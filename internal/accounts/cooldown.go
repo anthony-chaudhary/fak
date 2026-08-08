@@ -39,6 +39,15 @@ const DefaultCooldownWindow = time.Hour
 // clears far faster than a usage cap.
 const RateLimitCooldownWindow = 5 * time.Minute
 
+// WeeklyLimitWindow is the fallback window for a limit message that names a WEEKLY cap
+// but announces no window. DefaultCooldownWindow is sized for a rolling 5-hour cap, whose
+// "re-cool on the next probe" self-correction is cheap; a weekly cap's real window is DAYS,
+// so the same 1-hour fallback re-admits the seat ~168 times before it can possibly serve,
+// and every re-admission is a doomed spawn. Six hours is the compromise: still bounded (an
+// over-hold only costs idle seat time, and the account re-cools if it is genuinely free),
+// but no longer a spin. #5890.
+const WeeklyLimitWindow = 6 * time.Hour
+
 // CooldownKind distinguishes a self-recovering usage/weekly cap from a transient
 // throttle. It mirrors the launch-layer classification (launchModelUsageLimit /
 // launchModelRateLimit) so the write side maps one-to-one.
@@ -122,6 +131,40 @@ func ResolveReset(message string, now time.Time) time.Time {
 	}
 	if d, ok := parseRelativeWait(message); ok {
 		return now.Add(d).UTC()
+	}
+	return time.Time{}
+}
+
+// weeklyLimitRE names a WEEKLY cap in a limit message. It is deliberately phrase-anchored —
+// the word "weekly" adjacent to "limit" (including the gateway's `kind=weekly_limit` form),
+// "limit … for the week", or an explicit 7-day limit — so an ordinary usage-limit line is
+// never promoted to the longer weekly floor by a stray word. Anything it does not match keeps
+// DefaultCooldownWindow, which is the right size for the 5-hour rolling cap.
+var weeklyLimitRE = regexp.MustCompile(`(?i)weekly[\w /_-]*limit|limit[\w ]*for the week|\b7[ -]?day limit`)
+
+// IsWeeklyLimit reports whether a limit message names a WEEKLY cap as opposed to the rolling
+// 5-hour cap. The two self-recover on windows that differ by two orders of magnitude, so the
+// cooldown writers must not hold them for the same fallback duration (#5890).
+func IsWeeklyLimit(message string) bool { return weeklyLimitRE.MatchString(message) }
+
+// ResolveCooldownReset is the reset instant the COOLDOWN WRITERS use: ResolveReset's two
+// announced tiers (absolute, then relative), and — only when neither is present — a WEEKLY
+// floor for a message that names a weekly cap. It is the single entry point both writers call
+// (cmd/fak recordLaunchCooldown and guardrotate.PersistCooldownForRehome) so the weekly floor
+// can never be applied by one and dropped by the other, exactly as ResolveReset already
+// guarantees for the announced tiers.
+//
+// Why the floor lives here and not in ResolveReset: ResolveReset answers "what window did the
+// upstream ANNOUNCE?", and the honest answer for an unannounced weekly cap is still "none" —
+// callers that ask that question must keep getting the zero time. This function answers the
+// different question "how long should we hold the seat?", where a weekly cap's known-long
+// window is a better default than the rolling cap's one hour.
+func ResolveCooldownReset(message string, now time.Time) time.Time {
+	if at := ResolveReset(message, now); !at.IsZero() {
+		return at
+	}
+	if IsWeeklyLimit(message) {
+		return now.Add(WeeklyLimitWindow).UTC()
 	}
 	return time.Time{}
 }

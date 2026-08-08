@@ -2799,8 +2799,21 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
 # an honest WEEKLY_CAPPED hold. Everything here is FAIL-OPEN: any error resolves to
 # "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
 
+# The `-` in the class is load-bearing: Claude names its rolling cap "hit your 5-HOUR
+# limit", and a `[\w\s]`-only class stops dead at the hyphen — so the ONE banner that
+# names the 5-hour window explicitly was the one banner this gate could not see, while
+# "hit your weekly limit" (all word chars) matched. That asymmetry is what made the
+# fleet detect weekly caps and miss 5-hour caps entirely (#5890).
+# The `reached` alternatives cover Claude's other live phrasings — "Claude usage limit
+# reached." and "You've reached your weekly limit" — which carry none of "hit your",
+# "exhausted", "rate limited", or "429", so no hold was written for them at all and the
+# dispatcher kept spawning workers into the wall for the whole window. Both stay
+# PHRASE-anchored (a bare "limit reached" is not enough) so mid-run agent prose in a
+# productive log still cannot false-match.
 _CAP_BANNER_RE = re.compile(
-    r"hit your[\w\s]*limit|limit\s+exhausted|rate[_ -]limited|HTTP\s+429",
+    r"hit your[\w\s-]*limit|reached your[\w\s-]*limit"
+    r"|usage limit reached|(?:weekly|session|\d+[\s-]?hour)\s+limit\s+reached"
+    r"|limit\s+exhausted|rate[_ -]limited|HTTP\s+429",
     re.IGNORECASE)
 # The codex (OpenAI/ChatGPT) backend hits its own quota wall with a different banner
 # than Claude's: "You've hit your usage limit. Visit https://chatgpt.com/codex/...
@@ -2822,9 +2835,30 @@ _RESET_AT_RE = re.compile(
 # bare time-of-day reset that already passed a full day forward — falsely walls an
 # account that actually has room (the gem8 false-cap). Classify the banner so a
 # session limit gets a short cooldown bounded to its real reset.
-_CAP_WEEKLY_RE = re.compile(r"weekly[\w/\s]*limit", re.IGNORECASE)
+_CAP_WEEKLY_RE = re.compile(
+    r"weekly[\w/\s]*limit|limit[\w\s]*for the week|7[\s-]?day\s+limit", re.IGNORECASE)
 _CAP_SESSION_RE = re.compile(r"session\s+limit", re.IGNORECASE)
+# The 5-hour ROLLING cap is its own window — neither a multi-day weekly wall nor the short
+# session limit whose 90-minute clamp used to swallow it (see _ROLLING_HOLD_MAX_MIN).
+_CAP_FIVE_HOUR_RE = re.compile(r"\b5[\s-]?hour(?:ly)?\s+limit\b", re.IGNORECASE)
+# Does the banner name a SUBSCRIPTION cap at all? _CAP_BANNER_RE deliberately also fires on
+# a bare provider throttle (`reason=rate_limited`, `HTTP 429`), which is a minutes-long
+# transient, not a quota wall. Since the unqualified Claude usage banner now defaults to the
+# rolling 5-hour cap, the two must be told apart or every guard 429 would idle a healthy seat
+# for hours. A hit here means "a real usage cap"; a miss means "just a throttle".
+_CAP_USAGE_RE = re.compile(
+    r"hit your[\w\s-]*limit|reached your[\w\s-]*limit|usage limit"
+    r"|limit\s+reached|limit\s+exhausted|quota", re.IGNORECASE)
 _CAP_RESET_RE = re.compile(r"resets\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
+# Claude's modern phrasing is "your limit will RESET AT/ON <when>", not "resets <when>":
+# _CAP_RESET_RE and _CAP_RESET_FALLBACK_RE both require the literal "resets" and
+# _RESET_AT_RE accepts "reset at" only before an ISO date, so a wall-clock ("3pm") or
+# dated ("Nov 3 at 9am") reset was dropped and the hold fell back to a blind fallback_min
+# cooldown (#5890). The LA-suffixed form is tried first for the same reason _CAP_RESET_RE
+# precedes its fallback: the tz suffix bounds the capture instead of running to EOL.
+_WILL_RESET_LA_RE = re.compile(
+    r"resets?\s+(?:at|on)\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
+_WILL_RESET_RE = re.compile(r"resets?\s+(?:at|on)\s+([^\r\n.;]+)", re.IGNORECASE)
 _CAP_RESET_FALLBACK_RE = re.compile(r"resets\s+([^\r\n]+)", re.IGNORECASE)
 # The guard/gateway names a cap wall as a RELATIVE Go-duration wait, not an absolute
 # "resets <when>" clause — e.g.
@@ -2845,9 +2879,26 @@ _ANNOUNCED_WAIT_DUR_RE = re.compile(
 # future moment (a stale, already-passed bare time-of-day must not become a ~24h
 # wall). Weekly limits keep the full parsed reset.
 _SESSION_HOLD_MAX_MIN = 90
+# The rolling-5h cap gets its OWN ceiling. It shares the session bucket's motive — a stale
+# bare time-of-day must not become a ~24h wall — but not its number: a 5-hour window's real
+# reset is up to 5h out, so the 90-minute clamp re-offered a still-capped seat as much as
+# 3.5h early and respawned it straight into the same wall (#5890). 5h + 15m of clock/DST
+# slack keeps the ceiling honest without over-holding.
+_ROLLING_HOLD_MAX_MIN = 5 * 60 + 15
+# A WEEKLY cap whose banner names no parseable reset must not fall back to the same short
+# cooldown a rolling cap gets: the real window is days, so a fallback_min hold re-admits the
+# seat ~168 times before it can possibly serve. Hold longer, then re-probe — still bounded,
+# because an over-hold costs idle seat time while an under-hold costs a doomed spawn.
+_WEEKLY_FALLBACK_MIN = 6 * 60
 _MONTHS = {m: i for i, m in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
     start=1)}
+# A weekly cap names its reset by WEEKDAY far more often than by date ("your limit will reset
+# on Monday at 9am"). Without this map the weekday word is ignored and the bare time-of-day
+# branch resolves it to TODAY-or-TOMORROW — a Wednesday reset seen on a Thursday reads as
+# ~1.5h out instead of ~6 days, which is the under-hold that respawns a walled seat all week.
+_WEEKDAYS = {d: i for i, d in enumerate(
+    ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))}
 # America/Los_Angeles is PDT (UTC-7) over the summer reset windows this gate sees;
 # a PT wall-clock time + this offset == UTC. (A ±1h DST error only nudges the hold
 # edge and self-corrects on the next probe — fine for a throttle.)
@@ -2958,14 +3009,27 @@ def _cap_hit_from_text(text: str, *, evidence_log: str = "") -> dict[str, Any] |
     if not _CAP_BANNER_RE.search(text or ""):
         return None
     m = (_CODEX_RESET_RE.search(text) or _RESET_AT_RE.search(text) or _CAP_RESET_RE.search(text)
-         or _ANNOUNCED_WAIT_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text))
+         or _WILL_RESET_LA_RE.search(text) or _ANNOUNCED_WAIT_RE.search(text)
+         or _WILL_RESET_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text))
     reset_text = m.group(1).strip() if m else ""
+    # An explicit 5-hour banner outranks an incidental "session limit" mention, and the
+    # UNQUALIFIED Claude usage-limit banner ("Claude usage limit reached.") is the rolling
+    # 5-hour cap — not a session limit. Defaulting it to "session" is what filed the 5-hour
+    # window under a 90-minute ceiling it does not fit (#5890).
     if _CAP_WEEKLY_RE.search(text):
         kind = "weekly"
+    elif _CAP_FIVE_HOUR_RE.search(text):
+        kind = "rolling_5h"
     elif _CAP_SESSION_RE.search(text):
         kind = "session"
-    else:
+    elif not _CAP_USAGE_RE.search(text):
+        # No subscription-cap phrasing at all — this is a bare provider throttle (a guard
+        # `reason=rate_limited` / HTTP 429). It self-clears in minutes, so it keeps the SHORT
+        # `session` bucket and its 90-minute ceiling. Promoting it to the rolling-cap ceiling
+        # would idle a healthy seat for hours over a transient 429.
         kind = "session"
+    else:
+        kind = "rolling_5h"
     return {"reset_text": reset_text, "evidence_log": evidence_log, "kind": kind}
 
 
@@ -2973,13 +3037,21 @@ def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
                     hit: dict[str, Any], now_ts: float, fallback_min: int,
                     source: str) -> dict[str, Any]:
     now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
-    kind = hit.get("kind") or "session"
+    kind = hit.get("kind") or "rolling_5h"
+    # A weekly cap with no parseable reset falls back LONGER than a rolling one: its real
+    # window is days, so the short fallback re-admitted the seat over and over (#5890).
+    if kind == "weekly":
+        fallback_min = max(fallback_min, _WEEKLY_FALLBACK_MIN)
     until = (_parse_relative_wait(str(hit.get("reset_text") or ""), now_utc)
              or _parse_reset_to_utc(str(hit.get("reset_text") or ""), now_utc)
              or now_utc + dt.timedelta(minutes=fallback_min))
-    if kind == "session":
-        session_cap = now_utc + dt.timedelta(minutes=_SESSION_HOLD_MAX_MIN)
-        until = min(until, session_cap)
+    # Per-kind ceiling: each cap kind is clamped to ITS OWN real window, so a stale
+    # already-passed time-of-day can never become a ~24h wall and a genuine 5-hour reset
+    # is never truncated to the session limit's 90 minutes. Weekly keeps the full reset.
+    hold_max_min = {"session": _SESSION_HOLD_MAX_MIN,
+                    "rolling_5h": _ROLLING_HOLD_MAX_MIN}.get(kind)
+    if hold_max_min is not None:
+        until = min(until, now_utc + dt.timedelta(minutes=hold_max_min))
     state = {"product": product, "account": account_tag, "kind": kind,
              "reset_text": hit.get("reset_text") or "",
              "evidence_log": hit.get("evidence_log") or "",
@@ -3096,12 +3168,32 @@ def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | 
                 cand = dt.datetime(now_utc.year + 1, month, day, hour, minute) + _PT_TO_UTC
             except ValueError:
                 return None
-    else:
+        return _clamp_reset(cand, now_utc)
+    # A weekday name ("Monday at 9am") resolves to the NEXT such weekday, which for a weekly
+    # cap is up to 7 days out. Checked after the month branch so an explicit date always wins,
+    # and only when a time-of-day was found, so a stray day word in a long tail cannot
+    # manufacture a reset on its own.
+    wd = re.search(r"\b(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?"
+                   r"|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b", t)
+    if wd:
         now_pt = now_utc - _PT_TO_UTC
-        cand_pt = now_pt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        ahead = (_WEEKDAYS[wd.group(1)[:3]] - now_pt.weekday()) % 7
+        cand_pt = (now_pt + dt.timedelta(days=ahead)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0)
         if cand_pt <= now_pt:
-            cand_pt += dt.timedelta(days=1)
-        cand = cand_pt + _PT_TO_UTC
+            cand_pt += dt.timedelta(days=7)
+        return _clamp_reset(cand_pt + _PT_TO_UTC, now_utc)
+    now_pt = now_utc - _PT_TO_UTC
+    cand_pt = now_pt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if cand_pt <= now_pt:
+        cand_pt += dt.timedelta(days=1)
+    return _clamp_reset(cand_pt + _PT_TO_UTC, now_utc)
+
+
+def _clamp_reset(cand: dt.datetime, now_utc: dt.datetime) -> dt.datetime | None:
+    """The shared tail of every :func:`_parse_reset_to_utc` branch: a reset must be in the
+    FUTURE (a past instant is a misparse, not a zero-length hold) and is capped at 8 days so
+    a garbled clause can never wall a seat indefinitely."""
     if cand <= now_utc:
         return None
     return min(cand, now_utc + dt.timedelta(days=8))
