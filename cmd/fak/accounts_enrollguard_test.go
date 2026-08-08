@@ -163,11 +163,11 @@ func TestRunAccountsAdd_DuplicateRefusalOffersRemedies(t *testing.T) {
 	// conflicting seat — not just the --force escape hatch.
 	for _, want := range []string{
 		"REFUSED (identity-hijack)",
-		"FRESH config dir",                                   // criterion 2: the fresh-dir remedy
-		"CLAUDE_CONFIG_DIR=<new dir>",                        // ...spelled as something runnable
-		"canonicalize",                                       // criterion 3: make this login the canonical seat
+		"FRESH config dir",            // criterion 2: the fresh-dir remedy
+		"CLAUDE_CONFIG_DIR=<new dir>", // ...spelled as something runnable
+		"canonicalize",                // criterion 3: make this login the canonical seat
 		"fak accounts enroll-current --name alpha-netra --force",
-		"tombstone",                                          // ...or retire the other seat WITH fall-forward
+		"tombstone", // ...or retire the other seat WITH fall-forward
 		"fak accounts remove --name alpha-netra --rehome-to <seat>",
 	} {
 		if !strings.Contains(got, want) {
