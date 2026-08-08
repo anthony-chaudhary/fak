@@ -71,6 +71,16 @@ type Card struct {
 	// "always measure" (the fail-safe default — never carried), which is correct for
 	// cards that read out-of-tree inputs (session logs, git history, live state).
 	Corpus []string
+	// Origin identifies the producer seam where a cheap Go-backed card can run
+	// before the aggregate pane. It is deliberately limited to a command and a
+	// repo-relative owning file: no argv, environment, or payload is exposed.
+	Origin *ProducerOrigin
+}
+
+// ProducerOrigin is the stable at-origin hook metadata consumed by producers.
+type ProducerOrigin struct {
+	Command string `json:"command"`
+	File    string `json:"file"`
 }
 
 // Result is one collected scorecard payload paired with the card metadata needed
@@ -124,10 +134,10 @@ var Cards = []Card{
 	{Key: "ui_quality", Debt: "ui_quality_debt", Cmd: "go run ./cmd/fak ui-quality-scorecard --json", Label: "ui-quality", Corpus: []string{"cmd/fak/"}},
 	{Key: "disambiguation", Debt: "disambiguation_debt", Script: "concept_disambiguation_scorecard.py", Label: "concept-disambiguation"},
 	{Key: "intent_literal", Debt: "intent_literal_debt", Script: "intent_literal_scorecard.py", Label: "intent-literal"},
-	{Key: "tokendefaults", Debt: "token_defaults_debt", Cmd: "go run ./cmd/fak token-defaults-scorecard --json", Label: "token-defaults"},
-	{Key: "guard_rsi", Debt: "guard_rsi_debt", Cmd: "go run ./cmd/fak guard-rsi-scorecard --json", Label: "guard-rsi"},
+	{Key: "tokendefaults", Debt: "token_defaults_debt", Cmd: "go run ./cmd/fak token-defaults-scorecard --json", Label: "token-defaults", Origin: &ProducerOrigin{Command: "token-defaults-scorecard", File: "cmd/fak/token_defaults.go"}},
+	{Key: "guard_rsi", Debt: "guard_rsi_debt", Cmd: "go run ./cmd/fak guard-rsi-scorecard --json", Label: "guard-rsi", Origin: &ProducerOrigin{Command: "guard-rsi-scorecard", File: "cmd/fak/guardrsi.go"}},
 	{Key: "dogfood", Debt: "dogfood_debt", Cmd: "go run ./cmd/fak dogfood-score --json", Label: "dogfood-loop"},
-	{Key: "conceptusage", Debt: "conceptusage_debt", Cmd: "go run ./cmd/fak concept-usage-score --json", Label: "concept-usage"},
+	{Key: "conceptusage", Debt: "conceptusage_debt", Cmd: "go run ./cmd/fak concept-usage-score --json", Label: "concept-usage", Origin: &ProducerOrigin{Command: "concept-usage-score", File: "cmd/fak/conceptusagescore.go"}},
 	{Key: "maturity", Debt: "maturity_debt", Cmd: "go run ./cmd/fak maturity --json", Label: "maturity"},
 	{Key: "growth", Debt: "growth_debt", Cmd: "go run ./cmd/fak coverage-matrix --json", Label: "growth-debt"},
 	{Key: "support_maturity", Debt: "support_maturity_debt", Cmd: "go run ./cmd/fak support-maturity-scorecard --json", Label: "support-maturity"},
@@ -137,8 +147,8 @@ var Cards = []Card{
 	{Key: "heaviness", Debt: "heaviness_debt", Cmd: "go run ./cmd/fak operator heaviness --json", Label: "operator-heaviness"},
 	{Key: "propagation", Debt: "propagation_debt", Cmd: "go run ./cmd/fak propagation-scorecard --json", Label: "propagation"},
 	{Key: "antipattern", Debt: "antipattern_debt", Cmd: "go run ./cmd/fak antipattern-scorecard --json", Label: "antipattern"},
-	{Key: "negframe", Debt: "negframe_debt", Cmd: "go run ./cmd/fak score negframe --json", Label: "negframe"},
-	{Key: "negation_tax", Debt: "negation_tax_debt", Cmd: "go run ./cmd/fak score negation-tax --json", Label: "negation-tax"},
+	{Key: "negframe", Debt: "negframe_debt", Cmd: "go run ./cmd/fak score negframe --json", Label: "negframe", Origin: &ProducerOrigin{Command: "score negframe", File: "cmd/fak/negframescore.go"}},
+	{Key: "negation_tax", Debt: "negation_tax_debt", Cmd: "go run ./cmd/fak score negation-tax --json", Label: "negation-tax", Origin: &ProducerOrigin{Command: "score negation-tax", File: "cmd/fak/negationtaxscore.go"}},
 	{Key: "negation_operator", Debt: "negation_operator_debt", Cmd: "go run ./cmd/fak score negation_operator --json", Label: "negation-operator"},
 	{Key: "claim_repro", Debt: "claim_repro_debt", Script: "claim_repro_scorecard.py", Label: "claim-repro"},
 	{Key: "release", Debt: "release_debt", Script: "release_readiness_scorecard.py", Label: "release-readiness"},
@@ -229,6 +239,8 @@ type Metric struct {
 	// provably could not have moved). Zero-value (a measured metric) omits the field,
 	// so a full run's --json bytes are unchanged.
 	Carried bool `json:"carried,omitempty"`
+	// Origin is present only for cards with an at-producer hook.
+	Origin *ProducerOrigin `json:"origin,omitempty"`
 }
 
 // displayGrade is the single source of truth for a metric's effective letter grade.
@@ -275,7 +287,7 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 			e = "no payload"
 		}
 		return Metric{
-			Key: card.Key, Label: card.Label, DebtKey: card.Debt,
+			Key: card.Key, Label: card.Label, DebtKey: card.Debt, Origin: card.Origin,
 			Debt: nil, Grade: nil, Score: nil, OK: false, Verdict: "ERROR", Error: e,
 		}
 	}
@@ -291,7 +303,7 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 		}
 	}
 	m := Metric{
-		Key: card.Key, Label: card.Label, DebtKey: card.Debt,
+		Key: card.Key, Label: card.Label, DebtKey: card.Debt, Origin: card.Origin,
 		Debt:         debt,
 		Grade:        findGrade(payload),
 		RatchetGrade: findString(payload, "ratchet_grade"),
