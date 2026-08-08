@@ -37,6 +37,11 @@ STARTUP_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "startup.go
 # exposition command (NOT the gateway package): renderCachevalueExposition builds them
 # via w.gauge("name", ...) call sites, so the emitted set is parsed straight from there.
 CACHEVALUE_METRICS_GO = os.path.join(HERE, "..", "cmd", "fak", "cachevalue_metrics.go")
+# fak_fleet_ families are emitted by the `fak fleet metrics` exposition command — the
+# fleet-first exporter, the only source carrying a per-session label.
+FLEET_OVERVIEW_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-fleet-overview.json")
+FLEET_SESSION_DASH = os.path.join(HERE, "grafana", "dashboards", "fak-fleet-session.json")
+FLEET_METRICS_GO = os.path.join(HERE, "..", "cmd", "fak", "fleet_metrics.go")
 
 
 def make_snap(surface=4, api_error=3, hanging=2, auth=1, throttled_accts=("acctA",)):
@@ -356,9 +361,13 @@ class WriteArtifactsTest(unittest.TestCase):
 
 def _fleet_metric_names(exprs):
     """fleet_ metric names in PromQL exprs, ignoring quoted label VALUES
-    (e.g. up{job="fleet_bottleneck"} is the synthetic `up` metric, not a fleet_ one)."""
+    (e.g. up{job="fleet_bottleneck"} is the synthetic `up` metric, not a fleet_ one).
+
+    The lookbehind keeps this scoped to the PYTHON engine's namespace: without it,
+    `fak_fleet_sessions_by_liveness` (the Go exporter's family) also matches from its
+    fourth character and is then reported as a phantom fleet_ metric."""
     joined = re.sub(r'"[^"]*"', "", " ; ".join(exprs))   # drop quoted label values
-    return set(re.findall(r"fleet_[a-z0-9_]+", joined))
+    return set(re.findall(r"(?<![a-z0-9_])fleet_[a-z0-9_]+", joined))
 
 
 def _gateway_metric_names(exprs):
@@ -400,6 +409,39 @@ def _cachevalue_families():
     same emitter-source technique _gateway_families() uses for the gateway package."""
     src = _read(CACHEVALUE_METRICS_GO)
     return set(re.findall(r'w\.gauge\(\s*"(fak_(?:cachevalue|ablation)_[a-z0-9_]+)"', src))
+
+
+def _fleet_exporter_metric_names(exprs):
+    """fak_fleet_ metric names in PromQL exprs, ignoring quoted label VALUES (so
+    up{job="fak_fleet"} is the synthetic `up` metric, not a fak_fleet_ family)."""
+    joined = re.sub(r'"[^"]*"', "", " ; ".join(exprs))
+    return set(re.findall(r"fak_fleet_[a-z0-9_]+", joined))
+
+
+def _fleet_exporter_families():
+    """fak_fleet_ families emitted by `fak fleet metrics` (cmd/fak/fleet_metrics.go).
+
+    Two emission SHAPES have to be read, because the exporter emits family-major (all
+    samples of a family contiguous), which means the family name is not always a literal
+    at the w.gauge call site:
+
+      1. direct literals -- w.gauge("fak_fleet_sessions", ...) and the {name, help, fn}
+         table rows for the live per-session tier;
+      2. prefix + suffix -- the historical tier writes one TIER per name prefix
+         ("fak_fleet_usage_", "fak_fleet_usage_by_type_", "fak_fleet_usage_session_")
+         crossed with the family suffixes in emitFleetUsageFamilies, so the fleet total
+         can never be summed together with its own breakdown by accident.
+
+    Both are parsed here, and the cross product is expanded, so a panel querying a
+    phantom family still fails this test.
+    """
+    src = _read(FLEET_METRICS_GO)
+    names = set(re.findall(r'"(fak_fleet_[a-z0-9_]*[a-z0-9])"', src))
+    prefixes = set(re.findall(r'"(fak_fleet_[a-z0-9_]*_)"', src))
+    # suffixes: both the literal prefix+"..." call sites and the {suffix, help, fn} table
+    suffixes = set(re.findall(r'prefix\+"([a-z0-9_]+)"', src))
+    suffixes |= set(re.findall(r'\{"([a-z0-9_]+)",\s*"', src))
+    return names | {p + s for p in prefixes for s in suffixes}
 
 
 def _panel_exprs(dash):
@@ -491,6 +533,67 @@ class CrossSurfaceContractTest(unittest.TestCase):
         prom = _read(PROMETHEUS)
         self.assertIn("job_name: fak_gateway", prom)
         self.assertIn('targets: ["host.docker.internal:8080"]', prom)
+
+    def test_prometheus_scrapes_fleet_metrics(self):
+        prom = _read(PROMETHEUS)
+        self.assertIn("job_name: fak_fleet", prom)
+        self.assertIn('targets: ["host.docker.internal:9098"]', prom)
+
+    def test_fleet_dashboards_query_only_emitted_metrics(self):
+        """The fleet pair must not query a phantom fak_fleet_ family. This is the
+        lock-step that lets the exporter be refactored (renaming a family, moving a
+        tier behind a new prefix) without silently blanking a panel."""
+        emitted = _fleet_exporter_families()
+        self.assertIn("fak_fleet_session_info", emitted,
+                      "family extractor did not find the per-session _info family?")
+        for path in (FLEET_OVERVIEW_DASH, FLEET_SESSION_DASH):
+            with self.subTest(path=os.path.basename(path)):
+                dash = json.loads(_read(path))
+                referenced = _fleet_exporter_metric_names(_panel_exprs(dash))
+                self.assertTrue(referenced, "fleet dashboard references no fak_fleet_ metrics?")
+                missing = referenced - emitted
+                self.assertFalse(missing, f"fleet dashboard queries phantom metrics: {sorted(missing)}")
+
+    def test_fleet_alerts_reference_only_emitted_metrics(self):
+        exprs = re.findall(r"expr:\s*(.+)", _read(ALERTS))
+        refs = _fleet_exporter_metric_names(exprs)
+        self.assertTrue(refs, "alerts reference no fak_fleet_ metrics?")
+        missing = refs - _fleet_exporter_families()
+        self.assertFalse(missing, f"alerts query phantom fleet-exporter metrics: {sorted(missing)}")
+
+    def test_fleet_dashboard_json_is_valid_and_unique_ids(self):
+        for path, uid in ((FLEET_OVERVIEW_DASH, "fak-fleet-overview"),
+                          (FLEET_SESSION_DASH, "fak-fleet-session")):
+            with self.subTest(path=os.path.basename(path)):
+                dash = json.loads(_read(path))
+                ids = [p["id"] for p in dash["panels"]]
+                self.assertEqual(len(ids), len(set(ids)), "duplicate fleet panel ids")
+                self.assertEqual(dash["uid"], uid)
+
+    def test_fleet_overview_drills_into_the_session_dashboard(self):
+        """The two dashboards are only a PAIR if the overview actually links into the
+        drill-down with the clicked session id. A data link that lost its var-session
+        parameter would open an empty drill-down and look like missing data."""
+        dash = json.loads(_read(FLEET_OVERVIEW_DASH))
+        links = [lk
+                 for p in dash["panels"]
+                 for ov in p.get("fieldConfig", {}).get("overrides", [])
+                 for prop in ov.get("properties", [])
+                 if prop.get("id") == "links"
+                 for lk in prop.get("value", [])]
+        self.assertTrue(links, "no data link on the overview's session table")
+        self.assertTrue(any("var-session=" in lk.get("url", "") and
+                            "/d/fak-fleet-session" in lk.get("url", "") for lk in links),
+                        f"session table links do not carry the session into the drill-down: {links}")
+
+    def test_fleet_session_dashboard_has_a_session_variable(self):
+        dash = json.loads(_read(FLEET_SESSION_DASH))
+        names = {v["name"] for v in dash["templating"]["list"]}
+        self.assertIn("session", names,
+                      "the drill-down needs a `session` template variable to be drillable")
+        var = next(v for v in dash["templating"]["list"] if v["name"] == "session")
+        self.assertIn("fak_fleet_session_info", json.dumps(var),
+                      "the session selector must be sourced from the LIVE _info family")
 
 
 class RecoveryFreshnessTest(unittest.TestCase):
