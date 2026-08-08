@@ -227,7 +227,20 @@ function Invoke-WavePreflight {
   $pfArgs = @($py.Prefix) + @((Join-Path $RepoRoot 'tools\dispatch_preflight.py'), '--json', '--workspace', "$Workspace", '--max-workers', "$MaxWorkers")
   if ($WorkKind) { $pfArgs += @('--work-kind', $WorkKind) }
   if ($Product)  { $pfArgs += @('--product', $Product) }
-  $pfRaw = & $py.Exe @pfArgs 2>$null | Out-String
+  # A benign advisory on the preflight's stderr (dispatch_preflight's DIRTY_FAK_BIN note is
+  # the live one, #5856) is turned into a NativeCommandError ErrorRecord whenever THIS host's
+  # own stderr is redirected -- which it is under every non-console launcher: a cron, a CI
+  # step, a bash-driven refill loop. Under the script-scope $ErrorActionPreference='Stop' that
+  # record is TERMINATING, so the whole wave aborts before a single spawn, on a warning. Scope
+  # the preference to Continue for exactly this call: stderr stays discarded, the JSON verdict
+  # on stdout still decides, and a preflight that genuinely fails still lands on the
+  # no-verdict throw below (fail-safe REFUSE_INSPECT). The gate is not weakened, only its
+  # advisory chatter stops being fatal.
+  $prevEap = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $pfRaw = & $py.Exe @pfArgs 2>$null | Out-String
+  } finally { $ErrorActionPreference = $prevEap }
   $pf = $null
   try { $pf = $pfRaw | ConvertFrom-Json } catch { $pf = $null }
   if (-not $pf -or -not $pf.verdict) {
