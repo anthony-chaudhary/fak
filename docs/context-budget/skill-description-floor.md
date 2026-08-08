@@ -36,9 +36,9 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 58 skill(s); resident floor = 47236 bytes (~11809 tokens);
-  description floor = 47236 B; name-only floor = 787 B; at-rest card floor = 14196 bytes
-  at-rest intent slice (#5560): 10564 B (~2641 tokens) across 58 skill(s)
+skill footprint [interactive]: 59 skill(s); resident floor = 47821 bytes (~11955 tokens);
+  description floor = 47821 B; name-only floor = 797 B; at-rest card floor = 14449 bytes
+  at-rest intent slice (#5560): 10759 B (~2689 tokens) across 59 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
@@ -54,12 +54,19 @@ Heaviest resident descriptions — the trim targets:
 | 7 | 1231 | disambiguation-score |
 | 8 | 1223 | stability-score |
 
-The full 58-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 59-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 787 B` is the size of the headroom: **46.4 kB of the 47.2 kB
+`name-only floor = 797 B` is the size of the headroom: **47.0 kB of the 47.8 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
+
+**Last re-pin: 47236 → 47821 B (+585, 58 → 59 skills)** — the `fleet-wave` skill
+(the goal-shaped wave door over `super-loop`/`wave-harvest`). It is the worked
+example of the "prefer trimming first" rule below: drafted at **1296 B** it would
+have entered the table at rank 6, so the description was cut to the trigger
+sentence — *when* to load it, not what it does — and only the residual 585 B was
+banked. The body kept the detail; the resident tax did not.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -89,7 +96,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **47236**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **47821**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
