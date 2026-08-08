@@ -207,19 +207,22 @@ only as complete as the lease set it is shown: a surface that acquires nothing
 hierarchy; nothing on this page's path does. Three separate gaps, each tracked
 rather than shipped:
 
-1. **`regionadmit` has not adopted it.** Its `Taxonomy` is a different type
-   with an exact-match `Trees` lookup and no ancestor walk, so `--lane
+1. **`regionadmit` has not adopted it** (#5929). Its `Taxonomy` is a different
+   type with an exact-match `Trees` lookup and no ancestor walk, so `--lane
    gateway/server` gets an empty tree and `abi/registry.go` does not inherit
    `abi`'s exclusivity at rung 1. Porting means changing the live admission
    path `fak dispatch tick` and `fak loop drive` already run.
-2. **No surface picks a sub-lane on its own.** `fak dispatch wave` still routes
-   an issue to a declared leaf, so effective fleet concurrency (measured at ~22
-   in #5854) is unchanged even once rung 1 lands. #5854 is the blocker: the
-   lease record conflates admission geometry with authorization geometry, so
-   narrowing only the pricer yields phantom concurrency.
-3. **The commit-stamp lane vocabulary is still flat.** `internal/hooks` would
-   not bind a `(fak gateway/server)` trailer, so a worker holding a sub-lane
-   cannot stamp a commit for it.
+2. **No surface picks a sub-lane on its own** (#5854). `fak dispatch wave`
+   still routes an issue to a declared leaf, so effective fleet concurrency
+   (measured at ~22) is unchanged even once gap 1 closes. #5854 is the blocker:
+   the lease record conflates admission geometry with authorization geometry,
+   so narrowing only the pricer yields phantom concurrency.
+3. **The commit-stamp lane vocabulary is still flat** (#5930). A
+   `(fak gateway/server)` trailer matches no stamp shape in `internal/hooks`,
+   so a worker holding a sub-lane cannot stamp a commit for it.
+
+The measured ceiling is on epic #5785: ×25 addressable lanes on this repo, and
+why the last ×4 to ×100 is not honestly reachable under commit-by-path.
 
 Named next rungs, tracked in the backlog: the super-loop drive rung entering
 members through this gate (#2224), preflight live-count reading these leases
