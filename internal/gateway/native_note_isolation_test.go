@@ -28,10 +28,16 @@ import (
 	"testing"
 )
 
-// nativeEntryPoints are the owned loop's wire entry points: every native /v1/messages turn
-// is dispatched through one of these two (internal/gateway/messages.go's `if s.native`
-// branch returns immediately after calling them).
-var nativeEntryPoints = []string{"serveNativeMessages", "serveNativeMessagesStream"}
+// nativeEntryPoints are the owned loop's wire entry points — EVERY served path on which fak
+// owns the transcript, which is what makes the absence claim structural rather than
+// per-scenario. The first two take a native /v1/messages turn (internal/gateway/messages.go's
+// `if s.native` branch returns immediately after calling them). The third is the NDJSON
+// agent-sessions wire (POST /v1/fak/agent/sessions), which drives agent.RunGovernedArm — the
+// same owned loop under the kernel-governed arm. It is listed here because "the native path"
+// in #2414 means the owned loop, not one URL: a prose note spliced into the agent-sessions
+// handler would splice it into a transcript fak authors just as much as a /v1/messages one,
+// and guarding only the /v1/messages pair would let exactly that regression land green.
+var nativeEntryPoints = []string{"serveNativeMessages", "serveNativeMessagesStream", "handleFakAgentSessions"}
 
 // proseNoteHelpers is the prose-splice machinery that the wire forbids fak from authoring
 // as a real tool_result, so the proxy path folds it into the assistant's own voice. In the
@@ -188,9 +194,18 @@ func TestNativePathHasNoProseAdjudicationNote(t *testing.T) {
 	g := buildGatewayCallGraph(t)
 
 	for _, entry := range nativeEntryPoints {
-		if _, ok := g[entry]; !ok {
+		callees, ok := g[entry]
+		if !ok {
 			t.Fatalf("native entry point %q not found in the package call graph — "+
 				"the owned loop was renamed and this witness no longer guards it", entry)
+		}
+		// Non-vacuity: a node with NO outgoing edges is unreachable-from by construction, so
+		// every assertion below would pass without proving anything. Each owned-loop entry
+		// point demonstrably calls package-local helpers, so an empty callee set means the
+		// graph builder failed to read this body rather than that the path is clean.
+		if len(callees) == 0 {
+			t.Fatalf("native entry point %q has no package-local callees — buildGatewayCallGraph "+
+				"did not read its body, so the unreachability assertions below are vacuous", entry)
 		}
 		for _, helper := range proseNoteHelpers {
 			if path := reachPath(g, entry, helper); path != nil {
