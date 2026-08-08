@@ -126,6 +126,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexKnobs(stdout, stderr, rootDir, *asJSON)
 	case "freshness", "fresh":
 		return indexFreshness(stdout, stderr, cat, *asJSON, *limit)
+	case "execaudit", "executables", "exec":
+		return indexExecAudit(stdout, stderr, rootDir, *asJSON, *limit)
 	case "agents", "agentsmd", "agent":
 		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident)
 	default:
@@ -356,6 +358,7 @@ func writeIndexUsage(w io.Writer) {
   fak index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
   fak index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
   fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
+  fak index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
   fak index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
   flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
 `)
