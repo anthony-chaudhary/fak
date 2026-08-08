@@ -164,7 +164,7 @@ class DispatchWorkerTest(unittest.TestCase):
         for off in ("0", "off", "false", "no", "", "disable", "DISABLED", " Off "):
             self.assertFalse(mod.guard_enabled({"FLEET_DOGFOOD_GUARD": off}), off)
 
-    def test_resolve_fak_bin_prefers_env_then_intree_then_path_else_none(self) -> None:
+    def test_resolve_fak_bin_prefers_env_then_freshest_else_none(self) -> None:
         mod = load()
         # An explicit FAK_BIN that exists wins (use this very test file as a stand-in).
         existing = str(Path(__file__).resolve())
@@ -176,6 +176,42 @@ class DispatchWorkerTest(unittest.TestCase):
             Path("C:/definitely/not/a/repo/xyz"),
             {"FAK_BIN": "C:/no/such/fak", "PATH": str(Path(__file__).resolve().parent / "_no_fak_here_xyz")})
         self.assertIsNone(got)
+
+    def test_resolve_fak_bin_takes_the_freshest_build_not_the_in_tree_one(self) -> None:
+        """#5856: nothing refreshes tools/.bin, but FakSelfUpdate rebuilds the PATH copy
+        every 20 min. An unconditional in-tree preference therefore fronted every worker's
+        `fak guard` with a build 34 commits behind HEAD and stamped +dirty. Rank by build
+        time so the abandoned copy loses -- and so a developer's fresh dogfood build still
+        wins, which is the intent the old order was reaching for."""
+        mod = load()
+        exe = "fak.exe" if os.name == "nt" else "fak"
+        with tempfile.TemporaryDirectory() as td:
+            ws, pathdir = Path(td) / "ws", Path(td) / "bin"
+            intree = ws / "tools" / ".bin" / exe
+            intree.parent.mkdir(parents=True)
+            pathdir.mkdir(parents=True)
+            onpath = pathdir / exe
+            for p in (intree, onpath):
+                p.write_text("stub", encoding="utf-8")
+            env = {"PATH": str(pathdir)}
+
+            # The refreshed PATH copy is newer -> it wins. This is the fleet case, and the
+            # exact assertion the old in-tree-first resolver fails.
+            os.utime(intree, (1_000_000, 1_000_000))
+            os.utime(onpath, (2_000_000, 2_000_000))
+            self.assertEqual(mod.resolve_fak_bin(ws, env), str(onpath))
+
+            # A just-rebuilt dogfood binary is newer -> it wins. The dev case still holds.
+            os.utime(intree, (3_000_000, 3_000_000))
+            self.assertEqual(mod.resolve_fak_bin(ws, env), str(intree))
+
+            # Equal build times -> PATH, the copy something is accountable for refreshing.
+            os.utime(intree, (4_000_000, 4_000_000))
+            os.utime(onpath, (4_000_000, 4_000_000))
+            self.assertEqual(mod.resolve_fak_bin(ws, env), str(onpath))
+
+            # An unreadable candidate sorts last rather than raising (fail-open).
+            self.assertEqual(mod.fak_binary_build_time(str(ws / "no" / "such")), -1.0)
 
     def test_guard_provider_maps_claude_to_anthropic_else_openai(self) -> None:
         mod = load()
