@@ -825,3 +825,53 @@ docs/dispatch-status.md
 # AppData. Machine-generated, never source, and it reads as a no-lane path in the
 # `fak sync push` dirty-worktree report until it is ignored.
 /Microsoft/
+/.overlay4515
+
+# --- root DOT namespace (denylist -> allowlist inversion) -------------------------
+# The `/_*` block above inverted the '_'-prefix scratch convention. This does the same for
+# the OTHER root scratch convention the fleet actually uses more: a DOT prefix. Sessions park
+# overlay/probe/snapshot state in a dot-entry precisely BECAUSE Go and most tree-walkers skip
+# dot-entries -- `.overlay3267/`, `.ovl5119neg/`, `.fak-overlay-5087/`, `.replay5120/`,
+# `.sbom3279/` (a FULL second copy of the repo tree), `.parkprobecheck/`, `.tmp-3620-head/`,
+# `.scratch-5254-*.json`, `.validate5087.json`, `.commitmsg-4334.txt`, `.dv5648.log`.
+#
+# Every one of those was named REACTIVELY, after it had already leaked -- and each session
+# mints a fresh issue number, so the denylist can never catch up. `/.overlay4515` and
+# `/.verify1259` above are two single-use rules that prove the treadmill: they ignore exactly
+# one session's overlay and nothing else. So invert it. Ignore the root dot namespace by
+# DEFAULT and re-include the legitimate entries, which are few and stable.
+#
+# ROOT-ANCHORED ONLY -- the load-bearing safety property, exactly as with `/_*`. A gitignore
+# `*` never matches `/`, so `/.*` matches ONLY root dot-entries: it can never reach
+# `.github/workflows/*.yml`, `.claude/skills/**`, or a nested `internal/**/.keep` (witnessed
+# with `git check-ignore` on each). The re-include list below is every root dot path
+# `git ls-files` reports, with two deliberate deltas: `.dispatch-runs/` stays ignored (it
+# already was, above -- operator-private telemetry that predates this block), and
+# `.env.example` is listed though no such file exists yet, to preserve the `!.env.example`
+# intent declared further up. `git ls-files -i -c` is unchanged at 68 entries across this
+# change, so no tracked path changed state -- as expected, since gitignore is inert for them.
+#
+# To TRACK a new root dot path, add a `!` line here. Until you do, a bare `git add` will not
+# sweep it in -- which is the point. Deliberate one-offs still work with `git add -f`.
+#
+# The consequence to know: `git clean -Xdf` (and `fak sweep`) will now reap these as the
+# disposable scratch they are. Tree-walking gates mostly do NOT change behaviour here --
+# branchrole's refaudit, for one, already pruned them via `ls-files --others` (no
+# --exclude-standard), which drops ignored and untracked paths alike.
+/.*
+!/.aider.conf.yml
+!/.claude
+!/.claude-plugin
+!/.clinerules
+!/.codex
+!/.continue
+!/.cursorrules
+!/.dockerignore
+!/.env.example
+!/.gitattributes
+!/.github
+!/.gitignore
+!/.junie
+!/.mcp.json
+!/.rules
+!/.windsurfrules
