@@ -32,6 +32,8 @@ Label taxonomy is fleet's, baked in as defaults:
               area; derived from the lane an issue routes to)
   workflow  in-progress | duplicate | wontfix | invalid | help wanted |
               good first issue
+  dependency blocked-by | blocks  (directional pair naming a prerequisite edge
+              between two issues; see DEPENDENCY below)
 Override thresholds via flags; override label sets via --config (JSON file).
 
 Ranking (the "do next" order) is a transparent integer score, not a model:
@@ -86,6 +88,26 @@ AREA = {"agentic-serving", "trust-floor", "model-arch", "compute", "gpu",
 CLASS = {"class:frontdoor", "class:infra", "class:dev"}
 WORKFLOW = {"in-progress", "duplicate", "wontfix", "invalid", "help wanted",
             "good first issue"}
+# DEPENDENCY is the directional blocker pair (#3563): `blocked-by` points at a
+# PREREQUISITE ("this issue waits on #N"), `blocks` at a DEPENDENT ("#N waits on
+# this"). Deliberately a directional PAIR and not a bare `blocked` state label —
+# a state label records that an issue is stuck without recording what it is stuck
+# behind, which is the exact gap that left the backlog's dependency structure
+# invisible to a human reader.
+#
+# Each name is a label FAMILY, not a whole label: the counterpart issue rides in
+# the scoped form `blocked-by:#N` / `blocks:#N` (also accepted with `/` or a bare
+# number), the same family:value shape the repo already uses for `class:infra`,
+# `priority/P0`, and `tier/T0-required`. A bare family label with no `#N` is a
+# human marker only and carries no edge.
+#
+# Scope note: this module DECLARES the taxonomy and recognises the scoped form; no
+# reader consumes it yet. `fak blockers` today is post/feed/selfcheck only — it folds
+# a `gh issue list` payload for ONE label into a roll-up and has no graph subcommand,
+# so nothing currently unions these label edges with #3224's `blocked-by: #N`
+# issue-BODY token. Declaring the label side first is what lets the edges accumulate
+# on real issues before a reader exists to walk them.
+DEPENDENCY = {"blocked-by", "blocks"}
 # Bare kind fallback for the "documentation" docs(fak) spam pattern — the
 # docs(fak):* issues carry only `documentation`+`enhancement`, no priority, no
 # area. They are the canonical "needs-priority + garden" candidate.
@@ -99,10 +121,12 @@ LIST_LIMIT = 500       # gh issue list cap
 def _load_config(path: str | None) -> None:
     """Override label sets from a JSON file. Schema (all optional):
        {"priority": {"label": weight}, "kind": [...], "area": [...],
-        "workflow": [...], "stale_days": N, "q_idle_days": N}"""
+        "workflow": [...], "dependency": [...], "stale_days": N,
+        "q_idle_days": N}"""
     if not path:
         return
-    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, STALE_DAYS, Q_IDLE_DAYS
+    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, DEPENDENCY
+    global STALE_DAYS, Q_IDLE_DAYS
     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     if "priority" in cfg:
         PRIORITY = {k: int(v) for k, v in cfg["priority"].items()}
@@ -114,6 +138,8 @@ def _load_config(path: str | None) -> None:
         CLASS = set(cfg["class"])
     if "workflow" in cfg:
         WORKFLOW = set(cfg["workflow"])
+    if "dependency" in cfg:
+        DEPENDENCY = set(cfg["dependency"])
     STALE_DAYS = int(cfg.get("stale_days", STALE_DAYS))
     Q_IDLE_DAYS = int(cfg.get("q_idle_days", Q_IDLE_DAYS))
 
@@ -160,6 +186,24 @@ def load_injected_issues(source: str) -> list[dict]:
 
 def _label_names(issue: dict) -> set[str]:
     return {lab["name"] for lab in issue.get("labels", [])}
+
+
+def dependency_labels(labels: set[str]) -> list[str]:
+    """The DEPENDENCY-family labels an issue wears, sorted (deterministic).
+
+    Matches on the label FAMILY — the part before the `:`/`/` scope separator —
+    so both the bare marker (`blocked-by`) and the edge-carrying scoped form
+    (`blocked-by:#3224`) are recognised, while a merely similar name that is a
+    different label (`blocked-by-human`, the human-block dispatch hold) is NOT.
+    Read-only surfacing: this never re-weights the ranking, it just makes the
+    blocker edges a human is scanning for visible in the triage model.
+    """
+    out = []
+    for name in labels:
+        family = name.split(":", 1)[0].split("/", 1)[0].strip()
+        if family in DEPENDENCY:
+            out.append(name)
+    return sorted(out)
 
 
 def _days(iso: str, now: dt.datetime) -> int:
@@ -225,6 +269,7 @@ def classify(issue: dict, now: dt.datetime) -> dict:
         "idle_days": idle_days,
         "priority": prio,
         "in_progress": in_prog,
+        "dependency": dependency_labels(labels),
         "tags": tags,
         "score": int(score),
     }
