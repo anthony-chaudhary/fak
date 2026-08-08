@@ -248,6 +248,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Study: PrimeIntellect-ai/prime-agent @a18809e0 — RLM + Continual Harness pass; lock-holder identity and worktree-effect progress (#5892/#5893)](docs/notes/CONCEPT-STUDY-PRIME-AGENT-2026-08-08.md) -- auto-indexed dated note.
 - [Daily Git hygiene dogfood — 2026-08-06](docs/notes/GIT-DAILY-DOGFOOD-2026-08-06.md) -- auto-indexed dated note.
 - [Token classes as a guard/server duty — spine and research note](docs/notes/TOKEN-CLASS-SHIFT-LEFT-SPINE-2026-08-06.md) -- auto-indexed dated note.
 - [Knowing the denominator for an agentic trajectory](docs/notes/AGENTIC-TRAJECTORY-DENOMINATOR-2026-08-06.md) -- auto-indexed dated note.
