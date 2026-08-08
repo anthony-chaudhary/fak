@@ -612,15 +612,20 @@ func TestOrgTrustAnchorCarriesRunningFacts(t *testing.T) {
 		t.Fatalf("enroll: %v", err)
 	}
 
-	opts, _, err := OrgTrustAnchor(path, fixedNow, "0.9.0")
+	// The invariant is that the anchor FORWARDS the caller's running version
+	// verbatim — it never substitutes one of its own. Asserting the round trip
+	// rather than today's release string keeps this from failing on a version
+	// bump that changed nothing about the behaviour under test.
+	const running = "0.9.0"
+	opts, _, err := OrgTrustAnchor(path, fixedNow, running)
 	if err != nil {
 		t.Fatalf("anchor: %v", err)
 	}
 	if !opts.Now.Equal(fixedNow) {
 		t.Fatalf("anchor Now = %v, want %v", opts.Now, fixedNow)
 	}
-	if opts.RunningVersion != "0.9.0" {
-		t.Fatalf("anchor RunningVersion = %q", opts.RunningVersion)
+	if opts.RunningVersion != running {
+		t.Fatalf("anchor RunningVersion = %q, want the caller's %q forwarded unchanged", opts.RunningVersion, running)
 	}
 	if opts.ExpectedIssuer != "acme-corp" {
 		t.Fatalf("anchor ExpectedIssuer = %q, want the enrolled issuer", opts.ExpectedIssuer)
