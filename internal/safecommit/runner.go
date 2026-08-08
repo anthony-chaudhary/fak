@@ -255,6 +255,14 @@ func reapStaleLock(path string) {
 		return
 	}
 	clearReapFailure(path)
+	if res.Reason == ReapReasonHolderForeign && res.StartedAfterLock {
+		// The break was proven by start time, not by the image. Say so: the image on such a
+		// break is usually an ordinary fleet name that the allowlist would have cleared, so
+		// printing it alone would misattribute the evidence (#5892).
+		reapEventf("LOCK_BROKEN %s pid=%d age=%ds started_after_lock=true image=%s path=%s",
+			res.Reason, res.HolderPID, res.AgeSeconds, res.Image, path)
+		return
+	}
 	if res.Reason == ReapReasonHolderForeign && res.Image != "" {
 		reapEventf("LOCK_BROKEN %s pid=%d age=%ds image=%s path=%s",
 			res.Reason, res.HolderPID, res.AgeSeconds, res.Image, path)
