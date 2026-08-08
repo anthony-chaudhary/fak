@@ -81,7 +81,11 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	// Record the uuid<->trace join first (best-effort, fail-open), so it is written on EVERY
 	// SessionStart source — independent of the affordance mode below. The affordance "off" knob
 	// governs the injected hint, not the durable identity store the watchdog depends on.
-	recordGuardSessionStartIdentity(*traceFlag)
+	driverPID := recordGuardSessionStartIdentity(*traceFlag)
+	// …then register the session in the crash-survivable journal (C3, #3787), on the same terms:
+	// every SessionStart source, ahead of the affordance knob, best-effort. It reuses the driver
+	// pid the join above already witnessed rather than paying a second process census.
+	recordGuardSessionStartJournal(*traceFlag, driverPID)
 	if normalizeGuardSessionStartMode(*modeFlag) == guardSessionStartModeOff {
 		return 0
 	}
@@ -143,11 +147,15 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 // after the TTL-GC'd descriptor registry has forgotten the pairing. Fail-open by the hook's
 // contract: a missing id (a resumed child has CLAUDE_CODE_SESSION_ID stripped, so the UUID is
 // blank) or any write error is a silent no-op — the identity join must never wedge a start.
-func recordGuardSessionStartIdentity(traceID string) {
+//
+// It RETURNS the driver pid it witnessed (0 when none was, including on the early no-join
+// return), so the sibling journal registration (#3787) can stamp the same witnessed pid without
+// paying a second process census — the census is the expensive part of this hook.
+func recordGuardSessionStartIdentity(traceID string) int {
 	uuid := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
 	traceID = strings.TrimSpace(traceID)
 	if uuid == "" || traceID == "" {
-		return // a half row is not a join; FoldIdentity would skip it anyway
+		return 0 // a half row is not a join; FoldIdentity would skip it anyway
 	}
 	path := resume.IdentityLedgerPath(resolveSweepRegDir(""))
 	row := resume.IdentityRow{
@@ -172,11 +180,13 @@ func recordGuardSessionStartIdentity(traceID string) {
 	// so a later row carrying the same (uuid, trace) re-states the join unchanged while adding
 	// the pid FoldIdentityDriverPIDs is looking for. An unwitnessed start appends nothing, so
 	// a host that can never witness a driver pays no extra row at all.
-	if pid := witnessGuardSessionStartDriverPID(); pid > 0 {
+	pid := witnessGuardSessionStartDriverPID()
+	if pid > 0 {
 		row.TS = time.Now().UTC().Format(time.RFC3339)
 		row.PID = pid
 		_ = appendJSONL(path, row)
 	}
+	return pid
 }
 
 // --- driver-pid witness (#5542) -------------------------------------------------------- //
