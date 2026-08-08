@@ -28,6 +28,44 @@
 // build, no network. It parses each file independently, so a package that does not
 // fully compile (a common state in a shared tree with in-flight siblings) is still
 // scanned — a file that fails to parse is skipped and recorded, never fatal.
+//
+// # Known limits
+//
+// These are the boundaries of the syntactic pass, each one FIXTURED in
+// precision_test.go (TestPrecisionRecallClasses) rather than merely asserted here —
+// #3169. An accepted FALSE POSITIVE flags something that is in fact reachable; an
+// accepted FALSE NEGATIVE stays quiet about something that is in fact dead. Every entry
+// leans the same way on purpose: a miss costs one un-found orphan, a cry-wolf costs the
+// detector its readers.
+//
+//   - ACCEPTED FALSE POSITIVE — string-keyed / reflection dispatch. A func whose name
+//     occurs only inside a string literal (a generated dispatch table, a name-keyed
+//     registry resolved by reflection) has no identifier for the pass to count, so it is
+//     reported. The remedy is the //orphanscan:keep hatch on the func, which is visible
+//     at the definition; inferring wiring from string literals would cost real positives.
+//
+//   - ACCEPTED FALSE NEGATIVE — build-tag interactions. go/parser never evaluates
+//     //go:build, so a definition and its only use under DISJOINT constraints still pool
+//     into one reference set and the func is not flagged, even though it is dead on
+//     every individual platform. The same mechanism means a helper used only from a
+//     //go:build ignore standalone tool in the package dir counts as wired. Evaluating
+//     constraints would need a per-platform scan and could only ADD false positives.
+//
+//   - NOT A LIMIT (pinned so it stays that way) — free funcs satisfying an interface. A
+//     receiver-less func adapted through a func-typed adapter (the http.HandlerFunc
+//     shape) or assigned to a func field is referenced BY IDENTIFIER at the conversion
+//     or assignment, so the pass sees it. The worry only applies across a package
+//     boundary, and an unexported name cannot cross one.
+//
+//   - NOT A LIMIT (pinned so it stays that way) — references from generated code. A
+//     generated file is skipped as a source of CANDIDATES but its identifiers are
+//     counted as REFERENCES first, so same-package generated wiring is visible. The scan
+//     is package-local and cannot see another package's generated code, but only an
+//     EXPORTED name is reachable from there and exported names are never candidates —
+//     so there is no cross-package reference left to miss.
+//
+// Whole-tree coverage is a separate question from these limits; see
+// docs/notes/ORPHAN-FUNC-SCAN-2026-07-07.md.
 package orphanscan
 
 import (
