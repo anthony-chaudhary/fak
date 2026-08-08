@@ -248,6 +248,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Study: youneslaaroussi/Marionette @1f058aa2 — live tool-call loop steering, playbook-derived tool faulting, sequenced scripted-model E2E, ingest-time source denial (#5904-#5910)](docs/notes/CONCEPT-STUDY-MARIONETTE-2026-08-08.md) -- auto-indexed dated note.
 - [Study: agnt-gg/agnt @66208c56 — cache-prefix, gate-predicate and estimator borrows; source-available so INSPIRE-only (#5896-#5903)](docs/notes/CONCEPT-STUDY-AGNT-2026-08-08.md) -- auto-indexed dated note.
 - [Study: PrimeIntellect-ai/prime-agent @a18809e0 — RLM + Continual Harness pass; lock-holder identity and worktree-effect progress (#5892/#5893)](docs/notes/CONCEPT-STUDY-PRIME-AGENT-2026-08-08.md) -- auto-indexed dated note.
 - [Daily Git hygiene dogfood — 2026-08-06](docs/notes/GIT-DAILY-DOGFOOD-2026-08-06.md) -- auto-indexed dated note.
