@@ -134,6 +134,23 @@ func isolatedLandRetryCap() int {
 // fails open. Injectable so the whole path is testable against a fake.
 type GitRunner func(root string, args []string) (int, string)
 
+// IsolationBackend materializes and releases a worker's private writable tree.
+// Materialize must preserve git linkage so `git diff <baseSHA>` run in the
+// returned path observes the worker's complete patch; Release must remove only
+// that materialization. The seam exists so follow-on backends can attack the
+// roughly 450 MB per-worker cost of detached git worktrees tracked by #3165.
+type IsolationBackend interface {
+	Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result
+	Release(root, wtPath string, git GitRunner) Result
+}
+
+type gitWorktree struct{}
+
+var defaultIsolationBackend IsolationBackend = gitWorktree{}
+
+// IsolationBackends returns all registered implementations for conformance tests.
+func IsolationBackends() []IsolationBackend { return []IsolationBackend{gitWorktree{}} }
+
 // Result is the fail-open outcome of a git-touching op. OK is the one bit callers
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
@@ -357,6 +374,18 @@ func TrunkHeadSHA(root string, git GitRunner) string {
 // check alone never allowed (#3572). Result.Path is authoritative; a leased member does
 // NOT sit at Path(lane, key, wtRoot).
 func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
+	return PrepareWithBackend(root, lane, key, baseSHA, wtRoot, git, defaultIsolationBackend)
+}
+
+// PrepareWithBackend is the injectable form of Prepare.
+func PrepareWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend) Result {
+	if backend == nil {
+		backend = defaultIsolationBackend
+	}
+	return backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
+}
+
+func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 	base := baseSHA
 	if base == "" {
 		base = TrunkHeadSHA(root, git)
@@ -410,6 +439,18 @@ func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 // idle, so the next Prepare leases it rather than re-adding one (#3572). A return
 // reports OK with Removed=false; overflow and every failure path force-remove as above.
 func Reap(root, wtPath string, git GitRunner) Result {
+	return ReapWithBackend(root, wtPath, git, defaultIsolationBackend)
+}
+
+// ReapWithBackend is the injectable form of Reap.
+func ReapWithBackend(root, wtPath string, git GitRunner, backend IsolationBackend) Result {
+	if backend == nil {
+		backend = defaultIsolationBackend
+	}
+	return backend.Release(root, wtPath, git)
+}
+
+func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
 	if !IsWorkerWorktree(wtPath) {
 		return Result{OK: false, Path: wtPath, Removed: false,
 			Reason: "refusing to reap a non-worker worktree"}
