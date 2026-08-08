@@ -835,14 +835,34 @@ def _py() -> str:
 
 
 def _fak_command_prefix(root: Path) -> list[str]:
+    """Argv prefix for invoking ``fak``, freshest candidate first (#5856).
+
+    ``$FAK_BIN`` stays the absolute override. Otherwise rank the repo-root artifact and
+    the PATH binary by build time and take the newest, falling back to ``go run`` when
+    neither exists. The old order took ``<root>/fak.exe`` unconditionally and never
+    consulted PATH at all — while ``_fak_bin()`` in this same module resolves through
+    PATH — so a single dispatcher tick ran two different fak builds, and the repo-root
+    copy is the one nothing ever refreshes.
+
+    PATH is read through ``dispatch_worker._which_on_exact_path`` rather than
+    ``shutil.which``: on Windows the latter also applies current-directory search, which
+    would resolve right back to the repo-root artifact this function is trying to rank.
+    """
     explicit = os.environ.get("FAK_BIN")
     if explicit:
         return [explicit]
+    candidates: list[str] = []
+    onpath = dispatch_worker._which_on_exact_path("fak", os.environ.get("PATH"))
+    if onpath:
+        candidates.append(onpath)
     for name in ("fak.exe", "fak"):
         cand = root / name
         if cand.is_file():
-            return [str(cand)]
-    return ["go", "run", "./cmd/fak"]
+            candidates.append(str(cand))
+            break
+    if not candidates:
+        return ["go", "run", "./cmd/fak"]
+    return [max(candidates, key=dispatch_worker.fak_binary_build_time)]
 
 
 def contract_overlay_path(runs_dir: Path, number: int) -> Path:
@@ -3542,6 +3562,59 @@ def split_command_env(value: str) -> list[str]:
 # CLOSED) only on 3, and fail OPEN on everything else.
 LEASE_REFUSED_RC = 3
 
+# `fak leaseref <sub>` shells git, and git can stall for minutes on this shared
+# peer-dirty Windows trunk. `subprocess.run(..., capture_output=True, timeout=N)`
+# LOOKS like it bounds that, but on Windows it does not (#4368): CPython's
+# TimeoutExpired path calls Popen.kill() — TerminateProcess against the DIRECT child
+# only — and then re-enters communicate() with NO timeout to drain the pipe reader
+# threads. A descendant git.exe holds an INHERITED duplicate of the stdout/stderr pipe
+# write handle, so killing fak.exe alone never closes the pipe and that second
+# communicate() blocks FOREVER. That is the witnessed pre-spawn hang: the ancestry
+# `issue_resolve_dispatch.py -> fak.exe leaseref live -> git.exe -> git.exe` with the
+# dispatcher alive, no stdout/stderr, and no worker ever spawned — a tick that looks
+# live while doing no work and reaches neither WOULD_SPAWN/SPAWNED nor a refusal.
+#
+# So the timeout path reaps the whole process TREE first (`taskkill /F /T`, the same
+# honest reaper terminate_issue_worker_tree uses; a POSIX probe is spawned into its own
+# session so one killpg covers the descendants), which CLOSES those inherited handles,
+# and only then drains with a SECOND bounded join — abandoning the daemon reader threads
+# rather than waiting if even that lapses. Every path returns a typed verdict, so the
+# caller fails open and the tick still reaches a spawn decision.
+LEASE_TIMEOUT_RC = 124  # timeout(1)'s conventional code; distinct from 127 (exec failure)
+LEASE_DRAIN_TIMEOUT_S = 5
+
+
+def _terminate_lease_probe(proc: Any) -> dict[str, Any]:
+    """Reap a timed-out `fak leaseref` probe AND its git descendants.
+
+    ``Popen.kill()`` is not enough: on Windows it is a TerminateProcess against the
+    direct child, which leaves the grandchild git.exe alive holding the inherited pipe
+    write handle — the #4368 deadlock. ``taskkill /T`` walks the pid tree; the POSIX
+    branch signals the probe's OWN process group (the pid, never ``getpgid``, so a probe
+    that somehow is not a group leader can never route SIGKILL at the dispatcher).
+    """
+    pid = getattr(proc, "pid", None)
+    try:
+        if os.name == "nt":
+            killed = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                                    capture_output=True, text=True,
+                                    timeout=LEASE_DRAIN_TIMEOUT_S,
+                                    creationflags=no_window_creationflags())
+            out: dict[str, Any] = {"ok": killed.returncode == 0,
+                                   "returncode": killed.returncode,
+                                   "stderr": (killed.stderr or "").strip()[-300:]}
+        else:
+            os.killpg(pid, signal.SIGKILL)
+            out = {"ok": True, "returncode": 0}
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        out = {"ok": False, "returncode": None, "error": str(exc)}
+    try:
+        proc.kill()  # belt and braces: the direct child, whatever the tree reap did
+    except (OSError, ValueError):
+        pass
+    out["pid"] = pid
+    return out
+
 
 def _fak_bin(root: Path) -> list[str] | None:
     """The on-disk `fak` argv for a lease subprocess, or None when only the
@@ -3617,22 +3690,54 @@ def lease_id_for_lane(lane: str) -> str:
 
 def _run_lease(root: Path, args: list[str], *, timeout: int = 30) -> dict[str, Any]:
     """Run one `fak leaseref` subcommand, returning {rc, stdout, verdict}. Never
-    raises: an exec failure is reported as rc 127 so the caller fails open."""
+    raises: an exec failure is reported as rc 127 so the caller fails open, and a probe
+    that outlives `timeout` is reported as rc LEASE_TIMEOUT_RC.
+
+    This deliberately does NOT use `subprocess.run(timeout=...)`: see the
+    LEASE_TIMEOUT_RC note above — on Windows that timeout is unbounded whenever a
+    descendant git holds the inherited pipe, which is exactly this call site's #4368
+    pre-spawn hang. Popen + a tree reap + a bounded second drain is what actually
+    terminates."""
     bin_argv = _fak_bin(root)
     if not bin_argv:
         return {"rc": 127, "stdout": "", "verdict": None, "skipped": "no fak binary"}
     cmd = [*bin_argv, "leaseref", *args]
     kwargs: dict[str, Any] = {
-        "cwd": str(root), "capture_output": True, "text": True,
-        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+        "cwd": str(root), "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
+        "encoding": "utf-8", "errors": "replace",
     }
     if os.name == "nt":
         kwargs["creationflags"] = no_window_creationflags()
+    else:
+        # The probe owns its process group, so the timeout reap can signal the whole
+        # tree (a stalled git descendant included) without ever touching this process.
+        kwargs["start_new_session"] = True
     try:
-        proc = subprocess.run(cmd, **kwargs)
+        proc = subprocess.Popen(cmd, **kwargs)
     except (OSError, subprocess.SubprocessError) as exc:
         return {"rc": 127, "stdout": "", "verdict": None, "error": str(exc)}
-    out = (proc.stdout or "").strip()
+    try:
+        stdout, _stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        killed = _terminate_lease_probe(proc)
+        drained = True
+        try:
+            stdout, _stderr = proc.communicate(timeout=LEASE_DRAIN_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError):
+            # Even the post-reap drain lapsed: leave the daemon reader threads to the
+            # interpreter rather than joining them forever, and report it.
+            stdout, drained = "", False
+        return {"rc": LEASE_TIMEOUT_RC, "stdout": (stdout or "").strip(),
+                "verdict": None, "timeout": True, "timeout_s": timeout,
+                "killed": killed, "drained": drained,
+                "error": (f"LEASE_PROBE_TIMEOUT: `fak leaseref {' '.join(args)}` "
+                          f"exceeded {timeout}s; reaped pid {killed.get('pid')} tree "
+                          f"(ok={killed.get('ok')}, drained={drained})")}
+    except (OSError, subprocess.SubprocessError) as exc:
+        _terminate_lease_probe(proc)
+        return {"rc": 127, "stdout": "", "verdict": None, "error": str(exc)}
+    out = (stdout or "").strip()
     doc: Any = None
     try:
         doc = json.loads(out) if out else None
@@ -3788,8 +3893,15 @@ def live_lane_lease_lanes(root: Path, *, runner: Any | None = None) -> dict[str,
     run = runner or _run_lease
     res = run(root, ["live"])
     if res.get("rc") != 0:
-        return {"lanes": [], "fail_open": True, "rc": res.get("rc"),
-                "detail": res.get("error") or res.get("skipped")}
+        # A LEASE_PROBE_TIMEOUT surfaces as a TYPED row (timeout + the reap witness) so
+        # the tick's payload says the probe was bounded and reaped, not merely "rc != 0"
+        # — the #4368 difference between a fail-open read and a dispatcher that hung.
+        out = {"lanes": [], "fail_open": True, "rc": res.get("rc"),
+               "detail": res.get("error") or res.get("skipped")}
+        if res.get("timeout"):
+            out.update({"timeout": True, "timeout_s": res.get("timeout_s"),
+                        "killed": res.get("killed"), "drained": res.get("drained")})
+        return out
     doc = res.get("verdict")
     if not isinstance(doc, list):
         return {"lanes": [], "fail_open": True, "rc": res.get("rc"),

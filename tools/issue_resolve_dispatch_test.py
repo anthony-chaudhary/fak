@@ -9,7 +9,9 @@ directly.
 from __future__ import annotations
 
 import importlib.util
+import ast
 import atexit
+import inspect
 import json
 import os
 import re
@@ -17,6 +19,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -2941,6 +2945,53 @@ class BuildWorkerCommandTest(unittest.TestCase):
                 [r"C:\work\fak\fak.exe"])
 
 
+class FakCommandPrefixTest(unittest.TestCase):
+    """#5856: nothing refreshes the repo-root fak.exe, while FakSelfUpdate rebuilds the
+    PATH copy every 20 minutes from a pristine detached origin/main worktree. This prefix
+    used to take the repo-root artifact unconditionally and never consult PATH at all --
+    so a single dispatcher tick ran two different fak builds, the guarded one of them
+    witnessed 34 commits behind HEAD and stamped +dirty."""
+
+    def _layout(self, td: Path):
+        exe = "fak.exe" if os.name == "nt" else "fak"
+        root, pathdir = td / "root", td / "bin"
+        root.mkdir(parents=True)
+        pathdir.mkdir(parents=True)
+        rootbin, onpath = root / exe, pathdir / exe
+        for p in (rootbin, onpath):
+            p.write_text("stub", encoding="utf-8")
+            p.chmod(0o755)
+        return root, rootbin, onpath, pathdir
+
+    def test_explicit_fak_bin_still_wins(self) -> None:
+        mod = load()
+        with mock.patch.dict(os.environ, {"FAK_BIN": "C:/pinned/fak.exe"}):
+            self.assertEqual(mod._fak_command_prefix(Path("/nope")), ["C:/pinned/fak.exe"])
+
+    def test_freshest_build_wins_in_both_directions(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root, rootbin, onpath, pathdir = self._layout(Path(td))
+            with mock.patch.dict(os.environ, {"PATH": str(pathdir)}, clear=True):
+                # The refreshed PATH copy is newer -> it wins. The fleet case, and the
+                # assertion the old repo-root-first prefix fails.
+                os.utime(rootbin, (1_000_000, 1_000_000))
+                os.utime(onpath, (2_000_000, 2_000_000))
+                self.assertEqual(mod._fak_command_prefix(root), [str(onpath)])
+                # A just-rebuilt repo-root binary is newer -> it wins. The dev case holds.
+                os.utime(rootbin, (3_000_000, 3_000_000))
+                self.assertEqual(mod._fak_command_prefix(root), [str(rootbin)])
+
+    def test_no_binary_anywhere_falls_back_to_go_run(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            empty = Path(td) / "empty"
+            empty.mkdir()
+            with mock.patch.dict(os.environ, {"PATH": str(empty)}, clear=True):
+                self.assertEqual(
+                    mod._fak_command_prefix(empty), ["go", "run", "./cmd/fak"])
+
+
 class WinCreationFlagsTest(unittest.TestCase):
     def test_batch_launcher_gets_hidden_console_not_detached(self) -> None:
         # Regression: opencode.CMD spawned DETACHED_PROCESS dies at the batch
@@ -3046,6 +3097,12 @@ class BackendRoutingTest(unittest.TestCase):
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
         mod.read_dead_backends = lambda runs_dir, **k: []
+        # The active opencode gateway gate (#3866) probes a real HTTP endpoint when
+        # it is left unstubbed, so evaluate() would return GATEWAY_DOWN here purely
+        # because no gateway is listening on this machine — a live dependency this
+        # file forbids. Stub the gate itself (module-local, load() returns a fresh
+        # module) rather than account_probe, which is shared via sys.modules.
+        mod.gate_opencode_gateway = lambda planned, account, **k: (planned, None)
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
@@ -3056,7 +3113,12 @@ class BackendRoutingTest(unittest.TestCase):
                          lane="docs", live=False, backend="opencode")
         self.assertEqual(seen.get("product"), "opencode")       # routed to glm pool
         self.assertEqual(p["backend"], "opencode")
-        self.assertEqual(p["command"][0], "opencode")
+        # argv[0] is the GUARD binary, not the backend: guarded_launch_command wraps
+        # every worker argv, so the backend and its model are pinned INSIDE the wrapped
+        # command rather than at the head of it. Asserting on argv[0] would pin the
+        # wrapper away again the moment guarding is on, which it is by default.
+        self.assertTrue(p["guarded"])
+        self.assertIn("opencode", p["command"])
         self.assertIn("zai-coding-plan/glm-5.2", p["command"])   # model pinned/traced
         self.assertTrue(p["ok"])
 
@@ -4775,6 +4837,106 @@ class LaneLeaseHelperTest(unittest.TestCase):
         finally:
             sys.modules.pop("issue_lane_router", None)
             mod._LANE_TREE_CACHE.clear()
+
+
+# A stand-in for `fak leaseref live` shelling git: the grandchild INHERITS this
+# process's stdout/stderr pipe (exactly what git.exe gets when fak shells it), so
+# terminating only THIS pid leaves the pipe write handle open and any pipe-reader join
+# blocks until the grandchild itself exits. The #4368 hang in one file.
+_HUNG_GIT_STUB = """\
+import subprocess, sys, time
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+sys.stderr.write("grandchild=%d\\n" % child.pid)
+sys.stderr.flush()
+time.sleep(60)
+"""
+
+
+class LeaseProbeBoundedTest(unittest.TestCase):
+    """#4368: the pre-spawn `fak leaseref` probe terminates on a bounded clock even
+    when a descendant git holds the inherited pipe.
+
+    Witnessed ancestry: `issue_resolve_dispatch.py -> fak.exe leaseref live -> git.exe
+    -> git.exe`, dispatcher alive, no stdout/stderr, no worker — the tick reached
+    neither WOULD_SPAWN/SPAWNED nor a refusal. `subprocess.run(timeout=N)` does NOT
+    bound that on Windows: it kills the DIRECT child, then re-enters communicate() with
+    no timeout to drain reader threads the grandchild is still holding open."""
+
+    HARD_BOUND_S = 30  # probe 2s + drain 5s + reap slack; the un-reaped hang is 60s
+
+    def _stub_path(self) -> Path:
+        tmp = Path(tempfile.mkdtemp(prefix="issue-resolve-test-hunggit-"))
+        atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+        stub = tmp / "hung_git_stub.py"
+        stub.write_text(_HUNG_GIT_STUB, encoding="utf-8")
+        return stub
+
+    def test_hung_git_grandchild_is_reaped_on_a_bounded_clock(self) -> None:
+        mod = load()
+        stub = self._stub_path()
+        mod._fak_bin = lambda root: [sys.executable, str(stub)]
+        started = time.monotonic()
+        res = mod._run_lease(ROOT, ["live"], timeout=2)
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, self.HARD_BOUND_S,
+                        f"lease probe was NOT bounded: {elapsed:.1f}s (the hung git "
+                        "grandchild, not the timeout, decided when it returned)")
+        self.assertEqual(res["rc"], mod.LEASE_TIMEOUT_RC)
+        self.assertTrue(res["timeout"])
+        self.assertEqual(res["timeout_s"], 2)
+        self.assertIsNone(res["verdict"])
+        # Actionable stderr text, not a bare rc: names the verb, the bound, the reap.
+        self.assertIn("LEASE_PROBE_TIMEOUT", res["error"])
+        self.assertIn("leaseref live", res["error"])
+        # No orphan left behind: the tree reap (not Popen.kill) is what closes the
+        # grandchild's INHERITED pipe handle, so a completed drain IS the witness that
+        # the descendant died rather than outliving the dispatcher's probe.
+        self.assertTrue(res["killed"]["ok"], res["killed"])
+        self.assertTrue(res["drained"],
+                        "the post-reap drain lapsed: a descendant still holds the pipe")
+
+    def test_live_read_propagates_the_typed_timeout(self) -> None:
+        # The pre-spawn lane-lease read fails OPEN (advisory visibility must never wedge
+        # a tick) but carries the TYPED row, so the payload distinguishes "probe bounded
+        # and reaped" from a dispatcher that simply never came back.
+        mod = load()
+
+        def timed_out(root, args, **k):
+            return {"rc": mod.LEASE_TIMEOUT_RC, "stdout": "", "verdict": None,
+                    "timeout": True, "timeout_s": 30, "drained": True,
+                    "killed": {"ok": True, "pid": 4321},
+                    "error": "LEASE_PROBE_TIMEOUT: `fak leaseref live` exceeded 30s"}
+
+        out = mod.live_lane_lease_lanes(ROOT, runner=timed_out)
+        self.assertEqual(out["lanes"], [])
+        self.assertTrue(out["fail_open"])
+        self.assertTrue(out["timeout"])
+        self.assertEqual(out["timeout_s"], 30)
+        self.assertTrue(out["drained"])
+        self.assertEqual(out["killed"]["pid"], 4321)
+        self.assertIn("LEASE_PROBE_TIMEOUT", out["detail"])
+
+    def test_probe_never_reverts_to_unbounded_subprocess_run(self) -> None:
+        # The ratchet: `subprocess.run(..., timeout=N)` reads as bounded and is not, so a
+        # future edit that "simplifies" the probe back to it re-opens the hang.
+        mod = load()
+        # Read the CODE, not the prose: _run_lease's own docstring names the trap
+        # ("deliberately does NOT use subprocess.run(timeout=...)"), so asserting over
+        # the raw source would fail on the sentence that documents the fix. Drop the
+        # docstring through the AST rather than by string subtraction — since 3.13 the
+        # compiler dedents __doc__, so it is no longer a literal substring of the source.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(mod._run_lease)))
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)
+                and isinstance(fn.body[0].value.value, str)):
+            fn.body = fn.body[1:]
+        src = ast.unparse(fn)
+        self.assertNotIn("subprocess.run(", src,
+                         "_run_lease must not use subprocess.run: its Windows timeout "
+                         "path re-enters communicate() unbounded (#4368)")
+        self.assertIn("subprocess.Popen(", src)
+        self.assertIn("_terminate_lease_probe(", src)
 
 
 class EvaluateLeaseGateTest(unittest.TestCase):
