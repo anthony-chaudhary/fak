@@ -10,6 +10,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 
 ## The product
 
+- [SHIPPED] **Daily lock-aware Git hygiene** — `fak git daily --selfcheck` performs a deterministic, non-destructive maintenance pass that reports stale Git lock files without deleting them, and the registered daily cron path runs the same command; witnessed by `cmd/fak/git_daily_test.go` and `internal/gitdaily/gitdaily_test.go`.
 - [SHIPPED] fak provides a bounded micro-context fabric with one immutable agent base: the synthetic floor schedules 10,000 logical contexts, controlled-kernel witnesses complete 100 and 1,000 real-model contexts, and the cache-observable S2b fixture reconciles 4,859 reused prompt tokens with endpoint-native counters. The 10,000 real-model soak remains tracked separately; logical contexts are not physical model slots. ([research contract](docs/research/micro-context-fabrics.md), [S2b witness](docs/research/micro-context-s2b-kernel-cache-ab.md))
 
 - [SHIPPED] The gateway samples model-output prose into a bounded, non-blocking shadow queue and counts shared `internal/negframe.Classify` findings as `fak_negframe_output_negatives_total{surface="model_output"}` without rewriting or delaying response bytes; queue saturation drops telemetry and increments a labeled drop counter. Witness: `go test ./internal/gateway -run TestOutputNegation -count=1` (`TestOutputNegationCounter`, `TestOutputNegationAuditReturnsBeforeClassification`).
