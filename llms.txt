@@ -29,6 +29,7 @@
 - Adding a new model to the in-kernel engine — the one question that splits a one-line arch alias plus a recognition test from a `fak new-model` scaffold plus a forward pass and an oracle: [`docs/new-model-playbook.md`](docs/new-model-playbook.md)
 - Routing a run difference to loader, quant, or forward when model id, quant mode, and tokens/sec all match — the model-load provenance artifact and its algebra (schema `fak-model-load-provenance/1`): [`docs/model-load-provenance-troubleshooting.md`](docs/model-load-provenance-troubleshooting.md)
 - Release readiness, guarded cut/publish, verification, and rollback: [`fak release`](cmd/fak/release.go) and [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md)
+- Daily lock-aware shared-checkout Git hygiene, canonical verb, and proof floor: [`fak git-daily`](docs/releases/issue-5592-daily-lock-aware-git-hygiene-2026-08-08.md)
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Scoped benchmark results, tuned baselines, artifacts, and reproduce routes: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
 - Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
