@@ -8,12 +8,15 @@ import (
 // WidthObservation is one assistant turn folded after the fact. Suppressed turns are
 // excluded from batching denominators because the client prohibited parallel calls.
 type WidthObservation struct {
-	Lane       string `json:"lane"`
-	Engine     string `json:"engine"`
-	Model      string `json:"model"`
-	ToolCalls  int    `json:"tool_calls"`
-	Suppressed bool   `json:"client_suppressed,omitempty"`
-	Success    bool   `json:"success"`
+	Lane      string `json:"lane"`
+	Engine    string `json:"engine"`
+	Model     string `json:"model"`
+	ToolCalls int    `json:"tool_calls"`
+	// ToolItems is the independently processed item count across ToolCalls. Zero is
+	// the backward-compatible legacy form and means one item per tool call.
+	ToolItems  int  `json:"tool_items,omitempty"`
+	Suppressed bool `json:"client_suppressed,omitempty"`
+	Success    bool `json:"success"`
 }
 
 type WidthSeries struct {
@@ -24,9 +27,11 @@ type WidthSeries struct {
 	EligibleToolTurns    int     `json:"eligible_tool_turns"`
 	SuppressedToolTurns  int     `json:"suppressed_tool_turns"`
 	ToolCalls            int     `json:"tool_calls"`
+	ToolItems            int     `json:"tool_items"`
 	BatchedTurns         int     `json:"batched_turns"`
 	SuccessfulTurns      int     `json:"successful_turns"`
 	MeanToolCalls        float64 `json:"tool_calls_per_assistant_turn"`
+	ItemsPerToolCall     float64 `json:"items_per_tool_call"`
 	BatchedTurnRate      float64 `json:"batched_turn_rate"`
 	ToolTurnShare        float64 `json:"tool_turn_share"`
 	ClientSuppressedRate float64 `json:"client_suppressed_rate"`
@@ -57,6 +62,11 @@ func FoldWidth(observations []WidthObservation) WidthReport {
 			} else {
 				r.EligibleToolTurns++
 				r.ToolCalls += o.ToolCalls
+				items := o.ToolItems
+				if items < o.ToolCalls {
+					items = o.ToolCalls
+				}
+				r.ToolItems += items
 				if o.ToolCalls >= BatchedTurnMinCalls {
 					r.BatchedTurns++
 				}
@@ -72,6 +82,9 @@ func FoldWidth(observations []WidthObservation) WidthReport {
 		if r.EligibleToolTurns > 0 {
 			r.MeanToolCalls = float64(r.ToolCalls) / float64(r.EligibleToolTurns)
 			r.BatchedTurnRate = float64(r.BatchedTurns) / float64(r.EligibleToolTurns)
+		}
+		if r.ToolCalls > 0 {
+			r.ItemsPerToolCall = float64(r.ToolItems) / float64(r.ToolCalls)
 		}
 		if total := r.EligibleToolTurns + r.SuppressedToolTurns; total > 0 {
 			r.ClientSuppressedRate = float64(r.SuppressedToolTurns) / float64(total)
