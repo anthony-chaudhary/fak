@@ -1,6 +1,9 @@
 package devindex
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 // CommandOwner names the independently buildable artifact that owns a command.
 // Shared is reserved for a command whose executable contract genuinely belongs
@@ -22,6 +25,8 @@ type CommandOwnership struct {
 	Rationale         string       `json:"rationale"`
 	CompatibilityName string       `json:"compatibility_name"`
 	DispatchTarget    string       `json:"dispatch_target"`
+	DevReuse          DevReuse     `json:"dev_reuse"`
+	DevReuseRationale string       `json:"dev_reuse_rationale"`
 }
 
 // SupplementalDevVerbs are pre-switch namespace commands that are intentionally
@@ -60,12 +65,15 @@ func CommandOwnerships(verbs []Verb) []CommandOwnership {
 			target = "fak-dev"
 			rationale = "develops, tests, releases, or operates the fak repository"
 		}
+		reuse, reuseRationale := ClassifyDevReuse(verb.Name, owner)
 		out = append(out, CommandOwnership{
 			Name:              verb.Name,
 			Owner:             owner,
 			Rationale:         rationale,
 			CompatibilityName: verb.Name,
 			DispatchTarget:    target,
+			DevReuse:          reuse,
+			DevReuseRationale: reuseRationale,
 		})
 	}
 	return out
@@ -97,6 +105,16 @@ func ValidateCommandOwnership(verbs []Verb, inventory []CommandOwnership) []stri
 		}
 		if item.DispatchTarget == "" {
 			problems = append(problems, "missing dispatch target: "+item.Name)
+		}
+		if item.DevReuseRationale == "" {
+			problems = append(problems, "empty dev reuse rationale: "+item.Name)
+		}
+		if !item.DevReuse.valid() {
+			problems = append(problems, fmt.Sprintf("command %q has invalid dev reuse %q", item.Name, item.DevReuse))
+		} else if item.Owner == OwnerDev && item.DevReuse == DevReuseNA {
+			problems = append(problems, fmt.Sprintf("dev command %q has not-applicable dev reuse", item.Name))
+		} else if item.Owner != OwnerDev && item.DevReuse != DevReuseNA {
+			problems = append(problems, fmt.Sprintf("non-dev command %q has dev reuse %q", item.Name, item.DevReuse))
 		}
 	}
 	for name := range known {
