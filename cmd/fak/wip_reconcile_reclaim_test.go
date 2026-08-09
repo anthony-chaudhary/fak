@@ -180,8 +180,13 @@ func TestWipReconcileReclaimFlagExitsThreeWithQueue(t *testing.T) {
 	if strings.Contains(got, "charlie") {
 		t.Errorf("--reclaim must print ONLY the RECLAIM rows; charlie (QUARANTINE) leaked:\n%s", got)
 	}
-	if !strings.Contains(got, "fak wip land alpha") {
+	if !strings.Contains(got, "fak wip reconcile adopt alpha") {
 		t.Errorf("each row must name its recovery command; stdout:\n%s", got)
+	}
+	// #5998: the queue is read by a fleet, so it must say who holds each row. An
+	// unclaimed row's OWNER cell is "-", and the footer counts what is actually free.
+	if !strings.Contains(got, "OWNER") || !strings.Contains(got, "2 unclaimed") {
+		t.Errorf("worklist must surface adoption ownership; stdout:\n%s", got)
 	}
 
 	// The default (unfiltered) listing is unchanged: every verdict, exit 0.

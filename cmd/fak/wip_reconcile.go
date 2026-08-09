@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -47,16 +48,34 @@ type wipReconcileResult struct {
 // asks for is a worklist, not an auto-lander, because materializing a crashed
 // stranger's delta into a SHARED working tree would land on peers' live edits.
 func runWipReconcile(stdout, stderr io.Writer, argv []string) int {
+	// The ADOPTION seam (#5998). `fak wip reconcile adopt|resume|receipt <session>` are
+	// sub-verbs of reconcile rather than a peer of `wip land`, because they are the
+	// consumer of THIS verb's worklist: the queue names them, and keeping the naming and
+	// the code in one place is what stops the printed command from drifting away from the
+	// command that exists. A positional token is safe to intercept here because the
+	// reconcile flag parse rejects positional arguments outright.
+	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
+		switch argv[0] {
+		case "adopt", "resume", "receipt":
+			return runWipReclaim(stdout, stderr, argv[0], argv[1:])
+		}
+	}
+
 	fs := flag.NewFlagSet("wip reconcile", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "wip")
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
 	asJSON := fs.Bool("json", false, "emit the reconciliation decisions as JSON")
 	reclaimOnly := fs.Bool("reclaim", false, "print only the RECLAIM rows — the recovery worklist, ranked most-decayed-first by base drift; exit 3 if any exist")
+	dispatch := fs.Bool("dispatch", false, "with --reclaim, ADOPT the head unclaimed row (opt-in): it claims, materializes to an isolated target, and never lands, quarantines, or deletes anything")
 	fileTicket := fs.Bool("file-ticket", false, "on a QUARANTINE verdict, bind the orphan to ONE idempotent GitHub tracking ticket (keyed by session+start-SHA)")
 	dryRun := fs.Bool("dry-run", false, "with --file-ticket, print the exact ticket that would be filed instead of filing it (also the automatic behavior when gh is unavailable)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
+	}
+	if *dispatch && !*reclaimOnly {
+		fmt.Fprintln(stderr, "fak wip reconcile: --dispatch requires --reclaim (it acts on the recovery worklist, and only on it)")
+		return 2
 	}
 	ctx := context.Background()
 	res, err := wipReconcile(ctx, *repo)
@@ -95,21 +114,69 @@ func runWipReconcile(stdout, stderr io.Writer, argv []string) int {
 		}
 		wipReconcileFileTickets(ctx, tout, stderr, *repo, res.Decisions, *dryRun, newWipTicketGH())
 	}
+	// The opt-in dispatcher. It iterates ONLY res.Reclaim, so it is structurally incapable
+	// of touching a QUARANTINE checkpoint — the exclusion is a property of the worklist,
+	// not a check that could be forgotten. It never lands (that stays an explicit --land)
+	// and never deletes a ref, so its worst case is a claimed checkpoint and a patch file.
+	if *dispatch {
+		dout := stdout
+		if *asJSON {
+			dout = stderr
+		}
+		wipReconcileDispatch(ctx, dout, *repo, res.Reclaim)
+	}
 	if *reclaimOnly && len(res.Reclaim) > 0 {
 		return 3
 	}
 	return 0
 }
 
-// wipReclaimRender prints the recovery worklist head-first: the top row is the one
-// closest to decaying out of RECLAIM. Each row names the exact recovery command, since
-// the whole point of the queue is that RECLAIM is actionable and QUARANTINE is not.
+// wipReconcileDispatch adopts the head UNCLAIMED row, if there is one. Advisory in the
+// same sense the rest of this verb is: it never changes the reconcile exit code, because a
+// scheduler's branch is on "is there recoverable work", and whether one row got claimed
+// this tick does not change that answer.
+func wipReconcileDispatch(ctx context.Context, stdout io.Writer, repo string, rows []wiprecon.ReclaimRow) {
+	free := wiprecon.UnownedReclaim(rows)
+	if len(free) == 0 {
+		fmt.Fprintln(stdout, "dispatch: no unclaimed RECLAIM row to adopt")
+		return
+	}
+	head := free[0]
+	succ := wipAdoptSuccessorDefault()
+	if succ == "" {
+		fmt.Fprintf(stdout, "dispatch: %s is adoptable but this process has no session id (set $CLAUDE_CODE_SESSION_ID) — run `fak %s`\n",
+			head.Session, strings.Join(head.Argv, " "))
+		return
+	}
+	host, _ := os.Hostname()
+	res, code, err := wipAdoptRun(ctx, repo, wipAdoptOptions{
+		Session: head.Session, Successor: succ, Host: host, Now: time.Now(),
+	})
+	if err != nil {
+		fmt.Fprintf(stdout, "dispatch: %s: %v\n", head.Session, err)
+		return
+	}
+	fmt.Fprintf(stdout, "dispatch: %s -> %s (rc=%d) %s\n", head.Session, res.Verdict, code, res.Reason)
+	if res.Target != "" {
+		fmt.Fprintf(stdout, "  materialized %d verified file(s) to %s; the checkpoint ref is untouched\n", res.Verified, res.Target)
+	}
+}
+
+// wipReclaimRender prints the recovery worklist head-first: the top row is the one a
+// successor should take, which since #5998 means UNCLAIMED first and then closest to
+// decaying out of RECLAIM. Each row names the EXACT command that advances it — or says
+// plainly that no command may, because someone else holds the claim.
+//
+// The OWNER and REPL columns are not decoration. Without OWNER a fleet reads one queue and
+// races itself; without REPL a successor cannot tell a checkpoint that survives this
+// machine from one that does not, which is the difference between "recover it when
+// convenient" and "recover it now".
 func wipReclaimRender(stdout io.Writer, res wipReconcileResult) {
 	if len(res.Reclaim) == 0 {
 		fmt.Fprintf(stdout, "no reclaimable checkpoints: of %d reconciled, none is an unlanded delta that still applies cleanly\n", len(res.Decisions))
 		return
 	}
-	fmt.Fprintln(stdout, "DRIFT\tAGE_H\tSESSION\tLEAVES")
+	fmt.Fprintln(stdout, "DRIFT\tAGE_H\tREPL\tOWNER\tSESSION\tLEAVES")
 	for _, r := range res.Reclaim {
 		drift := "?"
 		if r.TrunkDistance != wiprecon.DriftUnknown {
@@ -119,13 +186,47 @@ func wipReclaimRender(stdout io.Writer, res wipReconcileResult) {
 		if leaves == "" {
 			leaves = "-"
 		}
-		fmt.Fprintf(stdout, "%s\t%.1f\t%s\t%s\n", drift, r.AgeHours, r.Session, leaves)
+		fmt.Fprintf(stdout, "%s\t%.1f\t%s\t%s\t%s\t%s\n",
+			drift, r.AgeHours, firstNonEmpty(r.Replication, "-"), wipReclaimOwnerCell(r), r.Session, leaves)
 	}
+	free := 0
 	for _, r := range res.Reclaim {
-		fmt.Fprintf(stdout, "  %s: %s — recover with `fak wip land %s`\n", r.Session, r.Reason, r.Session)
+		if len(r.Argv) == 0 {
+			fmt.Fprintf(stdout, "  %s: %s — held by %s at phase %s (attempt %d); wait for that claim to lapse rather than racing it\n",
+				r.Session, r.Reason, r.AdoptedBy, r.AdoptPhase, r.Attempts)
+			continue
+		}
+		free++
+		// Attempt history rides on the ACTIONABLE rows too, not just the held ones: a row
+		// that has already been claimed and dropped four times is the row an operator wants
+		// to see before a fifth automatic try, and it is precisely the row a dispatcher
+		// would otherwise pick up silently forever.
+		tried := ""
+		if r.Attempts > 0 {
+			tried = fmt.Sprintf(" — %d prior attempt(s)", r.Attempts)
+		}
+		fmt.Fprintf(stdout, "  %s: %s%s — recover with `fak %s`\n", r.Session, r.Reason, tried, strings.Join(r.Argv, " "))
 	}
-	fmt.Fprintf(stdout, "%d reclaimable of %d reconciled · DRIFT is commits HEAD has advanced past the checkpoint's base (? = base unresolvable); a higher drift is closer to decaying into QUARANTINE\n",
-		len(res.Reclaim), len(res.Decisions))
+	fmt.Fprintf(stdout, "%d reclaimable of %d reconciled, %d unclaimed · DRIFT is commits HEAD has advanced past the checkpoint's base (? = base unresolvable); a higher drift is closer to decaying into QUARANTINE · mirror %s\n",
+		len(res.Reclaim), len(res.Decisions), free, firstNonEmpty(res.Reclaim[0].MirrorFreshness, "unknown"))
+}
+
+// wipReclaimOwnerCell renders one row's adoption ownership in a single column: "-" for
+// unclaimed, the successor for a live claim, and a trailing "!" when the claim has lapsed
+// and its holder is provably gone — the takeover-eligible state, marked rather than
+// silently treated as free.
+func wipReclaimOwnerCell(r wiprecon.ReclaimRow) string {
+	if r.AdoptedBy == "" {
+		return "-"
+	}
+	cell := r.AdoptedBy
+	if r.AdoptedMine {
+		cell = "self:" + cell
+	}
+	if r.AdoptExpired {
+		cell += "!"
+	}
+	return cell
 }
 
 // wipReconcile classifies every WIP checkpoint into a reconciliation action from three
@@ -172,31 +273,57 @@ func wipReconcileAt(ctx context.Context, repo string, now time.Time) (wipReconci
 	decisions := wiprecon.Reconcile(cands)
 	return wipReconcileResult{
 		Decisions: decisions,
-		Reclaim:   wipReclaimWorklist(ctx, repo, decisions, bySession, now),
+		Reclaim:   wipReclaimWorklist(ctx, repo, decisions, bySession, live, now),
 	}, nil
 }
+
+// wipReclaimRemote is the remote the recovery queue grades replication and mirror
+// freshness against. `origin` is the only remote the fleet actually syncs checkpoints to
+// (internal/wipref/sync.go), and reading the mirror is a local ref sweep — no network — so
+// a clone with no origin simply reports NEVER_SYNCED rather than failing.
+const wipReclaimRemote = "origin"
 
 // wipReclaimWorklist resolves the base-drift facts for the RECLAIM decisions and ranks
 // them most-decayed-first (#5480). It costs at most ONE extra git spawn per RECLAIM row
 // and none at all for the other verdicts — deliberately, because RECLAIM is the rare
 // verdict (the reporter's fleet repo read 2 RECLAIM to 131 QUARANTINE), so the default
 // reconcile path's read cost is unchanged for every other row.
-func wipReclaimWorklist(ctx context.Context, repo string, decisions []wiprecon.Decision, bySession map[string]wipref.RefRecord, now time.Time) []wiprecon.ReclaimRow {
+func wipReclaimWorklist(ctx context.Context, repo string, decisions []wiprecon.Decision, bySession map[string]wipref.RefRecord, live map[string]bool, now time.Time) []wiprecon.ReclaimRow {
 	reclaimable := wiprecon.Reclaimable(decisions)
+	if len(reclaimable) == 0 {
+		return []wiprecon.ReclaimRow{}
+	}
+	// The durability and ownership facts are resolved ONCE for the whole queue, and only
+	// when the queue is non-empty: RECLAIM is the rare verdict, so the common reconcile
+	// pass still pays nothing for columns it will not print.
+	me := wipAdoptSuccessorDefault()
+	mirror, merr := wipMirrorIndex(ctx, repo, wipReclaimRemote)
+	freshness := ""
+	if merr == nil {
+		if view, verr := wipMirrorView(ctx, repo, wipReclaimRemote, len(mirror), now.Unix(), wipref.DefaultMirrorMaxAgeSeconds); verr == nil {
+			freshness = string(view.Freshness)
+		}
+	}
+
 	rows := make([]wiprecon.ReclaimRow, 0, len(reclaimable))
 	for _, d := range reclaimable {
 		rec := bySession[d.Session]
 		row := wiprecon.ReclaimRow{
-			Session:       d.Session,
-			Object:        rec.Object,
-			StartSHA:      rec.Stamp.StartSHA,
-			TrunkDistance: wipBaseDistance(ctx, repo, rec.Stamp.StartSHA),
-			Leaves:        rec.Stamp.Leaves,
-			Reason:        d.Reason,
+			Session:         d.Session,
+			Object:          rec.Object,
+			StartSHA:        rec.Stamp.StartSHA,
+			TrunkDistance:   wipBaseDistance(ctx, repo, rec.Stamp.StartSHA),
+			Leaves:          rec.Stamp.Leaves,
+			Reason:          d.Reason,
+			MirrorFreshness: freshness,
 		}
 		if row.Leaves == nil {
 			row.Leaves = []string{}
 		}
+		// Replication may never OVERSTATE durability, so an unreadable mirror grades the
+		// row LOCAL_ONLY exactly as an empty one does (ClassifyReplication's contract).
+		state, _ := wipref.ClassifyReplication(rec, mirror)
+		row.Replication = string(state)
 		// An unstamped or future capture time yields age 0 rather than a fabricated
 		// one: the queue is sorted by urgency, and an unmeasurable row must not be
 		// promoted by an artifact of the zero value.
@@ -205,9 +332,33 @@ func wipReclaimWorklist(ctx context.Context, repo string, decisions []wiprecon.D
 				row.AgeHours = age.Hours()
 			}
 		}
+		wipReclaimAnnotateAdoption(ctx, repo, &row, me, live, now.Unix())
+		row.Argv = wiprecon.AdoptArgv(row)
 		rows = append(rows, row)
 	}
 	return wiprecon.RankReclaim(rows)
+}
+
+// wipReclaimAnnotateAdoption folds one row's adoption receipt onto it. An UNREADABLE
+// receipt is reported as an anonymous, non-expired claim rather than as "unclaimed": the
+// queue's job is to stop two successors from racing, and a claim it cannot parse is still
+// a claim someone wrote. Reading it as free is the one error that produces the collision.
+func wipReclaimAnnotateAdoption(ctx context.Context, repo string, row *wiprecon.ReclaimRow, me string, live map[string]bool, nowUnix int64) {
+	rec, _, has, err := wipReadReceipt(ctx, repo, row.Session)
+	if err != nil {
+		row.AdoptedBy, row.AdoptPhase = "?", "UNREADABLE"
+		return
+	}
+	if !has {
+		return
+	}
+	row.AdoptedBy = rec.Successor
+	row.AdoptedMine = me != "" && rec.Successor == me
+	row.AdoptPhase = string(rec.Phase)
+	row.Attempts = rec.Attempt
+	// Expired is the TAKEOVER precondition reported, not applied: both legs — the claim
+	// lapsed AND its holder holds no live lease — exactly as wiprecon.DecideAdopt requires.
+	row.AdoptExpired = !live[rec.Successor] && rec.Expired(nowUnix)
 }
 
 // wipBaseDistance reports how many commits HEAD has advanced past the base the
