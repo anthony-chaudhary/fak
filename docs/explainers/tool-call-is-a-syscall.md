@@ -90,6 +90,11 @@ the floor distrusts is **quarantined** before it can become the model's next
 instructions (result-side gate). The four verdicts on the right are exactly the four
 numbers in the ledger line above: allowed / denied / repaired / deferred.*
 
+`REQUIRE_WITNESS` can be implemented as a durable pause: persist the exact call,
+release the live model/worker, verify an independently bound attestation, recheck policy,
+execute once, and resume the parked turn. It does **not** require keeping a context window
+resident in RAM. The full state machine, plugin seams, and user-preference boundaries are in
+[REQUIRE_WITNESS as a durable tool-call continuation](require-witness-tool-call-continuations.md).
 To see the flow in motion, watch the
 [44-second agent-kernel explainer](../../visuals/agent-kernel-video.mp4).
 
