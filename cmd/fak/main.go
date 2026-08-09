@@ -121,6 +121,8 @@ func main() {
 		cmdToolproc(os.Args[2:])
 	case "stallscan":
 		cmdStallscan(os.Args[2:])
+	case "sessiondiag":
+		cmdSessionDiag(os.Args[2:])
 	case "host-crash":
 		cmdHostCrash(os.Args[2:])
 	case "host-relaunch-broker":
