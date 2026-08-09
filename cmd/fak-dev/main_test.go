@@ -89,6 +89,28 @@ gateway = ["internal/gateway/**"]
 	}
 }
 
+func TestOrientExecutesThroughDevelopmentArtifact(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root := devindex.FindRoot(".")
+	if code := run(&out, &errOut, []string{"orient", "--root", root, "--leases=false", "--json", "--paths", "cmd/fak/main.go"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"lane"`) {
+		t.Fatalf("orient did not execute through fak-dev:\n%s", out.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchOrient(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "orient":`) || strings.Contains(string(body), "cmdOrient(") {
+		t.Fatal("runtime fak still dispatches the dev-only orient command")
+	}
+}
+
 func TestRuntimeSourceDoesNotDispatchIndex(t *testing.T) {
 	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
 	body, err := os.ReadFile(mainPath)

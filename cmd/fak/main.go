@@ -253,8 +253,6 @@ func main() {
 		cmdInit(os.Args[2:])
 	case "feature":
 		cmdFeature(os.Args[2:])
-	case "orient":
-		cmdOrient(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":
