@@ -290,6 +290,18 @@ def test_opencode_does_not_get_the_codex_loop_gate_flag() -> None:
 
 
 
+def test_glm_docs_spawn_is_guard_wrapped() -> None:
+    """The dedicated pool must actually apply the guard config it preflights."""
+    tree = ast.parse((ROOT / "tools" / "dispatch_glm_docs.py").read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    wraps = [n for n in calls if isinstance(n.func, ast.Attribute)
+             and isinstance(n.func.value, ast.Name) and n.func.value.id == "dw"
+             and n.func.attr == "guarded_launch_command"]
+    assert len(wraps) == 1, "GLM docs spawn must pass through guarded_launch_command"
+    assert ast.unparse(wraps[0].args[1]) == "'docs'"
+    assert ast.unparse(wraps[0].args[2]) == "'opencode'"
+
+
 def test_glm_docs_spawn_passes_prompt_payload() -> None:
     """The dedicated opencode launcher passes the full prompt out-of-band."""
     src = (ROOT / "tools" / "dispatch_glm_docs.py").read_text(encoding="utf-8")

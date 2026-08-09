@@ -265,6 +265,10 @@ def main(argv=None) -> int:
         env = ird.opencode_worker_env(OPENCODE_DIR, "docs", REPO, RUNS)
         env["FLEET_RESOLVE_ISSUE"] = str(issue)
         cmd = ird.build_worker_command("opencode", rb["prompt"], GLM_MODEL)
+        cmd, guarded = dw.guarded_launch_command(
+            cmd, "docs", "opencode", REPO, env=env)
+        if guarded:
+            dw.guard_env_augment(env)
         res = ird.spawn_issue_worker(cmd, env, REPO, RUNS, issue, "docs", "opencode",
                                      account=acct, spawn_probe_s=8.0,
                                      prompt_payload=rb["prompt"])
