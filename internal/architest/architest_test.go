@@ -499,6 +499,7 @@ var tier = map[string]int{
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
 	"testenv":               1, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
 	"estimatecal":           1, // #5899 (epic #3229): pure in-memory estimate-vs-billed correction ratio fold keyed by provider/model; stdlib-only, imports nothing internal, off the hot path.
+	"docreach":              1, // Pure document-reachability census; repository I/O stays in cmd/fak.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
