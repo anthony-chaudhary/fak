@@ -2,14 +2,21 @@ package agenticbench
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/genlock"
 )
 
-const ExternalHarnessQueueSchema = "fak.agentic-benchmark-external-harness-queue.v1"
+const (
+	ExternalHarnessQueueSchema = "fak.agentic-benchmark-external-harness-queue.v1"
+	externalHarnessQueueLock   = "internal/agenticbench/external-harness-queue.lock.json"
+)
 
 type ExternalHarnessQueue struct {
 	Schema             string                     `json:"schema"`
@@ -276,6 +283,21 @@ func RenderExternalHarnessQueueMarkdown(q *ExternalHarnessQueue) string {
 }
 
 func WriteExternalHarnessQueue(root, jsonPath, markdownPath string, now time.Time) (*ExternalHarnessQueue, error) {
+	// The queue embeds GeneratedAt, so two renders of the same committed inputs are
+	// intentionally not byte-reproducible. Key freshness on the source tree instead:
+	// an unchanged canonical input skips both artifact writes completely.
+	input, err := externalHarnessQueueInput(root)
+	if err != nil {
+		return nil, err
+	}
+	// Build state lives beside this generator, under the named agenticbench lane.
+	// Putting it under docs would misclassify state as prose; a loose root path
+	// would fall through to the exclusive global catch-all.
+	lock := genlock.OpenAt(root, externalHarnessQueueLock)
+	if outputsCurrent(root, lock, input, jsonPath, markdownPath) {
+		return BuildExternalHarnessQueue(root, now)
+	}
+
 	queue, err := BuildExternalHarnessQueue(root, now)
 	if err != nil {
 		return nil, err
@@ -289,13 +311,75 @@ func WriteExternalHarnessQueue(root, jsonPath, markdownPath string, now time.Tim
 		if err := writeQueueFile(jsonPath, b); err != nil {
 			return nil, err
 		}
+		if err := lock.Record(repoPath(root, jsonPath), input); err != nil {
+			return nil, err
+		}
+		if err := lock.Save(); err != nil {
+			return nil, err
+		}
 	}
 	if markdownPath != "" {
 		if err := writeQueueFile(markdownPath, []byte(RenderExternalHarnessQueueMarkdown(queue))); err != nil {
 			return nil, err
 		}
+		if err := lock.Record(repoPath(root, markdownPath), input); err != nil {
+			return nil, err
+		}
+		if err := lock.Save(); err != nil {
+			return nil, err
+		}
 	}
 	return queue, nil
+}
+
+func outputsCurrent(root string, lock *genlock.Lock, input []byte, paths ...string) bool {
+	seen := false
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		seen = true
+		if !lock.Current(repoPath(root, path), input) {
+			return false
+		}
+	}
+	return seen
+}
+
+func repoPath(root, path string) string {
+	if rel, err := filepath.Rel(root, path); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
+}
+
+func externalHarnessQueueInput(root string) ([]byte, error) {
+	// The queue reads these declared child artifacts. Keep the freshness input
+	// explicit: scanning the output directory would make the generated queue hash
+	// itself and could never become current.
+	files := []string{
+		"BENCHMARK-AUTHORITY.md",
+		"experiments/agent-live/agentdojo-fak-fullstack-20260625.json",
+		"experiments/vllm/glm52-agentic-battery/final-check.json",
+		"experiments/agent-live/swebench-opus-smoke-contract-20260626.json",
+		"experiments/agent-live/deepswe-raw-fak-contract-20260626.json",
+		"experiments/agent-live/toolsandbox-official-run-contract-20260626.json",
+		"experiments/agent-live/terminalbench-official-run-contract-20260626.json",
+		"experiments/agent-live/browseraction-official-run-contract-20260626.json",
+	}
+	var parts [][]byte
+	for _, rel := range files {
+		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				body = []byte("<missing>")
+			} else {
+				return nil, err
+			}
+		}
+		parts = append(parts, []byte(rel), body)
+	}
+	return genlock.Canonical(parts...), nil
 }
 
 func writeQueueFile(path string, b []byte) error {
