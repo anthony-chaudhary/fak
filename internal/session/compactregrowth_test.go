@@ -110,8 +110,11 @@ func TestRegrowthSteadyGrowthTrajectory(t *testing.T) {
 	}
 }
 
-// A byte-identical instruction payload reinjected after the fire is duplicated
-// invariant setup: flagged, measured by length, attributed to the instructions class.
+// A byte-identical instruction payload reinjected after the fire is cross-fire
+// restatement: flagged, measured by length, attributed to the instructions class.
+// The flagged row is the window's ONLY instructions row — the pre-fire copy was
+// discarded by the cut — so the anomaly is a rollout-level restatement counter,
+// never a license to drop the reinjection (#5255).
 func TestRegrowthDuplicatedSetupFlagged(t *testing.T) {
 	r := regrowthOf(t, scanRegrowthFixture(t, "duplicated-setup.jsonl"), 0)
 
@@ -121,6 +124,9 @@ func TestRegrowthDuplicatedSetupFlagged(t *testing.T) {
 	st := r.Classes[RegrowClassInstructions]
 	if st == nil || st.DupRows != 1 || st.DupBytes < RegrowthDupMinBytes {
 		t.Errorf("instructions class = %+v, want 1 duplicate row of >= %d bytes", st, RegrowthDupMinBytes)
+	}
+	if st != nil && st.Rows != 1 {
+		t.Errorf("instructions rows = %d, want 1 — the flagged duplicate must be the sole in-window copy (cross-fire restatement, not double residency)", st.Rows)
 	}
 	if r.Rebounded || r.Censored != RegrowthCensorRolloutEnd {
 		t.Errorf("rebounded/censored = %v/%q, want false/%s", r.Rebounded, r.Censored, RegrowthCensorRolloutEnd)

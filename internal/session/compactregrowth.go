@@ -76,6 +76,16 @@ var RegrowthThresholds = []int{50000, 100000, 150000, RegrowthReboundTokens}
 
 // Regrowth anomaly tokens — a closed vocabulary, same contract as the #4763 set.
 const (
+	// AnomalyDuplicateSetup counts ROLLOUT-level restatement, not resident waste. The
+	// dedup table is session-scoped across fires, so a post-fire reinjection of setup
+	// the cut already discarded reads as a duplicate even though it is the window's
+	// only resident copy. The #5255 attribution refuted the dedupe reading: within a
+	// post-fire window every instruction payload occurs exactly once, the fires that
+	// append setup are precisely those whose replacement_history omits it, and the
+	// emitter is the upstream CLI's post-compaction rebuild, not this repo — so
+	// removing the reinjection would strip the agent's instructions, not save context.
+	// Kept deliberately as an honest restatement counter; decision witness:
+	// testdata/compactaudit/setup-reinjection-decision-2026-08-09.md.
 	AnomalyDuplicateSetup     = "DUPLICATE_SETUP_REINJECTION"
 	AnomalyRepeatedToolResult = "REPEATED_TOOL_RESULT"
 	AnomalyOversizedEvent     = "OVERSIZED_EVENT"
