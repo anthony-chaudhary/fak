@@ -349,3 +349,61 @@ func TestAccountsDoctorWriteHydratesCanonicalPeer(t *testing.T) {
 		t.Fatalf("session transcript not copied: %v", err)
 	}
 }
+
+// TestAccountsDoctorDurableOrgWallOutranksNeedsLogin is the doctor surface of #4998.
+// Unlike TestAccountsDoctorAccessWallIsNotRelogin (a FRESH probe-ledger verdict on a
+// still-credentialed seat), this wall was witnessed in an EARLIER process and persisted
+// in the fleet-shared cooldown store — and Claude has since blanked the seat's tokens,
+// so the config-plane fold alone says needs_login. Doctor must keep the stronger typed
+// diagnosis across the process boundary and never hand the operator the futile relogin.
+func TestAccountsDoctorDurableOrgWallOutranksNeedsLogin(t *testing.T) {
+	t.Setenv("FLEET_REG_DIR", "")
+	home := t.TempDir()
+	walled := mkHome(t, home, ".claude-wall-seat", "wall@example.test", false)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"wall-seat","dir":"` + jsonPath(walled) + `"}` +
+		`],"roles":{"active":"wall-seat","anchor":"wall-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd := t.TempDir()
+	t.Setenv("FLEET_STATE_DIR", sd)
+
+	// Control: with no wall recorded, the blanked seat legitimately IS a relogin.
+	// Without this half the test could pass vacuously off the switch arm alone.
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"doctor", "--registry", regPath, "--home", home}); rc != 1 {
+		t.Fatalf("control doctor rc=%d, want 1; out=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "relogin") {
+		t.Fatalf("control: a blanked seat with no wall must fold to relogin:\n%s", out.String())
+	}
+
+	// Process 1 witnessed the terminal 403 and persisted the typed evidence, exactly
+	// as the guard's ObserveSeatHealth would; this doctor run is process 2.
+	store, err := accounts.LoadCooldownStore(filepath.Join(sd, "account-cooldown.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.RecordOrgAuthWall(accounts.UUIDBucketKey("u-wall@example.test"), "", time.Now().UTC()); !ok {
+		t.Fatal("RecordOrgAuthWall did not record")
+	}
+	if err := store.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	rc := runAccounts(&out, &errb, []string{"doctor", "--registry", regPath, "--home", home})
+	if rc != 1 {
+		t.Fatalf("doctor with a durable org wall rc=%d, want 1; out=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "org_auth_wall") || !strings.Contains(got, "access_blocked") {
+		t.Fatalf("doctor should keep the typed org-wall diagnosis and route it to access_blocked:\n%s", got)
+	}
+	if strings.Contains(got, "relogin") || strings.Contains(got, "CLAUDE_CONFIG_DIR=") {
+		t.Fatalf("doctor must never propose re-login for a durable org wall:\n%s", got)
+	}
+}

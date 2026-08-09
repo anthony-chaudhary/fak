@@ -211,7 +211,13 @@ func buildAccountsDoctorReport(registryPath string, reg accounts.Registry) acctD
 		Registry:    registryPath,
 		ProbeLedger: strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != "",
 	}
-	login := reg.LoginReport()
+	// The cooldown overlay is load-bearing here (#4998): the durable org-auth-wall
+	// evidence lives in the fleet-shared cooldown store, and only LoginReportAt folds
+	// it over the config-plane statuses. A plain LoginReport would re-collapse a
+	// witnessed wall into needs_login and doctor would prescribe the futile relogin.
+	// Fail-open (io.Discard swallows the unreadable-store note): a bad state file
+	// degrades doctor to config-plane verdicts, never blocks it.
+	login := loginReportWithCooldown(io.Discard, reg)
 	for _, obs := range login.Seats {
 		report.Seats = append(report.Seats, foldDoctorSeat(obs, report.ProbeLedger))
 	}
@@ -590,6 +596,16 @@ func foldDoctorSeat(obs accounts.LoginObservation, consultLedger bool) doctorSea
 		return seat
 	case accounts.LoginTombstoned:
 		return seat // already retired; Resolve/Serve fall forward past it
+	case accounts.LoginOrgAuthWall:
+		// The DURABLE org wall (#4998): a typed upstream 403 witnessed in an earlier
+		// process and persisted in the cooldown store. It arrives here already folded
+		// over the local status — even when Claude has since blanked the tokens to
+		// needs_login underneath — because re-login only mints another token for the
+		// SAME walled org. Route to the operator-judgment action, never doctorRelogin.
+		seat.Action = doctorAccessBlocked
+		seat.Command = "fak accounts remove --name " + obs.Name +
+			"  (org auth wall witnessed upstream; switch seats or bill via an API key — after an org admin re-enables access, `fak accounts cooldown --clear` returns the seat to the pool)"
+		return seat
 	}
 	// Ready seat: overlay the freshest active-probe verdict, when the prober is wired.
 	if consultLedger && obs.Dir != "" {
