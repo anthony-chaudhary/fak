@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/commitlifecycle"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/growthgate"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"github.com/anthony-chaudhary/fak/internal/wiprecon"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -545,31 +545,25 @@ func growthReapLedgerPath() string {
 // inspectGardenReclaim reads the existing RECLAIM worklist and surfaces only its
 // actionable head. It deliberately does not land, delete, or update checkpoint refs.
 func inspectGardenReclaim(stderr io.Writer, root string) gardenbundle.MemberResult {
-	res, err := wipReconcileAt(context.Background(), root, time.Now())
+	rows, err := commitLifecycleQueue(context.Background(), root)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak garden tick: reclaim worklist: %v\n", err)
-		return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "errored"}
+		fmt.Fprintf(stderr, "fak garden tick: commit lifecycle queue: %v\n", err)
+		return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "errored", Detail: err.Error()}
 	}
-	if len(res.Reclaim) == 0 {
-		return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "ok", Counts: map[string]int{"reclaimable": 0}}
+	counts := make(map[string]int)
+	var actionable []commitlifecycle.Row
+	for _, row := range rows {
+		counts[string(row.State)]++
+		if row.State != commitlifecycle.Shipped {
+			actionable = append(actionable, row)
+		}
 	}
-	head := res.Reclaim[0]
-	detail := fmt.Sprintf("%d reclaimable; most-decayed session=%s drift=%s age=%s", len(res.Reclaim), head.Session, gardenReclaimDrift(head), gardenReclaimAge(head.AgeHours))
-	return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "action", Detail: detail, Counts: map[string]int{"reclaimable": len(res.Reclaim)}}
-}
-
-func gardenReclaimDrift(row wiprecon.ReclaimRow) string {
-	if row.TrunkDistance < 0 {
-		return "?"
+	if len(actionable) == 0 {
+		return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "ok", Counts: counts}
 	}
-	return strconv.Itoa(row.TrunkDistance)
-}
-
-func gardenReclaimAge(ageHours float64) string {
-	if ageHours < 0 {
-		ageHours = 0
-	}
-	return (time.Duration(ageHours * float64(time.Hour))).Round(time.Second).String()
+	head := actionable[0]
+	detail := fmt.Sprintf("%d non-terminal; head=%s next=%s", len(actionable), head.State, commitLifecycleActionText(head.Action))
+	return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "action", Detail: detail, Counts: counts}
 }
 
 // collectGrowthLogs is the schedule-driven growthgate collector wired to the
