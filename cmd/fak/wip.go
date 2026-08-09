@@ -52,6 +52,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipStatus(stdout, stderr, argv[1:])
 	case "sync":
 		return runWipSync(stdout, stderr, argv[1:])
+	case "remote-drain":
+		return runWipRemoteDrain(stdout, stderr, argv[1:])
 	case "restore":
 		return runWipRestore(stdout, stderr, argv[1:])
 	case "land":
@@ -137,6 +139,12 @@ func wipUsage(w io.Writer) {
       direction, so a later reader can date this clone's picture of the remote instead
       of mistaking an unfetched mirror for an empty one. The stamp is local-only — the
       push refspec cannot carry it — and a sync that fails leaves none.
+
+  fak wip remote-drain [-C <repo>] [--remote R] [--apply] [--allow-peer] [--json]
+      Report remotely stored checkpoints and delete only those whose complete delta is
+      independently witnessed in the remote default branch. Report mode is read-only.
+      Age is never evidence. Own sessions are eligible by default; peers require
+      --allow-peer and the same containment proof. Unlanded or unknown work is kept.
 
   fak wip restore <session> [-C <repo>] [--apply]
       Print the checkpointed delta as an apply-able diff (default) or, with --apply,
