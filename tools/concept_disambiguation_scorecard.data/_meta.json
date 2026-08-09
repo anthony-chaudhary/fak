@@ -2493,6 +2493,16 @@
           "category": "incidental",
           "reason": "Private float formatter for the parity card render; introduces no maturity concept.",
           "token": "formatParityValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper implementing the existing git-daily health scorecard",
+          "token": "gitDailyCoverageKPI"
+        },
+        {
+          "category": "incidental",
+          "reason": "machine-readable KPI key within the existing git-daily health scorecard",
+          "token": "calendar_coverage"
         }
       ],
       "id": "support-maturity",
@@ -2515,6 +2525,7 @@
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",
         "achievedMaturity",
+        "calendar_coverage",
         "correctnessclass",
         "correctnessdependson",
         "coverageBlock",
@@ -2527,6 +2538,7 @@
         "errmmapunsupported",
         "errstreamingunsupported",
         "formatParityValue",
+        "gitDailyCoverageKPI",
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",

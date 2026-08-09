@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "gitdailydebt",
+      "canonical": "git_daily_debt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "git_daily_debt is the debt key of the git-daily health scorecard (internal/metrics/git_daily_health.go, const GitDailyDebtKey, schema fak-git-daily-health/1): the count of concrete, re-derivable repairs the card found while grading Daily lock-aware Git hygiene from its fak-git-daily/1 ledger over three axes - adoption (is the OS trigger still landing runs), outcome_health (what share of recorded ticks refused a tier or hit an incident), and fold_drift (the trailing streak of non-ok ticks that is the #4602 signature).",
+      "distinction": "Unlike climb_ratchet_debt (milestone ratchet rungs) and the other per-card *_debt integers, git_daily_debt counts ONLY defects derivable from the fak-git-daily/1 rows the daily tick appends. It never counts a scheduler fire: a deliberately skipped tick (ALREADY_RAN_TODAY, TICK_BUSY) writes no ledger row, so zero debt means every RECORDED run was healthy, not that nothing was skipped.",
+      "distinct_from": [
+        "x-goal25b-score-debt-climbratchetdebt",
+        "x-goal25b-score-debt-tokendefaultsdebt"
+      ],
+      "aliases": [],
+      "grounding": "git_daily_debt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

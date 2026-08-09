@@ -105,6 +105,10 @@ type GitDailyHealthInput struct {
 	RefusedStreak int
 	// Today is the LOCAL day key the recency check measures against ("" disables it).
 	Today string
+	// CurrentHour is the local wall-clock hour used only for today's 03:00 schedule grace.
+	CurrentHour int
+	// RunDays carries ledger day keys; duplicates are folded before coverage grading.
+	RunDays []string
 	// LedgerPath names the witness in every evidence string; "" falls back to the bare
 	// ledger file name.
 	LedgerPath string
@@ -145,6 +149,7 @@ func GradeGitDailyHealth(in GitDailyHealthInput) scorecard.Payload {
 
 	kpis := []scorecard.KPI{
 		gitDailyAdoptionKPI(in, ledger, stale),
+		gitDailyCoverageKPI(in, ledger),
 		gitDailyOutcomeKPI(in, ledger),
 		gitDailyDriftKPI(in, ledger),
 	}
@@ -202,6 +207,53 @@ func gitDailyAdoptionKPI(in GitDailyHealthInput, ledger string, stale int) score
 	k.Defects = []string{fmt.Sprintf(
 		"newest recorded tick in %s is %s, %d day(s) stale as of %s (>= %d): the schedule has stopped landing runs — re-check the OS trigger, and note a powered-down host reads the same way because a skipped tick writes no row",
 		ledger, in.LastDay, gap, in.Today, stale)}
+	return k
+}
+
+// gitDailyCoverageKPI grades each due calendar day. Today becomes due at the 03:00
+// local schedule. Missing days are typed debt, while detail preserves the powered-off-host
+// confound. The KPI is additive under fak-git-daily-health/1.
+func gitDailyCoverageKPI(in GitDailyHealthInput, ledger string) scorecard.KPI {
+	k := scorecard.KPI{Key: "calendar_coverage", Group: "usage"}
+	first, err1 := time.Parse(gitDailyDayLayout, in.FirstDay)
+	today, err2 := time.Parse(gitDailyDayLayout, in.Today)
+	if err1 != nil || err2 != nil || today.Before(first) {
+		k.Detail = "not gradable: calendar window is missing or invalid"
+		k.Soft = []string{"calendar coverage needs valid first-day and today witnesses"}
+		return k
+	}
+	end := today
+	if in.CurrentHour < 3 {
+		end = end.AddDate(0, 0, -1)
+	}
+	if end.Before(first) {
+		k.Score = 100
+		k.Detail = "today is still inside the pre-03:00 schedule grace; no day is due yet"
+		return k
+	}
+	due := int(end.Sub(first).Hours()/24) + 1
+	seen := make(map[string]bool, len(in.RunDays))
+	for _, day := range in.RunDays {
+		seen[day] = true
+	}
+	missing := make([]string, 0)
+	for day := first; !day.After(end); day = day.AddDate(0, 0, 1) {
+		key := day.Format(gitDailyDayLayout)
+		if !seen[key] {
+			missing = append(missing, key)
+		}
+	}
+	covered := due - len(missing)
+	k.Detail = fmt.Sprintf("%d of %d due calendar day(s) recorded from %s through %s; a missing day may mean the host was powered off, which this ledger cannot distinguish from trigger failure", covered, due, in.FirstDay, end.Format(gitDailyDayLayout))
+	if due < 3 {
+		k.Score = 100
+		k.Soft = append(k.Soft, "young ledger: fewer than 3 due days, so missing-day coverage is observed but not debt")
+		return k
+	}
+	k.Score = 100 * float64(covered) / float64(due)
+	if len(missing) > 0 {
+		k.Defects = append(k.Defects, fmt.Sprintf("%d missed calendar day(s) in %s (%s): verify both host availability and the scheduled trigger", len(missing), ledger, strings.Join(missing, ", ")))
+	}
 	return k
 }
 

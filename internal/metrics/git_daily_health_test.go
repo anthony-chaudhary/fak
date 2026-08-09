@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -493,4 +494,56 @@ func TestRealLedgerCaptureIsDerivedFromTheRawRows(t *testing.T) {
 	if got := GitDailyHealthFragment(derived, GradeGitDailyHealth(derived)); got != want {
 		t.Errorf("captured output from the raw ledger =\n  %q\nwant\n  %q", got, want)
 	}
+}
+
+func TestGitDailyCalendarCoverageMatrix(t *testing.T) {
+	cases := []struct {
+		name         string
+		first, today string
+		hour         int
+		days         []string
+		wantScore    float64
+		wantDefect   bool
+		wantText     string
+	}{
+		{"every day", "2026-07-01", "2026-07-11", 4, daysEvery(1, 11), 100, false, "11 of 11"},
+		{"every other day", "2026-07-01", "2026-07-11", 4, daysEvery(2, 11), 100 * 6.0 / 11.0, true, "5 missed calendar day"},
+		{"four of eleven", "2026-07-01", "2026-07-11", 4, []string{"2026-07-01", "2026-07-04", "2026-07-07", "2026-07-10"}, 100 * 4.0 / 11.0, true, "7 missed calendar day"},
+		{"pre tick today grace", "2026-07-01", "2026-07-11", 2, daysEvery(1, 10), 100, false, "10 of 10"},
+		{"young ledger", "2026-07-10", "2026-07-11", 4, []string{"2026-07-10"}, 100, false, "young ledger"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			k := gitDailyCoverageKPI(GitDailyHealthInput{FirstDay: tc.first, Today: tc.today, CurrentHour: tc.hour, RunDays: tc.days}, "ledger.jsonl")
+			if diff := k.Score - tc.wantScore; diff < -0.001 || diff > 0.001 {
+				t.Fatalf("score=%v want %v: %+v", k.Score, tc.wantScore, k)
+			}
+			if (len(k.Defects) > 0) != tc.wantDefect {
+				t.Fatalf("defects=%v want defect=%v", k.Defects, tc.wantDefect)
+			}
+			joined := k.Detail + " " + strings.Join(k.Defects, " ") + " " + strings.Join(k.Soft, " ")
+			if !strings.Contains(joined, tc.wantText) {
+				t.Fatalf("%q missing %q", joined, tc.wantText)
+			}
+			if tc.wantDefect && !strings.Contains(k.Detail, "powered off") {
+				t.Fatalf("confound not communicated: %q", k.Detail)
+			}
+		})
+	}
+}
+
+func TestGitDailyCalendarCoverageEmptyIsUngradable(t *testing.T) {
+	k := gitDailyCoverageKPI(GitDailyHealthInput{}, "ledger.jsonl")
+	if k.Score != 0 || len(k.Defects) != 0 || !strings.Contains(k.Detail, "not gradable") {
+		t.Fatalf("unexpected empty coverage: %+v", k)
+	}
+}
+
+func daysEvery(step, n int) []string {
+	start, _ := time.Parse(gitDailyDayLayout, "2026-07-01")
+	var out []string
+	for i := 0; i < n; i += step {
+		out = append(out, start.AddDate(0, 0, i).Format(gitDailyDayLayout))
+	}
+	return out
 }

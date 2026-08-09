@@ -301,6 +301,11 @@ func gitDailyHealthInput(rows []gitdaily.Row, path string) metrics.GitDailyHealt
 	for _, r := range rows {
 		outcomes = append(outcomes, string(r.Outcome()))
 	}
+	runDays := make([]string, 0, len(rows))
+	for _, row := range rows {
+		runDays = append(runDays, row.Day)
+	}
+	now := time.Now()
 	return metrics.GitDailyHealthInput{
 		Runs:        tally.Runs,
 		OK:          tally.OK,
@@ -315,8 +320,10 @@ func gitDailyHealthInput(rows []gitdaily.Row, path string) metrics.GitDailyHealt
 		RefusedStreak: metrics.GitDailyRefusedStreak(outcomes),
 		// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a
 		// UTC "today" would read a full day stale for half the world every evening.
-		Today:      time.Now().Format(gitdaily.DayLayout),
-		LedgerPath: path,
+		Today:       now.Format(gitdaily.DayLayout),
+		CurrentHour: now.Hour(),
+		RunDays:     runDays,
+		LedgerPath:  path,
 	}
 }
 
