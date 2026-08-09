@@ -72,3 +72,5 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 | Research design history | [`docs/notes/`](docs/notes/) | Current code, tests, and architecture before relying on an older decision |
 
 For an unlisted task, start at [`INDEX.md`](INDEX.md) and select the current audience route.
+
+- docs/generated/verb-surface.md — generated source-derived fak verb tree, REFUSES column, and unverified coverage count
