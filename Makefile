@@ -88,8 +88,11 @@ vet:
 architest-gate:
 	go test -count=1 ./internal/architest/ -run '$(ARCHITEST_GATE_RE)'
 
+# The suite boundary strips provider credentials using envconfiglint's secret-name
+# registry before any test process starts. Tests that need synthetic credentials set
+# them explicitly inside their own process; inherited developer credentials never cross.
 test: architest-gate
-	go test ./...
+	go run ./cmd/testenv -- go test ./...
 
 # test-fast: the 2s smoke tier — the synthetic + architest invariants only.
 # `-short` skips the weight-backed model witnesses (the ~538MB f32/safetensors
