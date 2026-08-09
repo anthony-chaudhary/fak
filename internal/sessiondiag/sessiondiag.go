@@ -2,7 +2,10 @@
 // structured log and SQLite store. It never consumes or emits log bodies.
 package sessiondiag
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const Schema = "fak.sessiondiag.v1"
 
@@ -78,4 +81,96 @@ func Classify(e Evidence, now time.Time) Report {
 		r.Verdict = "STORE_INTEGRITY_FAILURE"
 	}
 	return r
+}
+
+const IncidentSchema = "fak-session-incident/1"
+
+type ExitKind string
+
+const (
+	ExitNone        ExitKind = "none"
+	ExitFailure     ExitKind = "failure"
+	ExitIntentional ExitKind = "intentional"
+)
+
+type IncidentInput struct {
+	CapturedAt      time.Time
+	ProcessID       int
+	ProcessUUID     string
+	ThreadID        string
+	LastLogAt       time.Time
+	ExitAt          time.Time
+	ExitKind        ExitKind
+	ExitCode        *int
+	OSFailureEvent  bool
+	QueueDropDelta  int64
+	SlowWriteDelta  int64
+	WriterCount     int64
+	DBBytes         int64
+	WALBytes        int64
+	FreelistPages   int64
+	ProcessObserved bool
+}
+
+type Incident struct {
+	Schema         string `json:"schema"`
+	Verdict        string `json:"verdict"`
+	Causality      string `json:"causality"`
+	CapturedAt     string `json:"captured_at"`
+	ProcessID      int    `json:"process_id,omitempty"`
+	ProcessUUID    string `json:"process_uuid,omitempty"`
+	ThreadID       string `json:"thread_id,omitempty"`
+	LastLogAt      string `json:"last_log_at,omitempty"`
+	ExitAt         string `json:"exit_at,omitempty"`
+	ExitCode       *int   `json:"exit_code,omitempty"`
+	OSFailureEvent bool   `json:"os_failure_event"`
+	QueueDropDelta int64  `json:"queue_drop_delta"`
+	SlowWriteDelta int64  `json:"slow_write_delta"`
+	WriterCount    int64  `json:"writer_count"`
+	DBBytes        int64  `json:"db_bytes"`
+	WALBytes       int64  `json:"wal_bytes"`
+	FreelistPages  int64  `json:"freelist_pages"`
+}
+
+func CaptureIncident(in IncidentInput) Incident {
+	out := Incident{
+		Schema: IncidentSchema, CapturedAt: stamp(in.CapturedAt), ProcessID: in.ProcessID,
+		ProcessUUID: safeID(in.ProcessUUID), ThreadID: safeID(in.ThreadID), LastLogAt: stamp(in.LastLogAt),
+		ExitAt: stamp(in.ExitAt), ExitCode: in.ExitCode, OSFailureEvent: in.OSFailureEvent,
+		QueueDropDelta: in.QueueDropDelta, SlowWriteDelta: in.SlowWriteDelta, WriterCount: in.WriterCount,
+		DBBytes: in.DBBytes, WALBytes: in.WALBytes, FreelistPages: in.FreelistPages,
+	}
+	switch {
+	case in.ExitKind == ExitFailure && (!in.ExitAt.IsZero() || in.OSFailureEvent || in.ExitCode != nil):
+		out.Verdict, out.Causality = "DIRECT_PROCESS_FAILURE", "established"
+	case in.ExitKind == ExitIntentional:
+		out.Verdict, out.Causality = "INTENTIONAL_EXIT", "established"
+	case in.ProcessObserved:
+		out.Verdict, out.Causality = "HEALTHY_PROCESS", "not_applicable"
+	case in.QueueDropDelta > 0 || in.SlowWriteDelta > 0 || in.WALBytes > 0:
+		out.Verdict, out.Causality = "CORRELATED_RUNTIME_PRESSURE", "not_established"
+	default:
+		out.Verdict, out.Causality = "MISSING_EVIDENCE", "not_established"
+	}
+	return out
+}
+
+func stamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func safeID(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 128 {
+		return ""
+	}
+	for _, r := range s {
+		if !(r == '-' || r == '_' || r == '.' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return ""
+		}
+	}
+	return s
 }

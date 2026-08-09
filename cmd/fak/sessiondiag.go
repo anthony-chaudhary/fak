@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,13 @@ func runSessionDiag(stdout, stderr io.Writer, args []string, query sessionDiagQu
 	db := fs.String("db", defaultCodexLogDB(), "Codex structured-log SQLite path")
 	since := fs.Duration("since", 24*time.Hour, "bounded evidence window")
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	incidentOut := fs.String("incident-out", "", "write one redacted incident envelope (requires --process-id)")
+	processID := fs.Int("process-id", 0, "observed Codex process id")
+	processUUID := fs.String("process-uuid", "", "opaque process UUID")
+	threadID := fs.String("thread-id", "", "opaque thread id")
+	exitKind := fs.String("exit-kind", "none", "none, failure, or intentional")
+	exitCode := fs.String("exit-code", "", "process exit code when observed")
+	osFailure := fs.Bool("os-failure-event", false, "OS process-failure event observed")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -42,6 +50,43 @@ func runSessionDiag(stdout, stderr io.Writer, args []string, query sessionDiagQu
 		return 2
 	}
 	e.ProcessCount = countCodexProcesses()
+	if *incidentOut != "" {
+		if *processID <= 0 {
+			fmt.Fprintln(stderr, "fak sessiondiag: --incident-out requires --process-id")
+			return 2
+		}
+		var code *int
+		if *exitCode != "" {
+			n, err := strconv.Atoi(*exitCode)
+			if err != nil {
+				fmt.Fprintln(stderr, "fak sessiondiag: invalid --exit-code")
+				return 2
+			}
+			code = &n
+		}
+		kind := sessiondiag.ExitKind(*exitKind)
+		if kind != sessiondiag.ExitNone && kind != sessiondiag.ExitFailure && kind != sessiondiag.ExitIntentional {
+			fmt.Fprintln(stderr, "fak sessiondiag: --exit-kind must be none, failure, or intentional")
+			return 2
+		}
+		exitAt := time.Time{}
+		if kind != sessiondiag.ExitNone {
+			exitAt = time.Now()
+		}
+		inc := sessiondiag.CaptureIncident(sessiondiag.IncidentInput{CapturedAt: time.Now(), ProcessID: *processID, ProcessUUID: *processUUID, ThreadID: *threadID, ExitAt: exitAt, ExitKind: kind, ExitCode: code, OSFailureEvent: *osFailure, QueueDropDelta: e.QueueDrops, SlowWriteDelta: e.SlowWrites, WriterCount: e.ProcessCount, DBBytes: e.DBBytes, WALBytes: e.WALBytes, FreelistPages: e.FreelistPages, ProcessObserved: kind == sessiondiag.ExitNone})
+		b, err := json.MarshalIndent(inc, "", "  ")
+		if err != nil {
+			fmt.Fprintln(stderr, "fak sessiondiag: encode incident")
+			return 1
+		}
+		if err := os.WriteFile(*incidentOut, append(b, '\n'), 0600); err != nil {
+			fmt.Fprintln(stderr, "fak sessiondiag: write incident failed")
+			return 1
+		}
+		if !*jsonOut {
+			fmt.Fprintf(stdout, "incident=%s verdict=%s\n", filepath.Base(*incidentOut), inc.Verdict)
+		}
+	}
 	r := sessiondiag.Classify(e, time.Now())
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)

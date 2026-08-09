@@ -66,3 +66,33 @@ func TestCountCodexProcessesIsNonNegative(t *testing.T) {
 		t.Fatalf("count=%d", got)
 	}
 }
+
+func TestRunSessionDiagWritesRedactedIncident(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "incident.json")
+	var out, er bytes.Buffer
+	q := func(string, time.Duration) (sessiondiag.Evidence, error) {
+		return sessiondiag.Evidence{QueueDrops: 3, SlowWrites: 2, WALBytes: 4096, CodexProcesses: 4}, nil
+	}
+	code := runSessionDiag(&out, &er, []string{"--incident-out", dst, "--process-id", "42", "--process-uuid", "proc-42", "--thread-id", "thread-7", "--exit-kind", "failure", "--exit-code", "23", "--os-failure-event"}, q)
+	if code != 1 {
+		t.Fatalf("code=%d err=%s", code, er.String())
+	}
+	b, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got sessiondiag.Incident
+	if err = json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "DIRECT_PROCESS_FAILURE" || got.ProcessUUID != "proc-42" || got.QueueDropDelta != 3 {
+		t.Fatalf("%s", b)
+	}
+	if strings.Contains(string(b), dir) {
+		t.Fatalf("path leaked: %s", b)
+	}
+	if st, err := os.Stat(dst); err != nil || st.Mode().Perm()&0077 != 0 {
+		t.Fatalf("incident permissions=%v err=%v", st.Mode(), err)
+	}
+}
