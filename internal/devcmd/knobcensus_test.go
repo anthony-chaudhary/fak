@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -41,7 +41,7 @@ func writeKnobsRepo(t *testing.T) string {
 func TestIndexKnobsJSON(t *testing.T) {
 	root := writeKnobsRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"knobs", "--json", "--root", root}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"knobs", "--json", "--root", root}); rc != 0 {
 		t.Fatalf("runIndex knobs --json rc=%d, stderr=%s", rc, errb.String())
 	}
 	var census struct {
@@ -94,7 +94,7 @@ func TestIndexKnobsJSON(t *testing.T) {
 func TestIndexKnobsTable(t *testing.T) {
 	root := writeKnobsRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"knobs", "--root", root}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"knobs", "--root", root}); rc != 0 {
 		t.Fatalf("runIndex knobs rc=%d, stderr=%s", rc, errb.String())
 	}
 	got := out.String()

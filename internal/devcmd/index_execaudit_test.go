@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 // CLI proof for #5648. internal/devindex proves the DERIVATION (which packages are
 // executable, tested, reached); this file proves the half that only exists here: the
@@ -37,7 +37,7 @@ func writeExecAuditFile(t *testing.T, root, rel, body string) {
 func runExecAudit(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	rc := runIndex(&out, &errb, append([]string{"execaudit"}, args...))
+	rc := RunIndex(&out, &errb, append([]string{"execaudit"}, args...))
 	return rc, out.String(), errb.String()
 }
 

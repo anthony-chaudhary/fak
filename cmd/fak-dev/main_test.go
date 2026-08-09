@@ -89,6 +89,17 @@ gateway = ["internal/gateway/**"]
 	}
 }
 
+func TestRuntimeSourceDoesNotDispatchIndex(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "index"`) || strings.Contains(string(body), `case "index", "devindex"`) || strings.Contains(string(body), "cmdIndex(") {
+		t.Fatal("runtime fak still dispatches the dev-only index command")
+	}
+}
+
 func TestRuntimeSourceDoesNotDispatchWiki(t *testing.T) {
 	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
 	body, err := os.ReadFile(mainPath)

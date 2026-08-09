@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -52,7 +52,7 @@ func writeIndexRepo(t *testing.T) string {
 func TestIndexLeafShowsStatusBadge(t *testing.T) {
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"leaf", "--root", root, "gateway"}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"leaf", "--root", root, "gateway"}); rc != 0 {
 		t.Fatalf("runIndex leaf rc=%d, stderr=%s", rc, errb.String())
 	}
 	got := out.String()
@@ -64,7 +64,7 @@ func TestIndexLeafShowsStatusBadge(t *testing.T) {
 func TestIndexClaimsSearch(t *testing.T) {
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"claims", "--root", root, "gateway"}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"claims", "--root", root, "gateway"}); rc != 0 {
 		t.Fatalf("runIndex claims rc=%d, stderr=%s", rc, errb.String())
 	}
 	got := out.String()
@@ -80,7 +80,7 @@ func requireIndexUsageError(t *testing.T, sub, wantStderr string) {
 	t.Helper()
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{sub, "--root", root}); rc != 2 {
+	if rc := RunIndex(&out, &errb, []string{sub, "--root", root}); rc != 2 {
 		t.Fatalf("%s with no query rc=%d, want 2 (usage error)", sub, rc)
 	}
 	if got := errb.String(); got != wantStderr {
@@ -107,7 +107,7 @@ func TestIndexCtxPlansDispatch(t *testing.T) {
 	write("cmd/fak/demo.go", "package main\n//fak:ctxplan verb=cache-demo enters=\"prompt\" pages=\"none\" warms=\"none\"\nfunc cmdDemo() {}\n")
 
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"ctxplans", "--json", "--root", root}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"ctxplans", "--json", "--root", root}); rc != 0 {
 		t.Fatalf("runIndex ctxplans rc=%d stderr=%s", rc, errb.String())
 	}
 	if !strings.Contains(out.String(), `"name": "cache-demo"`) || !strings.Contains(out.String(), `"declared": true`) {
@@ -126,7 +126,7 @@ func TestIndexDocsNeedsQuery(t *testing.T) {
 func TestIndexClaimsJSON(t *testing.T) {
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"claims", "--json", "--root", root, "session"}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"claims", "--json", "--root", root, "session"}); rc != 0 {
 		t.Fatalf("runIndex claims --json rc=%d, stderr=%s", rc, errb.String())
 	}
 	var claims []struct {
@@ -145,7 +145,7 @@ func TestIndexClaimsJSON(t *testing.T) {
 func TestIndexGenerationJSON(t *testing.T) {
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"generation", "--json", "--root", root, "next"}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"generation", "--json", "--root", root, "next"}); rc != 0 {
 		t.Fatalf("runIndex generation --json rc=%d, stderr=%s", rc, errb.String())
 	}
 	var generations []struct {
@@ -194,7 +194,7 @@ func TestIndexRefsBlastRadiusCLI(t *testing.T) {
 	writeFile("internal/unrelated/unrelated.go", "package unrelated\n")
 
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"refs", "--json", "--root", root, "example.com/fak/internal/core.Widget"}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"refs", "--json", "--root", root, "example.com/fak/internal/core.Widget"}); rc != 0 {
 		t.Fatalf("runIndex refs rc=%d, stderr=%s", rc, errb.String())
 	}
 	var got devindex.BlastRadiusResult
@@ -245,7 +245,7 @@ func TestIndexFreshness(t *testing.T) {
 
 	// Table mode names both the dead-doc-link and the orphan-note drift.
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"freshness", "--root", root}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"freshness", "--root", root}); rc != 0 {
 		t.Fatalf("runIndex freshness rc=%d, stderr=%s", rc, errb.String())
 	}
 	got := out.String()
@@ -259,7 +259,7 @@ func TestIndexFreshness(t *testing.T) {
 	// JSON mode round-trips the typed findings.
 	out.Reset()
 	errb.Reset()
-	if rc := runIndex(&out, &errb, []string{"freshness", "--json", "--root", root}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"freshness", "--json", "--root", root}); rc != 0 {
 		t.Fatalf("runIndex freshness --json rc=%d, stderr=%s", rc, errb.String())
 	}
 	var drift []struct {
@@ -293,7 +293,7 @@ func TestIndexFreshnessClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"freshness", "--root", root}); rc != 0 {
+	if rc := RunIndex(&out, &errb, []string{"freshness", "--root", root}); rc != 0 {
 		t.Fatalf("runIndex freshness rc=%d, stderr=%s", rc, errb.String())
 	}
 	if !strings.Contains(out.String(), "no drift") {
@@ -329,15 +329,5 @@ func TestIndexFreshnessUndeclaredLeafParity(t *testing.T) {
 	got := cat.UndeclaredLeaves()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("undeclared-leaf parity broken:\n devindex=%v\n hooks   =%v\n(did devindex's declared-set fall behind dos.toml's [lanes]?)", got, want)
-	}
-}
-
-func TestIndexOwnershipMovedToFakDev(t *testing.T) {
-	var out, errOut bytes.Buffer
-	if code := runIndex(&out, &errOut, []string{"ownership"}); code != 2 {
-		t.Fatalf("legacy fak index ownership code=%d, want 2; stdout=%s stderr=%s", code, out.String(), errOut.String())
-	}
-	if !strings.Contains(errOut.String(), `unknown subcommand "ownership"`) {
-		t.Fatalf("legacy surface did not refuse ownership: %s", errOut.String())
 	}
 }

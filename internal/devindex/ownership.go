@@ -35,6 +35,7 @@ type CommandOwnership struct {
 // incomplete.
 func SupplementalDevVerbs() []Verb {
 	return []Verb{
+		{Name: "index", Synopsis: "query the repository self-index and audit runtime/dev ownership", Aliases: []string{"devindex"}, Lane: "devindex", Tier: TierDev},
 		{Name: "gh-spam-comments", Synopsis: "scan GitHub issue/PR comments for untrusted spam across reusable abuse families", Lane: "cmd", Tier: TierDev},
 		{Name: "workspace", Synopsis: "map the local agentic-development workspace and guard decision stream", Lane: "cmd", Tier: TierDev},
 	}
