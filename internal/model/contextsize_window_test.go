@@ -69,8 +69,8 @@ func TestContextSizeConfigChargesPerLayerWindow(t *testing.T) {
 		}
 	}
 
-	const uniformSlots = 30 * gemma4WindowedCtx           // 491520
-	const windowedSlots = 25*1024 + 5*gemma4WindowedCtx   // 107520
+	const uniformSlots = 30 * gemma4WindowedCtx         // 491520
+	const windowedSlots = 25*1024 + 5*gemma4WindowedCtx // 107520
 	wantUniform := int64(uniformSlots) * kvPerTokenPerLayerF32
 	wantWindowed := int64(windowedSlots) * kvPerTokenPerLayerF32
 

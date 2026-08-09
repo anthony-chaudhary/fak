@@ -29,11 +29,11 @@ this line is scar tissue and must be tolerated
 // prove the check is a drop detector, not a "score changed" detector.
 func TestScoreDropsWarnsOnFixtureRegression(t *testing.T) {
 	rep := Report{Head: "deadbee1", Modules: []Module{
-		{Name: "cmd/fak", Kind: "cmd", Rev: 9, Score: scoreOf(0.55)},                 // flat: silent
-		{Name: "internal/alpha", Kind: "internal", Rev: 5, Score: scoreOf(0.5)},      // DROP 0.8 -> 0.5
-		{Name: "internal/beta", Kind: "internal", Rev: 4, Score: scoreOf(0.9)},       // improved: silent
-		{Name: "internal/gamma", Kind: "internal", Rev: 1, Score: scoreOf(0.1)},      // first observation: silent
-		{Name: "internal/delta", Kind: "internal", Rev: 2, Score: nil},               // nothing joined: silent
+		{Name: "cmd/fak", Kind: "cmd", Rev: 9, Score: scoreOf(0.55)},            // flat: silent
+		{Name: "internal/alpha", Kind: "internal", Rev: 5, Score: scoreOf(0.5)}, // DROP 0.8 -> 0.5
+		{Name: "internal/beta", Kind: "internal", Rev: 4, Score: scoreOf(0.9)},  // improved: silent
+		{Name: "internal/gamma", Kind: "internal", Rev: 1, Score: scoreOf(0.1)}, // first observation: silent
+		{Name: "internal/delta", Kind: "internal", Rev: 2, Score: nil},          // nothing joined: silent
 	}}
 	drops := ScoreDrops(rep, []byte(regressionLedger))
 	if len(drops) != 1 {
@@ -66,7 +66,7 @@ func TestScoreDropsWarnsOnFixtureRegression(t *testing.T) {
 // nothing — a clean run must not print a "0 regressions" line.
 func TestScoreDropsSilentWithoutRegression(t *testing.T) {
 	rep := Report{Head: "deadbee1", Modules: []Module{
-		{Name: "cmd/fak", Kind: "cmd", Rev: 9, Score: scoreOf(0.55)},            // exactly equal
+		{Name: "cmd/fak", Kind: "cmd", Rev: 9, Score: scoreOf(0.55)},             // exactly equal
 		{Name: "internal/alpha", Kind: "internal", Rev: 5, Score: scoreOf(0.81)}, // up
 		{Name: "internal/beta", Kind: "internal", Rev: 4, Score: scoreOf(0.4)},   // exactly equal
 	}}
@@ -110,9 +110,9 @@ func TestScoreDropsAnchorsOnLastScoredRow(t *testing.T) {
 // truncating or skimming the advisory keeps the movement most worth looking at.
 func TestScoreDropsOrderWorstFirst(t *testing.T) {
 	rep := Report{Modules: []Module{
-		{Name: "internal/beta", Rev: 4, Score: scoreOf(0.35)},  // -0.05
-		{Name: "internal/alpha", Rev: 5, Score: scoreOf(0.1)},  // -0.70
-		{Name: "cmd/fak", Rev: 9, Score: scoreOf(0.35)},        // -0.20
+		{Name: "internal/beta", Rev: 4, Score: scoreOf(0.35)}, // -0.05
+		{Name: "internal/alpha", Rev: 5, Score: scoreOf(0.1)}, // -0.70
+		{Name: "cmd/fak", Rev: 9, Score: scoreOf(0.35)},       // -0.20
 	}}
 	drops := ScoreDrops(rep, []byte(regressionLedger))
 	var names []string

@@ -285,7 +285,7 @@ func TestHandleFakEventsFilteredCursorDoesNotRedeliverOrSkip(t *testing.T) {
 
 	// A new matching row lands behind rows the filter drops. Polling from the advanced
 	// cursor must see it — the head was not skipped by the earlier advance.
-	j.Emit(denyEvent("Bash", "trace-c"))       // Seq 5, filtered out
+	j.Emit(denyEvent("Bash", "trace-c"))         // Seq 5, filtered out
 	j.Emit(vdsoHitEvent("fetch_url", "trace-c")) // Seq 6, matches
 	after := drainEvents(t, httptest.NewRequest(http.MethodGet,
 		"/v1/fak/events?kind=VDSO_HIT&since="+strconv.FormatUint(next.Cursor, 10), nil))

@@ -80,7 +80,7 @@ func TestEstimateKVStoreBytesWindowIdentityCases(t *testing.T) {
 // window on a zero-layer config cannot resurrect a nonzero charge.
 func TestEstimateKVStoreBytesWindowFailsOpenOnBadGeometry(t *testing.T) {
 	for _, cfg := range []KVConfig{
-		{NumLayers: 4, HeadDim: 4, WindowPerLayer: []int{2, 2, 2, 2}},   // NumKVHeads 0
+		{NumLayers: 4, HeadDim: 4, WindowPerLayer: []int{2, 2, 2, 2}},    // NumKVHeads 0
 		{NumLayers: 4, NumKVHeads: 2, WindowPerLayer: []int{2, 2, 2, 2}}, // HeadDim 0
 		{NumKVHeads: 2, HeadDim: 4, WindowPerLayer: []int{2}},            // NumLayers 0
 	} {

@@ -45,14 +45,14 @@ import (
 // `fak skill footprint --json` payload (schema fak-skill-footprint/1) — renaming
 // one is a breaking change to that contract, not a refactor.
 type Entry struct {
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Version   string `json:"version"`
-	Digest    string `json:"digest"`
-	CardBytes   int `json:"card_bytes"`        // fak's at-rest serialized card
-	DescBytes   int `json:"description_bytes"` // the full description: the ranking key (#3234)
-	NameBytes   int `json:"name_bytes"`        // the name-only resident slice (#3612)
-	IntentBytes int `json:"intent_bytes"`      // the resident one-line intent slice (#5560)
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Digest      string `json:"digest"`
+	CardBytes   int    `json:"card_bytes"`        // fak's at-rest serialized card
+	DescBytes   int    `json:"description_bytes"` // the full description: the ranking key (#3234)
+	NameBytes   int    `json:"name_bytes"`        // the name-only resident slice (#3612)
+	IntentBytes int    `json:"intent_bytes"`      // the resident one-line intent slice (#5560)
 }
 
 // Floor is the whole-catalog resident floor: per-skill rows plus the totals — the

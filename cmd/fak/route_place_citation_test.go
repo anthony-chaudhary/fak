@@ -101,7 +101,7 @@ func TestTheCitationNeverNamesTurnsTheFloorRefused(t *testing.T) {
 	turns := routineTurns("rung-device", 25, 0, time.Hour)
 	for i := 0; i < 60; i++ {
 		turns = append(turns, modelroute.TurnOutcome{
-			ID: "selfreport-" + string(rune('a'+i%26)) + string(rune('a'+i/26)),
+			ID:    "selfreport-" + string(rune('a'+i%26)) + string(rune('a'+i/26)),
 			Model: "rung-device", Class: modelroute.ClassRoutine,
 			Success: true, Verify: modelroute.VerifyNone, At: time.Now().Add(-time.Hour),
 		})
