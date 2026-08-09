@@ -147,18 +147,5 @@ func devTierVerbs() []devindex.Verb {
 }
 
 func devOnlyVerbs() []devindex.Verb {
-	return []devindex.Verb{
-		{
-			Name:     "gh-spam-comments",
-			Synopsis: "scan GitHub issue/PR comments for untrusted spam across reusable abuse families (release archives, fake patch/fix lures) and optionally hide it as SPAM",
-			Lane:     "cmd",
-			Tier:     devindex.TierDev,
-		},
-		{
-			Name:     "workspace",
-			Synopsis: "map the local agentic-dev workspace spine and read the guard floor's live decision stream (allowed/blocked/quarantined/witnessed) — the #3426 preview",
-			Lane:     "cmd",
-			Tier:     devindex.TierDev,
-		},
-	}
+	return devindex.SupplementalDevVerbs()
 }

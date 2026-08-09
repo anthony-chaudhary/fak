@@ -1,0 +1,16 @@
+{
+  "schema": "fak-runtime-dev-split-baseline/1",
+  "captured_at": "2026-08-09T18:25:16.7290794Z",
+  "commit": "292200125e9b0d380e7eab21fb9daf0018ce552a",
+  "go_version": "go version go1.26.5 windows/amd64",
+  "goos": "windows",
+  "goarch": "amd64",
+  "host_os": "Microsoft Windows NT 10.0.26200.0",
+  "command": "./cmd/fak",
+  "package_count": 699,
+  "internal_package_count": 452,
+  "binary_size_bytes": 73350656,
+  "clean_build_elapsed_ms": 65555,
+  "provenance": "git archive HEAD; go build -o <temp>/fak-baseline.exe ./cmd/fak; go list -deps ./cmd/fak",
+  "note": "Captured from the then-current committed tip in an isolated git archive because the shared working tree was peer-dirty. This is a boundary baseline, not a performance claim."
+}

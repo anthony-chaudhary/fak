@@ -331,3 +331,29 @@ func TestIndexFreshnessUndeclaredLeafParity(t *testing.T) {
 		t.Errorf("undeclared-leaf parity broken:\n devindex=%v\n hooks   =%v\n(did devindex's declared-set fall behind dos.toml's [lanes]?)", got, want)
 	}
 }
+
+func TestIndexOwnershipReportsTotalInventoryAndLeaks(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runIndex(&out, &errOut, []string{"ownership", "--root", devindex.FindRoot(".")}); code != 0 {
+		t.Fatalf("runIndex ownership code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"command ownership: runtime=", " dev=", "runtime graph: packages=", "dev-leaks=", "LEAK "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("ownership output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestIndexOwnershipJSONIsMachineReadable(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runIndex(&out, &errOut, []string{"ownership", "--json", "--root", devindex.FindRoot(".")}); code != 0 {
+		t.Fatalf("runIndex ownership json code=%d stderr=%s", code, errOut.String())
+	}
+	var got devindex.OwnershipReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != "fak-command-ownership/1" || len(got.Commands) == 0 || got.Graph.PackageCount == 0 {
+		t.Fatalf("incomplete ownership report: %+v", got)
+	}
+}
