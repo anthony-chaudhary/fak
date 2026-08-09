@@ -1,9 +1,91 @@
 ---
 name: field-borrow
-description: One repeatable pass that turns an outward field idea into grounded backlog WITHOUT guessing whether fak already has it — the dogfood-witnessed capability-import loop. Before filing "fak should add X" from a named external system (Letta/MemGPT, Mem0, Zep/Graphiti, Cognee, vLLM/SGLang, a dated paper) or a row from the RESEARCH-*/industry field scans, it DOGFOODS fak's own self-query surface (`fak_feature_query` / `fak capabilities` / `fak index docs|leaves|verbs|claims`) to witness PRESENT / PARTIAL / ABSENT, grounds each real gap in a file:line seam, and files epic-anchored issues carrying the named source + the dogfood witness + the seam + a first checkable step. The human-curated, witness-first counterpart to the automated `idea-scout` (which dedups a candidate only against already-filed issues — a seen-cache, issue-body stamp, and title-Jaccard index — and never asks fak what it already has in the codebase); the product/agent-capability counterpart of `sota-check` (kernels) and `industry-score` (the competitive map). Use when reading a field/SOTA/research note and wondering "do we already have this?", before filing a capability-gap issue, after a competitor or paper ships a capability, or on a /loop cadence over the docs/notes RESEARCH-* corpus to convert inert research into witnessed, grounded backlog.
+description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, roadmap, design discussion, or field practice could improve fak—not only on explicit borrow requests. Mine code, tests, docs, history, releases, open/closed issues, PRs, discussions, roadmaps, and provenance; date observations and source events; directly port/adapt when exact-source licensing permits; explore the spirit of promising proposed or incomplete ideas; then dogfood fak self-query to classify PRESENT/PARTIAL/ABSENT before shipping or filing witnessed gaps.
 ---
 
 # field-borrow — borrow from the field, but witness the gap against yourself first
+
+## High-priority inspired-by default
+
+This is the repository's high-priority default "inspired by" workflow. Invoke it proactively
+whenever a named product, repository, paper, standard, benchmark, release, issue, PR, roadmap,
+design discussion, or field practice could improve fak. Do not wait for an explicit research or
+borrowing request: run it before bespoke design when credible prior art may change the choice.
+External evidence does not override user scope, security, legal obligations, or coherent shipping.
+
+Six laws govern every pass:
+
+1. **Priority:** consider external prior art early, not as optional cleanup after designing.
+2. **Licensed reuse:** copy or adapt directly when exact-source licensing and technical fit permit;
+   fresh reimplementation is not inherently better.
+3. **Exhaustiveness:** all relevant source classes were checked or explicitly marked unavailable.
+4. **Dating:** every observation carries event time, observation time, source state, and refresh cue.
+5. **Breadth:** mine implementation, docs, tests, history, releases, issues, PRs, discussions,
+   roadmaps, and provenance—not only README claims.
+6. **Spirit:** explore transferable principles and responsible extensions even when upstream has
+   only a partial prototype; label inference separately from shipped fact.
+
+## Exhaustive, dated source ledger
+
+For a repository-shaped source inspect canonical docs/design/API examples; code, tests, fixtures,
+and configuration at a pinned revision; releases/tags/changelog and relevant history/blame; open
+**and closed** issues; merged, closed, and open PRs plus review discussion; discussions, RFCs,
+ADRs, roadmaps, and TODOs; exact-revision LICENSE, per-file headers, NOTICE, vendored/generated
+provenance, submodules, and contribution terms. For papers/products/standards use equivalent
+primary sources (artifact/appendix, official release history, normative revision/errata). Follow
+citations to the mechanism's origin. Inaccessible surfaces are omissions, not empty results.
+
+Record every material observation with:
+
+- `observed_at`: full ISO date/time for the research observation;
+- `source_event_at`: commit, merge, release, publication, or update date;
+- source state: released/shipped, merged-unreleased, proposed/open, rejected/closed,
+  experimental, or unclear;
+- immutable anchor: `path:line@full-sha`, release/tag+digest, paper version/DOI, or standards rev;
+- platform context: relevant version, API generation, provider, hardware, plan/tier, or environment;
+- refresh trigger: release, PR merge, API rollover, benchmark rerun, or `none known`.
+
+Never write timeless “X does Y” for a changing platform. Open issues, PRs, and roadmaps prove
+interest/direction, not shipped behavior.
+
+## License disposition: copy when allowed
+
+Read the license at the exact studied revision and check per-file/NOTICE/provenance boundaries.
+Classify every candidate before implementation:
+
+- **DIRECT-PORT:** copying/modification is permitted and obligations fit. Prefer copying the
+  smallest coherent implementation or test, preserving notices and source `path@sha`, then adapt.
+- **ADAPT:** reuse is permitted but fak interfaces, dependencies, or constraints require material
+  changes. Identify direct versus rewritten portions and retain attribution.
+- **INSPIRE-ONLY:** terms are absent, unclear, incompatible, proprietary, or behavior-only. Build
+  independently; do not copy expressive code, tests, comments, or assets.
+- **DO-NOT-USE:** provenance or terms are unsafe; exclude and record why.
+
+Do **not** default to inspire-only because clean-room rewriting feels cleaner. Public visibility
+also does not grant permission. When obligations are ambiguous, use INSPIRE-ONLY or seek review.
+
+## Expansive candidate extraction
+
+Extract all of these before ranking:
+
+- direct mechanisms: algorithms, schemas, tests, UX, operations, and documentation;
+- negative knowledge: reverts, rejected proposals, recurring issue failures, regressions, reviews;
+- emerging direction: open PRs, issues, RFCs, roadmaps, TODOs, and design sketches, marked proposed;
+- **Spirit extensions:** infer the broader principle and adjacent fak applications, using
+  `source fact -> inferred principle -> fak opportunity -> disconfirming check`;
+- combinations across independent sources that produce a stronger design.
+
+Be expansive in discovery and conservative in claims. A promising unimplemented idea is a valid
+**INFERENCE** when paired with a cheap experiment/falsifier; it is not parity evidence.
+
+## Required completion evidence
+
+In addition to the PRESENT/PARTIAL/ABSENT self-query pass below, completion requires a coverage
+checklist, dated source ledger, license disposition, candidate matrix (fact versus inference and
+shipped versus proposed), exact fak seam, and either shipped proof or contract-ready filed work.
+Prefer shipping a safe in-scope minimal spine now over reflexively creating backlog. A long link
+list is not exhaustive research: state what each source changed in the conclusion.
+
 
 ## Why this skill exists
 

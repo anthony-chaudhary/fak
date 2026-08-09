@@ -23,11 +23,13 @@ the backlog; you never resolve it. A crawl is not a borrow; a study is not a shi
    nothing fresh is repo-shaped, STOP CLEAN — an empty pass is valid. Never invent a
    lead.**
 
-3. **STUDY via /study-repo.** Drive `.claude/skills/study-repo/SKILL.md` — don't
-   restate it. Shallow-clone INTO SCRATCH (never `C:\work\fak`), pin the commit
-   `@sha`, read the CODE (load-bearing modules + tests + recent commits) not the
-   README pitch, ground each candidate borrow at a real `path:line@sha`, decide
-   inspire-vs-integrate on the LICENSE.
+3. **STUDY via /study-repo and /field-borrow.** Drive both contracts. Clone INTO
+   SCRATCH, pin `@sha`, and mine the full evidence surface: code/tests/docs/history/
+   releases, open+closed issues, merged+closed+open PRs/reviews, discussions/roadmaps,
+   and exact-revision license/provenance. Date source events and observations. Extract
+   direct mechanisms, negative lessons, proposed direction, and a responsible
+   spirit-level extension (or why none survives). Prefer DIRECT-PORT or ADAPT when
+   licensing and technical fit permit; use INSPIRE-ONLY for unclear/incompatible terms.
 
 4. **WITNESS each borrow, then FILE small.** For each candidate run `/field-borrow`'s
    witness step — dogfood `fak_feature_query` / `fak index` (+ a raw Grep to guard

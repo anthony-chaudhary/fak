@@ -1,6 +1,6 @@
 ---
 name: study-repo
-description: One repeatable pass that turns "look at <repo>" into scoped, witnessed, license-clean, FILED backlog. When someone drops anything that names a body of code — a GitHub URL, a local checkout, a monorepo subtree, a single file, an npm/pypi/crates package, a paper-with-code / arXiv link, a tarball, a PR/diff, or a bare "study this repo" / "what can we learn from X" / "borrow from <repo>" with no URL at all — this drives the whole flow end to end. Acquire the source into scratch (never the tree) and PIN the commit SHA; read the CODE not the pitch, DEEP by default (fan parallel readers across load-bearing modules + tests + recent commits, then a completeness-critic pass — not a README skim) AND reconstruct THEIR design rationale + user world (who they built it for, what they optimized for, what constraint they were under); extract MANY candidate borrows, each grounded at a real source `path:line@sha` and ABLATED to the one axis it optimizes; decide borrow-vs-integrate with a license + attribution check; DECOMPOSE into many small independently-shippable tickets (or an epic + child leaves for a track), NEVER one "adopt everything from repo X" monolith; witness each borrow against fak on-axis (not at the capability name), so a coarse "we already have that" cannot dismiss a borrow it does not actually cover; and — the default terminal action — FILE the surviving PARTIAL/ABSENT borrows as gh issues under the right epic. The acquisition/exploration/scoping front-half that FEEDS `field-borrow` (which witnesses+files a single named capability). Distinct from the automated outward `idea-scout` and the kernel-only `sota-check`. Use when handed a specific external repo/codebase/paper to learn from, before filing any "we should adopt X from repo Y" issue, after a competitor open-sources something worth reading, or on a `/loop` cadence over a watch-list.
+description: High-priority deep study of external code and proposals for fak. Invoke proactively whenever a repository, package, PR, issue, release, paper-with-code, or implementation is relevant—not only on explicit study requests. Acquire into scratch and pin revisions; mine code, tests, docs, history, releases, open and closed issues, PRs, discussions, roadmaps, and license/provenance; date every observation; directly port or adapt implementation when licensing permits; and explore both shipped mechanisms and the transferable spirit of proposed or incomplete ideas. Extract many source-anchored candidates, then feed every candidate through field-borrow's current-fak witness before shipping or filing small independently provable effects.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob, Write, Edit, WebFetch, WebSearch, Agent, mcp__fak__fak_feature_query, mcp__fak__fak_capabilities, mcp__fak__fak_index_docs, mcp__fak__fak_index_leaves, mcp__fak__fak_index_verbs, mcp__fak__fak_index_claims
@@ -101,7 +101,7 @@ HEAD) is the falsifiable anchor** — the way `sota-check` pins a `PrimaryLink`.
 with no `@sha` is a rumor. If *why they changed it* will matter, deepen the clone now
 (`--depth` drops the log).
 
-### 2 — Read the CODE, not the pitch — DEEP by default
+### 2 — Mine the whole evidence surface — DEEP by default
 
 Read in this order, because it goes from claims to ground truth:
 
@@ -123,6 +123,13 @@ Read in this order, because it goes from claims to ground truth:
    testable claim, not a reflex), and it is the antidote to the ego dismissal — you cannot
    honestly conclude "ours is better" about a choice whose reason you never reconstructed.
 
+Before extraction, complete the source classes that can change the conclusion: releases/tags/
+changelog plus relevant history and blame; tests/fixtures; **open and closed issues**; merged,
+closed, and open PRs plus review discussion; discussions/RFCs/ADRs/roadmaps/TODOs; and exact-
+revision root/per-file licenses, NOTICE/provenance, vendored/generated code, and submodules.
+For every material observation record `observed_at`, `source_event_at`, source state, immutable
+anchor, platform/version context, and refresh trigger. Open work is direction, not shipped proof.
+
 **Deep is the default, and for anything past a single-file peek that means FAN OUT.**
 Dispatch parallel `Explore`/`Agent` readers — one per subsystem the README map exposes
 (e.g. the scheduler, the storage layer, the eval harness, the wire protocol) — each
@@ -142,6 +149,11 @@ makes conditional on the worldview read. Everything else is deep.
 paraphrase of the pitch.
 
 ### 3 — Extract candidate borrows, one technique each — ablated, not ego-scored
+
+Before narrowing, add candidates for direct mechanisms, negative knowledge (reverts,
+rejections, failures), emerging direction (issues/PRs/RFCs), and **spirit extensions**. For each
+extension write `source fact -> inferred principle -> fak opportunity -> disconfirming check`.
+An incomplete upstream prototype may inspire exploration but never proves shipped parity.
 
 For each thing worth taking, write one candidate with **four** fields, not "why it beats
 us":
@@ -177,23 +189,21 @@ candidate — write it down and let the ablated witness in step 6 decide. A rich
 proud-read) tell, not a sparse repo. Steps 4–6 shrink and scope; steps 2–3's job was to give
 them enough raw material.
 
-### 4 — Decide borrow-vs-integrate (the license gate)
+### 4 — Choose direct port, adaptation, inspiration, or exclusion (the license gate)
 
-This is the decision `field-borrow` never has to make, because study-repo touches real
-foreign code:
+Read exact-revision root/per-file licenses, NOTICE, provenance, submodules, and contribution terms.
+Public visibility is not permission; repository metadata is insufficient.
 
-- **INSPIRE (the default).** Learn the technique, reimplement it clean-room in fak's Go
-  idiom — same discipline as `sota-check` ("learn the technique, not copy the bytes"). No
-  license entanglement, but **still cite the source** (`path:line@sha`).
-- **INTEGRATE (the exception — copy/vendor bytes).** Allowed only when **all** hold: (a)
-  the source `LICENSE` is compatible with fak's license — *read the LICENSE file, do not
-  assume from the language*; (b) attribution is preserved; (c) the vendored path and its
-  provenance are recorded. Incompatible (copyleft into a permissive tree, or no license →
-  all-rights-reserved) → you **may not integrate**; fall back to INSPIRE. When in doubt,
-  INSPIRE.
+- **DIRECT-PORT (preferred when compatible):** copy the smallest coherent permitted implementation
+  or test, preserve notices/attribution, cite `path@sha`, then adapt names/interfaces/style.
+- **ADAPT:** reuse permitted implementation when fak constraints require material changes; identify
+  direct versus rewritten portions and preserve lineage/attribution.
+- **INSPIRE-ONLY:** for absent, unclear, incompatible, proprietary, or behavior-only sources,
+  independently implement the idea without copying expressive code/tests/comments/assets.
+- **DO-NOT-USE:** exclude unsafe provenance/terms and record why.
 
-Mark each candidate `inspire` or `integrate`, and drop any `integrate` that fails the gate
-down to `inspire` (or out).
+Do not reflexively rewrite compatible licensed implementation; obligations and technical fit decide.
+If obligations are ambiguous, use INSPIRE-ONLY or seek maintainer/legal review.
 
 ### 5 — Scope: many small tickets, NEVER a monolith
 
