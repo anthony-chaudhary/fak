@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **125** (clarity 9 + coverage 116) |
+| **Disambiguation-debt (drive to 0)** | **136** (clarity 11 + coverage 125) |
 | **Crystal-clear concepts (and climbing)** | **435** crystal of 2148 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2305 / 2421** (95.2% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2305 / 2430** (94.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2826 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 93.7/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 92.3/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2148 concepts - score 93.7/100 (grade A) - disambiguation-debt 125
+concept-disambiguation chart - 2148 concepts - score 92.3/100 (grade A) - disambiguation-debt 136
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 435
@@ -62,15 +62,15 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 52 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########################.. 387/409
-  session-runtime  ##########################.. 213/233
-  plan             ##########################.. 319/338
+  guard-gate       ##########################.. 387/411
+  session-runtime  #########################... 213/234
+  plan             ##########################.. 319/339
   policy-capability ##########################.. 153/166
+  context-ctx      ###########################. 202/211
   render-materialize ###########################. 177/186
+  cache            ###########################. 261/269
   loop             ##########################.. 77/84
-  context-ctx      ###########################. 202/208
   witness-proof    ###########################. 140/146
-  cache            ###########################. 261/266
   gateway-engine   ###########################. 169/174
   evict            ##########################.. 49/53
   score-debt       ###########################. 84/87
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 95.2%  (2305/2421 confusable tokens positioned)
+namespace coverage  [##############################..] 94.9%  (2305/2430 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -2420,6 +2420,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | separation | `reference_resolves` | 30 | 5 | 5 dangling distinct_from reference(s) |
 | honesty | `clarity_consistent` | 64 | 2 | 2 verdict overclaim(s) |
+| grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
@@ -2430,22 +2431,21 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `pair_separated` | 100 | 0 | all 191 confusable name-pair(s) are separated |
-| grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 387 | 409 | 22 |
-| session-runtime | 213 | 233 | 20 |
-| plan | 319 | 338 | 19 |
+| guard-gate | 387 | 411 | 24 |
+| session-runtime | 213 | 234 | 21 |
+| plan | 319 | 339 | 20 |
 | policy-capability | 153 | 166 | 13 |
+| context-ctx | 202 | 211 | 9 |
 | render-materialize | 177 | 186 | 9 |
+| cache | 261 | 269 | 8 |
 | loop | 77 | 84 | 7 |
-| context-ctx | 202 | 208 | 6 |
 | witness-proof | 140 | 146 | 6 |
-| cache | 261 | 266 | 5 |
 | gateway-engine | 169 | 174 | 5 |
 | evict | 49 | 53 | 4 |
 | score-debt | 84 | 87 | 3 |

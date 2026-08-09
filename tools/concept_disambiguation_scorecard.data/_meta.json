@@ -2605,10 +2605,16 @@
           "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "decisionStderr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 result record within ctxplan reconciliation",
+          "token": "PlanStepDecision"
         }
       ],
       "id": "decision",
       "ignore": [
+        "PlanStepDecision",
         "ReuseDecision",
         "appendsteerdecisions",
         "decisionStderr",
@@ -2920,6 +2926,41 @@
           "category": "incidental",
           "reason": "Local trace root identifier, not a planning concept.",
           "token": "candidateID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanStepDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanReconciliation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "indexedPlanStep"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanLogEntry"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanLog"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 ctxplan reconciliation operation",
+          "token": "ReconcilePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 local indexing helper",
+          "token": "indexPlanSteps"
         }
       ],
       "exclude": [
@@ -2940,7 +2981,12 @@
         "NoteCandidates",
         "PlanDecodeInterleave",
         "PlanEviction",
+        "PlanLog",
+        "PlanLogEntry",
+        "PlanReconciliation",
         "PlanResolver",
+        "PlanStepDecision",
+        "ReconcilePlan",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
@@ -2952,6 +2998,8 @@
         "candidates",
         "fitandplanserveggufexpertparallelpathondevice",
         "hostPlan",
+        "indexPlanSteps",
+        "indexedPlanStep",
         "notplanned",
         "nplan",
         "orderLaneCandidatesAged",
