@@ -514,7 +514,10 @@ func TestGitDailyCalendarCoverageMatrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			k := gitDailyCoverageKPI(GitDailyHealthInput{FirstDay: tc.first, Today: tc.today, CurrentHour: tc.hour, RunDays: tc.days}, "ledger.jsonl")
+			k, graded := gitDailyCoverageKPI(GitDailyHealthInput{FirstDay: tc.first, Today: tc.today, CurrentHour: tc.hour, RunDays: tc.days}, "ledger.jsonl", false)
+			if !graded {
+				t.Fatalf("coverage reported not-gradable on a witnessed window: %+v", k)
+			}
 			if diff := k.Score - tc.wantScore; diff < -0.001 || diff > 0.001 {
 				t.Fatalf("score=%v want %v: %+v", k.Score, tc.wantScore, k)
 			}
@@ -533,9 +536,76 @@ func TestGitDailyCalendarCoverageMatrix(t *testing.T) {
 }
 
 func TestGitDailyCalendarCoverageEmptyIsUngradable(t *testing.T) {
-	k := gitDailyCoverageKPI(GitDailyHealthInput{}, "ledger.jsonl")
+	k, graded := gitDailyCoverageKPI(GitDailyHealthInput{}, "ledger.jsonl", false)
 	if k.Score != 0 || len(k.Defects) != 0 || !strings.Contains(k.Detail, "not gradable") {
 		t.Fatalf("unexpected empty coverage: %+v", k)
+	}
+	if graded {
+		t.Fatalf("empty coverage reported itself as graded: %+v", k)
+	}
+}
+
+// TestGitDailyCoverageWithoutRunDaysIsNotDebt pins the half of #6018 that made the package
+// red: a caller that supplies no run-day keys has witnessed NOTHING about which days ran,
+// and folding that silence as "every due day missed" manufactures debt from an absent
+// witness. The window below is 10 days wide with 3 recorded ticks, so the pre-fix fold
+// charged 10 missed days here.
+func TestGitDailyCoverageWithoutRunDaysIsNotDebt(t *testing.T) {
+	k, graded := gitDailyCoverageKPI(GitDailyHealthInput{
+		Runs: 3, FirstDay: "2026-07-26", LastDay: "2026-07-28", Today: "2026-08-05",
+	}, "ledger.jsonl", false)
+	if graded {
+		t.Fatalf("coverage graded a window with no run-day witness: %+v", k)
+	}
+	if len(k.Defects) != 0 {
+		t.Errorf("defects = %v, want none: an absent witness is not a missed day", k.Defects)
+	}
+	if len(k.Soft) != 1 || !strings.Contains(k.Soft[0], "ledger.jsonl") {
+		t.Errorf("soft = %v, want one note naming the witness it needs", k.Soft)
+	}
+}
+
+// TestGitDailyUngradedCoverageDoesNotDragTheComposite pins the second half: Fold averages
+// KPI scores, so an ungraded axis left at Score 0 would read as "this scored zero" and pull
+// the letter grade down. The two inputs below differ ONLY in whether the run-day witness is
+// present, and the healthy one must still grade A.
+func TestGitDailyUngradedCoverageDoesNotDragTheComposite(t *testing.T) {
+	in := GitDailyHealthInput{
+		Runs: 10, OK: 10, FirstDay: "2026-07-27", LastDay: "2026-08-05",
+		LooseFolded: 500, Today: "2026-08-05", LedgerPath: "ledger.jsonl",
+	}
+	p := GradeGitDailyHealth(in)
+	if got := gitDailyDebt(t, p); got != 0 {
+		t.Errorf("%s = %d, want 0 with no run-day witness: %s", GitDailyDebtKey, got, p.Reason)
+	}
+	if got := gitDailyGrade(t, p); got != "A" {
+		t.Errorf("grade = %q, want A: an unwitnessed axis must cost the grade nothing", got)
+	}
+}
+
+// TestGitDailyStoppedTriggerChargesOneRepair pins the double-count half of #6018 with the
+// witness PRESENT: a trigger that stopped on 2026-07-28 makes adoption and coverage report
+// the same fact, but it is one repair — re-check the OS trigger — so it is one debt unit.
+// The missing days stay in the evidence as a soft note rather than vanishing.
+func TestGitDailyStoppedTriggerChargesOneRepair(t *testing.T) {
+	p := GradeGitDailyHealth(GitDailyHealthInput{
+		Runs: 3, OK: 3, FirstDay: "2026-07-26", LastDay: "2026-07-28",
+		RunDays:     []string{"2026-07-26", "2026-07-27", "2026-07-28"},
+		LooseFolded: 900, Today: "2026-08-05", LedgerPath: "ledger.jsonl",
+	})
+	if got := gitDailyDebt(t, p); got != 1 {
+		t.Errorf("%s = %d, want 1 (the stopped trigger is one repair): %s", GitDailyDebtKey, got, p.Reason)
+	}
+	coverage := gitDailyKPI(t, p, "calendar_coverage")
+	if len(coverage.Defects) != 0 {
+		t.Errorf("coverage defects = %v, want none while adoption charges the same stop", coverage.Defects)
+	}
+	if len(coverage.Soft) != 1 || !strings.Contains(coverage.Soft[0], "missed calendar day(s)") {
+		t.Errorf("coverage soft = %v, want the missing days preserved as evidence", coverage.Soft)
+	}
+	// The severity still lands: soft-ing the defect must not restore a passing score.
+	if coverage.Score >= 100 {
+		t.Errorf("coverage score = %v, want the missed days to still cost the axis", coverage.Score)
 	}
 }
 

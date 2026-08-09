@@ -2677,6 +2677,16 @@
           "category": "incidental",
           "reason": "Prometheus gauge family name exposing the latest normalized fak-to-SOTA ratio; a concrete series name, not a governed concept",
           "token": "fak_parity_ratio"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported const holding the literal KPI key string 'calendar_coverage'; named only so the weight map and the KPI cannot disagree by typo",
+          "token": "gitDailyCoverageKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "local bool carrying gitDailyCoverageKPI's second return (was the axis graded) to the weight map inside GradeGitDailyHealth",
+          "token": "coverageGraded"
         }
       ],
       "id": "support-maturity",
@@ -2723,6 +2733,7 @@
         "correctnessclass",
         "correctnessdependson",
         "coverageBlock",
+        "coverageGraded",
         "coveragePath",
         "coveragebaseline",
         "coveragediscipline",
@@ -2735,6 +2746,7 @@
         "fak_parity_value",
         "formatParityValue",
         "gitDailyCoverageKPI",
+        "gitDailyCoverageKey",
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",

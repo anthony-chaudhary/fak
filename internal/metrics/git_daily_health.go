@@ -74,6 +74,11 @@ const gitDailyDayLayout = "2006-01-02"
 // other value counts as a non-ok tick for the trailing-streak rule.
 const GitDailyOutcomeOK = "ok"
 
+// gitDailyCoverageKey names the calendar-coverage axis. It is a const because
+// GradeGitDailyHealth also has to name it in the weight map that drops the axis from the
+// composite when it is not gradable, and a typo there would silently restore the zero.
+const gitDailyCoverageKey = "calendar_coverage"
+
 // GitDailyHealthInput is the ledger-derived witness set the card grades. Every field is a
 // one-to-one projection of what gitdaily.FoldOutcomes already computes over the
 // `fak-git-daily/1` rows, so a caller passes tallies through rather than re-deriving them.
@@ -147,11 +152,29 @@ func GradeGitDailyHealth(in GitDailyHealthInput) scorecard.Payload {
 		stale = DefaultGitDailyStaleDays
 	}
 
+	// Adoption owns a TRAILING gap. When it has already charged "the trigger stopped",
+	// the days coverage would enumerate are that same single repair seen at a finer
+	// resolution, so coverage reports them soft rather than charging a second debt unit —
+	// the rule the empty-ledger case already applies to outcome_health and fold_drift.
+	gap, gapKnown := gitDailyDayGap(in.LastDay, in.Today)
+	adoptionStale := in.Runs > 0 && gapKnown && gap >= stale
+
+	coverage, coverageGraded := gitDailyCoverageKPI(in, ledger, adoptionStale)
 	kpis := []scorecard.KPI{
 		gitDailyAdoptionKPI(in, ledger, stale),
-		gitDailyCoverageKPI(in, ledger),
+		coverage,
 		gitDailyOutcomeKPI(in, ledger),
 		gitDailyDriftKPI(in, ledger),
+	}
+
+	// A not-gradable axis must not average into the composite: "no witness was supplied"
+	// is a different claim from "this scored zero", and Fold's mean cannot tell them
+	// apart. Weight it out instead, so an absent witness costs the grade nothing. Group
+	// is looked up before Key, and no weight names the "usage" group, so this reaches
+	// exactly the coverage axis and leaves adoption at its default weight of 1.
+	var weights map[string]float64
+	if !coverageGraded {
+		weights = map[string]float64{gitDailyCoverageKey: 0}
 	}
 
 	msgs := scorecard.Messages{
@@ -174,7 +197,7 @@ func GradeGitDailyHealth(in GitDailyHealthInput) scorecard.Payload {
 			"stale_after_days": stale,
 		},
 	}
-	return scorecard.Fold(GitDailyHealthSchema, kpis, GitDailyDebtKey, nil, msgs)
+	return scorecard.Fold(GitDailyHealthSchema, kpis, GitDailyDebtKey, weights, msgs)
 }
 
 // gitDailyAdoptionKPI grades usage: is the trigger still landing runs at all?
@@ -213,14 +236,31 @@ func gitDailyAdoptionKPI(in GitDailyHealthInput, ledger string, stale int) score
 // gitDailyCoverageKPI grades each due calendar day. Today becomes due at the 03:00
 // local schedule. Missing days are typed debt, while detail preserves the powered-off-host
 // confound. The KPI is additive under fak-git-daily-health/1.
-func gitDailyCoverageKPI(in GitDailyHealthInput, ledger string) scorecard.KPI {
-	k := scorecard.KPI{Key: "calendar_coverage", Group: "usage"}
+//
+// The second return says whether the axis was GRADED at all. A day is only "missed" on the
+// witness of the run-day keys, so a caller that supplies none has witnessed nothing about
+// coverage — folding that silence as "every due day missed" would manufacture debt out of
+// an absent witness, which is exactly what the file header forbids. The caller weights an
+// ungraded axis out of the composite rather than averaging its zero in.
+//
+// adoptionStale reports that the adoption axis has already charged the trailing gap. The
+// missing days are then the same repair at a finer resolution, so they stay soft: the
+// score still falls, but `git_daily_debt` counts one repair, not two.
+func gitDailyCoverageKPI(in GitDailyHealthInput, ledger string, adoptionStale bool) (scorecard.KPI, bool) {
+	k := scorecard.KPI{Key: gitDailyCoverageKey, Group: "usage"}
 	first, err1 := time.Parse(gitDailyDayLayout, in.FirstDay)
 	today, err2 := time.Parse(gitDailyDayLayout, in.Today)
 	if err1 != nil || err2 != nil || today.Before(first) {
 		k.Detail = "not gradable: calendar window is missing or invalid"
 		k.Soft = []string{"calendar coverage needs valid first-day and today witnesses"}
-		return k
+		return k, false
+	}
+	if len(in.RunDays) == 0 {
+		k.Detail = "not gradable: no run-day witness for the graded window"
+		k.Soft = []string{fmt.Sprintf(
+			"calendar coverage needs the per-run day keys behind %s: %d recorded tick(s) arrived without them, and an absent witness is not a missed day",
+			ledger, in.Runs)}
+		return k, false
 	}
 	end := today
 	if in.CurrentHour < 3 {
@@ -229,7 +269,7 @@ func gitDailyCoverageKPI(in GitDailyHealthInput, ledger string) scorecard.KPI {
 	if end.Before(first) {
 		k.Score = 100
 		k.Detail = "today is still inside the pre-03:00 schedule grace; no day is due yet"
-		return k
+		return k, true
 	}
 	due := int(end.Sub(first).Hours()/24) + 1
 	seen := make(map[string]bool, len(in.RunDays))
@@ -248,13 +288,18 @@ func gitDailyCoverageKPI(in GitDailyHealthInput, ledger string) scorecard.KPI {
 	if due < 3 {
 		k.Score = 100
 		k.Soft = append(k.Soft, "young ledger: fewer than 3 due days, so missing-day coverage is observed but not debt")
-		return k
+		return k, true
 	}
 	k.Score = 100 * float64(covered) / float64(due)
 	if len(missing) > 0 {
-		k.Defects = append(k.Defects, fmt.Sprintf("%d missed calendar day(s) in %s (%s): verify both host availability and the scheduled trigger", len(missing), ledger, strings.Join(missing, ", ")))
+		gaps := fmt.Sprintf("%d missed calendar day(s) in %s (%s): verify both host availability and the scheduled trigger", len(missing), ledger, strings.Join(missing, ", "))
+		if adoptionStale {
+			k.Soft = append(k.Soft, gaps+"; kept soft because the adoption axis already charges this stopped trigger as the one repair")
+		} else {
+			k.Defects = append(k.Defects, gaps)
+		}
 	}
-	return k
+	return k, true
 }
 
 // gitDailyOutcomeKPI grades the failure rate of the ticks that did run. An incident is
