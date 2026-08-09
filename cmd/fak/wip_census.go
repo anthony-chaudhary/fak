@@ -124,7 +124,23 @@ func wipPayloadReading(ctx context.Context, repo string, rec wipref.RefRecord) w
 	if len(rec.Stamp.Scope) == 0 {
 		return wipref.PayloadReading{Read: true}
 	}
-	args := []string{"diff", "--name-status", "--no-renames", "-z", "HEAD", rec.Object, "--"}
+	base := "HEAD"
+	if _, _, code, err := gitWip(ctx, repo, nil, "rev-parse", "--verify", "HEAD^{tree}"); err != nil {
+		return wipref.Unread("resolve HEAD tree: %v", err)
+	} else if code != 0 {
+		// An unborn repository has no HEAD commit, but a parentless checkpoint still
+		// has a real tree. Compare it with Git's own empty-tree object rather than
+		// treating the missing branch name as an empty payload.
+		empty, errStr, emptyCode, emptyErr := gitWipStdin(ctx, repo, "", "mktree")
+		if emptyErr != nil {
+			return wipref.Unread("create empty tree: %v", emptyErr)
+		}
+		if emptyCode != 0 {
+			return wipref.Unread("create empty tree exited %d: %s", emptyCode, strings.TrimSpace(errStr))
+		}
+		base = strings.TrimSpace(empty)
+	}
+	args := []string{"diff", "--name-status", "--no-renames", "-z", base, rec.Object, "--"}
 	args = append(args, rec.Stamp.Scope...)
 	out, errStr, code, err := gitWip(ctx, repo, nil, args...)
 	if err != nil {
