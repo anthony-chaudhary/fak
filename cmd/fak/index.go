@@ -130,6 +130,12 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexExecAudit(stdout, stderr, rootDir, *asJSON, *limit)
 	case "agents", "agentsmd", "agent":
 		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident)
+	case "graph":
+		if len(args) != 0 {
+			fmt.Fprintln(stderr, "usage: fak index graph [--json]")
+			return 2
+		}
+		return indexGraphMain(stdout, stderr, boolArg(*asJSON))
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -360,6 +366,7 @@ func writeIndexUsage(w io.Writer) {
   fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
   fak index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
   fak index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
+  fak index graph             HEAD-only Markdown reachability census under named resolver rules
   flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
 `)
 }
