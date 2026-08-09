@@ -1,47 +1,73 @@
 # Worker-land crash recovery — 2026-08-08
 
 `fak worktree worker land` uses an isolated index and `git commit-tree` before it
-compare-and-swap updates trunk. Every candidate commit is now anchored first under:
+compare-and-swap updates trunk. Every candidate commit is anchored first under:
 
 ```
 refs/fak/worker-land/<worktree-name>/<candidate-sha>
 ```
 
-That local named ref is the post-crash source of truth: it prevents Git GC from
-collecting the candidate and remains after the worker process or terminal dies.
-The pre-commit file delta also remains in the detached worker worktree until an
-explicit reap; cold reap already holds trees with unlanded changes.
+The local named ref protects process/session crashes and Git GC. For host/disk
+loss, opt into remote publish and independent read-back before trunk CAS:
+
+```bash
+fak worktree worker land --worktree D --recovery-remote origin ...
+# fail closed instead of proceeding LOCAL_ONLY when the remote cannot witness it:
+fak worktree worker land --worktree D --recovery-remote origin --require-remote-recovery ...
+```
+
+A successful remote claim means `git ls-remote` returned the exact candidate SHA.
+The read-only local mirror lives under `refs/fak/remoteworkerland/<remote>/...` and
+its last successful refresh has a reflogged stamp under
+`refs/fak/remoteworkerland-stamp/<remote>`. Remote/network failure never removes
+the local ref; best-effort mode lands and reports the failed receipt, while
+required mode refuses trunk CAS.
 
 ## Resume / inspect
 
 ```bash
 fak worktree worker list
 fak worktree worker recover
-# inspect one RECOVERABLE candidate
-git show refs/fak/worker-land/<worktree-name>/<candidate-sha>
+fak worktree worker recover --remote origin --fetch
 ```
 
-`recover` emits JSON. `RECOVERABLE` means the candidate is not an ancestor of
-current `HEAD`; re-run the original `worktree worker land` when its worktree and
-lease are available, or use an operator-reviewed `git cherry-pick <ref>` when the
-worktree is gone. `LANDED` means Git proves the candidate is already in `HEAD`.
+Recovery JSON classifies:
+
+- `LOCAL_ONLY`: process-crash safe, not yet host-loss witnessed;
+- `REPLICATED`: exact SHA exists locally and in the read-back mirror;
+- `REMOTE_ONLY`: fresh clone/host-loss case; restore the printed local ref then land;
+- `LANDED`: Git proves the candidate is already in current `HEAD`.
+
+Inspect any candidate with `git show <ref>`. A `RECOVERABLE` local candidate can
+be re-landed from its worker or operator-reviewed with `git cherry-pick <ref>`.
+A remote-only candidate's printed action uses `git update-ref` to restore the
+local recovery root before inspection/landing.
 
 ## Guarded cleanup
 
-```bash
-# accepted only when the candidate is already reachable from HEAD
-fak worktree worker recover --cleanup refs/fak/worker-land/<worktree>/<sha>
+Local cleanup refuses an unlanded candidate unless explicitly forced:
 
-# destructive escape hatch; inspect with git show first
+```bash
+fak worktree worker recover --cleanup refs/fak/worker-land/<worktree>/<sha>
 fak worktree worker recover --cleanup refs/fak/worker-land/<worktree>/<sha> --force
 ```
 
-Cleanup rejects refs outside the recovery namespace. Without `--force`, it also
-rejects every unlanded candidate. Recovery refs are intentionally retained after
-a successful land so a crash immediately after trunk CAS is observable and can
-be classified without trusting a session log.
+Remote cleanup is report-only by default. It fetches the remote default branch
+and requires the candidate to be its ancestor. Peer-named refs require an extra
+`--allow-peer`; age/lease expiry is never deletion proof because the ref is the
+work itself:
 
-These refs are machine-local. For host-loss durability of uncommitted work, use
-the existing `fak wip checkpoint` remote-mirror path; worker-land recovery refs
-close the narrower process/session-crash window around the off-branch commit and
-trunk CAS.
+```bash
+fak worktree worker recover --remote origin \
+  --cleanup-remote refs/fak/worker-land/<worktree>/<sha> \
+  --worktree-name <worktree>
+# only after reviewing eligible=true:
+fak worktree worker recover --remote origin \
+  --cleanup-remote refs/fak/worker-land/<worktree>/<sha> \
+  --worktree-name <worktree> --apply
+```
+
+The original recovery ref is intentionally retained after successful trunk CAS;
+ancestry read-back then classifies it `LANDED`, preventing duplicate application
+while preserving an audit/recovery root until explicit cleanup.
+

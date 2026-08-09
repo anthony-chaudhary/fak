@@ -75,6 +75,8 @@ type landConfig struct {
 	// coreLockWitness is the claim supplied out-of-band (the CLI flag). It wins
 	// over the commit-message trailer when both are present.
 	coreLockWitness string
+	recoveryRemote  string
+	requireRemote   bool
 }
 
 // WithCoreLockWitness supplies the hard-self core-lock maintenance witness claim
@@ -82,6 +84,16 @@ type landConfig struct {
 // --core-lock-maintenance-witness`, with identical semantics: the claim is
 // RESOLVED against independent evidence, and only a CONFIRMED resolution clears
 // the lock. An empty claim is the same as none.
+// WithRecoveryRemote publishes and independently reads back each isolated-land
+// candidate on remote before trunk CAS. Required mode refuses a missing witness;
+// best-effort mode preserves local landing and reports LOCAL_ONLY.
+func WithRecoveryRemote(remote string, require bool) LandOption {
+	return func(c *landConfig) {
+		c.recoveryRemote = strings.TrimSpace(remote)
+		c.requireRemote = require
+	}
+}
+
 func WithCoreLockWitness(claim string) LandOption {
 	return func(c *landConfig) { c.coreLockWitness = strings.TrimSpace(claim) }
 }

@@ -168,6 +168,8 @@ type Result struct {
 	// surfacing the count makes that otherwise-silent loss observable (#4599).
 	DroppedOutOfLane int                      `json:"dropped_out_of_lane,omitempty"`
 	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
+	RecoveryRef      string                   `json:"recovery_ref,omitempty"`
+	RemoteRecovery   *RemoteReadback          `json:"remote_recovery,omitempty"`
 }
 
 // VerifyHook is a build/adjudication witness run IN the isolated worktree before
@@ -590,7 +592,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
 	// safe isolated form here).
 	if isolatedLandEnabled() && len(paths) > 0 {
-		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv); handled {
+		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
 			res.DroppedOutOfLane = droppedOutOfLane
 			return res
 		}
@@ -710,7 +712,11 @@ func writePatch(diff string) (string, func(), error) {
 // working tree is synced for `paths` (git checkout <new> -- paths) so trunk builders
 // see the landed change, matching the baseline post-state; a sync hiccup is reported
 // but does NOT unland.
-func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner) (Result, bool) {
+func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner, configs ...landConfig) (Result, bool) {
+	cfg := landConfig{}
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
 	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
@@ -808,6 +814,14 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		if anchorErr != nil {
 			return Result{OK: false, Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error()}, true
 		}
+		var remoteReceipt *RemoteReadback
+		if cfg.recoveryRemote != "" {
+			receipt := PublishRecoveryRef(root, cfg.recoveryRemote, recoveryRef, newCommit, git)
+			remoteReceipt = &receipt
+			if cfg.requireRemote && !receipt.Witnessed {
+				return Result{OK: false, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt, Reason: "required remote recovery witness failed — trunk unchanged", Detail: receipt.Reason}, true
+			}
+		}
 		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
 		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
 		// commit built on the stale base is simply abandoned, unreferenced.
@@ -824,7 +838,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		}
 		return Result{OK: true, Applied: true, Committed: true,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
-			Detail: detail, Disambiguation: disambiguation}, true
+			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 	}
 	// Every bounded attempt lost its CAS — genuine sustained contention. Fall back to
 	// the baseline shared path as the final resort rather than loop unbounded.
