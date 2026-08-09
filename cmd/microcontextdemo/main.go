@@ -39,6 +39,8 @@ type config struct {
 	ControlledSoak bool
 	PrefixMode     string
 	APIShape       microagent.APIProviderShape
+	LiveInput      string
+	WorkUnits      []liveWorkUnit
 }
 
 type report struct {
@@ -95,7 +97,8 @@ type report struct {
 	MaxAttempts           int     `json:"max_attempts,omitempty"`
 	QueuePeakContexts     int     `json:"queue_peak_contexts,omitempty"`
 	HibernatedContexts    int     `json:"hibernated_contexts,omitempty"`
-	RestoredContexts      int     `json:"restored_contexts,omitempty"`
+	RestoredContexts      int            `json:"restored_contexts,omitempty"`
+	LiveInputRecords      []liveWorkUnit `json:"live_input_records,omitempty"`
 }
 
 type sharedBase struct {
@@ -208,6 +211,14 @@ func percentileMS(values []time.Duration, q float64) float64 {
 }
 
 func run(ctx context.Context, cfg config) (report, error) {
+	if cfg.LiveInput != "" && len(cfg.WorkUnits) == 0 {
+		units, err := loadLiveWorkUnits(cfg.LiveInput)
+		if err != nil {
+			return report{}, err
+		}
+		cfg.WorkUnits = units
+		cfg.Contexts = len(units)
+	}
 	if cfg.Contexts < 1 || cfg.Workers < 1 {
 		return report{}, fmt.Errorf("contexts and workers must be positive")
 	}
@@ -254,6 +265,9 @@ func run(ctx context.Context, cfg config) (report, error) {
 	start := time.Now()
 	for i := 0; i < cfg.Contexts; i++ {
 		id := "ctx-" + strconv.Itoa(i)
+		if len(cfg.WorkUnits) > 0 {
+			id = cfg.WorkUnits[i].workID()
+		}
 		retries := 0
 		if cfg.ControlledSoak {
 			retries = 2
@@ -283,6 +297,7 @@ func run(ctx context.Context, cfg config) (report, error) {
 		PhysicalWorkers: cfg.Workers, Completed: len(results) - failed, Failed: failed,
 		SharedBaseInstalls: 1, ElapsedMS: elapsed.Milliseconds(), ShardsPerSecond: float64(cfg.Contexts) / elapsed.Seconds(),
 		Mode: mode, Provider: cfg.Provider, Model: cfg.Model, Hardware: cfg.Hardware, BaseFingerprint: base.fingerprint, FirstFailure: firstFailure,
+		LiveInputRecords: cfg.WorkUnits,
 	}
 	if live == nil {
 		fake := gw.(*fakeEndpoint)
@@ -369,6 +384,7 @@ func main() {
 	flag.StringVar(&cfg.Model, "model", "", "live endpoint model id")
 	flag.StringVar(&cfg.Provider, "provider", "", "provider provenance label")
 	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
+	flag.StringVar(&cfg.LiveInput, "live-issues", "", "bounded gh issue-list JSON snapshot to use as work units")
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
 	flag.DurationVar(&cfg.RunTimeout, "run-timeout", 15*time.Minute, "overall run timeout (0 disables the deadline)")
 	flag.BoolVar(&cfg.ControlledSoak, "controlled-soak", false, "exercise the S5 canary/rollback, overload queue, cancellation, bounded retry, and hibernation contract")
