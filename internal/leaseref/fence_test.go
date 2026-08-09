@@ -217,3 +217,78 @@ func TestAcquireFencedCASContention(t *testing.T) {
 		t.Fatalf("contended renew: ok=%v reason=%q, want LEASE_CONTENDED (%+v)", v.OK, v.Reason, v)
 	}
 }
+
+// TestPublishFencedSuppressesDisplacedHolderResult is the task-result write-boundary
+// regression for #6000. Holder A pauses after finishing its result, B supersedes A's
+// expired generation, then A resumes. The externally-visible sink must see zero writes.
+func TestPublishFencedSuppressesDisplacedHolderResult(t *testing.T) {
+	g := newFakeGit()
+	s := NewWithRunner(g.run, "")
+	ctx := ctx()
+	t0 := time.Unix(2000, 0)
+	request := Record{ID: "task-result", TreeGlobs: []string{"results/**"}, Holder: "A", TTLSeconds: 10}
+
+	aToken, v, err := s.AcquireFenced(ctx, request, t0)
+	if err != nil || !v.OK {
+		t.Fatalf("A AcquireFenced: verdict=%+v err=%v", v, err)
+	}
+
+	// A is paused before publication. Its lease expires and B takes generation 2.
+	tResume := t0.Add(11 * time.Second)
+	bToken, v, err := s.AcquireFenced(ctx, Record{ID: request.ID, TreeGlobs: request.TreeGlobs, Holder: "B", TTLSeconds: 10}, tResume)
+	if err != nil || !v.OK || bToken.Generation != aToken.Generation+1 {
+		t.Fatalf("B supersede: token=%+v verdict=%+v err=%v", bToken, v, err)
+	}
+
+	writes := 0
+	v, err = s.PublishFenced(ctx, aToken, tResume, func() error {
+		writes++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stale PublishFenced: %v", err)
+	}
+	if v.OK || v.Reason != ReasonStaleLease {
+		t.Fatalf("stale verdict=%+v, want typed %s refusal", v, ReasonStaleLease)
+	}
+	if writes != 0 {
+		t.Fatalf("stale holder published %d results, want zero", writes)
+	}
+
+	v, err = s.PublishFenced(ctx, bToken, tResume.Add(time.Second), func() error {
+		writes++
+		return nil
+	})
+	if err != nil || !v.OK {
+		t.Fatalf("current PublishFenced: verdict=%+v err=%v", v, err)
+	}
+	if writes != 1 {
+		t.Fatalf("current holder writes=%d, want 1", writes)
+	}
+}
+
+func TestPublishFencedSuppressesMissingOrExpiredToken(t *testing.T) {
+	g := newFakeGit()
+	s := NewWithRunner(g.run, "")
+	now := time.Unix(3000, 0)
+	writes := 0
+	publish := func() error { writes++; return nil }
+
+	missing := Record{ID: "missing-result", Holder: "A", Generation: 1, TTLSeconds: 10, RenewedAt: now.Unix()}
+	v, err := s.PublishFenced(ctx(), missing, now, publish)
+	if err != nil || v.OK || v.Reason != ReasonNoLease {
+		t.Fatalf("missing verdict=%+v err=%v, want %s", v, err, ReasonNoLease)
+	}
+
+	token, v, err := s.AcquireFenced(ctx(), Record{ID: "expired-result", Holder: "A", TTLSeconds: 1}, now)
+	if err != nil || !v.OK {
+		t.Fatalf("acquire expired fixture: verdict=%+v err=%v", v, err)
+	}
+	v, err = s.PublishFenced(ctx(), token, now.Add(2*time.Second), publish)
+	if err != nil || v.OK || v.Reason != ReasonNoLease {
+		t.Fatalf("expired verdict=%+v err=%v, want %s", v, err, ReasonNoLease)
+	}
+	if writes != 0 {
+		t.Fatalf("missing/expired tokens published %d results, want zero", writes)
+	}
+}

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
 const liveTopicPrefix = "sharedtask:"
@@ -99,6 +101,39 @@ func (s *Store) applyAndPublish(ctx context.Context, bus *a2achan.Bus, from stri
 	}
 	verdict, n, err := publish(ctx, bus, from, event, caps...)
 	return result, verdict, n, err
+}
+
+// ApplyAndPublishFenced is the task-result publication path for leased workers. It applies
+// the task patch first, then verifies the supplied fencing token immediately before the bus
+// publish becomes externally visible. If ownership was lost, the sink is not called and the
+// typed leaseref verdict identifies the missing, expired, or superseded fence.
+//
+// now is explicit so a worker paused before publication can be tested deterministically.
+func (s *Store) ApplyAndPublishFenced(ctx context.Context, bus *a2achan.Bus, from string, patch Patch, fences *leaseref.Store, token leaseref.Record, now time.Time, caps ...abi.Capability) (PatchResult, leaseref.FenceVerdict, abi.Verdict, int, error) {
+	if fences == nil {
+		return PatchResult{}, leaseref.FenceVerdict{}, abi.Verdict{}, 0, fmt.Errorf("sharedtask: nil lease fence store")
+	}
+
+	var result PatchResult
+	var publishVerdict abi.Verdict
+	var published int
+	fenceVerdict, err := fences.PublishFenced(ctx, token, now, func() error {
+		// Apply is the first externally-visible result write. It stays inside the fenced
+		// callback so a displaced worker cannot mutate the shared task store either.
+		result = s.Apply(patch)
+		if result.Verdict != VerdictAccepted {
+			publishVerdict = abi.Verdict{Kind: abi.VerdictDefer, By: "sharedtask/live"}
+			return nil
+		}
+		event, ok := s.Event(result.TaskID, result.EventID)
+		if !ok {
+			return fmt.Errorf("sharedtask: accepted event %q missing", result.EventID)
+		}
+		var publishErr error
+		publishVerdict, published, publishErr = PublishEvent(ctx, bus, from, event, caps...)
+		return publishErr
+	})
+	return result, fenceVerdict, publishVerdict, published, err
 }
 
 func (s *Store) ApplyAndPublish(ctx context.Context, bus *a2achan.Bus, from string, patch Patch, caps ...abi.Capability) (PatchResult, abi.Verdict, int, error) {
