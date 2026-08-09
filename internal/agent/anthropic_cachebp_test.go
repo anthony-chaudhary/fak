@@ -2,7 +2,10 @@ package agent
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -710,5 +713,128 @@ func TestUpgradeAnthropicStableCacheTTL1hHeadOnlyIsDistinctAblation(t *testing.T
 	}
 	if !bytes.Contains(out, []byte(`"text":"history","cache_control":{"type":"ephemeral"}`)) {
 		t.Fatalf("head-only arm changed message breakpoint: %s", out)
+	}
+}
+
+// TestCachePrefixTransformsByteSafetyProperty drives the star-anchor and 1h
+// upgrade together over a large deterministic corpus. Removing only the two
+// documented insertions must recover the input byte-for-byte; this catches
+// re-marshalling, whitespace normalization, key reordering, and escaped-string
+// corruption anywhere in the request, not merely in the cached head.
+func TestCachePrefixTransformsByteSafetyProperty(t *testing.T) {
+	for i := 0; i < 1024; i++ {
+		seed := sha256.Sum256([]byte(fmt.Sprintf("cache-prefix-shape-%d", i)))
+		assertCachePrefixTransformsByteSafe(t, seed[:])
+	}
+}
+
+// FuzzCachePrefixTransformsByteSafety keeps an explicit seed corpus of the
+// message/tool/system shapes that have historically been fragile. Go's fuzzing
+// engine then mutates the strings and shape selector while the property checks
+// the real byte transforms rather than a decoded surrogate.
+func FuzzCachePrefixTransformsByteSafety(f *testing.F) {
+	for _, seed := range [][]byte{
+		{0, 0},
+		{1, '"', '\\', 0, 0xff},
+		{2, '<', 't', 'o', 'o', 'l', '_', 'u', 's', 'e', '>'},
+		{3, '\n', '\r', '\t'},
+		{4, 0xe2, 0x80, 0xa8, 0xf0, 0x9f, 0x92, 0xa5},
+		{5, '{', '}', '[', ']', ',', ':'},
+		{6, 'c', 'a', 'c', 'h', 'e', '_', 'c', 'o', 'n', 't', 'r', 'o', 'l'},
+		{7, 0, 1, 2, 3, 4, 5},
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, seed []byte) {
+		assertCachePrefixTransformsByteSafe(t, seed)
+	})
+}
+
+func assertCachePrefixTransformsByteSafe(t testing.TB, seed []byte) {
+	t.Helper()
+	raw := generatedStableAnthropicShape(seed)
+
+	anchored, anchorOutcome := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+	if anchorOutcome.Reason != BreakpointReasonNone {
+		t.Fatalf("star-anchor refused generated stable shape: reason=%q body=%s", anchorOutcome.Reason, raw)
+	}
+	const breakpoint = `,"cache_control":{"type":"ephemeral"}`
+	if got := bytes.Count(anchored, []byte(breakpoint)); got != 1 {
+		t.Fatalf("star-anchor insertion count=%d, want 1: %s", got, anchored)
+	}
+	if recovered := bytes.Replace(anchored, []byte(breakpoint), nil, 1); !bytes.Equal(recovered, raw) {
+		t.Fatalf("star-anchor changed bytes outside its breakpoint\nraw: %s\nout: %s", raw, anchored)
+	}
+
+	upgraded, upgradeOutcome := UpgradeAnthropicStableCacheTTL1h(anchored)
+	if upgradeOutcome.Reason != TTLUpgradeReasonNone {
+		t.Fatalf("1h upgrade refused anchored stable shape: reason=%q body=%s", upgradeOutcome.Reason, anchored)
+	}
+	const ttl = `,"ttl":"1h"`
+	if got := bytes.Count(upgraded, []byte(ttl)); got != 1 {
+		t.Fatalf("1h insertion count=%d, want 1: %s", got, upgraded)
+	}
+	withoutTTL := bytes.Replace(upgraded, []byte(ttl), nil, 1)
+	if !bytes.Equal(withoutTTL, anchored) {
+		t.Fatalf("1h upgrade changed bytes outside ttl insertion\nanchored: %s\nupgraded: %s", anchored, upgraded)
+	}
+	if recovered := bytes.Replace(withoutTTL, []byte(breakpoint), nil, 1); !bytes.Equal(recovered, raw) {
+		t.Fatalf("combined transforms changed cached-prefix bytes\nraw: %s\nout: %s", raw, upgraded)
+	}
+
+	anchoredAgain, secondAnchor := PlaceAnthropicCacheBreakpointWithOutcome(upgraded)
+	if secondAnchor.Reason != BreakpointReasonAlreadySet || !bytes.Equal(anchoredAgain, upgraded) {
+		t.Fatalf("star-anchor is not idempotent: reason=%q\nfirst: %s\nsecond: %s", secondAnchor.Reason, upgraded, anchoredAgain)
+	}
+	upgradedAgain, secondUpgrade := UpgradeAnthropicStableCacheTTL1h(upgraded)
+	if secondUpgrade.Reason != TTLUpgradeReasonAlready1h || !bytes.Equal(upgradedAgain, upgraded) {
+		t.Fatalf("1h upgrade is not idempotent: reason=%q\nfirst: %s\nsecond: %s", secondUpgrade.Reason, upgraded, upgradedAgain)
+	}
+}
+
+func generatedStableAnthropicShape(seed []byte) []byte {
+	if len(seed) == 0 {
+		seed = []byte{0}
+	}
+	if len(seed) > 256 {
+		seed = seed[:256]
+	}
+	// Hex deliberately cannot accidentally synthesize the UUID/timestamp/session
+	// markers that define a volatile head. JSON quoting still exercises varied
+	// lengths, empty values, nested objects, and field/whitespace layouts.
+	text, _ := json.Marshal(hex.EncodeToString(seed))
+	alt, _ := json.Marshal(hex.EncodeToString(append([]byte{0xa5}, seed...)))
+	messages := fmt.Sprintf(`[{"role":"user","content":[{"type":"text","text":%s},{"type":"tool_result","tool_use_id":%s,"content":%s}]},{"role":"assistant","content":[{"type":"tool_use","id":%s,"name":"lookup","input":{"q":%s}}]}]`, text, alt, text, alt, text)
+
+	switch seed[0] % 4 {
+	case 0:
+		return []byte(fmt.Sprintf("{\n  \"model\":\"m\", \"system\":[{\"type\":\"text\",\"text\":%s},{\"text\":%s,\"type\":\"text\"}],\n  \"messages\":%s, \"max_tokens\":64\n}", text, alt, messages))
+	case 1:
+		return []byte(fmt.Sprintf(`{"model":"m","tools":[{"name":"lookup","description":%s,"input_schema":{"properties":{"q":{"type":"string"}},"type":"object"}}],"messages":%s,"max_tokens":64}`, text, messages))
+	case 2:
+		return []byte(fmt.Sprintf(`{"messages":%s,"tools":[{"input_schema":{"type":"object"},"name":"lookup"}],"system":[{"text":%s,"type":"text"}],"model":"m","max_tokens":64}`, messages, text))
+	default:
+		return []byte(fmt.Sprintf("{ \"model\" : \"m\" , \"system\" : [ { \"type\" : \"text\" , \"meta\" : {\"nested\":[1,true,null]} , \"text\" : %s } ] , \"messages\" : %s , \"max_tokens\" : 64 }", alt, messages))
+	}
+}
+
+func TestCachePrefixTransformsVolatileHeadsAreIdentity(t *testing.T) {
+	volatile := []string{
+		`request 550e8400-e29b-41d4-a716-446655440000`,
+		`generated at 2026-08-08T12:34:56Z`,
+	}
+	for _, head := range volatile {
+		headJSON, _ := json.Marshal(head)
+		raw := []byte(fmt.Sprintf(`{"model":"m","system":[{"type":"text","text":%s}],"messages":[{"role":"user","content":"hi"}]}`, headJSON))
+		anchored, anchorOutcome := PlaceAnthropicCacheBreakpointWithOutcome(raw)
+		if anchorOutcome.Reason != BreakpointReasonVolatileHead || !bytes.Equal(anchored, raw) {
+			t.Errorf("star-anchor volatile identity failed for %q: reason=%q out=%s", head, anchorOutcome.Reason, anchored)
+		}
+
+		withBreakpoint := bytes.Replace(raw, []byte(`}`), []byte(`,"cache_control":{"type":"ephemeral"}}`), 1)
+		upgraded, upgradeOutcome := UpgradeAnthropicStableCacheTTL1h(withBreakpoint)
+		if upgradeOutcome.Reason != TTLUpgradeReasonVolatileHead || !bytes.Equal(upgraded, withBreakpoint) {
+			t.Errorf("1h volatile identity failed for %q: reason=%q out=%s", head, upgradeOutcome.Reason, upgraded)
+		}
 	}
 }
