@@ -306,6 +306,7 @@ func runHeadroomCompare(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	via := fs.String("via", "none,native,lingua", "comma-separated compressor arms")
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	evidencePath := fs.String("evidence", "", "independent fak-headroom-live-evidence/1 JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -324,6 +325,23 @@ func runHeadroomCompare(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	report := headroom.CompareBench(names, headroom.BenchCorpus())
+	if *evidencePath != "" {
+		raw, err := os.ReadFile(*evidencePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "headroom compare: read evidence: %v\n", err)
+			return 1
+		}
+		var evidence headroom.LiveComparisonEvidence
+		if err := json.Unmarshal(raw, &evidence); err != nil {
+			fmt.Fprintf(stderr, "headroom compare: decode evidence: %v\n", err)
+			return 1
+		}
+		report, err = headroom.ApplyLiveEvidence(report, evidence)
+		if err != nil {
+			fmt.Fprintf(stderr, "headroom compare: apply evidence: %v\n", err)
+			return 1
+		}
+	}
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -335,6 +353,9 @@ func runHeadroomCompare(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stdout, "%s: %d arms over %d frozen inputs\n", report.Schema, len(report.Arms), report.Corpus)
 		for _, arm := range report.Arms {
 			fmt.Fprintf(stdout, "  %-12s saved=%6.2f%% local=%d ns/input status=%s\n", arm.Name, 100*arm.Report.Saved, arm.NSPerInput, arm.Report.Status)
+		}
+		for _, pending := range report.Pending {
+			fmt.Fprintf(stdout, "  PENDING %s\n", pending)
 		}
 		for _, missing := range report.Missing {
 			fmt.Fprintf(stdout, "  MISSING %s\n", missing)

@@ -130,6 +130,8 @@ func benchAttribution(compressor string) (owner, dependency, fidelity, evidence 
 		return "external", "external_http_sidecar", "recoverable", "observed"
 	case NativeName:
 		return "fak", "in_process", "recoverable", "witnessed"
+	case LinguaName:
+		return "external", "llmlingua_http_service", "lossy_original_cas_preserved", "observed"
 	case NoopName:
 		return "fak", "none", "no-op", "configured"
 	default:
