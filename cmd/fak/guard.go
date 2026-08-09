@@ -856,6 +856,7 @@ func cmdGuard(argv []string) {
 	if quotaKey == "" {
 		quotaKey = "default"
 	}
+	quotaHarvester := accountobs.NewHarvester(quotaStore, quotaKey)
 	parkGoal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
 	if parkGoal == "" {
 		parkGoal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
@@ -868,7 +869,7 @@ func cmdGuard(argv []string) {
 	longRetryParked := false
 	observeUpstreamResponse := func(status int, header http.Header) {
 		// Passive, zero-request harvest; persistence failures never fail the response path.
-		_ = quotaStore.Observe(quotaKey, status, header, time.Now())
+		_ = quotaHarvester.Observe(status, header)
 		if parkGoal == "" || longRetryParked {
 			return
 		}
