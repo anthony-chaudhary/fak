@@ -39,6 +39,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/anthony-chaudhary/fak/internal/devcmd"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
@@ -451,30 +452,5 @@ func flushTab(tw *tabwriter.Writer, stderr io.Writer, label string) int {
 }
 
 func indexOwnership(stdout, stderr io.Writer, root string, asJSON bool) int {
-	const importRoot = "github.com/anthony-chaudhary/fak/cmd/fak"
-	report, err := devindex.BuildOwnershipReport(root, "./cmd/fak", importRoot)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak index ownership: %v\n", err)
-		return 1
-	}
-	if asJSON {
-		return encodeJSONOrFail(stdout, stderr, report, "fak index ownership")
-	}
-	var runtime, dev, shared int
-	for _, command := range report.Commands {
-		switch command.Owner {
-		case devindex.OwnerRuntime:
-			runtime++
-		case devindex.OwnerDev:
-			dev++
-		case devindex.OwnerShared:
-			shared++
-		}
-	}
-	fmt.Fprintf(stdout, "command ownership: runtime=%d dev=%d shared=%d total=%d\n", runtime, dev, shared, len(report.Commands))
-	fmt.Fprintf(stdout, "runtime graph: packages=%d internal=%d dev-leaks=%d\n", report.Graph.PackageCount, report.Graph.InternalCount, len(report.Graph.Leaks))
-	for _, leak := range report.Graph.Leaks {
-		fmt.Fprintf(stdout, "LEAK %s: %s\n", leak.Forbidden, strings.Join(leak.Path, " -> "))
-	}
-	return 0
+	return devcmd.RunOwnership(stdout, stderr, root, asJSON)
 }
