@@ -266,7 +266,14 @@ func wipReconcileAt(ctx context.Context, repo string, now time.Time) (wipReconci
 		}
 		c.Landed = st == wipref.OwnerLanded
 		if !c.Landed {
-			c.Applies = wipDeltaApplies(ctx, repo, r)
+			payload := wipref.BuildPayloadCensus(wipPayloadReading(ctx, repo, r))
+			if !payload.Read {
+				return wipReconcileResult{}, fmt.Errorf("measure checkpoint payload %s: %s", r.Ref, payload.Unreadable)
+			}
+			c.DivergedPaths = len(payload.DivergedPaths)
+			if c.DivergedPaths == 0 {
+				c.Applies = wipDeltaApplies(ctx, repo, r)
+			}
 		}
 		cands = append(cands, c)
 	}

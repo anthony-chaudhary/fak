@@ -15,9 +15,9 @@ func TestClassifyVocabulary(t *testing.T) {
 		{"live short-circuits even if subsumed", CensusFacts{Live: true, Resolved: true, Subsumed: true}, CensusLive},
 		{"landed beats the closed split", CensusFacts{Landed: true, Resolved: true}, CensusLanded},
 		{"dead + unresolved is unknown", CensusFacts{Resolved: false}, CensusUnknown},
-		{"dead + empty delta is a clean estimate", CensusFacts{Resolved: true, DeltaEmpty: true}, CensusClosedCleanEstimate},
-		{"dead + subsumed delta is a clean estimate", CensusFacts{Resolved: true, Subsumed: true}, CensusClosedCleanEstimate},
-		{"dead + non-empty un-subsumed delta is recoverable", CensusFacts{Resolved: true}, CensusClosedDirtyRecoverable},
+		{"dead + byte-identical payload is a clean estimate", CensusFacts{Resolved: true, PayloadRead: true, PayloadFiles: 1}, CensusClosedCleanEstimate},
+		{"dead + diverged payload is first-class", CensusFacts{Resolved: true, PayloadRead: true, PayloadFiles: 1, PayloadDiverged: 1}, CensusDiverged},
+		{"dead + absent payload is recoverable", CensusFacts{Resolved: true, PayloadRead: true, PayloadFiles: 1, PayloadAbsent: 1}, CensusClosedDirtyRecoverable},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestClassifyVocabulary(t *testing.T) {
 // collect this ref; if this test ever flips to a clean estimate, recoverable WIP
 // would be at risk of deletion.
 func TestCensusSafetyInvariant(t *testing.T) {
-	dirty := CensusFacts{Live: false, Landed: false, Resolved: true, DeltaEmpty: false, Subsumed: false}
+	dirty := CensusFacts{Live: false, Landed: false, Resolved: true, PayloadRead: true, PayloadFiles: 1, PayloadAbsent: 1}
 	got := Classify(dirty)
 	if got == CensusClosedCleanEstimate {
 		t.Fatalf("SAFETY VIOLATION: a non-empty unlanded dead-session delta classified %s (collectible)", got)

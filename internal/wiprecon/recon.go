@@ -42,10 +42,11 @@ const (
 // Candidate is one checkpoint plus the git-witnessed facts the decision turns on.
 // Landed and Applies are consulted only when the owner has CRASHED.
 type Candidate struct {
-	Session string
-	Owner   Owner
-	Landed  bool // the delta is already present in HEAD (git-witnessed)
-	Applies bool // the delta applies cleanly to the current working tree (git apply --check)
+	Session       string
+	Owner         Owner
+	Landed        bool // the delta is already present in HEAD (git-witnessed)
+	Applies       bool // the delta applies cleanly to the current working tree (git apply --check)
+	DivergedPaths int  // payload files present on HEAD with different bytes
 }
 
 // Decision is the per-candidate verdict.
@@ -64,6 +65,8 @@ func Decide(c Candidate) Decision {
 		d.Action, d.Reason = ActSkip, "owner still live — not reconciled"
 	case OwnerCrashed:
 		switch {
+		case c.DivergedPaths > 0:
+			d.Action, d.Reason = ActQuarantine, "DIVERGED payload differs from HEAD - refuse checkout/apply; inspect git diff HEAD...<checkpoint> -- <path>"
 		case c.Landed:
 			d.Action, d.Reason = ActDiscardWitnessed, "delta landed in HEAD — safe to drop, witnessed"
 		case c.Applies:

@@ -2,6 +2,7 @@ package wiprecon
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,15 @@ func TestReconcileTotalAndDeterministic(t *testing.T) {
 func TestReconcileEmpty(t *testing.T) {
 	if got := Reconcile(nil); got == nil || len(got) != 0 {
 		t.Errorf("want empty non-nil, got %#v", got)
+	}
+}
+
+func TestDecideDivergedRefusesReclaim(t *testing.T) {
+	got := Decide(Candidate{Session: "dead", Owner: OwnerCrashed, Applies: true, DivergedPaths: 1})
+	if got.Action != ActQuarantine {
+		t.Fatalf("action=%q, want %q", got.Action, ActQuarantine)
+	}
+	if !strings.Contains(got.Reason, "DIVERGED") || !strings.Contains(got.Reason, "git diff HEAD...") {
+		t.Fatalf("reason=%q, want three-way-diff guidance", got.Reason)
 	}
 }
