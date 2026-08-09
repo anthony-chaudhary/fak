@@ -250,6 +250,8 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "orient":
 		cmdOrient(os.Args[2:])
+	case "wiki":
+		cmdWiki(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":
