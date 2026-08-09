@@ -282,6 +282,18 @@ func gitWipOut(ctx context.Context, dir string, env []string, args ...string) (s
 
 // ---- checkpoint ----
 
+// wipCheckpointFault is a test-only crash injection seam. Production leaves it
+// nil. It runs immediately before/after the durable ref CAS so the crash matrix
+// can prove which claims survive each boundary without mocking Git.
+var wipCheckpointFault func(point string) error
+
+func wipCheckpointFaultAt(point string) error {
+	if wipCheckpointFault != nil {
+		return wipCheckpointFault(point)
+	}
+	return nil
+}
+
 // wipCheckpointResult is the JSON/plain result of a checkpoint.
 type wipCheckpointResult struct {
 	Session    string   `json:"session"`
@@ -583,11 +595,17 @@ func wipCheckpointScoped(ctx context.Context, repo, session string, buildable bo
 			CheckpointedAt: nowUnix,
 		},
 	}
+	if err := wipCheckpointFaultAt("before-ref-update"); err != nil {
+		return res, err
+	}
 	object, superseded, err := wipAnchorCAS(ctx, repo, cand.Ref, cand)
 	if err != nil {
 		return res, err
 	}
 	res.Object, res.Superseded = object, superseded
+	if err := wipCheckpointFaultAt("after-ref-update"); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 
