@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # dogfood-claude_test.sh - offline regressions for dogfood-claude.sh.
 #
-# (1) bounded backend-readiness waits (#3499): EXTRACTS the real `until curl ...`
-#     loop bodies and runs them with a stub curl that never succeeds, proving the
-#     loop terminates via a dead-PID liveness check (kill -0) AND a wall-clock
-#     deadline — the defect #3499 reported (unbounded until-curl).
+# (1) bounded backend-readiness waits (#3499, extended to the kernel /healthz wait
+#     by #3479): EXTRACTS the real `until curl ...` loop bodies and runs them with
+#     a stub curl that never succeeds, proving each loop terminates via a dead-PID
+#     liveness check (kill -0) AND a wall-clock deadline — the defect #3499/#3479
+#     reported (unbounded until-curl). The `serve` case is the third loop: it always
+#     had the kill -0 rung (#3479 cites it as the proof the others omitted one) but
+#     no deadline, so an alive-yet-never-healthy kernel still spun forever.
 # (2) the external-provider graduation gate (#3034): drives the real `--install`
 #     decision path (build-free, via FAK_DOGFOOD_INSTALL_DRYRUN) and `--graduation`
 #     to witness BOTH states — an opt-in wrapper that is NOT installed by default,
@@ -46,13 +49,17 @@ cat()  { return 0; }        # swallow log dumps
 die()  { echo "DIED: \$*"; exit 9; }
 OLLAMA_HOST="127.0.0.1:1"
 SHIM_PORT="1"
+PORT="1"
 MODEL="stub-model"        # a precondition of start_shim_backend in the real script
 FAK_DOGFOOD_OLLAMA_TIMEOUT_S="$timeout_s"
 FAK_DOGFOOD_SHIM_TIMEOUT_S="$timeout_s"
+FAK_DOGFOOD_HEALTH_TIMEOUT_S="$timeout_s"
 OLLAMA_PID=$pid_expr
 SHIM_PID=$pid_expr
+SERVE_PID=$pid_expr
 ollama_deadline=\$(( \$(date +%s) + $timeout_s ))
 shim_deadline=\$(( \$(date +%s) + $timeout_s ))
+serve_deadline=\$(( \$(date +%s) + $timeout_s ))
 $block
 echo "NODIE"   # only reached if the loop exited normally (it never should here)
 EOF
@@ -60,10 +67,11 @@ EOF
   bash -c "$harness"
 }
 
-for name in ollama shim; do
+for name in ollama shim serve; do
   case "$name" in
     ollama) block="$(extract_loop '$OLLAMA_HOST/api/tags')" ;;
     shim)   block="$(extract_loop '$SHIM_PORT/v1/models')" ;;
+    serve)  block="$(extract_loop '$PORT/healthz')" ;;
   esac
 
   if [[ -z "$block" || "$block" != *"kill -0"* ]]; then
@@ -150,7 +158,7 @@ else
 fi
 
 if [[ "$fails" -eq 0 ]]; then
-  echo "PASS: all dogfood-claude checks green (bounded-wait #3499 + graduation gate #3034)"
+  echo "PASS: all dogfood-claude checks green (bounded-wait #3499/#3479 + graduation gate #3034)"
   exit 0
 fi
 echo "FAIL: $fails dogfood-claude check(s) failed"

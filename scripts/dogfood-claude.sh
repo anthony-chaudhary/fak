@@ -941,8 +941,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Bound this wait too (#3479). kill -0 already caught a serve that DIED, but an
+# alive-yet-never-healthy kernel (wedged gguf mmap, a port stolen by a process
+# that answers TCP but not /healthz) still spun here forever. Generous default:
+# the --gguf backend mmaps a multi-GB checkpoint before it serves /healthz.
+serve_deadline=$(( $(date +%s) + ${FAK_DOGFOOD_HEALTH_TIMEOUT_S:-600} ))
 until curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; do
   kill -0 "$SERVE_PID" 2>/dev/null || { cat /tmp/fak-serve.log >&2; die "fak serve died on startup"; }
+  [ "$(date +%s)" -ge "$serve_deadline" ] && { cat /tmp/fak-serve.log >&2; die "timed out after ${FAK_DOGFOOD_HEALTH_TIMEOUT_S:-600}s waiting for kernel /healthz on :$PORT (see /tmp/fak-serve.log)"; }
   sleep 0.3
 done
 HEALTH="$(curl -s http://127.0.0.1:$PORT/healthz)"
