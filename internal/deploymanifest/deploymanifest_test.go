@@ -2,6 +2,7 @@ package deploymanifest
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -164,5 +165,27 @@ func TestPresentDistinguishesDeclaredValuesFromDefaults(t *testing.T) {
 	}
 	if m.Present("runtimes", "gateway") {
 		t.Fatal("omitted default runtimes.gateway recorded as user-declared")
+	}
+}
+
+func TestKnownAndDeclaredKeysAreStableAndComplete(t *testing.T) {
+	keys := KnownKeys()
+	if len(keys) != 13 {
+		t.Fatalf("KnownKeys count = %d, want 13", len(keys))
+	}
+	for i := 1; i < len(keys); i++ {
+		if keys[i-1].Dotted() >= keys[i].Dotted() {
+			t.Fatalf("KnownKeys not strictly sorted at %q, %q", keys[i-1].Dotted(), keys[i].Dotted())
+		}
+	}
+	m, err := Parse([]byte("[policy]\nfloor = \"policy.json\"\n[tenants]\nenabled = false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := m.DeclaredKeys()
+	got := []string{declared[0].Dotted(), declared[1].Dotted()}
+	want := []string{"policy.floor", "tenants.enabled"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DeclaredKeys = %v, want %v", got, want)
 	}
 }

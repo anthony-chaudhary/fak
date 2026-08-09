@@ -285,6 +285,12 @@ func cmdServe(argv []string) {
 		}
 		return
 	}
+	if manifestPresent {
+		if err := validateServeManifestOpinions(manifest); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
+			os.Exit(2)
+		}
+	}
 
 	resolveServeModelSources(sf)
 

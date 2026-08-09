@@ -42,8 +42,20 @@ The first runtime spine maps these manifest fields directly to serve:
 | `observability.bind` | `--addr` |
 
 Secrets remain in the named environment variable; the manifest stores only its
-name. Other typed deployment sections remain reserved for the all-in-one
-orchestrator and are not reported as applied serve values.
+name. Every key in the closed `fak.toml` vocabulary appears under `opinions` in
+the effective-config report with one runtime disposition:
+
+- `applied`: `serve` realizes the value directly;
+- `reserved`: the value is harmless here but belongs to the all-in-one `fak up`
+  orchestrator; or
+- `refused`: a non-default opinion cannot be honored by `serve`, so a real boot
+  exits with `CONFIG_OPINION_UNSUPPORTED` and a concrete next action rather than
+  silently ignoring it.
+
+`--print-effective-config` still prints refused opinions so an operator can
+inspect and repair the file without starting a listener. The generated minimal
+manifest remains serve-safe: its topology declarations either match what
+`serve` actually does or remain harmless reserved defaults.
 
 ## Server Command-Line Flags
 

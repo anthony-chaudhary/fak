@@ -382,6 +382,11 @@
           "category": "incidental",
           "reason": "Private issue #2830 registration helper, not a distinct cache mechanism",
           "token": "registerCacheLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "private content-key helper for the experiment; not a cache subsystem",
+          "token": "selectorCacheKey"
         }
       ],
       "id": "cache",
@@ -508,6 +513,7 @@
         "registerCacheLevers",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
+        "selectorCacheKey",
         "tokencache",
         "uncached",
         "usercachedir"
@@ -1040,6 +1046,11 @@
           "category": "incidental",
           "reason": "Method name required by issue #2830's local CacheLever interface, not a new guard gate",
           "token": "CorrectnessGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "private fixture planner adapter; not a product guard or gate",
+          "token": "selectorGateway"
         }
       ],
       "exclude": [
@@ -1179,6 +1190,7 @@
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
         "saveGuardSelfTightenOverlay",
+        "selectorGateway",
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
@@ -2266,6 +2278,11 @@
           "category": "incidental",
           "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
           "token": "fak_gateway_compaction_thrash_sessions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "private benchmark metric constant, not a new context capability or public concept",
+          "token": "MetricFactRecall"
         }
       ],
       "id": "context-ctx",
@@ -2274,6 +2291,7 @@
         "CompactionContract",
         "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
+        "MetricFactRecall",
         "appendGuardCompactionWitnessTo",
         "cctx",
         "compactionContractFrom",
@@ -2705,11 +2723,17 @@
           "category": "incidental",
           "reason": "local bool carrying gitDailyCoverageKPI's second return (was the axis graded) to the weight map inside GradeGitDailyHealth",
           "token": "coverageGraded"
+        },
+        {
+          "category": "incidental",
+          "reason": "A CLI refusal reason scoped to fak.toml serve wiring, not a reusable support-maturity concept",
+          "token": "CONFIG_OPINION_UNSUPPORTED"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "BAD_ACHIEVED_MATURITY",
+        "CONFIG_OPINION_UNSUPPORTED",
         "ClaudeKeychainSupported",
         "CorrectnessGate",
         "DecodeInterleaveUnsupported",
@@ -2885,6 +2909,26 @@
           "category": "incidental",
           "reason": "Issue-local result value grouping retry action and observability reason; not a reusable decision-system concept.",
           "token": "partialretrydecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed private implementation record for one selector result; not a repository concept",
+          "token": "selectorDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "private fixture classifier function; not a durable decision primitive",
+          "token": "fixtureSelectStage"
+        },
+        {
+          "category": "incidental",
+          "reason": "private exact-filter helper; not a distinct decision concept",
+          "token": "deterministicSelectorDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "independent fixture expectation helper; not a production oracle concept",
+          "token": "selectorOracle"
         }
       ],
       "id": "decision",
@@ -2893,9 +2937,13 @@
         "ReuseDecision",
         "appendsteerdecisions",
         "decisionStderr",
+        "deterministicSelectorDecision",
+        "fixtureSelectStage",
         "gooddecisionratio",
         "kinddecisionsabout",
-        "partialretrydecision"
+        "partialretrydecision",
+        "selectorDecision",
+        "selectorOracle"
       ],
       "min_files": 3,
       "name": "Decision family",
@@ -3020,6 +3068,11 @@
           "category": "incidental",
           "reason": "Format-only helper for the existing compact-audit report; it adds a ranking presentation but does not materialize a distinct domain artifact or lifecycle.",
           "token": "RenderCompactTrajectoryRanking"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ordinary adjective describing inline policy bytes that have not been written to a file",
+          "token": "unmaterialized"
         }
       ],
       "id": "render-materialize",
@@ -3057,6 +3110,7 @@
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
         "tuioverviewsavingsrender",
+        "unmaterialized",
         "wipBlockedRender",
         "wipReclaimRender"
       ],

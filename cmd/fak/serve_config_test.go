@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
@@ -96,5 +97,80 @@ func TestServeConfigRejectsUnknownKeyWithNamedReason(t *testing.T) {
 	loadErr, ok := err.(*deploymanifest.LoadError)
 	if !ok || loadErr.Reason != deploymanifest.ReasonUnknownKey {
 		t.Fatalf("error = %#v, want UNKNOWN_KEY LoadError", err)
+	}
+}
+
+func TestServeManifestDispositionCoversClosedVocabulary(t *testing.T) {
+	keys := deploymanifest.KnownKeys()
+	if len(keys) != 13 {
+		t.Fatalf("known key count = %d, want 13; update this witness and every runtime disposition deliberately", len(keys))
+	}
+	if len(serveManifestSpecs) != len(keys) {
+		t.Fatalf("disposition specs = %d, known keys = %d", len(serveManifestSpecs), len(keys))
+	}
+	for _, key := range keys {
+		dotted := key.Dotted()
+		spec, ok := serveManifestSpecs[dotted]
+		if !ok {
+			t.Errorf("%s has no serve disposition", dotted)
+			continue
+		}
+		if spec.reason == "" {
+			t.Errorf("%s has no disposition reason", dotted)
+		}
+		// This also proves manifestValue covers the same vocabulary without panic.
+		_ = manifestValue(deploymanifest.Defaults(), dotted)
+	}
+}
+
+func TestServeManifestOpinionsReportAppliedReservedAndRefused(t *testing.T) {
+	m, err := deploymanifest.Parse([]byte(`[runtimes]
+gateway = true
+agent_runtime = false
+model = "upstream"
+[policy]
+floor = "policy.json"
+[observability]
+metrics = false
+bind = "127.0.0.1:9191"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opinions := serveManifestOpinions(m)
+	checks := map[string]string{
+		"policy.floor":           "applied",
+		"observability.bind":     "applied",
+		"runtimes.gateway":       "applied",  // invoking serve realizes this topology opinion
+		"runtimes.model":         "reserved", // same default opinion is harmless
+		"runtimes.agent_runtime": "refused",  // a changed orchestration opinion cannot disappear
+		"observability.metrics":  "refused",  // serve cannot disable its metrics surface yet
+	}
+	for dotted, want := range checks {
+		if got := opinions[dotted].Disposition; got != want {
+			t.Errorf("%s disposition = %q, want %q", dotted, got, want)
+		}
+	}
+	if err := validateServeManifestOpinions(m); err == nil || !strings.Contains(err.Error(), "CONFIG_OPINION_UNSUPPORTED") || !strings.Contains(err.Error(), "runtimes.agent_runtime=false") {
+		t.Fatalf("validation error = %v, want named refusal with field/value", err)
+	}
+}
+
+func TestServeMinimalManifestIsSafeAndFullyAccounted(t *testing.T) {
+	m, err := deploymanifest.Parse(deploymanifest.Minimal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateServeManifestOpinions(m); err != nil {
+		t.Fatalf("fak init output must remain serve-safe: %v", err)
+	}
+	opinions := serveManifestOpinions(m)
+	if len(opinions) != len(deploymanifest.KnownKeys()) {
+		t.Fatalf("reported opinions = %d, known keys = %d", len(opinions), len(deploymanifest.KnownKeys()))
+	}
+	for dotted, opinion := range opinions {
+		if opinion.Disposition == "" || opinion.Reason == "" {
+			t.Errorf("%s disappeared into an empty disposition: %+v", dotted, opinion)
+		}
 	}
 }

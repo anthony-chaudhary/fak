@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -166,6 +167,40 @@ func Defaults() Manifest {
 // zero values as customization.
 func (m Manifest) Present(section, key string) bool {
 	return m.present[section+"."+key]
+}
+
+// Key names one field in the closed fak.toml vocabulary. Consumers iterate
+// KnownKeys instead of copying the parser's schema and silently missing a new
+// opinion when the manifest grows.
+type Key struct {
+	Section string `json:"section"`
+	Name    string `json:"key"`
+}
+
+func (k Key) Dotted() string { return k.Section + "." + k.Name }
+
+// KnownKeys returns the complete closed vocabulary in stable dotted order.
+func KnownKeys() []Key {
+	keys := make([]Key, 0)
+	for section, sectionKeys := range knownSections {
+		for key := range sectionKeys {
+			keys = append(keys, Key{Section: section, Name: key})
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Dotted() < keys[j].Dotted() })
+	return keys
+}
+
+// DeclaredKeys returns only fields explicitly written by the operator, in the
+// same stable order as KnownKeys.
+func (m Manifest) DeclaredKeys() []Key {
+	declared := make([]Key, 0, len(m.present))
+	for _, key := range KnownKeys() {
+		if m.Present(key.Section, key.Name) {
+			declared = append(declared, key)
+		}
+	}
+	return declared
 }
 
 // knownSections maps each closed-vocabulary section to its closed set of keys.
