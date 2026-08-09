@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **158** (clarity 11 + coverage 147) |
-| **Crystal-clear concepts (and climbing)** | **436** crystal of 2149 positioned |
+| **Crystal-clear concepts (and climbing)** | **438** crystal of 2151 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2307 / 2454** (94.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2827 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2829 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 91.8/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2149 concepts - score 91.8/100 (grade A) - disambiguation-debt 158
+concept-disambiguation chart - 2151 concepts - score 91.8/100 (grade A) - disambiguation-debt 158
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 436
+  * crystal       #######..................... 438
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -56,7 +56,7 @@ clarity mix by family (each cell = one concept):
   render-materialize *****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 5 crystal)
   score-debt       ********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (72 concept(s); 8 crystal)
   session-runtime  *************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (187 concept(s); 25 crystal)
-  support-maturity ***************oooooooooooooooooooooo (37 concept(s); 15 crystal)
+  support-maturity *****************oooooooooooooooooooooo (39 concept(s); 17 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ****************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 52 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 191/191
 
-name index: 2827 lookup name(s) -> 2149 concept(s), 61 ambiguous
+name index: 2829 lookup name(s) -> 2151 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **191 / 191** (190 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1488 / 3994 |
+| Boundaries drawn (mutual / total) | 1490 / 3997 |
 | Dangling `distinct_from` references (drive to 0) | 5 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2827 over 2149 concepts |
+| Lookup names indexed | 2829 over 2151 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2149 |
+| Concepts carrying a contrast set | 2151 |
 
 ## The concepts (best verdict first)
 
@@ -499,6 +499,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | metric | support-maturity | **FamilyCoverage** - The covmatrix/conceptcatalog measure (FamilyCoverage, JSON family_coverage) of how much of one model architecture's family is supported - a per-family fraction on the complete-model-support face. |
 | * | crystal | config | support-maturity | **Qwen35GDNParityCosineMin** - The acceptance floor constant (model.Qwen35GDNParityCosineMin) - the minimum cosine similarity the Qwen3.5 gated-delta-net path must hit against the reference to pass parity. |
 | * | crystal | symbol | support-maturity | **TestVerbTierCoverageIsTotal** - The named coverage guarantee (TestVerbTierCoverageIsTotal) referenced by the verb-tier gate: it reds CI when any live dispatch verb resolves to no tier, asserting verb-tier coverage is total. |
+| * | crystal | symbol | support-maturity | **ParityDashboard** - ParityDashboard is the folded, schema-tagged snapshot (internal/metrics/parity_dashboard.go, schema fak-parity-dashboard/1) of fak's SOTA parity performance: one panel per declared metric carrying that metric's full dated history plus its latest direction-aware fak-vs-SOTA verdict, together with an honest publication state. It is pure — it reads no clock and no disk — so its Render() bytes and its OpenMetrics() series are reproducible from the input corpus alone. |
+| * | crystal | symbol | support-maturity | **BuildParityDashboard** - BuildParityDashboard is the total fold (internal/metrics/parity_dashboard.go) from a caller-supplied ParityDashboardInput — declared metric axes plus dated fak-and-SOTA samples in any order — to the ParityDashboard snapshot. It sorts each metric's history ascending by time, derives the latest direction-aware verdict per panel, and resolves the publication state from the supplied public base. |
 | * | crystal | symbol | support-maturity | **CoverageEntries** - The modver adapter that lifts a flat {module: statement-coverage-percent} map into the map[string]ScoreEntry that Report.JoinScores consumes, tagging each entry ProvenanceWitnessed because the percent is read off a real go-coverprofile artifact rather than modeled (#2467). |
 | * | crystal | symbol | support-maturity | **CoverageScores** - The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467). |
 | * | crystal | symbol | support-maturity | **ReasonUnsupportedPatch** - Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar. |
@@ -2426,8 +2428,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2506/3994 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2149 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2507/3997 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2151 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |

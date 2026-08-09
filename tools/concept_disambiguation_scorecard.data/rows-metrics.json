@@ -19,5 +19,44 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "paritydashboard",
+      "canonical": "ParityDashboard",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ParityDashboard is the folded, schema-tagged snapshot (internal/metrics/parity_dashboard.go, schema fak-parity-dashboard/1) of fak's SOTA parity performance: one panel per declared metric carrying that metric's full dated history plus its latest direction-aware fak-vs-SOTA verdict, together with an honest publication state. It is pure — it reads no clock and no disk — so its Render() bytes and its OpenMetrics() series are reproducible from the input corpus alone.",
+      "distinction": "Unlike sotacoverage and the other support-maturity coverage ratios, which answer 'how much of the surface did we measure', ParityDashboard answers 'how does fak compare to the reference stack on each measured axis, over time, and is that comparison published yet'. Its Publication field is load-bearing: a dashboard with no configured absolute public Grafana base renders as unpublished with a named reason and NEVER fabricates a plausible URL, so 'public URL' stays a checkable fact rather than a ticked box.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-sotacoverage",
+        "buildparitydashboard"
+      ],
+      "aliases": [],
+      "grounding": "ParityDashboard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "buildparitydashboard",
+      "canonical": "BuildParityDashboard",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "BuildParityDashboard is the total fold (internal/metrics/parity_dashboard.go) from a caller-supplied ParityDashboardInput — declared metric axes plus dated fak-and-SOTA samples in any order — to the ParityDashboard snapshot. It sorts each metric's history ascending by time, derives the latest direction-aware verdict per panel, and resolves the publication state from the supplied public base.",
+      "distinction": "Unlike ParityDashboard, which is the resulting artifact, BuildParityDashboard is the admission boundary that decides what is even representable: it REFUSES rather than silently repairs. A missing uid, an empty or duplicate metric slug, an unknown direction, a negative band, or a sample naming an undeclared metric all return an error, so a typo can never quietly erase a panel or drop a measurement from the history a reader is trusting.",
+      "distinct_from": [
+        "paritydashboard"
+      ],
+      "aliases": [],
+      "grounding": "BuildParityDashboard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

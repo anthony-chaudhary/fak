@@ -1756,6 +1756,21 @@
           "category": "incidental",
           "reason": "The serialized wire value of the FindingHeldAxisUnwitnessed constant, not a second concept: it is the same finding rendered as its machine-readable JSON token, and the concept itself is positioned as findingheldaxisunwitnessed.",
           "token": "held_axis_unwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "prose emphasis in the file-header comment describing the pre-#1348 defect; not a symbol or a concept",
+          "token": "WITNESSLESS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Close-time hygiene plumbing that drops the per-Server table entry; the concept is proxyFillWitnessTable, already positioned",
+          "token": "closeProxyFillWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "the process-global map holder for per-Server tables; the concept is proxyFillWitnessTable, already positioned",
+          "token": "proxyFillWitnesses"
         }
       ],
       "id": "witness-proof",
@@ -1773,6 +1788,7 @@
         "TurnOutcomesFromWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
+        "WITNESSLESS",
         "WithCoreLockWitness",
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
@@ -1780,6 +1796,7 @@
         "appendGuardCompactionWitnessTo",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
+        "closeProxyFillWitnesses",
         "compactionWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
@@ -1808,6 +1825,7 @@
         "named_witness",
         "newGuardCompactionWitness",
         "nwitness",
+        "proxyFillWitnesses",
         "readGuardCompactionWitnesses",
         "recordGuardCompactionWitness",
         "refutations",
@@ -2544,6 +2562,121 @@
           "category": "incidental",
           "reason": "Issue #2830 CacheLever interface method, not a standalone maturity concept",
           "token": "CorrectnessGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported one-line panel-header formatter for the parity dashboard card; presentation helper, not a governed concept",
+          "token": "parityPanelHeader"
+        },
+        {
+          "category": "incidental",
+          "reason": "caller-supplied input DTO folded by BuildParityDashboard; a parameter carrier for the parity dashboard, not a governed concept of its own",
+          "token": "ParityDashboardInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-metric latest fak-vs-SOTA readout struct inside a parity panel; a field carrier, not a governed concept",
+          "token": "ParityComparison"
+        },
+        {
+          "category": "incidental",
+          "reason": "type tag naming which way is better for one parity metric; a closed two-member enum, not an independently governed concept",
+          "token": "ParityDirection"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityDirection set (larger value is better); enum member, not a governed concept",
+          "token": "ParityHigherIsBetter"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityDirection set (smaller value is better); enum member, not a governed concept",
+          "token": "ParityLowerIsBetter"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (fak beats the baseline past its band); enum member, not a governed concept",
+          "token": "ParityAhead"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (fak within the metric tolerance band); enum member, not a governed concept",
+          "token": "ParityAtParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (fak trails the baseline past its band); enum member, not a governed concept",
+          "token": "ParityBehind"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (no comparison possible); enum member, not a governed concept",
+          "token": "ParityUnknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-axis declaration struct (slug, unit, direction, band) for one parity panel; a field carrier, not a governed concept",
+          "token": "ParityMetric"
+        },
+        {
+          "category": "incidental",
+          "reason": "one dated fak-and-SOTA measurement row fed into the parity dashboard; an input row carrier, not a governed concept",
+          "token": "ParitySample"
+        },
+        {
+          "category": "incidental",
+          "reason": "one point of a parity metric historical series; a field carrier, not a governed concept",
+          "token": "ParityPoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-metric grouping of declaration, history and latest comparison; a field carrier, not a governed concept",
+          "token": "ParityPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "type tag for the closed published/unpublished state of a parity dashboard; enum type, not a governed concept",
+          "token": "ParityPublishState"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityPublishState set (a real absolute base resolved a URL); enum member, not a governed concept",
+          "token": "ParityPublished"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityPublishState set (no public URL, with a named reason); enum member, not a governed concept",
+          "token": "ParityUnpublished"
+        },
+        {
+          "category": "incidental",
+          "reason": "struct carrying the resolved publication state, URL and reason; a field carrier, not a governed concept",
+          "token": "ParityPublication"
+        },
+        {
+          "category": "incidental",
+          "reason": "versioned shape-tag string constant for the parity dashboard artifact; a schema literal, not a separate concept",
+          "token": "ParityDashboardSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported reducer turning one parity point into a direction-aware verdict; internal helper, not a governed concept",
+          "token": "compareParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported resolver deriving the public URL or naming why there is none; internal helper, not a governed concept",
+          "token": "resolveParityPublication"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus gauge family name exposing latest per-metric values by side; a concrete series name, not a governed concept",
+          "token": "fak_parity_value"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus gauge family name exposing the latest normalized fak-to-SOTA ratio; a concrete series name, not a governed concept",
+          "token": "fak_parity_ratio"
         }
       ],
       "id": "support-maturity",
@@ -2559,7 +2692,25 @@
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "NonCacheParity",
+        "ParityAhead",
+        "ParityAtParity",
+        "ParityBehind",
+        "ParityComparison",
+        "ParityDashboardInput",
+        "ParityDashboardSchema",
+        "ParityDirection",
+        "ParityHigherIsBetter",
         "ParityHolds",
+        "ParityLowerIsBetter",
+        "ParityMetric",
+        "ParityPanel",
+        "ParityPoint",
+        "ParityPublication",
+        "ParityPublishState",
+        "ParityPublished",
+        "ParitySample",
+        "ParityUnknown",
+        "ParityUnpublished",
         "SetupParityBlocks",
         "SetupParityReport",
         "SupportsRoutedExpertKQuant",
@@ -2568,6 +2719,7 @@
         "VerdictSetupParityFlagged",
         "achievedMaturity",
         "calendar_coverage",
+        "compareParity",
         "correctnessclass",
         "correctnessdependson",
         "coverageBlock",
@@ -2579,6 +2731,8 @@
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "fak_parity_ratio",
+        "fak_parity_value",
         "formatParityValue",
         "gitDailyCoverageKPI",
         "guardKeychainSupported",
@@ -2586,10 +2740,12 @@
         "joinCoverageScores",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
+        "parityPanelHeader",
         "paritybench",
         "parityreport",
         "parseCoverageLine",
         "recurrentevictunsupportederror",
+        "resolveParityPublication",
         "scoreparity",
         "seenSupport",
         "setup_parity_clean",
