@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accountobs"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -169,7 +170,7 @@ func cmdGuard(argv []string) {
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. Anthropic passthrough only.")
 	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. Anthropic passthrough only.")
-	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools); every deferred def stays byte-complete in tools[], so a first real use still resolves — nothing goes silently missing. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B token-delta x held-accuracy x poison gates reported PASS, the #3200 pin/quarantine guards the fault-in). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
+	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one 	ool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools); every deferred def stays byte-complete in tools[], so a first real use still resolves — nothing goes silently missing. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B token-delta x held-accuracy x poison gates reported PASS, the #3200 pin/quarantine guards the fault-in). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	exposeProfile := fs.String("expose-profile", "", "in-kernel fak_* MCP tool-surface profile (#3607): \"\" (full registry, default) | \"headless\" — a curated allowlist for a single-issue dispatch worker (fak_index_work, fak_admit, fak_adjudicate, fak_memory_run, fak_tools_search), pruning the ~9.9k-token full-registry schema floor every worker otherwise pays each turn; the rest page in on demand through the still-exposed fak_tools_search. `fak dispatch` launches workers with =headless. The FAK_GUARD_EXPOSE_PROFILE env OVERRIDES this flag (the fleet opt-out: set it to `full`/`off` to restore the whole registry). Any value other than \"headless\" keeps the full registry.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: a fresh launch id derived from host, cwd, and wrapped argv; pass this flag for a stable resumable id)")
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist. Spec: THRESHOLD[,days=N][,max=N][,report=PATH][,justify=TEXT] — THRESHOLD is high|medium|none|off (off by default, so a bare `--session-pressure-gate high` is the common form); days (default 7) and max (default 40) size the audit window over this workspace's transcript namespace; report=PATH writes the fak.session_audit.actions.v1 launch-gate report before allowing or refusing; justify=TEXT, with an explicit Opus --model, is the justification that allows the launch while still recording that report. justify= takes the REST of the spec so prose may contain commas — put it last. e.g. --session-pressure-gate high,days=3,report=pressure.json")
@@ -200,6 +201,10 @@ func cmdGuard(argv []string) {
 	piExtension := fs.Bool("pi-extension", true, "when wrapping Pi (earendil-works), prepend a session-scoped -e extension that calls pi.registerProvider(\"anthropic\", {baseUrl}) so Pi talks to the in-process gateway. Pi-only; Pi's Anthropic client reads baseUrl from provider config, not ANTHROPIC_BASE_URL, so the env repoint alone cannot route it. Pass --pi-extension=false if you already registered the fak provider yourself.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
+	fleetBus := fs.Bool("fleet-bus", true, "JOIN THE FLEET CONTROL BUS (#5953, epic #5599): announce this guard as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak dev fleet control send` reaches every live guard at once instead of none of them. ON BY DEFAULT, unlike `fak serve`'s: a guard is the process that is already running unattended in bulk, and a fleet-control instance nobody remembered to arm is worth exactly as much as no fleet control. What a guard applies is REAL and bounded: pause/resume/cancel/terminate/throttle ride the same session.Table.Transition write the single-session verbs use, and seat-refresh re-reads the accounts registry and retires the goal parks holding this box's workers once a seat can serve again. What it CANNOT do it declares rather than discovering at fan-out time — a guard wraps somebody else's agent and owns no session loop, so it announces steer as unsupported and `instances` reports \"0 of N can steer\" up front. Pass --fleet-bus=false for a total opt-out: no announce, no directory, no filesystem touch.")
+	fleetBusDir := fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
+	fleetBusID := fs.String("fleet-bus-id", "", "with --fleet-bus: this instance's stable bus identity (default: guard-<host>-<pid>). Pass a name to keep one identity across restarts — the id is what the exactly-once apply claim is keyed on, so two live processes sharing one id deliberately share one claim (only one of them applies a given directive).")
+	fleetBusInterval := fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live guard flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	guardHelpAll := guardArgvHasAll(argv)
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, guardHelpAll) }
 	_ = fs.Parse(argv)
@@ -846,6 +851,11 @@ func cmdGuard(argv []string) {
 
 	wireErrors := &guardWireErrorGauge{}
 	parkStore := goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}
+	quotaStore := accountobs.Store{Dir: filepath.Join(repoRoot(), ".fak", "account-observations")}
+	quotaKey := strings.TrimSpace(os.Getenv("FAK_ACCOUNT_ADMISSION_KEY"))
+	if quotaKey == "" {
+		quotaKey = "default"
+	}
 	parkGoal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
 	if parkGoal == "" {
 		parkGoal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
@@ -857,6 +867,8 @@ func cmdGuard(argv []string) {
 	}
 	longRetryParked := false
 	observeUpstreamResponse := func(status int, header http.Header) {
+		// Passive, zero-request harvest; persistence failures never fail the response path.
+		_ = quotaStore.Observe(quotaKey, status, header, time.Now())
 		if parkGoal == "" || longRetryParked {
 			return
 		}
@@ -1015,6 +1027,20 @@ func cmdGuard(argv []string) {
 		}
 	}
 	installGuardFleetProvider(srv, ctx, fleetLogf)
+	// Arm the CONTROL bus (guard_fleetbus.go) — distinct from the display pane above:
+	// the provider answers "what does this box look like", this answers "and here is
+	// something that can be told to change". Armed here, beside the pane and BEFORE
+	// Serve, because nothing this guard can apply depends on the gateway being healthy:
+	// the lifecycle ops write the process-wide session table, and seat-refresh is
+	// registry-and-disk work. Waiting for MarkReady would therefore hide a guard that
+	// is genuinely applyable, and a control point that refuses FLEETBUS_NO_TARGET
+	// against a booting fleet is correct about the roster and wrong about the world.
+	// The other direction is bounded and honest: a guard that announces and then dies
+	// before ready ages out of the roster within one TTL, and until it does it folds as
+	// OUTSTANDING — "addressed, never answered" — never as an apply.
+	// --fleet-bus=false makes this a total no-op.
+	stopGuardFleetBus := startGuardFleetBus(ctx, *fleetBus, *fleetBusDir, *fleetBusID, *fleetBusInterval)
+	defer stopGuardFleetBus()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()
 

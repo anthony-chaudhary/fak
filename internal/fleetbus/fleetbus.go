@@ -348,6 +348,32 @@ type Instance struct {
 	// ack is. An op an instance did not declare still gets a real attempt and a real
 	// ack.
 	Ops []Op `json:"ops,omitempty"`
+	// Unsupported is what this instance SAYS it structurally cannot apply — not "is
+	// busy", not "would refuse today", but "there is no local subject for this op in
+	// this process, and there never will be while it runs". A guard that owns no
+	// session loop declares steer here.
+	//
+	// It exists because the absence of an op from Ops is AMBIGUOUS in a way an
+	// operator cannot resolve: an instance that predates an op, one that forgot to
+	// list it, and one that genuinely cannot do it all look identical (silent). That
+	// ambiguity is what produces the worst reading of a fan-out — an operator sees
+	// "16 instances" in the roster, fans steer at them, collects 16 refusals, and
+	// only then learns the answer was always zero. Declaring it turns the roster into
+	// something answerable BEFORE the fan-out: "16 instances, 0 can steer" (Capability).
+	//
+	// It is the same KIND of claim as Ops and carries the same limit, which is why it
+	// is not a routing or selection input and no Selector axis reads it: a claim is
+	// not a witness. Addressing an instance that declared an op unsupported still
+	// gets that instance a real attempt and a real ack — a refusal under a closed
+	// token from its own applier, with the instance still in the denominator. That is
+	// deliberate: skipping declared-unsupported instances at publish time would turn
+	// a fleet that can do nothing into FLEETBUS_NO_TARGET, which reads as "nobody was
+	// there" rather than the truth, "everybody was there and none of them can".
+	//
+	// OPTIONAL and additive, under the same rule as Models/Zone: a record from a
+	// binary that predates the field parses with it empty, stays in the roster, and
+	// matches exactly the selectors it matched before.
+	Unsupported []Op `json:"unsupported,omitempty"`
 	// Models is what this instance SAYS it serves, and Zone where it says it sits.
 	// They are the same KIND of thing as Ops — a claim, not a witness — with one
 	// difference that has to be stated because it is easy to misread as promotion:
@@ -430,6 +456,60 @@ func (i Instance) WithServedModels(models []string) Instance {
 func (i Instance) WithZone(zone string) Instance {
 	i.Zone = strings.TrimSpace(zone)
 	return i
+}
+
+// WithUnsupportedOps stamps what this instance says it structurally cannot apply,
+// returning a copy. It normalizes exactly as WithServedModels does — trimmed,
+// de-duplicated, sorted, nil when empty — so a roster an operator diffs does not
+// churn on declaration order, and an instance declaring nothing writes no key at all.
+//
+// It is a builder rather than a NewInstance parameter for the same reason: an
+// announcer with nothing to declare should not have to say so with an empty argument.
+//
+// Declaring an op BOTH ways (in Ops and here) is not rejected. Validate's job is to
+// refuse records that cannot be addressed or aged, and a contradictory pair of claims
+// is neither — refusing it would drop a live instance out of the roster over a
+// display field. Capability resolves the contradiction the safe way instead, by
+// counting it as unsupported.
+func (i Instance) WithUnsupportedOps(ops []Op) Instance {
+	seen := map[Op]bool{}
+	out := make([]Op, 0, len(ops))
+	for _, op := range ops {
+		op = Op(strings.TrimSpace(string(op)))
+		if op == "" || seen[op] {
+			continue
+		}
+		seen[op] = true
+		out = append(out, op)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a] < out[b] })
+	if len(out) == 0 {
+		out = nil
+	}
+	i.Unsupported = out
+	return i
+}
+
+// DeclaresUnsupported reports whether this instance named op as something it cannot
+// apply. It is a claim, never a gate: read it to EXPLAIN a fleet, never to decide
+// whether to address one.
+func (i Instance) DeclaresUnsupported(op Op) bool {
+	for _, declared := range i.Unsupported {
+		if declared == op {
+			return true
+		}
+	}
+	return false
+}
+
+// DeclaresOp reports whether this instance named op as something it can apply.
+func (i Instance) DeclaresOp(op Op) bool {
+	for _, declared := range i.Ops {
+		if declared == op {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate refuses a presence record that cannot be addressed or aged.

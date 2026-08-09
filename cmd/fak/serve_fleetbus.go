@@ -17,8 +17,9 @@ package main
 // Two properties this file must not break:
 //
 // The ack reports what was OBSERVED, never what was enqueued. Every Outcome's witness
-// names the local write that actually happened and Affected counts the sessions it
-// landed on; an instance that matched nothing REFUSES rather than acking a hollow
+// names the local write that actually happened and Affected counts the sessions that
+// actually MOVED — a write that leaves the run state where it already was is reported,
+// never counted; an instance that matched nothing REFUSES rather than acking a hollow
 // "applied", because a fleet-wide report of "everybody applied, 0 affected" is the
 // accepted-but-never-applied phantom wearing a success token.
 //
@@ -94,6 +95,17 @@ func validateFleetBusVocabularies() error {
 	for op := range gwBusOps {
 		if _, overlap := sessionctl.Spec(sessionctl.ControlOp(op)); overlap {
 			return fmt.Errorf("fleet-bus op %q is ambiguous between gateway and session appliers", op)
+		}
+	}
+	// The guard adds a third vocabulary (guard_fleetbus.go). Checking it here rather
+	// than in that file keeps ONE place that can answer "does this op have exactly one
+	// owner", which is the only form of the question dispatch actually asks.
+	for _, op := range guardBusOwnedOps() {
+		if _, overlap := sessionctl.Spec(sessionctl.ControlOp(op)); overlap {
+			return fmt.Errorf("fleet-bus op %q is ambiguous between guard and session appliers", op)
+		}
+		if isGwBusOp(op) {
+			return fmt.Errorf("fleet-bus op %q is ambiguous between guard and gateway appliers", op)
 		}
 	}
 	return nil
@@ -205,7 +217,11 @@ func (a *fleetBusApplier) applyLifecycle(d fleetbus.Directive, op sessionctl.Con
 	if reason == "" {
 		reason = "fleet control " + string(op)
 	}
-	matched := a.matchedSessions(d.Selector)
+	// The PRE-write run state has to come from this one snapshot walk. Re-reading the
+	// table after the transition would race a concurrent turn and attribute its move to
+	// this directive; Table.Transition's own bool cannot answer it either, because that
+	// bool means "not terminal", never "the write mattered" (internal/session/table.go).
+	matched := a.matchedStates(d.Selector)
 	if len(matched) == 0 {
 		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused, "%s", a.noMatchDetail(d.Selector))
 	}
@@ -213,40 +229,60 @@ func (a *fleetBusApplier) applyLifecycle(d fleetbus.Directive, op sessionctl.Con
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	applied := 0
-	for _, traceID := range matched {
-		st, took := a.tbl.Transition(traceID, run, reason)
+	changed, already := 0, 0
+	for _, prev := range matched {
+		st, took := a.tbl.Transition(prev.TraceID, run, reason)
 		if !took {
 			continue
 		}
 		if a.durability != nil && a.durability.registry != nil {
-			if err := a.durability.writeThrough(ctx, traceID, st); err != nil {
+			if err := a.durability.writeThrough(ctx, prev.TraceID, st); err != nil {
 				return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
-					"%s applied in memory for %s but durable mirror failed: %v", op, traceID, err)
+					"%s applied in memory for %s but durable mirror failed: %v", op, prev.TraceID, err)
 			}
 		}
-		applied++
+		// The write was taken either way — it is still mirrored, and the session is
+		// still where the operator asked. Only a run-state CHANGE counts as Affected.
+		if prev.Run == run {
+			already++
+			continue
+		}
+		changed++
 	}
-	if applied == 0 {
+	if changed+already == 0 {
 		return fleetbus.OutcomeRefused(fleetbus.ApplyRefused,
 			"all %d matched session(s) refused %s (see the drive table's own tokens)", len(matched), op)
 	}
-	if a.durability == nil || a.durability.registry == nil {
-		out := fleetbus.OutcomeApplied(
-			fmt.Sprintf("%s: %d/%d session(s) took it in memory only (durability disabled)", op, applied, len(matched)),
-			applied)
-		out.Witness = "memory-only:" + out.Witness
-		return out
+	mirror, prefix := "in memory only (durability disabled)", "memory-only:"
+	if a.durability != nil && a.durability.registry != nil {
+		mirror, prefix = "and reached the durable mirror", "durable:"
 	}
-	out := fleetbus.OutcomeApplied(
-		fmt.Sprintf("%s: %d/%d session(s) took it and reached the durable mirror", op, applied, len(matched)),
-		applied)
-	out.Witness = "durable:" + out.Witness
+	// An all-no-op fan stays APPLIED with Affected 0 — a legal outcome the bus documents
+	// (internal/fleetbus/fleetbus.go's Affected doc), and the one an operator can act on:
+	// converting it to a refusal would trade an overcount for a false alarm about a fleet
+	// that is exactly where they asked it to be. What it must NOT do is say "took it".
+	var witness string
+	switch {
+	case changed == 0:
+		witness = fmt.Sprintf("%s: no run-state change — all %d matched session(s) were already %s (%s)",
+			op, already, run, mirror)
+	case already == 0:
+		witness = fmt.Sprintf("%s: %d/%d session(s) took it %s", op, changed, len(matched), mirror)
+	default:
+		witness = fmt.Sprintf("%s: %d/%d session(s) took it %s; %d were already %s",
+			op, changed, len(matched), mirror, already, run)
+	}
+	out := fleetbus.OutcomeApplied(witness, changed)
+	out.Witness = prefix + out.Witness
 	return out
 }
 
-func (a *fleetBusApplier) matchedSessions(sel fleetbus.Selector) []string {
-	var out []string
+// matchedStates resolves the selector against ONE snapshot and keeps the whole record,
+// not just the trace id. The run state it carries is the pre-write one a lifecycle fan
+// needs to tell a change from a no-op write; dropping it here is what forced the old
+// applier to read Transition's "not terminal" bool as if it meant "changed" (#5822).
+func (a *fleetBusApplier) matchedStates(sel fleetbus.Selector) []session.State {
+	var out []session.State
 	narrow := sel.NarrowsSessions()
 	bsel := sessionctl.BroadcastSelector{Lane: sel.Lane, Wave: sel.Wave, Label: sel.Label}
 	for _, st := range a.tbl.Snapshot() {
@@ -259,6 +295,18 @@ func (a *fleetBusApplier) matchedSessions(sel fleetbus.Selector) []string {
 				continue
 			}
 		}
+		out = append(out, st)
+	}
+	return out
+}
+
+func (a *fleetBusApplier) matchedSessions(sel fleetbus.Selector) []string {
+	states := a.matchedStates(sel)
+	if len(states) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(states))
+	for _, st := range states {
 		out = append(out, st.TraceID)
 	}
 	return out
@@ -327,8 +375,53 @@ func (a serveGwBusApplier) ReloadRoute() (string, bool, error) {
 	return fmt.Sprintf("source=%s reloads=%d rejects=%d", ev.Path, ev.Reloads, ev.Rejects), ev.Reloaded, nil
 }
 
-// startFleetBusLoop arms this serve as a bus INSTANCE: announce presence, then drain
-// every interval for the lifetime of ctx. It mirrors startGatewayUsageSnapshotLoop's
+// fleetBusArming is everything that differs between one bus instance and the next.
+// The announce/drain loop below is identical for every binary that joins the bus —
+// what a serve and a guard disagree about is only who they say they are, what they
+// claim they can and cannot do, and which applier owns the meaning — so those are
+// parameters and the loop is written once. Forking the loop per role is how the two
+// would drift into announcing on different schedules or logging refusals only on one
+// side, which is the failure the whole return path exists to prevent.
+type fleetBusArming struct {
+	// busDir is the directory transport root. Empty means "not armed" and is a
+	// byte-for-byte no-op — see resolveFleetBusDir.
+	busDir     string
+	instanceID string
+	// role is the instance record's role token ("serve", "guard"). Display only.
+	role string
+	// logPrefix is what this binary calls itself on stderr ("fak serve", "fak guard"),
+	// so an operator reading a mixed log can tell which process refused.
+	logPrefix string
+	interval  time.Duration
+	// ops / unsupported are the two capability CLAIMS on the presence record. Neither
+	// routes; see fleetbus.Instance.
+	ops         []fleetbus.Op
+	unsupported []fleetbus.Op
+	// applier owns op meaning for this role.
+	applier fleetbus.Applier
+}
+
+// startFleetBusLoop arms this serve as a bus INSTANCE. It is the serve-shaped call
+// onto startFleetBusInstance and stays positional because it is what serve's stages
+// and its tests already call.
+func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval time.Duration, tbl *session.Table, native bool, gwAppliers ...gwBusApplier) func() {
+	ap := &fleetBusApplier{tbl: tbl, native: native, durability: serveSessionDurability, ctx: ctx}
+	if len(gwAppliers) != 0 {
+		ap.gateway = gwAppliers[0]
+	}
+	return startFleetBusInstance(ctx, fleetBusArming{
+		busDir:     busDir,
+		instanceID: instanceID,
+		role:       "serve",
+		logPrefix:  "fak serve",
+		interval:   interval,
+		ops:        fleetBusAdvertisedOps(),
+		applier:    ap,
+	})
+}
+
+// startFleetBusInstance arms one process as a bus INSTANCE: announce presence, then
+// drain every interval for the lifetime of ctx. It mirrors startGatewayUsageSnapshotLoop's
 // shape — an empty dir is a byte-for-byte no-op, the returned stop func cancels, and the
 // loop also exits on ctx so a caller that forgets stop cannot leak the goroutine.
 //
@@ -336,34 +429,42 @@ func (a serveGwBusApplier) ReloadRoute() (string, bool, error) {
 // only on the first tick would leave a window where `fak fleet control send` refuses
 // FLEETBUS_NO_TARGET against a fleet that is actually up — a refusal that is correct
 // about the roster and wrong about the world.
-func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval time.Duration, tbl *session.Table, native bool, gwAppliers ...gwBusApplier) func() {
-	if strings.TrimSpace(busDir) == "" {
+func startFleetBusInstance(ctx context.Context, arm fleetBusArming) func() {
+	if strings.TrimSpace(arm.busDir) == "" {
 		return func() {}
 	}
-	if interval <= 0 {
-		interval = DefaultFleetBusInterval
+	prefix := strings.TrimSpace(arm.logPrefix)
+	if prefix == "" {
+		prefix = "fak"
+	}
+	if arm.interval <= 0 {
+		arm.interval = DefaultFleetBusInterval
+	}
+	if arm.applier == nil {
+		fmt.Fprintf(os.Stderr, "%s: --fleet-bus disabled: no applier was wired for role %q\n", prefix, arm.role)
+		return func() {}
 	}
 	if err := validateFleetBusVocabularies(); err != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: --fleet-bus disabled: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s: --fleet-bus disabled: %v\n", prefix, err)
 		return func() {}
 	}
-	bus, err := fleetbus.OpenDir(busDir)
+	bus, err := fleetbus.OpenDir(arm.busDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: --fleet-bus disabled: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s: --fleet-bus disabled: %v\n", prefix, err)
 		return func() {}
 	}
-	machine, pid, ops := fleetBusMachine(), os.Getpid(), fleetBusAdvertisedOps()
+	machine, pid := fleetBusMachine(), os.Getpid()
 	stamp := func(now time.Time) (fleetbus.Instance, *fleetbus.Refusal) {
-		return fleetbus.NewInstance(instanceID, machine, "serve", pid, "", ops, now)
+		inst, r := fleetbus.NewInstance(arm.instanceID, machine, arm.role, pid, "", arm.ops, now)
+		if r != nil {
+			return fleetbus.Instance{}, r
+		}
+		return inst.WithUnsupportedOps(arm.unsupported), nil
 	}
 	self, refusal := stamp(time.Now())
 	if refusal != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: --fleet-bus disabled: %v\n", refusal)
+		fmt.Fprintf(os.Stderr, "%s: --fleet-bus disabled: %v\n", prefix, refusal)
 		return func() {}
-	}
-	ap := &fleetBusApplier{tbl: tbl, native: native, durability: serveSessionDurability, ctx: ctx}
-	if len(gwAppliers) != 0 {
-		ap.gateway = gwAppliers[0]
 	}
 
 	// announce re-stamps and republishes presence, returning the record the drain then
@@ -375,16 +476,24 @@ func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval 
 			return prev
 		}
 		if err := bus.Announce(inst); err != nil {
-			fmt.Fprintf(os.Stderr, "fak serve: fleet-bus announce failed (non-fatal): %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s: fleet-bus announce failed (non-fatal): %v\n", prefix, err)
 		}
 		return inst
 	}
 	self = announce(time.Now(), self)
-	fmt.Fprintf(os.Stderr, "fak serve: fleet-bus armed as %s on %s (drain every %s)\n", self.ID, bus.Root, interval)
+	fmt.Fprintf(os.Stderr, "%s: fleet-bus armed as %s on %s (drain every %s)\n", prefix, self.ID, bus.Root, arm.interval)
+	if len(self.Unsupported) > 0 {
+		// Say the closed half out loud at arm time. An instance that declares an op
+		// unsupported is still addressed by it (that is deliberate — see
+		// fleetbus.Instance.Unsupported), so the operator's first evidence would
+		// otherwise be a refusal ack, long after the boot log could have told them.
+		fmt.Fprintf(os.Stderr, "%s: fleet-bus %s declares unsupported: %v (it will be addressed and will refuse, never silently skipped)\n",
+			prefix, self.ID, self.Unsupported)
+	}
 
 	loopCtx, cancel := context.WithCancel(ctx)
 	go func() {
-		t := time.NewTicker(interval)
+		t := time.NewTicker(arm.interval)
 		defer t.Stop()
 		for {
 			select {
@@ -392,17 +501,17 @@ func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval 
 				return
 			case now := <-t.C:
 				self = announce(now, self)
-				rep, err := fleetbus.Drain(bus, self, ap, now)
+				rep, err := fleetbus.Drain(bus, self, arm.applier, now)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "fak serve: fleet-bus drain failed (non-fatal): %v\n", err)
+					fmt.Fprintf(os.Stderr, "%s: fleet-bus drain failed (non-fatal): %v\n", prefix, err)
 					continue
 				}
 				for _, msg := range rep.Errors {
-					fmt.Fprintf(os.Stderr, "fak serve: fleet-bus drain: %s\n", msg)
+					fmt.Fprintf(os.Stderr, "%s: fleet-bus drain: %s\n", prefix, msg)
 				}
 				if rep.Applied+rep.Refused+rep.Expired > 0 {
-					fmt.Fprintf(os.Stderr, "fak serve: fleet-bus %s: applied=%d refused=%d expired=%d\n",
-						self.ID, rep.Applied, rep.Refused, rep.Expired)
+					fmt.Fprintf(os.Stderr, "%s: fleet-bus %s: applied=%d refused=%d expired=%d\n",
+						prefix, self.ID, rep.Applied, rep.Refused, rep.Expired)
 				}
 			}
 		}
