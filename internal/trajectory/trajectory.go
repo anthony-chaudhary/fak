@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/simhash"
 )
 
@@ -115,6 +116,20 @@ func (r *Recorder) Emit(ev abi.Event) {
 	if !ok {
 		return
 	}
+	if match := sourceMatch(ev); match.Refused {
+		// Replace the whole analysis payload before it enters byID. In particular,
+		// do not retain Query or producer labels: either can repeat the source bytes.
+		t.Query = ""
+		t.QueryEmbedding = nil
+		t.Verdict = "DENY"
+		t.Reason = match.Reason
+		t.ResultDigest = ""
+		t.Labels = map[string]string{
+			"capture_refused":       "true",
+			"capture_refusal_class": string(match.Class),
+			"capture_source_digest": match.SourceDigest,
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.embed && t.Query != "" {
@@ -140,6 +155,17 @@ func (r *Recorder) Emit(ev abi.Event) {
 		turns[i].Seq = i + 1
 	}
 	r.byID[t.TraceID] = turns
+}
+
+func sourceMatch(ev abi.Event) pathutil.CaptureSourceMatch {
+	if ev.Call == nil {
+		return pathutil.CaptureSourceMatch{}
+	}
+	var raw []byte
+	if ev.Call.Args.Kind == abi.RefInline {
+		raw = ev.Call.Args.Inline
+	}
+	return pathutil.CheckCaptureJSON(raw, ev.Call.Meta)
 }
 
 // Trace returns a snapshot of one trace's turns in order (nil if unknown).

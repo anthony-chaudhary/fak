@@ -23,12 +23,15 @@ package sessionjournal
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // Schema tags each row so a forward-extended reader can tell a lifecycle event from any
@@ -45,16 +48,21 @@ const (
 type Kind string
 
 const (
-	KindOpen  Kind = "open"  // registration at session start
-	KindBeat  Kind = "beat"  // heartbeat / liveness ping
-	KindClose Kind = "close" // clean deregister at graceful exit
+	KindOpen   Kind = "open"   // registration at session start
+	KindBeat   Kind = "beat"   // heartbeat / liveness ping
+	KindClose  Kind = "close"  // clean deregister at graceful exit
+	KindRefuse Kind = "refuse" // source refused before capture; content-free audit row
 )
+
+// ErrSourceDenied reports that Append wrote a content-free refusal instead of
+// the caller's event. It deliberately carries no source string.
+var ErrSourceDenied = errors.New("sessionjournal: capture source refused: " + pathutil.CaptureRefusalReason)
 
 // DriveCarry is the plain-data projection of a session's remaining drive-state — the
 // budget / generation / objective axes that must survive a machine-wide reboot so a
 // resumed process comes up at the RIGHT remaining allotment, not a fresh full one. Every
-// field is a scalar (no internal imports) so this foundation leaf stays stdlib-only (the
-// §5 no-upward-import fence); it is the crash-journal mirror of internal/resume.DriveCarry
+// field is a scalar (no internal state types) so this foundation leaf stays below the
+// §5 no-upward-import fence; it is the crash-journal mirror of internal/resume.DriveCarry
 // and the projection of internal/session.State's Budget / Generation / ObjectivePin axes.
 // A nil *DriveCarry on an Event / Session means "no carry" — exactly today's behavior.
 //
@@ -75,22 +83,23 @@ type DriveCarry struct {
 // Event is one appended lifecycle row. Forward-extensible: a row with extra keys still
 // decodes, so later rungs can add fields without breaking this reader.
 type Event struct {
-	Schema   string      `json:"schema"`
-	Kind     Kind        `json:"kind"`
-	ID       string      `json:"id"` // session / trace id — the join + fold key
-	TS       string      `json:"ts"` // RFC3339 UTC event time
-	Boot     string      `json:"boot,omitempty"`
-	PID      int         `json:"pid,omitempty"`
-	Host     string      `json:"host,omitempty"`
-	CWD      string      `json:"cwd,omitempty"`
-	Model    string      `json:"model,omitempty"`
-	Agent    string      `json:"agent,omitempty"`
-	Account  string      `json:"account,omitempty"` // config dir / seat
-	Argv     []string    `json:"argv,omitempty"`
-	StartSHA string      `json:"start_sha,omitempty"`
-	Gateway  string      `json:"gateway,omitempty"`
-	Drive    *DriveCarry `json:"drive,omitempty"`  // remaining drive-state to resume at (nil = none)
-	Reason   string      `json:"reason,omitempty"` // close reason
+	Schema       string      `json:"schema"`
+	Kind         Kind        `json:"kind"`
+	ID           string      `json:"id"` // session / trace id — the join + fold key
+	TS           string      `json:"ts"` // RFC3339 UTC event time
+	Boot         string      `json:"boot,omitempty"`
+	PID          int         `json:"pid,omitempty"`
+	Host         string      `json:"host,omitempty"`
+	CWD          string      `json:"cwd,omitempty"`
+	Model        string      `json:"model,omitempty"`
+	Agent        string      `json:"agent,omitempty"`
+	Account      string      `json:"account,omitempty"` // config dir / seat
+	Argv         []string    `json:"argv,omitempty"`
+	StartSHA     string      `json:"start_sha,omitempty"`
+	Gateway      string      `json:"gateway,omitempty"`
+	Drive        *DriveCarry `json:"drive,omitempty"`         // remaining drive-state to resume at (nil = none)
+	Reason       string      `json:"reason,omitempty"`        // close reason
+	SourceDigest string      `json:"source_digest,omitempty"` // denied-source identity; raw source is never recorded
 }
 
 // DefaultPath resolves the journal path: the env override, else <UserConfigDir>/fak/…,
@@ -116,6 +125,25 @@ func Append(path string, ev Event) error {
 	if ev.Schema == "" {
 		ev.Schema = Schema
 	}
+	if match := pathutil.CheckCaptureSource(ev.CWD); match.Refused {
+		refusal := Event{
+			Schema:       Schema,
+			Kind:         KindRefuse,
+			ID:           ev.ID,
+			TS:           ev.TS,
+			Boot:         ev.Boot,
+			Reason:       match.Reason,
+			SourceDigest: match.SourceDigest,
+		}
+		if err := appendEvent(path, refusal); err != nil {
+			return fmt.Errorf("%w (refusal audit unavailable: %v)", ErrSourceDenied, err)
+		}
+		return ErrSourceDenied
+	}
+	return appendEvent(path, ev)
+}
+
+func appendEvent(path string, ev Event) error {
 	if strings.TrimSpace(path) == "" {
 		path = DefaultPath()
 	}
@@ -202,6 +230,9 @@ func FoldEvents(events []Event) []Session {
 	byID := map[string]*Session{}
 	order := []string{}
 	for _, ev := range sorted {
+		if ev.Kind == KindRefuse {
+			continue // an audit refusal is not a session lifecycle transition
+		}
 		t := eventTime(ev)
 		s, ok := byID[ev.ID]
 		if !ok {
