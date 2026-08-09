@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -185,5 +186,40 @@ func repoRootForDoctorTest(t *testing.T) string {
 		if filepath.Dir(dir) == dir {
 			t.Fatalf("go.mod not found above %s", wd)
 		}
+	}
+}
+
+func TestReadCodexEffectiveMCPEntryResolvesPluginRegistrationWithoutLeakingEnv(t *testing.T) {
+	original := runCodexMCPGet
+	t.Cleanup(func() { runCodexMCPGet = original })
+	runCodexMCPGet = func(_ context.Context, configPath, name string) ([]byte, []byte, error) {
+		if name != "dos" || filepath.Base(configPath) != "config.toml" {
+			t.Fatalf("unexpected effective lookup: config=%q name=%q", configPath, name)
+		}
+		return []byte(`{"name":"dos","enabled":true,"transport":{"type":"stdio","command":"dos-mcp","args":["--safe"],"env":{"TOKEN":"secret"}}}`), nil, nil
+	}
+
+	command, args, err := readCodexEffectiveMCPEntry(filepath.Join(t.TempDir(), "config.toml"), "dos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "dos-mcp" || len(args) != 1 || args[0] != "--safe" {
+		t.Fatalf("unexpected effective registration: command=%q args=%q", command, args)
+	}
+}
+
+func TestResolveCodexMCPEntryPrefersLiteralConfig(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(config, []byte("[mcp_servers.dos]\ncommand = 'literal-dos'\nargs = ['--literal']\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	command, args, source, err := resolveCodexMCPEntry(config, "dos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "literal-dos" || len(args) != 1 || args[0] != "--literal" || source != "mcp_servers.dos" {
+		t.Fatalf("unexpected literal registration: command=%q args=%q source=%q", command, args, source)
 	}
 }
