@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1108,6 +1109,33 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	// needing out-of-band knowledge of the alias.
 	if d, ok := s.planner.(*DualPlanner); ok {
 		data = append(data, map[string]any{"id": d.LocalModelID(), "object": "model", "owned_by": "fak"})
+	}
+	if s.roster != nil {
+		seen := make(map[string]struct{}, len(data)+len(s.roster.Bindings))
+		for _, item := range data {
+			seen[item["id"].(string)] = struct{}{}
+		}
+		for _, binding := range s.roster.Bindings {
+			id := strings.TrimSpace(binding.Model)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			data = append(data, map[string]any{
+				"id":       id,
+				"object":   "model",
+				"owned_by": "fak-route-accounts",
+			})
+		}
+		// Roster declaration order is not an API contract. Stable ordering also makes
+		// equivalent roster files advertise byte-identical catalogs. No-roster output
+		// deliberately keeps the historical order above.
+		sort.Slice(data, func(i, j int) bool {
+			return data[i]["id"].(string) < data[j]["id"].(string)
+		})
 	}
 	codexModels := make([]map[string]any, 0, len(data))
 	for _, row := range data {
