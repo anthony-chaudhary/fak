@@ -377,3 +377,40 @@ func TestLoadTaxonomyOnThisWorkspace(t *testing.T) {
 		t.Fatalf("regionadmit lane tree = %v, want its declared tree", got)
 	}
 }
+
+func TestHierarchicalLaneResolutionAndAdmission(t *testing.T) {
+	tax := testTaxonomy()
+
+	got := ResolveTree(Request{Lane: "gateway/server"}, tax)
+	want := []string{"internal/gateway/server/**"}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("ResolveTree(gateway/server) = %v, want %v", got, want)
+	}
+
+	exclusive := Decide(
+		Request{Actor: "op", Lane: "abi/registry.go"},
+		[]Lease{{ID: "docs", Holder: "peer", Tree: []string{"docs/**"}}},
+		tax,
+	)
+	if exclusive.Admit || exclusive.Rung != RungExclusiveRequested {
+		t.Fatalf("exclusive descendant = %+v, want %s refusal", exclusive, RungExclusiveRequested)
+	}
+
+	parentChild := Decide(
+		Request{Actor: "me", Lane: "gateway/server"},
+		[]Lease{{ID: "gateway", Holder: "peer", Tree: []string{"internal/gateway/**"}}},
+		tax,
+	)
+	if parentChild.Admit || parentChild.Rung != RungSameLane {
+		t.Fatalf("parent/child = %+v, want %s refusal", parentChild, RungSameLane)
+	}
+
+	siblings := Decide(
+		Request{Actor: "me", Lane: "gateway/server"},
+		[]Lease{{ID: "router", Holder: "peer", Tree: []string{"internal/gateway/router/**"}}},
+		tax,
+	)
+	if !siblings.Admit {
+		t.Fatalf("disjoint siblings must co-run, got %+v", siblings)
+	}
+}
