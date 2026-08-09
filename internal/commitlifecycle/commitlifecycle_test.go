@@ -20,7 +20,10 @@ func TestFoldCoversLifecycle(t *testing.T) {
 		{"committed", Facts{LocalCommit: "abc"}, CommittedUnpushed, "fak", []string{"sync", "push"}, false},
 		{"parked", Facts{Checkpoint: "session-1", CheckpointLive: true}, Parked, "", nil, true},
 		{"reclaim", Facts{Checkpoint: "session-1"}, Reclaim, "fak", []string{"wip", "reconcile", "--reclaim"}, false},
-		{"checkpoint land", Facts{Checkpoint: "session-1", CheckpointApply: true}, LandReady, "fak", []string{"wip", "land", "session-1", "--apply"}, false},
+		{"checkpoint adopt", Facts{Checkpoint: "session-1", CheckpointApply: true}, LandReady, "fak", []string{"wip", "reconcile", "adopt", "session-1"}, false},
+		{"checkpoint resume own adoption", Facts{Checkpoint: "session-1", CheckpointApply: true, CheckpointAdoptedBy: "me", CheckpointAdoptMine: true}, LandReady, "fak", []string{"wip", "reconcile", "resume", "session-1"}, false},
+		{"checkpoint adopted by a live peer", Facts{Checkpoint: "session-1", CheckpointApply: true, CheckpointAdoptedBy: "peer"}, Parked, "", nil, true},
+		{"checkpoint adoption lapsed", Facts{Checkpoint: "session-1", CheckpointApply: true, CheckpointAdoptedBy: "peer", CheckpointAdoptExpired: true}, LandReady, "fak", []string{"wip", "reconcile", "adopt", "session-1"}, false},
 		{"worker land", Facts{WorkerPath: `C:\\worker`, WorkerLandReady: true}, LandReady, "fak", []string{"worktree", "worker", "land", "--path", `C:\\worker`}, false},
 		{"landed", Facts{LandedCommit: "def"}, LandedUnpushed, "fak", []string{"sync", "push"}, false},
 		{"local shipped", Facts{LocalCommit: "abc", LocalOnRemote: true}, Shipped, "", nil, false},
@@ -44,12 +47,15 @@ func TestFoldCoversLifecycle(t *testing.T) {
 
 func TestFoldContradictionsFailClosed(t *testing.T) {
 	for name, facts := range map[string]Facts{
-		"remote without local":  {LocalOnRemote: true},
-		"remote without landed": {LandedOnRemote: true},
-		"checkpoint without id": {CheckpointApply: true},
-		"worker without path":   {WorkerLandReady: true},
-		"contract without dirt": {CommitArgs: []string{"--path", "a.go"}},
-		"live checkpoint apply": {Checkpoint: "s", CheckpointLive: true, CheckpointApply: true},
+		"remote without local":   {LocalOnRemote: true},
+		"remote without landed":  {LandedOnRemote: true},
+		"checkpoint without id":  {CheckpointApply: true},
+		"worker without path":    {WorkerLandReady: true},
+		"contract without dirt":  {CommitArgs: []string{"--path", "a.go"}},
+		"live checkpoint apply":  {Checkpoint: "s", CheckpointLive: true, CheckpointApply: true},
+		"adoption without id":    {CheckpointAdoptedBy: "peer"},
+		"mine without adopter":   {Checkpoint: "s", CheckpointApply: true, CheckpointAdoptMine: true},
+		"lapsed without adopter": {Checkpoint: "s", CheckpointApply: true, CheckpointAdoptExpired: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := Fold(facts)

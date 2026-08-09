@@ -35,13 +35,21 @@ type Facts struct {
 	CommitArgs      []string // complete args after "fak commit"; empty means no safe contract
 	LocalCommit     string
 	LocalOnRemote   bool
-	Checkpoint      string // refs/fak/wip session id accepted by `fak wip land`
+	Checkpoint      string // refs/fak/wip session id accepted by `fak wip reconcile adopt`
 	CheckpointLive  bool
 	CheckpointApply bool
-	WorkerPath      string
-	WorkerLandReady bool
-	LandedCommit    string
-	LandedOnRemote  bool
+	// CheckpointAdoptedBy is the successor session holding this checkpoint's adoption
+	// receipt (#5998); "" means unclaimed. CheckpointAdoptMine narrows that to "and it is
+	// me", and CheckpointAdoptExpired to "and its claim lapsed with its holder gone".
+	// Together they are what keeps this queue from handing one checkpoint to two agents:
+	// a row a live peer already claimed is real work, but not the reader's work.
+	CheckpointAdoptedBy    string
+	CheckpointAdoptMine    bool
+	CheckpointAdoptExpired bool
+	WorkerPath             string
+	WorkerLandReady        bool
+	LandedCommit           string
+	LandedOnRemote         bool
 }
 
 // Row is the fold result. Every non-terminal row has either executable argv or
@@ -70,7 +78,22 @@ func Fold(f Facts) Row {
 			return gated(Parked, "checkpoint owner is live; wait for its lease to close or intervene explicitly")
 		}
 		if f.CheckpointApply {
-			return Row{State: LandReady, Action: Action{Tool: "fak", Args: []string{"wip", "land", f.Checkpoint, "--apply"}}}
+			// The argv this row names is the ADOPTION command (#5998), not a bare land.
+			// Two reasons, and the second is why the old `wip land <id> --apply` here was
+			// worse than merely wrong: a shared queue that tells every reader to land the
+			// same checkpoint invites two of them to do it, and `--apply` is a flag of
+			// `fak wip restore`, not of `fak wip land`, so that argv exits 2 whichever way
+			// it is ordered — unparsed as a second positional, undefined once reordered.
+			// A printed command that cannot run is indistinguishable, to a dispatcher,
+			// from one that can.
+			switch {
+			case f.CheckpointAdoptMine:
+				return Row{State: LandReady, Action: Action{Tool: "fak", Args: []string{"wip", "reconcile", "resume", f.Checkpoint}}}
+			case f.CheckpointAdoptedBy != "" && !f.CheckpointAdoptExpired:
+				return gated(Parked, "checkpoint is adopted by "+f.CheckpointAdoptedBy+"; wait for that claim to lapse or take it over explicitly")
+			default:
+				return Row{State: LandReady, Action: Action{Tool: "fak", Args: []string{"wip", "reconcile", "adopt", f.Checkpoint}}}
+			}
 		}
 		return Row{State: Reclaim, Action: Action{Tool: "fak", Args: []string{"wip", "reconcile", "--reclaim"}}}
 	}
@@ -95,6 +118,12 @@ func contradiction(f Facts) string {
 	}
 	if (f.CheckpointLive || f.CheckpointApply) && f.Checkpoint == "" {
 		return "checkpoint state has no checkpoint identity"
+	}
+	if (f.CheckpointAdoptedBy != "" || f.CheckpointAdoptMine || f.CheckpointAdoptExpired) && f.Checkpoint == "" {
+		return "adoption state has no checkpoint identity"
+	}
+	if (f.CheckpointAdoptMine || f.CheckpointAdoptExpired) && f.CheckpointAdoptedBy == "" {
+		return "adoption state has no adopting successor"
 	}
 	if f.WorkerLandReady && f.WorkerPath == "" {
 		return "worker land witness has no worker path"

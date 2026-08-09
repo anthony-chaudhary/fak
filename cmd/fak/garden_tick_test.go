@@ -187,7 +187,7 @@ func TestInspectGardenReclaimSurfacesQueueWithoutMutatingRefs(t *testing.T) {
 	if got.State != "action" || got.Counts["LAND_READY"] != 2 {
 		t.Fatalf("result = %+v, want two land-ready lifecycle rows", got)
 	}
-	if !strings.Contains(got.Detail, "head=LAND_READY") || !strings.Contains(got.Detail, "fak wip land alpha --apply") {
+	if !strings.Contains(got.Detail, "head=LAND_READY") || !strings.Contains(got.Detail, "fak wip reconcile adopt alpha") {
 		t.Fatalf("detail = %q, want executable lifecycle head", got.Detail)
 	}
 }
@@ -196,7 +196,7 @@ func TestGardenTickIncludesReclaimInspection(t *testing.T) {
 	old := gardenReclaimInspect
 	t.Cleanup(func() { gardenReclaimInspect = old })
 	gardenReclaimInspect = func(io.Writer, string) gardenbundle.MemberResult {
-		return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "action", Detail: "2 non-terminal; head=LAND_READY next=fak wip land oldest --apply"}
+		return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "action", Detail: "2 non-terminal; head=LAND_READY next=fak wip reconcile adopt oldest"}
 	}
 	t.Setenv("FAK_GARDEN", "1")
 	root := t.TempDir()
@@ -205,7 +205,7 @@ func TestGardenTickIncludesReclaimInspection(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runGardenTick code=%d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(out.String(), `"key": "commit_lifecycle"`) || !strings.Contains(out.String(), "fak wip land oldest --apply") {
+	if !strings.Contains(out.String(), `"key": "commit_lifecycle"`) || !strings.Contains(out.String(), "fak wip reconcile adopt oldest") {
 		t.Fatalf("tick omitted reclaim queue: %s", out.String())
 	}
 }

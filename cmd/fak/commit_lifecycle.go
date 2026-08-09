@@ -27,6 +27,14 @@ func commitLifecycleQueue(ctx context.Context, repo string) ([]commitlifecycle.R
 		return nil, err
 	}
 	decisions := result.Decisions
+	// The recovery worklist already resolved each RECLAIM row's adoption receipt, so the
+	// lifecycle queue reads ownership from it rather than re-deriving it. That keeps ONE
+	// answer to "who holds this checkpoint": a second derivation here could disagree with
+	// the queue the operator is looking at, and the disagreement would be invisible.
+	reclaim := make(map[string]wiprecon.ReclaimRow, len(result.Reclaim))
+	for _, r := range result.Reclaim {
+		reclaim[r.Session] = r
+	}
 	rows = append(rows, make([]commitlifecycle.Row, 0, len(decisions))...)
 	for _, d := range decisions {
 		facts := commitlifecycle.Facts{Checkpoint: d.Session}
@@ -35,6 +43,11 @@ func commitLifecycleQueue(ctx context.Context, repo string) ([]commitlifecycle.R
 			facts.CheckpointLive = true
 		case wiprecon.ActReclaim:
 			facts.CheckpointApply = true
+			if row, ok := reclaim[d.Session]; ok {
+				facts.CheckpointAdoptedBy = row.AdoptedBy
+				facts.CheckpointAdoptMine = row.AdoptedMine
+				facts.CheckpointAdoptExpired = row.AdoptExpired
+			}
 		case wiprecon.ActQuarantine:
 			rows = append(rows, commitlifecycle.Row{
 				State: commitlifecycle.Unknown,
