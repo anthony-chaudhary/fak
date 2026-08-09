@@ -25,12 +25,27 @@ const NativeName = "native"
 // one copy plus an elision marker.
 const dupRunMin = 3
 
-type nativeCompressor struct{}
+type nativeCompressor struct {
+	detectUpstream func(context.Context) (Presence, error)
+}
 
 // Name returns the compressor's registry key (NativeName, "native").
 func (nativeCompressor) Name() string { return NativeName }
 
-func (nativeCompressor) Compress(_ context.Context, in Input) (Output, error) {
+func (c nativeCompressor) Compress(ctx context.Context, in Input) (Output, error) {
+	upstream := in.UpstreamHeadroom
+	if upstream == nil {
+		if c.detectUpstream != nil {
+			if p, err := c.detectUpstream(ctx); err == nil {
+				upstream = &p
+			}
+		} else if p, err := DetectUpstream(ctx); err == nil {
+			upstream = &p
+		}
+	}
+	if upstream != nil && upstream.InFront {
+		return passthroughWithReason(in, "inert", "Headroom proxy detected at "+upstream.URL+"; native compression deferred to avoid double-compress"), nil
+	}
 	orig := in.Bytes
 	if len(orig) == 0 {
 		return passthrough(in), nil
