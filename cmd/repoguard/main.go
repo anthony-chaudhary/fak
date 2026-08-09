@@ -84,33 +84,32 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	var payload hookPayload
 	var workspaceRoot string
-	violations, err := func() ([]repoguard.Violation, error) {
-		raw, err := io.ReadAll(stdin)
-		if err != nil {
-			return nil, err
-		}
-		if len(strings.TrimSpace(string(raw))) == 0 {
-			return nil, nil
-		}
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			return nil, err
-		}
-		cwd := payload.Cwd
-		if cwd == "" {
-			cwd, _ = os.Getwd()
-		}
-		workspaceRoot = repoguard.FindRepoRoot(cwd)
-		safeRoots := repoguard.SafeRootsForWorkspace(workspaceRoot)
-		hints := repoguard.Hints{
-			LiveMonitorIDs:   liveMonitorIDsForRead(payload, workspaceRoot, stderr),
-			LeafDeclarations: leafDeclarationsForWrite(payload, workspaceRoot),
-		}
-		return repoguard.EvaluateWithHints(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, hints), nil
-	}()
+	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintf(stderr, "repo_guard: internal error, allowing (%v)\n", err)
 		return 0
 	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return 0
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		cwd, _ := os.Getwd()
+		workspaceRoot = repoguard.FindRepoRoot(cwd)
+		recordMalformedPayload(workspaceRoot, err, stderr)
+		fmt.Fprintf(stderr, "repo_guard: malformed hook payload, allowing (%v)\n", err)
+		return 0
+	}
+	cwd := payload.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	workspaceRoot = repoguard.FindRepoRoot(cwd)
+	safeRoots := repoguard.SafeRootsForWorkspace(workspaceRoot)
+	hints := repoguard.Hints{
+		LiveMonitorIDs:   liveMonitorIDsForRead(payload, workspaceRoot, stderr),
+		LeafDeclarations: leafDeclarationsForWrite(payload, workspaceRoot),
+	}
+	violations := repoguard.EvaluateWithHints(payload.ToolName, payload.ToolInput, workspaceRoot, safeRoots, hints)
 	if len(violations) == 0 {
 		return 0
 	}
@@ -164,6 +163,21 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	}})
 	fmt.Fprintf(stderr, "repo_guard: DENY %s\n", reason)
 	return 0
+}
+
+func recordMalformedPayload(workspaceRoot string, parseErr error, stderr io.Writer) {
+	row := repoguard.DecisionRecord{
+		Schema:   repoguard.DecisionRecordSchema,
+		Ts:       time.Now().UTC().Format(time.RFC3339),
+		Tool:     "PreToolUse",
+		Decision: "record",
+		Mode:     "enforce",
+		Reason:   "MALFORMED_HOOK_PAYLOAD",
+		Why:      parseErr.Error(),
+	}
+	if err := repoguard.AppendDecisions(repoguard.DecisionJournalPath(workspaceRoot), []repoguard.DecisionRecord{row}); err != nil {
+		fmt.Fprintf(stderr, "repo_guard: malformed-payload journal write failed, continuing (%v)\n", err)
+	}
 }
 
 // recordDecisions appends the guard's findings to the durable decision journal.
