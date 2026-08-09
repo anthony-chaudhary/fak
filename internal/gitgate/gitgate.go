@@ -577,6 +577,7 @@ func CoveredByAnyTree(p string, trees []string) bool { return coveredByAnyTree(p
 func (g *GitGate) Classify(cmd string) (string, bool) { return g.classify(cmd) }
 
 func (g *GitGate) classify(cmd string) (string, bool) {
+	cmd = stripQuotedHeredocBodies(cmd)
 	// The unwrap pass yields cmd itself PLUS every command string the shell grammar
 	// wraps around a git call the flat tokenizer cannot see: a `$(...)` / backtick
 	// command substitution and the `-c` string of a `bash -c '...'` / `sh -c '...'`
@@ -1222,6 +1223,137 @@ const maxUnwrapSources = 256
 // internal/witness remain the backstop. A malformed / unbalanced / over-deep input yields
 // only the sources we could safely extract — it never silently drops cmd itself, so the
 // flat-tokenizer floor is preserved as a strict subset of this pass.
+// stripQuotedHeredocBodies removes expansion-disabled heredoc payloads
+// before command substitutions and command segments are inspected. The header
+// and terminator remain visible. Unquoted or unterminated heredocs remain
+// untouched so expansion-capable or malformed input is handled conservatively.
+func stripQuotedHeredocBodies(cmd string) string {
+	parseDelimiter := func(line string) (delim string, stripTabs bool, ok bool) {
+		var (
+			quote    byte
+			tok      strings.Builder
+			words    []string
+			delims   []string
+			tabs     []bool
+			redirect bool
+		)
+		flush := func() {
+			if tok.Len() > 0 {
+				words = append(words, tok.String())
+				tok.Reset()
+			}
+		}
+		for i := 0; i < len(line); i++ {
+			ch := line[i]
+			if quote != 0 {
+				if ch == quote {
+					quote = 0
+				} else {
+					tok.WriteByte(ch)
+				}
+				continue
+			}
+			switch ch {
+			case '\\':
+				if i+1 < len(line) {
+					i++
+					tok.WriteByte(line[i])
+				}
+			case '\'', '"':
+				quote = ch
+			case '>':
+				redirect = true
+				flush()
+			case '<':
+				if i+1 >= len(line) || line[i+1] != '<' {
+					flush() // a plain stdin redirect reads a FILE, not a body
+					continue
+				}
+				// `<<<` is a here-STRING: its value sits on this line, there is no
+				// body to strip, and treating it as one would eat real commands.
+				if i+2 < len(line) && line[i+2] == '<' {
+					return "", false, false
+				}
+				flush()
+				i += 2
+				stripTabs := false
+				if i < len(line) && line[i] == '-' {
+					stripTabs = true
+					i++ // <<- strips leading tabs from the body and terminator
+				}
+				for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+					i++
+				}
+				if i >= len(line) || (line[i] != '\'' && line[i] != '"') {
+					return "", false, false // unquoted heredocs permit live expansion
+				}
+				q := line[i]
+				i++
+				var d strings.Builder
+				for i < len(line) && line[i] != q {
+					d.WriteByte(line[i])
+					i++
+				}
+				if d.Len() == 0 || i >= len(line) {
+					return "", false, false
+				}
+				delims = append(delims, d.String())
+				tabs = append(tabs, stripTabs)
+			case ' ', '\t', '\r':
+				flush()
+			case '|', ';', '&', '(', ')', '{', '}', '`', '$':
+				// A second statement, a subshell or a substitution on the opener line
+				// could route the body somewhere that runs it. Prove nothing.
+				return "", false, false
+			default:
+				tok.WriteByte(ch)
+			}
+		}
+		flush()
+		if quote != 0 || len(delims) != 1 || !redirect || len(words) == 0 {
+			return "", false, false
+		}
+		// cat is the whole allow-list on purpose: it never interprets its input, and
+		// with stdout redirected the body lands in a file. tee is excluded because it
+		// also writes stdout, so `tee f <<'EOF' | sh` would execute the body.
+		if words[0] != "cat" {
+			return "", false, false
+		}
+		return delims[0], tabs[0], true
+	}
+	// A here-doc needs both an opener and a body on a following line.
+	if !strings.Contains(cmd, "<<") || !strings.Contains(cmd, "\n") {
+		return cmd
+	}
+	lines := strings.Split(cmd, "\n")
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		out = append(out, lines[i])
+		delim, stripTabs, ok := parseDelimiter(lines[i])
+		if !ok {
+			continue
+		}
+		end := -1
+		for j := i + 1; j < len(lines); j++ {
+			candidate := strings.TrimSuffix(lines[j], "\r")
+			if stripTabs {
+				candidate = strings.TrimLeft(candidate, "\t")
+			}
+			if candidate == delim {
+				end = j
+				break
+			}
+		}
+		// A malformed opener is not enough evidence to subtract the rest of
+		// the command. Leave it visible so classification remains conservative.
+		if end < 0 {
+			continue
+		}
+		i = end
+	}
+	return strings.Join(out, "\n")
+}
+
 func unwrapShellSources(cmd string) []string {
 	out := make([]string, 0, 4)
 	seen := map[string]bool{}
@@ -1261,6 +1393,13 @@ func commandSubstitutions(s string) []string {
 	var quote byte // 0, '\'' or '"' — the surrounding quote context
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
+		if quote != '\'' && ch == '\\' && i+1 < len(s) {
+			// Outside single quotes, a backslash makes the next shell byte
+			// literal. In particular, \`...\` is a markdown code span in an
+			// unquoted payload, not command substitution.
+			i++
+			continue
+		}
 		if quote == '\'' {
 			// Single quotes are literal: nothing expands, just find the close.
 			if ch == '\'' {
