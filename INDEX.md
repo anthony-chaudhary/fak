@@ -260,6 +260,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Micro-context dogfood readout — 2026-08-08](docs/notes/MICRO-CONTEXT-DOGFOOD-2026-08-08.md) -- auto-indexed dated note.
 - [Worker-land crash recovery — 2026-08-08](docs/notes/WORKER-LAND-CRASH-RECOVERY-2026-08-08.md) -- auto-indexed dated note.
 - [Study: professorpalmer/Puppetmaster @5de5cd58 — second pass over the v1.18.0→v1.21.13 delta; the honest-instrument thesis (a freshness verdict for a check that could not run, a savings ledger that debits itself, mechanical citation verification), passive quota harvest, a relay-borrowed 401, and a lease write boundary (epic #5961, #5962-#5981)](docs/notes/CONCEPT-STUDY-PUPPETMASTER-2026-08-08.md) -- auto-indexed dated note.
 - [Study: thu-nics/C2C @113c3a9b — Cache-to-Cache KV fusion; DRAFT (no issues filed): positional cross-tokenizer alignment and per-layer KV precision are PARTIAL, the neural fuser is a fak-stated DIVERGENT; substituted for an unresolvable arXiv citation](docs/notes/CONCEPT-STUDY-C2C-2026-08-08.md) -- auto-indexed dated note.
