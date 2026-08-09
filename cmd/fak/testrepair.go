@@ -6,6 +6,8 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -65,7 +67,7 @@ func execTestCommand(argv []string, stdin io.Reader, stdout, stderr io.Writer) t
 		fmt.Fprintf(stderr, "fak test: %s\n", msg)
 		return testCommandResult{ExitCode: 1, SpawnError: msg}
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := windowgate.Command(argv[0], argv[1:]...)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, stdin
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {

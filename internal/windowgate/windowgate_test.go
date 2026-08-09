@@ -424,6 +424,18 @@ func TestGoDispatchExecRules(t *testing.T) {
 	}
 }
 
+func TestFakTestRunnerSuppressesGoToolchainWindow(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "testrepair.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	if !strings.Contains(text, "windowgate.Command(argv[0], argv[1:]...)") {
+		t.Fatal("fak test runner must construct variable Go toolchain commands through windowgate.Command")
+	}
+}
+
 func TestGoExecCandidatesSurfaceLiteralConsoleTools(t *testing.T) {
 	src := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n _, _ = cmd.Output()\n}\n"
 	got := GoExecCandidates("cmd/fak/feature.go", src)
