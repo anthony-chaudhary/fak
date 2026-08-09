@@ -270,6 +270,9 @@ type Coordinator struct {
 	watchingRewrite bool
 	// nonHoldStreak counts non-holding harness rewrites toward the reset escalation (#3159).
 	nonHoldStreak int
+
+	// pruneRefusals counts rejected individual prune proposals by stable reason.
+	pruneRefusals RefusalCounters
 }
 
 // Config is the coordinator's tunable policy. A zero value is valid: New/NewWith fill it with
@@ -334,6 +337,19 @@ func NewConfig(cfg Config) *Coordinator {
 // Posture returns the current standing block/allow stance for the PreCompact hook to
 // enforce between turns, without advancing state.
 func (c *Coordinator) Posture() Posture { return c.posture }
+
+// CheckPrune applies the arithmetic and structural guards at the coordinator's
+// prune seam and records refused decisions for observability. Callers still use
+// Observe/Classify to decide when cache timing permits compaction; this method
+// decides whether the particular proposed cut is profitable and well-formed.
+func (c *Coordinator) CheckPrune(spanTokens int, transcript []TranscriptItem, cut int) PruneResult {
+	d := CheckPrune(spanTokens, transcript, cut)
+	c.pruneRefusals = CountRefusal(c.pruneRefusals, d)
+	return d
+}
+
+// PruneRefusals reports coordinator-local refused-prune counters by reason.
+func (c *Coordinator) PruneRefusals() RefusalCounters { return c.pruneRefusals }
 
 // Observe folds one served turn into the coordinator and returns the per-turn Decision. It
 // updates the standing posture (block while fak copes; allow once fak's compaction has
