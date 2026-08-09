@@ -273,6 +273,61 @@ func (s Store) ClaimDue(goal, supervisor string, now time.Time) (Record, error) 
 	if now.Unix() < r.ParkedUntil {
 		return r, ErrNotDue
 	}
+	return s.takeClaim(r, goal, supervisor,
+		"resume claimed; launch command exactly once and retain lease/witness contract", now)
+}
+
+// Release retires a park that is NOT yet due, on an operator's directive, because
+// the operator has changed the world the park was a statement about — enrolled a
+// seat, cleared a cooldown, re-logged in. It is this park's fourth clearing path and
+// the only one driven from outside the parked process (see AdmitProbe for the other
+// three and for why a park needs more than its own timer).
+//
+// It exists because the other three are all internal, and none of them can hear
+// "the wall is gone now". The timer waits out a window whose cause has already been
+// removed, the probe slot spends a worker unit to rediscover a fact the operator
+// already knows, and MaxWait only bounds the damage. A fleet whose workers sit
+// auth-blocked for days after a seat was added is the whole cost of having no
+// fourth path: the fix landed, and nothing on the box was listening for it.
+//
+// The asymmetry that makes this safe is the same one MaxWait relies on: releasing a
+// park fails OPEN. The account is re-admitted, and if the operator was wrong and the
+// wall is still up, the next 429 re-parks under the newly announced wait with a
+// fresh probe budget. So the cost of a wrong release is one unit and a re-park,
+// while the cost of no release is a walled seat for the rest of the window.
+//
+// It takes the SAME O_EXCL claim sidecar as ClaimDue and reports ErrClaimed rather
+// than releasing twice. That matters more here than for the timer path: this is
+// reached by a broadcast, so every instance on the box races for the same records,
+// and exactly one may report the release as its own affected work. A caller that
+// loses the race learns it lost and counts nothing — never a second phantom release
+// of one park.
+//
+// reason is recorded verbatim in next_legal_action so the record itself says who
+// retired it and why; an empty reason is refused rather than written, because an
+// unattributed release is indistinguishable on disk from the timer path.
+func (s Store) Release(goal, releaser, reason string, now time.Time) (Record, error) {
+	if strings.TrimSpace(reason) == "" {
+		return Record{}, errors.New("goalpark: release needs a reason")
+	}
+	r, err := s.Load(goal)
+	if err != nil {
+		return Record{}, err
+	}
+	if r.ClaimedAt != 0 {
+		return r, ErrClaimed
+	}
+	return s.takeClaim(r, goal, releaser,
+		"released early by operator directive ("+strings.TrimSpace(reason)+"); the wall's cause is asserted gone — "+
+			"resume the command exactly once, and re-park on the next long Retry-After if it is not", now)
+}
+
+// takeClaim is the one write that retires a park: an O_EXCL sidecar taken BEFORE the
+// public record is rewritten, so a crash between the two leaves the park claimed-in-
+// spirit and unclaimable rather than claimable twice. ClaimDue and Release differ
+// only in which precondition they check and what they write into next_legal_action;
+// sharing the write is what keeps their exactly-once guarantee identical.
+func (s Store) takeClaim(r Record, goal, by, next string, now time.Time) (Record, error) {
 	claim := s.path(goal) + ".claim"
 	f, err := os.OpenFile(claim, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
@@ -281,13 +336,13 @@ func (s Store) ClaimDue(goal, supervisor string, now time.Time) (Record, error) 
 	if err != nil {
 		return r, err
 	}
-	fmt.Fprintf(f, "%s %d\n", supervisor, now.Unix())
+	fmt.Fprintf(f, "%s %d\n", by, now.Unix())
 	if err = f.Close(); err != nil {
 		return r, err
 	}
 	r.ClaimedAt = now.Unix()
-	r.ClaimedBy = supervisor
-	r.NextAction = "resume claimed; launch command exactly once and retain lease/witness contract"
+	r.ClaimedBy = by
+	r.NextAction = next
 	b, _ := json.MarshalIndent(r, "", "  ")
 	b = append(b, '\n')
 	if err = os.WriteFile(s.path(goal), b, 0o600); err != nil {
@@ -306,7 +361,7 @@ func (s Store) ClaimDue(goal, supervisor string, now time.Time) (Record, error) 
 //
 // A blocked verdict is additionally offered the park's open probe slot, if any,
 // so the wall cannot seal itself shut for its whole announced window — see
-// AdmitProbe for the bound and for all three of this park's clearing paths.
+// AdmitProbe for the bound and for all four of this park's clearing paths.
 //
 // When the wait HAS elapsed, Resolve claims the record on the spot. #4805 wrote
 // "wait until parked_until; then supervisor atomically claims and resumes the
@@ -365,7 +420,7 @@ func (s Store) probePath(goal string, parkedAt int64, slot int) string {
 // single run allowed through a wall that is otherwise still standing, so the
 // park can learn whether its condition survives.
 //
-// It is the second of this park's three clearing paths, and the only one that
+// It is the second of this park's four clearing paths, and the first one that
 // does not depend on the wall lasting exactly as long as it was announced to:
 //
 //  1. parked_until elapses — Resolve claims and retires the record (the timer).
@@ -376,6 +431,9 @@ func (s Store) probePath(goal string, parkedAt int64, slot int) string {
 //  3. MaxWait clamps the recorded window at write time, so no announced wait —
 //     malformed, mis-scaled, or a genuine multi-day weekly reset — parks longer
 //     than a day.
+//  4. an operator retires it — Release, the only path driven from OUTSIDE the
+//     parked process, for when the wall's cause is removed (a seat enrolled, a
+//     cooldown cleared) and no internal path can hear about it.
 //
 // Admitting a probe deliberately does NOT clear, claim, or shorten the park: the
 // record stays live and keeps walling every other run on the walled account. A
