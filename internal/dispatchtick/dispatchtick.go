@@ -49,6 +49,21 @@ const (
 // with the Python launchers, not a rebuild.
 var DefaultMaxWorkers = envPosInt("FAK_MAX_WORKERS", FallbackMaxWorkers)
 
+// WaveHint is the dispatch-computed workflow signal consumed by downstream schedulers.
+// It carries a ready-set decision, not graph edges, so consumers cannot rederive a DAG.
+type WaveHint struct {
+	Agent            string
+	Node             string
+	Wave             string
+	StepsToExecution int
+	Worker           int
+}
+
+// NewWaveHint stamps a workflow decision at the dispatch boundary.
+func NewWaveHint(agent, node, wave string, stepsToExecution, worker int) WaveHint {
+	return WaveHint{Agent: agent, Node: node, Wave: wave, StepsToExecution: stepsToExecution, Worker: worker}
+}
+
 // envPosInt returns the positive-int value of the named env var, or fallback on
 // unset/garbage -- the same tolerant contract as dispatch_preflight._env_pos_int,
 // so the Go and Python halves of the dispatch stack read one knob one way.

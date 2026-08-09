@@ -1339,6 +1339,16 @@
           "category": "incidental",
           "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
           "token": "fak_gateway_compaction_thrash_sessions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "private scheduler map implementing dispatch-authored affinity hints, not a public runtime concept",
+          "token": "sessionAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "setter for the private scheduler affinity map, not a separate session lifecycle concept",
+          "token": "SetSessionAffinity"
         }
       ],
       "id": "session-runtime",
@@ -1348,6 +1358,7 @@
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
+        "SetSessionAffinity",
         "bumpSessionHandoffBlocks",
         "compactThrashSessions",
         "confusedsessions",
@@ -1381,6 +1392,7 @@
         "scheduler_weights",
         "schedulers",
         "scheduling",
+        "sessionAffinity",
         "sessionNameForBatch",
         "sessionRegistryRecoveryStage",
         "session_compaction_thrash",
@@ -1934,6 +1946,16 @@
           "category": "incidental",
           "reason": "Local corpus adapter that selects the already-declared reference arm; it introduces no policy capability.",
           "token": "referencePolicyForCorpusCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ordered doomloop actuator-rung enum, not a new policy capability",
+          "token": "StrengthToolPolicyGrammar"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized doomloop actuator-rung value, not a new policy capability",
+          "token": "tool_policy_grammar"
         }
       ],
       "exclude": [
@@ -1951,6 +1973,7 @@
         "ProgressCallAdjudicated",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
+        "StrengthToolPolicyGrammar",
         "ToolPolicyVersion",
         "adjudicate",
         "adjudicated",
@@ -1971,7 +1994,8 @@
         "policylabel",
         "postures",
         "printGuardLaunchPostures",
-        "referencePolicyForCorpusCell"
+        "referencePolicyForCorpusCell",
+        "tool_policy_grammar"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
@@ -2464,6 +2488,11 @@
           "category": "incidental",
           "reason": "local boolean accumulator, not a project support-maturity concept",
           "token": "seenSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private float formatter for the parity card render; introduces no maturity concept.",
+          "token": "formatParityValue"
         }
       ],
       "id": "support-maturity",
@@ -2497,6 +2526,7 @@
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "formatParityValue",
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",
