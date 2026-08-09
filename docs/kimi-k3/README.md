@@ -1,3 +1,8 @@
+---
+title: "Kimi K3 for Claude Code, through fak"
+description: "The standalone route page for fak's first-class Moonshot Kimi K3 support, and how to serve and view it locally from the repository root."
+---
+
 # Kimi K3 for Claude Code, through fak
 
 This directory contains the standalone marketing page for fak's first-class Moonshot Kimi K3 route.

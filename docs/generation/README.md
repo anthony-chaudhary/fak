@@ -1,3 +1,8 @@
+---
+title: "Implementation documentation by generation"
+description: "How to tell whether a fak implementation document describes current work, a later product generation, research, or historical evidence."
+---
+
 # Implementation documentation by generation
 
 **Primary audience:** contributors deciding whether an implementation document describes current work, a later product generation, research, or historical evidence.
