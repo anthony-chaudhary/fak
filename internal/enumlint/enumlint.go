@@ -19,6 +19,7 @@ type Config struct {
 	SkipDirs          []string
 	IncludeTopDirs    []string
 	Exempt            func(string) (string, bool)
+	Rules             []string
 	LiteralMinMembers int
 	LiteralMaxOmitted int
 }
@@ -82,8 +83,16 @@ func Analyze(cfg Config) (Report, error) {
 		sf, se := p.checkSwitches(cfg.Exempt)
 		lf, le := p.checkLiterals(cfg.Exempt, cfg.LiteralMinMembers, cfg.LiteralMaxOmitted)
 		rep.Sites += se + le
-		rep.Findings = append(rep.Findings, sf...)
-		rep.Findings = append(rep.Findings, lf...)
+		for _, f := range sf {
+			if len(cfg.Rules) == 0 || ruleInList(f.Rule, cfg.Rules) {
+				rep.Findings = append(rep.Findings, f)
+			}
+		}
+		for _, f := range lf {
+			if len(cfg.Rules) == 0 || ruleInList(f.Rule, cfg.Rules) {
+				rep.Findings = append(rep.Findings, f)
+			}
+		}
 		_ = se
 		_ = le
 	}
@@ -122,4 +131,13 @@ func sortFindings(fs []Finding) {
 		}
 		return a.Owner < b.Owner
 	})
+}
+
+func ruleInList(rule string, rules []string) bool {
+	for _, r := range rules {
+		if r == rule {
+			return true
+		}
+	}
+	return false
 }
