@@ -139,6 +139,7 @@ var tier = map[string]int{
 	"modelladder":          3,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             3,                // model registry; imports hfhub(1)+stdlib, off the hot path.
 	"modelsrc":             3,                // model-source URL registry; transports stay behind ReaderAt openers.
+	"nativebench":          1,                // stdlib-only native benchmark comparison obligations and report generation.
 	"skillenv":             5,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
 	"guardroute":           5,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"guardcomplaint":       5,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
