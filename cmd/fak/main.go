@@ -717,6 +717,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdBench(args)
 	case "benchmarks":
 		cmdBenchmarks(args)
+	case "native-benchmarks":
+		cmdNativeBenchmarks(args)
 	case "frontierswe":
 		cmdFrontierswe(args)
 	case "sota":
