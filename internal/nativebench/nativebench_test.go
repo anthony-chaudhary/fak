@@ -110,3 +110,28 @@ func TestValidateRequiresEveryEquivalentIntegrationArm(t *testing.T) {
 		}
 	}
 }
+
+func TestContextCompressionRequiresLLMLinguaIntegrationArm(t *testing.T) {
+	var found bool
+	for _, contract := range All() {
+		if contract.Capability != "context_compression" {
+			continue
+		}
+		found = true
+		if len(contract.Integrations) != 1 || contract.Integrations[0] != "headroom/lingua" {
+			t.Fatalf("integrations=%v, want headroom/lingua", contract.Integrations)
+		}
+		var arm bool
+		for _, alternative := range contract.Alternatives {
+			if alternative.Class == FirstClassIntegration && alternative.Integration == "headroom/lingua" {
+				arm = true
+			}
+		}
+		if !arm {
+			t.Fatal("context compression contract lacks fak + LLMLingua integration arm")
+		}
+	}
+	if !found {
+		t.Fatal("context_compression contract missing")
+	}
+}

@@ -75,7 +75,9 @@ var contracts = []Contract{
 		Alternatives: []Alternative{
 			{Name: "full history with provider caching (tuned no-compression baseline)", Class: TunedBaseline, Source: "in-repository A/B arm"},
 			{Name: "LongLLMLingua", Class: NextBest, Source: "https://arxiv.org/abs/2310.06839"},
+			{Name: "fak + LLMLingua-2 compressor", Class: FirstClassIntegration, Integration: "headroom/lingua", Source: "https://github.com/anthony-chaudhary/fak/issues/3204"},
 		},
+		Integrations: []string{"headroom/lingua"},
 	},
 }
 
