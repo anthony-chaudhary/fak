@@ -43,6 +43,17 @@ func TestOwnershipCommandUsesInventory(t *testing.T) {
 	}
 }
 
+func TestIndexLaneExecutesThroughDevelopmentArtifact(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root := devindex.FindRoot(".")
+	if code := run(&out, &errOut, []string{"index", "lane", "cmd/fak/main.go", "--root", root, "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"lane"`) {
+		t.Fatalf("index lane did not execute through fak-dev:\n%s", out.String())
+	}
+}
+
 func TestWikiStructureExecutesThroughDevelopmentArtifact(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{

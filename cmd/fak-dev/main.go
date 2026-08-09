@@ -1,14 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
 
 	"github.com/anthony-chaudhary/fak/internal/devcmd"
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
 func main() { os.Exit(run(os.Stdout, os.Stderr, os.Args[1:])) }
@@ -21,8 +19,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "version", "--version":
 		return runVersion(stdout, argv[1:])
-	case "index":
-		return runIndex(stdout, stderr, argv[1:])
+	case "index", "devindex":
+		return devcmd.RunIndex(stdout, stderr, argv[1:])
 	case "wiki":
 		return devcmd.RunWiki(stdout, stderr, argv[1:])
 	default:
@@ -63,34 +61,3 @@ func runVersion(w io.Writer, argv []string) int {
 	fmt.Fprintf(w, "fak-dev %s (%s)\n", version, revision)
 	return 0
 }
-
-func runIndex(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) == 0 || argv[0] != "ownership" {
-		fmt.Fprintln(stderr, "usage: fak-dev index ownership [--json] [--root PATH]")
-		return 2
-	}
-	root := ""
-	asJSON := false
-	for i := 1; i < len(argv); i++ {
-		switch argv[i] {
-		case "--json":
-			asJSON = true
-		case "--root":
-			i++
-			if i >= len(argv) {
-				fmt.Fprintln(stderr, "fak-dev index ownership: --root requires a path")
-				return 2
-			}
-			root = argv[i]
-		default:
-			fmt.Fprintf(stderr, "fak-dev index ownership: unknown argument %q\n", argv[i])
-			return 2
-		}
-	}
-	if root == "" {
-		root = devindex.FindRoot(".")
-	}
-	return devcmd.RunOwnership(stdout, stderr, root, asJSON)
-}
-
-var _ = json.Valid // keep encoding/json available to source scanners validating JSON surfaces
