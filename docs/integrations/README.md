@@ -70,6 +70,15 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 
 ---
 
+## Are you comparing fak with a filter, guardrail, gateway, MCP host, or tool router?
+
+Use the [filtering and tooling parity guide](../concepts/filtering-tooling-parity.md) to decide,
+capability by capability, whether to replace a component, integrate it with fak, or do neither.
+It separates shipped tool-call/result filtering from complementary prompt/output moderation and
+names the trust boundary and failure semantics for each integration.
+
+---
+
 ## Which agent do you run?
 
 Pick by **client**, the **wire** it speaks, and its **support** status. **Default:** if a
