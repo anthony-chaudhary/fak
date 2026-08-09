@@ -663,7 +663,12 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				// Classify the exact metadata shape that execViaKernel will lower onto
 				// the ToolCall, so native manifest matching stays in parity with the
 				// proxy path for read_only and sensitivity labels.
-				engine, rerr := cfg.resolveToolEngine(tool, metaFor(tool))
+				// A call that CREATES delegated work (--spawn placement, #5420) takes its
+				// own rung here instead of inheriting this turn's: same pre-Syscall point,
+				// so the residency floor still adjudicates the real destination. Unarmed,
+				// or an agent type the operator never declared, falls through to the
+				// ordinary per-tool-call route unchanged.
+				engine, rerr := cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
 				if rerr != nil {
 					// Fail loud, exactly like the gateway's buildCall: a misconfigured roster
 					// must never silently dispatch a routed call to the wrong (or default)

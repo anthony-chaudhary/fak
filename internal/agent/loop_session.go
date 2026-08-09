@@ -41,12 +41,18 @@ func WithFinalGate(check func() (satisfied bool, missingWitness string)) RunOpti
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
 type runConfig struct {
-	table                 *session.Table
-	gate                  *SessionGate
-	trace                 string
-	route                 *modelroute.Manifest
-	roster                *modelroute.Roster
-	principal             string
+	table     *session.Table
+	gate      *SessionGate
+	trace     string
+	route     *modelroute.Manifest
+	roster    *modelroute.Roster
+	principal string
+	// spawnPlace is the OPTIONAL per-spawn placement policy (#5420, WithSpawnPlacement
+	// in spawn_place.go). When set, a tool call that creates delegated work gets its own
+	// walk down the roster's zone ladder for its own declared work class instead of
+	// inheriting the engine this turn was routed to. nil => no spawn is ever placed and
+	// the loop is byte-for-byte the historical loop.
+	spawnPlace            *SpawnPlacementPolicy
 	spec                  *abi.Speculator
 	contextPlanner        *SessionPlanner
 	contextBaselineOutput int

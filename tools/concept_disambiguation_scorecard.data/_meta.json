@@ -1877,6 +1877,16 @@
           "category": "incidental",
           "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
           "token": "fak_gateway_compaction_thrash_sessions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private runConfig helper that composes existing modelroute placement for one agent-loop tool call; not a new gateway engine concept.",
+          "token": "resolveCallEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter that invokes the existing modelroute spawn placer and resolves its selected account; not a new gateway engine concept.",
+          "token": "resolveSpawnEngine"
         }
       ],
       "id": "gateway-engine",
@@ -1892,6 +1902,8 @@
         "kernelSession",
         "kernels",
         "kernelwiki",
+        "resolveCallEngine",
+        "resolveSpawnEngine",
         "shrinkWireInKernel"
       ],
       "min_files": 3,
@@ -2010,6 +2022,11 @@
           "category": "incidental",
           "reason": "Serialized doomloop actuator-rung value, not a new policy capability",
           "token": "tool_policy_grammar"
+        },
+        {
+          "category": "incidental",
+          "reason": "Agent-loop adapter over the already-positioned modelroute spawn-placement policy; not a new capability-policy primitive.",
+          "token": "SpawnPlacementPolicy"
         }
       ],
       "exclude": [
@@ -2027,6 +2044,7 @@
         "ProgressCallAdjudicated",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
+        "SpawnPlacementPolicy",
         "StrengthToolPolicyGrammar",
         "ToolPolicyVersion",
         "adjudicate",
