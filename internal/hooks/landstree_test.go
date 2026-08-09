@@ -78,8 +78,8 @@ func TestLandsTreeStillDeniesStagedViolation(t *testing.T) {
 }
 
 func TestGateScopesClassifyEveryRegisteredGate(t *testing.T) {
-	rows := map[string]GateScope{}
-	for _, row := range GateScopes() {
+	rows := map[string]gateScopeRow{}
+	for _, row := range gateScopes() {
 		if _, exists := rows[row.Gate]; exists {
 			t.Fatalf("duplicate scope row for %s", row.Gate)
 		}
