@@ -250,8 +250,6 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "orient":
 		cmdOrient(os.Args[2:])
-	case "wiki":
-		cmdWiki(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":
@@ -363,6 +361,8 @@ func main() {
 		cmdModel(os.Args[2:])
 	case "new-model":
 		cmdNewModel(os.Args[2:])
+	case "architecture":
+		cmdArchitecture(os.Args[2:])
 	case "new-leaf":
 		cmdNewLeaf(os.Args[2:])
 	case "pull":

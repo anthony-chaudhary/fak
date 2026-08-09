@@ -503,6 +503,7 @@ var tier = map[string]int{
 	"testquality":           3, // #5936: pure stdlib Go test AST quality findings plus counted baseline ratchet; repository I/O and CLI wiring stay in cmd/fak.
 	"dependencyquarantine":  0, // #5947: stdlib-only repository dependency-budget and nested-module quarantine checker; imports no sibling leaf.
 	"enumlint":              0, // #5935: pure stdlib Go AST closed-enum discovery, exhaustiveness rules, and counted baseline ratchet; repository I/O is caller-selected.
+	"archreport":            2, // read-only query/report over the architest declaration source and package import graph.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
