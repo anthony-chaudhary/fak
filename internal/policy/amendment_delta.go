@@ -195,6 +195,15 @@ func DiffAmendment(old, next adjudicator.Policy) AmendmentDelta {
 		d.route(false, AmendmentChange{Field: "SecretPatterns", Label: "added_secret_patterns", New: p})
 	}
 
+	// InlineEval: supplemental interpreter+flag specs only broaden write detection.
+	added, removed = diffStrings(inlineEvalStrings(old.InlineEval), inlineEvalStrings(next.InlineEval))
+	for _, spec := range removed {
+		d.route(true, AmendmentChange{Field: "InlineEval", Label: "removed_inline_eval", Old: spec})
+	}
+	for _, spec := range added {
+		d.route(false, AmendmentChange{Field: "InlineEval", Label: "added_inline_eval", New: spec})
+	}
+
 	// EgressBlockHosts: an added block host tightens, a removed one widens.
 	added, removed = diffStrings(old.EgressBlockHosts, next.EgressBlockHosts)
 	for _, h := range removed {
@@ -296,6 +305,16 @@ func argPredicateDisplay(key string) string {
 		return key[:i]
 	}
 	return key
+}
+
+func inlineEvalStrings(specs []adjudicator.InlineEvalSpec) []string {
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		flags := append([]string(nil), spec.Flags...)
+		sort.Strings(flags)
+		out = append(out, strings.ToLower(spec.Interp)+":"+strings.Join(flags, ","))
+	}
+	return out
 }
 
 func regexpStrings(patterns []*regexp.Regexp) []string {

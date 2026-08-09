@@ -63,11 +63,15 @@ func guardedCommandTree(args map[string]any, globs []string) (cmd, glob string, 
 // whole-segment target because their real file open happens inside a program string,
 // not in shell operands.
 func commandSelfModify(args map[string]any, globs []string) string {
+	return commandSelfModifyWithSpecs(args, globs, nil)
+}
+
+func commandSelfModifyWithSpecs(args map[string]any, globs []string, extra []InlineEvalSpec) string {
 	cmd, ok := commandArg(args)
 	if !ok {
 		return "" // no command to inspect
 	}
-	for _, target := range commandWriteTargets(cmd) {
+	for _, target := range commandWriteTargetsWithSpecs(cmd, extra) {
 		if g := matchGlob(target, globs); g != "" {
 			return g
 		}
@@ -283,6 +287,10 @@ func isRedirectTargetBoundary(b byte) bool {
 // deliberately small, not a shell parser: the goal is to keep the SELF_MODIFY floor
 // target-scoped for the common write idioms the floor already recognizes.
 func commandWriteTargets(cmd string) []string {
+	return commandWriteTargetsWithSpecs(cmd, nil)
+}
+
+func commandWriteTargetsWithSpecs(cmd string, extra []InlineEvalSpec) []string {
 	var targets []string
 	add := func(target string) {
 		target = cleanShellOperand(target)
@@ -300,7 +308,7 @@ func commandWriteTargets(cmd string) []string {
 		add(target)
 	}
 	for _, segment := range shellSegments(cmd) {
-		for _, target := range segmentWriteTargets(segment) {
+		for _, target := range segmentWriteTargetsWithSpecs(segment, extra) {
 			add(target)
 		}
 	}
@@ -308,6 +316,10 @@ func commandWriteTargets(cmd string) []string {
 }
 
 func segmentWriteTargets(segment string) []string {
+	return segmentWriteTargetsWithSpecs(segment, nil)
+}
+
+func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []string {
 	var targets []string
 	add := func(target string) {
 		target = cleanShellOperand(target)
@@ -405,6 +417,13 @@ func segmentWriteTargets(segment string) []string {
 	case "patch":
 		for _, target := range plainOperands(args) {
 			add(target)
+		}
+	}
+	for _, spec := range extra {
+		ev := interpreterEvalSpec{interp: strings.ToLower(spec.Interp), flags: spec.Flags}
+		if interpreterEvalMatch(lc, ev) && inlineEvalWriteIntent(lc) {
+			add(segment)
+			break
 		}
 	}
 	for _, ev := range interpreterEvalFlags {

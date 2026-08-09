@@ -92,6 +92,7 @@ type Manifest struct {
 	// pattern fails loud) and unioned with the canon floor at the gate. Maps to
 	// adjudicator.Policy.SecretPatterns.
 	SecretPatterns []string          `json:"secret_patterns,omitempty"`
+	InlineEval     []InlineEvalSpec  `json:"inline_eval,omitempty"`
 	SafeSinks      []string          `json:"safe_sinks,omitempty"`
 	Authorize      []AuthorizeRule   `json:"authorize,omitempty"`
 	Sources        map[string]string `json:"sources,omitempty"`
@@ -200,6 +201,13 @@ type AuthorizeRule struct {
 //
 // reason (optional) is the closed-vocabulary refusal code cited on a violation;
 // it defaults to POLICY_BLOCK when omitted.
+// InlineEvalSpec declares an additional inline-program interpreter spelling.
+// It only broadens the write-shaped floor; it cannot make a command less restricted.
+type InlineEvalSpec struct {
+	Interp string   `json:"interp"`
+	Flags  []string `json:"flags"`
+}
+
 type ArgRule struct {
 	Tool        string `json:"tool"`
 	Arg         string `json:"arg"`
@@ -483,6 +491,11 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		return Runtime{}, err
 	}
 	p.SecretPatterns = secretPats
+	inlineEval, err := compileInlineEval(m.InlineEval)
+	if err != nil {
+		return Runtime{}, err
+	}
+	p.InlineEval = inlineEval
 	sources, err := compileSources(m.Sources)
 	if err != nil {
 		return Runtime{}, err
@@ -630,6 +643,12 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 			if re != nil {
 				m.SecretPatterns = append(m.SecretPatterns, re.String())
 			}
+		}
+	}
+	if len(p.InlineEval) > 0 {
+		m.InlineEval = make([]InlineEvalSpec, 0, len(p.InlineEval))
+		for _, spec := range p.InlineEval {
+			m.InlineEval = append(m.InlineEval, InlineEvalSpec{Interp: spec.Interp, Flags: cloneSlice(spec.Flags)})
 		}
 	}
 	m.LintWrites = p.LintWrites
@@ -866,6 +885,32 @@ func parseSource(s string) (provenance.Source, error) {
 	default:
 		return provenance.Untrusted, fmt.Errorf("unknown source %q (want trusted_local|untrusted)", s)
 	}
+}
+
+func compileInlineEval(specs []InlineEvalSpec) ([]adjudicator.InlineEvalSpec, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]adjudicator.InlineEvalSpec, 0, len(specs))
+	for i, spec := range specs {
+		interp := strings.ToLower(strings.TrimSpace(spec.Interp))
+		if interp == "" {
+			return nil, fmt.Errorf("inline_eval[%d].interp must not be empty", i)
+		}
+		if len(spec.Flags) == 0 {
+			return nil, fmt.Errorf("inline_eval[%d].flags must not be empty", i)
+		}
+		flags := make([]string, 0, len(spec.Flags))
+		for j, flag := range spec.Flags {
+			flag = strings.TrimSpace(flag)
+			if flag == "" {
+				return nil, fmt.Errorf("inline_eval[%d].flags[%d] must not be empty", i, j)
+			}
+			flags = append(flags, flag)
+		}
+		out = append(out, adjudicator.InlineEvalSpec{Interp: interp, Flags: flags})
+	}
+	return out, nil
 }
 
 // compileSecretPatterns compiles the manifest's declared EXTRA secret RE2 strings

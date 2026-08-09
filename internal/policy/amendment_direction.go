@@ -64,6 +64,7 @@ var analyzedAmendmentFields = map[string]bool{
 	"SelfModifyGlobs":  true,
 	"ArgPredicates":    true,
 	"SecretPatterns":   true,
+	"InlineEval":       true,
 	"EgressBlockHosts": true,
 	// Hand-written in diffRemainingKnobs below (#5414).
 	"RedactFields":             true,

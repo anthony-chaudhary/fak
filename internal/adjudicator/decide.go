@@ -108,6 +108,9 @@ type Policy struct {
 	// canon.SecretPatterns floor at the gate — extend, never replace. Empty by
 	// default (floor patterns only), so this too is additive.
 	SecretPatterns []*regexp.Regexp
+	// InlineEval extends the compiled inline-interpreter write floor. Entries are
+	// validated by policy.Manifest.ToPolicy and unioned with the built-in specs.
+	InlineEval []InlineEvalSpec
 	// EgressExtraDenyHosts are operator-declared host names/IPs the egress rung refuses
 	// IN ADDITION to the hardwired cloud-metadata / link-local class (manifest
 	// egress.deny_hosts). It only ever TIGHTENS the floor — the hardwired metadata set
@@ -433,7 +436,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// internal/abi/x.go) is NOT a self-modify, so it stays allowed. Bounded
 	// disclosure: the witness names only the offending glob.
 	if pr.runs(cl, rungCmdSelfModify) {
-		if g := commandSelfModify(args, p.SelfModifyGlobs); g != "" {
+		if g := commandSelfModifyWithSpecs(args, p.SelfModifyGlobs, p.InlineEval); g != "" {
 			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  abi.ReasonSelfModify,
@@ -1041,6 +1044,11 @@ func wordByte(b byte) bool {
 // interpreterEvalSpec pairs a general-purpose interpreter with the inline-program flags
 // whose presence as a TOKEN means it runs code from an opaque string argument able to
 // write a file directly.
+type InlineEvalSpec struct {
+	Interp string
+	Flags  []string
+}
+
 type interpreterEvalSpec struct {
 	interp string   // the interpreter named as a command word (`ruby`, `node`, …)
 	flags  []string // its inline-eval flags (`-e`, `--eval`, `-c`, `-p`/`--print`)

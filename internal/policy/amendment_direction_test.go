@@ -93,6 +93,13 @@ func amendmentDirectionCases() []amendmentDirectionCase {
 			widenNext:   adjudicator.Policy{},
 		},
 		{
+			field:       "InlineEval",
+			tightenOld:  adjudicator.Policy{},
+			tightenNext: adjudicator.Policy{InlineEval: []adjudicator.InlineEvalSpec{{Interp: "perl", Flags: []string{"-e"}}}},
+			widenOld:    adjudicator.Policy{InlineEval: []adjudicator.InlineEvalSpec{{Interp: "perl", Flags: []string{"-e"}}}},
+			widenNext:   adjudicator.Policy{},
+		},
+		{
 			field:       "EgressBlockHosts",
 			tightenOld:  adjudicator.Policy{},
 			tightenNext: adjudicator.Policy{EgressBlockHosts: []string{"ads.example.invalid"}},
