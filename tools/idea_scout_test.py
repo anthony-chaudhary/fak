@@ -64,11 +64,11 @@ GH_FIXTURE = [
      "description": "A capability gateway and policy adjudicator for LLM tool calls",
      "url": "https://github.com/acme/agent-firewall",
      "stargazersCount": 540, "pushedAt": "2026-06-15T00:00:00Z",
-     "createdAt": "2025-01-01T00:00:00Z", "language": "Go"},
+     "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455},
     {"fullName": "tiny/nostars",
      "description": "barely related", "url": "https://github.com/tiny/nostars",
      "stargazersCount": 3, "pushedAt": "2020-01-01T00:00:00Z",
-     "createdAt": "2019-01-01T00:00:00Z", "language": "Python"},
+     "createdAt": "2019-01-01T00:00:00Z", "language": "Python", "size": 135},
 ]
 
 TOPIC = {"key": "prompt-injection-defense",
@@ -109,6 +109,7 @@ class GithubParseTest(unittest.TestCase):
         self.assertEqual(cands[0]["source_id"], "github:acme/agent-firewall")
         self.assertEqual(cands[0]["extra"]["stars"], 540)
         self.assertEqual(cands[0]["extra"]["language"], "Go")
+        self.assertEqual(cands[0]["extra"]["size"], 7455)
 
     def test_source_id_is_lowercased(self) -> None:
         # GitHub repo names are case-insensitive; the dedup key must normalize so
@@ -122,6 +123,22 @@ class GithubParseTest(unittest.TestCase):
         seen = {"github:acme/agent-firewall": {"filed_at": "2026-01-01"}}
         self.assertEqual(
             M.is_duplicate(c, seen, set(), [], "", 0.55), "seen-cache")
+
+    def test_both_fetchers_request_repo_size(self) -> None:
+        calls: list[list[str]] = []
+        orig = M.gh_json
+        try:
+            M.gh_json = lambda args: calls.append(list(args)) or []
+            M.fetch_github("agent", 2)
+            M.fetch_github_fresh("agent", 2)
+        finally:
+            M.gh_json = orig
+
+        self.assertEqual(len(calls), 2)
+        for argv in calls:
+            fields = argv[argv.index("--json") + 1].split(",")
+            self.assertIn("size", fields)
+            self.assertNotIn("diskUsage", fields)
 
 
 class ScoreTest(unittest.TestCase):
@@ -353,7 +370,7 @@ class GatherTest(unittest.TestCase):
                  "description": "a brand-new agent tool sandbox",
                  "url": "https://github.com/newco/fresh-agent",
                  "stargazersCount": 8, "pushedAt": "2026-06-18T00:00:00Z",
-                 "createdAt": "2026-06-10T00:00:00Z", "language": "Go"}
+                 "createdAt": "2026-06-10T00:00:00Z", "language": "Go", "size": 7455}
         topics = [{"key": "t", "github": "agent tool", "terms": ["agent", "tool"]}]
         cfg = dict(M.DEFAULTS)  # min_stars=25, fresh_min_stars=3, fresh_per_topic=6
         errors: list[str] = []
@@ -370,10 +387,40 @@ class GatherTest(unittest.TestCase):
         self.assertEqual(cands[0]["source_id"], "github:newco/fresh-agent")
         self.assertEqual(cands[0]["extra"].get("lane"), "fresh")
 
+    def test_repo_size_floor_applies_to_stars_and_fresh_lanes(self) -> None:
+        tiny = {"fullName": "x/scaffold", "url": "https://github.com/x/scaffold",
+                "description": "thin scaffold", "stargazersCount": 9000,
+                "updatedAt": "2026-07-09T00:00:00Z", "language": "Go", "size": 135}
+        real = dict(tiny, fullName="x/real", url="https://github.com/x/real", size=7455)
+        cfg = dict(M.DEFAULTS)
+        topic = {"key": "agents", "github": "agents", "terms": ["agents"]}
+        orig_g, orig_f = M.fetch_github, M.fetch_github_fresh
+        try:
+            M.fetch_github = lambda q, n: [dict(tiny), dict(real)]
+            M.fetch_github_fresh = lambda q, n: [dict(tiny), dict(real)]
+            candidates = M.gather_candidates([topic], cfg, [])
+        finally:
+            M.fetch_github, M.fetch_github_fresh = orig_g, orig_f
+        self.assertNotIn(tiny["url"], {c["url"] for c in candidates})
+        real_candidates = [c for c in candidates if c["url"] == real["url"]]
+        self.assertEqual(len(real_candidates), 2)  # stars lane and fresh lane
+        self.assertEqual({c["extra"].get("lane") for c in real_candidates},
+                         {None, "fresh"})
+
+        # `size` is admission-only. Carrying it into extra must not perturb the
+        # established score or its human-readable reasons.
+        star_candidate = next(c for c in real_candidates
+                              if c["extra"].get("lane") is None)
+        without_size = dict(star_candidate, extra=dict(star_candidate["extra"]))
+        without_size["extra"].pop("size")
+        self.assertEqual(M.score_candidate(star_candidate, topic, cfg, NOW),
+                         M.score_candidate(without_size, topic, cfg, NOW))
+
     def test_fresh_lane_respects_fresh_min_stars(self) -> None:
         toy = {"fullName": "toy/repo", "url": "https://github.com/toy/repo",
                "description": "", "stargazersCount": 1,
-               "pushedAt": "2026-06-19T00:00:00Z", "createdAt": "2026-06-15T00:00:00Z"}
+               "pushedAt": "2026-06-19T00:00:00Z",
+               "createdAt": "2026-06-15T00:00:00Z", "size": 7455}
         topics = [{"key": "t", "github": "agent tool", "terms": ["agent"]}]
         cfg = dict(M.DEFAULTS)  # fresh_min_stars=3
         errors: list[str] = []
@@ -472,7 +519,12 @@ class MainHermeticTest(unittest.TestCase):
     def _stub(self, *, arxiv: str = "", github_items=None, existing=None,
               filed=None, created_urls=None):
         M.fetch_arxiv = lambda *a, **k: arxiv
-        M.fetch_github = lambda *a, **k: list(github_items or [])
+        # Legacy end-to-end fixtures predate GitHub's size admission field;
+        # default them to a clearly substantive repository unless a test sets
+        # an explicit size to exercise the floor.
+        M.fetch_github = lambda *a, **k: [
+            dict(item, size=item.get("size", 7455))
+            for item in (github_items or [])]
         # EVERY lane must be stubbed or main() reaches the real `gh search repos`
         # / arXiv / HN / Reddit: the suite is meant to be hermetic, and a live
         # lane silently injects today's real results into every fixture. The HN
@@ -580,7 +632,7 @@ class FiledStampDurabilityTest(unittest.TestCase):
             "description": "an agent tool guardrail policy capability gateway",
             "url": "https://github.com/fu351/Doberman-Core",
             "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z",
-            "createdAt": "2025-01-01T00:00:00Z", "language": "Go"}
+            "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455}
 
     def setUp(self) -> None:
         self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
@@ -812,7 +864,8 @@ class SharedRunCorpusTest(unittest.TestCase):
 
     def _wire(self, case: dict) -> None:
         M.fetch_arxiv = lambda *a, **k: ""
-        M.fetch_github = lambda *a, **k: [dict(r) for r in case["repos"]]
+        M.fetch_github = lambda *a, **k: [
+            dict(repo, size=repo.get("size", 7455)) for repo in case["repos"]]
         M.fetch_github_fresh = lambda *a, **k: []
         M.fetch_hackernews = lambda *a, **k: ""
         M.fetch_reddit = lambda *a, **k: ""
@@ -1029,18 +1082,38 @@ class SharedSourceCorpusTest(unittest.TestCase):
             if reddit_error:
                 raise RuntimeError(reddit_error)
             return case.get("reddit_payload", "")
-        M.fetch_hackernews = _hn
-        M.fetch_reddit = _reddit
 
         cfg = dict(M.DEFAULTS)
         cfg["min_points"] = case["min_points"]
+        cfg["min_repo_size_kb"] = case.get(
+            "min_repo_size_kb", cfg["min_repo_size_kb"])
         errors: list[str] = []
-        cands = M.gather_candidates([dict(case["topic"])], cfg, errors)
+        original_fetchers = (M.fetch_github, M.fetch_github_fresh,
+                             M.fetch_hackernews, M.fetch_reddit)
+        try:
+            M.fetch_github = lambda *a, **k: [
+                dict(repo) for repo in case.get("github_repos", [])]
+            M.fetch_github_fresh = lambda *a, **k: [
+                dict(repo) for repo in case.get("github_fresh_repos", [])]
+            M.fetch_hackernews = _hn
+            M.fetch_reddit = _reddit
+            cands = M.gather_candidates([dict(case["topic"])], cfg, errors)
+        finally:
+            (M.fetch_github, M.fetch_github_fresh,
+             M.fetch_hackernews, M.fetch_reddit) = original_fetchers
         self.assertEqual([c["source_id"] for c in cands],
                          case["want_source_ids"],
                          f"{case['name']}: {case['why']} "
                          f"(internal/ideascout runs the same case through "
                          f"GatherCandidates)")
+        if case.get("assert_size_score_neutral"):
+            for cand in cands:
+                without_size = dict(cand, extra=dict(cand["extra"]))
+                without_size["extra"].pop("size", None)
+                self.assertEqual(
+                    M.score_candidate(cand, case["topic"], cfg, NOW),
+                    M.score_candidate(without_size, case["topic"], cfg, NOW),
+                    f"{case['name']}: repo size must stay admission-only")
         for want in case.get("want_errors_contain", []):
             self.assertIn(want, "; ".join(errors), case["name"])
         if not case.get("want_errors_contain"):

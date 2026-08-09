@@ -23,6 +23,7 @@ func DefaultConfig() Config {
 		HNPerTopic:      8,
 		RedditPerTopic:  8,
 		MinStars:        25,
+		MinRepoSizeKB:   500,
 		FreshPerTopic:   6,
 		FreshMinStars:   3,
 		FreshWindowDays: 45,
@@ -233,6 +234,8 @@ func applyThresholds(cfg *Config, values map[string]any) {
 			cfg.RedditPerTopic = anyInt(v, cfg.RedditPerTopic)
 		case "min_stars":
 			cfg.MinStars = anyInt(v, cfg.MinStars)
+		case "min_repo_size_kb":
+			cfg.MinRepoSizeKB = anyInt(v, cfg.MinRepoSizeKB)
 		case "fresh_per_topic":
 			cfg.FreshPerTopic = anyInt(v, cfg.FreshPerTopic)
 		case "fresh_min_stars":

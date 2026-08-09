@@ -54,7 +54,7 @@ func (f LiveFetcher) FetchArxiv(query string, maxResults int) (string, error) {
 
 func (f LiveFetcher) FetchGitHub(query string, limit int) ([]GitHubRepo, error) {
 	var out []GitHubRepo
-	err := ghJSONFn([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "stars", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, 60*time.Second, &out)
+	err := ghJSONFn([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "stars", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language,size"}, 60*time.Second, &out)
 	return out, err
 }
 
@@ -64,7 +64,7 @@ func (f LiveFetcher) FetchGitHub(query string, limit int) ([]GitHubRepo, error) 
 // repos surface where the stars sort would bury them under incumbents.
 func (f LiveFetcher) FetchGitHubFresh(query string, limit int) ([]GitHubRepo, error) {
 	var out []GitHubRepo
-	err := ghJSONFn([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "updated", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language"}, 60*time.Second, &out)
+	err := ghJSONFn([]string{"search", "repos", query, "--limit", strconv.Itoa(limit), "--sort", "updated", "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,createdAt,language,size"}, 60*time.Second, &out)
 	return out, err
 }
 

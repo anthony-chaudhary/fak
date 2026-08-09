@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -239,6 +240,52 @@ func TestScoreCandidateHackerNewsPoints(t *testing.T) {
 	}
 }
 
+// withDefaultRepoSize keeps legacy gather fixtures focused on the behaviour
+// they predate. Tests of the size floor always set an explicit non-zero size.
+func withDefaultRepoSize(repos []GitHubRepo) []GitHubRepo {
+	out := append([]GitHubRepo(nil), repos...)
+	for i := range out {
+		if out[i].Size == 0 {
+			out[i].Size = 7455
+		}
+	}
+	return out
+}
+
+func TestLiveFetcherRequestsRepoSizeOnBothGitHubLanes(t *testing.T) {
+	var calls [][]string
+	orig := ghJSONFn
+	t.Cleanup(func() { ghJSONFn = orig })
+	ghJSONFn = func(args []string, _ time.Duration, _ any) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}
+
+	fetcher := LiveFetcher{}
+	if _, err := fetcher.FetchGitHub("agent", 2); err != nil {
+		t.Fatalf("FetchGitHub: %v", err)
+	}
+	if _, err := fetcher.FetchGitHubFresh("agent", 2); err != nil {
+		t.Fatalf("FetchGitHubFresh: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("GitHub fetch calls = %d, want 2", len(calls))
+	}
+	for _, argv := range calls {
+		fieldList, ok := argAfter(argv, "--json")
+		if !ok {
+			t.Fatalf("GitHub fetch missing --json: %v", argv)
+		}
+		fields := strings.Split(fieldList, ",")
+		if !slices.Contains(fields, "size") {
+			t.Fatalf("GitHub fetch fields %v missing size", fields)
+		}
+		if slices.Contains(fields, "diskUsage") {
+			t.Fatalf("GitHub search does not support diskUsage: %v", fields)
+		}
+	}
+}
+
 type stubFetcher struct {
 	github      []GitHubRepo
 	githubFresh []GitHubRepo
@@ -246,16 +293,20 @@ type stubFetcher struct {
 	redditJSON  string
 }
 
-func (s stubFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
-func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return s.github, nil }
-func (s stubFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return s.githubFresh, nil }
-func (s stubFetcher) FetchHackerNews(string, int) (string, error)        { return s.hnJSON, nil }
-func (s stubFetcher) FetchReddit(string, int) (string, error)            { return s.redditJSON, nil }
-func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error)   { return nil, nil }
-func (s stubFetcher) FetchScoutIssues(int) ([]ExistingIssue, error)      { return nil, nil }
-func (s stubFetcher) EnsureLabels() error                                { return nil }
-func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)      { return "", nil }
-func (s stubFetcher) AddToProject(string, string, string) error          { return nil }
+func (s stubFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(s.github), nil
+}
+func (s stubFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(s.githubFresh), nil
+}
+func (s stubFetcher) FetchHackerNews(string, int) (string, error)      { return s.hnJSON, nil }
+func (s stubFetcher) FetchReddit(string, int) (string, error)          { return s.redditJSON, nil }
+func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error) { return nil, nil }
+func (s stubFetcher) FetchScoutIssues(int) ([]ExistingIssue, error)    { return nil, nil }
+func (s stubFetcher) EnsureLabels() error                              { return nil }
+func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)    { return "", nil }
+func (s stubFetcher) AddToProject(string, string, string) error        { return nil }
 
 func TestGatherCandidatesHackerNewsFiltersByPoints(t *testing.T) {
 	hn := `{"hits":[
@@ -353,6 +404,49 @@ func TestGatherCandidatesFreshLaneAdmitsYoungRepo(t *testing.T) {
 	}
 }
 
+func TestGatherCandidatesRepoSizeFloorAppliesToBothGitHubLanes(t *testing.T) {
+	tiny := GitHubRepo{FullName: "x/scaffold", URL: "https://github.com/x/scaffold", Description: "thin scaffold", StargazersCount: 9000, UpdatedAt: "2026-07-09T00:00:00Z", Size: 135}
+	real := tiny
+	real.FullName, real.URL, real.Size = "x/real", "https://github.com/x/real", 7455
+	cfg := DefaultConfig()
+	topic := Topic{Key: "agents", GitHub: "agents", Terms: []string{"agents"}}
+	var errs []string
+	cands := GatherCandidates(stubFetcher{github: []GitHubRepo{tiny, real}, githubFresh: []GitHubRepo{tiny, real}}, []Topic{topic}, cfg, &errs)
+	var realCandidates []Candidate
+	for _, cand := range cands {
+		if cand.URL == tiny.URL {
+			t.Fatalf("tiny scaffold admitted: %#v", cands)
+		}
+		if cand.URL == real.URL {
+			realCandidates = append(realCandidates, cand)
+		}
+	}
+	if len(realCandidates) != 2 {
+		t.Fatalf("real repository admitted %d times, want stars + fresh lanes: %#v", len(realCandidates), cands)
+	}
+	lanes := map[string]bool{}
+	for _, cand := range realCandidates {
+		lanes[stringFromExtra(cand.Extra, "lane")] = true
+	}
+	if !lanes[""] || !lanes["fresh"] {
+		t.Fatalf("real repository lane provenance = %v, want stars + fresh", lanes)
+	}
+
+	withoutSize := realCandidates[0]
+	withoutSize.Extra = map[string]any{}
+	for key, value := range realCandidates[0].Extra {
+		if key != "size" {
+			withoutSize.Extra[key] = value
+		}
+	}
+	now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	gotScore, gotReasons := ScoreCandidate(realCandidates[0], topic, cfg, now)
+	wantScore, wantReasons := ScoreCandidate(withoutSize, topic, cfg, now)
+	if gotScore != wantScore || !reflect.DeepEqual(gotReasons, wantReasons) {
+		t.Fatalf("repo size perturbed score: with size=(%d, %v), without=(%d, %v)", gotScore, gotReasons, wantScore, wantReasons)
+	}
+}
+
 func TestGatherCandidatesFreshLaneRespectsFreshMinStars(t *testing.T) {
 	toy := GitHubRepo{
 		FullName:        "toy/repo",
@@ -416,8 +510,10 @@ type windowedFetcher struct {
 	windowErr error
 }
 
-func (f windowedFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
-func (f windowedFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return f.repos, nil }
+func (f windowedFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (f windowedFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(f.repos), nil
+}
 func (f windowedFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
 func (f windowedFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
 func (f windowedFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
@@ -822,8 +918,10 @@ type corpusFetcher struct {
 	scoutErr  error
 }
 
-func (f corpusFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
-func (f corpusFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return f.repos, nil }
+func (f corpusFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (f corpusFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(f.repos), nil
+}
 func (f corpusFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
 func (f corpusFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
 func (f corpusFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
@@ -986,17 +1084,21 @@ type sourceScoreCase struct {
 }
 
 type sourceGatherCase struct {
-	Name              string          `json:"name"`
-	Topic             Topic           `json:"topic"`
-	MinPoints         int             `json:"min_points"`
-	HNPayload         string          `json:"hn_payload"`
-	RedditPayload     string          `json:"reddit_payload"`
-	HNError           string          `json:"hn_error"`
-	RedditError       string          `json:"reddit_error"`
-	WantSourceIDs     []string        `json:"want_source_ids"`
-	WantErrorsContain []string        `json:"want_errors_contain"`
-	Why               string          `json:"why"`
-	TopicRaw          json.RawMessage `json:"-"`
+	Name                   string          `json:"name"`
+	Topic                  Topic           `json:"topic"`
+	MinPoints              int             `json:"min_points"`
+	MinRepoSizeKB          int             `json:"min_repo_size_kb"`
+	GitHubRepos            []GitHubRepo    `json:"github_repos"`
+	GitHubFreshRepos       []GitHubRepo    `json:"github_fresh_repos"`
+	HNPayload              string          `json:"hn_payload"`
+	RedditPayload          string          `json:"reddit_payload"`
+	HNError                string          `json:"hn_error"`
+	RedditError            string          `json:"reddit_error"`
+	WantSourceIDs          []string        `json:"want_source_ids"`
+	WantErrorsContain      []string        `json:"want_errors_contain"`
+	AssertSizeScoreNeutral bool            `json:"assert_size_score_neutral"`
+	Why                    string          `json:"why"`
+	TopicRaw               json.RawMessage `json:"-"`
 }
 
 type sourceCorpus struct {
@@ -1218,11 +1320,21 @@ func TestSharedSourceCorpusScoreCases(t *testing.T) {
 // bytes, every other lane empty. tools/idea_scout_test.py stubs the Python
 // fetchers identically.
 type sourceProbeFetcher struct {
-	hn        string
-	reddit    string
-	hnErr     error
-	redditErr error
+	github      []GitHubRepo
+	githubFresh []GitHubRepo
+	hn          string
+	reddit      string
+	hnErr       error
+	redditErr   error
 	corpusFetcher
+}
+
+func (f sourceProbeFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return append([]GitHubRepo(nil), f.github...), nil
+}
+
+func (f sourceProbeFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) {
+	return append([]GitHubRepo(nil), f.githubFresh...), nil
 }
 
 func (f sourceProbeFetcher) FetchHackerNews(string, int) (string, error) {
@@ -1241,7 +1353,10 @@ func TestSharedSourceCorpusGatherCases(t *testing.T) {
 	c := loadSourceCorpus(t)
 	for _, tc := range c.GatherCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			fetcher := sourceProbeFetcher{hn: tc.HNPayload, reddit: tc.RedditPayload}
+			fetcher := sourceProbeFetcher{
+				github: tc.GitHubRepos, githubFresh: tc.GitHubFreshRepos,
+				hn: tc.HNPayload, reddit: tc.RedditPayload,
+			}
 			if tc.HNError != "" {
 				fetcher.hnErr = errors.New(tc.HNError)
 			}
@@ -1250,6 +1365,9 @@ func TestSharedSourceCorpusGatherCases(t *testing.T) {
 			}
 			cfg := DefaultConfig()
 			cfg.MinPoints = tc.MinPoints
+			if tc.MinRepoSizeKB != 0 {
+				cfg.MinRepoSizeKB = tc.MinRepoSizeKB
+			}
 			var errorsOut []string
 			cands := GatherCandidates(fetcher, []Topic{tc.Topic}, cfg, &errorsOut)
 
@@ -1263,6 +1381,23 @@ func TestSharedSourceCorpusGatherCases(t *testing.T) {
 			}
 			if !reflect.DeepEqual(gotIDs, want) {
 				t.Fatalf("gather case %q: source_ids = %v, want %v\n  why: %s\n  (tools/idea_scout_test.py runs the same case through gather_candidates)", tc.Name, gotIDs, tc.WantSourceIDs, tc.Why)
+			}
+			if tc.AssertSizeScoreNeutral {
+				now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+				for _, cand := range cands {
+					withoutSize := cand
+					withoutSize.Extra = map[string]any{}
+					for key, value := range cand.Extra {
+						if key != "size" {
+							withoutSize.Extra[key] = value
+						}
+					}
+					gotScore, gotReasons := ScoreCandidate(cand, tc.Topic, cfg, now)
+					wantScore, wantReasons := ScoreCandidate(withoutSize, tc.Topic, cfg, now)
+					if gotScore != wantScore || !reflect.DeepEqual(gotReasons, wantReasons) {
+						t.Fatalf("gather case %q: repo size perturbed score: with=(%d, %v), without=(%d, %v)", tc.Name, gotScore, gotReasons, wantScore, wantReasons)
+					}
+				}
 			}
 			for _, wantErr := range tc.WantErrorsContain {
 				if !strings.Contains(strings.Join(errorsOut, "; "), wantErr) {
@@ -1463,8 +1598,10 @@ type recordingFetcher struct {
 	filed  []recordedIssue
 }
 
-func (f *recordingFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
-func (f *recordingFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return f.repos, nil }
+func (f *recordingFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (f *recordingFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(f.repos), nil
+}
 func (f *recordingFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
 func (f *recordingFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
 func (f *recordingFetcher) FetchReddit(string, int) (string, error)            { return "", nil }

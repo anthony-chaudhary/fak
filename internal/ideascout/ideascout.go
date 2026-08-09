@@ -44,14 +44,17 @@ type Topic struct {
 }
 
 type Config struct {
-	RecentDays      int     `json:"recent_days"`
-	MinScore        int     `json:"min_score"`
-	MaxIssues       int     `json:"max_issues"`
-	ArxivPerTopic   int     `json:"arxiv_per_topic"`
-	GitHubPerTopic  int     `json:"github_per_topic"`
-	HNPerTopic      int     `json:"hn_per_topic"`
-	RedditPerTopic  int     `json:"reddit_per_topic"`
-	MinStars        int     `json:"min_stars"`
+	RecentDays     int `json:"recent_days"`
+	MinScore       int `json:"min_score"`
+	MaxIssues      int `json:"max_issues"`
+	ArxivPerTopic  int `json:"arxiv_per_topic"`
+	GitHubPerTopic int `json:"github_per_topic"`
+	HNPerTopic     int `json:"hn_per_topic"`
+	RedditPerTopic int `json:"reddit_per_topic"`
+	MinStars       int `json:"min_stars"`
+	// MinRepoSizeKB is a coarse GitHub KiB proxy: it rejects tiny scaffolds,
+	// but can drop dense small repos and admit large hollow ones.
+	MinRepoSizeKB   int     `json:"min_repo_size_kb"`
 	FreshPerTopic   int     `json:"fresh_per_topic"`   // recency-sorted GitHub repos fetched per topic (0 disables the fresh lane)
 	FreshMinStars   int     `json:"fresh_min_stars"`   // fresh-lane star floor: admits young repos the MinStars floor would drop
 	FreshWindowDays int     `json:"fresh_window_days"` // pushed within this window earns the strong "actively updated" bonus
@@ -159,6 +162,7 @@ type GitHubRepo struct {
 	UpdatedAt       string `json:"updatedAt"`
 	CreatedAt       string `json:"createdAt"`
 	Language        string `json:"language"`
+	Size            int    `json:"size"`
 }
 
 type Fetcher interface {

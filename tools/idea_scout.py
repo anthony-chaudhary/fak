@@ -253,6 +253,9 @@ DEFAULTS = {
     "hn_per_topic": 8,    # Hacker News stories fetched per topic
     "reddit_per_topic": 8,  # Reddit posts fetched per topic
     "min_stars": 25,      # stars-lane repos under this many stars are dropped pre-score
+    # Coarse GitHub KiB proxy: rejects tiny scaffolds, but can drop dense small
+    # repos and admit large hollow ones; it is not a quality signal.
+    "min_repo_size_kb": 500,
     "min_points": 10,     # HN/Reddit posts under this many points are dropped pre-score
     "fresh_per_topic": 6,  # recency-sorted GitHub repos fetched per topic (0 disables the fresh lane)
     "fresh_min_stars": 3,  # fresh-lane star floor: admits young repos the min_stars floor would drop
@@ -458,6 +461,7 @@ def parse_github_repos(items: list[dict[str, Any]], topic_key: str,
                 "stars": it.get("stargazersCount", 0),
                 "pushed_at": it.get("pushedAt", "") or it.get("updatedAt", ""),
                 "language": it.get("language", "") or "",
+                "size": it.get("size", 0),
             },
         })
     return out
@@ -822,7 +826,7 @@ def fetch_github(query: str, limit: int) -> list[dict[str, Any]]:
     return gh_json([
         "search", "repos", query, "--limit", str(limit), "--sort", "stars",
         "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,"
-        "createdAt,language",
+        "createdAt,language,size",
     ])
 
 
@@ -834,7 +838,7 @@ def fetch_github_fresh(query: str, limit: int) -> list[dict[str, Any]]:
     return gh_json([
         "search", "repos", query, "--limit", str(limit), "--sort", "updated",
         "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,"
-        "createdAt,language",
+        "createdAt,language,size",
     ])
 
 
@@ -1059,7 +1063,8 @@ def gather_candidates(topics: list[dict[str, Any]], cfg: dict[str, Any],
             try:
                 items = fetch_github(topic["github"], cfg["github_per_topic"])
                 items = [it for it in items
-                         if int(it.get("stargazersCount", 0) or 0) >= cfg["min_stars"]]
+                         if int(it.get("size", 0) or 0) >= cfg["min_repo_size_kb"]
+                         and int(it.get("stargazersCount", 0) or 0) >= cfg["min_stars"]]
                 cands += parse_github_repos(items, key)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"github[{key}]: {e}")
@@ -1071,7 +1076,8 @@ def gather_candidates(topics: list[dict[str, Any]], cfg: dict[str, Any],
             try:
                 items = fetch_github_fresh(topic["github"], cfg["fresh_per_topic"])
                 items = [it for it in items
-                         if int(it.get("stargazersCount", 0) or 0) >= cfg["fresh_min_stars"]]
+                         if int(it.get("size", 0) or 0) >= cfg["min_repo_size_kb"]
+                         and int(it.get("stargazersCount", 0) or 0) >= cfg["fresh_min_stars"]]
                 fresh = parse_github_repos(items, key)
                 for c in fresh:
                     c["extra"]["lane"] = "fresh"

@@ -29,8 +29,9 @@
   "threshold_keys": [
     "arxiv_per_topic", "dup_jaccard", "fresh_min_stars", "fresh_per_topic",
     "fresh_window_days", "github_per_topic", "hn_per_topic", "issue_scan_limit",
-    "max_issues", "milestone", "min_points", "min_score", "min_stars", "project",
-    "project_owner", "recent_days", "reddit_per_topic", "scout_scan_limit"
+    "max_issues", "milestone", "min_points", "min_repo_size_kb", "min_score",
+    "min_stars", "project", "project_owner", "recent_days", "reddit_per_topic",
+    "scout_scan_limit"
   ],
 
   "_config_comment": "The loud-refusal half of #5549: a config naming a lane the running implementation cannot serve must FAIL, not gather zero and exit 0. Each case is a topic object; `refuse` says whether load_config/LoadConfig must reject it, and `refuse_contains` pins the substrings the message must carry so the operator is told WHICH key was unknown. Substrings are quote-free on purpose: Go writes the key as %q and Python as repr(), and that is idiom, not contract -- what the contract requires is that the offending key be NAMED.",
@@ -209,8 +210,27 @@
     }
   ],
 
-  "_gather_comment": "The behavioural half of the vocabulary claim. For each declared topic key a topic naming ONLY that key must actually gather its lane's candidates -- a key that is admissible at config load and unread at gather time is precisely the #5549 defect, and a vocabulary list alone would not see it. `min_points` is the lane's admission floor.",
+  "_gather_comment": "The behavioural half of the vocabulary claim. For each declared topic key a topic naming ONLY that key must actually gather its lane's candidates -- a key that is admissible at config load and unread at gather time is precisely the #5549 defect, and a vocabulary list alone would not see it. The cases pin both the points floor and #5891's GitHub repository-size floor across both implementations.",
   "gather_cases": [
+    {
+      "name": "github-size-floor-applies-to-stars-and-fresh-lanes",
+      "topic": {"key": "github-size-probe", "github": "agent", "terms": ["agent"]},
+      "min_points": 10,
+      "min_repo_size_kb": 500,
+      "github_repos": [
+        {"fullName": "x/scaffold", "description": "thin agent scaffold", "url": "https://github.com/x/scaffold", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 135},
+        {"fullName": "x/real", "description": "substantive agent implementation", "url": "https://github.com/x/real", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455}
+      ],
+      "github_fresh_repos": [
+        {"fullName": "x/scaffold", "description": "thin agent scaffold", "url": "https://github.com/x/scaffold", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 135},
+        {"fullName": "x/real", "description": "substantive agent implementation", "url": "https://github.com/x/real", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455}
+      ],
+      "hn_payload": "",
+      "reddit_payload": "",
+      "want_source_ids": ["github:x/real", "github:x/real"],
+      "assert_size_score_neutral": true,
+      "why": "the 135 KiB scaffold is rejected before scoring on BOTH GitHub lanes; the 7455 KiB repository is admitted by both, and removing only `extra.size` leaves its established score and reasons unchanged."
+    },
     {
       "name": "hn-lane-gathers-and-floors",
       "topic": {"key": "hn-probe", "hn": "prompt injection", "terms": ["agent"]},

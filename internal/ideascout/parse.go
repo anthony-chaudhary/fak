@@ -89,6 +89,7 @@ func ParseGitHubRepos(items []GitHubRepo, topicKey string) []Candidate {
 				"stars":     it.StargazersCount,
 				"pushed_at": pushed,
 				"language":  it.Language,
+				"size":      it.Size,
 			},
 		})
 	}

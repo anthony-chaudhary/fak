@@ -84,7 +84,7 @@ func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]
 			}
 		}
 		if topic.GitHub != "" {
-			cands = appendStarLane(cands, errorsOut, "github", topic.Key, cfg.MinStars,
+			cands = appendStarLane(cands, errorsOut, "github", topic.Key, cfg.MinStars, cfg.MinRepoSizeKB,
 				func() ([]GitHubRepo, error) { return fetcher.FetchGitHub(topic.GitHub, cfg.GitHubPerTopic) },
 				nil)
 		}
@@ -93,7 +93,7 @@ func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]
 			// with a low star floor so young/trending repos the MinStars floor
 			// would drop enter the pool. Recency itself is rewarded in scoring
 			// (which has a clock); here we only admit and tag provenance.
-			cands = appendStarLane(cands, errorsOut, "github-fresh", topic.Key, cfg.FreshMinStars,
+			cands = appendStarLane(cands, errorsOut, "github-fresh", topic.Key, cfg.FreshMinStars, cfg.MinRepoSizeKB,
 				func() ([]GitHubRepo, error) { return fetcher.FetchGitHubFresh(topic.GitHub, cfg.FreshPerTopic) },
 				func(c *Candidate) {
 					if c.Extra == nil {
@@ -121,7 +121,7 @@ func GatherCandidates(fetcher Fetcher, topics []Topic, cfg Config, errorsOut *[]
 // star floor and parse them into candidates. `tag` post-processes each admitted
 // candidate and may be nil — it is how the fresh lane stamps its provenance while the
 // main lane stamps nothing.
-func appendStarLane(cands []Candidate, errorsOut *[]string, label, topicKey string, minStars int,
+func appendStarLane(cands []Candidate, errorsOut *[]string, label, topicKey string, minStars, minRepoSizeKB int,
 	fetch func() ([]GitHubRepo, error), tag func(*Candidate)) []Candidate {
 	items, err := fetch()
 	if err != nil {
@@ -130,7 +130,7 @@ func appendStarLane(cands []Candidate, errorsOut *[]string, label, topicKey stri
 	}
 	filtered := items[:0]
 	for _, item := range items {
-		if item.StargazersCount >= minStars {
+		if item.Size >= minRepoSizeKB && item.StargazersCount >= minStars {
 			filtered = append(filtered, item)
 		}
 	}
