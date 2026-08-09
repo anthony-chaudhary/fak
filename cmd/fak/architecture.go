@@ -50,9 +50,15 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	for _, t := range report.Tiers {
 		fmt.Fprintf(stdout, "  tier %d %-22s %d\n", t.Level, t.Name, t.Leaves)
 	}
+	if *leaf == "" && len(report.Hotspots) > 0 {
+		fmt.Fprintln(stdout, "  hotspots (direct fan-in):")
+		for _, hotspot := range report.Hotspots {
+			fmt.Fprintf(stdout, "    %-22s %d\n", hotspot.Name, hotspot.FanIn)
+		}
+	}
 	for _, l := range report.Leaves {
 		if *leaf != "" || len(l.Violations) > 0 {
-			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) deps=%v", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.Dependencies)
+			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) deps=%v dependents=%v", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.Dependencies, l.Dependents)
 			if len(l.Violations) > 0 {
 				fmt.Fprintf(stdout, " violations=%v", l.Violations)
 			}

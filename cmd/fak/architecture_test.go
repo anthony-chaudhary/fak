@@ -39,3 +39,14 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunArchitectureTextNamesDependents(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runArchitecture([]string{"--leaf", "archreport"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "dependents=") {
+		t.Fatalf("output does not name dependents: %s", out.String())
+	}
+}

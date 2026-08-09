@@ -27,13 +27,21 @@ type Leaf struct {
 	ImportFloor      int      `json:"import_floor"`
 	ImportFloorName  string   `json:"import_floor_name"`
 	Dependencies     []string `json:"dependencies"`
+	Dependents       []string `json:"dependents,omitempty"`
 	Violations       []string `json:"violations,omitempty"`
 }
+
+type Hotspot struct {
+	Name  string `json:"name"`
+	FanIn int    `json:"fan_in"`
+}
+
 type Report struct {
-	Schema     string `json:"schema"`
-	Tiers      []Tier `json:"tiers"`
-	Leaves     []Leaf `json:"leaves"`
-	Violations int    `json:"violations"`
+	Schema     string    `json:"schema"`
+	Tiers      []Tier    `json:"tiers"`
+	Leaves     []Leaf    `json:"leaves"`
+	Hotspots   []Hotspot `json:"hotspots,omitempty"`
+	Violations int       `json:"violations"`
 }
 
 func Analyze(root, onlyLeaf string) (Report, error) {
@@ -61,11 +69,11 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	}
 	leaves := make([]string, 0, len(tiers))
 	for leaf := range tiers {
-		if onlyLeaf == "" || leaf == onlyLeaf {
-			leaves = append(leaves, leaf)
-		}
+		leaves = append(leaves, leaf)
 	}
 	sort.Strings(leaves)
+	allLeaves := make([]Leaf, 0, len(leaves))
+	byName := make(map[string]int, len(leaves))
 	for _, name := range leaves {
 		deps, err := internalImports(filepath.Join(root, "internal", name))
 		if err != nil {
@@ -87,8 +95,36 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 		}
 		sort.Strings(violations)
-		report.Violations += len(violations)
-		report.Leaves = append(report.Leaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), Dependencies: deps, Violations: violations})
+		byName[name] = len(allLeaves)
+		allLeaves = append(allLeaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), Dependencies: deps, Violations: violations})
+	}
+	for _, importer := range allLeaves {
+		for _, dependency := range importer.Dependencies {
+			if i, ok := byName[dependency]; ok {
+				allLeaves[i].Dependents = append(allLeaves[i].Dependents, importer.Name)
+			}
+		}
+	}
+	for i := range allLeaves {
+		sort.Strings(allLeaves[i].Dependents)
+		if len(allLeaves[i].Dependents) > 0 {
+			report.Hotspots = append(report.Hotspots, Hotspot{Name: allLeaves[i].Name, FanIn: len(allLeaves[i].Dependents)})
+		}
+	}
+	sort.Slice(report.Hotspots, func(i, j int) bool {
+		if report.Hotspots[i].FanIn != report.Hotspots[j].FanIn {
+			return report.Hotspots[i].FanIn > report.Hotspots[j].FanIn
+		}
+		return report.Hotspots[i].Name < report.Hotspots[j].Name
+	})
+	if onlyLeaf == "" {
+		report.Leaves = allLeaves
+	} else {
+		report.Leaves = []Leaf{allLeaves[byName[onlyLeaf]]}
+		report.Hotspots = nil
+	}
+	for _, leaf := range report.Leaves {
+		report.Violations += len(leaf.Violations)
 	}
 	return report, nil
 }
