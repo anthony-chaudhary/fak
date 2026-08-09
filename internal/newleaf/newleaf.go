@@ -22,7 +22,7 @@ const (
 
 var (
 	NameRE = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
-	Tiers  = map[string]int{"root": 0, "foundation": 1, "mechanism": 2, "composer": 3, "integrator": 4}
+	Tiers  = map[string]int{"root": 0, "primitive": 1, "foundation-composite": 2, "mechanism": 3, "composer": 4, "integrator": 5}
 )
 
 type Options struct {
@@ -148,7 +148,7 @@ func Apply(opts Options) (Report, error) {
 		return Report{}, fmt.Errorf("%q is not a valid lowercase Go package name", name)
 	}
 	if tier == "root" {
-		return Report{}, fmt.Errorf("'root' is reserved for internal/abi; pick foundation or higher")
+		return Report{}, fmt.Errorf("'root' is reserved for internal/abi; pick primitive or higher")
 	}
 	root := opts.Root
 	if root == "" {
@@ -279,7 +279,7 @@ func (r Report) JSON() ([]byte, error) {
 
 var tierRowRE = regexp.MustCompile(`"([a-z][a-z0-9]*)"\s*:\s*(\d+)`)
 
-// TierNameForLevel reverses Tiers: a level (0..4) to its canonical tier name, or ""
+// TierNameForLevel reverses Tiers: a level (0..5) to its canonical tier name, or ""
 // for an unknown level.
 func TierNameForLevel(level int) string {
 	for name, n := range Tiers {
@@ -349,13 +349,15 @@ func ScanInternalDeps(dir string) ([]string, error) {
 	return out, nil
 }
 
-// MinTier returns the minimum legal tier LEVEL for a leaf with the given internal
-// deps and the highest-tier dep that sets it (governing == "" when the floor is the
-// unconditional foundation default). It is max(tier(dep)) floored at foundation; a
-// dep absent from tierOf is ignored — an unknown package cannot raise the floor.
+// MinTier returns the minimum legal tier for a leaf with the given internal dependencies.
+// No dependencies (or abi alone) is primitive. Any other internal dependency makes the leaf
+// at least foundation-composite; a still-higher dependency raises that floor.
 func MinTier(deps []string, tierOf map[string]int) (level int, governing string) {
-	level = Tiers["foundation"]
+	level = Tiers["primitive"]
 	for _, d := range deps {
+		if d != "abi" && level < Tiers["foundation-composite"] {
+			level, governing = Tiers["foundation-composite"], d
+		}
 		if t, ok := tierOf[d]; ok && t > level {
 			level, governing = t, d
 		}

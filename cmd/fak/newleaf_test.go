@@ -14,7 +14,7 @@ func TestNewLeafCommandDryRun(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rc := runNewLeaf(&stdout, &stderr, []string{
 		"--workspace", root,
-		"--tier", "foundation",
+		"--tier", "primitive",
 		"--dry-run",
 		"fedtrust",
 	})
@@ -29,7 +29,7 @@ func TestNewLeafCommandDryRun(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("unmarshal report: %v", err)
 	}
-	if report.Name != "fedtrust" || report.Tier != "foundation" || !report.DryRun {
+	if report.Name != "fedtrust" || report.Tier != "primitive" || !report.DryRun {
 		t.Fatalf("unexpected report: %+v", report)
 	}
 	if _, err := os.Stat(filepath.Join(root, "internal", "fedtrust")); !os.IsNotExist(err) {
@@ -78,7 +78,7 @@ func TestNewLeafCommandCreatesRegisteredLeaf(t *testing.T) {
 
 func TestNewLeafCommandValidatesArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	rc := runNewLeaf(&stdout, &stderr, []string{"--tier", "foundation", "Fed_Trust"})
+	rc := runNewLeaf(&stdout, &stderr, []string{"--tier", "primitive", "Fed_Trust"})
 	if rc != 2 {
 		t.Fatalf("rc=%d, want 2", rc)
 	}
@@ -90,9 +90,9 @@ func TestNewLeafCommandValidatesArgs(t *testing.T) {
 func TestNewLeafSuggestTierFromImports(t *testing.T) {
 	root := commandNewLeafSuggestWorkspace(t)
 
-	// (1) no internal deps -> foundation.
-	if s := commandRunSuggest(t, root, "alpha", ""); s.SuggestedTier != "foundation" {
-		t.Fatalf("alpha suggested_tier = %q, want foundation (%+v)", s.SuggestedTier, s)
+	// (1) no internal deps -> primitive.
+	if s := commandRunSuggest(t, root, "alpha", ""); s.SuggestedTier != "primitive" {
+		t.Fatalf("alpha suggested_tier = %q, want primitive (%+v)", s.SuggestedTier, s)
 	}
 
 	// (2) imports a mechanism -> suggests >= mechanism, naming the governing dep.
@@ -124,7 +124,7 @@ func TestNewLeafScaffoldSurfacesTierAdvisory(t *testing.T) {
 		t.Fatalf("unmarshal report: %v", err)
 	}
 	if report.TierAdvisory == "" {
-		t.Fatalf("scaffolding composer with no imports should surface a foundation advisory: %s", stdout.String())
+		t.Fatalf("scaffolding composer with no imports should surface a primitive advisory: %s", stdout.String())
 	}
 }
 

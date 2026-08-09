@@ -10,7 +10,9 @@
 // It enforces these load-bearing contracts (see architest_test.go):
 //
 //  1. The LAYERED-DAG import rule. Every internal package has a declared tier; a
-//     package may import only packages whose tier is <= its own. Upward imports
+//     package may import only packages whose tier is <= its own. Primitive leaves are
+//     distinct from foundation composites, so assembly edges are no longer hidden
+//     inside one catch-all foundation tier. Upward imports
 //     (a foundation lib reaching up into an integrator) are the layer inversion
 //     that turns the dependency DAG into spaghetti and silently voids the
 //     "two fleet workers editing two leaves cannot collide" guarantee. Go already
@@ -21,7 +23,8 @@
 //     not import os/exec — the per-decide subprocess boundary fak exists to remove
 //     (DIRECTION.md). This is DIRECTION's "reviewer's grep #1" turned into a gate.
 //
-//  3. Every package declares its tier. A new leaf that forgets to take a position
+//  3. Every package declares its tier, and the declaration carries behavior: tier-1
+//     primitives may import only abi. A new leaf that forgets to take a position
 //     in the layering fails the suite, so growth cannot silently erode the contract.
 //
 //  4. The whole request path is interpreter-free. Stronger than (2): no package

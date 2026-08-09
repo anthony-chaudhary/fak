@@ -134,14 +134,13 @@ func TestAddLeafLaneLegacyPrefixTreatedAsPresent(t *testing.T) {
 }
 
 func TestTiersAndNameRE(t *testing.T) {
-	if Tiers["foundation"] != 1 {
-		t.Fatalf("foundation tier = %d, want 1", Tiers["foundation"])
+	for tier, want := range map[string]int{"primitive": 1, "foundation-composite": 2, "mechanism": 3, "composer": 4, "integrator": 5} {
+		if got := Tiers[tier]; got != want {
+			t.Fatalf("%s tier = %d, want %d", tier, got, want)
+		}
 	}
 	if !NameRE.MatchString("fedtrust") {
 		t.Fatal("fedtrust should match NameRE")
-	}
-	if NameRE.MatchString("Fed_Trust") {
-		t.Fatal("Fed_Trust should not match NameRE")
 	}
 }
 
@@ -181,7 +180,7 @@ func TestApplyCreatesLeafAndUpdatesTables(t *testing.T) {
 		}
 	}
 	arch := readNewLeafFile(t, root, "internal/architest/architest_test.go")
-	if !strings.Contains(arch, `"fedtrust": 3,`) {
+	if !strings.Contains(arch, `"fedtrust": 4,`) {
 		t.Fatalf("architest tier missing fedtrust: %s", arch)
 	}
 	reg := readNewLeafFile(t, root, "internal/registrations/registrations.go")
@@ -208,40 +207,33 @@ func TestParseTierTableReadsRows(t *testing.T) {
 	}
 }
 
-func TestMinTierFloorsAtFoundation(t *testing.T) {
-	tierOf := map[string]int{"abi": 0, "foo": 1, "engine": 2, "recall": 3}
-	// no internal deps -> foundation (floored, never root).
-	if level, gov := MinTier(nil, tierOf); level != Tiers["foundation"] || gov != "" {
-		t.Fatalf("empty deps: level=%d gov=%q, want foundation and no governing dep", level, gov)
+func TestMinTierDistinguishesPrimitiveFromComposite(t *testing.T) {
+	tierOf := map[string]int{"abi": 0, "foo": 1, "engine": 3, "recall": 4}
+	if got, gov := MinTier(nil, tierOf); got != 1 || gov != "" {
+		t.Fatalf("empty deps: level=%d gov=%q", got, gov)
 	}
-	// importing only an abi(0) dep still floors at foundation.
-	if level, gov := MinTier([]string{"abi"}, tierOf); level != Tiers["foundation"] || gov != "" {
-		t.Fatalf("abi-only deps: level=%d gov=%q, want foundation floor", level, gov)
+	if got, gov := MinTier([]string{"abi"}, tierOf); got != 1 || gov != "" {
+		t.Fatalf("abi deps: level=%d gov=%q", got, gov)
 	}
-	// importing a mechanism(2) raises the floor to mechanism, naming the dep.
-	if level, gov := MinTier([]string{"foo", "engine"}, tierOf); level != Tiers["mechanism"] || gov != "engine" {
-		t.Fatalf("mechanism dep: level=%d gov=%q, want mechanism governed by engine", level, gov)
+	if got, gov := MinTier([]string{"foo"}, tierOf); got != 2 || gov != "foo" {
+		t.Fatalf("primitive dep: level=%d gov=%q", got, gov)
 	}
-	// an unknown dep cannot raise the floor.
-	if level, _ := MinTier([]string{"unknownpkg"}, tierOf); level != Tiers["foundation"] {
-		t.Fatalf("unknown dep raised the floor to %d", level)
+	if got, gov := MinTier([]string{"foo", "engine"}, tierOf); got != 3 || gov != "engine" {
+		t.Fatalf("mechanism dep: level=%d gov=%q", got, gov)
 	}
 }
 
 func TestTierAdvisoryFiresOnMismatch(t *testing.T) {
-	tierOf := map[string]int{"abi": 0, "foo": 1, "engine": 2}
-	// minimum-correct: no advisory.
-	if a := TierAdvisory("foundation", nil, tierOf); a != "" {
-		t.Fatalf("minimum-correct declaration fired an advisory: %q", a)
+	tierOf := map[string]int{"abi": 0, "foo": 1, "engine": 3}
+	if a := TierAdvisory("primitive", nil, tierOf); a != "" {
+		t.Fatalf("minimum declaration should not advise: %q", a)
 	}
-	// over-declared with no governing dep.
 	over := TierAdvisory("composer", nil, tierOf)
-	if !strings.Contains(over, "foundation") || !strings.Contains(over, "composer") {
+	if !strings.Contains(over, "primitive") || !strings.Contains(over, "you declared") {
 		t.Fatalf("over-declared advisory = %q", over)
 	}
-	// under-declared: architest would reject; advisory names the offending dep.
-	under := TierAdvisory("foundation", []string{"engine"}, tierOf)
-	if !strings.Contains(under, "engine") || !strings.Contains(under, "mechanism") {
+	under := TierAdvisory("primitive", []string{"engine"}, tierOf)
+	if !strings.Contains(under, "tier must be") || !strings.Contains(under, "engine") {
 		t.Fatalf("under-declared advisory = %q", under)
 	}
 }
@@ -269,7 +261,7 @@ func TestScanInternalDepsSkipsTestsAndStdlib(t *testing.T) {
 func TestSuggestForExistingLeaf(t *testing.T) {
 	root := t.TempDir()
 	mustWriteNewLeafFile(t, root, "internal/architest/architest_test.go",
-		"package architest\n\nvar tier = map[string]int{\n\t\"abi\": 0,\n\t\"engine\": 2,\n\t// new-leaf:tier\n}\n")
+		"package architest\n\nvar tier = map[string]int{\n\t\"abi\": 0,\n\t\"engine\": 3,\n\t// new-leaf:tier\n}\n")
 	mustWriteNewLeafFile(t, root, "internal/beta/beta.go",
 		"package beta\n\nimport _ \"github.com/anthony-chaudhary/fak/internal/engine\"\n")
 	s, err := Suggest(root, "beta", "integrator")

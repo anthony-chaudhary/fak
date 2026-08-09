@@ -14,7 +14,7 @@ func cmdNewLeaf(argv []string) { os.Exit(runNewLeaf(os.Stdout, os.Stderr, argv))
 func runNewLeaf(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("new-leaf", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	tier := fs.String("tier", "", "layering tier: foundation, mechanism, composer, or integrator")
+	tier := fs.String("tier", "", "layering tier: primitive, foundation-composite, mechanism, composer, or integrator")
 	suggestTier := fs.String("suggest-tier", "", "read-only: print the minimum-correct tier for an existing internal leaf derived from its imports, then exit")
 	register := fs.Bool("register", false, "add the leaf to the defconfig blank-import list")
 	summary := fs.String("summary", "", "one-line package summary for doc.go")
