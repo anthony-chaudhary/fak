@@ -203,10 +203,11 @@ func clampInfoScrollToSample(s infoViewState, v guardInfoVars, tr *guardInfoTren
 // live session (main + every sub-agent, with lineage/run-state/wall-clock/budget/activity). It
 // shows EVERY session — the overview's 4-row cap is exactly what this view exists to lift.
 func renderInfoAgentsView(v guardInfoVars) []string {
+	rows := renderInfoFleetRows(v.Fleet)
 	if len(v.Sessions) == 0 {
-		return []string{" agents: none running (no session registry wired, or nothing live)"}
+		return append(rows, " agents: none running (no session registry wired, or nothing live)")
 	}
-	rows := []string{" agents: " + guardInfoAgentsSummary(v.Sessions)}
+	rows = append(rows, " agents: "+guardInfoAgentsSummary(v.Sessions))
 	for _, s := range v.Sessions {
 		rows = append(rows, "  "+guardInfoAgentText(s))
 	}

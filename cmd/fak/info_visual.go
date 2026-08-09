@@ -178,8 +178,15 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 // run, and the live liveness (replies / in-flight) — the persistent identity the scrolled-off
 // startup banner can no longer give.
 func guardInfoVisualIdentityRow(v guardInfoVars) string {
-	return fmt.Sprintf("%s · ↑%s · replies %d · busy %d",
+	local := fmt.Sprintf("%s · ↑%s · replies %d · busy %d",
 		guardInfoVersionTag(), humanUptime(v.Gateway.UptimeSeconds), v.Inference.Turns, v.Gateway.InflightRequests)
+	// Fleet posture leads the pinned row when guard publishes it. On narrow terminals the
+	// width cap therefore preserves the cross-machine status instead of truncating it behind
+	// the local gateway identity; the expanded Agents tab carries the complete machine sample.
+	if fleet := guardInfoFleetSummary(v.Fleet); fleet != "" {
+		return fleet + " · local " + local
+	}
+	return local
 }
 
 // guardInfoVisualTinyRow is the 1-row fallback for a pane too short for any sub-pane: the compact
