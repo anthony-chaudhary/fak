@@ -3,7 +3,6 @@ package devindex
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 )
@@ -56,7 +55,7 @@ type GraphReport struct {
 // LoadImportGraph asks the Go toolchain for the complete dependency graph of a
 // package pattern. The caller controls Dir so this can run in a clean archive.
 func LoadImportGraph(dir, pattern string) ([]ImportNode, error) {
-	cmd := exec.Command("go", "list", "-deps", "-json", pattern)
+	cmd := graphCommand("go", "list", "-deps", "-json", pattern)
 	cmd.Dir = dir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
