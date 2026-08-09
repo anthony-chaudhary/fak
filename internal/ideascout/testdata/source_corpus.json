@@ -1,0 +1,272 @@
+{
+  "schema": "fak/idea-scout-source-corpus@1",
+  "_comment": [
+    "The SHARED SOURCE corpus (#5549). Read by BOTH scouts:",
+    "internal/ideascout/ideascout_test.go (TestSharedSourceCorpus*) and",
+    "tools/idea_scout_test.py (SharedSourceCorpusTest).",
+    "",
+    "Sibling of dedup_corpus.json and the same mechanism one stage earlier. That",
+    "file ties the two implementations' DEDUP rungs together; this one ties their",
+    "GATHER contract: which source lanes exist, which topic/threshold keys are",
+    "admissible, what each lane's parser folds the same wire bytes into, and what",
+    "the points floor admits. #5547 made dedup mechanical after the same defect had",
+    "to be fixed twice; #5549 is the identical hazard in gather -- `hn` and `reddit`",
+    "existed only in the Go scout, so a topic naming them on the SCHEDULED Python",
+    "path (tools/register_idea_scout.ps1) gathered zero candidates and reported a",
+    "normal success. Nothing failed. That is what this file makes impossible.",
+    "",
+    "It lives under the Go package's testdata/ for the same reason dedup_corpus.json",
+    "does: Go excludes testdata/ from builds and vet, while tools/*.json are scout",
+    "CONFIG files (--config) and a corpus dropped there would read as one."
+  ],
+
+  "topic_keys": ["arxiv", "github", "hn", "reddit"],
+  "meta_keys": ["key", "terms", "area"],
+  "lanes": ["arxiv", "github", "github-fresh", "hn", "reddit"],
+  "display_list": "arXiv + GitHub + Hacker News + Reddit",
+
+  "_threshold_comment": "Every knob a --config `thresholds` block may set. Go derives this from Config's JSON tags, Python from DEFAULTS' keys; both must equal this list. Divergence here is not hypothetical: hn_per_topic, reddit_per_topic and min_points were Go-only knobs that Python silently dropped.",
+  "threshold_keys": [
+    "arxiv_per_topic", "dup_jaccard", "fresh_min_stars", "fresh_per_topic",
+    "fresh_window_days", "github_per_topic", "hn_per_topic", "issue_scan_limit",
+    "max_issues", "milestone", "min_points", "min_repo_size_kb", "min_score",
+    "min_stars", "project", "project_owner", "recent_days", "reddit_per_topic",
+    "scout_scan_limit"
+  ],
+
+  "_config_comment": "The loud-refusal half of #5549: a config naming a lane the running implementation cannot serve must FAIL, not gather zero and exit 0. Each case is a topic object; `refuse` says whether load_config/LoadConfig must reject it, and `refuse_contains` pins the substrings the message must carry so the operator is told WHICH key was unknown. Substrings are quote-free on purpose: Go writes the key as %q and Python as repr(), and that is idiom, not contract -- what the contract requires is that the offending key be NAMED.",
+  "config_cases": [
+    {
+      "name": "hn-only-topic-is-admissible",
+      "topic": {"key": "hn-only", "hn": "prompt injection", "terms": ["agent"]},
+      "refuse": false,
+      "why": "hn alone is a complete topic once the lane exists on both sides. Before #5549 Python refused this with 'must set arxiv and/or github' -- loud, but about the wrong key."
+    },
+    {
+      "name": "reddit-only-topic-is-admissible",
+      "topic": {"key": "reddit-only", "reddit": "llm gateway", "terms": ["gateway"]},
+      "refuse": false,
+      "why": "same for reddit; a topic may name any single lane."
+    },
+    {
+      "name": "arxiv-plus-hn-and-reddit-is-admissible",
+      "topic": {"key": "mixed", "arxiv": "abs:agent", "hn": "prompt injection", "reddit": "prompt injection agent", "terms": ["agent"]},
+      "refuse": false,
+      "why": "THE #5549 CASE. Python accepted this and then read only `arxiv` -- the hn/reddit keys gathered nothing, recorded no error, and the run exited 0. It must now be accepted AND served."
+    },
+    {
+      "name": "unknown-source-key-refuses",
+      "topic": {"key": "typo", "arxiv": "abs:agent", "redit": "prompt injection", "terms": ["agent"]},
+      "refuse": true,
+      "refuse_contains": ["redit", "unknown key"],
+      "why": "a misspelt lane is the silent-no-op in miniature: it looks configured and contributes nothing. Refusing names the typo."
+    },
+    {
+      "name": "unserved-lane-refuses-by-name",
+      "topic": {"key": "future", "arxiv": "abs:agent", "youtube": "llm agents", "terms": ["agent"]},
+      "refuse": true,
+      "refuse_contains": ["youtube", "unknown key"],
+      "why": "the general form: a lane one implementation grows and the other does not must refuse on the implementation that lacks it, rather than no-op."
+    },
+    {
+      "name": "no-source-at-all-refuses",
+      "topic": {"key": "sourceless", "terms": ["agent"]},
+      "refuse": true,
+      "refuse_contains": ["at least one source"],
+      "why": "a topic that queries nothing can only ever gather nothing."
+    },
+    {
+      "name": "missing-terms-refuses",
+      "topic": {"key": "termless", "arxiv": "abs:agent"},
+      "refuse": true,
+      "refuse_contains": ["terms"],
+      "why": "pre-existing contract, kept here so the new key check did not displace it."
+    }
+  ],
+
+  "_parse_comment": "Both implementations fold the SAME wire bytes. `payload` is the raw response text a fetcher returns, so nothing is re-serialised differently on the two sides. Every field of every expected candidate is asserted, `extra` as a whole map -- so a key present on one side only reds.",
+  "parse_cases": [
+    {
+      "name": "hn-link-story-and-self-post",
+      "lane": "hn",
+      "topic": "hn-probe",
+      "payload": "{\"hits\":[{\"objectID\":\"49023427\",\"title\":\"Show HN: a credential gateway that keeps secrets out of AI agents\",\"url\":\"https://example.invalid/onecli\",\"author\":\"jdoe\",\"points\":110,\"num_comments\":32,\"created_at\":\"2026-07-23T12:00:00Z\",\"story_text\":\"<p>An open source <i>vault</i> for   agents.</p>\"},{\"objectID\":\"49088058\",\"story_title\":\"Prompt injection defenses that actually hold\",\"author\":\"asmith\",\"points\":64,\"num_comments\":9,\"created_at\":\"2026-07-20T08:30:00Z\",\"story_text\":\"\"},{\"objectID\":\"\",\"title\":\"dropped: no objectID\",\"points\":900},{\"objectID\":\"49099999\",\"title\":\"\",\"points\":900}]}",
+      "want": [
+        {
+          "source": "hackernews",
+          "source_id": "hn:49023427",
+          "url": "https://example.invalid/onecli",
+          "title": "Show HN: a credential gateway that keeps secrets out of AI agents",
+          "summary": "An open source vault for agents.",
+          "published": "2026-07-23T12:00:00Z",
+          "topic": "hn-probe",
+          "extra": {
+            "points": 110,
+            "num_comments": 32,
+            "discussion": "https://news.ycombinator.com/item?id=49023427",
+            "author": "jdoe"
+          }
+        },
+        {
+          "source": "hackernews",
+          "source_id": "hn:49088058",
+          "url": "https://news.ycombinator.com/item?id=49088058",
+          "title": "Prompt injection defenses that actually hold",
+          "summary": "",
+          "published": "2026-07-20T08:30:00Z",
+          "topic": "hn-probe",
+          "extra": {
+            "points": 64,
+            "num_comments": 9,
+            "discussion": "https://news.ycombinator.com/item?id=49088058",
+            "author": "asmith"
+          }
+        }
+      ],
+      "why": "hit 1 is a link story: outbound url kept, HTML stripped and whitespace squashed out of story_text, permalink still recorded as `discussion`. hit 2 is a text post: no url, so the permalink becomes the url, and the title comes from story_title. hits 3 and 4 are dropped -- no objectID, and no title."
+    },
+    {
+      "name": "hn-malformed-payload-yields-nothing",
+      "lane": "hn",
+      "topic": "hn-probe",
+      "payload": "{not json",
+      "want": [],
+      "why": "a bad response admits nothing rather than raising: one dead source never sinks the run. Both implementations must swallow it the same way."
+    },
+    {
+      "name": "reddit-link-and-self-post",
+      "lane": "reddit",
+      "topic": "reddit-probe",
+      "payload": "{\"data\":{\"children\":[{\"data\":{\"id\":\"1a2b3c\",\"title\":\"An  LLM gateway that routes by policy\",\"url\":\"https://example.invalid/gateway\",\"permalink\":\"/r/LocalLLaMA/comments/1a2b3c/an_llm_gateway/\",\"score\":240,\"num_comments\":41,\"created_utc\":1784808000,\"selftext\":\"<p>built this over the weekend</p>\",\"subreddit\":\"LocalLLaMA\"}},{\"data\":{\"id\":\"4d5e6f\",\"title\":\"KV cache reuse across turns\",\"permalink\":\"/r/MachineLearning/comments/4d5e6f/kv_cache_reuse/\",\"score\":18,\"num_comments\":3,\"created_utc\":1784536200,\"selftext\":\"\",\"subreddit\":\"MachineLearning\"}},{\"data\":{\"id\":\"\",\"title\":\"dropped: no id\",\"score\":900}}]}}",
+      "want": [
+        {
+          "source": "reddit",
+          "source_id": "reddit:1a2b3c",
+          "url": "https://example.invalid/gateway",
+          "title": "An LLM gateway that routes by policy",
+          "summary": "built this over the weekend",
+          "published": "2026-07-23T12:00:00Z",
+          "topic": "reddit-probe",
+          "extra": {
+            "points": 240,
+            "num_comments": 41,
+            "discussion": "https://www.reddit.com/r/LocalLLaMA/comments/1a2b3c/an_llm_gateway/",
+            "subreddit": "LocalLLaMA"
+          }
+        },
+        {
+          "source": "reddit",
+          "source_id": "reddit:4d5e6f",
+          "url": "https://www.reddit.com/r/MachineLearning/comments/4d5e6f/kv_cache_reuse/",
+          "title": "KV cache reuse across turns",
+          "summary": "",
+          "published": "2026-07-20T08:30:00Z",
+          "topic": "reddit-probe",
+          "extra": {
+            "points": 18,
+            "num_comments": 3,
+            "discussion": "https://www.reddit.com/r/MachineLearning/comments/4d5e6f/kv_cache_reuse/",
+            "subreddit": "MachineLearning"
+          }
+        }
+      ],
+      "why": "Reddit stamps posts with a Unix created_utc float; both sides must render the SAME RFC3339 string (1784808000 -> 2026-07-23T12:00:00Z), which is the kind of conversion two implementations drift on. Post 1 is a link post (outbound url, permalink as discussion); post 2 is a self post, so the permalink serves as both. The third child is dropped: empty id."
+    },
+    {
+      "name": "reddit-malformed-payload-yields-nothing",
+      "lane": "reddit",
+      "topic": "reddit-probe",
+      "payload": "[]",
+      "want": [],
+      "why": "a listing that is not an object admits nothing rather than raising."
+    }
+  ],
+
+  "_score_comment": "`points` is the HN/Reddit analogue of GitHub `stars`, and it was a Go-only bonus: an identical candidate scored 30 in Go and 10 in Python, so an HN story that cleared min_score on one path could never clear it on the other. Terms are matched against the title only here, so these cases isolate the points bonus.",
+  "score_cases": [
+    {
+      "name": "points-earn-a-capped-bonus",
+      "candidate": {"title": "prompt injection defense", "summary": "", "published": "", "extra": {"points": 400}},
+      "terms": ["prompt injection"],
+      "want_score": 30,
+      "want_reason_contains": "400 points (+20)",
+      "why": "10 for the title hit + 400/20 = 20."
+    },
+    {
+      "name": "points-bonus-is-capped",
+      "candidate": {"title": "prompt injection defense", "summary": "", "published": "", "extra": {"points": 5000}},
+      "terms": ["prompt injection"],
+      "want_score": 35,
+      "want_reason_contains": "5000 points (+25)",
+      "why": "10 for the title hit + the cap of 25, not 250: a front-page story cannot outweigh relevance."
+    },
+    {
+      "name": "sub-divisor-points-earn-nothing",
+      "candidate": {"title": "prompt injection defense", "summary": "", "published": "", "extra": {"points": 19}},
+      "terms": ["prompt injection"],
+      "want_score": 10,
+      "want_reason_contains": "",
+      "why": "19/20 = 0, so no bonus and no reason line -- the reasons stay honest about what earned score."
+    }
+  ],
+
+  "_gather_comment": "The behavioural half of the vocabulary claim. For each declared topic key a topic naming ONLY that key must actually gather its lane's candidates -- a key that is admissible at config load and unread at gather time is precisely the #5549 defect, and a vocabulary list alone would not see it. The cases pin both the points floor and #5891's GitHub repository-size floor across both implementations.",
+  "gather_cases": [
+    {
+      "name": "github-size-floor-applies-to-stars-and-fresh-lanes",
+      "topic": {"key": "github-size-probe", "github": "agent", "terms": ["agent"]},
+      "min_points": 10,
+      "min_repo_size_kb": 500,
+      "github_repos": [
+        {"fullName": "x/scaffold", "description": "thin agent scaffold", "url": "https://github.com/x/scaffold", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 135},
+        {"fullName": "x/real", "description": "substantive agent implementation", "url": "https://github.com/x/real", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455}
+      ],
+      "github_fresh_repos": [
+        {"fullName": "x/scaffold", "description": "thin agent scaffold", "url": "https://github.com/x/scaffold", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 135},
+        {"fullName": "x/real", "description": "substantive agent implementation", "url": "https://github.com/x/real", "stargazersCount": 9000, "updatedAt": "2026-07-09T00:00:00Z", "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455}
+      ],
+      "hn_payload": "",
+      "reddit_payload": "",
+      "want_source_ids": ["github:x/real", "github:x/real"],
+      "assert_size_score_neutral": true,
+      "why": "the 135 KiB scaffold is rejected before scoring on BOTH GitHub lanes; the 7455 KiB repository is admitted by both, and removing only `extra.size` leaves its established score and reasons unchanged."
+    },
+    {
+      "name": "hn-lane-gathers-and-floors",
+      "topic": {"key": "hn-probe", "hn": "prompt injection", "terms": ["agent"]},
+      "min_points": 100,
+      "hn_payload": "{\"hits\":[{\"objectID\":\"1\",\"title\":\"above the floor\",\"points\":110,\"created_at\":\"2026-07-23T12:00:00Z\"},{\"objectID\":\"2\",\"title\":\"below the floor\",\"points\":12,\"created_at\":\"2026-07-23T12:00:00Z\"}]}",
+      "reddit_payload": "",
+      "want_source_ids": ["hn:1"],
+      "why": "the topic names only `hn`, so only the hn lane may contribute; the 12-point story is dropped by min_points before scoring."
+    },
+    {
+      "name": "reddit-lane-gathers-and-floors",
+      "topic": {"key": "reddit-probe", "reddit": "llm gateway", "terms": ["gateway"]},
+      "min_points": 100,
+      "hn_payload": "",
+      "reddit_payload": "{\"data\":{\"children\":[{\"data\":{\"id\":\"keep\",\"title\":\"above the floor\",\"score\":240,\"created_utc\":1784808000,\"permalink\":\"/r/x/comments/keep/\"}},{\"data\":{\"id\":\"drop\",\"title\":\"below the floor\",\"score\":4,\"created_utc\":1784808000,\"permalink\":\"/r/x/comments/drop/\"}}]}}",
+      "want_source_ids": ["reddit:keep"],
+      "why": "same for the reddit lane; the two lanes share one min_points floor."
+    },
+    {
+      "name": "both-lanes-on-one-topic-run-in-declared-order",
+      "topic": {"key": "both", "hn": "prompt injection", "reddit": "prompt injection agent", "terms": ["agent"]},
+      "min_points": 10,
+      "hn_payload": "{\"hits\":[{\"objectID\":\"h1\",\"title\":\"hn story\",\"points\":110,\"created_at\":\"2026-07-23T12:00:00Z\"}]}",
+      "reddit_payload": "{\"data\":{\"children\":[{\"data\":{\"id\":\"r1\",\"title\":\"reddit post\",\"score\":240,\"created_utc\":1784808000,\"permalink\":\"/r/x/comments/r1/\"}}]}}",
+      "want_source_ids": ["hn:h1", "reddit:r1"],
+      "why": "lane ORDER is part of the contract: hn before reddit, matching SOURCE_LANES / sourceLanes, so the two gatherers walk a topic identically."
+    },
+    {
+      "name": "a-failing-lane-is-attributed-not-fatal",
+      "topic": {"key": "hn-probe", "hn": "prompt injection", "terms": ["agent"]},
+      "min_points": 10,
+      "hn_error": "hn status 503 Service Unavailable",
+      "reddit_payload": "",
+      "want_source_ids": [],
+      "want_errors_contain": ["hn[hn-probe]:"],
+      "why": "one dead lane never sinks the run: it records `label[topic]: ...` and admits nothing. The label is the lane's declared name, so error attribution and the vocabulary cannot drift apart."
+    }
+  ]
+}

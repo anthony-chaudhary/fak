@@ -72,6 +72,17 @@ func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (serv
 		turn.state = *ref
 		return turn, false, false
 	}
+	// COMPACTION THRASH (#2424): a session whose window refilled to the compaction limit on
+	// ctxThrashConsecutiveRefills consecutive turns is spending a compaction per reply and
+	// making no headway — the lever is firing and the traffic is undoing it. The closed
+	// verdict COMPACTION_THRASH is taken here, at the same pre-model boundary the ceiling
+	// uses, so the stop lands cleanly instead of after another full window is re-shipped.
+	// Inert (nil) unless the operator armed FAK_COMPACTION_THRASH_STOP; the verdict is
+	// COUNTED either way, so a deploy watches the row before it arms the stop. See ctxadvice.go.
+	if ref := s.compactionThrashRefusal(trace); ref != nil {
+		turn.state = *ref
+		return turn, false, false
+	}
 	// Control-plane SPEND CAP (#3273): if a scope this trace belongs to (session / agent
 	// / team / tenant) has crossed its versioned budget, the kernel refuses the turn here
 	// — before the model is consulted — carrying the closed reason and the pause/kill run
@@ -370,6 +381,15 @@ func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
 			},
 			"reason": st.Reason,
 		})
+		return
+	}
+	// COMPACTION_THRASH (#2424) is not operator DRIVE control either: nobody paused this
+	// session — its own window refilled to the compaction limit turn after turn. Still 409
+	// (terminal, the same class as an operator stop), but with its own code and a message
+	// naming the measured run and the only continuation that helps, so a supervisor does not
+	// go looking for an operator who never acted. See ctxadvice.go.
+	if st.Reason == ReasonCompactionThrash {
+		writeJSON(w, http.StatusConflict, compactionThrashRefusalBody(st))
 		return
 	}
 	msg := "session " + st.TraceID + " is " + st.Run + " (operator control); request refused"

@@ -44,7 +44,9 @@ import "fmt"
 // tiling) and the reduction order (pinned by the reference) — never the expert math.
 //
 // SCOPE — honest, in-pattern. Like tensor_parallel.go before it, this lands the PROVEN
-// primitive; it is NOT yet wired into the live glmMoeFFN forward, and the Collective it
+// primitive. It IS wired into the live forward as of 0230b79c32: ffnForLayer (moe.go:76)
+// returns glmMoeEPFFN whenever epRanks > 1, which `fak serve --expert-parallel N` sets
+// (serve.go:226 -> Config.ExpertParallelRanks, serve.go:473). The Collective it
 // reduces through is LocalCollective (the single-box, bit-exact default) / BackendCollective
 // on cpu-ref. A real cross-DEVICE reduction needs the NCCL/RCCL compute.CollectiveBackend
 // rung (hardware-gated, native-753b-track-staged-plan.md P3) — only with that may a

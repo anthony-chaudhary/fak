@@ -555,6 +555,23 @@ def discover(roots, since_days=None, ns_prefix=NS_INCLUDE_PREFIX, include_subage
     out.sort(key=lambda r: r["mtime"], reverse=True)
     return out
 
+def _parent_session(rec):
+    """The TOP-LEVEL session a discovered transcript belongs to (#3226).
+
+    A top-level transcript is its own parent. A subagent / workflow transcript lives
+    at <ns>/<parent-session-id>/**/<agent>.jsonl, so its parent is the first path
+    component under the namespace directory — the session that spawned the fan-out,
+    and therefore the one its spend and behavioral findings are attributed to."""
+    stem = os.path.splitext(os.path.basename(rec["path"]))[0]
+    if rec.get("kind") != "subagent":
+        return stem
+    try:
+        rel = os.path.relpath(rec["path"], os.path.join(rec["root"], rec["ns"]))
+    except (ValueError, KeyError):      # e.g. different drives on Windows
+        return stem
+    head = rel.replace("\\", "/").split("/")[0]
+    return os.path.splitext(head)[0] or stem
+
 def _txt_len(content):
     """char length of a content field that may be str or list of blocks."""
     if isinstance(content, str):
@@ -808,6 +825,19 @@ def _pct(xs, p):
     k = max(0, min(len(xs)-1, int(round((p/100)*(len(xs)-1)))))
     return xs[k]
 
+def _ns_of(s):
+    """The namespace an analyzed transcript belongs to. A subagent transcript sits in
+    a nested <parent-session>/… directory, so basename(dirname(path)) is NOT its
+    namespace — prefer the ns `discover` recorded on the record (#3226)."""
+    return s.get("ns") or os.path.basename(os.path.dirname(s["path"]))
+
+def _attributed_session(s):
+    """Which TOP-LEVEL session a finding belongs to. A subagent's turns (cost and
+    every behavioral detector) are attributed to the parent session that spawned
+    it, so a fan-out stuck in a retry loop surfaces against a session an operator
+    can actually open (#3226). A top-level transcript is its own parent."""
+    return s.get("parent_session") or s["session"]
+
 def aggregate(sessions):
     S = [s for s in sessions if "error" not in s]
     tot = collections.Counter()
@@ -822,7 +852,7 @@ def aggregate(sessions):
     ns_cost = collections.Counter()
     ns_models = collections.defaultdict(collections.Counter)   # ns -> {model: output tok}
     for s in S:
-        ns = os.path.basename(os.path.dirname(s["path"]))
+        ns = _ns_of(s)
         ns_roll[ns]["sessions"] += 1
         ns_roll[ns]["output"] += s["tokens"]["output"]
         ns_roll[ns]["cache_read"] += s["tokens"]["cache_read"]
@@ -882,8 +912,8 @@ def aggregate(sessions):
         if s.get("assistant_turns", 0) >= BURST_LONG_SESSION_MIN \
                 and b.get("suffix_resets", 0) >= 1:
             burst_rows.append({
-                "session": s["session"],
-                "ns": os.path.basename(os.path.dirname(s["path"])),
+                "session": _attributed_session(s),
+                "ns": _ns_of(s),
                 "turns": s.get("assistant_turns", 0),
                 "cache_create": s["tokens"]["cache_create"],
                 "cc_share": s.get("cc_share"),
@@ -894,21 +924,23 @@ def aggregate(sessions):
         if b.get("stall_gaps", 0):
             stall_sessions += 1
         max_gap_s = max(max_gap_s, b.get("max_gap_s", 0) or 0)
-        ns = os.path.basename(os.path.dirname(s["path"]))
+        # #3226 — a subagent's findings are labelled with the PARENT session that
+        # spawned it, so the offender tables always name a session an operator can open.
+        ns, sid = _ns_of(s), _attributed_session(s)
         for r in (b.get("repeat_failures") or [])[:1]:
-            repeat_rows.append({"session": s["session"], "ns": ns, **r})
+            repeat_rows.append({"session": sid, "ns": ns, **r})
         for r in (b.get("failure_mass") or [])[:1]:
-            mass_rows.append({"session": s["session"], "ns": ns, **r})
+            mass_rows.append({"session": sid, "ns": ns, **r})
         for r in (b.get("file_churn") or [])[:1]:
-            filechurn_rows.append({"session": s["session"], "ns": ns, **r})
+            filechurn_rows.append({"session": sid, "ns": ns, **r})
         for r in (b.get("success_loops") or [])[:1]:
-            successloop_rows.append({"session": s["session"], "ns": ns, **r})
+            successloop_rows.append({"session": sid, "ns": ns, **r})
         # #3942 — surface the genuine never-read defect per session with the
         # offending file(s), so the count is actionable, not just a total.
         tnr = (b.get("not_read_classes") or {}).get("true_never_read", 0)
         if tnr:
             never_read_rows.append({
-                "session": s["session"], "ns": ns, "count": tnr,
+                "session": sid, "ns": ns, "count": tnr,
                 "paths": [p.get("path", "") for p in
                           (b.get("true_never_read_paths") or [])[:3]]})
     per_tool_beh = {t: {"calls": tot_tools.get(t, 0),
@@ -995,38 +1027,52 @@ def fmt_pct(frac):
 def _namespace_name(path):
     return os.path.basename(os.path.dirname(path))
 
-def _scope_line(sessions, ns_prefix, since_days, include_subagents, max_sessions):
-    namespaces = sorted({_namespace_name(s["path"]) for s in sessions if "error" not in s})
+def _count_kinds(sessions):
+    """(top-level, subagent) transcript counts for a list of analyzed sessions."""
+    subs = sum(1 for s in sessions if s.get("kind") == "subagent")
+    return len(sessions) - subs, subs
+
+def _scope_line(sessions, ns_prefix, since_days, top_level_only, max_sessions):
+    namespaces = sorted({_ns_of(s) for s in sessions if "error" not in s})
     if len(namespaces) > 8:
         ns_desc = ", ".join(namespaces[:8]) + f", ... (+{len(namespaces)-8} more)"
     else:
         ns_desc = ", ".join(namespaces) if namespaces else "none"
     ns_filter = ns_prefix or "all non-excluded namespaces"
     window = "all-time" if since_days is None else f"last {since_days:g} days"
-    kinds = "top-level session transcripts"
-    if include_subagents:
-        kinds += " (subagents reported separately below)"
+    # #3226 — subagent/workflow transcripts are folded into every total BY DEFAULT;
+    # --top-level-only restores the pre-#3226 view (and prints what it is hiding).
+    if top_level_only:
+        kinds = ("top-level session transcripts ONLY (`--top-level-only`; "
+                 "subagent/workflow spend excluded — see the NOTE)")
+    else:
+        kinds = ("session transcripts + subagent/workflow transcripts "
+                 "(folded into every total below, attributed to their parent session)")
     cap = f"; max top-level sessions: {max_sessions}" if max_sessions else ""
     return (f"{len(namespaces)} namespaces folded ({ns_desc}); "
             f"namespace filter: {ns_filter}; time window: {window}; {kinds}{cap}")
 
 def _subagent_note(summary):
+    """What a `--top-level-only` run is hiding: the subagent spend it left out (#3226)."""
     if not summary or not summary.get("count"):
         return None
     tokens = summary.get("tokens", {})
     return (f"NOTE: +{summary['count']} subagent transcripts uncounted; "
-            f"re-run with `--include-subagents` "
+            f"drop `--top-level-only` to fold them in "
             f"(about +${summary.get('cost_usd', 0.0):,.2f} / "
             f"+{fmt_int(tokens.get('output', 0))} output tok).")
 
-def _report_header(S, agg, ns_prefix, since_days, include_subagents, max_sessions,
+def _report_header(S, agg, ns_prefix, since_days, top_level_only, max_sessions,
                    excluded_subagents):
     """Title, generation stamp and the one-line statement of what was in scope."""
     L = []
+    n_top, n_sub = _count_kinds([s for s in S if "error" not in s])
+    audited = (f"{n_top} top-level + {n_sub} subagent = {agg['n_sessions']}"
+               if n_sub else f"{agg['n_sessions']}")
     L.append("# Session-Transcript Audit — active scope\n")
     L.append(f"**Generated:** {datetime.datetime.now().isoformat(timespec='seconds')}  ")
-    L.append(f"**Top-level sessions audited:** {agg['n_sessions']}  ·  **Tool:** `tools/session_audit.py` (re-runnable)  ")
-    L.append(f"**Scope:** {_scope_line(S, ns_prefix, since_days, include_subagents, max_sessions)}")
+    L.append(f"**Transcripts audited:** {audited}  ·  **Tool:** `tools/session_audit.py` (re-runnable)  ")
+    L.append(f"**Scope:** {_scope_line(S, ns_prefix, since_days, top_level_only, max_sessions)}")
     note = _subagent_note(excluded_subagents)
     if note:
         L.append(note)
@@ -1339,28 +1385,65 @@ def _behavior_lens(agg):
     L.append("")
     return L
 
+def _transcript_label(s):
+    """Row label for one transcript. A subagent row is rendered as
+    `<parent>→<agent>` so a folded fan-out is never mistaken for a session (#3226)."""
+    sid = s["session"][:8]
+    if s.get("kind") == "subagent":
+        return f"{_attributed_session(s)[:8]}→{sid}"
+    return sid
+
 def _top_sessions_table(S):
-    """The 15 sessions that generated the most output, with their cost shape."""
+    """The 15 transcripts that generated the most output, with their cost shape."""
     L = []
-    L.append("## Top 15 sessions by output tokens\n")
+    L.append("## Top 15 transcripts by output tokens\n")
     L.append("| Session | NS | Turns | Tool calls | Output tok | I:O | Cache-hit | cc-share | Est.$ |")
     L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for s in sorted(S, key=lambda x: -x["tokens"]["output"])[:15]:
-        ns = os.path.basename(os.path.dirname(s["path"]))
+        ns = _ns_of(s)
         io = f"{s['io_ratio']:.0f}" if s["io_ratio"] else "—"
         ch = f"{s['cache_hit_frac']*100:.0f}%" if s["cache_hit_frac"] is not None else "—"
         cc = f"{s['cc_share']*100:.0f}%" if s.get("cc_share") is not None else "—"
-        L.append(f"| {s['session'][:8]} | {ns} | {s['assistant_turns']} | {s['n_tool_use']} | "
+        L.append(f"| {_transcript_label(s)} | {ns} | {s['assistant_turns']} | {s['n_tool_use']} | "
                  f"{fmt_int(s['tokens']['output'])} | {io} | {ch} | {cc} | ${s['cost_usd']:.2f} |")
     L.append("")
     return L
 
+def _subagent_fold_table(S):
+    """#3226 reconciliation: the top-level / subagent split of the SAME totals rendered
+    above, so `audit` == `audit --top-level-only` + this delta is checkable by eye and
+    the delta can never be added back on top (that would double-count)."""
+    subs = [s for s in S if s.get("kind") == "subagent"]
+    if not subs:
+        return []
+    top = [s for s in S if s.get("kind") != "subagent"]
+    rows = [("top-level sessions", top), ("subagent / workflow", subs),
+            ("**TOTAL (= scope totals above)**", S)]
+    L = []
+    L.append("## Subagent / workflow fold — INCLUDED in every total above (#3226)\n")
+    L.append(f"{len(subs)} subagent transcripts are folded into the scope totals, the "
+             "behavioral lens and the per-namespace rollup, attributed to their parent "
+             "session. This table is a RECONCILIATION of those totals, not an addition — "
+             "adding it back on would double-count. Use `--top-level-only` for the "
+             "top-level-only view (the `top-level sessions` row below).\n")
+    L.append("| Slice | Transcripts | Output tok | Fresh input | Cache-read | Cache-create | Est. cost |")
+    L.append("|---|---:|---:|---:|---:|---:|---:|")
+    for name, group in rows:
+        g = summarize_analyses(group)
+        t = g["tokens"]
+        L.append(f"| {name} | {g['count']} | {fmt_int(t.get('output', 0))} | "
+                 f"{fmt_int(t.get('input', 0))} | {fmt_int(t.get('cache_read', 0))} | "
+                 f"{fmt_int(t.get('cache_create', 0))} | ${g['cost_usd']:,.2f} |")
+    L.append("")
+    return L
+
 def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
-              include_subagents=False, max_sessions=None, excluded_subagents=None):
+              top_level_only=False, max_sessions=None, excluded_subagents=None):
     S = [s for s in sessions if "error" not in s]
-    L = _report_header(S, agg, ns_prefix, since_days, include_subagents,
+    L = _report_header(S, agg, ns_prefix, since_days, top_level_only,
                        max_sessions, excluded_subagents)
     L.extend(_scope_totals(agg))
+    L.extend(_subagent_fold_table(S))
     L.extend(_model_mix_table(agg))
     L.extend(_billing_bucket_table(agg))
     L.extend(_per_model_table(agg))
@@ -1401,48 +1484,61 @@ def summarize_transcripts(records):
 def cmd_audit(a):
     roots = a.root or DEFAULT_ROOTS
     ns_prefix = "" if a.all else a.ns_prefix
-    ss = discover(roots, a.since_days, ns_prefix,
-                  include_subagents=a.include_subagents)
+    # #3226 — subagent/workflow transcripts are folded into the rollup BY DEFAULT.
+    # They were ~23% of billed spend sitting outside the headline totals, and every
+    # delegated turn lives in one, so the behavioral detectors (retry loop, file churn,
+    # success loop, never-read edit, cache burst) had no delegated volume to look at
+    # at all. `--top-level-only` restores the pre-#3226 view and prints what it hides.
+    top_level_only = getattr(a, "top_level_only", False)
+    ss = discover(roots, a.since_days, ns_prefix, include_subagents=not top_level_only)
+    sess_recs = [s for s in ss if s.get("kind", "session") != "subagent"]
+    sub_recs = [s for s in ss if s.get("kind") == "subagent"]
     if a.max:
-        ss = ss[:a.max]
-    kind = {s["path"]: s.get("kind", "session") for s in ss}
-    print(f"analyzing {len(ss)} transcripts ...", file=sys.stderr)
+        # --max caps TOP-LEVEL sessions (that is what it has always meant and what the
+        # scope line reports). Slicing the interleaved list instead would silently make
+        # it mean "transcripts" and drop sessions the operator asked for. A subagent
+        # rides along when its parent survived the cap, or when its parent is not in the
+        # window at all — dropping those orphans would hide real spend.
+        kept = sess_recs[:a.max]
+        keep_ids = {_parent_session(r) for r in kept}
+        in_scope = {_parent_session(r) for r in sess_recs}
+        sub_recs = [r for r in sub_recs
+                    if _parent_session(r) in keep_ids or _parent_session(r) not in in_scope]
+        sess_recs = kept
+    print(f"analyzing {len(sess_recs) + len(sub_recs)} transcripts "
+          f"({len(sess_recs)} top-level + {len(sub_recs)} subagent) ...", file=sys.stderr)
     out = []
-    for s in ss:
-        r = analyze(s["path"])
-        r["kind"] = kind.get(s["path"], "session")
+    for rec in sess_recs + sub_recs:
+        r = analyze(rec["path"])
+        r["kind"] = rec.get("kind", "session")
+        r["ns"] = rec.get("ns")
+        r["parent_session"] = _parent_session(rec)
         out.append(r)
-    sess = [r for r in out if r.get("kind") == "session"]
+    sess = [r for r in out if r.get("kind") != "subagent"]
     subs = [r for r in out if r.get("kind") == "subagent"]
-    agg = aggregate(sess)
+    # `out` is `sess` + `subs` with no overlap (discover returns each path once), so the
+    # witness holds by construction: this aggregate == the --top-level-only aggregate
+    # plus exactly the subagent delta. _subagent_fold_table renders that reconciliation.
+    agg = aggregate(out)
     excluded_subagents = None
-    if not a.include_subagents:
+    if top_level_only:
         subagent_records = [s for s in discover(roots, a.since_days, ns_prefix,
                                                 include_subagents=True)
                             if s.get("kind") == "subagent"]
         if subagent_records:
             excluded_subagents = summarize_transcripts(subagent_records)
-    md = report_md(sess, agg, ns_prefix=ns_prefix, since_days=a.since_days,
-                   include_subagents=a.include_subagents, max_sessions=a.max,
+    md = report_md(out, agg, ns_prefix=ns_prefix, since_days=a.since_days,
+                   top_level_only=top_level_only, max_sessions=a.max,
                    excluded_subagents=excluded_subagents)
-    if subs:
-        sub_summary = summarize_analyses(subs)
-        st = collections.Counter(sub_summary["tokens"])
-        scost = sub_summary["cost_usd"]
-        md += ("\n## Subagent / workflow spend (SEPARATE transcripts, usually uncounted)\n\n"
-               f"- **{len(subs)} subagent transcripts** (workflow/fan-out agents under `<session>/subagents/`)\n"
-               f"- Output tokens: {fmt_int(st['output'])}  ·  Cache-read: {fmt_int(st['cache_read'])}  "
-               f"·  Cache-creation: {fmt_int(st['cache_create'])}  ·  Fresh input: {fmt_int(st['input'])}\n"
-               f"- Est. cost: ${scost:,.2f}  _(assumed pricing)_\n"
-               f"- **True spend = top-level + this.** Subagent output here is "
-               f"{(st['output']/max(sum(r['tokens']['output'] for r in sess if 'error' not in r),1)*100):.0f}% "
-               f"of the top-level session output — the orchestrator sessions undercount real work by that much.\n")
     if a.md:
         open(a.md, "w", encoding="utf-8").write(md)
         print(f"wrote {a.md}", file=sys.stderr)
     if a.json:
         slim = {"aggregate": agg,
+                "top_level_only": top_level_only,
                 "excluded_subagents": excluded_subagents,
+                "subagent_summary": summarize_analyses(subs) if subs else None,
+                "top_level_summary": summarize_analyses(sess) if subs else None,
                 "sessions": [{k: v for k, v in s.items() if k != "prompts"} for s in out]}
         json.dump(slim, open(a.json, "w", encoding="utf-8"), indent=2)
         print(f"wrote {a.json}", file=sys.stderr)
@@ -1454,7 +1550,7 @@ def cmd_audit(a):
         hangs = (agg.get("behavior") or {}).get("interactive_hangs", 0)
         if hangs > gate:
             print(f"::gate:: INTERACTIVE_HANG regression — {hangs} hang(s) across "
-                  f"{len(sess)} sessions exceeds --gate-hangs {gate}", file=sys.stderr)
+                  f"{len(out)} transcripts exceeds --gate-hangs {gate}", file=sys.stderr)
             raise SystemExit(3)
         print(f"gate ok: {hangs} interactive hang(s) ≤ --gate-hangs {gate}",
               file=sys.stderr)
@@ -1468,7 +1564,7 @@ def cmd_audit(a):
                  or {}).get("true_never_read", 0)
         if never > nr_gate:
             print(f"::gate:: TRUE_NEVER_READ regression — {never} never-read edit(s) "
-                  f"across {len(sess)} sessions exceeds --gate-never-read {nr_gate}",
+                  f"across {len(out)} transcripts exceeds --gate-never-read {nr_gate}",
                   file=sys.stderr)
             raise SystemExit(3)
         print(f"gate ok: {never} never-read edit(s) ≤ --gate-never-read {nr_gate}",
@@ -1717,8 +1813,17 @@ def main():
             q.add_argument("--max", type=int, default=None)
             q.add_argument("--json", default=None)
             q.add_argument("--md", default=None)
-            q.add_argument("--include-subagents", action="store_true",
-                           help="also fold in subagent/workflow transcripts (separate files)")
+            # #3226 — folding subagent/workflow transcripts is now the DEFAULT, so the
+            # opt-IN flag became a no-op alias kept for callers/scripts that pass it,
+            # and --top-level-only is the opt-OUT that restores the pre-#3226 view.
+            g = q.add_mutually_exclusive_group()
+            g.add_argument("--top-level-only", action="store_true",
+                           help="count ONLY top-level session transcripts, excluding "
+                                "subagent/workflow spend from every total and from the "
+                                "behavioral lens (the pre-#3226 view)")
+            g.add_argument("--include-subagents", action="store_true",
+                           help="no-op: subagent/workflow transcripts are folded in by "
+                                "default since #3226 (kept for compatibility)")
             q.add_argument("--gate-hangs", type=int, default=None, metavar="N",
                            help="exit 3 if interactive-editor/pager hangs (#2365 d3) "
                                 "across the scanned window exceed N — a CI regression "

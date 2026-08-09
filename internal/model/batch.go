@@ -260,7 +260,21 @@ func (m *Model) NewBatchFromPrefix(prefix *KVCache, n int) *BatchSession {
 // NewBatchFromPrefixReserve is NewBatchFromPrefix with per-user cache capacity reserved
 // for the known decode/result tail. It preserves the same exact cloned prefix but avoids
 // append-triggered prefix re-copies during the measured fleet run.
+// It refuses, by name, an architecture whose session state is NOT the KVCache — the same
+// rule SessionFromPrefix enforces, asked here because this constructor assembles its Session
+// structs by hand and so bypasses that one (#5548). A recompute session carries its prefix as
+// a token history and leaves the cache empty, so the clone above would hand back n lanes that
+// have ingested nothing while every caller believes each holds the shared prefix. This site is
+// the worse of the two: it fans that loss across the whole batch at once, and the resulting
+// decode is wrong with no error, because an empty cache is a well-formed zero-length prefix at
+// every consumer. Carrying the history instead would buy nothing — a cacheless forward
+// recomputes each lane's prefix regardless, so the once-not-n prefill this constructor exists
+// to deliver does not exist for it, and reporting it would misstate the cross-agent lever.
 func (m *Model) NewBatchFromPrefixReserve(prefix *KVCache, n, extraPositions int) *BatchSession {
+	if !m.Cfg.KVPrefixReuseSupported() {
+		panic("model: NewBatchFromPrefix is not available for architecture " + m.Cfg.archFamilyKey() +
+			": its session state is the token history, not the KV cache, so a cache clone carries no prefix")
+	}
 	bs := &BatchSession{M: m, Seqs: make([]*Session, n)}
 	for i := range bs.Seqs {
 		bs.Seqs[i] = &Session{M: m, Cache: prefix.CloneWithReserve(extraPositions)}

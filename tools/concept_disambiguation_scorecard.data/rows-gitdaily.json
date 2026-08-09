@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "x2-score-debt-gitdailyhealthdebtkey",
+      "canonical": "HealthDebtKey (git-daily health card)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The scorecard debt-integer key for the git-daily health card: the string \"git_daily_debt\" under which the card publishes its count of health lenses scoring below the pass line.",
+      "distinction": "Not the generic per-scorecard *_debt integer concept (x2-score-debt-debtintegers) and not a named scorecard surface (x2-score-debt-scorecardvariants): this is one concrete card's key constant, the argument the git-daily renderer passes to scorecard.Render to select which integer heads the work-list.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers",
+        "x2-score-debt-scorecardvariants"
+      ],
+      "aliases": [],
+      "grounding": "HealthDebtKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x2-render-materialize-gitdailyrenderhealth",
+      "canonical": "RenderHealth (git-daily health readout)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The one-call operator readout for the git-daily health card: it composes the graded card from HealthFacts and projects it through scorecard.Render as a terminal work-list keyed on HealthDebtKey.",
+      "distinction": "Not the generic scorecard markdown projector (x2-render-materialize-renderer), which it calls, and not a transcript renderer (x2-render-materialize-rendertext): this is the git-daily-specific compose-then-render pairing, the only entry point that decides WHICH debt key orders the readout.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "x2-render-materialize-rendertext"
+      ],
+      "aliases": [],
+      "grounding": "RenderHealth",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

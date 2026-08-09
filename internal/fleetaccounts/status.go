@@ -225,11 +225,45 @@ func shouldConsultProbeLedger() bool {
 	return accountprobe.ResolveRegDir().BlocksDerivable()
 }
 
+// seatProbeUnmeasured reports whether a BUSY probe ledger — one carrying rows for at least
+// one account — has no current evidence about THIS seat: no row at all, or a newest row past
+// accountprobe.SeatCoverageMaxAgeMin (or undatable). It is the per-seat half of the question
+// shouldConsultProbeLedger asks per-registry, and the whole of #5391: on the host that filed
+// it the ledger was present, derivable and busy — opencode-* rows current to the minute —
+// while several claude seats' newest rows were 8-9 days old, so a registry-level "blocks are
+// derivable here" was true and told the fold nothing whatever about those seats.
+//
+// The "busy" precondition (CoverageReport.Sufficient) is deliberate and is the reason this
+// does not re-open #5439's boundary. A ledger that has recorded NOTHING is already described
+// by the registry-level judgement, and a seat-level downgrade there would only restate it; a
+// ledger that has recorded rows for OTHER accounts is the case where the registry-level
+// answer is affirmatively misleading, because the prober demonstrably ran and demonstrably
+// skipped this seat. Only the second case is what #5391 observed, so only the second case
+// moves. now is injected by the caller for determinism.
+func seatProbeUnmeasured(account string, now time.Time) bool {
+	rep := accountprobe.GradeSeats([]string{account}, "", now)
+	if !rep.Sufficient || len(rep.Seats) != 1 {
+		return false
+	}
+	return !rep.Seats[0].Health.Measured()
+}
+
 // markUnknownHealth downgrades the fold's status_source from the confident "registry" to
-// "registry-unknown" when an UNBLOCKED seat is being published out of a registry that
-// cannot derive a block at all (no probe ledger beside its sessions.json — see
-// accountprobe.RegChoice.BlocksDerivable, whose doc states the obligation this discharges:
-// a caller that would otherwise publish "no seats blocked" must publish nothing instead).
+// "registry-unknown" when an UNBLOCKED seat is being published on probe evidence that does
+// not exist. Two disjoint absences reach the same verdict:
+//
+//   - blocksDerivable false — the registry itself cannot derive a block at all (no probe
+//     ledger beside its sessions.json — see accountprobe.RegChoice.BlocksDerivable, whose doc
+//     states the obligation this discharges: a caller that would otherwise publish "no seats
+//     blocked" must publish nothing instead).
+//   - seatUnmeasured true — the registry CAN derive blocks and its ledger is busy, but that
+//     ledger holds no current row for this particular seat (see seatProbeUnmeasured). #5391:
+//     "never probed" and "probed OK" must not both read as a proven-free seat just because
+//     the prober is healthy for some other account class.
+//
+// The second is the narrower and later of the two, and it is what keeps the first from being
+// read as a sufficient test. A registry-wide grade cannot see a per-class coverage hole, and
+// a per-class hole is what routes workers at a seat that answers 403 to everything.
 //
 // Unknown-health is a THIRD state, and deliberately not a block. Converting absence into
 // blocked would strand every seat on a host whose prober has not run — and worse, it is
@@ -244,8 +278,11 @@ func shouldConsultProbeLedger() bool {
 // A blocked seat keeps "registry": "blocked" is a positive derivation from the registry's
 // own throttle/auth rows, not a statement about probe evidence, so its provenance is not in
 // doubt. An empty registry keeps "none", which already says "nothing was consulted".
-func markUnknownHealth(st RuntimeStatus, blocksDerivable bool) RuntimeStatus {
-	if blocksDerivable || st.Blocked || st.StatusSource != "registry" {
+func markUnknownHealth(st RuntimeStatus, blocksDerivable, seatUnmeasured bool) RuntimeStatus {
+	if st.Blocked || st.StatusSource != "registry" {
+		return st
+	}
+	if blocksDerivable && !seatUnmeasured {
 		return st
 	}
 	st.StatusSource = "registry-unknown"
@@ -562,9 +599,16 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		st.BlockKind, st.hasBlockKind = kind, true
 		st.BlockReason = reason
 	}
-	// Nothing above found a block. If the registry could not have derived one, say so
-	// rather than publishing a seat as proven-free on evidence that was never available.
-	return markUnknownHealth(st, consultLedger)
+	// Nothing above found a block. If the registry could not have derived one — or if the
+	// busy ledger it derives them from has no current row for THIS seat — say so rather than
+	// publishing a seat as proven-free on evidence that was never available. The seat grade
+	// is read only when it can still change the answer, so a blocked seat (whose provenance
+	// is not in doubt) and a ledger-less registry (already answered) pay no extra ledger read.
+	seatUnmeasured := false
+	if consultLedger && !st.Blocked && st.StatusSource == "registry" {
+		seatUnmeasured = seatProbeUnmeasured(account, now)
+	}
+	return markUnknownHealth(st, consultLedger, seatUnmeasured)
 }
 
 func registryEmpty(reg Registry) bool {

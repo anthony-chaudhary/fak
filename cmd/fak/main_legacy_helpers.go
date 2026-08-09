@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -44,6 +45,20 @@ import (
 // SHAPE, never its name, and a verification failure exits non-zero with the closed
 // vocabulary refusal named on stderr  -  the envelope arm never fails open.
 func cmdPolicy(argv []string) {
+	if len(argv) > 0 && argv[0] == "land-rule" {
+		fs := flag.NewFlagSet("policy land-rule", flag.ExitOnError)
+		candidate := fs.String("candidate", "", "ArgRules-only candidate JSON")
+		policyPath := fs.String("policy", "", "policy manifest to merge")
+		reloadURL := fs.String("reload-url", "", "POST endpoint for the running gateway policy reload")
+		land := fs.Bool("land", false, "write the merged policy and reload (default is dry-run)")
+		rollback := fs.Bool("rollback", false, "restore the recorded preimage and reload")
+		_ = fs.Parse(argv[1:])
+		if err := runPolicyLandRule(*policyPath, *candidate, *reloadURL, *land, *rollback, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "fak policy land-rule:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	fs := flag.NewFlagSet("policy", flag.ExitOnError)
 	verbFlagUsage(fs, "policy")
 	dump := fs.Bool("dump", false, "write the built-in DefaultPolicy as a manifest to stdout")
@@ -65,7 +80,18 @@ func cmdPolicy(argv []string) {
 			RunningVersion: appversion.Current(),
 		})
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak policy:", err)
+			// This is the command the POLICY_LOAD_FAILED recovery sends an operator
+			// to, so it must not dead-end here: the rejection itself carries the
+			// knob that produced it and the next step, exactly like the bail that
+			// sent them (bail.go).
+			writeConfigBail(os.Stderr, configBail{
+				Verb:    "fak policy",
+				Reason:  bailPolicyLoadFailed,
+				Summary: fmt.Sprintf("--check rejected the manifest: %v", err),
+				Knobs:   []bailKnob{bailFile(*check, "did not validate").want("a manifest whose every deny cites a closed-vocabulary reason")},
+				Check:   "fak policy --dump   # the default manifest, to diff yours against",
+				Bind:    []string{"path=" + *check},
+			})
 			os.Exit(1)
 		}
 		fmt.Print(report)
@@ -103,6 +129,12 @@ type orgCheckOptions struct {
 // rendered; anything else takes the original policy.LoadRuntime path unchanged, so a
 // plain manifest  -  including an unreadable or invalid one  -  keeps the exact wording
 // this verb has always produced.
+//
+// The ONE ambient read is the advisory modver rev printed beside a valid manifest's path
+// (#4311): it arrives through the policyManifestRevFn seam, is best-effort (a manifest
+// outside a git repo, or one that is not a tracked examples/<file>.json module, simply
+// resolves to no rev), and is display only  -  it is never consulted to decide whether a
+// floor validates, so the accept/reject behavior above is exactly what it was.
 func checkPolicyFile(path string, org orgCheckOptions) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err == nil && isOrgEnvelope(raw) {
@@ -112,7 +144,7 @@ func checkPolicyFile(path string, org orgCheckOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("OK  %s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", path, policy.SummaryRuntime(rt)), nil
+	return fmt.Sprintf("OK  %s%s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", path, policyRevTag(policyManifestRevFn(path)), policy.SummaryRuntime(rt)), nil
 }
 
 // isOrgEnvelope sniffs whether raw is a signed `fak-org-policy/v1` envelope rather
@@ -455,10 +487,41 @@ func statusName(s abi.Status) string {
 }
 
 func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fak:", err)
+	if err == nil {
+		return
+	}
+	// applyPolicy — the launch-time floor install, reached from `fak serve`,
+	// `fak chat`, `fak attest`, and the agent verbs — ends here on a floor that
+	// would not load. That made the single most common fatal misconfiguration
+	// fak has print `fak: policy floor.json: invalid manifest: ...` and stop,
+	// with no path named as a knob and nothing to run next.
+	//
+	// applyPolicy lives in main.go and calls this helper, so recognizing the
+	// typed error here upgrades every one of those call sites at once. Every
+	// other must() caller is untouched: only a *policy.LoadError takes this path.
+	var loadErr *policy.LoadError
+	if errors.As(err, &loadErr) {
+		observed := "did not validate"
+		want := "a manifest whose every deny cites a closed-vocabulary reason"
+		if loadErr.Op == policy.LoadOpRead {
+			observed = "could not be read"
+			want = "a readable path to the capability floor"
+		}
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak",
+			Reason:  bailPolicyLoadFailed,
+			Summary: fmt.Sprintf("refusing to start on a capability floor that would not load: %v", err),
+			Knobs: []bailKnob{
+				bailFlag("policy", loadErr.Path),
+				bailFile(loadErr.Path, observed).want(want),
+			},
+			Check: "fak policy --check " + loadErr.Path + "   # the precise rejection, read-only",
+			Bind:  []string{"path=" + loadErr.Path},
+		})
 		os.Exit(1)
 	}
+	fmt.Fprintln(os.Stderr, "fak:", err)
+	os.Exit(1)
 }
 
 // embeddedGGUFTokenizer builds a tokenizer straight from the GGUF's own

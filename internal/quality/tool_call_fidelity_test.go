@@ -60,6 +60,30 @@ func TestToolCallFidelityFaithfulCallPasses(t *testing.T) {
 // TestToolCallFidelityWrongToolFails is the selection-defect witness: a call
 // naming a different tool fails closed at score 0 and Detail names both the
 // selected and the expected tool.
+func TestToolCallFidelityRejectsSchemaLegalInventedLiteral(t *testing.T) {
+	c := toolFidelityCase(1)
+	eng := Trace{Text: `{"tool":"get_weather","args":{"city":"Oslo","days":7,"units":"celsius"}}`}
+	got := toolCallFidelity{}.Judge(Trace{}, eng, c)
+	if got.Pass || got.Score != 2.0/3.0 {
+		t.Fatalf("schema-legal invented days must fail at 2/3, got %+v", got)
+	}
+	for _, want := range []string{`argument "days"`, "invented literal 7", "task instruction"} {
+		if !strings.Contains(got.Detail, want) {
+			t.Fatalf("detail %q missing %q", got.Detail, want)
+		}
+	}
+}
+
+func TestToolCallFidelityInstructionLiteralNormalization(t *testing.T) {
+	c := toolFidelityCase(1)
+	c.Prompt = "Fetch the 3-day OSLO forecast in degrees C."
+	eng := Trace{Text: `{"tool":"get_weather","args":{"city":"oslo","days":3,"units":"celsius"}}`}
+	got := toolCallFidelity{}.Judge(Trace{}, eng, c)
+	if !got.Pass || got.Score != 1 {
+		t.Fatalf("normalized instruction literals should pass, got %+v", got)
+	}
+}
+
 func TestToolCallFidelityWrongToolFails(t *testing.T) {
 	c := toolFidelityCase(1)
 	wrong := `{"tool":"send_email","args":{"city":"Oslo","days":3,"units":"celsius"}}`

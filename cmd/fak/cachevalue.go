@@ -53,7 +53,7 @@ import (
 
 //fak:ctxplan verb=cachevalue enters="nothing live — an offline fold over the durable cache-value, cache-savings, and gateway-usage JSONL ledgers on disk" pages="nothing into a model window — it renders a cache-effectiveness P&L card and posts it to the #scoreboard Slack channel (or prints it under --dry-run)" warms="nothing — it REPORTS on whether the kernel prompt-cache method is paying off; it warms no prompt cache or KV itself"
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | census | metrics", argv,
+	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | census | metrics | regress", argv,
 		subcommand{"report", runCachevalueReport},
 		subcommand{"shapes", runCachevalueShapes},
 		subcommand{"compaction", runCachevalueCompaction},
@@ -64,6 +64,7 @@ func cmdCachevalue(argv []string) {
 		subcommand{"weekly", runCachevalueWeekly},
 		subcommand{"census", runCachevalueCensus},
 		subcommand{"metrics", runCachevalueMetrics},
+		subcommand{"regress", runCachevalueRegress},
 	)
 }
 
@@ -86,6 +87,7 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "the durable cache-value ledger to fold (docs/nightrun/cache-value.jsonl)")
 	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "the Track-2 OBSERVED-$ ledger to fold (.fak/nightrun/cache-savings.jsonl)")
 	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (.fak/nightrun/gateway-usage.jsonl)")
+	fabricLedger := fs.String("microcontext-ledger", "", "controlled micro-context prefix A/B ledger to map into Track 1")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
@@ -103,6 +105,14 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	track1 := filterTrack1Since(cachevalueledger.ReadLedgerFile(*ledger), *since)
+	if *fabricLedger != "" {
+		row, err := cachevaluereport.FabricTrack1Row(*fabricLedger)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak cachevalue feed: micro-context provenance: %v\n", err)
+			return 1
+		}
+		track1 = append(track1, row)
+	}
 	track2 := filterTrack2Since(cachevaluereport.ReadSavingsLedgerFile(*savingsLedger), *since)
 	usage := filterGatewayUsageSince(gatewayusageledger.ReadLedgerFile(*usageLedger), *since)
 	report := cachevaluereport.FoldTwoTrackWithUsage(track1, track2, usage, time.Now(), cachevaluereport.FleetBenefitOptions{

@@ -1,0 +1,309 @@
+{
+  "schema": "fak-context-admission/1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run TestCtxAdmission -count=1",
+    "generated_by": "bench.DefaultCtxAdmissionReceipt",
+    "note": "hermetic fixture corpus with a declared reference tokenizer and prompt template; witnesses the admission CONTRACT and its typed refusals, not any provider's real vocabulary"
+  },
+  "cases": 10,
+  "admitted": 2,
+  "refused": 8,
+  "rows": [
+    {
+      "name": "fits-common-prose",
+      "note": "known positive: all-vocabulary prose, counted rendered, fits the window",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-common",
+        "model": "fak-ref-8b",
+        "decision": "ADMITTED",
+        "evidence_gap": false,
+        "measured": true,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "measurement": {
+          "rendered_prompt_digest": "2edded614678c6b9",
+          "rendered_chars": 2085,
+          "rendered_prompt_tokens": 382,
+          "reserved_completion_tokens": 256,
+          "total_tokens": 638,
+          "context_limit_tokens": 870,
+          "headroom_tokens": 232,
+          "char_heuristic_tokens": 521,
+          "char_heuristic_would_admit": true
+        }
+      }
+    },
+    {
+      "name": "same-chars-rare-tokens",
+      "note": "adversarial: byte-for-byte the same LENGTH as fits-common-prose, admitted by the chars-per-token heuristic, refused on real tokens",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-rare",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "OVER_CONTEXT_LIMIT",
+        "evidence_gap": false,
+        "measured": true,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "measurement": {
+          "rendered_prompt_digest": "bc05e951b22fe757",
+          "rendered_chars": 2085,
+          "rendered_prompt_tokens": 714,
+          "reserved_completion_tokens": 256,
+          "total_tokens": 970,
+          "context_limit_tokens": 870,
+          "headroom_tokens": -100,
+          "char_heuristic_tokens": 521,
+          "char_heuristic_would_admit": true
+        }
+      }
+    },
+    {
+      "name": "exact-fit-boundary",
+      "note": "boundary: rendered + reserved is EXACTLY the window; must admit",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-edge",
+        "model": "fak-ref-8b",
+        "decision": "ADMITTED",
+        "evidence_gap": false,
+        "measured": true,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "measurement": {
+          "rendered_prompt_digest": "cc6052ccd8488981",
+          "rendered_chars": 485,
+          "rendered_prompt_tokens": 107,
+          "reserved_completion_tokens": 256,
+          "total_tokens": 363,
+          "context_limit_tokens": 363,
+          "headroom_tokens": 0,
+          "char_heuristic_tokens": 121,
+          "char_heuristic_would_admit": false
+        }
+      }
+    },
+    {
+      "name": "one-token-over-boundary",
+      "note": "boundary: the same request one token over the window; must refuse",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-edge-over",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "OVER_CONTEXT_LIMIT",
+        "evidence_gap": false,
+        "measured": true,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "measurement": {
+          "rendered_prompt_digest": "b0e6dfdb033bef87",
+          "rendered_chars": 485,
+          "rendered_prompt_tokens": 107,
+          "reserved_completion_tokens": 256,
+          "total_tokens": 363,
+          "context_limit_tokens": 362,
+          "headroom_tokens": -1,
+          "char_heuristic_tokens": 121,
+          "char_heuristic_would_admit": false
+        }
+      }
+    },
+    {
+      "name": "tokenizer-unresolved",
+      "note": "no tokenizer was resolved; nothing can be counted",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-no-tokenizer",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "TOKENIZER_UNRESOLVED",
+        "evidence_gap": true,
+        "measured": false,
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        }
+      }
+    },
+    {
+      "name": "tokenizer-unbound",
+      "note": "a tokenizer resolved for a DIFFERENT model; a confident count of the wrong vocabulary",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-wrong-tokenizer",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "TOKENIZER_UNBOUND",
+        "evidence_gap": true,
+        "measured": false,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-70b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        }
+      }
+    },
+    {
+      "name": "template-unresolved",
+      "note": "no prompt template; the string that would be sent is unknown",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-no-template",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "TEMPLATE_UNRESOLVED",
+        "evidence_gap": true,
+        "measured": false,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        }
+      }
+    },
+    {
+      "name": "template-unbound",
+      "note": "a template resolved for a DIFFERENT model; the wrong framing would be counted",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-wrong-template",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "TEMPLATE_UNBOUND",
+        "evidence_gap": true,
+        "measured": false,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-70b"
+        }
+      }
+    },
+    {
+      "name": "limit-undeclared",
+      "note": "the target declares no context window; there is nothing to compare against",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-no-limit",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "CONTEXT_LIMIT_UNDECLARED",
+        "evidence_gap": true,
+        "measured": false,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        }
+      }
+    },
+    {
+      "name": "completion-reserve-undeclared",
+      "note": "no completion headroom declared; the window holds prompt AND completion",
+      "admission": {
+        "schema": "fak-context-admission/1",
+        "request_id": "ctx-no-reserve",
+        "model": "fak-ref-8b",
+        "decision": "REFUSED",
+        "refusal": "COMPLETION_RESERVE_UNDECLARED",
+        "evidence_gap": true,
+        "measured": false,
+        "tokenizer": {
+          "name": "fak-ref-piece",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        },
+        "template": {
+          "name": "fak-ref-chat",
+          "revision": "v1",
+          "model": "fak-ref-8b"
+        }
+      }
+    }
+  ],
+  "refusal_counts": [
+    {
+      "refusal": "TOKENIZER_UNRESOLVED",
+      "count": 1
+    },
+    {
+      "refusal": "TOKENIZER_UNBOUND",
+      "count": 1
+    },
+    {
+      "refusal": "TEMPLATE_UNRESOLVED",
+      "count": 1
+    },
+    {
+      "refusal": "TEMPLATE_UNBOUND",
+      "count": 1
+    },
+    {
+      "refusal": "CONTEXT_LIMIT_UNDECLARED",
+      "count": 1
+    },
+    {
+      "refusal": "COMPLETION_RESERVE_UNDECLARED",
+      "count": 1
+    },
+    {
+      "refusal": "OVER_CONTEXT_LIMIT",
+      "count": 2
+    }
+  ],
+  "unexercised_refusals": [],
+  "char_heuristic_disagreements": 2,
+  "verdict": "CONTEXT_ADMISSION_DISCRIMINATING"
+}

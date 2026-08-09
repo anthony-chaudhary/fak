@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -46,6 +47,66 @@ func TestStallFingerprint_hasSchemaAndVerdict(t *testing.T) {
 	}
 	if _, ok := rec["verdict"]; !ok {
 		t.Fatalf("verdict missing from record")
+	}
+}
+
+// A census in which TWO processes independently cross the reboot high-water: the
+// leaking terminal and, behind it, the TermService svchost the single-max verdict
+// used to mask (#4614).
+func twoCrosserStallSample() stallscan.Sample {
+	return stallscan.Sample{
+		AvailableMB:       229000,
+		SystemHandleTotal: 300000,
+		TopHandles: []stallscan.ProcHandles{
+			{PID: 4242, Name: "WindowsTerminal.exe", Handles: 33054},
+			{PID: 9001, Name: "svchost.exe", Handles: 31200},
+		},
+	}
+}
+
+func TestStallFingerprint_rebootBlockCarriesEveryCrosser(t *testing.T) {
+	// The --json reboot block must name both drivers, not just the max.
+	s := twoCrosserStallSample()
+	rec := stallFingerprint(s, stallscan.Classify(s, stallscan.DefaultThresholds()))
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Reboot stallscan.RebootAdvice `json:"reboot"`
+	}
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Reboot.Process != "WindowsTerminal.exe" {
+		t.Fatalf("headline must stay the worst hog: %+v", back.Reboot)
+	}
+	if len(back.Reboot.Crossers) != 2 || back.Reboot.Crossers[1].Process != "svchost.exe" {
+		t.Fatalf("--json reboot block must carry both crossers, got %+v", back.Reboot.Crossers)
+	}
+	if !strings.Contains(string(b), `"crossers"`) {
+		t.Fatalf("crossers key missing from the emitted JSON:\n%s", b)
+	}
+}
+
+func TestRenderStallFingerprint_listsSecondaryCrossers(t *testing.T) {
+	s := twoCrosserStallSample()
+	var buf bytes.Buffer
+	renderStallFingerprint(&buf, s, stallscan.Classify(s, stallscan.DefaultThresholds()), 6)
+	out := buf.String()
+	if !strings.Contains(out, "reboot      : ADVISED") || !strings.Contains(out, "WindowsTerminal.exe pid 4242 at 33054") {
+		t.Fatalf("expected the headline reboot line:\n%s", out)
+	}
+	if !strings.Contains(out, "ALSO (handle_high_water axis): svchost.exe pid 9001 at 31200") {
+		t.Fatalf("the second crosser must be listed beneath the headline:\n%s", out)
+	}
+	// One crosser renders exactly as before: no ALSO line at all.
+	var solo bytes.Buffer
+	one := stallscan.Sample{AvailableMB: 229000, SystemHandleTotal: 300000,
+		TopHandles: []stallscan.ProcHandles{{PID: 4242, Name: "WindowsTerminal.exe", Handles: 33054}}}
+	renderStallFingerprint(&solo, one, stallscan.Classify(one, stallscan.DefaultThresholds()), 6)
+	if strings.Contains(solo.String(), "ALSO") {
+		t.Fatalf("a lone crosser must not grow an ALSO line:\n%s", solo.String())
 	}
 }
 

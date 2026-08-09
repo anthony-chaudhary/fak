@@ -1,5 +1,11 @@
 # AGENTS.md — orientation for coding agents
 
+> **Not the human contributor guide.** This file is operating instructions for *automated*
+> contributors working inside the maintainers' shared checkout — trunk guards, lane leases,
+> commit trailers, and shared-tree rules that have no meaning outside it. If you are a human
+> evaluating or contributing to fak, read [`README.md`](README.md) for what fak is and
+> [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute; nothing below is required of you.
+
 > You are an autonomous agent working in this repo. This file is the machine-read entry
 > point (the [agents.md](https://agents.md) convention). It is intentionally
 > command-dense and free of philosophy. For the *why*, read [`README.md`](README.md);
@@ -388,6 +394,15 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
   reds the trunk on any `tools/*.py` outside the baseline, and porting a grandfathered script
   to Go shrinks that baseline - the ratchet only ever tightens. When you *touch* a `tools/*.py`
   for non-trivial work, default to porting it to Go in the same pass (`REASON_NEW_PYTHON_TOOL`).
+  **Dependency-heavy Go tools use a nested-module quarantine, not Python and not a root dependency.**
+  Put the public façade at `tools/<name>/` and keep it stdlib-only; put dependency-heavy
+  implementation code beneath it (for example `tools/<name>/terminal/go.mod`). The façade
+  preserves the root invocation (`go run ./tools/<name> ...`) while invoking the nested
+  module explicitly. Never add a root requirement to make a tool compile. The
+  `internal/dependencyquarantine` gate pins the reviewed root require/checksum sets, walks
+  the repository for nested `go.mod` files, rejects non-stdlib façade imports, and runs
+  every discovered nested module under CI. A dependency-budget change requires an explicit
+  allowlist update and review; a new nested module requires no central enumeration.
 - **GPU-server private control is private; public evidence is scrubbed.** Benchmark results and
   runbooks can live here once scrubbed to generic GPU-server language, but live private
   control code belongs in `fak-private`: private bridge/control packages, private cleanup
@@ -443,8 +458,14 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
 
 A guard refusal names a token from a **closed vocabulary** — declared as `[reasons.*]`
 blocks in [`dos.toml`](dos.toml), each with a `summary` + a `fix` you can look up live
-with `dos check-reason <TOKEN>`. When you hit one, recover by the action below; don't
-route around the guard (that just trips the next one).
+with `dos check-reason <TOKEN>`. Eleven of those tokens also carry a **recovery plan built
+into the binary**: `fak recover <TOKEN>` prints the concrete commands for that token —
+dry-run by default, `--execute` runs only the steps the plan marks safe, and a manual-only
+plan refuses `--execute` with exit 3 rather than guessing. `fak recover --list` shows which
+tokens it knows and whether each is `executable` or `manual`; the token argument is
+case- and separator-insensitive, so `fak recover off-trunk` resolves to `OFF_TRUNK`. When
+you hit one, recover by the action below; don't route around the guard (that just trips the
+next one).
 
 | Token | What tripped it | Recover by |
 |---|---|---|
@@ -456,6 +477,7 @@ route around the guard (that just trips the next one).
 | `NEVER_AMEND_SHARED` | a git command would rewrite shared trunk history (`commit --amend`, rebase, `pull --rebase`, or force-push) | do not amend, rebase, or force-push in the shared tree. Make a new path-scoped commit, or fetch and merge the configured trunk in place; push only with a plain fast-forward push. If an existing commit has only a message typo, leave that message intact—shared history has no compliant rewrite path—and validate future subjects first with `fak commit --preview`. |
 | `ARCH_LAYER_VIOLATION` | an upward/cross-tier import, or a new leaf with no declared tier | invert the dependency through a registration seam, or push the shared type down a layer; declare a new leaf's tier (`fak new-leaf`). Floor: `internal/architest` |
 | `OUT_OF_DIRECTION` | request-path logic in an untyped language, or a non-Go package blank-imported into the kernel | keep the request path Go-only; a non-Go seam stays off-path behind a typed, re-validated boundary. Floor: architest `TestHotPathHasNoExec` |
+| `UNAUTHENTICATED_OFF_HOST_BIND` | `fak serve` was asked to bind an address reachable from off this host (`0.0.0.0`, `::`, a bare `:port`, a routable IP) while neither `--require-key-env` nor `--key-principal` configures an inbound token door | arm a token door (`--require-key-env FAK_API_KEY`, or `--key-principal <tenant>=<ENV_VAR>`) with the env var set, or keep the listener local with `--addr 127.0.0.1:8080`. For a deliberate isolated segment where a host firewall does the work, `--unsafe-allow-unauthenticated-bind` binds anyway and warns loudly every boot. Loopback, `--stdio`, and an authenticated off-host bind are never refused. Floor: `cmd/fak/serve_bind_safety.go` |
 | `FILE_ADMISSION` | a staged path is private-only content, a **noisy one-off operational artifact** (GPU reserve/availability status, dispatch telemetry, scratch dump — by the `fak:operator-private` marker or the loose-ops-doc name backstop), regenerable junk, or an oversized blob | move private-only code + operator-only status to `fak-private`; mark a one-off ops doc `fak:operator-private` (or gitignore it); a genuine curated note goes under `docs/notes/` in scrubbed language; drop or gitignore junk; put real data under `experiments/` or `testdata/`. See [`docs/gpu-server-private-boundary.md`](docs/gpu-server-private-boundary.md) |
 | `PUBLIC_LEAK` | staged content matches a redact-needle | remove or redact the needle before committing; `FLEET_ALLOW_LEAK=1` overrides once, only for an intentional adversarial fixture |
 | `OUT_OF_TREE_WRITE` | a write op escaped the repo into a sibling tree, **and** the operator dialed this reason up to `deny` (default is silent-`record`, which does not refuse) | operate inside the workspace; send scratch to a temp dir, never `..`. The default already allows it; a `deny` here is a deliberate operator policy — respect it. See [`docs/repo-guard.md`](docs/repo-guard.md) |
@@ -618,4 +640,3 @@ routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
 | A curated map of all the docs | [`llms.txt`](llms.txt) |
 
 License: [Apache-2.0](LICENSE).
-

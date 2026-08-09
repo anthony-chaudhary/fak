@@ -10,10 +10,12 @@ package main
 //
 //   - --durable : reads the durable C1 session registry (internal/session.Registry over
 //     a FileStore), which survives a process restart and eviction. No gateway required.
-//   - --fleet   : --durable PLUS a best-effort `git fetch` of the refs/fak/locks/*
+//   - --fleet   : --durable PLUS a best-effort, BOUNDED `git fetch` of the refs/fak/locks/*
 //     namespace, then folds in every node's C2 session refs (internal/leaseref
 //     refs/fak/locks/session-*) so a peer node's sessions appear here too. Deduped by id,
-//     preferring the richer local C1 row over its own pushed C2 projection.
+//     preferring the richer local C1 row over its own pushed C2 projection. Both the
+//     remote fetch and the local ref read carry their own deadline — see
+//     sessionFleetFetchBudget / sessionFleetRefReadBudget for why they are separate.
 //
 // Each row is sourced from the registry + an ORACLE, never the agent's self-report:
 //   {id, host, pcb_state, liveness_class, cache_posture, age, parent_id}
@@ -127,20 +129,7 @@ func runSessionInventory(stdout, stderr io.Writer, opt sessionInventoryOpts) int
 		if remote == "" {
 			remote = "origin"
 		}
-		store := leaseref.NewInDir("")
-		ctx := context.Background()
-		// Best-effort fetch: a fleet view of peers' sessions needs the remote refs, but a
-		// missing remote / no network must degrade to "the C2 refs this clone already has",
-		// never fail the whole listing (the same fail-open posture as leaseref publish).
-		if _, ferr := store.Sync(ctx, remote, false, true); ferr != nil {
-			fmt.Fprintf(stderr, "fak session ls --fleet: git fetch %s: %v (showing already-fetched C2 refs only)\n", remote, ferr)
-		}
-		live, _, lerr := store.LiveSessions(ctx, now)
-		if lerr != nil {
-			fmt.Fprintf(stderr, "fak session ls --fleet: read session refs: %v\n", lerr)
-		} else {
-			fleetDescs = live
-		}
+		fleetDescs = fleetSessionDescriptors(stderr, leaseref.NewInDir(""), remote, now)
 	}
 
 	inv := buildSessionInventory(local, fleetDescs, now, opt.staleWindow, opt.fleet)
@@ -149,6 +138,107 @@ func runSessionInventory(stdout, stderr io.Writer, opt sessionInventoryOpts) int
 	}
 	renderSessionInventory(stdout, inv)
 	return 0
+}
+
+// sessionFleetFetchBudget bounds the best-effort remote fetch behind `fak session ls
+// --fleet` (#5568). This call site used to hand store.Sync a context.Background(); Sync
+// shells out to a real `git fetch` and internal/leaseref carries no deadline of its own,
+// so the fail-open posture below covered only "this clone cannot REACH the remote" and
+// never "this clone cannot FINISH reaching it". An auth-stalled or black-holed remote
+// parked the operator's command inside exec.Cmd.Run indefinitely and the degradation line
+// it exists to print was never reached.
+//
+// THE BOUND GOES AT THE CALL SITE, NOT IN leaseref.Store — the rule #5564 established.
+// Store.Sync takes a context.Context, so it must honour its CALLER's deadline rather than
+// impose one, and leasewrite_endpoint.go deliberately wraps it in a WIDER 30s
+// leasePublishTimeout; a floor inside Sync would make that constant a lie.
+//
+// WHY 30s. The repo bounds this exact operation in exactly two other places, and both
+// docs argue along one axis — is a caller waiting on it?
+//
+//   - ambientLeaseRefSyncBudget, 10s (leaseref_sync_ambient.go): a caller IS waiting, and
+//     it is an automated loop tick that never asked to converge, so it is deliberately
+//     tight — the doc says so in as many words.
+//   - leasePublishTimeout, 30s (leasewrite_endpoint.go): NO caller is waiting (an
+//     asynchronous publisher goroutine), which its doc gives as the reason it may be that
+//     wide.
+//
+// This surface holds a caller waiting — but that caller TYPED --fleet, the flag whose
+// entire job is the remote refs. Charging an operator who asked for the remote view the
+// automated tick's budget answers a question they did not ask: "already-fetched C2 refs
+// only" is precisely the thing --fleet exists to be more than. So it sits at the wide end
+// of the range the repo has already sanctioned for one store.Sync — leasePublishTimeout's
+// 30s — and no wider, because nothing in this repo justifies exceeding the widest bound it
+// has ever placed on this operation. It is not written as leasePublishTimeout: the two are
+// bounded for different reasons and must be free to move apart.
+//
+// It is a VISIBILITY bound, not a correctness one. The surface is fail-open, so spending
+// it costs peer rows on this one listing and never a wrong row.
+//
+// A var rather than a const ONLY so a test can shrink it and witness the give-up without
+// sleeping (the ambientLeaseRefSyncBudget precedent). Nothing in production assigns it.
+var sessionFleetFetchBudget = 30 * time.Second
+
+// sessionFleetRefReadBudget bounds the LOCAL C2 ref read that follows the fetch
+// (LiveSessions -> for-each-ref + cat-file over this clone's own ref database). It is
+// deliberately its OWN deadline rather than a share of the fetch's, for two reasons:
+//
+//   - IT IS WHAT MAKES THE DEGRADATION LINE TRUE. That line promises "showing
+//     already-fetched C2 refs only". One shared deadline breaks the promise exactly when
+//     it is made: a fetch that spends the whole budget would hand LiveSessions an
+//     already-dead context, the local read would fail instantly, and the command would
+//     say "showing already-fetched C2 refs only" while showing none of them.
+//   - A DIFFERENT COST PROFILE. The fetch's worst case is a remote that never answers;
+//     this read touches no network at all. So it is bounded as a WEDGE BACKSTOP, not as a
+//     performance budget — the shape prepushArchiveTimeout (2m, prepush_build.go) already
+//     has in this repo: a local git read bounded fail-open so a stalled subprocess becomes
+//     a bounded degraded answer instead of a silent forever-hang.
+//
+// WHY NOT TIGHTER. This read is not cheap in the tail: #5355 measured the pre-batch
+// per-ref reader at ~594s over the ~14k-ref backlog, which is why ListSessions now reads
+// through ONE `git cat-file --batch`. NewInDir wires the stdin seam, so this call site
+// takes that batched path and the bound only has to clear a batched read of a large
+// namespace, not the retired per-ref one. KNOWN TRADE: if the batch is unavailable and the
+// per-ref fallback runs against a backlog that size, this budget cuts the read short —
+// fail-open, so the read error prints and the durable C1 rows still render. That is the
+// deliberate choice over an unbounded wait on a path that is already the degraded one.
+var sessionFleetRefReadBudget = 2 * time.Minute
+
+// fleetSessionDescriptors converges the C2 session namespace with remote and returns the
+// live peer descriptors. Both git steps are BOUNDED and both are FAIL-OPEN: a missing
+// remote, no network, a remote that never answers, or an unreadable ref database each
+// degrade to a stderr line plus the best view still available, never a failed listing.
+// The two budgets are separate on purpose (see each constant's doc).
+func fleetSessionDescriptors(stderr io.Writer, store *leaseref.Store, remote string, now time.Time) []leaseref.SessionDescriptor {
+	fetchCtx, cancelFetch := context.WithTimeout(context.Background(), sessionFleetFetchBudget)
+	_, ferr := store.Sync(fetchCtx, remote, false, true)
+	// Read the expiry BEFORE cancel(), so "the budget ran out" is not confused with "we
+	// tore the context down on the way out".
+	fetchExpired := fetchCtx.Err() != nil
+	cancelFetch()
+	if ferr != nil {
+		// git does not know it was killed by a deadline — a cancelled fetch surfaces as a
+		// plain non-zero exit — so on expiry the line NAMES the budget. Otherwise the
+		// operator reads a bare exit code and blames a remote that was merely slow.
+		cause := ""
+		if fetchExpired {
+			cause = fmt.Sprintf("gave up after the %s fetch budget: ", sessionFleetFetchBudget)
+		}
+		fmt.Fprintf(stderr, "fak session ls --fleet: git fetch %s: %s%v (showing already-fetched C2 refs only)\n", remote, cause, ferr)
+	}
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), sessionFleetRefReadBudget)
+	defer cancelRead()
+	live, _, lerr := store.LiveSessions(readCtx, now)
+	if lerr != nil {
+		cause := ""
+		if readCtx.Err() != nil {
+			cause = fmt.Sprintf("gave up after the %s ref-read budget: ", sessionFleetRefReadBudget)
+		}
+		fmt.Fprintf(stderr, "fak session ls --fleet: read session refs: %s%v\n", cause, lerr)
+		return nil
+	}
+	return live
 }
 
 // buildSessionInventory folds the durable C1 descriptors and the (optional) C2 fleet

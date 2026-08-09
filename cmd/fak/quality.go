@@ -14,10 +14,16 @@ import (
 // ladder (epic #4509): `fak quality run` executes one versioned case through a
 // reference path and an engine path and emits a machine-readable result with a
 // pass/fail verdict and a replayable failure bundle; `fak quality explain` renders
-// a result as first-failure localization (#4520).
+// a result as first-failure localization (#4520) — the failing oracle, the exact
+// divergent step, and the stage of the serving path the evidence attributes it to
+// (normalization, tokenization, logits, sampling, stops, cache, transport, rubric)
+// or an explicit abstention when the evidence names none of them; `fak quality
+// replay` is the consuming half of the portable failure bundle (#4515) — it
+// reproduces a recorded failure from the stored artifact ALONE, so the ladder's
+// replay promise is exercised rather than asserted.
 func cmdQuality(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: fak quality <run|explain> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: fak quality <run|explain|replay> [flags]")
 		os.Exit(2)
 	}
 	switch argv[0] {
@@ -25,8 +31,10 @@ func cmdQuality(argv []string) {
 		os.Exit(runQualityRun(os.Stdout, os.Stderr, argv[1:]))
 	case "explain":
 		os.Exit(runQualityExplain(os.Stdout, os.Stderr, argv[1:]))
+	case "replay":
+		os.Exit(runQualityReplay(os.Stdout, os.Stderr, os.Stdin, argv[1:]))
 	default:
-		fmt.Fprintf(os.Stderr, "fak quality: unknown subcommand %q (want run|explain)\n", argv[0])
+		fmt.Fprintf(os.Stderr, "fak quality: unknown subcommand %q (want run|explain|replay)\n", argv[0])
 		os.Exit(2)
 	}
 }
@@ -39,7 +47,7 @@ func runQualityRun(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	casePath := fs.String("case", "", "path to a quality-case JSON (default: built-in demo case)")
 	enginePath := fs.String("engine-trace", "", "path to an engine Trace JSON to judge against the reference (default: demo engine)")
-	inject := fs.String("inject", "", "demo defect to inject into the engine path: decode|report (default: none/clean)")
+	inject := fs.String("inject", "", "demo defect to inject into the engine path: decode|stop|report (default: none/clean)")
 	asJSON := fs.Bool("json", false, "emit the machine-readable result JSON to stdout")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -102,7 +110,7 @@ func runQualityExplain(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak quality explain", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	resultPath := fs.String("result", "", "path to a result JSON emitted by `fak quality run --json` (default: run the demo)")
-	inject := fs.String("inject", "", "when running the demo, inject a defect: decode|report")
+	inject := fs.String("inject", "", "when running the demo, inject a defect: decode|stop|report")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -133,6 +141,64 @@ func runQualityExplain(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprint(stdout, quality.Explain(res))
 	if !res.Pass {
+		return 1
+	}
+	return 0
+}
+
+// runQualityReplay is the ONE command that replays an injected failure from its
+// bundle (#4515). Its sole input is the stored artifact — a failure bundle, or the
+// whole result `fak quality run --json` emitted — and it reproduces the recorded
+// failure from that artifact's own contents: no case file, no environment, no live
+// engine. Exit codes follow `run`'s convention, read through the replay lens: 0 the
+// bundle reproduced its recorded failure, 1 it did not (it replayed clean, replayed
+// to a DIFFERENT failure, or was too incomplete to replay — inconclusive is never a
+// pass), 2 a usage/IO error, which is never conflated with either.
+func runQualityReplay(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
+	fs := flag.NewFlagSet("fak quality replay", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	bundlePath := fs.String("bundle", "", "path to a failure-bundle JSON or a `fak quality run --json` result (required; \"-\" reads stdin)")
+	asJSON := fs.Bool("json", false, "emit the machine-readable replay verdict JSON to stdout")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *bundlePath == "" {
+		fmt.Fprintln(stderr, "fak quality replay: -bundle is required (a replay's only input is the bundle)")
+		return 2
+	}
+
+	var (
+		blob []byte
+		err  error
+	)
+	if *bundlePath == "-" {
+		blob, err = io.ReadAll(stdin)
+	} else {
+		blob, err = os.ReadFile(*bundlePath)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak quality replay: %v\n", err)
+		return 2
+	}
+
+	b, err := quality.LoadBundle(blob)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak quality replay: %v\n", err)
+		return 2
+	}
+
+	v := quality.Replay(b)
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(v); err != nil {
+			fmt.Fprintf(stderr, "fak quality replay: encode verdict: %v\n", err)
+			return 2
+		}
+	} else {
+		fmt.Fprint(stdout, quality.ExplainReplay(v))
+	}
+	if !v.Reproduced {
 		return 1
 	}
 	return 0

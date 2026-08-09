@@ -116,6 +116,95 @@ func TestReuseHonorsForceRerunEscapeHatch(t *testing.T) {
 	}
 }
 
+// reusePartsRun is reuseParts with an explicit Run command on the one selectable
+// task, so a case can pin the benchmark config (model/precision) the next run uses.
+func reusePartsRun(commit, run string, runs []benchruns.Run) Parts {
+	p := reuseParts(commit, runs)
+	p.Tasks[0].Run = run
+	return p
+}
+
+// TestReuseNarrowsToSelectedTaskConfig is the #5087 failure-class proof: the launch
+// gate must key reuse on the SELECTED task's model/precision, not on (commit × box)
+// alone. Before the fix evalReuse left both axes wildcard, so EVERY row below reused
+// the prior run — including the ones whose recorded config is a different model or a
+// different precision than the task about to run, silently suppressing a datum that
+// was never actually collected.
+func TestReuseNarrowsToSelectedTaskConfig(t *testing.T) {
+	const macbench = "fak macbench all --model qwen3.6-27b --precision q8"
+	const modelbench = "go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m -quant q8"
+	cases := []struct {
+		name      string
+		run       string
+		model     string // the prior catalog run's recorded config
+		precision string
+		wantReuse bool
+	}{
+		{name: "same model and precision", run: macbench, model: "qwen3.6-27b", precision: "q8", wantReuse: true},
+		{name: "case-insensitive config match", run: macbench, model: "Qwen3.6-27B", precision: "Q8", wantReuse: true},
+		{name: "different model", run: macbench, model: "smollm2-135m", precision: "q8"},
+		{name: "different precision", run: macbench, model: "qwen3.6-27b", precision: "q4_k_m"},
+		{name: "unrecorded config", run: macbench, model: "unknown", precision: "unknown"},
+		{name: "model from export dir basename", run: modelbench, model: "smollm2-135m", precision: "q8", wantReuse: true},
+		{name: "different export dir model", run: modelbench, model: "qwen2.5-3b", precision: "q8"},
+		{name: "task pins no config keeps the wildcard", run: "echo 12 tok/s", model: "anything", precision: "whatever", wantReuse: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prior := benchruns.Run{
+				"run_id": fleetRunID, "machine_id": "box-a", "model": tc.model, "precision": tc.precision,
+				"timestamp": "2026-07-15T05:43:47Z",
+			}
+			rep := StatusFromParts(reusePartsRun(fullCommit, tc.run, []benchruns.Run{prior}))
+			if rep.Local.Next == nil || rep.Local.Next.Run != tc.run {
+				t.Fatalf("precondition: selected datum = %+v, want the %q task", rep.Local.Next, tc.run)
+			}
+			wantAction := "collect_local"
+			if tc.wantReuse {
+				wantAction = "reuse_run"
+			}
+			if rep.Reuse.Reuse != tc.wantReuse {
+				t.Fatalf("task %q vs recorded %s/%s: reuse = %+v, want reuse=%v",
+					tc.run, tc.model, tc.precision, rep.Reuse, tc.wantReuse)
+			}
+			if rep.NextAction.Kind != wantAction {
+				t.Fatalf("action = %+v, want %s", rep.NextAction, wantAction)
+			}
+		})
+	}
+}
+
+// TestTaskConfigResolution pins the Run-command parse: which flags name which axis,
+// both value spellings, and the values that name no concrete config at all.
+func TestTaskConfigResolution(t *testing.T) {
+	cases := []struct {
+		run       string
+		model     string
+		precision string
+	}{
+		{run: "echo 12 tok/s"},
+		{run: "fak macbench all --gateway http://127.0.0.1:8080 --model qwen3.6-27b --json", model: "qwen3.6-27b"},
+		{run: "fak serve --model=glm-5.2 --precision=q4_k_m", model: "glm-5.2", precision: "q4_k_m"},
+		{run: "go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m", model: "smollm2-135m"},
+		{run: `modelbench -dir C:\cache\smollm2-135m\`, model: "smollm2-135m"},
+		// an explicit report name beats the -dir fallback, whichever order they appear in.
+		{run: "modelbench -dir internal/model/.cache/qwen -name qwen3.6-27b-q4k", model: "qwen3.6-27b-q4k"},
+		// a valueless boolean flag pins nothing: -quant here is followed by another flag.
+		{run: "modelbench -quant -q4k -dir internal/model/.cache/smollm2-135m", model: "smollm2-135m"},
+		// placeholders and shell variables name no concrete config.
+		{run: "fak serve --gguf <glm-5.2.gguf> --model <fill-me-in>"},
+		{run: "fak serve --model $FAK_MODEL --precision $PREC"},
+		// a model id inside a JSON payload is not a flag and must not be mistaken for one.
+		{run: `curl -d '{"model":"deepseek-v2-lite","max_tokens":16}' http://127.0.0.1:8000/v1/chat/completions`},
+	}
+	for _, tc := range cases {
+		model, precision := taskConfig(tc.run)
+		if model != tc.model || precision != tc.precision {
+			t.Errorf("taskConfig(%q) = (%q, %q), want (%q, %q)", tc.run, model, precision, tc.model, tc.precision)
+		}
+	}
+}
+
 // TestLineageReuseUnit exercises the pure predicate across every axis.
 func TestLineageReuseUnit(t *testing.T) {
 	runs := []benchruns.Run{

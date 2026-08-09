@@ -207,7 +207,7 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 	// pinning the subscription, is left alone (Ran=false) — see guardRunHeadlessRehydrate's
 	// doc for why.
 	if p.pinUpstream && p.up == "anthropic" {
-		if v := guardRunHeadlessRehydrate(cmdGuardStdinInteractive(), p.pinUpstream, p.credPath); v.Refused {
+		if v := guardRunHeadlessRehydrate(cmdGuardStdinInteractive(), p.pinUpstream, p.credPath, in.oauthTokenEnv); v.Refused {
 			fmt.Fprintf(os.Stderr, "fak guard: STALE_CRED — the Claude subscription OAuth token in %s is expired and did not refresh within the wait window, and stdin is not a terminal — refusing to spawn a headless agent that would only hit a raw upstream 401.%s\n", v.CredPath, guardLoginStatusNote(us))
 			fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in (refreshes the token), or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or raise FAK_AUTH_REFRESH_WINDOW if a refresh is just slow.")
 			os.Exit(2)

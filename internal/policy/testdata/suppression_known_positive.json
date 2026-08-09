@@ -1,0 +1,6 @@
+{
+  "schema": "fak-policy-suppressions/1",
+  "findings": [{"rule":"secret","scope":"src/a.go"}],
+  "remaining": [],
+  "suppressions": [{"rule":"secret","scope":"src/a.go","reason":"known fixture","status":"used","used":true}]
+}

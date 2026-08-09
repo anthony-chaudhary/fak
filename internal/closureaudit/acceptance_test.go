@@ -1,6 +1,7 @@
 package closureaudit
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -170,6 +171,73 @@ func TestResolveNeverGuessesWhenEvidenceIsMissing(t *testing.T) {
 	})
 	if res.Verdict != AcceptanceUnknown || !strings.Contains(res.Reason, ReasonProbeFailed) {
 		t.Fatalf("probe failed: %+v", res)
+	}
+}
+
+// TestResolveAbstainsOnGenericPresenceOnly reproduces #5822's false positive
+// (#6002): every behaviour-shaped done condition declines at extraction
+// (whitespace), the only surviving needle is the module-wide identifier
+// `Affected`, and presence that generic must abstain — never resolve SHIPPED.
+func TestResolveAbstainsOnGenericPresenceOnly(t *testing.T) {
+	body := "## Done condition\n" +
+		"- a post-restart drain reports `Outcome.Status == applied` and `Outcome.Affected == 0`\n" +
+		"- `Affected` counts run-state changes, not raw writes\n"
+	acc := ExtractAcceptance(body)
+	if len(acc.Needles) != 1 || acc.Needles[0].Text != "Affected" || acc.Needles[0].Kind != NeedleSymbol {
+		t.Fatalf("fixture must survive only the bare identifier: %+v", acc)
+	}
+	if len(acc.Declined) != 2 {
+		t.Fatalf("the behaviour clauses must stay visible as declined: %+v", acc.Declined)
+	}
+	// The measured shape of the #5822 run: `Affected` present in 34 unrelated Go
+	// files on the ref, declared at top level by none of them.
+	files := make([]string, 34)
+	for i := range files {
+		files[i] = fmt.Sprintf("internal/pkg%02d/pkg.go", i)
+	}
+	res := Resolve("origin/main", acc, []Presence{{Needle: "Affected", Found: true, Files: files}})
+	if res.Verdict == AcceptanceShipped {
+		t.Fatalf("generic vocabulary presence resolved SHIPPED — the #5822 false positive: %+v", res)
+	}
+	if res.Verdict != AcceptanceUnknown || !strings.Contains(res.Reason, ReasonGenericPresenceOnly) {
+		t.Fatalf("want UNKNOWN(%s): verdict=%q reason=%q", ReasonGenericPresenceOnly, res.Verdict, res.Reason)
+	}
+	if res.Remaining == "" {
+		t.Fatal("an abstain must say how to corroborate")
+	}
+
+	// Positive control: the same generic needle corroborated by a seam path the
+	// acceptance also names still ships.
+	body = "## Done condition\n" +
+		"- `Affected` counts run-state changes in `internal/fleetbus/drain.go`\n"
+	acc = ExtractAcceptance(body)
+	res = Resolve("origin/main", acc, []Presence{
+		{Needle: "Affected", Found: true, Files: files},
+		{Needle: "internal/fleetbus/drain.go", Found: true, Files: []string{"internal/fleetbus/drain.go"}},
+	})
+	if res.Verdict != AcceptanceShipped {
+		t.Fatalf("a seam-specific path must keep corroborated resolutions SHIPPED: %+v", res)
+	}
+}
+
+// TestResolveBareSymbolSpreadBoundary pins the narrowness cut: a bare symbol
+// found in at most maxBareSymbolSpread files corroborates on its own; one file
+// past that is module vocabulary and abstains.
+func TestResolveBareSymbolSpreadBoundary(t *testing.T) {
+	acc := ExtractAcceptance("## Acceptance\n- `ResolveHostSpill` decides the spill target\n")
+	spread := func(n int) []Presence {
+		files := make([]string, n)
+		for i := range files {
+			files[i] = fmt.Sprintf("cmd/fak/site%02d.go", i)
+		}
+		return []Presence{{Needle: "ResolveHostSpill", Found: true, Files: files}}
+	}
+	if res := Resolve("origin/main", acc, spread(maxBareSymbolSpread)); res.Verdict != AcceptanceShipped {
+		t.Fatalf("a narrowly-spread bare symbol must still ship: %+v", res)
+	}
+	if res := Resolve("origin/main", acc, spread(maxBareSymbolSpread+1)); res.Verdict != AcceptanceUnknown ||
+		!strings.Contains(res.Reason, ReasonGenericPresenceOnly) {
+		t.Fatalf("one past the spread cap must abstain: %+v", res)
 	}
 }
 

@@ -63,8 +63,11 @@ func TestA2AHandlers(t *testing.T) {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
-		if card["id"] != "fleet-fak" {
-			t.Errorf("expected card id 'fleet-fak', got %v", card["id"])
+		// The card's identity carries the configured engine (#5642) — this server
+		// was built with EngineID "mock", so every fak process no longer answers to
+		// the same bare "fleet-fak".
+		if card["id"] != "fleet-fak-mock" {
+			t.Errorf("expected card id 'fleet-fak-mock', got %v", card["id"])
 		}
 
 		if card["version"] != a2aVersion {

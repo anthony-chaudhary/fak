@@ -95,7 +95,23 @@ func policyWideningError(d policyWideningDelta) error {
 }
 
 func applyPolicyRuntimeLocked(rt policy.Runtime, source, digest, warning string, enforceWideningGate bool) (string, error) {
-	widening := diffPolicyWidening(adjudicator.Default.PolicySnapshot(), rt.Adjudicator)
+	current := adjudicator.Default.PolicySnapshot()
+	// CORE-LOCK-ALL (#5423) is checked FIRST and is unconditional: it outranks both
+	// escapes the widening gate below carries. That gate only runs when the caller asks
+	// for it (enforceWideningGate) and is defeatable with FAK_POLICY_RELOAD_ALLOW_WIDEN=1
+	// — reasonable for an operator's own reload, but the whole point of launching under
+	// --core-lock-all is that the session cannot be widened afterwards, including by an
+	// env var the wrapped agent could set on a process it spawns. On a launch WITHOUT the
+	// flag guardCoreLockAllActive() is false and the verdict admits unconditionally, so
+	// this path stays byte-for-byte what it was. Note the classification differs from
+	// diffPolicyWidening's: it routes through policy.DiffAmendment, the canonical
+	// amendment-class engine, and so fails CLOSED on anything it cannot classify.
+	if admit, reason := guardCoreLockAllAdmitAmendment(current, rt.Adjudicator); !admit {
+		err := fmt.Errorf("policy reload refused: %s", reason)
+		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, source, digest, journal.ConfigSwapRejected, err.Error())
+		return "", err
+	}
+	widening := diffPolicyWidening(current, rt.Adjudicator)
 	if enforceWideningGate && !widening.Empty() && !policyReloadWidenConfirmed() {
 		err := policyWideningError(widening)
 		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, source, digest, journal.ConfigSwapRejected, err.Error())

@@ -252,11 +252,34 @@ func (p MultimodalPolicy) valid() error {
 }
 
 func admitVisionEmbedding(img *VisionEmbedding, policy MultimodalPolicy, verdict *MultimodalVerdict, hidden int) error {
+	if err := admitImageMetadata(img.Image, policy, verdict); err != nil {
+		return err
+	}
+	if len(img.Vectors) == 0 {
+		return denyMultimodal(verdict, "image embedding is empty")
+	}
+	verdict.EmbeddingTokens += len(img.Vectors)
+	if verdict.EmbeddingTokens > policy.MaxEmbeddingTokens {
+		return denyMultimodal(verdict, "image embedding token count exceeds limit")
+	}
+	for i, vec := range img.Vectors {
+		if len(vec) != hidden {
+			return denyMultimodal(verdict, fmt.Sprintf("image embedding vector %d has width %d, want %d", i, len(vec), hidden))
+		}
+	}
+	return nil
+}
+
+// admitImageMetadata is the PIXEL-FREE half of image admission: the image count, media
+// type, dimension and byte-budget axes — every check that needs only MultimodalImage, not
+// an encoded embedding. It is split out so the pre-encode gate (vision_prompt.go) can
+// apply these exact bounds, in this exact order, before an image is decoded, instead of
+// inventing a second governance ordering that could disagree with this one.
+func admitImageMetadata(meta MultimodalImage, policy MultimodalPolicy, verdict *MultimodalVerdict) error {
 	verdict.Images++
 	if verdict.Images > policy.MaxImages {
 		return denyMultimodal(verdict, "too many images")
 	}
-	meta := img.Image
 	media := normalizeMediaType(meta.MediaType)
 	if !strings.HasPrefix(media, "image/") {
 		return denyMultimodal(verdict, "media type must be image/*")
@@ -275,18 +298,6 @@ func admitVisionEmbedding(img *VisionEmbedding, policy MultimodalPolicy, verdict
 	verdict.ImageBytes += nbytes
 	if nbytes > policy.MaxImageBytes || verdict.ImageBytes > policy.MaxImageBytes {
 		return denyMultimodal(verdict, "image bytes exceed limit")
-	}
-	if len(img.Vectors) == 0 {
-		return denyMultimodal(verdict, "image embedding is empty")
-	}
-	verdict.EmbeddingTokens += len(img.Vectors)
-	if verdict.EmbeddingTokens > policy.MaxEmbeddingTokens {
-		return denyMultimodal(verdict, "image embedding token count exceeds limit")
-	}
-	for i, vec := range img.Vectors {
-		if len(vec) != hidden {
-			return denyMultimodal(verdict, fmt.Sprintf("image embedding vector %d has width %d, want %d", i, len(vec), hidden))
-		}
 	}
 	return nil
 }

@@ -5,7 +5,8 @@ These pin the parity the .ps1 already had and the .py port had drifted from:
   * REG_DIR must follow FLEET_REG_DIR so the watchdog READS the registry/plan/ledger
     from the same dir the fleet_sessions.py refresh child WRITES (the silent-no-op /
     split-resume-once-ledger blocker when an ambient FLEET_REG_DIR is set by the
-    control pane or an operator).
+    control pane or an operator) -- and with the variable UNSET both sides must still
+    land on the one host registry the shared resolver picks, never a second one (#5390).
   * CLAUDE_EXE must prefer the fleet-wide FLEET_CLAUDE_EXE convention (account_probe.py
     et al.), with FAK_CLAUDE_EXE only a back-compat fallback.
   * Active probing must stay gated to the live tick so a default dry-run spends nothing.
@@ -50,9 +51,20 @@ def test_reg_dir_follows_fleet_reg_dir(tmp_path):
     assert wd.REG_DIR == target, "watchdog must read where fleet_sessions.py writes"
 
 
-def test_reg_dir_defaults_to_local_registry():
+def test_reg_dir_unset_converges_on_the_shared_resolver():
+    """With FLEET_REG_DIR unset the watchdog must land wherever the SHARED resolver lands.
+
+    It used to hard-code the clone-root ``tools/_registry`` here. That is a real dir on a
+    maintainer's box and NOT the one the prober writes its ledger to, so an env-unset
+    watchdog maintained a second, ledger-less registry beside the live one -- the #5390
+    fork. Pinning the resolver rather than a literal path is what keeps the watchdog, the
+    fleet_sessions.py writer and the Go reader on one dir no matter which rung wins here.
+    """
+    import fleet_regdir
+
     wd = _reload({"FLEET_REG_DIR": None})
-    assert wd.REG_DIR == os.path.join(wd.HERE, "_registry")
+    assert wd.REG_DIR == fleet_regdir.reg_dir(), \
+        "an unset FLEET_REG_DIR must resolve, not fork into a second registry"
 
 
 def test_claude_exe_prefers_fleet_convention(tmp_path):
@@ -275,16 +287,29 @@ def _seed_ps1_fleet(tmp_path, *, fak_exit, fak_reason, sessions, ledger_rows=())
     claude = tmp_path / "claude.cmd"
     claude.write_text('@echo off\r\necho launched>>"%s"\r\n' % marker, encoding="ascii")
 
-    # The fake `fak` serves two roles: the `resume admit` gate (echo a decision + exit code)
-    # and, once a managed-cache posture is configured, the `fak guard <posture> -- claude ...`
-    # front. The guard branch records the argv it was fronted with (the behavioral witness that
-    # the posture reached the launch) and is inert for the admit-only tests (%1 != "guard").
+    # The fake `fak` serves three roles: the `resume cap` tick sizer (#3581), the `resume admit`
+    # gate (echo a decision + exit code), and, once a managed-cache posture is configured, the
+    # `fak guard <posture> -- claude ...` front. The guard branch records the argv it was fronted
+    # with (the behavioral witness that the posture reached the launch) and is inert for the
+    # admit-only tests (%1 != "guard").
+    #
+    # The `resume cap` branch is REQUIRED, not optional: since #3581 the .ps1 defaults -MaxPerTick
+    # to 0 and derives the tick size from `fak resume cap`. A fake that answers only `resume admit`
+    # leaves .cap null -> [int]$null -> cap=0 -> "per-tick cap reached (0)" -> the watchdog launches
+    # NOTHING, and every behavioral test below silently asserts against a tick that never ran. The
+    # payload mirrors internal/resume.WatchdogCap and is self-consistent (2 healthy seats x seat_cap
+    # 6 = 12 capacity, 4 active -> headroom 8 -> cap 8, inside floor 4 / ceiling 64) so the derived
+    # cap comfortably exceeds the handful of sessions these fixtures seed.
     guard_marker = tmp_path / "guard_fronts.txt"
     fak = tmp_path / "fak.cmd"
     fak.write_text(
         '@echo off\r\n'
         'if "%1"=="guard" (\r\n'
         'echo %* >> "' + str(guard_marker) + '"\r\n'
+        'exit /b 0\r\n'
+        ')\r\n'
+        'if "%2"=="cap" (\r\n'
+        'echo {"cap":8,"floor":4,"ceiling":64,"seat_cap":6,"healthy_seats":2,"headroom":8}\r\n'
         'exit /b 0\r\n'
         ')\r\n'
         'echo {"decision":{"reason":"' + fak_reason + '"}}\r\n'
@@ -1146,6 +1171,121 @@ def test_continuous_reverts_to_tick_cap_when_governor_fails_open(tmp_path, monke
             (reg / "resume_ledger.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
     assert any(r.get("phase") == "gate_fail_open" for r in rows), \
         "the fail-open is surfaced durably (#2173), never silent"
+
+
+def _drive_cron(root, monkeypatch, *, backlog, headroom, ticks, tick_sec, spacing_sec, cap, env):
+    """Drive `ticks` successive CRON ticks of the REAL main() launch loop over a fixture backlog
+    on a virtual clock. Returns (latencies, ticks_used).
+
+    Fixture: `backlog` sessions that are ALL already dead at t=0 (the moment the backlog exists),
+    with the first cron tick firing at t=0 and each later tick at k*`tick_sec`. Every session's
+    death is t=0, so its launch offset on the virtual clock IS its death->launch latency.
+
+    The clock advances ONLY through the watchdog's own inter-launch spacing (time.sleep), so the
+    latencies are measured from the real loop's pacing decisions rather than asserted from a
+    formula. Between ticks the plan is re-derived WITHOUT the sessions already resumed: a live
+    `claude --resume` forks the transcript into a NEW sid, so fleet_sessions.py never re-plans a
+    resumed sid (the .ps1 models the same fact with PruneClosedPlanRows).
+
+    Conservative by construction: real deaths land at a uniformly random offset INSIDE a cron
+    period, so the tick-quantized baseline here (deaths exactly on a tick boundary) understates
+    its own real latency. A drop measured against it is a lower bound on the real drop."""
+    import json as _json
+    reg = root / "reg"
+    log = root / "log"
+    cfg = root / "cfg"
+    for d in (reg, log, cfg):
+        d.mkdir(parents=True, exist_ok=True)
+    plan_path = reg / "resume_plan.json"
+    sids = [f"{i:08d}-2222-3333-4444-555555555555" for i in range(backlog)]
+
+    def _row(sid):
+        return {"session": sid, "account": ".claude-t", "resume_account": ".claude-t",
+                "project": "C--work-fak", "cwd": None, "disp": "STOPPED_APIERR",
+                "rehomed": False, "config_dir": str(cfg), "resume_config_dir": str(cfg)}
+
+    base_env = {"FAK_LIVE": "1", "FLEET_REG_DIR": str(reg), "FAK_WATCHDOG_LOG_DIR": str(log),
+                "FAK_MAX_PER_TICK": str(cap), "FAK_LAUNCH_SPACING_SEC": str(spacing_sec),
+                "FAK_PROBE": "none", "CLAUDE_CODE_SESSION_ID": None}
+    base_env.update(env)
+    wd = _reload(base_env)
+
+    clock = [0.0]
+    launched_at: dict[str, float] = {}
+
+    class _Proc:
+        def __init__(self, pid):
+            self.pid = pid
+
+    def fake_popen(argv, **kw):
+        argv = list(argv)
+        if "--resume" in argv:
+            launched_at.setdefault(argv[argv.index("--resume") + 1], clock[0])
+        return _Proc(9000 + len(launched_at))
+
+    class _R:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    def fake_gate():
+        # the source governor stays the real rate limiter: admit while the box has free
+        # headroom across every account, then DEFER.
+        if len(launched_at) < headroom:
+            return True, "admitted"
+        return False, "SOURCE_SATURATED"
+
+    monkeypatch.setattr(wd.subprocess, "run", lambda *a, **k: _R())
+    monkeypatch.setattr(wd.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(wd.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(wd, "source_admit_gate", fake_gate)
+
+    ticks_used = 0
+    for k in range(ticks):
+        assert clock[0] <= k * tick_sec, "a tick's launches must fit inside the cron period"
+        clock[0] = float(k * tick_sec)
+        remaining = [s for s in sids if s not in launched_at]
+        if not remaining:
+            break
+        plan_path.write_text(_json.dumps({"plan": [_row(s) for s in remaining]}), encoding="utf-8")
+        assert wd.main() == 0
+        ticks_used = k + 1
+    return [launched_at[s] for s in sids if s in launched_at], ticks_used
+
+
+def test_continuous_drain_lowers_p50_death_to_launch_latency(tmp_path, monkeypatch):
+    # Acceptance #3: MEASURED p50 death->launch latency on a fixture backlog drops vs the
+    # tick-quantized baseline. Same backlog, same headroom, same spacing, same cron period --
+    # only FAK_DRAIN_CONTINUOUS differs, so the delta is attributable to the drain alone.
+    import math
+    import statistics
+    backlog, cap, tick_sec, spacing = 24, 4, 300, 5
+    common = dict(backlog=backlog, headroom=backlog, ticks=backlog + 1, tick_sec=tick_sec,
+                  spacing_sec=spacing, cap=cap)
+    baseline, baseline_ticks = _drive_cron(
+        tmp_path / "baseline", monkeypatch, env={"FAK_DRAIN_CONTINUOUS": None}, **common)
+    continuous, continuous_ticks = _drive_cron(
+        tmp_path / "continuous", monkeypatch,
+        env={"FAK_DRAIN_CONTINUOUS": "1", "FAK_DRAIN_MAX": "500"}, **common)
+
+    # both modes eventually recover the WHOLE backlog -- the comparison is over the same set
+    assert len(baseline) == backlog and len(continuous) == backlog
+    # ... but the baseline needs ceil(B/cap) cron ticks to get there; the drain needs one
+    assert baseline_ticks == math.ceil(backlog / cap) == 6
+    assert continuous_ticks == 1
+
+    p50_baseline = statistics.median(baseline)
+    p50_continuous = statistics.median(continuous)
+    assert p50_continuous < p50_baseline, (p50_continuous, p50_baseline)
+    # the baseline p50 is bounded BELOW by the cron period (tick quantization); the drain's p50
+    # collapses to the source-governor spacing floor and the whole backlog lands inside one period
+    assert p50_baseline > tick_sec, p50_baseline
+    assert p50_continuous <= backlog * spacing, p50_continuous
+    assert max(continuous) < tick_sec, max(continuous)
+    # Measured on this fixture (B=24, cap=4, tick=300s, spacing=5s): p50 death->launch
+    # 757.5s -> 57.5s (13.2x), worst case 1515s -> 115s, 6 cron ticks -> 1. Pinned as
+    # inequalities, not magic numbers, so a spacing/cap retune cannot make this assertion lie.
+    assert p50_continuous * 10 < p50_baseline, (p50_continuous, p50_baseline)
 
 
 def test_powershell_watchdog_has_continuous_drain_parity():

@@ -8,6 +8,34 @@ type Q4KExpertStats struct {
 	MetalFusedQ6KDownExperts   int64 `json:"metal_fused_q6k_down_experts"`
 	MetalFusedQ6KDownBatches   int64 `json:"metal_fused_q6k_down_batches"`
 	MetalFusedQ6KDownFallbacks int64 `json:"metal_fused_q6k_down_fallbacks"`
+
+	// RoutedExpertsDeviceHAL counts routed experts whose gate/up/down projections AND
+	// SwiGLU all executed on compute.Backend through expertSwiGLUHAL — the resident
+	// device routed path. RoutedExpertsOffHAL counts every routed expert that took any
+	// other route (the Metal fused MLP, the host k-quant GEMV, or the generic mulGroup
+	// dispatch). They are recorded at the single branch point in expertSwiGLU, so their
+	// sum is every expert that function ran on a session-bearing kernel.
+	//
+	// The pair exists because throughput alone cannot answer "did the device path run".
+	// #4843 landed a resident-CUDA routed-expert path that was unreachable dead code on
+	// the live glm_moe_dsa decode for three weeks: the DGX evidence showed only tok/s,
+	// which is equally consistent with a slow device path and a host scalar batch. A
+	// CUDA glm_moe_dsa run reporting RoutedExpertsDeviceHAL == 0 with a nonzero
+	// RoutedExpertsOffHAL is running the host path, whatever its tok/s says (#5111).
+	RoutedExpertsDeviceHAL int64 `json:"routed_experts_device_hal"`
+	RoutedExpertsOffHAL    int64 `json:"routed_experts_off_hal"`
+}
+
+// RoutedExpertDeviceHALFraction returns the share of routed experts that executed on
+// the backend through expertSwiGLUHAL. A zero denominator reports 0 rather than NaN.
+// 1.0 on a CUDA glm_moe_dsa decode is the reachability witness; 0.0 is the #5111
+// dead-path condition.
+func (s Q4KExpertStats) RoutedExpertDeviceHALFraction() float64 {
+	total := s.RoutedExpertsDeviceHAL + s.RoutedExpertsOffHAL
+	if total == 0 {
+		return 0
+	}
+	return float64(s.RoutedExpertsDeviceHAL) / float64(total)
 }
 
 // MetalFusedQ6KDownFraction returns the fired-expert fraction for the Metal
@@ -51,6 +79,24 @@ func (s *Session) recordMetalFusedQ6KDownExperts(n int, batched bool) {
 	if batched {
 		s.q4kExpertStats.MetalFusedQ6KDownBatches++
 	}
+}
+
+// recordRoutedExpertDeviceHAL / recordRoutedExpertOffHAL are the two outcomes of
+// expertSwiGLU's device-HAL branch. Both are nil-safe on the receiver: residentKernel
+// and splitKernel carry no session (the host-pinned --cpu-offload-experts regime), so
+// the call is a no-op there rather than a branch at every call site.
+func (s *Session) recordRoutedExpertDeviceHAL(n int) {
+	if s == nil || n <= 0 {
+		return
+	}
+	s.q4kExpertStats.RoutedExpertsDeviceHAL += int64(n)
+}
+
+func (s *Session) recordRoutedExpertOffHAL(n int) {
+	if s == nil || n <= 0 {
+		return
+	}
+	s.q4kExpertStats.RoutedExpertsOffHAL += int64(n)
 }
 
 func (s *Session) recordMetalFusedQ6KDownFallback(n int) {

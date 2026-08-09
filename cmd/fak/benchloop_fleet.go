@@ -299,11 +299,7 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if *remove {
-		cmd := exec.Command("schtasks.exe", "/Delete", "/TN", *task, "/F")
-		configureDispatchHelperCommand(cmd)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
+		if !runBenchFleetSchtasks(stderr, "", "/Delete", "/TN", *task, "/F") {
 			return 1
 		}
 		fmt.Fprintf(stdout, "removed %s\n", *task)
@@ -322,14 +318,30 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	tr := fmt.Sprintf("cmd.exe /d /s /c \"%s\"", runner)
-	cmd := exec.Command("schtasks.exe", "/Create", "/TN", *task, "/SC", "MINUTE", "/MO", fmt.Sprint(*interval), "/TR", tr, "/F", "/RL", "LIMITED")
-	cmd.Dir = root
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
+	if !runBenchFleetSchtasks(stderr, root, "/Create", "/TN", *task, "/SC", "MINUTE", "/MO", fmt.Sprint(*interval), "/TR", tr, "/F", "/RL", "LIMITED") {
 		return 1
 	}
 	fmt.Fprintf(stdout, "installed %s every %dm: %s\n", *task, *interval, tr)
 	return 0
+}
+
+// runBenchFleetSchtasks runs one schtasks.exe invocation for `fak bench-loop install`,
+// reporting failure with the scheduler's own combined output appended -- schtasks explains
+// itself on stdout, so swallowing it would leave the operator with a bare exit status. dir
+// is the working directory of the schtasks.exe process itself, not the created task's --
+// the task carries the workspace explicitly in its /TR command line -- and "" leaves it
+// inherited, which is all a deletion needs. Both the install and the --remove path refuse
+// through this one rule.
+func runBenchFleetSchtasks(stderr io.Writer, dir string, args ...string) bool {
+	cmd := exec.Command("schtasks.exe", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop install: %v: %s\n", err, strings.TrimSpace(string(out)))
+		return false
+	}
+	return true
 }

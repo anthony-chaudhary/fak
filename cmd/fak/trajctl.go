@@ -79,6 +79,42 @@ const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over
       Low-calibration scorers are annotated, never dropped. --json emits the
       pinned ` + trajctl.CalibrationSchema + ` report.
 
+  fak trajctl quote --corpus FILE --capability-version V --policy-version V
+                     --index-version V --index-coverage N --quality-min N
+                     --quality-witness METHOD [--ledger FILE] [--at RFC3339]
+      Emit an immutable repo_question cost quote from witnessed history.
+      Unsupported cold starts are refused (exit 3), never guessed.
+
+  fak trajctl quote-revise --quote QUOTE.json --reason route_failure
+                            [--revision N] [--ledger FILE] [--at RFC3339]
+      Append a widening revision bound to the initial quote; never overwrite it.
+
+  fak trajctl quote-complete --quote QUOTE.json --ledger FILE
+                              --quality-score N --quality-witness REF
+                              --raw-cost N --cost-unit UNIT [--censored]
+      Bind the declared quality contract to an external witness and raw cost.
+
+  fak trajctl quote-backtest --corpus FILE
+      Chronological held-out p50/p80/p95 coverage, retaining censored outcomes.
+
+  fak trajctl backtest --scorer X --corpus Y [--incumbent M] [--json]
+      THE QUALIFICATION GATE — a scorer ships with its backtest (#2573).
+      Replay a candidate scorer over a RECORDED corpus (a trajctl ledger
+      exported earlier) and calibrate its fresh readings against the witnessed
+      W3 outcomes already in that history, optionally alongside the incumbent
+      method it would replace. Offline and free: nothing is appended, no model
+      is called, and the live ledger is never the default corpus.
+
+      A new or changed scoring method must earn QUALIFIED here before it is
+      registered for live use: its readings must track the outcome at the
+      well-calibrated bar AND not materially regress the incumbent.
+
+      The verdict vocabulary is closed, so "could not run" is never mistaken
+      for "passed": QUALIFIED | NOT_QUALIFIED | INCONCLUSIVE (the corpus could
+      not decide -- NOT a pass) | BACKTEST_ERROR. --json emits the pinned
+      ` + trajctl.BacktestSchema + ` report.
+      Backtest exit: 0 qualified, 3 ran-and-refused, 1 could-not-run, 2 usage.
+
 Ledger default: <root>/` + trajctl.DefaultLedgerRel + `
 Exit: 0 ok, 2 usage error, 1 ledger/parse failure.`
 
@@ -101,6 +137,16 @@ func runTrajctl(stdout, stderr io.Writer, argv []string) int {
 		return runTrajctlScore(stdout, stderr, rest)
 	case "scorers":
 		return runTrajctlScorers(stdout, stderr, rest)
+	case "backtest":
+		return runTrajctlBacktest(stdout, stderr, rest)
+	case "quote":
+		return runTrajctlQuote(stdout, stderr, rest)
+	case "quote-revise":
+		return runTrajctlQuoteRevise(stdout, stderr, rest)
+	case "quote-complete":
+		return runTrajctlQuoteComplete(stdout, stderr, rest)
+	case "quote-backtest":
+		return runTrajctlQuoteBacktest(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, trajctlUsage)
 		return 0

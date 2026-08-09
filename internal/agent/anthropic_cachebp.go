@@ -93,10 +93,11 @@ type BreakpointOutcome struct {
 const (
 	TTLUpgradeReasonNone               = "" // UPGRADED: ttl:"1h" was spliced into a stable-head cache_control object.
 	TTLUpgradeReasonNonJSON            = "non_json"
-	TTLUpgradeReasonNoStableBreakpoint = "no_stable_breakpoint" // no cache_control on system/tools; message-tail breakpoints are not stable head.
-	TTLUpgradeReasonAlready1h          = "already_1h"           // the stable-head breakpoint is already on the 1h tier.
-	TTLUpgradeReasonTTLAlreadySet      = "ttl_already_set"      // another ttl value exists; respect the caller's choice.
-	TTLUpgradeReasonVolatileHead       = "volatile_head"        // the candidate head carries an obvious per-request token.
+	TTLUpgradeReasonNoStableBreakpoint = "no_stable_breakpoint"    // no cache_control on system/tools; message-tail breakpoints are not stable head.
+	TTLUpgradeReasonAlready1h          = "already_1h"              // the stable-head breakpoint is already on the 1h tier.
+	TTLUpgradeReasonTTLAlreadySet      = "ttl_already_set"         // another ttl value exists; respect the caller's choice.
+	TTLUpgradeReasonVolatileHead       = "volatile_head"           // the candidate head carries an obvious per-request token.
+	TTLUpgradeReasonVolatileMessage    = "volatile_message_prefix" // the candidate message prefix carries an obvious per-request token.
 	TTLUpgradeReasonSpliceFailed       = "splice_failed"
 	TTLUpgradeReasonRedecodeFail       = "redecode_failed"
 )
@@ -105,7 +106,11 @@ const (
 // stable-head cache_control object. Reason==TTLUpgradeReasonNone means Target was upgraded.
 type TTLUpgradeOutcome struct {
 	Reason string
-	Target string // "system" | "tools"
+	Target string // "system" | "tools" | "messages"
+
+	// Split counts make the head-only versus message-prefix ablation inspectable.
+	UpgradedHeadBreakpoints    int
+	UpgradedMessageBreakpoints int
 
 	// Redaction witness (#2191) — same contract as BreakpointOutcome's redaction fields.
 	Redacted          bool
@@ -347,11 +352,29 @@ func parseHex4(b []byte) (cp int, ok bool) {
 // redaction retry (anthropic_cachebp_redact.go, opt-in via FAK_CACHEBP_REDACT); with the lever
 // off (the default) the refusal is returned exactly as before.
 func UpgradeAnthropicStableCacheTTL1h(raw []byte) ([]byte, TTLUpgradeOutcome) {
-	out, oc := upgradeAnthropicStableCacheTTL1hOnce(raw)
+	return upgradeAnthropicStableCacheTTL1h(raw, false)
+}
+
+// UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes extends the original
+// head-only transform across eligible message-prefix breakpoints while preserving
+// Anthropic's longer-before-shorter TTL ordering.
+func UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes(raw []byte) ([]byte, TTLUpgradeOutcome) {
+	return upgradeAnthropicStableCacheTTL1h(raw, true)
+}
+
+// UpgradeAnthropicStableCacheTTL1hHeadOnly is the explicit ablation baseline for
+// the original managed-cache behavior. It upgrades system/tools breakpoints but
+// leaves message-prefix breakpoints on their caller-selected tier.
+func UpgradeAnthropicStableCacheTTL1hHeadOnly(raw []byte) ([]byte, TTLUpgradeOutcome) {
+	return upgradeAnthropicStableCacheTTL1h(raw, false)
+}
+
+func upgradeAnthropicStableCacheTTL1h(raw []byte, includeMessages bool) ([]byte, TTLUpgradeOutcome) {
+	out, oc := upgradeAnthropicStableCacheTTL1hOnce(raw, includeMessages)
 	if oc.Reason != TTLUpgradeReasonVolatileHead {
 		return out, oc
 	}
-	return retryUpgradeWithRedactedHead(raw, oc)
+	return retryUpgradeWithRedactedHead(raw, oc, includeMessages)
 }
 
 // upgradeAnthropicStableCacheTTL1hOnce is one un-retried upgrade pass — the original edit.
@@ -365,7 +388,7 @@ func UpgradeAnthropicStableCacheTTL1h(raw []byte) ([]byte, TTLUpgradeOutcome) {
 // stay 5m, which is legal because they FOLLOW the 1h head (descending order). Any refusal —
 // a volatile head, an explicit caller ttl on any head breakpoint, a splice ambiguity —
 // refuses the WHOLE body (identity), never a partial edit that would 400 upstream.
-func upgradeAnthropicStableCacheTTL1hOnce(raw []byte) ([]byte, TTLUpgradeOutcome) {
+func upgradeAnthropicStableCacheTTL1hOnce(raw []byte, includeMessages bool) ([]byte, TTLUpgradeOutcome) {
 	if len(raw) == 0 {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
 	}
@@ -440,12 +463,70 @@ func upgradeAnthropicStableCacheTTL1hOnce(raw []byte) ([]byte, TTLUpgradeOutcome
 		}
 	}
 
+	// Messages follow the tools/system head in Anthropic's cache-prefix order. A
+	// cache_control on a content block therefore marks a stable message prefix:
+	// later turns append after it without changing the marked bytes. Upgrade every
+	// eligible marked prefix, not merely the last one, because Anthropic requires a
+	// longer TTL to precede a shorter TTL. The head scan above either upgraded every
+	// earlier head breakpoint or refused the entire edit, so this extension cannot
+	// manufacture an invalid 5m-before-1h layout.
+	messageSplices := 0
+	if messages, messageSpans, ok := decodeTopLevelArray(raw, "messages"); includeMessages && ok {
+		for mi, message := range messages {
+			contentStart, contentEnd, ok := objectValueSpan(message, "content")
+			if !ok {
+				continue
+			}
+			content := message[contentStart:contentEnd]
+			blocks, blockSpans, ok := arrayElementSpans(content)
+			if !ok {
+				continue // string content cannot carry a block cache_control
+			}
+			for bi, block := range blocks {
+				if !rawHasCacheControl(block) {
+					continue
+				}
+				marked++
+				primaryTarget = "messages"
+				// Refuse when any byte in the prefix through this breakpoint has a
+				// self-evident per-request token. This is deliberately the same
+				// conservative UUID/timestamp vocabulary used for the head.
+				if anyHeadElementVolatile(messages[:mi]) || anyHeadElementVolatile([]json.RawMessage{message[:contentStart+blockSpans[bi].end]}) {
+					return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonVolatileMessage, Target: "messages"}
+				}
+				ccStart, ccEnd, ok := objectValueSpan(block, "cache_control")
+				if !ok {
+					return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: "messages"}
+				}
+				cc := block[ccStart:ccEnd]
+				var parsed struct {
+					Type string `json:"type"`
+					TTL  string `json:"ttl"`
+				}
+				if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
+					return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: "messages"}
+				}
+				switch parsed.TTL {
+				case "1h":
+					already1h++
+				case "":
+					abs := messageSpans[mi].start + contentStart + blockSpans[bi].start + ccStart
+					splices = append(splices, ttlSplice{abs: abs, cc: cc})
+					messageSplices++
+				default:
+					return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonTTLAlreadySet, Target: "messages"}
+				}
+			}
+		}
+	}
+
 	if marked == 0 {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNoStableBreakpoint}
 	}
 	if len(splices) == 0 {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonAlready1h, Target: primaryTarget}
 	}
+	headSplices := len(splices) - messageSplices
 	// Apply back-to-front so earlier absolute offsets stay valid as later bytes grow.
 	sort.Slice(splices, func(i, j int) bool { return splices[i].abs > splices[j].abs })
 	out := raw
@@ -459,7 +540,7 @@ func upgradeAnthropicStableCacheTTL1hOnce(raw []byte) ([]byte, TTLUpgradeOutcome
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonRedecodeFail, Target: primaryTarget}
 	}
-	return out, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNone, Target: primaryTarget}
+	return out, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNone, Target: primaryTarget, UpgradedHeadBreakpoints: headSplices, UpgradedMessageBreakpoints: messageSplices}
 }
 
 func anyHeadElementVolatile(elems []json.RawMessage) bool {

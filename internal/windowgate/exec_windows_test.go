@@ -8,11 +8,20 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
+)
+
+// Env keys the console probe below uses to re-exec this test binary as its own
+// child, matching the FAK_WINDOWGATE_TAB_CLOSE_HELPER pattern further down.
+const (
+	consoleProbeEnv       = "FAK_WINDOWGATE_CONSOLE_PROBE"
+	consoleProbeReportEnv = "FAK_WINDOWGATE_CONSOLE_PROBE_REPORT"
 )
 
 func TestConfigureBackgroundCommandSetsWindowsNoWindow(t *testing.T) {
@@ -46,6 +55,111 @@ func TestConfigureWorkerCommandSetsProcessGroupFlag(t *testing.T) {
 	}
 	if cmd.SysProcAttr.CreationFlags&CreateNewProcessGroup == 0 {
 		t.Errorf("CreationFlags=%#x missing CREATE_NEW_PROCESS_GROUP", cmd.SysProcAttr.CreationFlags)
+	}
+}
+
+// TestConfigureDetachedCommandClearsNoWindowAndDetaches pins the mutual-exclusion
+// invariant ConfigureDetachedCommand exists to encode (#3597). The production
+// sequence applies it OVER an already-background command (spawnDispatchIssueWorker
+// calls configureDispatchSpawn first), so the pre-set CREATE_NO_WINDOW below is the
+// real starting state, not a contrived one. Windows silently ignores
+// CREATE_NO_WINDOW when DETACHED_PROCESS is present, so leaving both set would
+// encode a contradiction that reads as though the window flag still did something.
+func TestConfigureDetachedCommandClearsNoWindowAndDetaches(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit", "0")
+	ConfigureBackgroundCommand(cmd) // the production predecessor
+	ConfigureDetachedCommand(cmd)
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr is nil")
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Error("HideWindow = false, want true")
+	}
+	if cmd.SysProcAttr.CreationFlags&DetachedProcess == 0 {
+		t.Errorf("CreationFlags=%#x missing DETACHED_PROCESS (%#x)",
+			cmd.SysProcAttr.CreationFlags, DetachedProcess)
+	}
+	if cmd.SysProcAttr.CreationFlags&CreateNoWindow != 0 {
+		t.Errorf("CreationFlags=%#x still carries CREATE_NO_WINDOW (%#x); DETACHED_PROCESS must clear it",
+			cmd.SysProcAttr.CreationFlags, CreateNoWindow)
+	}
+	ConfigureDetachedCommand(nil) // must not panic on a nil command
+}
+
+// consoleAttachedProcessCount returns how many processes share THIS process's
+// console, via GetConsoleProcessList. It is 0 exactly when the caller has no
+// console at all — which is the only direct, host-independent way to tell
+// DETACHED_PROCESS apart from CREATE_NO_WINDOW.
+//
+// GetConsoleWindow is NOT usable here: CREATE_NO_WINDOW allocates a console whose
+// WINDOW is suppressed, so it returns NULL for both flags even though only one of
+// them actually declined the console (and its conhost.exe host process).
+func consoleAttachedProcessCount() uint32 {
+	buf := make([]uint32, 64)
+	r, _, _ := kernel32.NewProc("GetConsoleProcessList").Call(
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return uint32(r)
+}
+
+// TestDetachedSpawnHasNoConsoleWhereBackgroundSpawnDoes is #3597's load-bearing
+// witness: it measures the thing the issue is actually about — whether the spawned
+// child owns a console (and therefore a conhost.exe/OpenConsole.exe host process,
+// the per-worker cost #2340 measured at 87 panes / 2,829 threads / 54k handles /
+// 2 GB and #3405 showed scaling linearly with fleet size).
+//
+// Asserting both flags in ONE test is deliberate: the background spawn is the
+// control. Without it a passing detached assertion could just mean the test host
+// never allocates consoles, and the regression this guards against —
+// silently reverting to CREATE_NO_WINDOW — would still read green.
+func TestDetachedSpawnHasNoConsoleWhereBackgroundSpawnDoes(t *testing.T) {
+	if os.Getenv(consoleProbeEnv) == "1" {
+		report := os.Getenv(consoleProbeReportEnv)
+		if report == "" {
+			os.Exit(3)
+		}
+		if err := os.WriteFile(report, []byte(strconv.FormatUint(uint64(consoleAttachedProcessCount()), 10)), 0o644); err != nil {
+			os.Exit(4)
+		}
+		os.Exit(0)
+	}
+
+	probe := func(configure func(*exec.Cmd)) uint32 {
+		t.Helper()
+		report := filepath.Join(t.TempDir(), "console-count")
+		cmd := exec.Command(os.Args[0], "-test.run=^TestDetachedSpawnHasNoConsoleWhereBackgroundSpawnDoes$")
+		cmd.Env = append(os.Environ(), consoleProbeEnv+"=1", consoleProbeReportEnv+"="+report)
+		// Redirect to files, matching the dispatched worker's transcript binding: the
+		// child has no use for a console because its output is already captured.
+		sink, err := os.Create(filepath.Join(filepath.Dir(report), "sink"))
+		if err != nil {
+			t.Fatalf("create sink: %v", err)
+		}
+		defer sink.Close()
+		cmd.Stdout, cmd.Stderr = sink, sink
+		configure(cmd)
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("probe child: %v", err)
+		}
+		b, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatalf("probe child wrote no report: %v", err)
+		}
+		n, err := strconv.ParseUint(strings.TrimSpace(string(b)), 10, 32)
+		if err != nil {
+			t.Fatalf("probe report %q: %v", b, err)
+		}
+		return uint32(n)
+	}
+
+	// Control: CREATE_NO_WINDOW is invisible but still OWNS a console.
+	if got := probe(ConfigureBackgroundCommand); got == 0 {
+		t.Fatalf("background spawn reported %d console processes, want >0; "+
+			"the detached assertion below would be vacuous on this host", got)
+	}
+	// Acceptance: DETACHED_PROCESS owns no console, so there is no host process to pay for.
+	if got := probe(ConfigureDetachedCommand); got != 0 {
+		t.Fatalf("detached spawn reported %d console processes, want 0 (#3597): "+
+			"the child still owns a console and therefore a conhost/OpenConsole host process", got)
 	}
 }
 

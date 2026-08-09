@@ -129,6 +129,49 @@ func TestDecideWatchdogRowBlockedOutcomes(t *testing.T) {
 	}
 }
 
+func TestDecideWatchdogRowReplaySafetyConjunct(t *testing.T) {
+	// A retryable (recoverable) outcome whose interrupted turn emitted replay-unsafe
+	// output must NOT auto-retry (#5927) — and the refusal carries the observable reason.
+	row := WatchdogPlanRow{Session: "sid-replay", Account: ".claude-x",
+		PartialBlocks: []EmittedBlock{{Kind: BlockText, Text: "half an answer"}, {Kind: BlockToolCall, ToolCallID: "charged-card"}}}
+	d := DecideWatchdogRow(row, WatchdogGuards{}, nil, OutcomeRecoverable)
+	if d.Action != WatchdogSkipBlocked || !strings.Contains(d.Reason, ReasonReplayUnsafeOutput) {
+		t.Fatalf("unsafe partial: action=%s reason=%q, want skip_blocked naming %s", d.Action, d.Reason, ReasonReplayUnsafeOutput)
+	}
+
+	// A thinking-only partial stays retryable: the conjunct narrows, it never widens or
+	// replaces the error classification.
+	row.PartialBlocks = []EmittedBlock{{Kind: BlockThinking}}
+	if d := DecideWatchdogRow(row, WatchdogGuards{}, nil, OutcomeRecoverable); d.Action != WatchdogLaunch {
+		t.Fatalf("thinking-only partial: action=%s (%s), want launch", d.Action, d.Reason)
+	}
+
+	// An interrupted turn whose tool calls all carry matching results is
+	// preserve-and-continued (the resume continues the preserved transcript), never
+	// discarded — and still counts its attempt.
+	row.PartialBlocks = []EmittedBlock{
+		{Kind: BlockToolCall, ToolCallID: "c1"}, {Kind: BlockToolResult, ToolCallID: "c1"}}
+	d = DecideWatchdogRow(row, WatchdogGuards{}, []Attempt{}, OutcomeRecoverable)
+	if d.Action != WatchdogLaunch || !strings.Contains(d.Reason, ReasonCompletedToolEffects) || d.Attempt != 1 {
+		t.Fatalf("completed effects: got %#v, want launch naming %s at attempt 1", d, ReasonCompletedToolEffects)
+	}
+
+	// No blocks (clean tail / unreadable transcript) leaves the gate inert.
+	row.PartialBlocks = nil
+	if d := DecideWatchdogRow(row, WatchdogGuards{}, nil, OutcomeRecoverable); d.Action != WatchdogLaunch {
+		t.Fatalf("nil blocks: action=%s (%s), want launch", d.Action, d.Reason)
+	}
+
+	// The conjunct never overturns a Blocked verdict: a spent cap stays blocked even
+	// with completed tool effects on the row.
+	row.PartialBlocks = []EmittedBlock{
+		{Kind: BlockToolCall, ToolCallID: "c1"}, {Kind: BlockToolResult, ToolCallID: "c1"}}
+	hist := []Attempt{{Phase: "launched"}, {Phase: "launched"}}
+	if d := DecideWatchdogRow(row, WatchdogGuards{MaxAttempts: 2}, hist, OutcomeRecoverable); d.Action != WatchdogSkipBlocked {
+		t.Fatalf("spent cap with completed effects: action=%s (%s), want skip_blocked", d.Action, d.Reason)
+	}
+}
+
 func TestDecideWatchdogRowAttemptCapBlocks(t *testing.T) {
 	hist := []Attempt{{Phase: "launched"}, {Phase: "launched"}}
 	d := DecideWatchdogRow(WatchdogPlanRow{Session: "sid-5", Account: ".claude-x"},

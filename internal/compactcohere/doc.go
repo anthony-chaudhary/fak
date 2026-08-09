@@ -24,7 +24,7 @@
 // package is that missing sensor + policy, kept pure so the whole decision is unit-tested
 // without a gateway, a provider, a child process, or a clock.
 //
-// Two surfaces:
+// Three surfaces:
 //
 //   - Classify(prev, cur, ttl) attributes one served turn's prefix event — STABLE,
 //     FAK_CUT, FAK_WORLD_BREAK, HARNESS_REWRITE, or COLD_TTL — from cheap, content-free
@@ -35,6 +35,10 @@
 //     harness's cache-destroying auto-compaction WHILE fak is coping, and yield the net
 //     back to the harness once fak's own compaction has bailed for a sustained streak (so
 //     suppressing the harness can never strand a session into a hard context overflow).
+//   - ToolResult.Useless is a conservative, producer-authored preference for provably
+//     empty results. SelectToolResults promotes those results ahead of the caller's unchanged
+//     age/size heuristic order only when the existing PrefixEvent is cache-safe, and the
+//     Coordinator publishes how many flagged results were selected.
 //
 // It is tier-1 (foundation): stdlib-only, imports nothing internal, off the hot path. It
 // takes digests as opaque strings (the caller hashes the bytes), so it never touches a

@@ -124,6 +124,68 @@ func TestRunAccountsAdd_RefusesIdentityHijack(t *testing.T) {
 	}
 }
 
+// TestRunAccountsAdd_DuplicateRefusalOffersRemedies is the #3954 leg that makes the refusal
+// ACTIONABLE rather than merely correct. Stopping the operator is only half the contract: the
+// ticket asks the duplicate branch to point at the two safe exits by name — (a) log in again under
+// a FRESH config dir when a different account was intended, and (b) the canonicalize/tombstone path
+// when this login should become the seat that already holds the account. Without this the refusal's
+// only signposted exits were `--force` (which commits the exact duplicate the guard exists to
+// prevent) and a bare `remove` (which retires the other, working seat with no fall-forward).
+func TestRunAccountsAdd_DuplicateRefusalOffersRemedies(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	t.Setenv("FAK_ACCOUNT_SUFFIX", "-netra")
+	home := t.TempDir()
+	hermeticProbeStub(t)
+	// Seat "alpha" already owns account u-shared; a second dir logged into the SAME account.
+	mkLoggedInSeat(t, home, ".claude-alphasrc-netra", "shared@example.test", "u-shared", "")
+	mkLoggedInSeat(t, home, ".claude-betasrc-netra", "shared@example.test", "u-shared", "")
+	regPath := filepath.Join(home, "registry.json")
+
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{
+		"add", "--name", "alpha", "--adopt", "--from", "alphasrc-netra",
+		"--registry", regPath, "--home", home,
+	}); rc != 0 {
+		t.Fatalf("seed enroll of alpha rc=%d stderr=%s", rc, errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{
+		"add", "--name", "beta", "--adopt", "--from", "betasrc-netra",
+		"--registry", regPath, "--home", home,
+	}); rc != 1 {
+		t.Fatalf("a duplicate-identity enroll must refuse with rc=1, got rc=%d\nstdout=%s", rc, out.String())
+	}
+	got := errb.String()
+	// The refusal names BOTH remedies the ticket asked for, as runnable commands against the
+	// conflicting seat — not just the --force escape hatch.
+	for _, want := range []string{
+		"REFUSED (identity-hijack)",
+		"FRESH config dir",            // criterion 2: the fresh-dir remedy
+		"CLAUDE_CONFIG_DIR=<new dir>", // ...spelled as something runnable
+		"canonicalize",                // criterion 3: make this login the canonical seat
+		"fak accounts enroll-current --name alpha-netra --force",
+		"tombstone", // ...or retire the other seat WITH fall-forward
+		"fak accounts remove --name alpha-netra --rehome-to <seat>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("duplicate refusal must offer %q; stderr:\n%s", want, got)
+		}
+	}
+	// The refusal stays a refusal: no half-seat dir, no registry row, alpha untouched.
+	if _, err := os.Stat(filepath.Join(home, ".claude-beta-netra")); err == nil {
+		t.Error("an offered-remedy refusal must still leave no half-created seat dir")
+	}
+	if h := findHome(t, regPath, "beta-netra"); h.Name != "" {
+		t.Errorf("an offered-remedy refusal must not enroll a registry row: %+v", h)
+	}
+	if h := findHome(t, regPath, "alpha-netra"); h.Name == "" || !h.Active() {
+		t.Errorf("the existing seat alpha must survive the refusal: %+v", h)
+	}
+}
+
 // TestRunAccountsAdd_ForceOverridesHijack documents the sanctioned escape hatch: --force enrolls the
 // duplicate anyway, with a loud warning instead of a refusal.
 func TestRunAccountsAdd_ForceOverridesHijack(t *testing.T) {

@@ -2,6 +2,7 @@ package selfquery
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -60,6 +61,39 @@ func testTools() []ToolDescriptor {
 		{Name: "fak_memory_explain", Description: "Explain a memory query.", InputSchema: json.RawMessage(`{"type":"object","properties":{"driver":{"type":"string"}}}`)},
 		{Name: "fak_memory_run", Description: "Run a memory query.", InputSchema: json.RawMessage(`{"type":"object","properties":{"driver":{"type":"string"},"apply":{"type":"boolean"}}}`)},
 		{Name: "deny_delete", Description: "Synthetic ordinary tool for guarded request tests.", InputSchema: json.RawMessage(`{"type":"object"}`)},
+	}
+}
+
+func TestQueryDefaultCapAndExplicitAll(t *testing.T) {
+	tools := make([]ToolDescriptor, DefaultResultLimit+17)
+	for i := range tools {
+		tools[i] = ToolDescriptor{Name: fmt.Sprintf("common_tool_%03d", i), Description: "the common agent tool for a task and the system", InputSchema: json.RawMessage(`{"type":"object"}`)}
+	}
+	cat, err := Load(writeRepo(t), Options{Tools: tools})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := "the common agent tool for a task and the system"
+	bounded, err := cat.Query(Request{Query: query, Plane: PlaneLive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(bounded.Cards); got != DefaultResultLimit {
+		t.Fatalf("default result count = %d, want %d", got, DefaultResultLimit)
+	}
+	all, err := cat.Query(Request{Query: query, Plane: PlaneLive, All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(all.Cards); got <= DefaultResultLimit {
+		t.Fatalf("all result count = %d, want > %d", got, DefaultResultLimit)
+	}
+	explicit, err := cat.Query(Request{Query: query, Plane: PlaneLive, Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(explicit.Cards); got != 3 {
+		t.Fatalf("explicit result count = %d, want 3", got)
 	}
 }
 

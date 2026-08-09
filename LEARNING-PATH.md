@@ -5,6 +5,11 @@ description: "A linear, prerequisite-based curriculum across every fak concept: 
 
 # The fak learning path
 
+*This page owns one job: teaching fak's ideas in prerequisite order. It is for a reader who
+wants to understand the system, not evaluate it ([README](README.md)), install it
+([GETTING-STARTED](GETTING-STARTED.md)), route a task ([START-HERE](START-HERE.md)), or look
+a page up by name ([INDEX](INDEX.md)). Nothing here is required to run fak.*
+
 fak is a lot of ideas stacked into one binary: an addressable KV cache that keeps long
 sessions cheap to hold warm, right-model-per-call routing, and a pure-Go in-kernel model —
 and, riding along on the same write-time checkpoint, a default-deny capability floor, a
@@ -27,11 +32,12 @@ reading them in the wrong order.
 
 > New to the project entirely? The fastest taste of the payoff is one offline pass that
 > prints the token/turn savings from the shared prefix — `go run ./cmd/fak agent --offline`
-> (see **FAK 104**); the same run also prints the safety A/B, and the 2-minute boundary
-> proof in [`README.md`](README.md#tool-call-controls) is the secondary, security-side view.
-> Either way, come back here and start at **FAK 101**. Just want to install and run?
-> [`START-HERE.md`](START-HERE.md) and [`GETTING-STARTED.md`](GETTING-STARTED.md) are the
-> install front doors; this page is the *concept* front door.
+> (see **FAK 104**); the same run also prints the safety A/B, which
+> [`README.md`](README.md#try-the-kernel-without-a-key-model-or-gpu) frames as the
+> security-side boundary proof. Either way, come back here and start at **FAK 101**. Just
+> want to install and run? [`GETTING-STARTED.md`](GETTING-STARTED.md) is the install-and-run
+> page and [`START-HERE.md`](START-HERE.md) routes a job you already have; this page is the
+> *concept* front door.
 
 ## How to read a course
 
@@ -2154,6 +2160,7 @@ quickstart is [`docs/fak/neo-cloud-deploy.md`](docs/fak/neo-cloud-deploy.md).
 | `fak stallscan` | Reads the churn signals (soft-fault storm, scheduler/syscall thrash, spawn bursts) that reveal a low-usage machine stall. | `fak stallscan` |
 | `fak growthgate` | The standing-footprint twin of `stallscan`: classifies where the disk/IO went and emits a census + verdict. | `fak growthgate --json` |
 | `fak git-maint` | Guarded, lock-aware "consolidate-never-prune" object-DB maintenance (multi-pack-index / commit-graph) the destructive-git guard otherwise only defers. | `fak git-maint -h` |
+| `fak git-daily` | The scheduled daily tick that makes `git-maint` actually fold: reaps the orphaned locks the maintenance tiers correctly defer on, THEN consolidates; once-a-day deduped, so a coarse OS trigger is safe. | `fak git-daily --dry-run` |
 | `fak clean-bins` | Safe, idempotent, witnessed prune of the stray `go build` binaries dropped at the module root. | `fak clean-bins` |
 | `fak buildcheck` | Concurrency-safe compile check for a fleet editing one shared trunk; never drops a binary in the tree. | `fak buildcheck` |
 | `fak ci-preflight` | Answers "is the committed trunk tip CI-buildable and gofmt-clean, and if not which files" without trusting the working tree. | `fak ci-preflight -h` |

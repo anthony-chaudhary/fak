@@ -41,7 +41,8 @@ CPU job from a wedged loop, *auto-reaping* a CPU-only pin is additionally gated 
 ``--cpu-reap-confirm`` consecutive runs (a tiny start-time-keyed pid streak ledger): a
 standing reaper only kills a core-pin that has persisted across scheduled ticks, while
 thread/handle runaways and orphans still reap immediately. Cross-platform via the
-platform's own tools (PowerShell on Windows, ``ps`` on Linux); no third-party deps.
+platform's own tools (PowerShell on Windows, ``ps`` on POSIX -- in whichever of the
+two ``ps`` dialects the host speaks, see ``_ps_census_spec``); no third-party deps.
 
 Exit code: 0 == clean / disabled (no runaway) ; 1 == a runaway is flagged
 (ACTION). With ``--enact`` the kills are reported in the JSON ``enacted`` list.
@@ -600,7 +601,7 @@ def collect_processes() -> tuple[list[dict[str, Any]], str]:
     try:
         if system == "Windows":
             return _collect_windows(), ""
-        return _collect_posix(), ""
+        return _collect_posix(system)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return [], f"{type(exc).__name__}: {exc}"
 
@@ -678,46 +679,280 @@ def _parse_windows_json(text: str) -> list[dict[str, Any]]:
     return out
 
 
-def _collect_posix() -> list[dict[str, Any]]:
-    # nlwp == number of light-weight processes (threads). cputimes == cumulative
-    # CPU seconds (Linux ps; integer resolution -- use a longer --cpu-window on
-    # POSIX so a one-second tick is a small fraction of the window). cputimes sits
-    # BEFORE comm so a space-bearing command name stays the parser's final field.
-    # If a platform's ps lacks a column it comes back absent and that dimension is
-    # simply skipped for that host (the others still work).
-    proc = subprocess.run(
-        ["ps", "-eo", "pid=,nlwp=,rss=,cputimes=,comm="],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        creationflags=_win_creationflags(),
-    )
-    return _parse_posix_ps(proc.stdout)
+# --------------------------------------------------------------------------- #
+# `ps` dialects (POSIX)
+# --------------------------------------------------------------------------- #
+# `ps` is two tools wearing one name, and this is the Python twin of the Go fix in
+# internal/procguard (#5385) -- same rules, deliberately, because it is the same bug.
+#
+# procps-ng (Linux) defines output keywords the BSD dialect has never had -- nlwp,
+# etimes, cputimes -- and a `ps` handed a keyword it does not know rejects the
+# INVOCATION rather than dropping that one column. A real non-procps `ps` (the MSYS2
+# build shipped with Git for Windows, which does not implement -o at all) answers:
+#
+#     $ ps -eo pid=,nlwp=,rss=,cputimes=,comm=
+#     ps: unknown option -- o
+#     Try `ps --help' for more information.
+#     ; exit 1, stdout EMPTY
+#
+# so every row is lost, not merely the thread column. Before #5541 that came back
+# from _collect_posix as rows=[] paired with an EMPTY error string, and the guard
+# printed scanned=0 / ok=true / "no runaway or orphaned process; no action" -- a host
+# it could not measure at all, reported as a host measured and found clean. An
+# unreadable dimension has to be NAMED, never rendered as a reading of zero.
+#
+# Three rules follow from that, one per failure the old code had:
+#   1. the INVOCATION varies by dialect (_ps_census_spec / _ps_relations_spec), so a
+#      BSD host gets an argv its `ps` can actually answer;
+#   2. a column the dialect simply does not have is PS_NO_COLUMN and leaves the field
+#      None -- "unknown", never a fabricated 0 (classify() skips a None dimension);
+#   3. a tool that fails keeps its stdout, and _census_error decides what the failure
+#      means from whether anything parsed.
+PS_NO_COLUMN = -1
+
+# Keywords procps-ng defines and BSD `ps` does not. Kept in step with
+# internal/architest/ps_dialect_test.go's procpsOnlyKeywords, which enforces the same
+# list over Go source; the Python half is enforced by proc_resource_guard_test.py.
+PS_PROCPS_ONLY_KEYWORDS = ("nlwp", "etimes", "cputimes")
 
 
-def _parse_posix_ps(text: str) -> list[dict[str, Any]]:
+def _ps_bsd(system: str) -> bool:
+    """Whether ``platform.system()`` names a host that speaks the BSD `ps` dialect.
+
+    ONLY Darwin, matching internal/procguard.psBSD and for the same reason: Darwin is
+    the platform that was actually witnessed rejecting the procps keywords. The other
+    BSDs very probably behave the same way, but "very probably" is the assumption that
+    shipped this bug -- an unwitnessed platform keeps the invocation known to work on
+    the hosts fak is known to run on, and _census_error is what stops such a host
+    reading as an empty machine in the meantime. Adding a name here should come with a
+    pasted `ps` transcript from it."""
+    return system == "Darwin"
+
+
+def _ps_census_spec(system: str) -> dict[str, Any]:
+    """The resource-census `ps` dialect for a host: pid, threads, RSS, CPU seconds.
+
+    Why a branch and not one column set both dialects accept: the vocabularies do
+    intersect (pid, rss, comm, time) but the intersection contains NO thread-count
+    keyword -- BSD `ps` has none at all. A shared column set would have to drop nlwp,
+    silently disabling the thread dimension on Linux, which is the dimension this
+    guard exists for (the incident was one process at ~129,427 threads). Fixing BSD by
+    blinding Linux is not a fix, so Linux keeps its invocation byte for byte and BSD
+    gets the best set its `ps` can answer -- thread count is not among them and stays
+    None. ``cpu_time`` sits BEFORE ``comm`` in both so a space-bearing command name
+    stays the parser's final field."""
+    if _ps_bsd(system):
+        # BSD's cumulative-CPU column is `time`, FORMATTED [[dd-]hh:]mm:ss[.ff] rather
+        # than the bare seconds procps' `cputimes` emits -- see _parse_ps_duration.
+        return {
+            "args": ["-eo", "pid=,rss=,time=,comm="],
+            "n": 4,
+            "pid": 0,
+            "threads": PS_NO_COLUMN,  # BSD `ps` has no thread keyword; threads stays None
+            "rss_kb": 1,
+            "cpu_time": 2,
+            "comm": 3,
+            "ppid": PS_NO_COLUMN,
+            "elapsed": PS_NO_COLUMN,
+            "argv": PS_NO_COLUMN,
+            "optional": 2,
+        }
+    return {
+        "args": ["-eo", "pid=,nlwp=,rss=,cputimes=,comm="],
+        "n": 5,
+        "pid": 0,
+        "threads": 1,
+        "rss_kb": 2,
+        "cpu_time": 3,
+        "comm": 4,
+        "ppid": PS_NO_COLUMN,
+        "elapsed": PS_NO_COLUMN,
+        "argv": PS_NO_COLUMN,
+        "optional": 3,
+    }
+
+
+def _ps_relations_spec(system: str) -> dict[str, Any]:
+    """The relations `ps` dialect: pid, ppid, elapsed age, command name, full cmdline.
+
+    BSD has `etime` (formatted) where procps has `etimes` (whole seconds); every other
+    keyword in this row is common vocabulary, which is why the two argvs differ by
+    exactly one keyword."""
+    elapsed = "etime=," if _ps_bsd(system) else "etimes=,"
+    return {
+        "args": ["-eo", "pid=,ppid=," + elapsed + "comm=,args="],
+        "n": 5,
+        "pid": 0,
+        "threads": PS_NO_COLUMN,
+        "rss_kb": PS_NO_COLUMN,
+        "cpu_time": PS_NO_COLUMN,
+        "comm": 3,
+        "ppid": 1,
+        "elapsed": 2,
+        "argv": 4,
+        "optional": 4,  # a zombie has no argv; cmdline then falls back to the comm
+    }
+
+
+def _ps_column(spec: dict[str, Any], parts: list[str], key: str) -> str:
+    """One spec column out of an already-split line.
+
+    Answers "" for a column this dialect does not have, and for the ``optional``
+    column on a line that came back one field short -- the case where every later
+    column shifts one to the left, because `ps` omits the VALUE, not just its
+    contents (a zombie has neither accumulated CPU time nor an argv). The pre-#5541
+    parser already tolerated exactly that one-field-short shape; this keeps the
+    tolerance instead of silently dropping those rows."""
+    i = spec[key]
+    if i == PS_NO_COLUMN:
+        return ""
+    optional = spec.get("optional", PS_NO_COLUMN)
+    if len(parts) < spec["n"] and optional != PS_NO_COLUMN:
+        if i == optional:
+            return ""
+        if i > optional:
+            i -= 1
+    if i < 0 or i >= len(parts):
+        return ""
+    return parts[i]
+
+
+def _parse_ps_duration(value: Any) -> float | None:
+    """One `ps` time column in seconds, in either dialect.
+
+    procps' ``etimes``/``cputimes`` are bare integers; BSD has no such keyword and its
+    ``etime``/``time`` columns are FORMATTED [[dd-]hh:]mm:ss[.ff]. A keyword rename
+    alone would therefore have produced ages of 0 on a BSD host, so the BSD column set
+    is only half a fix without this. One parser reads both: a bare integer is the
+    degenerate seconds-only case of the same grammar, so the Linux path still yields
+    exactly the integer it yielded before.
+
+    None for anything unreadable (a `-` placeholder, a leaked header, an unexpected
+    dialect). The caller then leaves the field None rather than recording a zero: a
+    zero age means "started this instant" and a zero CPU time means "never ran", both
+    of which are claims, and neither is witnessed by an unparseable string."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    days = 0.0
+    if "-" in text:  # dd-hh:mm:ss
+        head, _, text = text.partition("-")
+        try:
+            days = float(head)
+        except ValueError:
+            return None
+        if days < 0:
+            return None
+    fields = text.split(":")
+    if len(fields) > 3:  # nothing in either dialect is deeper than hh:mm:ss
+        return None
+    total = 0.0
+    for field in fields:
+        # Digits and one decimal point only. float() alone would accept "nan", "inf"
+        # and "1e9"; a census column is never any of those, and a NaN age would poison
+        # every comparison downstream instead of being rejected here.
+        if not field or any(ch not in "0123456789." for ch in field):
+            return None
+        try:
+            seconds = float(field)
+        except ValueError:
+            return None
+        if seconds < 0:
+            return None
+        total = total * 60 + seconds
+    return days * 86400 + total
+
+
+def _run_tool(timeout: float, *argv: str) -> tuple[str, str]:
+    """Run a census tool and return BOTH its stdout and, if it failed, the failure text.
+
+    The two are not exclusive, which is the whole point: a `ps` that does not
+    recognise one requested keyword may still print the rows it does understand and
+    only then exit non-zero, and discarding that stdout is what made a POSIX census
+    report an empty machine on a host running hundreds of processes. It is the CALLER
+    that decides what a non-zero exit means, because only the caller can see whether
+    the bytes parsed into anything.
+
+    The tool's stderr rides along in the error text. "exit status 1" alone was true
+    and useless -- the sentence that names this bug on sight ("ps: unknown option --
+    o") was being thrown away with it."""
+    try:
+        proc = subprocess.run(
+            list(argv),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            creationflags=_win_creationflags(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return "", f"{type(exc).__name__}: {exc}"
+    if proc.returncode != 0:
+        detail = f"exit status {proc.returncode}"
+        stderr = (proc.stderr or "").strip()
+        if stderr:
+            detail += ": " + stderr[:200]
+        return (proc.stdout or ""), detail
+    return (proc.stdout or ""), ""
+
+
+def _census_error(rows: int, tool_error: str) -> str:
+    """The ONE rule every collector applies to a tool that failed: keep the failure
+    only when nothing usable came out of it.
+
+    Both halves matter and they pull in opposite directions.
+
+    Rows AND an error -> report the census, drop the error. A `ps` that printed rows
+    and then exited non-zero over one unknown keyword has answered the question.
+    Reporting the error anyway would be worse than the original bug in one specific
+    way: ``ok`` is computed as ``not collect_error``, so rows-with-an-error would turn
+    a host whose census WORKED into a permanent ACTION.
+
+    No rows AND an error -> report the error. Returning zero rows and no error states
+    that the host is quiet, which is the one claim this guard must never make on
+    evidence it does not have: a guard that saw nothing must say it saw nothing, not
+    that there was nothing to see.
+
+    The residual case this cannot separate is a tool that died PART WAY through
+    printing; those rows are kept and look complete. That is the direction the rest of
+    the guard already fails in (a short census flags fewer runaways: a missed reap,
+    never a wrong one)."""
+    return "" if rows > 0 else tool_error
+
+
+def _collect_posix(system: str = "") -> tuple[list[dict[str, Any]], str]:
+    spec = _ps_census_spec(system or platform.system())
+    out, tool_error = _run_tool(30, "ps", *spec["args"])
+    rows = _parse_posix_ps(out, spec)
+    error = _census_error(len(rows), tool_error)
+    return ([], error) if error else (rows, "")
+
+
+def _parse_posix_ps(text: str, spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    spec = spec or _ps_census_spec("Linux")
     out: list[dict[str, Any]] = []
     for line in (text or "").splitlines():
-        parts = line.split(None, 4)
-        # 5-column = pid nlwp rss cputimes comm (current format); 4-column =
-        # pid nlwp rss comm (a ps without cputimes) -> cpu_s skipped, not a breach.
-        if len(parts) >= 5:
-            pid, nlwp, rss, cputimes, comm = parts[0], parts[1], parts[2], parts[3], parts[4]
-        elif len(parts) == 4:
-            pid, nlwp, rss, comm = parts
-            cputimes = None
-        else:
+        parts = line.split(None, spec["n"] - 1)
+        if len(parts) < spec["n"] - 1:
             continue
-        rss_kb = _as_int(rss)
+        pid = _as_int(_ps_column(spec, parts, "pid"))
+        if pid is None:
+            # A line whose first field is not a pid is not a process: a leaked header,
+            # or a usage message a failing `ps` printed on stdout. Dropping it is what
+            # keeps _census_error honest -- a phantom row would count as a census and
+            # suppress the very error that explains the empty result.
+            continue
+        rss_kb = _as_int(_ps_column(spec, parts, "rss_kb"))
         out.append(
             {
-                "pid": _as_int(pid),
-                "name": os.path.basename(comm.strip()),
-                "threads": _as_int(nlwp),
+                "pid": pid,
+                "name": os.path.basename(_ps_column(spec, parts, "comm").strip()),
+                "threads": _as_int(_ps_column(spec, parts, "threads")),
                 "handles": None,
                 "ws_mb": (rss_kb // 1024) if rss_kb is not None else None,
-                "cpu_s": _as_float(cputimes),
+                "cpu_s": _parse_ps_duration(_ps_column(spec, parts, "cpu_time")),
             }
         )
     return out
@@ -731,7 +966,7 @@ def collect_relations() -> tuple[list[dict[str, Any]], str]:
     try:
         if system == "Windows":
             return _collect_windows_relations(), ""
-        return _collect_posix_relations(), ""
+        return _collect_posix_relations(system)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return [], f"{type(exc).__name__}: {exc}"
 
@@ -778,34 +1013,37 @@ def _parse_windows_relations(text: str) -> list[dict[str, Any]]:
     return out
 
 
-def _collect_posix_relations() -> list[dict[str, Any]]:
-    # etimes == elapsed seconds (Linux ps). comm == bare name, args == full cmdline.
-    proc = subprocess.run(
-        ["ps", "-eo", "pid=,ppid=,etimes=,comm=,args="],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        creationflags=_win_creationflags(),
-    )
-    return _parse_posix_ps_relations(proc.stdout)
+def _collect_posix_relations(system: str = "") -> tuple[list[dict[str, Any]], str]:
+    spec = _ps_relations_spec(system or platform.system())
+    out, tool_error = _run_tool(30, "ps", *spec["args"])
+    rows = _parse_posix_ps_relations(out, spec)
+    error = _census_error(len(rows), tool_error)
+    return ([], error) if error else (rows, "")
 
 
-def _parse_posix_ps_relations(text: str) -> list[dict[str, Any]]:
+def _parse_posix_ps_relations(text: str,
+                              spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    spec = spec or _ps_relations_spec("Linux")
     out: list[dict[str, Any]] = []
     for line in (text or "").splitlines():
-        parts = line.split(None, 4)
-        if len(parts) < 4:
+        parts = line.split(None, spec["n"] - 1)
+        if len(parts) < spec["n"] - 1:
             continue
-        pid, ppid, etimes, comm = parts[0], parts[1], parts[2], parts[3]
-        args = parts[4] if len(parts) > 4 else comm
+        pid = _as_int(_ps_column(spec, parts, "pid"))
+        if pid is None:  # not a process row -- see _parse_posix_ps
+            continue
+        comm = _ps_column(spec, parts, "comm")
+        # An empty argv column (a zombie keeps its accounting name and nothing else)
+        # falls back to the command name, exactly as the pre-#5541 parser did.
+        args = _ps_column(spec, parts, "argv") or comm
+        age = _parse_ps_duration(_ps_column(spec, parts, "elapsed"))
         out.append(
             {
-                "pid": _as_int(pid),
-                "ppid": _as_int(ppid),
+                "pid": pid,
+                "ppid": _as_int(_ps_column(spec, parts, "ppid")),
                 "name": os.path.basename(comm.strip()),
                 "cmdline": args,
-                "age_sec": _as_int(etimes),
+                "age_sec": int(age) if age is not None else None,
             }
         )
     return out

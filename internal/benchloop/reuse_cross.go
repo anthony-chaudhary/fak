@@ -29,9 +29,9 @@ type CrossCommit struct {
 	ChangedPaths func(prevCommit, headCommit string) (paths []string, ok bool)
 	// Next is the identity of the run that would be launched, feeding the
 	// model/config drift rungs of DetectInvalidation. Zero-value model+config
-	// carries the prior artifact's identity forward: benchloop's launch gate keys
-	// on (commit x machine) with model/config wildcards, so the reused artifact
-	// IS the config it would re-run.
+	// carries the prior artifact's identity forward: only prior runs that already
+	// clear the key's machine/model/precision axes are candidates here (#5087), so
+	// the reused artifact IS the config it would re-run.
 	Next benchcli.BenchmarkArtifact
 }
 

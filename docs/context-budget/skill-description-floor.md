@@ -36,8 +36,9 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 58 skill(s); resident floor = 47236 bytes (~11809 tokens);
-  description floor = 47236 B; name-only floor = 787 B; at-rest card floor = 51409 bytes
+skill footprint [interactive]: 59 skill(s); resident floor = 47821 bytes (~11955 tokens);
+  description floor = 47821 B; name-only floor = 797 B; at-rest card floor = 14449 bytes
+  at-rest intent slice (#5560): 10759 B (~2689 tokens) across 59 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
@@ -53,12 +54,19 @@ Heaviest resident descriptions — the trim targets:
 | 7 | 1231 | disambiguation-score |
 | 8 | 1223 | stability-score |
 
-The full 58-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 59-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 787 B` is the size of the headroom: **46.4 kB of the 47.2 kB
+`name-only floor = 797 B` is the size of the headroom: **47.0 kB of the 47.8 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
+
+**Last re-pin: 47236 → 47821 B (+585, 58 → 59 skills)** — the `fleet-wave` skill
+(the goal-shaped wave door over `super-loop`/`wave-harvest`). It is the worked
+example of the "prefer trimming first" rule below: drafted at **1296 B** it would
+have entered the table at rank 6, so the description was cut to the trigger
+sentence — *when* to load it, not what it does — and only the residual 585 B was
+banked. The body kept the detail; the resident tax did not.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -88,7 +96,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **47236**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **47821**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
@@ -133,24 +141,76 @@ of nothing.
 - `TestSkillDescBudgetReasonsRegisteredInDosToml` proves both tokens are declared in
   `dos.toml [reasons]` as refusals, and `TestBaselineDocPinsTheCommittedCeiling`
   proves this page carries the same number the constant does.
+- For the card split (#5560), in `internal/capindex`:
+  `TestResidentCardCarriesIntentNotFullDescription` proves the serialized card holds
+  the intent line and no `description` field; `TestFaultStillPagesTheWholeSkillBody`
+  proves the elided prose is byte-for-byte recoverable from the faulted body;
+  `TestShrinkingTheRankingKeyCostsSelectionQuality` is the A/B above and FAILS if a
+  shrunken ranking key ever stops costing selection quality, so the trade is re-decided
+  with evidence rather than silently; `TestExplicitFrontmatterIntentWins` pins the
+  `intent:` override end to end.
 
-## What this issue deliberately does NOT do
+## The card split (#5560) — and why it does NOT move this number
 
-- **The `capindex` card split** — `skill_resolver.go` still copies the whole
-  `description` into both the at-rest `CardBytes` and the ranking `Trigger`, so the
-  "name + one-line intent" index #3234 promised does not exist yet. That is #3234's
-  undelivered item 2.
-- **The userland description migration** — trimming the heaviest descriptions above.
-  That is #3234's undelivered item 3, and this ratchet is what makes it a *bankable*
-  win: a trim that is not banked into the constant now reds as
-  `SKILL_DESC_BUDGET_STALE`.
+`capindex.CapCard` now separates the two copies of the prose that used to be one
+field (`skill_resolver.go`):
 
-Both deserve their own issue. This one only stops the bleeding.
+| field | who reads it | cost of a byte |
+|---|---|---|
+| `Intent` | serialized into `CardBytes`; what a listing renders | a **resident token**, paid every session |
+| `Trigger` | `Catalog.scoreCard`, `contextq`, `selfquery`'s ranker | **recall** — it never leaves the process |
+
+`Intent` is the leading sentence of the `description`, capped at
+`capindex.SkillIntentMaxBytes` (320 B), overridable per skill with a frontmatter
+`intent:` line. The full prose is still reachable two ways: as the ranking key, and
+in the SKILL.md body that `Fault` pages in on selection. It is a residency split,
+not a deletion.
+
+**Measured effect:** the at-rest card floor falls **51,409 B → 14,196 B (−72%)**.
+
+**The ranking key was measured, not assumed.** #5560 asked whether `Trigger` may
+shrink too. `capindex.TestShrinkingTheRankingKeyCostsSelectionQuality` builds 56
+probes from the corpus itself — rare terms that appear only in the *tail* of a
+skill's own description — and ranks them through the shipped `Catalog.RankCards`:
+
+| ranking key | top-1 | probes matching nothing at all |
+|---|---:|---:|
+| full description (shipped) | 54/56 (96%) | 0 |
+| leading sentence only | 4/56 (7%) | 27 |
+
+So `Trigger` keeps the full description. Selection quality, not byte count, decides
+that field. `TestEverySkillStaysInvocableByName` pins the other half: name
+addressability survives even with *no* trigger at all, because `scoreCard` weights a
+name match above a trigger match.
+
+**This is why `SkillDescriptionBudgetBytes` is unchanged at 47,236.** The gated
+`DescFloor` is the sum of the frontmatter `description` fields — the prose a harness
+renders into the always-on skill listing, and the thing #5444 exists to refuse the
+growth of. The card split moved where fak *serializes* that prose; it did not delete a
+byte of frontmatter. Re-pinning the ceiling down onto the derived intent slice would
+bank a win that was never won, and would blind the ratchet to a description that
+doubles in its tail — the exact growth it was built to catch.
+
+## What is still NOT done
+
+- **The userland description migration** — #3234's undelivered item 3, and the only
+  lever that moves the 47,236 B number: shortening the frontmatter `description`
+  fields themselves. `score-2x` carries the **worked example** of the migration — one
+  `intent:` line added, its `description` untouched, so the gated floor is byte-identical
+  and only the at-rest card shrank. The 5 skills whose leading sentence still overruns
+  the 320 B cap and therefore elides (`curate-cluster`, `issue-triage`, `sota-check`,
+  `trajectory-audit`, `wave-harvest`) are named by
+  `capindex.TestResidentIntentInventory` and are the next adopters. Sweeping all 58 is
+  deliberately not done here.
+- **A witnessed on-the-wire count** — see the provenance caveat above. Which slice a
+  given harness build actually ships is still unconfirmed, and the card split does not
+  change that.
 
 ## Cross-links
 
 - **#3229** — epic: shrink the always-sent context budget.
 - **#3234** — the measurement this ratchet defends (`fak skill footprint`).
 - **#3612** — the `headless` name-only profile (the 787 B floor above).
+- **#5560** — the `capindex` residency split above (`Intent` vs `Trigger`).
 - [MCP tool-schema floor](mcp-tool-floor.md) — the systemic sibling, with the
   `FLOOR_BUDGET_*` / `DESC_BUDGET_*` ratchets this one is modelled on.

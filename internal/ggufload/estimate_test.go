@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -286,6 +287,129 @@ func TestEstimateCPUOffloadExpertsMemoryPlanSplitsDeviceAndHost(t *testing.T) {
 	}
 	if len(fe.Demands) != 2 || fe.Demands[1].Class != compute.MemoryOffload || fe.Demands[1].Scope != compute.MemoryScopeHost {
 		t.Fatalf("FitError demands = %+v, want host-scoped offload demand preserved", fe.Demands)
+	}
+}
+
+// #4952: a --cpu-offload-experts rank in a SHARDED expert-parallel serve admits only its own
+// routed-expert band into the host expert pool (the loader's WithExpertShard seam), so the plan
+// that gates it must charge that band and not the whole routed set. Charging the full set to every
+// rank overstates host demand ~ranks-fold and refuses a serve that fits. Shared experts are
+// replicated per rank and must stay whole; ranks<=1 must be byte-identical to the unsharded plan.
+func TestEstimateCPUOffloadExpertsExpertParallelShardsHostRoutedExperts(t *testing.T) {
+	newWS := func() *WeightSource {
+		f := &File{
+			Metadata: synthGLMMeta(4),
+			Tensors: []TensorInfo{
+				{Name: "token_embd.weight", Dims: []uint64{256}, Type: TensorF32},               // device, 1024 B
+				{Name: "blk.0.ffn_gate_inp.weight", Dims: []uint64{128}, Type: TensorF32},       // router device, 512 B
+				{Name: "blk.0.attn_k_b.weight", Dims: []uint64{64}, Type: TensorF32},            // KV-b half device, 256 B
+				{Name: "blk.0.ffn_gate_shexp.weight", Dims: []uint64{512}, Type: TensorF32},     // shared expert host, 2048 B, replicated
+				{Name: "blk.0.ffn_gate_exps.weight", Dims: []uint64{1024}, Type: TensorF32},     // routed blob host, 4096 B over 4 experts
+				{Name: "blk.78.nextn.eh_proj.weight", Dims: []uint64{1 << 20}, Type: TensorF32}, // skipped, counts nowhere
+			},
+		}
+		ws, err := NewWeightSource(f, nil, 0)
+		if err != nil {
+			t.Fatalf("NewWeightSource: %v", err)
+		}
+		return ws
+	}
+	const device = int64(1024 + 512 + 256)
+	const shared = int64(2048)
+	const routed = int64(4096)
+
+	full, err := newWS().EstimateCPUOffloadExpertsMemoryPlan()
+	if err != nil {
+		t.Fatalf("EstimateCPUOffloadExpertsMemoryPlan: %v", err)
+	}
+	if got, want := full.ByClass()[compute.MemoryOffload], shared+routed; got != want {
+		t.Fatalf("unsharded host offload = %d, want the whole routed set %d", got, want)
+	}
+
+	// ranks<=1 is the same plan by construction — the pre-#4952 behaviour of every non-EP serve.
+	for _, ranks := range []int{0, 1} {
+		one, err := newWS().EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks)
+		if err != nil {
+			t.Fatalf("EP-%d offload plan: %v", ranks, err)
+		}
+		if !reflect.DeepEqual(one, full) {
+			t.Fatalf("ranks=%d plan = %+v, want byte-identical to the unsharded plan %+v", ranks, one, full)
+		}
+	}
+
+	for _, tc := range []struct {
+		ranks int
+		band  int64
+	}{
+		{ranks: 2, band: routed / 2},
+		{ranks: 4, band: routed / 4},
+	} {
+		plan, err := newWS().EstimateCPUOffloadExpertsExpertParallelMemoryPlan(tc.ranks)
+		if err != nil {
+			t.Fatalf("EP-%d offload plan: %v", tc.ranks, err)
+		}
+		by := plan.ByClass()
+		if got, want := by[compute.MemoryOffload], shared+tc.band; got != want {
+			t.Fatalf("EP-%d host offload = %d, want replicated shared expert + one routed band %d", tc.ranks, got, want)
+		}
+		// The device side is dense/router/attention only, unchanged by sharding: the routed
+		// experts live in host RAM on this arm whether or not the rank holds a band.
+		if got := plan.DeviceTotal(); got != device {
+			t.Fatalf("EP-%d DeviceTotal = %d, want the unchanged dense side %d", tc.ranks, got, device)
+		}
+		byDetail := memoryPlanBytesByDetail(plan)
+		if got := byDetail["gguf-host-expert-offload"]; got != shared {
+			t.Fatalf("EP-%d replicated host detail = %d, want the shared expert %d; plan=%+v", tc.ranks, got, shared, plan)
+		}
+		if got := byDetail["gguf-host-expert-offload-shard"]; got != tc.band {
+			t.Fatalf("EP-%d routed host shard detail = %d, want %d; plan=%+v", tc.ranks, got, tc.band, plan)
+		}
+		if got := byDetail["gguf-device-dense-load"]; got != device {
+			t.Fatalf("EP-%d device detail = %d, want %d; plan=%+v", tc.ranks, got, device, plan)
+		}
+		for _, d := range plan {
+			if d.Detail == "gguf-host-expert-offload-shard" && d.Scope != compute.MemoryScopeHost {
+				t.Fatalf("EP-%d routed band must stay host-scoped on the offload arm: %+v", tc.ranks, d)
+			}
+		}
+	}
+}
+
+// A non-MoE (or non-batched-expert) architecture has no routed band to shard, so an EP rank count
+// must leave its offload plan exactly as the unsharded one — never a silent under-charge.
+func TestEstimateCPUOffloadExpertsExpertParallelIgnoresNonBatchedArch(t *testing.T) {
+	f := &File{
+		Metadata: map[string]Value{
+			"general.architecture":                   {Type: TypeString, Value: "qwen2"},
+			"qwen2.context_length":                   {Type: TypeUint64, Value: uint64(16)},
+			"qwen2.embedding_length":                 {Type: TypeUint64, Value: uint64(32)},
+			"qwen2.block_count":                      {Type: TypeUint64, Value: uint64(2)},
+			"qwen2.feed_forward_length":              {Type: TypeUint64, Value: uint64(64)},
+			"qwen2.attention.head_count":             {Type: TypeUint64, Value: uint64(4)},
+			"qwen2.attention.head_count_kv":          {Type: TypeUint64, Value: uint64(2)},
+			"qwen2.attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-5)},
+			"qwen2.rope.freq_base":                   {Type: TypeFloat32, Value: float32(10000)},
+			"tokenizer.ggml.eos_token_id":            {Type: TypeUint32, Value: uint32(2)},
+		},
+		Tensors: []TensorInfo{
+			{Name: "token_embd.weight", Dims: []uint64{256}, Type: TensorF32},
+			{Name: "blk.0.ffn_gate.weight", Dims: []uint64{512}, Type: TensorF32},
+		},
+	}
+	ws, err := NewWeightSource(f, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	full, err := ws.EstimateCPUOffloadExpertsMemoryPlan()
+	if err != nil {
+		t.Fatalf("EstimateCPUOffloadExpertsMemoryPlan: %v", err)
+	}
+	ep, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(8)
+	if err != nil {
+		t.Fatalf("EstimateCPUOffloadExpertsExpertParallelMemoryPlan: %v", err)
+	}
+	if !reflect.DeepEqual(ep, full) {
+		t.Fatalf("non-batched-expert arch EP-8 plan = %+v, want the unsharded plan %+v", ep, full)
 	}
 }
 

@@ -106,7 +106,7 @@ grep -n "^title:" docs/adoption/concept-card.md
 grep -n "concept-card" INDEX.md
 
 # the SEO/AEO scorecard does not regress for this new doc
-python tools/seo_aeo_scorecard.py
+fak score seo
 
 # the two proof commands the card promises actually fire (verified 2026-07-03)
 fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> verdict=DENY reason=POLICY_BLOCK

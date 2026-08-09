@@ -1,0 +1,28 @@
+# claim-reclass.txt — forward-only reclassification ledger (#5434)
+#
+# The push-seam claim-honesty gate (tools/githooks/pre-push, DOS reason CLAIM_UNWITNESSED)
+# refuses a push when a commit in origin/<trunk>..HEAD makes a claim its own diff cannot
+# witness. Amending is forbidden on this shared trunk — a rebase rewrites peers' commits and
+# moves HEAD under every live session — so the cure is additive: append a record here that
+# DEMOTES the landed claim to a type the commit's REAL diff already witnesses, and commit it.
+# Nothing is rewritten; the retraction lands as new history like every other fact in this repo.
+#
+# A record may ONLY demote. `fak hooks claim-reclass` re-derives the commit's subject and
+# changed-path set from git and refuses any record that names a code-effect type, cites a path
+# the commit never touched, or claims a type the diff does not independently witness. So the
+# strongest thing an accepted record can say is "the landed subject overstated this; the
+# evidence supports only a <docs|chore|test|...> claim" — a retraction, not a pass.
+#
+# Format: `key: value` blocks opened by `commit:`; keys are commit/type/witness/reason.
+# `witness:` may repeat. Get the exact record for a live residual with:
+#   dos review --workspace . "origin/main..HEAD" 2>&1 | fak hooks claim-reclass --root .
+
+commit: 00713794bfb9eb4503b264dd70ea73d4791c8a56
+type: docs
+witness: docs/model-accounts.md
+reason: The landed subject reads `fix(modelroute): document the shipped turn-evidence producer`, but the diff is docs/model-accounts.md alone (+64/-8) and touches no program source. The producer it describes was already shipped; this commit only wrote down where the grader's input comes from. The `fix(...)` type therefore overstated a documentation change as a code-effect one — the evidence supports a `docs` claim and nothing more.
+
+commit: ab9fc0eca886a3a7df44f702d5f1460428441b44
+type: docs
+witness: .claude/goal-prompts/resolve-top-issue-witnessed.md
+reason: The landed subject reads `fix(dispatch): treat a kernel refusal as a pause and checkpoint-commit in the goal fuel`, but the diff is .claude/goal-prompts/resolve-top-issue-witnessed.md alone (+58/-56) and touches no program source. Nothing in the dispatch path changed: the commit rewrote the /goal fuel's prose so a worker READS a refusal as a pause and checkpoint-commits, which is a change to the instructions handed to an agent, not to any code that runs. The `fix(...)` type therefore overstated a prompt-documentation edit as a code-effect one — the evidence supports a `docs` claim and nothing more.

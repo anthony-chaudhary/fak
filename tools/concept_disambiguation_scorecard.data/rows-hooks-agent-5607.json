@@ -1,0 +1,42 @@
+{
+  "rows": [
+    {
+      "id": "agenthookdelegate",
+      "canonical": "agentHookDelegate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "agentHookDelegate is one registered child process for one agent-LIFECYCLE event (PreToolUse/PostToolUse/Stop): the compiled stand-in for a single hooks entry in .claude/settings.json, carrying the event it serves and an Argv resolver that reports whether the delegate is present on this box at all.",
+      "distinction": "Not hooks.Gate or hooks.HygieneGate, which are COMMIT-boundary checks run in-process over a staged diff or tracked tree and whose could-not-run is exit 2; an agentHookDelegate is an out-of-process child on the tool-call path, where exit 2 is the harness BLOCK signal and could-not-run must therefore report as exit 1.",
+      "distinct_from": [
+        "gate",
+        "repoguardargv"
+      ],
+      "aliases": [],
+      "grounding": "agentHookDelegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "repoguardargv",
+      "canonical": "repoguardArgv",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a repo root: the compiled tools/.bin/repoguard if present, else the tools/repo_guard.py source, else NOT-PRESENT. It answers only 'what should be executed here, and does it exist', never whether the guard allows the call.",
+      "distinction": "Not repoguard itself (the separate cmd/repoguard binary that renders the permission decision on stdout), and not agentHookDelegate (the registry entry that OWNS this resolver alongside its event). repoguardArgv deliberately omits the settings.json wrapper's staleness probe, which blanked a stale binary and fell through to a source path it never confirmed existed -- silently running nothing.",
+      "distinct_from": [
+        "agenthookdelegate"
+      ],
+      "aliases": [],
+      "grounding": "repoguardArgv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

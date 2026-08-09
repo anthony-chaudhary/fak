@@ -206,6 +206,17 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	gn := expertName(layer, expert, "gate_proj.weight")
 	un := expertName(layer, expert, "up_proj.weight")
 	dn := expertName(layer, expert, "down_proj.weight")
+	// The session behind mat, when it has one. Admit both sessionQ4KKernel (the generic
+	// blockStep kernel) AND backendKernel (what decodeBandGLMDsa actually builds);
+	// residentKernel and splitKernel carry none. It resolves the device HAL route below
+	// and owns the reachability counters, so both outcomes land on the same session.
+	var sess *Session
+	switch mk := mat.(type) {
+	case sessionQ4KKernel:
+		sess = mk.s
+	case backendKernel:
+		sess = mk.s
+	}
 	// CUDA/device HAL route: keep all three expert projections and SwiGLU on the
 	// backend. The helper admits only bias-free SiLU experts whose gate/up/down
 	// weights all have an honest resident Q4_K or staged F16 k-quant representation.
@@ -213,25 +224,23 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		!m.has(expertName(layer, expert, "gate_proj.bias")) &&
 		!m.has(expertName(layer, expert, "up_proj.bias")) &&
 		!m.has(expertName(layer, expert, "down_proj.bias")) {
-		// Admit both sessionQ4KKernel (the generic blockStep kernel) AND backendKernel
-		// (what decodeBandGLMDsa actually builds). expertSwiGLUHAL itself gates on
-		// supportsRoutedExpertKQuant + halW, so a non-capable backend returns ok=false
-		// and falls through unchanged (#5111).
-		var sess *Session
-		switch mk := mat.(type) {
-		case sessionQ4KKernel:
-			sess = mk.s
-		case backendKernel:
-			sess = mk.s
-		}
+		// expertSwiGLUHAL itself gates on supportsRoutedExpertKQuant + halW, so a
+		// non-capable backend returns ok=false and falls through unchanged (#5111).
 		if sess != nil {
 			if xf, ok := xn.([]float32); ok {
 				if out, ok := sess.expertSwiGLUHAL(gn, un, dn, xf); ok {
+					sess.recordRoutedExpertDeviceHAL(1)
 					return out
 				}
 			}
 		}
 	}
+	// Past the device-HAL route, so this expert runs somewhere else: the Metal fused MLP
+	// below, the host k-quant GEMV, or the generic mulGroup dispatch. Recording it here —
+	// the single point every non-HAL route flows through — is what lets a hardware
+	// witness PROVE the device path executed rather than infer it from throughput, the
+	// gap that hid #4843's unreachable device path for three weeks (#5111).
+	sess.recordRoutedExpertOffHAL(1)
 	q6Down := false
 	if dq := m.kqw[dn]; dq != nil && dq.kind == kindQ6K {
 		q6Down = true
@@ -446,6 +455,10 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	if sk, ok := mat.(sessionQ4KKernel); ok {
 		sk.s.recordQ4KExpertRoute(len(picks))
 	}
+	// R3/#5614: the router has just named this layer's whole activated set, so stage the prefix of
+	// it the ring budget can hold before any expert GEMM runs, instead of discovering each expert one
+	// GEMM too late. Inert without a routed-expert ring, which is the default.
+	prefetchActivatedExperts(m, layer, picks, mat)
 	// Batched-expert decode lever (#1382): the top-k routed experts of a Qwen3.6-27B q4_k_m MoE
 	// layer are the dominant decode cost (mlp_decode, ~32-54% — the MAC-QWEN36 diagnosis), and the
 	// per-expert loop below fires ONE command buffer / parFor per expert. Two batched paths collapse
@@ -560,6 +573,8 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	H := cfg.HiddenSize
 	delta := make([]float32, H)
 	picks := glmRoute(m, layer, xn, mat)
+	// R3/#5614: same-step activated-set prefetch — see moeFFN.apply. Inert without a ring.
+	prefetchActivatedExperts(m, layer, picks, mat)
 	// Lever 2: on the pure-CPU resident path, batch the routed experts' GEMVs into ONE parFor
 	// per projection instead of ~3 per expert (moe_host_batch.go) — bit-identical to the loop
 	// below (TestBatchedExpertDeltaMatchesLoop). Any config the fast path does not model

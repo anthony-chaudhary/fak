@@ -83,6 +83,20 @@ type Row struct {
 	CallSeq   uint64 `json:"call_seq,omitempty"`   // the kernel's per-call submission id (ToolCall.SeqNo): the join key tying a call's DECIDE to its later QUARANTINE
 	Witness   string `json:"witness,omitempty"`    // the bounded-disclosure claim the verdict surfaced (offending self-modify glob / tool.arg bound / require-witness claim)
 	ArgsLabel string `json:"args_label,omitempty"` // bounded, redacted call shape label for operator diagnosis; never raw args
+	// DenyRule is the closed-vocabulary id of the policy RUNG that refused
+	// (abi.DenyRuleID) — the machine-routable key Witness only ever carried as the
+	// leading words of free-text prose. Verdict.Reason names the refusal's class;
+	// this names the rule inside it, so a consumer can separate the seven gitgate
+	// laws that all cite POLICY_BLOCK, or the recursive-delete rung from the
+	// out-of-tree-write rung, without parsing a 400-character claim (#5863).
+	//
+	// It is the ONE field on this row whose value space is a compile-time closed
+	// set: rowFromEvent re-validates whatever the rung stamped through
+	// abi.DenyRuleID and drops a non-member WHOLE. Nothing is filtered, trimmed, or
+	// truncated into the set, so — unlike a scrub-and-bound field such as ArgsLabel,
+	// which fused an env-assignment value into a label before #5863 — no input byte
+	// can appear here at all. Do not "relax" that to a character class.
+	DenyRule string `json:"deny_rule,omitempty"`
 
 	// Capability fields (for C6: witness + audit surface). These are populated for
 	// CAP_FAULT / CAP_EVICT / CAP_VERSION_BIND events to track capability lifecycle.
@@ -161,6 +175,18 @@ type Row struct {
 	// carries the full correlated record (user id, turn id, per-session
 	// predecessor link) layered on top.
 	Relay *RelayProvenance `json:"relay,omitempty"`
+
+	// Capability-grant field (for CAPABILITY_GRANT: the GATED-WIDEN
+	// provenance witness, #5178). A grant loosens the live security boundary
+	// but is supervision, not a kernel decision, so AppendCapabilityGrant
+	// writes it directly through the chain, like a config swap. NOT part of
+	// the hash-chain pre-image (chainHash lists the chained fields explicitly,
+	// so appending it here leaves every existing journal verifying
+	// byte-for-byte); the chained forensic identity of a grant — Kind, the
+	// widened knob (Tool), the gated channel (Reason) and the actor (By) —
+	// rides the frozen decision fields above, and this carries the full
+	// correlated record (old→new values, amendment class, source) on top.
+	Grant *CapabilityGrantRow `json:"capability_grant,omitempty"`
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
@@ -508,6 +534,7 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		row.Reason = abi.ReasonName(v.Reason)
 		row.By = v.By
 		row.Witness = witnessOf(v)
+		row.DenyRule = denyRuleOf(v)
 	}
 	if r := ev.Result; r != nil {
 		row.ResultDigest = refDigest(r.Payload)
@@ -546,14 +573,48 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 // require-witness gate's claim (Meta["claim"]). "" when the verdict disclosed
 // nothing. This is the one forensic field the live wire carried but the durable
 // row used to drop, leaving an audit unable to say WHICH glob/arg tripped a deny.
+//
+// The claim is bounded and scrubbed HERE (boundWitness) because the journal is
+// the SOLE scrubber on this wire: internal/guardcorpus copies row.Witness
+// verbatim into the exported dataset and is documented as never re-deriving
+// redaction. Both sources are untrusted for this purpose — Meta is a string map
+// any rung can write, and even the typed Payload.Claim is concatenated from
+// call-derived bytes by several live rungs (see boundWitness).
+//
+// Unlike DenyRule (#5863) this field CANNOT be a closed-vocabulary set-membership
+// test: its value is open-ended remedial prose, 156 distinct values across this
+// host's corpus, and that prose is what keeps a refused agent alive. So it gets
+// the weaker-but-lossless treatment — a generous bound plus a value-targeted
+// scrub — rather than being dropped whole on a non-member.
 func witnessOf(v *abi.Verdict) string {
 	if v == nil {
 		return ""
 	}
 	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
-		return wp.Claim
+		return boundWitness(wp.Claim)
 	}
-	return v.Meta["claim"]
+	return boundWitness(v.Meta["claim"])
+}
+
+// denyRuleOf extracts the refusing rung's closed-vocabulary rule id from the
+// verdict, or "" when the rung stamped none. The journal is the SOLE scrubber on
+// this wire (internal/guardcorpus copies these fields verbatim into the exported
+// dataset), so it never trusts Meta — a string map any rung, and in principle a
+// model-influenced one, can write. abi.DenyRuleID is a set-membership test over a
+// compile-time literal vocabulary: a non-member is dropped whole rather than
+// scrubbed down into the set, so this field cannot carry an arg value, a path, a
+// host, or a secret no matter what is stamped. That property is the reason the
+// offending TOKEN is deliberately NOT recorded alongside it: a token is user data
+// by construction and has no closed vocabulary to be validated against.
+func denyRuleOf(v *abi.Verdict) string {
+	if v == nil || v.Meta == nil {
+		return ""
+	}
+	id, ok := abi.DenyRuleID(v.Meta[abi.MetaDenyRule])
+	if !ok {
+		return ""
+	}
+	return id
 }
 
 func refDigest(r abi.Ref) string {
@@ -661,25 +722,113 @@ func firstStringField(obj map[string]any, names ...string) string {
 	return ""
 }
 
+// navStems names command stems that only position the shell — they select a
+// directory or load an environment, they are not the operative command. Labeling
+// one of them names the navigation prefix of a compound command and throws the
+// command that actually ran away ("cd fak && go test ./..." -> "cd fak"), which
+// collapsed unrelated failures onto one undiagnosable label (#5863). Their
+// argument is a path, so the stem cannot simply be dropped in favor of the second
+// token either — the whole segment has to be stepped over.
+var navStems = map[string]bool{
+	"cd":           true,
+	"chdir":        true,
+	"pushd":        true,
+	"popd":         true,
+	"set-location": true,
+	"source":       true,
+	".":            true,
+}
+
+// commandStem names the operative command of a shell command line as at most two
+// scrubbed atoms. It walks the connector-separated segments and steps over leading
+// navigation segments so the label names what ran, not how the shell got there. The
+// label stays bounded and scrubbed exactly as before — this re-aims the same two
+// atoms, it never emits more of them. If every segment is navigation there is no
+// operative command to name, so the first segment's label is kept.
 func commandStem(command string) string {
-	for _, seg := range strings.Split(command, ";") {
-		fields := strings.Fields(seg)
-		for i, raw := range fields {
-			tok := cleanToken(raw)
-			if tok == "" || tok == "&" || strings.HasPrefix(tok, "-") || strings.HasPrefix(strings.ToLower(tok), "$env:") {
-				continue
+	first := ""
+	for _, seg := range commandSegments(command) {
+		label, stem := segmentLabel(seg)
+		if label == "" {
+			continue
+		}
+		if first == "" {
+			first = label
+		}
+		if navStems[strings.ToLower(stem)] {
+			continue
+		}
+		return label
+	}
+	return first
+}
+
+// commandSegments splits a command line on the connectors that separate one command
+// from the next (";", "&&", "||", "|", "&", newline). Quoting is deliberately not
+// parsed: the result only ever feeds a bounded, scrubbed label, never execution, and
+// a mis-split can only produce a shorter atom, never a longer or less-redacted one.
+func commandSegments(command string) []string {
+	segs := []string{}
+	var b strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(b.String()); s != "" {
+			segs = append(segs, s)
+		}
+		b.Reset()
+	}
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		switch c {
+		case ';', '|', '&', '\n', '\r':
+			flush()
+			if i+1 < len(command) && command[i+1] == c { // collapse "&&" / "||"
+				i++
 			}
-			stem := pathStem(tok)
-			if stem == "" {
-				continue
-			}
-			if next := commandSecond(fields[i+1:]); next != "" {
-				return boundArgsLabel(stem + " " + next)
-			}
-			return stem
+		default:
+			b.WriteByte(c)
 		}
 	}
-	return ""
+	flush()
+	return segs
+}
+
+// segmentLabel returns the bounded label for one segment plus the bare stem it was
+// built from, so the caller can tell a navigation segment from an operative one.
+func segmentLabel(seg string) (label, stem string) {
+	fields := strings.Fields(seg)
+	for i, raw := range fields {
+		tok := cleanToken(raw)
+		if skipStemToken(tok) {
+			continue
+		}
+		s := pathStem(tok)
+		if s == "" {
+			continue
+		}
+		if next := commandSecond(fields[i+1:]); next != "" {
+			return boundArgsLabel(s + " " + next), s
+		}
+		return s, s
+	}
+	return "", ""
+}
+
+// skipStemToken reports whether a token cannot be the operative command's stem. An
+// environment assignment ("VAR=value", "env", "export") is skipped so the label
+// names the command the environment was set up for — and so an assignment's value
+// can never reach the label, which it could before (#5863).
+func skipStemToken(tok string) bool {
+	if tok == "" || tok == "&" {
+		return true
+	}
+	if strings.HasPrefix(tok, "-") || strings.Contains(tok, "=") {
+		return true
+	}
+	switch strings.ToLower(tok) {
+	case "env", "export":
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(tok), "$env:")
 }
 
 func commandSecond(fields []string) string {
@@ -768,6 +917,113 @@ func boundArgsLabel(s string) string {
 		return s
 	}
 	return s[:maxArgsLabelLen] + "..."
+}
+
+const (
+	// maxWitnessLen bounds row.Witness. It is DELIBERATELY not maxArgsLabelLen (96).
+	// Measured over this host's whole corpus (513 .dispatch-runs/guard-audit/*.jsonl,
+	// 82k rows, ~630 with a witness, ~156 distinct values — the corpus is live, so
+	// repeated scans saw 622-631 as peers appended and the reaper pruned): witness
+	// length p50 53, p90 65, p99 447, max 447. Bounding at 96 truncates 57 rows (9.05%) and discards
+	// 26.22% of all witness prose bytes — and the long values are precisely the
+	// gate's own remedy text (the 447-byte OFF_TRUNK refusal names the sanctioned
+	// `fak worktree worker prepare` route only in its second half). Truncating that
+	// converts a recoverable refusal into a dead end, which costs more than the
+	// disclosure it prevents. 512 sits above the observed maximum, so the measured
+	// truncation cost today is ZERO while the field stops being structurally
+	// unbounded.
+	maxWitnessLen = 512
+	boundEllipsis = "..."
+	redactedValue = "[redacted]"
+)
+
+// boundWitness makes the Witness field satisfy the contract internal/guardcorpus
+// states for it. That package copies row.Witness VERBATIM into the exported
+// GUARD-SESSION dataset under a comment asserting the journal "already bounded
+// and scrubbed" it — an assertion that was true of ArgsLabel and false of
+// Witness, which reached the wire raw.
+//
+// The field is NOT rung-authored by construction, which is why a bound is needed
+// rather than just a corrected comment. Live producers concatenate call-derived
+// bytes into the claim: internal/adjudicator/egresslist.go builds
+// "egress restricted, host not allowlisted: "+dests[0] from a host parsed out of
+// the call args, decide.go does the same for the WebFetch host and scheme, and
+// internal/adjudicator/lintwrites.go builds one from the target path plus a
+// Go/JSON parser message that embeds the offending SOURCE TOKEN verbatim.
+func boundWitness(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = redactSecretAssignments(s)
+	if len(s) <= maxWitnessLen {
+		return s
+	}
+	return s[:maxWitnessLen] + boundEllipsis
+}
+
+// redactSecretAssignments replaces the VALUE of any `key=value` / `key: value`
+// atom whose KEY is secretish, and leaves every other byte untouched.
+//
+// It is deliberately NOT safeProvidedArgsLabel's whole-string secretish() drop.
+// That rule keys on the SUBSTRING "secret" anywhere in the string, so reusing it
+// here would blank the witness on exactly the SECRET_EXFIL refusals an operator
+// most needs to read — measured: it destroys 2 distinct corpus values / 4 rows,
+// including "ctxmmu SECRET_EXFIL secret_pattern quarantine_id=q1". Keying on the
+// assignment KEY instead alters ZERO real witness rows — verified by replaying
+// boundWitness over every row of the live corpus (the only assignment keys
+// present are quarantine_id, core.hooksPath and if, none secretish) — while
+// still redacting a value a rung concatenated behind a secret-shaped name.
+func redactSecretAssignments(s string) string {
+	if !secretish(s) {
+		return s // fast path: no needle anywhere, so no assignment can be secretish
+	}
+	var b strings.Builder
+	b.Grow(len(s) + len(redactedValue))
+	i := 0
+	for i < len(s) {
+		if s[i] != '=' && s[i] != ':' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+		sep := i
+		i++
+		// KEY: the identifier run immediately LEFT of the separator.
+		k := sep
+		for k > 0 && isKeyByte(s[k-1]) {
+			k--
+		}
+		if k == sep || !secretish(s[k:sep]) {
+			continue
+		}
+		// VALUE: the next whitespace-delimited atom, after optional separator spacing.
+		v := i
+		for v < len(s) && (s[v] == ' ' || s[v] == '\t') {
+			v++
+		}
+		e := v
+		for e < len(s) && !isWitnessSpace(s[e]) {
+			e++
+		}
+		if e == v {
+			continue // nothing assigned; leave the separator as it stands
+		}
+		b.WriteString(s[i:v]) // preserve the original spacing verbatim
+		b.WriteString(redactedValue)
+		i = e
+	}
+	return b.String()
+}
+
+func isKeyByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '_' || c == '-' || c == '.'
+}
+
+func isWitnessSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 func verdictName(k abi.VerdictKind) string {

@@ -110,7 +110,7 @@ func TestRenderCoreLockWarnings_quietWhenNone(t *testing.T) {
 func TestEmitHygieneJSON_render(t *testing.T) {
 	ws := auditCoreLockPaths([]string{"internal/canon/schema.go"})
 	var out, errb bytes.Buffer
-	emitHygieneJSON(&out, &errb, nil, ws)
+	emitHygieneJSON(&out, &errb, nil, ws, nil, runScope{Population: scopePopulationTree})
 
 	var got struct {
 		Findings         []map[string]any  `json:"findings"`

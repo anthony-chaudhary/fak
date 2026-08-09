@@ -17,7 +17,9 @@ Three supported paths, fastest first:
 3. [Docker](#3-docker) — a tiny distroless image for "put `fak` in front of my model in
    production".
 
-A [build-from-source](#build-from-source) fallback and the [`go install`
+[What's in the binary](#whats-in-the-binary) answers the question the three paths above
+skip — why one ~13 MB binary carries hundreds of verbs, and which of them are yours. A
+[build-from-source](#build-from-source) fallback and the [`go install`
 status](#about-go-install) are at the end.
 
 Next: once `fak` is on your PATH, the [first-session tutorial](docs/fak/tutorial.md)
@@ -169,6 +171,61 @@ docker build --build-arg APP_VERSION=0.43.0 -t fak:0.43.0 .
 
 Override the entrypoint command to run `fak agent`, `fak policy`, etc. instead of the
 gateway.
+
+---
+
+## What's in the binary
+
+One `fak` binary dispatches roughly **270 verbs**. Two dozen are the product you installed;
+the large majority exist to develop *this repository* — commit gating, lane leases, fleet
+dispatch, scorecards, release plumbing. That is startling if you came for a gateway, so
+here is the split. It is not a convention you have to learn: the binary carries it as data.
+
+| Tier | Count on `main` | What it is | Lists itself with |
+| --- | --- | --- | --- |
+| **frontdoor** | 26 | the product: gateway, guard, policy, sessions, models, audit, attest | `fak help` |
+| **dev** | 241 | tooling for developing the `fak` repository itself | `fak dev` |
+| *hidden* | 6 | re-exec / hook seams `fak` spawns for itself; never listed | — |
+
+Don't trust those counts — they move as verbs land, and none of the rest of this page
+depends on them. Derive your own: `fak dev` prints the dev-tier count and the whole list
+for the build you actually installed, `fak help --all` prints every listed verb tagged with
+its tier, and `fak index verbs --json` emits the same classification as machine-readable
+rows. The classification has exactly one home in the source
+([`internal/devindex/tiers.go`](internal/devindex/tiers.go)) and a test refuses a newly
+dispatched verb that no tier claims, so a verb cannot drift into the wrong column.
+
+### Is the dev tier a problem in a production image?
+
+No — and the reason is specific, not reassurance:
+
+- **A verb runs only when it is the command you invoke.** Nothing in the dev tier is
+  scheduled or started by `fak serve`, and no HTTP or MCP request can reach one: the
+  gateway never spawns a process.
+- **The container never invokes one.** The [`Dockerfile`](Dockerfile) sets
+  `ENTRYPOINT ["/usr/local/bin/fak"]` with `CMD ["serve", "--addr", "0.0.0.0:8080"]`.
+- **Most dev verbs have nothing to act on outside a checkout.** They locate the repository
+  by searching upward for `dos.toml` / `go.mod`; a distroless image has neither.
+- **They cost bytes, not behaviour** — and the bytes are the ~13 MB the Docker section
+  above already quotes.
+
+Whichever verb you run, the one thing `fak` writes unprompted is a local usage journal in
+`<user-config-dir>/fak/` (`usage.jsonl` plus the `usage.salt` it hashes with): verb name,
+the *number* of arguments, a salted digest of the argument vector, exit code, duration,
+version, hostname, pid — never argument values, and never off the machine. Set
+`FAK_USAGE_LOG=off` to disable it. The full account — why `off` is the only spelling that
+disables it, the `FAK_USAGE_LOG_PATH` override, what each row contains, and the fact that
+nothing rotates the file — lives in
+[the durable-artifacts inventory](docs/observability/durable-artifacts.md#the-cli-usage-journal-is-on-by-default).
+
+### Is a slimmer artifact planned?
+
+No. There is no build tag and no reduced release artifact, and the published archives are
+the whole binary. That is a design position rather than an oversight: one binary with one
+surface is a stated project value — see
+[one binary is the whole surface](docs/explainers/one-binary-one-surface.md) — and a second
+artifact would be a second thing to build, checksum, attest, and support. If it ever
+changes, it will change in a release note rather than silently.
 
 ---
 

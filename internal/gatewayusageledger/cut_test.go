@@ -23,6 +23,11 @@ func cutTestRow(t *testing.T, kind, sessionType string, ms int64, base int64) Ro
 			f.SetInt(base)
 		case reflect.Uint64:
 			f.SetUint(uint64(base))
+		case reflect.Bool:
+			// Intent flags (#4349) fold by OR, so an all-true corpus keeps every field
+			// true through a cut — the same "no counter total is lost" check as the
+			// numeric fields, expressed in the only algebra a flag has.
+			f.SetBool(true)
 		case reflect.Map:
 			m := reflect.MakeMap(f.Type())
 			m.SetMapIndex(reflect.ValueOf("reason_a"), reflect.ValueOf(uint64(base)))

@@ -593,3 +593,66 @@ func TestRegistered(t *testing.T) {
 		t.Fatal("gitgate.v1 capability not registered — init() did not run or did not register")
 	}
 }
+
+// TestClassifyQuotedHeredocBodiesAreInert is the captured behavioral witness for
+// #5960. A quoted cat heredoc redirected to a file is data, not shell: prose in
+// its body must not become a recovered git command or backtick substitution.
+// Expansion-capable and otherwise-unproven heredocs remain fail-closed.
+func TestClassifyQuotedHeredocBodiesAreInert(t *testing.T) {
+	g := New()
+	tests := []struct {
+		name string
+		cmd  string
+		deny bool
+	}{
+		{
+			name: "quoted body containing both false-positive shapes",
+			cmd:  "cat > runbook.md <<'DOC'\n`git push --force origin main`\ngit commit --amend\nDOC",
+		},
+		{
+			name: "double-quoted delimiter",
+			cmd:  "cat > report.md <<\"DOC\"\n`git push -f`\nDOC",
+		},
+		{
+			name: "tab-stripping quoted delimiter",
+			cmd:  "cat > report.md <<-'DOC'\n\tgit push --force\n\tDOC",
+		},
+		{
+			name: "unquoted delimiter remains expansion-capable",
+			cmd:  "cat > report.md <<DOC\n$(git push --force)\nDOC",
+			deny: true,
+		},
+		{
+			name: "non-cat opener is not proven inert",
+			cmd:  "sh <<'DOC'\ngit push --force\nDOC",
+			deny: true,
+		},
+		{
+			name: "shell-escaped markdown span in unquoted printf payload",
+			cmd:  "printf %s \\`git push --force origin main\\` > runbook.md",
+		},
+		{
+			name: "real backtick laundering outside body",
+			cmd:  "echo `git push --force origin main`",
+			deny: true,
+		},
+		{
+			name: "real command substitution outside body",
+			cmd:  "echo $(git push --force origin main)",
+			deny: true,
+		},
+	}
+	unterminated := "cat > report.md <<'DOC'\n" + string(rune(96)) + "git push --" + "force" + string(rune(96))
+	if got := stripQuotedHeredocBodies(unterminated); got != unterminated {
+		t.Fatalf("unterminated heredoc was stripped: %q", got)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			law, denied := g.Classify(tc.cmd)
+			if denied != tc.deny {
+				t.Fatalf("Classify(%q) denied=%v, want %v (law=%q)", tc.cmd, denied, tc.deny, law)
+			}
+		})
+	}
+}

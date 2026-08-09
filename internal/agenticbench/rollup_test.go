@@ -1,6 +1,8 @@
 package agenticbench
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +190,72 @@ func TestBuildExternalHarnessQueue(t *testing.T) {
 		if !strings.Contains(md, want) {
 			t.Fatalf("queue markdown missing %q:\n%s", want, md)
 		}
+	}
+}
+
+func TestWriteExternalHarnessQueueSkipsNondeterministicRewrite(t *testing.T) {
+	root := fixtureRoot(t)
+	jsonPath := filepath.Join(root, "experiments", "agent-live", "queue.json")
+	markdownPath := filepath.Join(root, "experiments", "agent-live", "queue.md")
+	first := time.Date(2026, 6, 26, 1, 2, 3, 0, time.UTC)
+	if _, err := WriteExternalHarnessQueue(root, jsonPath, markdownPath, first); err != nil {
+		t.Fatal(err)
+	}
+	beforeJSON, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeMarkdown, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeJSONInfo, err := os.Stat(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeMarkdownInfo, err := os.Stat(markdownPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(root, filepath.FromSlash(externalHarnessQueueLock))
+
+	// The naive renderer proves why output-byte comparison is the wrong oracle:
+	// the same source tree rendered at another instant emits different bytes.
+	later, err := BuildExternalHarnessQueue(root, first.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	laterJSON, err := json.MarshalIndent(later, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(beforeJSON, append(laterJSON, '\n')) {
+		t.Fatal("naive generator unexpectedly produced identical bytes despite generated_at")
+	}
+
+	// Coarse timestamp filesystems need a visible interval to expose an accidental
+	// rewrite. The input lock must make the second run perform no write at all.
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := WriteExternalHarnessQueue(root, jsonPath, markdownPath, first.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string][]byte{jsonPath: beforeJSON, markdownPath: beforeMarkdown} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("unchanged input rewrote %s content", path)
+		}
+	}
+	afterJSONInfo, _ := os.Stat(jsonPath)
+	afterMarkdownInfo, _ := os.Stat(markdownPath)
+	if !afterJSONInfo.ModTime().Equal(beforeJSONInfo.ModTime()) || !afterMarkdownInfo.ModTime().Equal(beforeMarkdownInfo.ModTime()) {
+		t.Fatalf("unchanged input touched output mtimes: json %v -> %v; markdown %v -> %v",
+			beforeJSONInfo.ModTime(), afterJSONInfo.ModTime(), beforeMarkdownInfo.ModTime(), afterMarkdownInfo.ModTime())
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("committable input lock not written at %s: %v", lockPath, err)
 	}
 }
 

@@ -151,11 +151,13 @@ func PersistCooldownForRehome(store *accounts.CooldownStore, account, reason, re
 	if store == nil || !isAccountCap || strings.TrimSpace(account) == "" {
 		return accounts.CooldownEntry{}, false
 	}
-	// The reset is resolved by the shared accounts.ResolveReset so this live-429 writer and the
-	// launch-exit writer (cmd/fak recordLaunchCooldown) can never hold one account to two
+	// The reset is resolved by the shared accounts.ResolveCooldownReset so this live-429 writer
+	// and the launch-exit writer (cmd/fak recordLaunchCooldown) can never hold one account to two
 	// different reset times — an explicit RFC3339 reset wins, else a weekly cap's announced
-	// relative wait (announced_wait≈1h7m) is honored, else the kind's default window (#2610).
-	entry := store.Cool(account, accounts.CooldownUsageLimit, cooldownReasonLine(reason), now, accounts.ResolveReset(resetSource, now))
+	// relative wait (announced_wait≈1h7m) is honored (#2610), else an UNANNOUNCED weekly cap
+	// takes the weekly floor rather than the rolling cap's 1-hour default (#5890), else the
+	// kind's default window.
+	entry := store.Cool(account, accounts.CooldownUsageLimit, cooldownReasonLine(reason), now, accounts.ResolveCooldownReset(resetSource, now))
 	return entry, true
 }
 

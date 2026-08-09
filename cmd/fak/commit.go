@@ -106,7 +106,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reviewObjective := fs.String("review-objective", envOrDefault("FAK_REVIEW_OBJECTIVE", ""), "objective given to --review-model (default: FAK_GOAL_OBJECTIVE, then first commit-message line)")
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL for --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
-	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit")
+	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit; the gate runs before any `git add`, so a file this commit ADDS needs changed:<path> (committed:<path> is refuted for it)")
 	reclaimLock := fs.Bool("reclaim-stale-index-lock", false, "RECOVERY (no commit): reclaim an orphaned .git/index.lock, and sweep leftover .git/next-index-<pid>.lock residue, when the lane evidence proves them stale with no live writer — dry-run unless --apply. Same path as `fak commit status --reclaim-stale-index-lock`")
 	reclaimApply := fs.Bool("apply", false, "with --reclaim-stale-index-lock, actually remove the reclaimed files (default: dry-run)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
@@ -165,13 +165,14 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 
 	// --require-issue pre-lints the message before touching git: a real commit on the shared trunk
 	// cannot be amended (a sibling may push it first), so a missing bindable `#N` is caught here as a
-	// PRE-commit refusal (exit 3) rather than discovered weeks later as a CLAIMED_CLOSED row (#312).
+	// PRE-commit refusal (exit 4: a verdict on the message, not contention — the same command
+	// will be refused again) rather than discovered weeks later as a CLAIMED_CLOSED row (#312).
 	if *requireIssue {
 		rep := hooks.LintCommitMessageWithOptions(message, paths, root, true)
 		if !rep.OK {
 			fmt.Fprintln(stderr, "fak commit: --require-issue refused this commit:")
 			renderPreview(stderr, rep, "")
-			return 3
+			return safecommit.ExitRefused
 		}
 	}
 
@@ -185,7 +186,9 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		if okB, reason, detail := commitBuildCheckGate(stderr, root, paths); !okB {
 			fmt.Fprintf(stderr, "fak commit: %s\n%s\n", reason, strings.TrimSpace(detail))
 			fmt.Fprintln(stderr, "fak commit: the prospective committed tree does not compile under default tags — commit refused so the committed trunk stays green. Commit the missing definition too, or fence not-yet-compiling WIP behind //go:build wip_<feature> (see `fak wip fence`), or pass --no-build-check for an intentional multi-commit landing.")
-			return 3
+			// A verdict on this pathset, not contention: an unchanged retry recompiles the
+			// same red tree. Exit 4 so a lander fixes the build instead of backing off.
+			return safecommit.ExitRefused
 		}
 	}
 
@@ -330,7 +333,9 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 	queue, rec, err := store.Submit(intent)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak commit submit: %v\n", err)
-		return 3
+		// The intent was rejected on its content (an unstampable subject, a bad base):
+		// nothing was queued and resubmitting the identical intent is refused again.
+		return safecommit.ExitRefused
 	}
 	res := commitSubmitResult{
 		Queued:    true,
@@ -423,7 +428,10 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		if *dryRun || len(drain.Ready)+len(drain.Stale)+len(drain.Invalid) == 0 {
 			return 0
 		}
-		return 3
+		// The rollup plan is not executable (stale or invalid intents in the queue): a
+		// verdict on the queue's contents, not contention, so exit 4 — draining again
+		// without repairing the queue produces the same unexecutable plan.
+		return safecommit.ExitRefused
 	}
 
 	commitRes, err := commitFn(context.Background(), safecommit.Options{
@@ -608,9 +616,11 @@ func assembleMessage(in io.Reader, m, file string, stderr io.Writer) (string, in
 	}
 }
 
-// commitExitCode maps a Result to the process exit code. PRE-commit refusals are exit 3
-// ("blocked — retry or replan"); a commit that ran but produced a bad result (race, push
-// rejection, hook refusal) is exit 1 ("ran, result is bad — halt").
+// commitExitCode maps a Result to the process exit code. Contention is exit 3 ("the lock
+// was busy — nothing landed, retry with backoff"); a refusal on the merits is exit 4
+// ("no — retrying the same command cannot change the answer"); a commit that ran but
+// produced a bad result (race, push rejection, hook refusal) is exit 1 ("ran, result is
+// bad — halt"). See internal/safecommit.RefusalExitCode for the classification (#5505 W4).
 func commitExitCode(res safecommit.Result) int {
 	switch res.Reason {
 	case "":
@@ -618,8 +628,9 @@ func commitExitCode(res safecommit.Result) int {
 	case safecommit.ReasonNoPath, safecommit.ReasonEmptyMessage:
 		return 2
 	case safecommit.ReasonNotARepo:
-		// A setup/environment error: nothing landed, safe to retry once fixed.
-		return safecommit.ExitPreCommitRefusal
+		// A setup/environment error: nothing landed, and re-running here never will —
+		// the caller has to move to a work tree first.
+		return safecommit.ExitRefused
 	}
 	// The closed refusal vocabulary is classified by safecommit (the SoT next to
 	// RefusalReasons); a test there asserts every reason is covered.

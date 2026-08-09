@@ -477,6 +477,65 @@ func TestRunAccountsAddAdopt_NoProbeIdentityStaysDiskOnly(t *testing.T) {
 	}
 }
 
+// TestRunAccountsRemoveFlattensInboundRehome pins #4672: removing a seat WITHOUT --archive must
+// repoint every OTHER seat that rehomed to it forward to the live rehome target, so the registry
+// does not accrete tombstoned->tombstoned->…->live chains as intermediate hops retire. Shape is
+// the issue's own acceptance case: seat C rehomes to B; `remove B --rehome-to A` must leave C
+// rehoming to A, not the now-tombstoned B. (The --archive path, which repoints inbound edges onto
+// the renamed handle so `restore` can reverse it, is covered by TestRunAccountsRestoreArchive.)
+func TestRunAccountsRemoveFlattensInboundRehome(t *testing.T) {
+	// Same hermetic roster isolation the sibling remove/restore tests use: keep the regenerated
+	// dos/job views inside t.TempDir() so this can never clobber a live operator's switcher roster.
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	home := t.TempDir()
+	seatB := mkHome(t, home, ".claude-seat-b", "b@example.test", true)
+	seatA := mkHome(t, home, ".claude-seat-a", "a@example.test", true)
+
+	// C is a tombstoned seat whose rehome edge names B (the inbound edge #4672 is about); B and A
+	// are live; A is the default and the removal's rehome target.
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"C","status":"tombstoned","rehome_to":"B"},` +
+		`{"name":"B","dir":"` + jsonPath(seatB) + `"},` +
+		`{"name":"A","dir":"` + jsonPath(seatA) + `","default":true}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{
+		"remove", "--name", "B", "--rehome-to", "A",
+		"--registry", regPath, "--home", home,
+	}); rc != 0 {
+		t.Fatalf("remove rc=%d stderr=%s", rc, errb.String())
+	}
+
+	got, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatalf("registry should validate after remove: %v", err)
+	}
+	byName := map[string]accounts.Home{}
+	for _, h := range got.Homes {
+		byName[h.Name] = h
+	}
+	if b := byName["B"]; b.Active() {
+		t.Fatalf("B should be tombstoned after remove: %+v", b)
+	}
+	// The inbound edge on C is flattened past the tombstoned B to the live target A.
+	if c := byName["C"]; c.RehomeTo != "A" {
+		t.Fatalf("C rehome_to = %q, want A (flattened past tombstoned B)", c.RehomeTo)
+	}
+	// No surviving edge anywhere names the tombstoned seat B — the pool stays legible and cannot
+	// lengthen the chain when B's own target later retires.
+	for _, h := range got.Homes {
+		if h.RehomeTo == "B" {
+			t.Fatalf("seat %q still rehomes to tombstoned B: %+v", h.Name, h)
+		}
+	}
+}
+
 func TestExtractToken(t *testing.T) {
 	cases := map[string]string{
 		"sk-ant-oat01-abc":                          "sk-ant-oat01-abc",

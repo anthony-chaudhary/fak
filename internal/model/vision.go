@@ -135,6 +135,50 @@ func (t *VisionTower) tensorOptional(name string) []float32 {
 	return nil
 }
 
+// AttachVisionTower joins a SEPARATELY-LOADED image tower to this text model — the
+// companion-mmproj half of a VLM load (#4875).
+//
+// The inline path already worked: a safetensors checkpoint carries model.visual.* beside
+// the decoder, so newModel segregates it into Model.Vision during the load
+// (extractQwen35VisionTower, below). The CANONICAL llama.cpp VLM deployment does not look
+// like that — it ships TWO files, a text GGUF plus a companion mmproj GGUF, and the mmproj
+// half is read by ggufload.OpenMMProj and turned into a *VisionTower by
+// WeightSource.VisionTower(). Nothing joined that tower to a Model. Model.Vision had
+// exactly one assignment in the tree (weights.go, the inline path), so a GGUF VLM could
+// only ever be loaded as two halves that could never meet, and EncodeImagePrompt reported
+// "no vision tower retained" no matter what mmproj the operator supplied. This is that
+// join, and it is why the seam needs no RetainVision: that flag gates whether a DECODER
+// load keeps vision tensors it would otherwise drop, whereas an mmproj is opened
+// explicitly and has nothing to drop.
+//
+// Admission is the encoder's OWN construction rather than a second opinion: the tower is
+// accepted only if newVisionEncoder resolves it against this decoder's hidden size, so
+// anything AttachVisionTower admits is something NewVisionEncoder can build. That moves a
+// mismatched mmproj — wrong projector width, missing required tensor, incomplete clip.*
+// geometry — from a failure at the first image request to a refusal at load, while the
+// operator can still act on it, and makes it impossible for attach to admit a tower the
+// encoder would then reject. The trial encoder is discarded; it is a validation, not a
+// cache, so NewVisionEncoder stays the single construction point.
+//
+// Attaching is one-shot. An already-attached model is refused rather than silently
+// re-pointed, so a second mmproj cannot quietly swap the tower a running server is already
+// encoding against. The tower is shared, not copied, matching the zero-copy weight
+// contract the rest of the model uses.
+func (m *Model) AttachVisionTower(tower *VisionTower) error {
+	if tower == nil {
+		return fmt.Errorf("model: attach vision tower: nil tower")
+	}
+	if m.Vision != nil {
+		return fmt.Errorf("model: attach vision tower: this model already carries a vision tower (%d tensor(s), %d bytes); attaching is one-shot",
+			len(m.Vision.manifest), m.Vision.Bytes())
+	}
+	if _, err := newVisionEncoder(tower, m.Cfg.HiddenSize); err != nil {
+		return fmt.Errorf("model: attach vision tower: %w", err)
+	}
+	m.Vision = tower
+	return nil
+}
+
 // extractQwen35VisionTower segregates the retained model.visual.* tensors out of a
 // decoder manifest+raw into a standalone VisionTower — the safetensors twin of
 // ggufload's mmproj VisionTower(). materializeQwen35Tensors leaves model.visual.* in

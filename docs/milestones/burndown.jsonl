@@ -1,2 +1,3 @@
 {"schema":"fak-milestone-burndown-ledger/1","date":"2026-07-13","commit":"31c6538b","generated_at":"2026-07-13T11:32:31Z","verdict":"OK","total":17,"overdue":1,"at_risk":2,"no_due_date":6,"on_track":8,"done":0,"open_total":386,"at_risk_debt":13}
 {"schema":"fak-milestone-burndown-ledger/1","date":"2026-07-27","commit":"2ce52dfa0","generated_at":"2026-07-27T11:42:43Z","verdict":"OK","total":17,"overdue":2,"at_risk":1,"no_due_date":6,"on_track":8,"done":0,"open_total":290,"at_risk_debt":14}
+{"schema":"fak-milestone-burndown-ledger/1","date":"2026-08-03","commit":"f1c36fd45","generated_at":"2026-08-03T11:47:04Z","verdict":"OK","total":17,"overdue":2,"at_risk":4,"no_due_date":6,"on_track":5,"done":0,"open_total":284,"at_risk_debt":20}

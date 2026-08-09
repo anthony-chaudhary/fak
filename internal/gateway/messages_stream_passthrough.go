@@ -33,6 +33,13 @@ import (
 // upstream request.
 var errPassthroughResponded = errors.New("gateway: anthropic passthrough response already written")
 
+// errUpstreamInBandRefusal is returned from the event callback when the upstream refused the
+// turn IN-BAND before message_start with an `error` frame this build cannot classify into a
+// status. It is deliberately NOT an *agent.UpstreamStatusError: nothing definite is known
+// about the refusal, so the caller's pre-start arm treats it like any other unclassified
+// non-start and falls back to the buffered path instead of surfacing an invented status.
+var errUpstreamInBandRefusal = errors.New("gateway: upstream refused the stream in-band before message_start")
+
 // sseToolAccum buffers one upstream tool_use content block while its input streams in,
 // so the full call can be reconstructed and adjudicated before the client sees it.
 type sseToolAccum struct {
@@ -58,6 +65,13 @@ type anthropicPassthrough struct {
 	send       func(string, any)
 	started    bool
 	wroteError bool
+	// wroteErrCause is the REAL failure behind the terminal HTTP error wroteError marks.
+	// onEvent can only hand the caller the errPassthroughResponded sentinel — "a response
+	// was already written" is a control-flow fact, not a failure kind — so the cause is
+	// carried here for the terminal switch to count and print. Nil means the producer had
+	// no upstream failure to report, and the switch then stays silent rather than filing a
+	// control-flow value as an upstream failure on /metrics.
+	wroteErrCause error
 
 	outIdx    int         // next contiguous client-facing content-block index
 	passIdx   map[int]int // upstream index -> client index (relayed blocks)
@@ -237,7 +251,9 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			if aerr != nil {
 				p.s.logf("gateway: result-floor error (messages stream): %v", aerr)
 				writeErr(p.w, http.StatusBadGateway, "upstream model error")
-				p.wroteError = true
+				// Carry the cause out with the flag: the sentinel below is all the caller
+				// would otherwise have, and it says nothing about WHY the turn failed.
+				p.wroteError, p.wroteErrCause = true, aerr
 				return errPassthroughResponded
 			}
 			p.resultAdms = adms
@@ -364,10 +380,18 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.send("error", ev.Data)
 			return nil
 		}
-		p.s.logf("gateway: upstream error before stream start (messages)")
-		writeErr(p.w, http.StatusBadGateway, "upstream model error")
-		p.wroteError = true
-		return errPassthroughResponded
+		// Pre-start: the client still has nothing, so the response is STILL OURS to choose —
+		// which is exactly what writing a hardcoded 502 here used to throw away (#5491). The
+		// classified in-band refusals (overloaded_error, rate_limit_error, …) never reach
+		// this arm at all: StreamAnthropicRaw intercepts them before message_start, retries
+		// the transient ones invisibly, and surfaces the rest as a real *UpstreamStatusError
+		// carrying the upstream's own status. What is left here is a frame this build cannot
+		// classify, and the honest answer for it is the SAME door every other pre-start
+		// failure takes — the caller's default arm, which counts the failure and falls back
+		// to the buffered path — rather than a terminal 502 that also cut off the fallback by
+		// setting wroteError.
+		p.s.logf("gateway: unclassified upstream error frame before stream start (messages)")
+		return errUpstreamInBandRefusal
 	}
 	return nil
 }
@@ -432,7 +456,22 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			})
 			return true
 		case p.wroteError:
-			return true // a clean terminal HTTP error was already written
+			// A clean terminal HTTP error is already on the wire, so the CLIENT has its
+			// answer and must not be written to twice — nothing below touches the response.
+			// But "the client was told" and "the operator was told" are different questions,
+			// and only the first was ever satisfied here: the producer's s.logf reaches the
+			// --log stream (OFF by default), so a result-floor 502 was invisible on /metrics
+			// and printed no FAILED line — an under-count nobody notices, because the number
+			// is too SMALL. Count + print the real cause the producer stashed, never the
+			// errPassthroughResponded value in `err`: that one means "we already responded",
+			// not "the turn failed", and would file a pure control-flow artifact in the
+			// coarse `other` bucket. No producer observes before setting the flag, so the
+			// failure is counted exactly once.
+			if p.wroteErrCause != nil {
+				s.metrics.observeUpstreamError(p.wroteErrCause)
+				s.renderTurnDebugError(reqTrace, "anthropic_messages", p.wroteErrCause, time.Since(began))
+			}
+			return true
 		default:
 			// The stream never opened and nothing was written. Count + surface the failure on
 			// the default debug line (the s.logf calls below only reach the --log stream, OFF

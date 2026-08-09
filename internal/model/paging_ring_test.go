@@ -174,10 +174,11 @@ func TestPagedRingWeightTooLargeReturnsNil(t *testing.T) {
 	}
 }
 
-// q8ResidentBytes is the resident footprint of a Q8_0 weight the way the ring budget accounts it:
-// one int8 code per weight plus one f32 scale per 32-wide block (the 1.125 B/weight of q8Tensor's
-// doc). Used to size the ring budget in the Q8 witnesses so used()<=budget() is meaningful.
-func q8ResidentBytes(qt *q8Tensor) int64 { return int64(len(qt.q) + len(qt.d)*4) }
+// The Q8 witnesses below size the ring budget with q8ResidentBytes — the resident footprint of a
+// Q8_0 weight the way the budget accounts it (one int8 code per weight plus one f32 scale per
+// 32-wide block, the 1.125 B/weight of q8Tensor's doc), so used()<=budget() is meaningful. It moved
+// to expert_ring_hal.go when the live HAL began sizing ring admissions with the same arithmetic
+// (#5611); this is now one definition serving both.
 
 // TestPagedRingMatMulQ8BitEqualResident is the Q8_0 twin of TestPagedRingMatMulBitEqualResident: with
 // a budget that fits every Q8 weight, each named weight's ring GEMM is byte-for-byte a resident Q8

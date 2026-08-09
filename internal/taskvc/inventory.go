@@ -29,11 +29,13 @@ package taskvc
 //     several are deliberately-parked one-shots.
 //
 // Measured live on 2026-07-26 (`Get-ScheduledTask`, root path, State != Disabled:
-// 48 tasks, of which 29 are in scope by the rule above): 16 rebuildable from a
-// versioned installer, 13 covered by a scrubbed task-XML export under
-// tools/scheduled-tasks/, 0 orphans. The 2026-07-08 audit counted ~35 orphans;
-// most were closed by installers landed in the intervening weeks, and the
-// residual 13 are captured here.
+// 48 tasks, of which 29 are in scope by the rule above): 29 covered and 0 orphans,
+// split 16 rebuildable from a versioned installer and 13 covered by a scrubbed
+// task-XML export under tools/scheduled-tasks/. The #5409 reconcile has since
+// promoted FleetWorktreeDoctor from the capture tier to its installer, so the split
+// now reads 17 / 12 against the same 29 tasks; its export stays tracked but no row
+// leans on it. The 2026-07-08 audit counted ~35 orphans; most were closed by
+// installers landed in the intervening weeks, and the residual 12 are captured here.
 //
 // The two coverage tiers are NOT equivalent, and the difference is the honest part.
 // An installer rebuilds the loop from the repo outright. An XML export versions the
@@ -77,20 +79,15 @@ var inventory = []Coverage{
 	// second stale-work loop. This row is what keeps it from drifting again.
 	{Task: "FleetStaleWorkGarden", Status: StatusInstaller, Installer: "tools/register_stale_work_watchdog.ps1"},
 	{Task: "FleetSupervisorWatchdog", Status: StatusInstaller, Installer: "tools/register_supervisor_watchdog.ps1"},
-
-	// ---- Name drift: installer exists, but cannot bind the live task ---------
-	// The capture is the stopgap: it cannot fix the drift, but it does mean the
-	// live task survives a reimage while the naming decision is still open.
-	{
-		Task:    "FleetWorktreeDoctor",
-		Status:  StatusDrift,
-		Capture: "tools/scheduled-tasks/FleetWorktreeDoctor.xml",
-		Reason: "tools/register_worktree_doctor.ps1 defaults -TaskName to the interpolated " +
-			`"FleetWorktreeDoctor-$repoSlug", so it cannot be proven to update the bare live ` +
-			"FleetWorktreeDoctor in place; a reinstall registers FleetWorktreeDoctor-fak alongside it. " +
-			"Same class as the FleetStaleWorkGarden mismatch (#3323); reconcile needs an operator " +
-			"decision on whether the live task or the per-clone naming scheme is canonical.",
-	},
+	// The same reconcile, one class later (#5409). register_worktree_doctor.ps1 used
+	// to interpolate "FleetWorktreeDoctor-$repoSlug", which no static parse can bind,
+	// so this row sat at StatusDrift leaning on a task-XML capture as a stopgap. Its
+	// -TaskName default is now the bare literal that the live task and the versioned
+	// capture (tools/scheduled-tasks/FleetWorktreeDoctor.xml, whose <URI> reads
+	// \FleetWorktreeDoctor) already agreed on, so a reinstall updates the live task in
+	// place and the binder can prove it. The capture stays tracked as a historical
+	// export, but it is no longer this row's coverage claim — the installer is.
+	{Task: "FleetWorktreeDoctor", Status: StatusInstaller, Installer: "tools/register_worktree_doctor.ps1"},
 
 	// ---- Captured: scrubbed task XML under tools/scheduled-tasks/ ------------
 	// Each Reason names what the XML alone does NOT restore, because that residual

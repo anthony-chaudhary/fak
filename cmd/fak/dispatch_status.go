@@ -28,7 +28,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchdoa"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/focusscore"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
@@ -60,16 +62,33 @@ type dispatchStatusFocus struct {
 	Posture   string `json:"posture"`    // "warn" | "hold": posture a tick WOULD apply now
 }
 
+// dispatchStatusSpawnHealth is the DOA-spawn census (#5868): of the workers that
+// FINISHED in the recent window, how many died before they ever began work. It exists
+// because the live-worker sections above go quiet in exactly the same way for an idle
+// fleet and for a fleet whose every spawn is dying at argv parse — the 2026-07-28..08-03
+// outage killed 350 of 382 spawned workers and this card read "0 live worker(s)" for six
+// days straight. Present only when the window holds at least one finished run.
+type dispatchStatusSpawnHealth struct {
+	WindowHours float64        `json:"window_hours"`
+	Runs        int            `json:"runs"` // the DENOMINATOR: every finished spawn in the window
+	DOA         int            `json:"doa"`
+	Rate        float64        `json:"doa_rate"`
+	Status      string         `json:"status"` // clear | warn | alarm
+	Causes      map[string]int `json:"causes,omitempty"`
+	Sample      []string       `json:"sample,omitempty"`
+}
+
 // dispatchStatusSnapshot is the fleet-dispatch-status/1 payload.
 type dispatchStatusSnapshot struct {
-	Schema          string                 `json:"schema"`
-	RunsDir         string                 `json:"runs_dir"`
-	LiveWorkerCount int                    `json:"live_worker_count"`
-	IssuesInFlight  []int                  `json:"issues_in_flight"`
-	LanesHeld       []string               `json:"lanes_held"`
-	Workers         []dispatchStatusWorker `json:"workers"`
-	Focus           *dispatchStatusFocus   `json:"focus,omitempty"`
-	Trajectory      *trajctl.Status        `json:"trajectory,omitempty"`
+	Schema          string                     `json:"schema"`
+	RunsDir         string                     `json:"runs_dir"`
+	LiveWorkerCount int                        `json:"live_worker_count"`
+	IssuesInFlight  []int                      `json:"issues_in_flight"`
+	LanesHeld       []string                   `json:"lanes_held"`
+	Workers         []dispatchStatusWorker     `json:"workers"`
+	Focus           *dispatchStatusFocus       `json:"focus,omitempty"`
+	SpawnHealth     *dispatchStatusSpawnHealth `json:"spawn_health,omitempty"`
+	Trajectory      *trajctl.Status            `json:"trajectory,omitempty"`
 }
 
 func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
@@ -144,6 +163,41 @@ func dispatchStatusTrajectory(root string) *trajctl.Status {
 	return &status
 }
 
+// dispatchStatusSpawnHealthFold folds the runs directory's recently-FINISHED workers
+// into the DOA-spawn census, or nil when the window held nothing to grade (so a snapshot
+// over an empty/absent runs dir stays byte-identical to before #5868).
+func dispatchStatusSpawnHealthFold(runsDir string, now time.Time) *dispatchStatusSpawnHealth {
+	rep := scanDispatchDOA(runsDir, dispatchDOAWindow, dispatchDOASettle, now)
+	if rep.Runs == 0 {
+		return nil
+	}
+	return &dispatchStatusSpawnHealth{
+		WindowHours: dispatchDOAWindow.Hours(),
+		Runs:        rep.Runs,
+		DOA:         rep.DOA,
+		Rate:        rep.Rate,
+		Status:      rep.Status,
+		Causes:      rep.Causes,
+		Sample:      rep.Sample,
+	}
+}
+
+// dispatchStatusSpawnHealthLine renders the census as the operator line, reusing the
+// same renderer the JSON payload is folded from so the two can never disagree.
+func dispatchStatusSpawnHealthLine(h *dispatchStatusSpawnHealth) string {
+	if h == nil {
+		return ""
+	}
+	return dispatchDOALine(dispatchdoa.Report{
+		Runs:   h.Runs,
+		DOA:    h.DOA,
+		Rate:   h.Rate,
+		Causes: h.Causes,
+		Status: h.Status,
+		Sample: h.Sample,
+	}, time.Duration(h.WindowHours*float64(time.Hour)))
+}
+
 // dispatchStatusScan folds the runs directory into the live-worker snapshot. It is
 // pure over the filesystem: the same runs-dir yields the same snapshot, so a test
 // drives it hermetically by planting resolve-*.log/.pid sidecars for a live pid. root
@@ -185,6 +239,7 @@ func dispatchStatusScan(runsDir, root string) dispatchStatusSnapshot {
 		LanesHeld:       lanes,
 		Workers:         workers,
 		Focus:           dispatchStatusFold(root),
+		SpawnHealth:     dispatchStatusSpawnHealthFold(runsDir, time.Now()),
 		Trajectory:      dispatchStatusTrajectory(root),
 	}
 }
@@ -219,6 +274,9 @@ func renderDispatchStatus(snap dispatchStatusSnapshot) string {
 	fmt.Fprintf(&b, "dispatch status — %d live worker(s)\n", snap.LiveWorkerCount)
 	fmt.Fprintf(&b, "runs-dir: %s\n", snap.RunsDir)
 	fmt.Fprintf(&b, "lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
+	if line := dispatchStatusSpawnHealthLine(snap.SpawnHealth); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
 	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
@@ -246,6 +304,9 @@ func renderDispatchStatusMarkdown(snap dispatchStatusSnapshot) string {
 	fmt.Fprintf(&b, "### dispatch status — %d live worker(s)\n\n", snap.LiveWorkerCount)
 	fmt.Fprintf(&b, "- runs-dir: `%s`\n", snap.RunsDir)
 	fmt.Fprintf(&b, "- lanes held: %s\n", dispatchStatusLaneField(snap.LanesHeld))
+	if line := dispatchStatusSpawnHealthLine(snap.SpawnHealth); line != "" {
+		fmt.Fprintf(&b, "- %s\n", line)
+	}
 	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
 		fmt.Fprintf(&b, "- %s\n", line)
 	}

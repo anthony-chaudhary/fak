@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
+	"github.com/anthony-chaudhary/fak/internal/laneadmit"
 )
 
 // ReasonCollisionRisk is the closed refusal token a region-admission refusal
@@ -95,10 +96,7 @@ func ResolveTree(req Request, tax Taxonomy) []string {
 	if len(cleanGlobs(req.Tree)) > 0 {
 		return cleanGlobs(req.Tree)
 	}
-	if req.Lane != "" {
-		return cleanGlobs(tax.Trees[req.Lane])
-	}
-	return nil
+	return laneTaxonomy(tax).TreeFor(req.Lane)
 }
 
 // LaneOf reports the lane that owns tree: first by exact, order-insensitive
@@ -116,8 +114,6 @@ func LaneOf(tree []string, tax Taxonomy) string {
 	if key == "" {
 		return ""
 	}
-	// Deterministic: on the (unexpected) case of two lanes declaring the same
-	// tree, the lexically first lane name wins.
 	lanes := make([]string, 0, len(tax.Trees))
 	for lane := range tax.Trees {
 		lanes = append(lanes, lane)
@@ -128,8 +124,6 @@ func LaneOf(tree []string, tax Taxonomy) string {
 			return lane
 		}
 	}
-	// Containment rung: the tightest containing lane wins (longest container
-	// prefix); the sorted walk makes an exact-specificity tie deterministic.
 	best, bestSpec := "", -1
 	for _, lane := range lanes {
 		if spec, ok := treeContainmentSpec(tree, tax.Trees[lane]); ok && spec > bestSpec {
@@ -150,8 +144,8 @@ func strictlyWithinLane(tree []string, lane string, tax Taxonomy) bool {
 	if lane == "" {
 		return false
 	}
-	laneTree, ok := tax.Trees[lane]
-	if !ok {
+	laneTree := laneTaxonomy(tax).TreeFor(lane)
+	if len(laneTree) == 0 {
 		return false
 	}
 	if LaneOf(tree, tax) != lane {
@@ -248,7 +242,7 @@ func Decide(req Request, live []Lease, tax Taxonomy) Decision {
 		}
 		others = append(others, l)
 	}
-	if tax.Exclusive[req.Lane] && len(others) > 0 {
+	if laneTaxonomy(tax).IsExclusive(req.Lane) && len(others) > 0 {
 		c := others[0]
 		return refusal(RungExclusiveRequested, &c, fmt.Sprintf(
 			"lane %q is exclusive (runs alone) but %d lease(s) are live, e.g. %s",
@@ -258,14 +252,20 @@ func Decide(req Request, live []Lease, tax Taxonomy) Decision {
 		l := others[i]
 		lane := l.Lane
 		if lane == "" {
-			lane = LaneOf(l.Tree, tax)
+			lane = laneadmit.LaneForPath(firstConcretePath(l.Tree), laneTaxonomy(tax), laneadmit.GranDir)
+			if lane == "" {
+				lane = LaneOf(l.Tree, tax)
+			}
 		}
-		if tax.Exclusive[lane] {
+		if laneTaxonomy(tax).IsExclusive(lane) {
 			return refusal(RungExclusiveLive, &l, fmt.Sprintf(
 				"live lease %s holds exclusive lane %q, which blocks every new region until it clears",
 				leaseLabel(l), lane))
 		}
-		if req.Lane != "" && lane == req.Lane {
+		if req.Lane != "" && lane != "" && (laneadmit.LaneContains(req.Lane, lane) || laneadmit.LaneContains(lane, req.Lane)) {
+			if !laneadmit.LanesConflict(req.Lane, lane) {
+				continue
+			}
 			// A named lane serializes by default (a whole-lane claim runs alone),
 			// but when BOTH the request and the live lease are STRICTLY-NARROWED
 			// proper sub-regions of the lane, geometry -- not the shared lane name
@@ -308,6 +308,21 @@ func leaseLabel(l Lease) string {
 		return l.ID
 	}
 	return fmt.Sprintf("%s (holder %s)", l.ID, l.Holder)
+}
+
+func firstConcretePath(tree []string) string {
+	for _, glob := range cleanGlobs(tree) {
+		path := strings.TrimSuffix(glob, "/**")
+		path = strings.TrimSuffix(path, "/*")
+		if path != "" && !strings.ContainsAny(path, "*?[") {
+			return path
+		}
+	}
+	return ""
+}
+
+func laneTaxonomy(tax Taxonomy) laneadmit.Taxonomy {
+	return laneadmit.Taxonomy{Trees: tax.Trees, Exclusive: tax.Exclusive, Loaded: true}
 }
 
 // LoadTaxonomy reads the workspace's `dos.toml [lanes]` exclusive set and

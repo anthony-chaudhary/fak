@@ -22,12 +22,16 @@ package sessionctl
 // fields) — that assumption is the invalidating one this artifact names. So, like
 // redirect.go's objective store, this package owns the per-session metadata home:
 // a process-global tag registry keyed by trace (TagSession / SessionTag /
-// ClearSessionTag). A spawn site (the dispatch worker launcher, the wave driver)
-// tags each session it starts; broadcast resolves against the tags. FAIL-CLOSED
-// both ways: an UNTAGGED session never matches any selector (a broadcast cannot
-// silently mutate work nobody scoped into it), and an EMPTY selector is refused
-// malformed rather than matching everything (the "quiesce the fleet by accident"
-// over-match the issue names as a confusion risk).
+// ClearSessionTag). The PRODUCER is the serve process's session-admission boundary
+// — cmd/fak's tagServedSessionAdmit, on the decideSession hook every served turn
+// crosses — which tags each trace from the routing identity the process was
+// launched under and drops the tag when the session stops (#5640). Any in-process
+// spawn site that knows a session's lane more precisely may TagSession it first;
+// admission fills gaps and never overwrites. FAIL-CLOSED both ways: an UNTAGGED
+// session never matches any selector (a broadcast cannot silently mutate work
+// nobody scoped into it), and an EMPTY selector is refused malformed rather than
+// matching everything (the "quiesce the fleet by accident" over-match the issue
+// names as a confusion risk).
 //
 // Scope fence (per the issue). Per-gateway only — the fan-out is over ONE
 // process's session.Table; cross-host fleet broadcast is out of scope. Lifecycle
@@ -36,6 +40,7 @@ package sessionctl
 // epic's follow-on.
 
 import (
+	"container/list"
 	"fmt"
 	"strings"
 	"sync"
@@ -62,18 +67,35 @@ func (m BroadcastMeta) IsZero() bool {
 	return m.Lane == "" && m.Wave == "" && len(m.Labels) == 0
 }
 
+// MaxSessionTags bounds the tag registry. A tag is dropped by ClearSessionTag at
+// session teardown, but teardown is not guaranteed to run for every trace a live
+// process ever admits: session.Table is itself a bounded LRU that EVICTS a cold
+// record silently (no terminal transition, so no teardown edge fires), and a
+// gateway minting a per-request trace churns ids faster than any of them stop. An
+// unbounded map behind those two facts is a leak in a long-lived serve, which is
+// the failure mode "tag without untag" trades a correctness bug for. So the
+// registry carries its own ceiling and evicts the LEAST-RECENTLY-TAGGED trace past
+// it — the same bounded-LRU discipline, and the same reason, as the drive table it
+// shadows.
+const MaxSessionTags = 8192
+
 // broadcast tag state is per-session, keyed by the run's trace id — the same
 // keying and lifecycle as redirect.go's objective store. Process-global: the serve
-// process that owns the session.Table owns the tags.
+// process that owns the session.Table owns the tags. broadcastOrder/broadcastIndex
+// are the recency ring enforcing MaxSessionTags; all three move together under
+// broadcastMu.
 var (
-	broadcastMu   sync.Mutex
-	broadcastTags = map[string]BroadcastMeta{}
+	broadcastMu    sync.Mutex
+	broadcastTags  = map[string]BroadcastMeta{}
+	broadcastOrder = list.New()
+	broadcastIndex = map[string]*list.Element{}
 )
 
 // TagSession records trace's routing metadata for broadcast selection. The spawn
-// site (dispatch worker launcher, wave driver) calls it once per session it
-// starts. An empty trace or zero meta is ignored — an unmatchable tag is never
-// stored. Overwrites any prior tag (a re-homed session re-tags).
+// site (the serve admission boundary — see cmd/fak's tagServedSessionAdmit) calls
+// it once per session it starts. An empty trace or zero meta is ignored — an
+// unmatchable tag is never stored. Overwrites any prior tag (a re-homed session
+// re-tags) and refreshes its recency, evicting the coldest tag past MaxSessionTags.
 func TagSession(trace string, meta BroadcastMeta) {
 	trace = strings.TrimSpace(trace)
 	if trace == "" || meta.IsZero() {
@@ -82,6 +104,36 @@ func TagSession(trace string, meta BroadcastMeta) {
 	broadcastMu.Lock()
 	defer broadcastMu.Unlock()
 	broadcastTags[trace] = meta
+	broadcastTouchLocked(trace)
+	broadcastTrimLocked()
+}
+
+// broadcastTouchLocked moves trace to the front of the recency ring, inserting it
+// when unseen. Caller holds broadcastMu.
+func broadcastTouchLocked(trace string) {
+	if el := broadcastIndex[trace]; el != nil {
+		broadcastOrder.MoveToFront(el)
+		return
+	}
+	broadcastIndex[trace] = broadcastOrder.PushFront(trace)
+}
+
+// broadcastTrimLocked evicts from the cold end until the registry is within
+// MaxSessionTags. Eviction is FAIL-CLOSED in the same direction the whole package
+// is: an evicted trace becomes untagged, so it matches no selector — a broadcast
+// can never reach a session on the strength of a stale tag. Caller holds
+// broadcastMu.
+func broadcastTrimLocked() {
+	for len(broadcastTags) > MaxSessionTags {
+		el := broadcastOrder.Back()
+		if el == nil {
+			return
+		}
+		trace := el.Value.(string)
+		broadcastOrder.Remove(el)
+		delete(broadcastIndex, trace)
+		delete(broadcastTags, trace)
+	}
 }
 
 // SessionTag returns trace's routing metadata and whether one is declared.
@@ -106,6 +158,10 @@ func ClearSessionTag(trace string) {
 	broadcastMu.Lock()
 	defer broadcastMu.Unlock()
 	delete(broadcastTags, trace)
+	if el := broadcastIndex[trace]; el != nil {
+		broadcastOrder.Remove(el)
+		delete(broadcastIndex, trace)
+	}
 }
 
 // BroadcastSelector names the set of sessions a broadcast steers: every STATED
@@ -218,6 +274,17 @@ var broadcastRunStates = map[ControlOp]session.RunState{
 	OpCancel:    session.Draining,
 	OpTerminate: session.Terminating,
 	OpThrottle:  session.Throttled,
+}
+
+// BroadcastRunState returns the drive-state a broadcastable lifecycle op enqueues,
+// and whether op is broadcastable at all. It exists so a fan-out that resolves its
+// OWN session set — the cross-process fleet bus, whose instance-level selector is
+// already the deliberate-widening gate this package's session selector provides —
+// can ride the same op→run-state table instead of forking a second copy of it. A
+// forked copy is how `resume` and `running` drift apart.
+func BroadcastRunState(op ControlOp) (session.RunState, bool) {
+	run, ok := broadcastRunStates[op]
+	return run, ok
 }
 
 // BroadcastableOps returns the closed set of ops a broadcast may fan, in the

@@ -92,11 +92,22 @@ const (
 // is a count or a token sum; none carries prompt content. Mutated only under
 // Server.ctxValueMu.
 type sessionCtxValue struct {
-	turns           int  // every served turn (all wires), not just compacted ones
-	contextEvents   int  // turns where fak's own compaction/planned-view transform fired
-	turnsSinceEvent int  // turns since the last context event; == turns when none yet
-	lastTurnEvent   bool // the most recent turn was a context event
-	ttl1hActive     bool // the 1h prompt-cache TTL-upgrade rung fired for this session
+	turns              int  // every served turn (all wires), not just compacted ones
+	contextEvents      int  // turns where fak's own compaction/planned-view transform fired
+	turnsSinceEvent    int  // turns since the last context event; == turns when none yet
+	lastTurnEvent      bool // the most recent turn was a context event
+	ttl1hActive        bool // the 1h prompt-cache TTL-upgrade rung fired for this session
+	ttl1hMessagePrefix bool // that rung upgraded at least one message-prefix breakpoint
+
+	// consecutiveEvents is the run of BACK-TO-BACK context-event turns: the window
+	// refilling to the limit as fast as the transform sheds it. Any turn that fired no
+	// context event resets it, so it measures a RUN and never a lifetime total. At
+	// ctxThrashConsecutiveRefills it is the COMPACTION_THRASH verdict (ctxadvice.go).
+	consecutiveEvents int
+	// noticedClass is the step class the in-band advisory last reported to the model for
+	// this session, so the push fires once per ENTRY into a pressure state rather than
+	// every turn the session sits in one (ctxAdviceNoteOnce).
+	noticedClass StepClass
 
 	// ring holds the last ctxValueWindow turns' resident-token counts within the
 	// CURRENT window era; a context event clears it, so the growth slope never spans
@@ -402,9 +413,18 @@ func (s *Server) observeCtxValue(trace string, uncachedPrompt, cacheRead, cacheC
 		v.turnsSinceEvent = 0
 		v.lastTurnEvent = true
 		v.resetRing() // the growth slope never spans a window rewrite
+		// COMPACTION THRASH (#2424): count the RUN of back-to-back context events. Recorded
+		// on the turn the run REACHES the line (== not >=) so one thrashing stretch books
+		// exactly one verdict however long it goes on — a session stuck at the limit must
+		// read as one sick session, not as a counter that climbs with the transcript.
+		v.consecutiveEvents++
+		if v.consecutiveEvents == ctxThrashConsecutiveRefills {
+			s.metrics.recordCompactionThrash()
+		}
 	} else {
 		v.turnsSinceEvent++
 		v.lastTurnEvent = false
+		v.consecutiveEvents = 0
 	}
 	v.push(resident)
 	v.lastResident = resident
@@ -447,7 +467,12 @@ func (s *Server) ctxValueForLocked(trace string) *sessionCtxValue {
 // the upgrade applies (maybeUpgradeAnthropicCacheTTL1H). A nil server or empty
 // trace no-ops; the note-minted record stays out of the multi-session snapshot
 // until a real served turn is observed (the no-phantom invariant).
-func (s *Server) noteCtxValueTTL1h(trace string) {
+func (s *Server) noteCtxValueTTL1h(trace string) { s.noteCtxValueTTL1hScope(trace, false) }
+
+// noteCtxValueTTL1hScope records whether this trace's admitted 1h layout reaches
+// into messages. That scope lets provider cache_creation tokens be split into the
+// head-only baseline versus the message-prefix arm without guessing from totals.
+func (s *Server) noteCtxValueTTL1hScope(trace string, messagePrefix bool) {
 	if s == nil || strings.TrimSpace(trace) == "" {
 		return
 	}
@@ -455,6 +480,7 @@ func (s *Server) noteCtxValueTTL1h(trace string) {
 	defer s.ctxValueMu.Unlock()
 	if v := s.ctxValueForLocked(trace); v != nil {
 		v.ttl1hActive = true
+		v.ttl1hMessagePrefix = v.ttl1hMessagePrefix || messagePrefix
 	}
 }
 
@@ -471,6 +497,20 @@ func (s *Server) ttl1hActiveFor(trace string) bool {
 	defer s.ctxValueMu.Unlock()
 	if v, ok := s.ctxValue[trace]; ok {
 		return v.ttl1hActive
+	}
+	return false
+}
+
+// ttl1hMessagePrefixFor reports whether the admitted 1h layout for trace includes
+// a message-prefix breakpoint. False is the head-only control arm.
+func (s *Server) ttl1hMessagePrefixFor(trace string) bool {
+	if s == nil || strings.TrimSpace(trace) == "" {
+		return false
+	}
+	s.ctxValueMu.Lock()
+	defer s.ctxValueMu.Unlock()
+	if v, ok := s.ctxValue[trace]; ok {
+		return v.ttl1hMessagePrefix
 	}
 	return false
 }

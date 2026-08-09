@@ -46,6 +46,26 @@ import (
 // guardResumePlanSchema tags the machine-readable plan so a --json consumer can bind it.
 const guardResumePlanSchema = "fak.guard-resume-plan.v1"
 
+// The resume projection's SUBSTITUTED price, used when the operator supplies neither
+// --input-price nor --output-price. Named (rather than inlined at the substitution
+// site) for two reasons #5483 names: an unpriced input silently becoming a priced
+// number is the defect, so the substitution must be reportable as one; and this is
+// the fourth in-tree Opus-class rate card, so guardOpusClassRateCards can read the
+// LIVE value instead of transcribing it. Matches `fak resume plan`'s default and
+// gateway.ClaudeOpus48*PerMTokUSD so the three agree — not because 5/25 is settled
+// (it is one of three in-tree bases), but so a substituted number is at least the
+// same substituted number everywhere.
+const (
+	guardResumeFallbackInputPerMTokUSD  = 5.0
+	guardResumeFallbackOutputPerMTokUSD = 25.0
+	// guardResumePricingSourceOperator / ...Substituted are the two basis stamps the
+	// plan can carry. They are the whole point of the field: without them a reader
+	// cannot tell a projection the operator priced from one fak defaulted.
+	guardResumePricingSourceOperator    = "operator:--input-price/--output-price"
+	guardResumePricingSourceSubstituted = "SUBSTITUTED default:anthropic/claude-opus-4-8 (ESTIMATED — no price supplied)"
+	guardResumePricingSourceMixed       = "MIXED operator + SUBSTITUTED default (only one of --input-price/--output-price was supplied)"
+)
+
 // guardResumeInput carries the resume facts the planner feeds to the C9 rung. Idle and size
 // are resolved by the CLI (from the descriptor + flags) before the pure core runs, so
 // planGuardResume stays total and I/O-free — the posture/argv selection is unit-tested
@@ -87,6 +107,14 @@ type guardResumePlan struct {
 	ResidentTokens         int     `json:"resident_tokens"`
 	ProjectedPrefillTokens int     `json:"projected_prefill_tokens"`
 	ProjectedPromptCostUSD float64 `json:"projected_prompt_cost_usd"`
+	// PricingSource is the BASIS STAMP for ProjectedPromptCostUSD (#5483): which rate
+	// card produced the dollars. Never omitempty — a $ figure with no basis is exactly
+	// the unfalsifiable number this field exists to eliminate, so it is always present.
+	PricingSource string `json:"pricing_source"`
+	// PricingInputPerMTokUSD / PricingOutputPerMTokUSD are the rates actually applied,
+	// carried alongside the label so a consumer can reproduce the projection.
+	PricingInputPerMTokUSD  float64 `json:"pricing_input_per_mtok_usd"`
+	PricingOutputPerMTokUSD float64 `json:"pricing_output_per_mtok_usd"`
 
 	CompactHistoryBudget int      `json:"compact_history_budget,omitempty"`
 	ContinueFlag         string   `json:"continue_flag,omitempty"`
@@ -102,9 +130,16 @@ func planGuardResume(query string, desc session.Descriptor, in guardResumeInput)
 	if in.CompactHistoryBudget <= 0 {
 		in.CompactHistoryBudget = gateway.DefaultCompactHistoryBudget
 	}
+	// An UNPRICED input must not silently become a PRICED number: when the operator
+	// supplies no rate the projection still runs on a substituted default, so record
+	// WHICH of the two happened and report it beside the dollars (#5483).
+	pricingSource := guardResumePricingSourceOperator
 	if in.Pricing.InputPerMTokUSD == 0 && in.Pricing.OutputPerMTokUSD == 0 {
-		// Opus 4.8 base pricing, matching `fak resume plan`'s default so the two agree.
-		in.Pricing = resume.Pricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25}
+		pricingSource = guardResumePricingSourceSubstituted
+		in.Pricing = resume.Pricing{
+			InputPerMTokUSD:  guardResumeFallbackInputPerMTokUSD,
+			OutputPerMTokUSD: guardResumeFallbackOutputPerMTokUSD,
+		}
 	}
 
 	verdict := preflight.PlanResume(preflight.ResumeInput{
@@ -140,10 +175,15 @@ func planGuardResume(query string, desc session.Descriptor, in guardResumeInput)
 		ResidentTokens:         in.ResidentTokens,
 		ProjectedPrefillTokens: verdict.ProjectedPrefillTokens,
 		ProjectedPromptCostUSD: verdict.ProjectedPromptCostUSD,
-		CompactHistoryBudget:   compact,
-		ContinueFlag:           continueFlag,
-		RelaunchArgv:           argv,
-		Verdict:                verdict,
+
+		PricingSource:           pricingSource,
+		PricingInputPerMTokUSD:  in.Pricing.InputPerMTokUSD,
+		PricingOutputPerMTokUSD: in.Pricing.OutputPerMTokUSD,
+
+		CompactHistoryBudget: compact,
+		ContinueFlag:         continueFlag,
+		RelaunchArgv:         argv,
+		Verdict:              verdict,
 	}
 }
 
@@ -271,6 +311,21 @@ func runGuardResume(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
+	// --input-price / --output-price carry NON-ZERO defaults, so the planner's
+	// "did the operator price this?" test cannot see the difference between a supplied
+	// 5 and a defaulted 5 — every CLI plan would claim an operator basis it did not
+	// have. fs.Visit reports only the flags actually PRESENT on the command line, so an
+	// unpriced invocation hands the planner a zero Pricing and is stamped SUBSTITUTED
+	// (#5483). The dollars are identical either way; only the honesty of the label changes.
+	var inPriceSupplied, outPriceSupplied bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "input-price":
+			inPriceSupplied = true
+		case "output-price":
+			outPriceSupplied = true
+		}
+	})
 	if fs.NArg() == 0 {
 		fmt.Fprintln(stderr, "fak guard resume: need a session id (id or trace prefix) — list with `fak session ls --fleet`")
 		return 2
@@ -306,6 +361,10 @@ func runGuardResume(stdout, stderr io.Writer, argv []string) int {
 	if *ttl1h {
 		ttl = resume.TTL1h
 	}
+	pricing := resume.Pricing{InputPerMTokUSD: *inputPrice, OutputPerMTokUSD: *outputPrice}
+	if !inPriceSupplied && !outPriceSupplied {
+		pricing = resume.Pricing{} // let the planner substitute, and SAY that it did
+	}
 	plan := planGuardResume(query, desc, guardResumeInput{
 		IdleSeconds:          guardResumeIdleSeconds(desc, *idleSeconds, now),
 		ResidentTokens:       *residentTokens,
@@ -313,9 +372,15 @@ func runGuardResume(stdout, stderr io.Writer, argv []string) int {
 		BudgetTokens:         *budgetTokens,
 		WarmSpliceAvailable:  *warmSplice,
 		CompactHistoryBudget: *compactBudget,
-		Pricing:              resume.Pricing{InputPerMTokUSD: *inputPrice, OutputPerMTokUSD: *outputPrice},
+		Pricing:              pricing,
 		TTL:                  ttl,
 	})
+	// Half-supplied is its own basis, and the honest one to report: the other half is
+	// still fak's default, so calling the whole projection operator-priced would be a
+	// claim the operator did not make.
+	if inPriceSupplied != outPriceSupplied {
+		plan.PricingSource = guardResumePricingSourceMixed
+	}
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, plan, "fak guard resume")
@@ -352,6 +417,10 @@ func renderGuardResumePlan(w io.Writer, p guardResumePlan) {
 	fmt.Fprintf(w, "  path:      %s  [%s]\n", p.Path, p.Recommended)
 	fmt.Fprintf(w, "  idle:      %ds   resident: %d tok\n", p.IdleSeconds, p.ResidentTokens)
 	fmt.Fprintf(w, "  projected: %d prefill tok  ~$%.4f prompt\n", p.ProjectedPrefillTokens, p.ProjectedPromptCostUSD)
+	// The basis rides directly under the $ it explains, so the dollars can never be
+	// read without the card that produced them (#5483).
+	fmt.Fprintf(w, "  $ basis:   %s  [$%g/MTok in, $%g/MTok out]\n",
+		p.PricingSource, p.PricingInputPerMTokUSD, p.PricingOutputPerMTokUSD)
 	if p.CompactHistoryBudget > 0 {
 		fmt.Fprintf(w, "  compact:   --compact-history-budget %d  (#745 cache-safe byte-splice)\n", p.CompactHistoryBudget)
 	}

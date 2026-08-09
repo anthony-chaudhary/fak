@@ -46,9 +46,27 @@ param(
   # Default mirrors the preflight ceiling (built-in 20, FAK_MAX_WORKERS retunes it);
   # the wave preflight and per-spawn preflight gates both bound it below that ceiling.
   [int]$Count = $(if ($env:FAK_MAX_WORKERS -match '^[1-9]\d*$') { [int]$env:FAK_MAX_WORKERS } else { 20 }),
-  [string]$PointerFile = ".claude/goal-prompts/resolve-tickets-witnessed.md",
-  [string]$Workspace   = "C:\work\fleet",
-  [string]$LogDir      = "C:\work\fleet\.goal-runs",
+  # Defaults must work from a bare invocation, because a bare invocation is what a cron,
+  # a CI step and a refill loop actually issue (#5895). All three below used to be wrong
+  # in the same direction — they named a pointer that is not in the tree and a checkout
+  # that is not this one — so `launch_wave_detached.ps1 -Count 30 -Launch` threw
+  # `pointer file not found` on every spawn and the wave was zero workers.
+  #
+  # The pointer is resolved AFTER `Set-Location $Workspace` in the goal launcher, so the
+  # two defaults are coupled: a relative pointer path is read against the workspace. Keep
+  # this name pointing at a file that exists; the guard test pins both the existence and
+  # the /goal char cap so a rename cannot silently reintroduce the zero-worker wave.
+  [string]$PointerFile = ".claude/goal-prompts/resolve-top-issue-witnessed.md",
+  # Self-locating: tools/ -> repo root, i.e. the checkout this script was invoked from.
+  # The old literal named a sibling clone missing tools/proc_resource_guard.py, so
+  # dispatch_preflight fail-safed to REFUSE_INSPECT (cap=4, granted=0) and refused the
+  # whole wave. An explicit -Workspace still overrides.
+  [string]$Workspace   = (Split-Path -Parent $PSScriptRoot),
+  # Empty derives <Workspace>\.goal-runs below, mirroring launch_goal_detached.ps1. The
+  # old literal pinned the sibling's runs dir, which is where every liveness probe then
+  # read ANOTHER wave's logs and pid crumbs — ids recycle, so a dead run gets vouched for
+  # by its predecessor's artifacts.
+  [string]$LogDir      = '',
   [ValidateSet('engineering','eng','dev','feature','implementation',
                'gardening','garden','maintenance','maint','cleanup','chore','triage','')]
   [string]$WorkKind    = 'engineering',
@@ -73,6 +91,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot   # tools/ -> repo root
+# Derived after binding, not in the param block: a param default that reads another param
+# depends on declaration order, and this one has to survive an explicit -Workspace.
+if (-not $LogDir) { $LogDir = Join-Path $Workspace '.goal-runs' }
 if ($Json -and $Launch) {
   throw "-Json is a dry-run plan format; remove -Launch or run the text launcher explicitly."
 }
@@ -227,7 +248,20 @@ function Invoke-WavePreflight {
   $pfArgs = @($py.Prefix) + @((Join-Path $RepoRoot 'tools\dispatch_preflight.py'), '--json', '--workspace', "$Workspace", '--max-workers', "$MaxWorkers")
   if ($WorkKind) { $pfArgs += @('--work-kind', $WorkKind) }
   if ($Product)  { $pfArgs += @('--product', $Product) }
-  $pfRaw = & $py.Exe @pfArgs 2>$null | Out-String
+  # A benign advisory on the preflight's stderr (dispatch_preflight's DIRTY_FAK_BIN note is
+  # the live one, #5856) is turned into a NativeCommandError ErrorRecord whenever THIS host's
+  # own stderr is redirected -- which it is under every non-console launcher: a cron, a CI
+  # step, a bash-driven refill loop. Under the script-scope $ErrorActionPreference='Stop' that
+  # record is TERMINATING, so the whole wave aborts before a single spawn, on a warning. Scope
+  # the preference to Continue for exactly this call: stderr stays discarded, the JSON verdict
+  # on stdout still decides, and a preflight that genuinely fails still lands on the
+  # no-verdict throw below (fail-safe REFUSE_INSPECT). The gate is not weakened, only its
+  # advisory chatter stops being fatal.
+  $prevEap = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $pfRaw = & $py.Exe @pfArgs 2>$null | Out-String
+  } finally { $ErrorActionPreference = $prevEap }
   $pf = $null
   try { $pf = $pfRaw | ConvertFrom-Json } catch { $pf = $null }
   if (-not $pf -or -not $pf.verdict) {

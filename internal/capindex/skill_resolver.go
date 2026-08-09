@@ -27,11 +27,28 @@ func NewSkillResolver(root string) *SkillResolver {
 	return &SkillResolver{Root: root}
 }
 
+// SkillIntentMaxBytes caps one skill's RESIDENT intent line (#5560, epic #3229).
+//
+// The cap is what makes the at-rest floor bounded PER SKILL rather than "however
+// much prose the author's leading sentence happened to run to" — which is the exact
+// mechanism by which the resident floor grew 30% in twenty days unopposed (#5444).
+// At 320 B a skill's resident line costs ~80 estimated tokens at the house divisor,
+// and 58 skills fit in ~4.6 kB even in the worst case.
+//
+// It is a BINDING cap, not a generous one: measured over fak's own corpus, most
+// leading sentences fit and a handful elide (the longest runs 664 B). Eliding is the
+// designed nudge, not a defect — a skill whose leading sentence will not fit is
+// telling its author to write an explicit frontmatter `intent:`, which then wins
+// outright (score-2x carries the worked example). TestResidentIntentInventory names
+// the ones still eliding, so that migration is a list rather than a hunt.
+const SkillIntentMaxBytes = 320
+
 // skillFrontmatter is the subset of SKILL.md YAML frontmatter the card needs.
 type skillFrontmatter struct {
 	name        string
 	version     string
-	description string
+	description string // the full prose: the in-process ranking key
+	intent      string // OPTIONAL `intent:` override for the resident one-liner
 	tags        []string
 }
 
@@ -81,11 +98,16 @@ func (r *SkillResolver) Index() []CapCard {
 	entries := r.scanSkillDirs()
 	cards := make([]CapCard, 0, len(entries))
 	for _, e := range entries {
+		// The at-rest card carries only what is needed to DECIDE whether to load
+		// this skill: name, version, tags, and one intent line. The full
+		// description stays out of the serialized card (#5560) — it is held as the
+		// in-process ranking key below, and the whole SKILL.md faults in on demand.
+		intent := intentLine(e.fm.description, e.fm.intent)
 		cardBytes, _ := json.Marshal(map[string]any{
-			"name":        e.name,
-			"version":     e.fm.version,
-			"description": e.fm.description,
-			"tags":        e.fm.tags,
+			"name":    e.name,
+			"version": e.fm.version,
+			"intent":  intent,
+			"tags":    e.fm.tags,
 		})
 
 		tags := append([]string{"skill"}, e.fm.tags...)
@@ -96,6 +118,7 @@ func (r *SkillResolver) Index() []CapCard {
 				Version: e.fm.version,
 			},
 			Digest:    Digest(e.body), // hash the WHOLE SKILL.md, not just the card
+			Intent:    intent,
 			Trigger:   e.fm.description,
 			Tags:      tags,
 			CardBytes: cardBytes,
@@ -204,11 +227,104 @@ func parseFrontmatter(body []byte) skillFrontmatter {
 			fm.version = val
 		case "description":
 			fm.description = val
+		case "intent":
+			fm.intent = val
 		case "tags":
 			fm.tags = parseInlineList(val)
 		}
 	}
 	return fm
+}
+
+// intentLine picks the RESIDENT one-liner for a capability (#5560).
+//
+// An explicit frontmatter `intent:` wins — an author who knows their skill's first
+// sentence is not self-contained says so once, in the file, instead of the index
+// guessing forever. Otherwise the leading sentence of the description is used, which
+// needs no migration of the 58 existing SKILL.md files. Either way the result is
+// capped at SkillIntentMaxBytes, so no single skill can quietly become a resident
+// paragraph again.
+func intentLine(description, explicit string) string {
+	line := strings.TrimSpace(explicit)
+	if line == "" {
+		line = FirstSentence(description)
+	}
+	return capWords(line, SkillIntentMaxBytes)
+}
+
+// sentenceAbbrevs are the tokens whose trailing period does NOT end a sentence. The
+// single-letter case ("e.g.", "i.e.") is handled structurally, not listed.
+var sentenceAbbrevs = map[string]bool{
+	"vs": true, "cf": true, "al": true, "approx": true, "incl": true, "resp": true,
+}
+
+// FirstSentence returns the leading sentence of s — the text up to and including the
+// first sentence terminator that is FOLLOWED BY WHITESPACE and not preceded by an
+// abbreviation. Requiring the whitespace is what keeps a path (".claude/skills/x.md")
+// or a version ("v0.42.0") from being read as a sentence end; the abbreviation check
+// is what keeps "e.g." and "vs." from cutting mid-clause. Text with no terminator is
+// returned whole.
+func FirstSentence(s string) string {
+	for i, r := range s {
+		if r != '.' && r != '?' && r != '!' {
+			continue
+		}
+		rest := s[i+1:]
+		if rest != "" && !isSpaceByte(rest[0]) {
+			continue // mid-token punctuation: a path, a decimal, an abbreviation's inner dot
+		}
+		if r == '.' && sentenceAbbrevs[lastWord(s[:i])] {
+			continue
+		}
+		return strings.TrimSpace(s[:i+1])
+	}
+	return strings.TrimSpace(s)
+}
+
+func isSpaceByte(b byte) bool { return b == ' ' || b == '\t' || b == '\n' || b == '\r' }
+
+// lastWord returns the trailing run of letters in s, lowercased — the token whose
+// period is being judged. A single letter yields a one-character result, which the
+// caller treats as an abbreviation ("e.g.", "i.e.").
+func lastWord(s string) string {
+	end := len(s)
+	start := end
+	for start > 0 {
+		c := s[start-1]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			start--
+			continue
+		}
+		break
+	}
+	w := strings.ToLower(s[start:end])
+	if len(w) == 1 {
+		return "vs" // structural: a lone letter before a period is an abbreviation
+	}
+	return w
+}
+
+// capWords truncates s to at most max BYTES on a word boundary, marking the elision
+// with a horizontal ellipsis so a reader can tell prose was left behind rather than
+// the author having written a fragment. It never splits a multi-byte rune: the cut
+// falls back to the last rune boundary when the line holds no space to break on.
+func capWords(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	const mark = "…"
+	budget := max - len(mark)
+	if budget <= 0 {
+		return ""
+	}
+	cut := strings.LastIndexByte(s[:budget+1], ' ')
+	if cut <= 0 {
+		cut = budget
+		for cut > 0 && s[cut]&0xC0 == 0x80 { // back off to a rune boundary
+			cut--
+		}
+	}
+	return strings.TrimRight(s[:cut], " \t") + mark
 }
 
 // parseInlineList parses a YAML inline list "[a, b, c]" into a slice. A bare

@@ -19,7 +19,29 @@ ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT / "tools"))
 
+# Arrange the DIR, not just the variable (#5390). fleet_accounts binds REG_DIR/REGISTRY_PATH
+# at IMPORT time from the host registry ladder, and the ladder's discovery rungs are real
+# places: on a maintainer's box FLEET_REG_DIR-unset now resolves to %LOCALAPPDATA%\Fleet\
+# registry, which carries a live sessions.json AND a live probe_ledger.jsonl. The routing,
+# wave-allocation and runtime-status cases below would then grade against the operator's
+# actual fleet instead of their fixtures -- green on CI (no host registry) and false-red on
+# a laptop, which is the worst shape a suite can have. So pin an empty registry BEFORE the
+# import: the env rung outranks every discovery rung, so nothing on this host can be read.
+_HERMETIC_REG = tempfile.mkdtemp(prefix="fleet-accounts-test-reg-")
+_SAVED_REG_ENV = {k: os.environ.get(k) for k in ("FLEET_REG_DIR", "FLEET_STATE_DIR")}
+os.environ["FLEET_REG_DIR"] = _HERMETIC_REG
+os.environ.pop("FLEET_STATE_DIR", None)
+
 import fleet_accounts  # noqa: E402
+
+
+def tearDownModule() -> None:
+    for key, value in _SAVED_REG_ENV.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    shutil.rmtree(_HERMETIC_REG, ignore_errors=True)
 
 
 def account_dir(root: Path, name: str, projects: bool = True) -> Path:
@@ -330,8 +352,12 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(status["block_kind"], "auth")
 
     def test_explicit_empty_registry_does_not_load_live_registry(self) -> None:
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("FLEET_REG_DIR", None)
+        # The claim is about the `registry={}` ARGUMENT short-circuiting, so the registry dir
+        # has to be arranged, not merely unnamed: popping FLEET_REG_DIR used to mean "no
+        # ledger anywhere", but since #5390 an unnamed dir falls through to the host's real
+        # registry, whose live ledger legitimately opens the probe rung. Name the module's
+        # empty dir instead -- the same "nothing to read" the pop used to imply by accident.
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": _HERMETIC_REG}, clear=False):
             with mock.patch.object(
                 fleet_accounts, "load_registry",
                 side_effect=AssertionError("unexpected load")
@@ -1093,9 +1119,12 @@ class WaveAllocationTest(unittest.TestCase):
         w = fleet_accounts.allocate_wave(
             9, task_class="t1", home=str(self.home),
             config_home=str(self.config_home), registry=reg)
-        self.assertEqual(w["granted"], 8, "the throttled pool is not offered")
-        self.assertNotIn("gem7", {lane["tag"] for lane in w["lanes"]})
-        self.assertTrue(any(b.get("tag") == "gem7" for b in w["blocked_target_accounts"]))
+        self.assertEqual(w["granted"], 9, "healthy pools still satisfy the requested wave")
+        lanes_by_tag = {lane["tag"] for lane in w["lanes"]}
+        self.assertNotIn("gem7", lanes_by_tag, "the throttled pool contributes zero slots")
+        blocked = [b for b in w["blocked_target_accounts"] if b.get("tag") == "gem7"]
+        self.assertEqual(len(blocked), 1)
+        self.assertTrue(blocked[0]["reason"].startswith("usage limit"))
 
     def test_wave_respects_product_filter(self) -> None:
         login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
@@ -1625,6 +1654,232 @@ class ProbeLedgerConsultTest(unittest.TestCase):
             status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
         self.assertFalse(status["available"])
         self.assertNotIn("usage_soon_reset", status)
+
+
+class LedgerGateGradeTest(unittest.TestCase):
+    """#5439's Python half: the probe-ledger rung is gated on what the resolved registry can
+    DERIVE, not on FLEET_REG_DIR merely being SET, and a registry that can derive nothing
+    publishes unknown-health instead of a proven-free seat.
+
+    Mirror of internal/fleetaccounts/status_ledgergate_test.go. The Go twin has to pin every
+    rung accountprobe.ResolveRegDir surveys (LOCALAPPDATA, TMP, ...) so its verdict is not a
+    fact about the operator's laptop; account_probe.reg_dir now walks the SAME ladder via
+    fleet_regdir, so the env rung -- which outranks every discovery rung -- is what pins it
+    outright here, except in the one case that deliberately leaves it unset and patches the
+    resolver instead."""
+
+    ACCT = ".claude-gate5439"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        fleet_accounts._PROBE_LEDGER_CACHE.update(key=None, by_account={}, ages={}, obs={})
+        self.addCleanup(lambda: fleet_accounts._PROBE_LEDGER_CACHE.update(
+            key=None, by_account={}, ages={}, obs={}))
+
+    def _reg_dir(self, name: str, *, ledger: str | None) -> Path:
+        """A registry dir carrying sessions.json, and probe_ledger.jsonl iff `ledger` is not
+        None (`""` = a wired prober that has recorded nothing)."""
+        d = self.root / name
+        d.mkdir()
+        (d / "sessions.json").write_text("{}", encoding="utf-8")
+        if ledger is not None:
+            (d / "probe_ledger.jsonl").write_text(ledger, encoding="utf-8")
+        return d
+
+    def _live_registry(self) -> dict:
+        return {"generated_utc": dt.datetime.now(dt.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"),
+                "throttle": {},
+                "sessions": [{"account": self.ACCT, "project": "work", "disp": "LIVE"}]}
+
+    def _capped_registry(self) -> dict:
+        return {"generated_utc": "2026-06-17T00:00:00+00:00",
+                "throttle": {self.ACCT: {"reset": "Dec 31, 11pm (America/Los_Angeles)"}},
+                "sessions": []}
+
+    def test_gate_grades_derivability_not_the_env_var(self) -> None:
+        bearing = self._reg_dir("bearing", ledger="")
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        reg = self._live_registry()
+        for d, want in ((bearing, True), (ledger_less, False)):
+            with self.subTest(dir=d.name):
+                with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(d)}, clear=False):
+                    self.assertIs(fleet_accounts._registry_blocks_derivable(), want)
+                    self.assertIs(
+                        fleet_accounts._should_consult_probe_ledger(reg, None), want,
+                        "the rung must follow derivability, not FLEET_REG_DIR being set")
+
+    def test_explicit_probe_ledger_argument_still_wins(self) -> None:
+        # The caller affordance the Go twin has no equivalent of: an explicit override
+        # outranks the filesystem, so every hermetic caller keeps its pinned verdict.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        reg = self._live_registry()
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            self.assertTrue(fleet_accounts._should_consult_probe_ledger(reg, True))
+            self.assertFalse(fleet_accounts._should_consult_probe_ledger(reg, False))
+
+    def test_ledger_rung_runs_when_derivable_without_reg_dir(self) -> None:
+        # The acceptance line: the rung runs whenever blocks are DERIVABLE, whether or not
+        # FLEET_REG_DIR is set. Under the old env-var gate the rung never ran here, so a fresh
+        # OK probe stayed invisible and the carried throttle won.
+        import account_probe
+        ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)).isoformat()
+        bearing = self._reg_dir("bearing", ledger=json.dumps(
+            {"ts": ts, "account": self.ACCT, "tag": "gate", "status": "OK"}) + "\n")
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(account_probe, "reg_dir", lambda: str(bearing)):
+            os.environ.pop("FLEET_REG_DIR", None)
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._capped_registry())
+        self.assertTrue(status["available"],
+                        "a derivable registry's fresh ledger OK must clear the carried"
+                        " throttle even with FLEET_REG_DIR unset")
+        self.assertEqual(status["status_source"], "probe-ledger")
+
+    def test_ledger_rung_skipped_when_reg_dir_cannot_derive_blocks(self) -> None:
+        # The one case whose verdict the change FLIPS: FLEET_REG_DIR is set, so the old gate
+        # turned the rung on, but it names a dir with no ledger beside its sessions.json.
+        # Nothing is lost by refusing -- every read under that dir returned nothing anyway.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._capped_registry())
+        self.assertFalse(status["available"])
+        self.assertTrue(status["throttled"])
+        # A blocked seat keeps the confident source: "blocked" was derived from the registry's
+        # own throttle row, so its provenance is not in doubt.
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_underivable_registry_publishes_unknown_health(self) -> None:
+        # The second acceptance line. Both halves asserted on purpose: the seat stays OFFERED
+        # and only the CLAIM is weakened. Converting absence into a block would be
+        # self-sealing -- the roster routes the work that runs the prober.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._live_registry())
+        self.assertTrue(status["available"], "unknown health must not strand the seat")
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "registry-unknown")
+
+    def test_derivable_registry_keeps_registry_status_source(self) -> None:
+        # The control that keeps the new state from being a blanket rename.
+        bearing = self._reg_dir("bearing", ledger="")
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(bearing)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._live_registry())
+        self.assertTrue(status["available"])
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_empty_registry_keeps_none_status_source(self) -> None:
+        # The boundary on the other side: "none" already says nothing was consulted, and is
+        # the more precise of the two statements, so unknown-health must not overwrite it.
+        ledger_less = self._reg_dir("ledgerless", ledger=None)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(ledger_less)}, clear=False):
+            status = fleet_accounts.runtime_status(self.ACCT, registry={})
+        self.assertEqual(status["status_source"], "none")
+
+
+class SeatProbeCoverageTest(unittest.TestCase):
+    """#5391's Python half: a seat the prober has not spoken about lately is published as
+    unknown-health even though the registry it is published out of derives blocks perfectly
+    well for OTHER accounts.
+
+    #5439 (LedgerGateGradeTest above) grades per-REGISTRY. The host that filed #5391 shows why
+    that is not sufficient: probe_ledger.jsonl there was present, derivable and busy --
+    ``opencode-*`` rows current to the minute -- while several claude seats' newest rows were
+    8-9 days old. Every registry-level question answered "yes", and none of it was evidence
+    about those seats. Mirror of internal/fleetaccounts/status_seatcoverage_test.go; the two
+    surfaces must not disagree about one host, which is the #5390 failure in another costume.
+
+    Both halves are asserted on every case: the weakened claim must never become a block.
+    Converting absence into blocked is self-sealing -- the roster routes the work that runs the
+    prober -- and #5391 files itself as a coverage gap for exactly that reason."""
+
+    ACCT = ".claude-seat5391"
+    OTHER = "opencode-fixture"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        fleet_accounts._PROBE_LEDGER_CACHE.update(key=None, by_account={}, ages={}, obs={})
+        self.addCleanup(lambda: fleet_accounts._PROBE_LEDGER_CACHE.update(
+            key=None, by_account={}, ages={}, obs={}))
+
+    def _row(self, account: str, minutes_ago: float, status: str = "OK") -> str:
+        ts = (dt.datetime.now(dt.timezone.utc)
+              - dt.timedelta(minutes=minutes_ago)).isoformat()
+        return json.dumps({"ts": ts, "account": account, "tag": "seat", "status": status})
+
+    def _reg_dir(self, *rows: str) -> Path:
+        """A ledger-bearing registry dir carrying `rows` (none => a wired prober that has
+        recorded nothing)."""
+        d = self.root / "bearing"
+        d.mkdir(exist_ok=True)
+        (d / "sessions.json").write_text("{}", encoding="utf-8")
+        (d / "probe_ledger.jsonl").write_text(
+            "".join(r + "\n" for r in rows), encoding="utf-8")
+        return d
+
+    def _live_registry(self, throttle: dict | None = None) -> dict:
+        return {"generated_utc": dt.datetime.now(dt.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"),
+                "throttle": throttle or {},
+                "sessions": [{"account": self.ACCT, "project": "work", "disp": "LIVE"}]}
+
+    def _status(self, reg_dir: Path, registry: dict) -> dict:
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(reg_dir)}, clear=False):
+            return fleet_accounts.runtime_status(self.ACCT, registry=registry)
+
+    def test_busy_ledger_with_no_row_for_seat_publishes_unknown_health(self) -> None:
+        # The acceptance line: "never probed" and "probed OK" must be distinguishable. The
+        # prober demonstrably ran two minutes ago and has simply never named this seat.
+        d = self._reg_dir(self._row(self.OTHER, 2))
+        status = self._status(d, self._live_registry())
+        self.assertTrue(status["available"], "unknown health must not strand the seat")
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "registry-unknown")
+
+    def test_eight_day_old_seat_row_publishes_unknown_health(self) -> None:
+        # The observed shape verbatim: one account current to the minute, this one last heard
+        # from eight days ago. A row that old is not evidence about now.
+        d = self._reg_dir(self._row(self.ACCT, 8 * 24 * 60), self._row(self.OTHER, 2))
+        status = self._status(d, self._live_registry())
+        self.assertTrue(status["available"])
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "registry-unknown")
+
+    def test_seat_row_inside_coverage_budget_keeps_registry_status_source(self) -> None:
+        # The control that keeps the new trigger from being a blanket rename. Two windows, and
+        # they are not the same window: a two-hour-old OK is past PROBE_LEDGER_FRESH_MIN (so
+        # the fold correctly falls through to the registry rung) and well inside
+        # SEAT_COVERAGE_MAX_AGE_MIN, so the claim published there is a confident one.
+        d = self._reg_dir(self._row(self.ACCT, 120))
+        status = self._status(d, self._live_registry())
+        self.assertTrue(status["available"])
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_blocked_seat_keeps_registry_status_source(self) -> None:
+        # Ordering: "blocked" is a positive derivation from the registry's own throttle row,
+        # not a statement about probe evidence, so unknown-health has nothing to add.
+        d = self._reg_dir(self._row(self.OTHER, 2))
+        status = self._status(d, self._live_registry(
+            {self.ACCT: {"reset": "Dec 31, 11pm (America/Los_Angeles)"}}))
+        self.assertFalse(status["available"])
+        self.assertTrue(status["throttled"])
+        self.assertEqual(status["status_source"], "registry")
+
+    def test_empty_ledger_keeps_registry_status_source(self) -> None:
+        # The boundary #5439 drew and this change does not move: a ledger present but EMPTY
+        # leaves every seat unmeasured, yet the registry-level grade already describes that
+        # host and a seat-level downgrade would only restate it. Without the busy-ledger
+        # precondition this case would flip, so the assertion is load-bearing for it.
+        d = self._reg_dir()
+        status = self._status(d, self._live_registry())
+        self.assertEqual(status["status_source"], "registry")
 
 
 def _future_reset_str(minutes: float) -> str:

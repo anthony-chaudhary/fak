@@ -298,23 +298,9 @@ func (l *Ledger) Chain(trace string) ([]Entry, error) {
 	if !ok {
 		return nil, fmt.Errorf("sessionledger: trace %q not found", trace)
 	}
-	var rev []Entry
-	for h != "" {
-		e, ok := l.nodes[h]
-		if !ok {
-			if len(rev) == 0 {
-				return nil, fmt.Errorf("sessionledger: missing node %s", h)
-			}
-			break // evicted ancestor: return the suffix we still hold
-		}
-		rev = append(rev, e)
-		h = e.Parent
-	}
-	out := make([]Entry, len(rev))
-	for i := range rev {
-		out[len(rev)-1-i] = rev[i]
-	}
-	return out, nil
+	// The walk itself is chainFromLocked (rewind.go), shared with ChainFrom so a rewound
+	// suffix is replayed by exactly the same code that replays a live trace.
+	return l.chainFromLocked(h)
 }
 
 func Verify(entries []Entry) error {

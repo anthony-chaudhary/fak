@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -75,12 +76,13 @@ func diagnoseMCP(server, configPath, explicit string, explicitArgs []string, tim
 	command, args := strings.TrimSpace(explicit), explicitArgs
 	if command == "" {
 		var err error
-		command, args, err = readCodexMCPEntry(configPath, server)
+		var source string
+		command, args, source, err = resolveCodexMCPEntry(configPath, server)
 		if err != nil {
 			add(doctorMCPStage{Name: "config_parse", Status: "fail", Cause: "CONFIG_INVALID", Detail: err.Error(), Remediation: "fix " + configPath + " or pass --command explicitly"})
 			return rep
 		}
-		add(doctorMCPStage{Name: "config_parse", Status: "pass", Detail: "resolved mcp_servers." + server + " without printing env/secrets"})
+		add(doctorMCPStage{Name: "config_parse", Status: "pass", Detail: "resolved " + source + " without printing env/secrets"})
 	} else {
 		rep.ConfigPath = ""
 		add(doctorMCPStage{Name: "config_parse", Status: "skip", Detail: "explicit command"})
@@ -255,6 +257,76 @@ func flagValue(args []string, name string) string {
 	return ""
 }
 
+var errCodexMCPEntryNotFound = errors.New("Codex MCP entry not found")
+
+type codexMCPGetResult struct {
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	DisabledReason any    `json:"disabled_reason"`
+	Transport      struct {
+		Type    string   `json:"type"`
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+	} `json:"transport"`
+}
+
+func resolveCodexMCPEntry(path, name string) (string, []string, string, error) {
+	command, args, err := readCodexMCPEntry(path, name)
+	if err == nil {
+		return command, args, "mcp_servers." + name, nil
+	}
+	if !errors.Is(err, errCodexMCPEntryNotFound) {
+		return "", nil, "", err
+	}
+	command, args, err = readCodexEffectiveMCPEntry(path, name)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("%w; effective Codex lookup failed: %v", errCodexMCPEntryNotFound, err)
+	}
+	return command, args, "effective Codex MCP registration " + name, nil
+}
+
+var runCodexMCPGet = func(ctx context.Context, configPath, name string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, "codex", "mcp", "get", name, "--json")
+	// Plugin registrations are folded by CODEX_HOME rather than serialized into
+	// config.toml. Point Codex at the same home the operator asked us to inspect.
+	cmd.Env = append(os.Environ(), "CODEX_HOME="+filepath.Dir(configPath))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func readCodexEffectiveMCPEntry(configPath, name string) (string, []string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	stdout, stderr, err := runCodexMCPGet(ctx, configPath, name)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", nil, fmt.Errorf("codex mcp get timed out")
+		}
+		detail := strings.TrimSpace(string(stderr))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", nil, fmt.Errorf("codex mcp get %s: %s", name, detail)
+	}
+	var got codexMCPGetResult
+	if err := json.Unmarshal(stdout, &got); err != nil {
+		return "", nil, fmt.Errorf("decode codex mcp get %s: %w", name, err)
+	}
+	if !got.Enabled {
+		return "", nil, fmt.Errorf("Codex MCP server %s is disabled", name)
+	}
+	if got.Transport.Type != "stdio" {
+		return "", nil, fmt.Errorf("Codex MCP server %s uses unsupported %q transport", name, got.Transport.Type)
+	}
+	if got.Transport.Command == "" {
+		return "", nil, fmt.Errorf("Codex MCP server %s has no stdio command", name)
+	}
+	return got.Transport.Command, got.Transport.Args, nil
+}
+
 func readCodexMCPEntry(path, name string) (string, []string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -288,7 +360,7 @@ func readCodexMCPEntry(path, name string) (string, []string, error) {
 		}
 	}
 	if command == "" {
-		return "", nil, fmt.Errorf("%s command not found", section)
+		return "", nil, fmt.Errorf("%w: %s command not found", errCodexMCPEntryNotFound, section)
 	}
 	return command, args, nil
 }

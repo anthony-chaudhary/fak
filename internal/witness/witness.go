@@ -27,6 +27,7 @@
 //	notests:<ref>     the commit did NOT edit its own gating tests (reward-hack guard)
 //	symptom:<ref>     a fix(...) ships a test that fails on the parent, passes at the ref (#1326)
 //	exec:<json>       fail-to-pass/pass-to-pass execution witness
+//	settled:<json>    an asynchronously produced artifact has stopped growing (#5646)
 //
 // The notests rung is the dual of the others: where the rest CONFIRM that a
 // claimed effect is present, notests REFUTES when a ship-commit modified the very
@@ -42,6 +43,18 @@
 // structural half (no test touched => REFUTED) always runs; the red-then-green
 // execution is opt-in via FAK_WITNESS_SYMPTOM (default ABSTAIN). See symptom.go.
 //
+// ONE VERB IS DELIBERATELY NOT HERE. `changed:<path>` ("the path is part of the
+// change now being made") is resolved by internal/corelockgate at the hard-self
+// core-lock consult point and NOWHERE else, because that is the only caller holding a
+// changed pathset to answer it against — see internal/corelockgate/changedwitness.go.
+// Every producer that reaches THIS resolver (the file-admission hook, the
+// dispatch-tick witness, the agent turn and workflow journals) has no changed set at
+// all, so the question is meaningless for them; a `changed:` claim therefore falls
+// through to the ABSTAIN below, which the kernel's fail-closed default turns into a
+// deny. Do not "complete the grammar" by adding a case for it here: a rung that
+// cannot see a change cannot answer a question about one, and a guess would be a
+// false CONFIRM.
+//
 // An unrecognized or empty claim, or any environment where git is unavailable,
 // resolves to ABSTAIN (fail-to-abstain) — the witness never blocks on its own
 // uncertainty; the kernel's fail-closed default turns an abstain into a deny.
@@ -56,6 +69,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/corelockgate"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -257,6 +271,11 @@ func (r *Resolver) resolveUncached(ctx context.Context, c *abi.ToolCall, kind, a
 		return abi.WitnessConfirmed
 	case "exec":
 		return r.resolveExecution(ctx, arg)
+	case "settled":
+		// The settled-artifact rung (#5646): `path:` proves an asynchronously
+		// produced artifact EXISTS; this proves it has stopped growing and belongs
+		// to THIS run, so a consumer never parses a prefix. See settle.go.
+		return r.resolveSettled(ctx, arg)
 	case "symptom":
 		// The fix-witness rung (#1326): does the fix at <ref> carry a test that FAILS on the
 		// parent and PASSES at the ref? Structural check always runs; the red-then-green
@@ -320,4 +339,20 @@ func init() {
 	// verdict; this turns a claimed effect into a corroborated (or refused) one.
 	abi.RegisterWitnessResolver("dos_verify", Default)
 	abi.RegisterCapability("witness.dos_verify")
+
+	// The hard-self core-lock gate (internal/corelockgate, #5392) resolves its
+	// maintenance-witness claims through THIS resolver, but it is a foundation
+	// (tier-1) leaf and may not import witness (tier 2). So the edge is inverted:
+	// the gate declares the factory shape and we supply the real, git-evidence
+	// implementation here, in the same init that registers the abi resolver above.
+	// A nil runner means the caller injected no git seam, so the resolver opens the
+	// real one. With this registration absent the gate refuses every claim it cannot
+	// corroborate — fail-closed, never fail-open.
+	corelockgate.RegisterResolverFactory(func(run corelockgate.Runner, dir string) abi.WitnessResolver {
+		r := Runner(run)
+		if run == nil {
+			r = gitRunner
+		}
+		return NewWithRunner(r, dir)
+	})
 }

@@ -79,6 +79,19 @@ type Snapshot struct {
 	ResidentTokens int
 	HeldSpans      int
 
+	// The reclaimable carve (#4037). ResidentTokens is one LUMPED number, and a
+	// lumped number hides the operationally decisive split: CommittedTokens are
+	// pinned by a live cachemeta dependent (StateResident — evicting one
+	// invalidates that dependent, so shedding cannot buy them back), while
+	// ReclaimableTokens are clean eviction candidates (StateEvictable) that a
+	// shed returns in full. A window that is 90% full reads the same either way
+	// until these are separated, so a meter cannot tell "nearly stuck" from
+	// "nearly all slack". They partition the resident total exactly:
+	// CommittedTokens + ReclaimableTokens == ResidentTokens. Grade pressure on
+	// CommittedTokens alone — see pressure.go.
+	CommittedTokens   int
+	ReclaimableTokens int
+
 	// Byte-level accounting (ctxmmu, the text-tier enforcement). The ctxmmu
 	// ledger keys byte quarantines by quarantine id (q<n>), which the kvmmu span
 	// ledger does not carry, so clearance is reported as a reconciled COUNT
@@ -112,10 +125,15 @@ func Query(c *kvmmu.Context, mmu *ctxmmu.MMU) Snapshot {
 		out.ResidentTokens += s.Len
 		deps := countDependents(live, s.KV)
 		row.EvictBlastRadius = BlastRadius{Tokens: s.Len, DependentEntries: deps}
+		// The same dependent count that decides the span's State decides which
+		// band it lands in, so the per-span rows and the totals can never
+		// disagree about what is reclaimable (#4037).
 		if deps > 0 {
 			row.State = StateResident
+			out.CommittedTokens += s.Len
 		} else {
 			row.State = StateEvictable
+			out.ReclaimableTokens += s.Len
 		}
 		out.Spans = append(out.Spans, row)
 	}

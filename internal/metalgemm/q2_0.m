@@ -45,6 +45,56 @@ using namespace metal;
 // accumulates sum_i (code_i - 2) * x_i over the 32-wide block, scales that block sum by the block
 // scale d, and adds it to a per-lane float accumulator. simd_sum then reduces across the lanes.
 // This is the in-kernel twin of internal/model.q2MatRows.
+kernel void q2_0_gemm(device const uchar* codes [[buffer(0)]],
+                        device const float* scales [[buffer(1)]],
+                        device const float* X [[buffer(2)]],
+                        device float* Y [[buffer(3)]],
+                        constant int& nblk [[buffer(4)]],
+                        constant int& out [[buffer(5)]],
+                        constant int& p [[buffer(6)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    uint o = gid.x, t = gid.y;
+    if (o >= (uint)out || t >= (uint)p) return;
+    float acc = 0.0f;
+    const uint row = o * (uint)nblk;
+    device const float* x = X + t * (uint)nblk * 32u;
+    for (uint b = 0; b < (uint)nblk; b++) {
+        const float d = scales[row + b];
+        device const uchar* q = codes + (row + b) * 8u;
+        device const float* xb = x + b * 32u;
+        for (uint j = 0; j < 8u; j++) {
+            uchar v = q[j];
+            uint k = j * 4u;
+            acc += d * (float(int(v & 3u) - 2) * xb[k] + float(int((v >> 2) & 3u) - 2) * xb[k+1] +
+                        float(int((v >> 4) & 3u) - 2) * xb[k+2] + float(int((v >> 6) & 3u) - 2) * xb[k+3]);
+        }
+    }
+    Y[t * (uint)out + o] = acc;
+}
+
+kernel void q2_0_mlp_gate(device const uchar* gc [[buffer(0)]], device const float* gs [[buffer(1)]],
+                           device const uchar* uc [[buffer(2)]], device const float* us [[buffer(3)]],
+                           device const float* x [[buffer(4)]], device float* inter [[buffer(5)]],
+                           constant int& nblk [[buffer(6)]], constant int& hidden [[buffer(7)]],
+                           uint o [[thread_position_in_grid]]) {
+    if (o >= (uint)hidden) return;
+    float g=0.0f,u=0.0f; uint row=o*(uint)nblk;
+    for(uint b=0;b<(uint)nblk;b++){ device const float* xb=x+b*32u; uchar vg,vu; float dg=gs[row+b],du=us[row+b];
+      for(uint j=0;j<8u;j++){ vg=gc[(row+b)*8u+j]; vu=uc[(row+b)*8u+j]; uint k=j*4u;
+        g+=dg*(float(int(vg&3u)-2)*xb[k]+float(int((vg>>2)&3u)-2)*xb[k+1]+float(int((vg>>4)&3u)-2)*xb[k+2]+float(int((vg>>6)&3u)-2)*xb[k+3]);
+        u+=du*(float(int(vu&3u)-2)*xb[k]+float(int((vu>>2)&3u)-2)*xb[k+1]+float(int((vu>>4)&3u)-2)*xb[k+2]+float(int((vu>>6)&3u)-2)*xb[k+3]); }}
+    inter[o]=(g/(1.0f+exp(-g)))*u;
+}
+
+kernel void q2_0_mlp_down(device const uchar* codes [[buffer(0)]], device const float* scales [[buffer(1)]],
+                           device const float* x [[buffer(2)]], device float* y [[buffer(3)]],
+                           constant int& nblk [[buffer(4)]], constant int& out [[buffer(5)]],
+                           uint o [[thread_position_in_grid]]) {
+    if(o >= (uint)out) return; float acc=0.0f; uint row=o*(uint)nblk;
+    for(uint b=0;b<(uint)nblk;b++){ float d=scales[row+b]; device const uchar* q=codes+(row+b)*8u; device const float* xb=x+b*32u;
+      for(uint j=0;j<8u;j++){ uchar v=q[j]; uint k=j*4u; acc+=d*(float(int(v&3u)-2)*xb[k]+float(int((v>>2)&3u)-2)*xb[k+1]+float(int((v>>4)&3u)-2)*xb[k+2]+float(int((v>>6)&3u)-2)*xb[k+3]); }} y[o]=acc;
+}
+
 kernel void q2_0_gemv(device const uchar* W    [[buffer(0)]],  // out*nblk*8 packed 2-bit codes, 4/byte low-first
                       device const float* WD   [[buffer(1)]],  // out*nblk weight block-scales
                       device const float* X    [[buffer(2)]],  // in f32 activations
@@ -77,6 +127,7 @@ kernel void q2_0_gemv(device const uchar* W    [[buffer(0)]],  // out*nblk*8 pac
 )MSL";
 
 static id<MTLComputePipelineState> psoQ2Gemv;
+static id<MTLComputePipelineState> psoQ2Gemm, psoQ2MLPGate, psoQ2MLPDown;
 static int gQ2Ready;
 
 static int q2_0_init(void) {
@@ -86,7 +137,10 @@ static int q2_0_init(void) {
     id<MTLLibrary> lib = [gDev newLibraryWithSource:kQ2Src options:nil error:&err];
     if (lib == nil) { NSLog(@"q2_0: library compile failed: %@", err); return 0; }
     psoQ2Gemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_gemv"] error:&err];
-    if (!psoQ2Gemv) { NSLog(@"q2_0: pipeline build failed: %@", err); return 0; }
+    psoQ2Gemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_gemm"] error:&err];
+    psoQ2MLPGate = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_mlp_gate"] error:&err];
+    psoQ2MLPDown = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q2_0_mlp_down"] error:&err];
+    if (!psoQ2Gemv || !psoQ2Gemm || !psoQ2MLPGate || !psoQ2MLPDown) { NSLog(@"q2_0: pipeline build failed: %@", err); return 0; }
     gQ2Ready = 1;
     return 1;
 }
@@ -242,6 +296,27 @@ void mg_q2_0_gemv_group(const int* wids, int n, const float* x, float* Ycat, con
     }
 }
 
+void mg_q2_0_gemm(int wid, const float* X, int p, float* Y) {
+    @autoreleasepool {
+        if (wid < 0 || wid >= gNQ2 || p <= 0 || !q2_0_init()) return;
+        Q2W W=gQ2[wid]; q2_0_grow_scratch((long)p*W.in,(long)p*W.out);
+        memcpy(gQ2XBuf.contents,X,(size_t)p*W.in*4); id<MTLCommandBuffer> cmd=[gQueue commandBuffer]; id<MTLComputeCommandEncoder> e=[cmd computeCommandEncoder];
+        [e setComputePipelineState:psoQ2Gemm]; [e setBuffer:(__bridge id<MTLBuffer>)W.codes offset:0 atIndex:0]; [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1]; [e setBuffer:gQ2XBuf offset:0 atIndex:2]; [e setBuffer:gQ2YBuf offset:0 atIndex:3]; [e setBytes:&W.nblk length:4 atIndex:4]; [e setBytes:&W.out length:4 atIndex:5]; [e setBytes:&p length:4 atIndex:6];
+        [e dispatchThreads:MTLSizeMake(W.out,p,1) threadsPerThreadgroup:MTLSizeMake(16,16,1)]; [e endEncoding]; [cmd commit]; [cmd waitUntilCompleted]; memcpy(Y,gQ2YBuf.contents,(size_t)p*W.out*4);
+    }
+}
+
+int mg_q2_0_mlp(int gate, int up, int down, const float* x, float* y) {
+    @autoreleasepool {
+        if(gate<0||up<0||down<0||gate>=gNQ2||up>=gNQ2||down>=gNQ2||!q2_0_init()) return 0;
+        Q2W G=gQ2[gate],U=gQ2[up],D=gQ2[down]; if(G.in!=U.in||G.out!=U.out||D.in!=G.out) return 0;
+        q2_0_grow_scratch(G.in,G.out>D.out?G.out:D.out); memcpy(gQ2XBuf.contents,x,(size_t)G.in*4);
+        id<MTLCommandBuffer> cmd=[gQueue commandBuffer]; id<MTLComputeCommandEncoder> e=[cmd computeCommandEncoder];
+        [e setComputePipelineState:psoQ2MLPGate]; [e setBuffer:(__bridge id<MTLBuffer>)G.codes offset:0 atIndex:0]; [e setBuffer:(__bridge id<MTLBuffer>)G.scales offset:0 atIndex:1]; [e setBuffer:(__bridge id<MTLBuffer>)U.codes offset:0 atIndex:2]; [e setBuffer:(__bridge id<MTLBuffer>)U.scales offset:0 atIndex:3]; [e setBuffer:gQ2XBuf offset:0 atIndex:4]; [e setBuffer:gQ2YBuf offset:0 atIndex:5]; [e setBytes:&G.nblk length:4 atIndex:6]; [e setBytes:&G.out length:4 atIndex:7]; [e dispatchThreads:MTLSizeMake(G.out,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+        [e setComputePipelineState:psoQ2MLPDown]; [e setBuffer:(__bridge id<MTLBuffer>)D.codes offset:0 atIndex:0]; [e setBuffer:(__bridge id<MTLBuffer>)D.scales offset:0 atIndex:1]; [e setBuffer:gQ2YBuf offset:0 atIndex:2]; [e setBuffer:gQ2XBuf offset:0 atIndex:3]; [e setBytes:&D.nblk length:4 atIndex:4]; [e setBytes:&D.out length:4 atIndex:5]; [e dispatchThreads:MTLSizeMake(D.out,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)]; [e endEncoding]; [cmd commit]; [cmd waitUntilCompleted]; memcpy(y,gQ2XBuf.contents,(size_t)D.out*4); return 1;
+    }
+}
+
 // --- accessors for the GPU-resident decode forward (decode.m) ---
 // The resident decode forward chains a token's matmuls into ONE command buffer, so it needs to BIND
 // each projection's resident ternary buffers directly into its own encoder rather than go through
@@ -255,6 +330,7 @@ void mg_q2_0_dims(int wid, int* out, int* in, int* nblk) {
 
 // mg_q2_0_reset releases every resident ternary weight buffer and the reused scratch, returning the
 // Q2_0 table to empty. Mirrors mg_q8_reset. Call only when no Q2_0Weight handle is still in use.
+
 void mg_q2_0_reset(void) {
     for (int i = 0; i < gNQ2; i++) {
         if (gQ2[i].codes  != NULL) { CFBridgingRelease(gQ2[i].codes);  gQ2[i].codes  = NULL; }

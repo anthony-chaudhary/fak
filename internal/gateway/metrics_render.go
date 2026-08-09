@@ -255,6 +255,7 @@ func (s *Server) renderMetrics() string {
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
 	s.writeInKernelPressureTrimMetrics(&b)
+	s.writeMoEResidencyMetrics(&b) // #5617: activated-expert residency for a serve that declared an expert budget
 	m.writeCompactionMetrics(&b)
 	s.writeToolPageMetrics(&b) // #2440: ctxmmu tool-schema page catalog residency + dedup witnesses
 	m.writeResetShadowMetrics(&b)
@@ -454,6 +455,70 @@ func (s *Server) writeInKernelOOMRetryMetrics(b *strings.Builder) {
 	for _, row := range st.Rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_retry_last_failed_bytes{backend=\"%s\",class=\"%s\"} %d\n",
 			promQuote(backend), promQuote(oomClassLabel(row.Class)), row.LastFailedBytes)
+	}
+}
+
+// writeMoEResidencyMetrics emits the activated-expert residency family (R6, #5617): what a serve
+// that declared an expert budget actually paid to keep the top-k experts resident.
+//
+// Two silences are deliberate. A proxy planner does not implement the reporter, and a local planner
+// whose operator declared no budget never builds a ring — both emit nothing at all, because a
+// scrape of `fak_gateway_moe_expert_staging_total 0` is indistinguishable from a ring that ran and
+// missed everything, and the whole point of this family is telling those apart.
+//
+// The series are the raw counters plus the gauges that are NOT recoverable from them. Hit rate,
+// refusal rate and bytes-per-token are deliberately absent: each is a ratio of two counters here,
+// so PromQL derives them at the resolution the operator asks for rather than at whatever window
+// this process happened to accumulate. Budget and peak cannot be derived, and the placement/shape
+// gauges describe the most recent request only — the same last-request framing the request-memory
+// plan above uses, because drift against a pin set does not sum across requests.
+func (s *Server) writeMoEResidencyMetrics(b *strings.Builder) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.MoEResidencyReporter)
+	if !ok {
+		return
+	}
+	l := reporter.MoEResidencyStats()
+	if l.Requests == 0 {
+		return // no request ever engaged a routed-expert ring: not measured, not "measured as zero"
+	}
+	writeHelpType(b, "fak_gateway_moe_expert_staging_total", "Routed-expert weight stagings served by the local activated-expert ring, split by outcome. A refusal is a staging no budget could admit, which falls back to permanent residency and means the declared budget stopped bounding anything.", "counter")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_staging_total{outcome=\"hit\"} %d\n", l.Hits)
+	fmt.Fprintf(b, "fak_gateway_moe_expert_staging_total{outcome=\"page_in\"} %d\n", l.PageIns)
+	fmt.Fprintf(b, "fak_gateway_moe_expert_staging_total{outcome=\"refused\"} %d\n", l.Refusals)
+	writeHelpType(b, "fak_gateway_moe_expert_evictions_total", "Routed-expert weights evicted from the local activated-expert ring to stay inside the declared budget.", "counter")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_evictions_total %d\n", l.Evictions)
+	writeHelpType(b, "fak_gateway_moe_expert_page_in_bytes_total", "Device bytes moved by cold routed-expert page-ins. Divided by fak_gateway_moe_residency_tokens_total this is the expert bytes each forwarded token cost, which is the number an expert budget is sized against.", "counter")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_page_in_bytes_total %d\n", l.PageInBytes)
+	writeHelpType(b, "fak_gateway_moe_residency_requests_total", "Completed local requests that engaged a routed-expert ring.", "counter")
+	fmt.Fprintf(b, "fak_gateway_moe_residency_requests_total %d\n", l.Requests)
+	writeHelpType(b, "fak_gateway_moe_residency_tokens_total", "Tokens those requests actually forwarded through the model. Prompt tokens served from the prefix cache are excluded: they activated no expert, and counting them would make the byte rates read cheaper than they are.", "counter")
+	fmt.Fprintf(b, "fak_gateway_moe_residency_tokens_total %d\n", l.Tokens)
+	writeHelpType(b, "fak_gateway_moe_residency_reconciliation_failures_total", "Requests whose own residency report failed its internal identity checks. Should be 0 forever; any increase means the ring's accounting disagreed with itself and every series in this family is suspect.", "counter")
+	fmt.Fprintf(b, "fak_gateway_moe_residency_reconciliation_failures_total %d\n", l.ReconciliationFailures)
+	writeHelpType(b, "fak_gateway_moe_expert_budget_bytes", "Declared device-byte ceiling for resident routed experts, as most recently observed.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_budget_bytes %d\n", l.BudgetBytes)
+	writeHelpType(b, "fak_gateway_moe_expert_peak_resident_bytes", "High-water resident routed-expert footprint across every request. Staying well under the budget means the surplus could be given back to KV.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_moe_expert_peak_resident_bytes %d\n", l.PeakBytes)
+
+	last := l.Last
+	if last.Shape.Experts > 0 {
+		writeHelpType(b, "fak_gateway_moe_activated_fraction", "Fraction of the model's experts a single token routes to (k/E) — the gap between stored and activated bytes this ladder exists to exploit.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_moe_activated_fraction %s\n", promFloat(last.Shape.ActivatedFraction))
+	}
+	if basis := strings.TrimSpace(last.Placement.Basis); basis != "" && basis != "none" {
+		writeHelpType(b, "fak_gateway_moe_placement_drift", "Share of the most recent request's resident-expert plan that the request never routed to. This is a last-request gauge, not a cumulative counter: drift against a pin set does not sum across requests.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_moe_placement_drift{basis=\"%s\"} %s\n", promQuote(basis), promFloat(last.Placement.Drift))
+		writeHelpType(b, "fak_gateway_moe_placement_served_share", "Share of the most recent request's expert touches that the resident plan actually served — the complement of drift. Last-request gauge.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_moe_placement_served_share{basis=\"%s\"} %s\n", promQuote(basis), promFloat(last.Placement.Coverage))
+	}
+	if last.Shared != nil && last.Shared.Agents > 0 {
+		writeHelpType(b, "fak_gateway_moe_shared_ring_agents", "Sessions attached to the shared activated-expert ring during the most recent request. Last-request gauge.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_moe_shared_ring_agents %d\n", last.Shared.Agents)
+		writeHelpType(b, "fak_gateway_moe_agents_per_page_in", "Sessions served by the average cold page-in under the shared ring. At 1.0 every page-in served only the agent that paid for it, which is N private rings wearing one name. Last-request gauge.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_moe_agents_per_page_in %s\n", promFloat(last.Rates.AgentsPerPageIn))
 	}
 }
 
@@ -1211,6 +1276,7 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_compaction_candidate_bail_rate %s\n", promFloat(compactCandidateBailRate(snap.attempts["fired"], candidateBails)))
 
 	writeCounter(b, "fak_gateway_compaction_anchor_starved_total", "WITNESSED (fak authored): under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation, so compaction structurally cannot fire no matter how long the session grows. A SUBSET of bail_reason{reason=\"under_budget\"}, broken out because the two are opposite: plain under_budget is a benign short session, anchor-starved is the dormant-on-real-Claude-Code-traffic pathology (issue #1407) that no budget tightening fixes.", int64(snap.anchorStarved))
+	writeCounter(b, "fak_gateway_compaction_thrash_sessions_total", "WITNESSED (fak authored): sessions that hit the closed verdict COMPACTION_THRASH (#2424) — the context window refilled to the compaction limit on 3 consecutive turns, so the lever fired every turn and bought no lasting headroom. Counted ONCE per thrashing stretch, so this is sessions-that-thrashed, not turns-spent-thrashing. It is NOT a bail (compaction FIRED each time), which is why it is published here instead of under bail_reason_total, whose label set stays the compactor's own closed vocabulary. Nonzero means the binding constraint is the traffic, not the budget: tightening the budget compacts more often and changes nothing. Detection is always on; the session STOP that acts on it is opt-in behind FAK_COMPACTION_THRASH_STOP.", int64(snap.thrashSessions))
 	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "WITNESSED (fak authored): whole messages stubbed out across all fires.", int64(snap.dropped))
 	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "WITNESSED (fak authored): estimated tokens fak removed from the outbound body by history compaction fires plus uncached-tail trim (same ~4ch/token currency as the budget and provider input_tokens). What fak SENT — not a claim about what the provider billed.", int64(snap.shed))
 	writeCounter(b, "fak_gateway_compaction_cache_read_tokens_total", "OBSERVED (provider-reported, relayed verbatim): cumulative cache_read_input_tokens on compacted turns. Pair with shed_tokens to see the net effect; attribute nothing to fak from it alone — fak only guarantees the prefix it shipped was byte-identical (see attempts{fired} with prefix_mismatch=0).", int64(snap.cacheReads))

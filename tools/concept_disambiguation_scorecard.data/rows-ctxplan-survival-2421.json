@@ -1,0 +1,86 @@
+{
+  "rows": [
+    {
+      "id": "c2421-pin-evict-refused",
+      "canonical": "PIN_EVICT_REFUSED (survival-class compaction refusal)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "The closed refusal token a history compaction names when the plan it was about to forward would have evicted a page the kernel classes PINNED - the session's active steer, its live continuation seed, or a standing system invariant (#2421). Registered in dos.toml [reasons.PIN_EVICT_REFUSED] and in the internal/agent compaction bail vocabulary; on it the outbound body is forwarded UNCHANGED rather than compacted lossily.",
+      "distinction": "A REFUSAL to evict, decided on contract grounds before or after the drop, not an eviction outcome or state: StateEvictable labels a span's residency state and EvictUnderBudget performs a budget-gated eviction, while this token is what the compactor returns when it declines to evict at all.",
+      "distinct_from": [
+        "x2-evict-stateevictable",
+        "x2-evict-evictunderbudget",
+        "c2421-class-evictable",
+        "c2421-check-eviction"
+      ],
+      "aliases": [],
+      "grounding": "PIN_EVICT_REFUSED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "c2421-class-evictable",
+      "canonical": "ctxplan.ClassEvictable (survival class)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "The least-protected member of ctxplan's survival-class vocabulary (#2421): a context page that may be dropped and is then genuinely gone - aged transcript prose. It is the ZERO value of SurvivalClass, so an unstamped or unrecognised page falls to it and can never be silently promoted into the protected set by a kind string the model supplied.",
+      "distinction": "A page-KIND-derived survival class in the compaction contract, distinct from StateEvictable, which is a ctxresidency runtime STATE of a span; and distinct from its sibling ClassReplayable, which is equally droppable but whose full bytes stay recoverable through the content-addressed store.",
+      "distinct_from": [
+        "x2-evict-stateevictable",
+        "c2421-pin-evict-refused"
+      ],
+      "aliases": [],
+      "grounding": "ClassEvictable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "c2421-check-eviction",
+      "canonical": "ctxplan.CheckEviction (survival-class adjudication)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "The verification half of the survival-class contract (#2421): given typed pages and the page IDs some other planner proposes to drop, it returns PIN_EVICT_REFUSED when any of them classes PINNED and empty otherwise. It is what makes the guarantee hold for eviction plans ctxplan did not author - a byte splicer on a wire body, say.",
+      "distinction": "ADJUDICATES a drop produced elsewhere, distinct from PlanEviction which AUTHORS one, and distinct from KVCache.TryEvict, which performs a fallible exact-span removal rather than judging whether a removal is permitted.",
+      "distinct_from": [
+        "x2-evict-tryevict",
+        "c2421-pin-evict-refused",
+        "c2421-plan-eviction"
+      ],
+      "aliases": [],
+      "grounding": "CheckEviction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "c2421-plan-eviction",
+      "canonical": "ctxplan.PlanEviction (survival-class eviction planner)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "The planner half of the survival-class contract (#2421): it plans the drop that brings typed pages down to a token budget while honouring each page's class - refusing whole with PIN_EVICT_REFUSED when the PINNED floor alone exceeds the budget, and otherwise shedding the EVICTABLE set before it touches a single REPLAYABLE page.",
+      "distinction": "Class-aware and refusal-capable, distinct from EvictUnderBudget, which evicts to a budget with no survival contract and therefore no outcome in which it declines; and distinct from CheckEviction, which judges a plan rather than producing one.",
+      "distinct_from": [
+        "x2-evict-evictunderbudget",
+        "c2421-check-eviction"
+      ],
+      "aliases": [],
+      "grounding": "PlanEviction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

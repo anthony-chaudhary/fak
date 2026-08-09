@@ -9,14 +9,20 @@
 // a removed Deny/SelfModifyGlob, a loosened Posture, or any FROZEN-floor
 // movement all refuse; only a tighten-only or no-op delta is self-admissible.
 //
-// AND TODAY THERE IS NO CALLER. This ships as the DECISION half only: nothing
-// outside its test calls admitSelfTightenOverlay, so no live overlay is admitted
-// or refused by it yet. Said outright because "enforcement companion" above is a
-// DESIGN relationship and not a wiring claim — the propose-only channel does not
-// route through this function today, and naming a call site that does not exist
-// is the failure mode this repo treats as an unwitnessed claim. Promotion
-// evidence is a self-authored overlay that actually reaches this gate and is
-// journaled with its class; the arming rung is filed rather than half-done here.
+// THE GATE IS NOW ARMED (#5411). It shipped as the DECISION half only — nothing
+// outside its own test called admitSelfTightenOverlay, so no live overlay was
+// admitted or refused by it. The seam it decides for now exists:
+// guard_self_tighten_overlay.go supplies the agent-writable overlay
+// (.fak/agent/self-tighten.json) and guardAdmitSelfTightenProposal routes it here,
+// called from the floor assembly in guard_startup.go's loadGuardCapabilityFloor at
+// every `fak guard` launch. So the promotion evidence the earlier note asked for —
+// a self-authored overlay that actually reaches this gate and carries its class —
+// is the launch path itself, and the class rides the floor-source provenance.
+// The "enforcement companion" sentence above remains a DESIGN relationship to the
+// propose-only channel: #5182's on-disk schema is widen-shaped, so that channel
+// still does not route through this function, and only the tighten overlay does.
+// Live mid-session reload stays deferred (the design spike scopes v1 to the launch
+// boundary), so the reload paths do not call this yet.
 //
 // ONE BRANCH IS UNREACHABLE BY CONSTRUCTION, AND THAT IS THE POINT.
 // AmendmentFrozenViolation cannot be produced by DiffAmendment as it stands:

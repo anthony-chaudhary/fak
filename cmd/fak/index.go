@@ -126,8 +126,22 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexKnobs(stdout, stderr, rootDir, *asJSON)
 	case "freshness", "fresh":
 		return indexFreshness(stdout, stderr, cat, *asJSON, *limit)
+	case "execaudit", "executables", "exec":
+		return indexExecAudit(stdout, stderr, rootDir, *asJSON, *limit)
 	case "agents", "agentsmd", "agent":
 		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident)
+	case "ownership", "split":
+		if len(args) != 0 {
+			fmt.Fprintln(stderr, "usage: fak index ownership [--json] [--root PATH]")
+			return 2
+		}
+		return indexOwnership(stdout, stderr, rootDir, *asJSON)
+	case "graph":
+		if len(args) != 0 {
+			fmt.Fprintln(stderr, "usage: fak index graph [--json]")
+			return 2
+		}
+		return indexGraphMain(stdout, stderr, boolArg(*asJSON))
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -356,7 +370,10 @@ func writeIndexUsage(w io.Writer) {
   fak index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
   fak index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
   fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
+  fak index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
   fak index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
+  fak index graph             HEAD-only Markdown reachability census under named resolver rules
+  fak index ownership         runtime/dev command inventory + runtime dependency leak paths
   flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
 `)
 }
@@ -429,6 +446,35 @@ func flushTab(tw *tabwriter.Writer, stderr io.Writer, label string) int {
 	if err := tw.Flush(); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", label, err)
 		return 1
+	}
+	return 0
+}
+
+func indexOwnership(stdout, stderr io.Writer, root string, asJSON bool) int {
+	const importRoot = "github.com/anthony-chaudhary/fak/cmd/fak"
+	report, err := devindex.BuildOwnershipReport(root, "./cmd/fak", importRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak index ownership: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, report, "fak index ownership")
+	}
+	var runtime, dev, shared int
+	for _, command := range report.Commands {
+		switch command.Owner {
+		case devindex.OwnerRuntime:
+			runtime++
+		case devindex.OwnerDev:
+			dev++
+		case devindex.OwnerShared:
+			shared++
+		}
+	}
+	fmt.Fprintf(stdout, "command ownership: runtime=%d dev=%d shared=%d total=%d\n", runtime, dev, shared, len(report.Commands))
+	fmt.Fprintf(stdout, "runtime graph: packages=%d internal=%d dev-leaks=%d\n", report.Graph.PackageCount, report.Graph.InternalCount, len(report.Graph.Leaks))
+	for _, leak := range report.Graph.Leaks {
+		fmt.Fprintf(stdout, "LEAK %s: %s\n", leak.Forbidden, strings.Join(leak.Path, " -> "))
 	}
 	return 0
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,12 +22,19 @@ import (
 // once; it reads the staged diff once and runs every gate over it. Exit codes mirror the gate
 // contract so the shell wrapper can fall back to Python: 0 = clean/pass, 1 = a block gate fired,
 // 2 = could-not-run (the wrapper then runs the Python path — fail-open).
+//
+// Exit 0 does NOT by itself mean every gate ran. A single gate whose Check cannot reach its
+// evidence is skipped and the run still exits 0 (fail-open, deliberate: a broken checker must
+// never wedge every commit on a shared trunk). What tells the two apart is the skip ledger
+// (#5299): each skipped gate is named on stderr, and the count plus the names ride in the --json
+// payload as skipped_count / skipped_gates. Read that ledger — not the exit code — to know
+// whether a green commit was checked by the full gate set or a degraded one.
 
 func cmdHooks(argv []string) { os.Exit(runHooks(os.Stdout, os.Stderr, argv)) }
 
 func runHooks(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | popup-scan | claim-reclass | lane-audit)")
+		fmt.Fprintln(stderr, "fak hooks: subcommand required (pre-commit | commit-msg <file> | pre-push | import-witness | popup-scan | claim-reclass | lane-audit | agent <pretool|posttool|stop>)")
 		return 2
 	}
 	switch argv[0] {
@@ -45,8 +53,12 @@ func runHooks(stdout, stderr io.Writer, argv []string) int {
 		return runHooksClaimReclass(stdout, stderr, os.Stdin, argv[1:])
 	case "lane-audit":
 		return runHooksLaneAudit(stdout, stderr, argv[1:])
+	case "agent":
+		// Agent-LIFECYCLE hooks, not the commit boundary. Reads the harness envelope on stdin
+		// and answers on a DIFFERENT exit-code contract — see cmd/fak/hooks_agent.go.
+		return runHooksAgent(stdout, stderr, os.Stdin, argv[1:])
 	default:
-		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | popup-scan | claim-reclass | lane-audit)\n", argv[0])
+		fmt.Fprintf(stderr, "fak hooks: unknown subcommand %q (pre-commit | commit-msg | pre-push | import-witness | popup-scan | claim-reclass | lane-audit | agent)\n", argv[0])
 		return 2
 	}
 }
@@ -242,6 +254,40 @@ func checkWithinBudget(g hooks.Gate, d *hooks.StagedDiff, budget time.Duration) 
 	}
 }
 
+// preCommitGates is the gate set the pre-commit hook runs. It is indirected through a var —
+// the same seam idiom as commitFn / execCommand elsewhere in this package — ONLY so a test can
+// inject a gate with a known verdict (notably one that CANNOT run, which no real gate does on a
+// healthy fixture repo). Production always reads hooks.PreCommitGates().
+var preCommitGates = hooks.PreCommitGates
+
+// couldNotRunClass names the CLASS of a gate's could-not-run error for the operator report, and
+// deliberately never renders the error itself. Several gates scan for secret material
+// (PUBLIC_LEAK, SECRET_SHAPE) over the staged diff, so an error value they return could carry a
+// matched needle or a slice of that diff; printing it would leak through the very gate whose
+// failure is being announced. Both return values are fixed literals, so a skip report can name a
+// gate and a sentinel and nothing else.
+func couldNotRunClass(err error) string {
+	if errors.Is(err, hooks.ErrCouldNotRun) {
+		return "ErrCouldNotRun"
+	}
+	return "unclassified error"
+}
+
+// enabledGateNames returns the names of the gates in gs that this run WOULD have checked — the
+// ones an operator turned off (FLEET_<NAME>_GUARD=off) or escaped are deliberate intent, not a
+// degraded run, so they never count as skipped. Used to name the tail of gates a spent hook
+// budget drops (#5335) in the same skip ledger as a single could-not-run gate (#5299).
+func enabledGateNames(gs []hooks.Gate) []string {
+	var names []string
+	for _, g := range gs {
+		if mode, escaped := gateModeDefault(g.ModeEnv, g.EscapeEnv, g.DefaultMode); mode == "off" || escaped {
+			continue
+		}
+		names = append(names, g.Name)
+	}
+	return names
+}
+
 func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("hooks pre-commit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -285,11 +331,50 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 
 	budget := resolveCheckBudget()
 	var allFindings []hooks.Finding
+	// skipped names every enabled gate that produced NO verdict this run — one whose Check could
+	// not reach its evidence (#5299) or one a wall-clock budget cut off (#5335). The fail-open
+	// itself stands: a broken checker must never wedge every commit on a shared trunk. What
+	// #5299 adds is that the skip is VISIBLE, so an operator can tell "every gate ran clean"
+	// from "PUBLIC_LEAK never ran and the rest were clean" — two states this hook used to
+	// report identically, letting a persistently-broken SECURITY gate go unnoticed.
+	var skipped []string
+	// reports is the per-gate CANDIDATE DENOMINATOR ledger (#5602): for each gate that was
+	// ENABLED this run, how many staged items its own filter admitted. Gates turned off or
+	// escaped are absent by the same rule that keeps them out of `skipped` — that is operator
+	// intent, not a degraded run, and reporting a zero denominator for a gate nobody asked to
+	// run would misdescribe it as having judged nothing.
+	var reports []gateReport
+	// scope is what this run quantified OVER (#5603): the staged set, plus the gates operator
+	// intent left unable to refuse. `reports` says how much each gate judged; scope says which
+	// population those numbers were drawn from and which gates are missing from them entirely.
+	// Both narrowings are silent today — a run with half the gate set softened prints the same
+	// "clean" as a full one, and a staged-clean commit reads like a clean tree.
+	scope := runScope{Population: scopePopulationStaged}
 	blocked := false
-	for _, g := range hooks.PreCommitGates() {
+	gates := preCommitGates()
+	for i, g := range gates {
 		mode, escaped := gateModeDefault(g.ModeEnv, g.EscapeEnv, g.DefaultMode)
 		if mode == "off" || escaped {
+			// Operator intent, not a degraded run: still never counted as skipped (#5299 keeps
+			// meaning "a checker broke"). But it IS a narrowing, so scope names it (#5603).
+			why := "off"
+			if escaped {
+				why = "escaped"
+			}
+			scope.Narrowing.NotRun = append(scope.Narrowing.NotRun, g.Name+" ("+why+")")
+			if escaped || gateModeIsEnvSet(g.ModeEnv) {
+				scope.Narrowing.ByOperator = append(scope.Narrowing.ByOperator, g.Name)
+			}
 			continue
+		}
+		if mode != "block" {
+			// Ran, judged real candidates, and cannot refuse. Distinguishing a gate that SHIPS
+			// advisory from one an operator quietened this run is the whole point of ByEnv:
+			// collapsing them would report a hollowed-out run as fak's designed posture.
+			scope.Narrowing.Advisory = append(scope.Narrowing.Advisory, g.Name)
+			if gateModeIsEnvSet(g.ModeEnv) {
+				scope.Narrowing.ByOperator = append(scope.Narrowing.ByOperator, g.Name)
+			}
 		}
 		// Charge every gate against the shared wall clock, so N slow gates cannot sum past the
 		// total the way N per-gate budgets could.
@@ -298,22 +383,40 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			if !*asJSON {
 				fmt.Fprintf(stderr, "pre-commit: %s hook budget spent; remaining gates from %s skipped (fail-open, #5335)\n", totalBudget, g.Name)
 			}
+			// The whole TAIL from here on is unchecked, this gate included — count all of it,
+			// so the ledger never understates how degraded the run was.
+			skipped = append(skipped, enabledGateNames(gates[i:])...)
+			for _, name := range enabledGateNames(gates[i:]) {
+				reports = append(reports, gateReport{Gate: name, Skipped: true})
+			}
 			break
 		}
 		findings, gerr := checkWithinBudget(g, d, gateBudget)
+		reports = append(reports, buildGateReport(d, g.Name, len(findings), gerr != nil))
 		if gerr != nil {
 			// A single gate that could-not-run — or ran past its wall-clock budget (#5335) — is
-			// skipped (fail-open); the other gates still run. A budget cut-off is reported so a
-			// wedged or deliberately-slow gate is visible, never a silent bypass of a real check.
-			if errors.Is(gerr, errCheckBudgetExceeded) && !*asJSON {
-				fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, gateBudget)
+			// skipped (fail-open); the other gates still run. Either way the gate is NAMED and
+			// counted, so a wedged, broken, or deliberately-slow gate is visible rather than a
+			// silent bypass of a real check.
+			skipped = append(skipped, g.Name)
+			if !*asJSON {
+				if errors.Is(gerr, errCheckBudgetExceeded) {
+					fmt.Fprintf(stderr, "pre-commit: gate %s exceeded its %s budget; skipped (fail-open, #5335)\n", g.Name, gateBudget)
+				} else {
+					fmt.Fprintf(stderr, "pre-commit: gate %s could not run (%s); skipped (fail-open, #5299)\n", g.Name, couldNotRunClass(gerr))
+				}
 			}
 			continue
 		}
 		if len(findings) == 0 {
 			continue
 		}
-		allFindings = append(allFindings, findings...)
+		for _, finding := range findings {
+			// The gate mode is the disposition contract for this run: warn findings remain
+			// visible but must trail every binding repair in the model-facing hand-off.
+			finding.Advisory = mode != "block"
+			allFindings = append(allFindings, finding)
+		}
 		if mode == "block" {
 			blocked = true
 			if !*asJSON {
@@ -326,8 +429,24 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// The count, once, at the end of the human report: the per-gate lines above scroll away in a
+	// noisy commit, and "how much of the gate set actually ran" is the one number that separates
+	// a clean commit from a degraded one.
+	if len(skipped) > 0 && !*asJSON {
+		fmt.Fprintf(stderr, "pre-commit: %d of %d gate(s) skipped (fail-open) — this commit ran a DEGRADED gate set: %s\n",
+			len(skipped), len(gates), strings.Join(skipped, ", "))
+	}
+
+	// The clean path used to print NOTHING and return 0, and silence carries two meanings:
+	// "every gate checked its candidates and found none" and "no gate had anything to check".
+	// One line naming the domain separates them (#5602).
+	if len(allFindings) == 0 && !*asJSON {
+		fmt.Fprintln(stderr, cleanRunSummary(reports, len(d.StagedPaths), scope))
+	}
+
 	if *asJSON {
-		emitFindingsJSON(stdout, stderr, allFindings)
+		orderFindingsForRepair(allFindings)
+		emitFindingsJSON(stdout, stderr, allFindings, skipped, reports, scope)
 	}
 	if blocked {
 		if !*asJSON {
@@ -488,11 +607,132 @@ func distinctFindingFiles(findings []hooks.Finding) []string {
 	return files
 }
 
-func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding) {
+// gateReport is one enabled gate's line in the `gates` array (#5602): what it judged, how many
+// items it judged, and how many findings that produced.
+//
+// Candidates is a POINTER so "the gate reports no denominator" serializes as JSON null and can
+// never be mistaken for the number 0. Zero is a real answer here — "this gate ran and judged
+// nothing" is exactly the state the issue exists to surface — so unlike Finding.Severity, whose
+// zero means UNGRADED, this field cannot overload zero to mean absent.
+type gateReport struct {
+	Gate       string `json:"gate"`
+	Candidates *int   `json:"candidates"`     // null = this gate reports no denominator
+	Unit       string `json:"unit,omitempty"` // what Candidates counts, in that gate's own terms
+	Findings   int    `json:"findings"`
+	Skipped    bool   `json:"skipped,omitempty"` // ran no verdict this commit (#5299/#5335)
+}
+
+// buildGateReport folds one gate's outcome and the denominator that gate recorded for itself
+// into a report line. A gate that recorded nothing leaves Candidates nil — UNREPORTED, which the
+// caller must not render as 0.
+func buildGateReport(d *hooks.StagedDiff, name string, findings int, skipped bool) gateReport {
+	r := gateReport{Gate: name, Findings: findings, Skipped: skipped}
+	if n, unit, ok := d.Candidates(name); ok {
+		r.Candidates = &n
+		r.Unit = unit
+	}
+	return r
+}
+
+// cleanRunSummary is the one line the clean path prints so silence stops meaning two things.
+// It splits the enabled gates into the ones that actually judged something, the ones that ran
+// and admitted nothing, and the ones that report no denominator at all — three states the old
+// empty payload rendered identically.
+func cleanRunSummary(reports []gateReport, stagedFiles int, scope runScope) string {
+	var judged, idle, unreported int
+	var named []gateReport
+	for _, r := range reports {
+		switch {
+		case r.Skipped:
+			// Already named by the degraded-run line; not a clean-path claim.
+		case r.Candidates == nil:
+			unreported++
+		case *r.Candidates == 0:
+			idle++
+		default:
+			judged++
+			named = append(named, r)
+		}
+	}
+	sort.Slice(named, func(i, j int) bool {
+		if *named[i].Candidates != *named[j].Candidates {
+			return *named[i].Candidates > *named[j].Candidates
+		}
+		return named[i].Gate < named[j].Gate
+	})
+	const show = 3
+	var parts []string
+	for i, r := range named {
+		if i == show {
+			parts = append(parts, fmt.Sprintf("+%d more", len(named)-show))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %d %s", r.Gate, *r.Candidates, r.Unit))
+	}
+	msg := fmt.Sprintf("pre-commit: clean — %d gate(s) over %d staged file(s): %d judged candidates",
+		len(reports), stagedFiles, judged)
+	if len(parts) > 0 {
+		msg += " (" + strings.Join(parts, "; ") + ")"
+	}
+	msg += fmt.Sprintf(", %d judged nothing", idle)
+	if unreported > 0 {
+		// Say UNREPORTED out loud rather than folding it into the zero bucket: a gate that
+		// reports no denominator has not told us it judged nothing, and printing it as if it
+		// had would rebuild the exact ambiguity this line exists to remove.
+		msg += fmt.Sprintf(", %d report no denominator", unreported)
+	}
+	// Every count above is a count OF something, and until now the line never said of what
+	// (#5603). The scope clause closes that: which population the staged file count came from,
+	// and which gates operator intent left out of the numbers entirely.
+	return msg + " — " + scope.note()
+}
+
+// orderFindingsForRepair puts binding work before advisory work without disturbing the
+// registry/file/line order inside either disposition.
+func orderFindingsForRepair(findings []hooks.Finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		return !findings[i].Advisory && findings[j].Advisory
+	})
+}
+
+// emitFindingsJSON writes the --json report: the findings, and the ledger of gates that never
+// delivered a verdict. skipped_gates / skipped_count are the machine-readable half of #5299 —
+// with the fail-open deliberately kept, and stderr silenced under --json, they are the ONLY way
+// a consumer can tell a run where every gate reached its evidence from one where a security
+// gate errored out. Both keys are always present (empty list, zero count on a full run) so a
+// reader never has to treat "absent" as "none". Only gate NAMES appear: a gate's error text can
+// carry the secret material it was scanning for, and never reaches this payload.
+//
+// `gates` (#5602) is additive on the same principle: it is always present, and it carries each
+// enabled gate's candidate DENOMINATOR so a clean payload states the domain it was clean over.
+// `scope` / `scope_narrowing` (#5603) complete it — the denominators are meaningless to a
+// consumer that cannot tell WHICH population they were drawn from, and `fak hygiene` emits
+// overlapping gate names over a different one.
+func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding, skipped []string, gates []gateReport, scope runScope) {
 	if findings == nil {
 		findings = []hooks.Finding{}
 	}
-	if err := writeIndentedJSON(stdout, map[string]any{"findings": findings, "count": len(findings)}); err != nil {
+	if skipped == nil {
+		skipped = []string{}
+	}
+	if gates == nil {
+		gates = []gateReport{}
+	}
+	payload := map[string]any{
+		"findings":      findings,
+		"count":         len(findings),
+		"skipped_gates": skipped,
+		"skipped_count": len(skipped),
+		// Additive only: every pre-existing key keeps its exact name and meaning, so a consumer
+		// reading findings/count still parses this payload unchanged (#5602).
+		"gates": gates,
+		// scope is a bare string, not an object, so the cheapest possible check —
+		// `.scope == "staged"` — is the one that works; the structured detail lives beside it
+		// under its own key rather than forcing every consumer through a nested read (#5603).
+		"scope":           scope.Population,
+		"scope_narrowing": scope.narrowingPayload(),
+	}
+	if err := writeIndentedJSON(stdout, payload); err != nil {
 		fmt.Fprintf(stderr, "fak hooks: %v\n", err)
 	}
 }

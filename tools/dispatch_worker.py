@@ -86,7 +86,24 @@ def install_no_window_subprocess_defaults(module: Any = subprocess) -> None:
         return wrapped
 
     module.run = with_flags(module.run)
-    module.Popen = with_flags(module.Popen)
+    # Popen has to stay a CLASS, so wrap it by SUBCLASSING rather than with with_flags.
+    # `class Popen(subprocess.Popen)` is a shape the stdlib itself uses -- asyncio's
+    # windows_utils does exactly that at import time -- so swapping the class for a plain
+    # function turns every later subclass into a TypeError. The damage then lands nowhere
+    # near this line: unittest.mock imports asyncio, so any script that installed these
+    # defaults silently lost `from unittest import mock` for the rest of the process, and
+    # the traceback blamed asyncio's own __init__. Subclassing keeps isinstance checks and
+    # subclassing intact while still defaulting the flag.
+    base_popen = module.Popen
+
+    class _NoWindowPopen(base_popen):  # type: ignore[misc,valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs.setdefault("creationflags", no_window_creationflags())
+            super().__init__(*args, **kwargs)
+
+    _NoWindowPopen.__name__ = getattr(base_popen, "__name__", "Popen")
+    _NoWindowPopen.__qualname__ = getattr(base_popen, "__qualname__", "Popen")
+    module.Popen = _NoWindowPopen
     module.call = with_flags(module.call)
     module.check_call = with_flags(module.check_call)
     module.check_output = with_flags(module.check_output)
@@ -884,25 +901,59 @@ def node_caps(env: dict[str, str] | None = None) -> frozenset[str]:
     return frozenset(caps)
 
 
+def fak_binary_build_time(path: str) -> float:
+    """Build time of a ``fak`` binary, or ``-1.0`` when it cannot be stat'd (#5856).
+
+    An unreadable candidate sorts LAST rather than raising: binary resolution must never
+    be the thing that breaks dispatch, and by construction a sibling candidate is still
+    usable. Shared with ``issue_resolve_dispatch._fak_command_prefix`` so both dispatch
+    paths rank the same way from one definition.
+    """
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return -1.0
+
+
 def resolve_fak_bin(workspace: Path, env: dict[str, str] | None = None) -> str | None:
     """Locate a ``fak`` binary to front the worker with, or ``None``.
 
-    Precedence: ``$FAK_BIN`` (if it exists) -> the in-tree ``tools/.bin/fak[.exe]``
-    the dogfood launcher builds -> ``fak`` on PATH. ``None`` means the caller should
-    fail OPEN (launch the worker unwrapped) rather than break dispatch on a host that
-    has not built fak.
+    Precedence: ``$FAK_BIN`` (the absolute override, if it exists) -> the **freshest** of
+    the in-tree ``tools/.bin/fak[.exe]`` and ``fak`` on PATH. ``None`` means the caller
+    should fail OPEN (launch the worker unwrapped) rather than break dispatch on a host
+    that has not built fak.
+
+    Freshest, not in-tree-first (#5856). Only ONE copy on a fleet host is refreshed:
+    ``FakSelfUpdate`` rebuilds the PATH binary every 20 minutes from a pristine detached
+    ``origin/main`` worktree. Nothing refreshes ``tools/.bin``, so an unconditional
+    preference for it fronted every dispatched worker's ``fak guard`` with a build
+    witnessed 34 commits behind HEAD and stamped ``+dirty`` — the kernel adjudicating the
+    fleet was enforcing policy the trunk had already replaced, which is invisible from
+    inside a worker because the stale binary answers every question confidently.
+
+    Ranking by build time keeps the dogfood-launcher intent intact — a developer who just
+    rebuilt ``tools/.bin`` still wins, because their build genuinely IS the newest — while
+    letting a refreshed copy overtake an abandoned one. A tie goes to PATH, the copy
+    something is accountable for keeping current.
     """
     e = env if env is not None else os.environ
     explicit = (e.get("FAK_BIN") or "").strip()
     if explicit and Path(explicit).exists():
         return explicit
+    candidates: list[str] = []
+    # PATH first, so an mtime TIE resolves to the refreshed copy. Honor the supplied env's
+    # PATH (so the env param fully governs resolution); an absent PATH key falls back to
+    # the process PATH.
+    onpath = _which_on_exact_path("fak", e.get("PATH"))
+    if onpath:
+        candidates.append(onpath)
     exe = "fak.exe" if os.name == "nt" else "fak"
     intree = Path(workspace) / "tools" / ".bin" / exe
     if intree.exists():
-        return str(intree)
-    # Honor the supplied env's PATH for the lookup (so the env param fully governs
-    # resolution); an absent PATH key falls back to the process PATH.
-    return _which_on_exact_path("fak", e.get("PATH"))
+        candidates.append(str(intree))
+    if not candidates:
+        return None
+    return max(candidates, key=fak_binary_build_time)
 
 
 def guard_provider(backend: str) -> str:

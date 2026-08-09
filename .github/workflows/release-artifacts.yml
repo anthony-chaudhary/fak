@@ -359,6 +359,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$fail"
 
+      # CI spec impact (#5947): adds only this release-gate assertion; existing
+      # inputs, consumers, required checks, artifacts, and job names are unchanged.
+      - name: verify nested modules and root dependency quarantine
+        run: go test ./internal/dependencyquarantine
+
       - name: verify go install resolves and runs the tag
         id: verify_go_install
         run: |

@@ -12,12 +12,16 @@ import (
 )
 
 // Reason tokens stamped on a broken lock's LOCK_BROKEN event (issue #2339). The set
-// is closed: a break is either a dead recorded holder, or a live PID whose process
-// image is provably not a committer (a reused PID number now owned by something
+// is closed: a break is either a dead recorded holder, or a live PID whose process is
+// provably not the one that took the lock (a reused PID number now owned by something
 // unrelated). An empty Reason means the lock was NOT reapable.
 const (
-	ReapReasonHolderDead    = "holder_dead"    // recorded PID is no longer a running process
-	ReapReasonHolderForeign = "holder_foreign" // PID is alive but its image is not a fak/git committer (PID reuse)
+	ReapReasonHolderDead = "holder_dead" // recorded PID is no longer a running process
+	// ReapReasonHolderForeign covers both proofs of PID reuse, because from the lane's
+	// point of view they are the same fact: the PID is alive and it is not the holder.
+	// Either the process started after the lock was written (#5892), or its image is not a
+	// fak/git committer (#2339). The event carries which one decided it.
+	ReapReasonHolderForeign = "holder_foreign"
 )
 
 // Reason tokens classifying WHY an attempted reap's os.Remove was refused by the OS.
@@ -84,17 +88,25 @@ type LockProbe struct {
 	HolderPID  int       // the PID recorded in the file (0 if absent/unparseable)
 	Alive      bool      // the recorded holder is a currently-running process
 	Stale      bool      // Exists && HolderPID>0 && !Alive — a DEAD holder still owns the file
-	Foreign    bool      // Exists && HolderPID>0 && Alive but the image is provably not a committer (PID reuse)
+	Foreign    bool      // Exists && HolderPID>0 && Alive but the process is provably not the holder (PID reuse)
 	Image      string    // the recorded holder's process image base name, when readable ("" otherwise)
 	ModTime    time.Time // the lockfile's last-modified time (zero when absent/unreadable)
 	AgeSeconds int64     // whole seconds since ModTime at probe time (0 when absent/unreadable)
 	Reason     string    // ReapReason* naming WHY the lock is reapable, or "" when it is not
+
+	// StartedAt is when the process now at HolderPID started, when that is readable (zero
+	// otherwise). StartedAfterLock is the proof derived from it: the process started after
+	// this lockfile was written, so whatever it is now, it cannot be the process that wrote
+	// it. See the startTimeSkewGrace comment for why that is the stronger discriminator.
+	StartedAt        time.Time
+	StartedAfterLock bool
 }
 
-// Reapable reports whether the probed lock may be broken: a dead recorded holder, OR
-// a live PID whose image is provably foreign (a reused PID). A live committer, an
-// absent file, and an unattributable/unidentifiable file are all NOT reapable — the
-// fail-safe stance that never breaks a lock a live committer holds.
+// Reapable reports whether the probed lock may be broken: a dead recorded holder, OR a
+// live PID that is provably not the process that took the lock — one that started after
+// the lock was written, or whose image is provably foreign (both are reused PIDs). A live
+// committer, an absent file, and an unattributable/unidentifiable file are all NOT
+// reapable — the fail-safe stance that never breaks a lock a live committer holds.
 func (p LockProbe) Reapable() bool { return p.Stale || p.Foreign }
 
 // processImageNameFn resolves a running PID's process image base name (lowercased,
@@ -102,6 +114,30 @@ func (p LockProbe) Reapable() bool { return p.Stale || p.Foreign }
 // a package var so the PID-reuse image guard is unit-testable without spawning a real
 // foreign process. Default is the platform implementation in alive_image_*.go.
 var processImageNameFn = processImageName
+
+// processStartTimeFn resolves when the process at a live PID started, reporting ok=false
+// when that cannot be read. Package var for the same reason processImageNameFn is one: the
+// PID-reuse guard has to be provable in a unit test without arranging a real recycled PID.
+// Default is the platform implementation in starttime_*.go.
+var processStartTimeFn = processStartTime
+
+// startTimeSkewGrace is how much LATER than the lockfile's own mtime the process at the
+// recorded PID may claim to have started before the probe calls it a reused PID (#5892).
+//
+// The comparison works because gpulease writes the holder's PID into the lockfile at the
+// instant it wins the flock and nothing touches the file again for the rest of the hold, so
+// the mtime IS the moment the lock was recorded. A process cannot predate its own writes,
+// so a holder that genuinely took this lock always started BEFORE the mtime; only a PID
+// recycled onto a later process can start after it. That makes this a proof rather than the
+// guess an image name can offer — and, unlike a start id persisted into the record, it
+// works on lockfiles already sitting on disk instead of only on ones written from now on.
+//
+// The grace is pure fail-safe margin for the two clocks not being the same instrument: a
+// FILETIME and an NTFS mtime share the system clock, but the procfs derivation goes through
+// a whole-second btime plus USER_HZ ticks, so it can land up to about a second out. A real
+// reuse wedge is minutes to hours old, so spending seconds here costs nothing and keeps the
+// one error this guard may never make — breaking a live committer's lock — out of reach.
+const startTimeSkewGrace = 5 * time.Second
 
 // nowFn is time.Now, injectable so age computation is deterministic in tests.
 var nowFn = time.Now
@@ -170,10 +206,32 @@ func ProbeLock(path string) LockProbe {
 		p.Reason = ReapReasonHolderDead
 		return p
 	}
-	// The holder PID is alive. It is only reapable if the running process is provably
-	// NOT a committer — a reused PID number now owned by something unrelated. An image
-	// we cannot read is treated as committer-like, so a live holder is never broken on
-	// a failed image read.
+	// The holder PID is alive. It is only reapable if the running process is provably NOT
+	// the committer that took this lock — a reused PID number now owned by something
+	// unrelated. Two independent discriminators can establish that, and each is consulted
+	// in full: they fail in different directions, so neither may short-circuit the other.
+	//
+	// First, identity by start time. A process that started after this lockfile was written
+	// cannot be the process that wrote it, whatever it is now called — the proof the image
+	// name cannot supply. On a fleet host this is the discriminator that matters, because
+	// the image allowlist below IS the ambient process population there (pwsh, node, claude,
+	// git), so a recycled PID reads as committer-like and the lane wedges (#5892).
+	if started, ok := processStartTimeFn(pid); ok {
+		p.StartedAt = started
+		if !p.ModTime.IsZero() && started.After(p.ModTime.Add(startTimeSkewGrace)) {
+			p.StartedAfterLock = true
+			p.Foreign = true
+			p.Reason = ReapReasonHolderForeign
+		}
+	}
+	// Second, the original image heuristic (#2339). It still runs when the start time
+	// proved nothing — an unreadable start time, a platform without one, or a lockfile
+	// whose mtime we could not stat — so no lock that was reapable before this guard
+	// existed stops being reapable now. The image is read either way, because a break
+	// justified by start time still wants it on the LOCK_BROKEN event as evidence.
+	//
+	// An image we cannot read is treated as committer-like, so a live holder is never
+	// broken on a failed image read.
 	if image, ok := processImageNameFn(pid); ok {
 		p.Image = image
 		if !looksLikeCommitterImage(image) {
@@ -193,7 +251,15 @@ type ReapResult struct {
 	HolderPID  int
 	AgeSeconds int64
 	Reason     string // ReapReason* naming why the lock was judged breakable; "" when it was not reapable
-	Image      string // the foreign image that justified a holder_foreign break, else ""
+	Image      string // the recorded holder PID's process image at probe time, else ""
+
+	// StartedAfterLock records that a holder_foreign break was justified by process START
+	// TIME rather than by the image name — the process at the recorded PID began after the
+	// lockfile was written. It matters on the event: the image that accompanies such a
+	// break is typically an ordinary committer-like name (pwsh, node), so reporting it
+	// alone would read as if THAT name were the evidence, when the name is exactly what
+	// could not decide the question.
+	StartedAfterLock bool
 
 	// Attempted records that the probe judged the lock REAPABLE and a remove was actually
 	// issued. It splits the two very different states that Reaped=false used to collapse
@@ -234,7 +300,13 @@ func (r ReapResult) Failed() bool { return r.Attempted && !r.Reaped }
 // Reaped=false. Reap POLICY is unchanged: exactly the same locks are broken as before.
 func ReapStaleLockResult(path string) ReapResult {
 	p := ProbeLock(path)
-	res := ReapResult{Path: path, HolderPID: p.HolderPID, AgeSeconds: p.AgeSeconds, Image: p.Image}
+	res := ReapResult{
+		Path:             path,
+		HolderPID:        p.HolderPID,
+		AgeSeconds:       p.AgeSeconds,
+		Image:            p.Image,
+		StartedAfterLock: p.StartedAfterLock,
+	}
 	if !p.Reapable() {
 		return res
 	}

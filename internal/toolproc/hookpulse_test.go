@@ -33,8 +33,8 @@ func TestHookEventsBridgesABackgroundLaunch(t *testing.T) {
 		t.Fatalf("primary = %+v, want the launch's exit", evs[0])
 	}
 	bg := evs[1]
-	if bg.Kind != EvSpawn || bg.CallID != "bg:bilsbrzwq" || bg.Tool != "Bash[bg]" || bg.Session != "s1" {
-		t.Fatalf("bridge = %+v, want spawn of bg:bilsbrzwq as Bash[bg] in s1", bg)
+	if bg.Kind != EvSpawn || bg.CallID != "bg:s1:bilsbrzwq" || bg.Tool != "Bash[bg]" || bg.Session != "s1" {
+		t.Fatalf("bridge = %+v, want spawn of bg:s1:bilsbrzwq as Bash[bg] in s1", bg)
 	}
 	if bg.DeadlineMS != 600_000 || bg.HeartbeatEveryMS != 30_000 {
 		t.Fatalf("bridge envelope = %+v, want the Bash[bg] grant", bg)
@@ -42,12 +42,12 @@ func TestHookEventsBridgesABackgroundLaunch(t *testing.T) {
 	// A structured announcement (shellId key) bridges the same way.
 	p.ToolResponse = json.RawMessage(`{"shellId": "sh-9", "stdout": ""}`)
 	evs, err = HookEvents("post", p, hookEnvNone, 2_000, existing)
-	if err != nil || len(evs) != 2 || evs[1].CallID != "bg:sh-9" {
-		t.Fatalf("structured announce => %+v, %v; want a bg:sh-9 spawn", evs, err)
+	if err != nil || len(evs) != 2 || evs[1].CallID != "bg:s1:sh-9" {
+		t.Fatalf("structured announce => %+v, %v; want a bg:s1:sh-9 spawn", evs, err)
 	}
 	// Re-announcing an already-journaled id must not respawn it (dup spawn
 	// refuses the fold).
-	dup := append(existing, Event{Kind: EvSpawn, CallID: "bg:bilsbrzwq", Tool: "Bash[bg]", Session: "s1", AtMS: 1_500})
+	dup := append(existing, Event{Kind: EvSpawn, CallID: "bg:s1:bilsbrzwq", Tool: "Bash[bg]", Session: "s1", AtMS: 1_500})
 	p.ToolResponse = json.RawMessage(`"Command running in background with ID: bilsbrzwq"`)
 	evs, err = HookEvents("post", p, hookEnvNone, 2_000, dup)
 	if err != nil || len(evs) != 1 {
@@ -60,7 +60,7 @@ func TestHookEventsBridgesABackgroundLaunch(t *testing.T) {
 // reporting the job finished exits it instead — exactly once.
 func TestHookEventsPulsesThePolledJob(t *testing.T) {
 	existing := []Event{
-		{Kind: EvSpawn, CallID: "bg:job7", Tool: "Bash[bg]", Session: "s1", AtMS: 1_000},
+		{Kind: EvSpawn, CallID: "bg:s1:job7", Tool: "Bash[bg]", Session: "s1", AtMS: 1_000},
 		{Kind: EvSpawn, CallID: "tu-poll", Tool: "BashOutput", Session: "s1", AtMS: 5_000},
 	}
 	p := HookPayload{SessionID: "s1", ToolName: "BashOutput", ToolUseID: "tu-poll",
@@ -74,8 +74,8 @@ func TestHookEventsPulsesThePolledJob(t *testing.T) {
 		t.Fatalf("HookEvents = %+v, want [poll exit, pulse]", evs)
 	}
 	pulse := evs[1]
-	if pulse.Kind != EvPulse || pulse.CallID != "bg:job7" || pulse.Via != "tu-poll" {
-		t.Fatalf("bridge = %+v, want a pulse on bg:job7 via tu-poll", pulse)
+	if pulse.Kind != EvPulse || pulse.CallID != "bg:s1:job7" || pulse.Via != "tu-poll" {
+		t.Fatalf("bridge = %+v, want a pulse on bg:s1:job7 via tu-poll", pulse)
 	}
 
 	// Completion poll: the job exits ok.
@@ -84,11 +84,11 @@ func TestHookEventsPulsesThePolledJob(t *testing.T) {
 	p.ToolUseID = "tu-poll2"
 	p.ToolResponse = json.RawMessage(`{"status": "completed", "stdout": ""}`)
 	evs, err = HookEvents("post", p, hookEnvNone, 8_000, done)
-	if err != nil || len(evs) != 2 || evs[1].Kind != EvExit || evs[1].CallID != "bg:job7" || evs[1].Status != "ok" {
+	if err != nil || len(evs) != 2 || evs[1].Kind != EvExit || evs[1].CallID != "bg:s1:job7" || evs[1].Status != "ok" {
 		t.Fatalf("completion poll => %+v, %v; want the job's ok exit", evs, err)
 	}
 	// A second completion poll after the job exited emits no double exit.
-	after := append(done, Event{Kind: EvExit, CallID: "bg:job7", AtMS: 8_000, Status: "ok"},
+	after := append(done, Event{Kind: EvExit, CallID: "bg:s1:job7", AtMS: 8_000, Status: "ok"},
 		Event{Kind: EvSpawn, CallID: "tu-poll3", Tool: "BashOutput", Session: "s1", AtMS: 9_000})
 	p.ToolUseID = "tu-poll3"
 	evs, err = HookEvents("post", p, hookEnvNone, 10_000, after)
@@ -148,7 +148,7 @@ func TestHookEventsBridgedJournalFolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fold: %v", err)
 	}
-	job := findProc(t, tab, "bg:j1")
+	job := findProc(t, tab, "bg:s1:j1")
 	if job.State != StateRunning || job.Liveness != LivenessLive || job.Pulses != 1 {
 		t.Fatalf("mid-flight job = state=%s live=%s pulses=%d, want RUNNING/LIVE/1", job.State, job.Liveness, job.Pulses)
 	}
@@ -158,7 +158,7 @@ func TestHookEventsBridgedJournalFolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fold: %v", err)
 	}
-	if job = findProc(t, tab, "bg:j1"); job.Liveness != LivenessStalled {
+	if job = findProc(t, tab, "bg:s1:j1"); job.Liveness != LivenessStalled {
 		t.Fatalf("silent job liveness = %s, want STALLED", job.Liveness)
 	}
 
@@ -172,7 +172,7 @@ func TestHookEventsBridgedJournalFolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fold: %v", err)
 	}
-	if job = findProc(t, tab, "bg:j1"); job.State != StateDone || job.ExitStatus != "ok" {
+	if job = findProc(t, tab, "bg:s1:j1"); job.State != StateDone || job.ExitStatus != "ok" {
 		t.Fatalf("finished job = state=%s exit=%s, want DONE/ok", job.State, job.ExitStatus)
 	}
 }

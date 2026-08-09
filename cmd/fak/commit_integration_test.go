@@ -141,8 +141,9 @@ func TestRunCommit_integration_nothingStaged(t *testing.T) {
 	code := runCommit(&out, &errb, []string{
 		"--json", "--dir", repo, "--no-signoff", "--path", "a.txt", "-m", "noop",
 	})
-	if code != 3 {
-		t.Fatalf("nothing-staged should exit 3, got %d (stdout=%q)", code, out.String())
+	if code != safecommit.ExitRefused {
+		t.Fatalf("nothing-staged should exit %d (a verdict, not contention), got %d (stdout=%q)",
+			safecommit.ExitRefused, code, out.String())
 	}
 	var res safecommit.Result
 	_ = json.Unmarshal(out.Bytes(), &res)

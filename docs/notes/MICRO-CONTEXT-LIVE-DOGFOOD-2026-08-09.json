@@ -1,0 +1,50 @@
+{
+  "schema": "fak-microcontext-spine/1",
+  "verdict": "PASS",
+  "logical_shards": 8,
+  "physical_workers": 4,
+  "completed": 8,
+  "failed": 0,
+  "shared_base_installs": 1,
+  "turn_count": 8,
+  "peak_in_flight": 4,
+  "elapsed_ms": 3,
+  "shards_per_second": 2155.9274530412054,
+  "scope": "synthetic endpoint; proves bounded harness fan-out and shared-base semantics, not model tokens/sec",
+  "mode": "synthetic",
+  "base_fingerprint": "microcontext-base-v1",
+  "live_input_records": [
+    {
+      "number": 6011,
+      "title": "fix(mcpfootprint): bank the measured 5464-token schema floor"
+    },
+    {
+      "number": 6010,
+      "title": "docs(wip): reconcile --reclaim help still steers to 'fak wip land', not the adopt argv the queue prints"
+    },
+    {
+      "number": 6009,
+      "title": "fix(microcontextdemo): eliminate S3 restart hibernation race"
+    },
+    {
+      "number": 6008,
+      "title": "fix(accounts): org-auth-wall tests are red on trunk while the implementing cooldown change sits uncommitted (orphan WIP of #4998)"
+    },
+    {
+      "number": 6007,
+      "title": "fix(build): cmd/fak test binary red on trunk — info_panels_test.go undefined: gateway; dispatch-wave test failing"
+    },
+    {
+      "number": 6006,
+      "title": "fak commit's COMMITTED_RED build gate fails open on archive timeout and the skip is absent from --json"
+    },
+    {
+      "number": 6005,
+      "title": "Stale tools/.bin/fak.exe predates the changed: core-lock witness verb, so a correct claim abstains"
+    },
+    {
+      "number": 6004,
+      "title": "fix(microcontextdemo): accept live repository work as dogfood input"
+    }
+  ]
+}

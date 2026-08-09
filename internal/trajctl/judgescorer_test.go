@@ -167,6 +167,54 @@ func rubricConjunctiveRef(rows []ScoreRow) (EvidenceRef, bool) {
 	return EvidenceRef{}, false
 }
 
+// TestJudgeScorerRejectsScalarAboveCriterionSupport captures #5951's failure
+// class: the judge cannot claim complete progress while its own itemization says
+// that the rubric is only half complete. The fold fails closed with no W1 row.
+func TestJudgeScorerRejectsScalarAboveCriterionSupport(t *testing.T) {
+	obj := conjunctiveObjective()
+	obj.Rubric.Conjunctive = false
+	client := &cannedJudge{
+		verdict: JudgeVerdict{
+			Progress:  1,
+			Met:       true,
+			Rationale: "complete",
+			Criteria: []RubricFinding{
+				{ID: "c1", Progress: 1},
+				{ID: "c2", Progress: 0},
+			},
+		},
+		usage: JudgeUsage{Tokens: 80},
+	}
+
+	if rows := NewJudgeScorer(client, 512).Score(obj, EvidenceWindow{}); len(rows) != 0 {
+		t.Fatalf("contradictory scalar produced rows: %+v", rows)
+	}
+}
+
+// TestJudgeScorerAcceptsScalarAtCriterionSupport pins the non-regression side:
+// an itemized soft verdict whose scalar does not exceed its findings still
+// yields the ordinary W1 row.
+func TestJudgeScorerAcceptsScalarAtCriterionSupport(t *testing.T) {
+	obj := conjunctiveObjective()
+	obj.Rubric.Conjunctive = false
+	client := &cannedJudge{
+		verdict: JudgeVerdict{
+			Progress:  0.5,
+			Rationale: "one of two complete",
+			Criteria: []RubricFinding{
+				{ID: "c1", Progress: 1},
+				{ID: "c2", Progress: 0},
+			},
+		},
+		usage: JudgeUsage{Tokens: 80},
+	}
+
+	rows := NewJudgeScorer(client, 512).Score(obj, EvidenceWindow{})
+	if len(rows) != 1 || rows[0].Value != 0.5 {
+		t.Fatalf("consistent itemized verdict = %+v, want one row at 0.5", rows)
+	}
+}
+
 // TestJudgeScorerConjunctiveAllPass is the #3926 done-condition's happy half:
 // every criterion at the pass threshold makes the W1 value 1.0 — and it is the
 // hard AND, not the soft progress, that decides it (the verdict's soft progress

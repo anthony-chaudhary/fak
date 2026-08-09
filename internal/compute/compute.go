@@ -272,6 +272,21 @@ type KVConfig struct {
 	HeadDim    int
 	RopeTheta  float64
 	Precision  KVPrecision
+	// WindowPerLayer is the OPTIONAL per-layer sliding-attention bound (one entry per
+	// layer, in layer order) for an interleaved local/global checkpoint. A positive
+	// entry caps how many positions that layer can ever attend to — and therefore how
+	// many it must keep resident; a NON-POSITIVE entry (and any layer past the end of
+	// the slice) means full attention, the same "no window" spelling
+	// kvbudget.LayerProfile.Window uses, so a projection can hand the two the identical
+	// slice. Nil (the zero value) is the uniform case: EstimateKVStoreBytes then takes
+	// its untouched NumLayers x tokens expression and is byte-identical to before this
+	// field existed, exactly as Precision's zero value is.
+	//
+	// This is PLANNING geometry only — no KVStore implementation reads it, so setting it
+	// never changes what a backend allocates, only what the planner charges. It is
+	// therefore only safe to populate when the cache genuinely drops aged-out positions
+	// on a windowed layer; see model.Config.ContextSizeConfig for the gate that decides.
+	WindowPerLayer []int
 }
 
 // KVStore is the interface the kernel-owned attention cache lives behind — the one
@@ -368,6 +383,37 @@ type Backend interface {
 // interface and uses it only when present, so cpu-ref and non-collective backends are unchanged.
 type RankUploader interface {
 	UploadRank(t Tensor, as Dtype, rank int) (Tensor, error)
+}
+
+// Fence is the completion handle an AsyncUploader hands back for one in-flight transfer. It is
+// the ONLY narrow host fence in the interface: Read fences the whole queue (and pulls bytes host-
+// ward to do it), which is both too coarse to attribute a cost to and too expensive to use as a
+// synchronisation primitive.
+//
+// Wait blocks until the transfer is visible to subsequent ops on the backend. Done is a
+// non-blocking poll, and it is what makes OVERLAP observable rather than merely real: a fence
+// already Done when its weight is finally demanded landed entirely underneath other work, which
+// is the fraction the activated-expert prefetch (#5614) exists to grow and could not report.
+//
+// A Fence must be safe to Wait more than once, and Done must never report true before the
+// transfer is visible — a fence that lies optimistic turns a prefetch into a data race.
+type Fence interface {
+	Wait()
+	Done() bool
+}
+
+// AsyncUploader is an OPTIONAL extension for backends that can issue a host->device transfer
+// without fencing the caller. Discovered by type assertion exactly like RankUploader and
+// CollectiveInitializer: absent on cpu-ref and on every backend whose Upload is already
+// synchronous, and an absent implementation never changes the forward loop.
+//
+// The point is not speed on its own — a backend whose Upload is internally async already
+// overlaps. The point is that the caller gets a handle it can attribute time to, so staging a
+// layer's routed top-k ahead of its first expert GEMM becomes a MEASURED overlap instead of an
+// untunable hope. The returned Tensor must not be read or multiplied before its Fence is
+// satisfied.
+type AsyncUploader interface {
+	UploadAsync(t Tensor, as Dtype) (Tensor, Fence)
 }
 
 // CollectiveInitializer is an OPTIONAL extension for backends whose collective capability needs

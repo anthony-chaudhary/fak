@@ -59,8 +59,13 @@ var shellCallTypes = map[string]bool{
 }
 
 // shellFunctionNames are function_call names that wrap a shell command line.
+// `shell_command` is the name the captured rollouts overwhelmingly use (#5120's
+// replay measured it at ~95% of all calls, matching #4764's own audit); omitting it
+// sent every shell call down the non-shell branch, where the command is never
+// extracted and the whole inventory folds into one UNKNOWN bucket.
 var shellFunctionNames = map[string]bool{
-	"shell": true, "bash": true, "container.exec": true, "local_shell": true, "exec_command": true,
+	"shell": true, "bash": true, "container.exec": true, "local_shell": true,
+	"exec_command": true, "shell_command": true,
 }
 
 // outputTypes map an output record to the call it completes.

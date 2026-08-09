@@ -148,6 +148,38 @@ type Counters struct {
 	// Deny-all stops (WITNESSED) — turns where every proposed tool call was refused.
 	DenyAllStops uint64 `json:"deny_all_stops"`
 
+	// UpstreamErrorKinds is the per-KIND breakdown of upstream/planner turn failures
+	// (#5487), keyed by the closed vocabulary the gateway's single classifier
+	// (gateway.upstreamErrorKind) already returns: "stalled", "oom", "unreachable",
+	// "rate_limited", "auth", "forbidden", "overloaded", "status_4xx", "status_5xx",
+	// "transport", "other". It is OBSERVED at the upstream boundary and relayed — a
+	// nonzero count here is not a fak fault.
+	//
+	// It exists because the kind was previously process-local ONLY: it fed the in-memory
+	// /metrics counter and the `fak-turn … FAILED` stderr line, both of which die with
+	// the process. Under `fak guard` the gateway is a per-invocation process, so once the
+	// wrapped command exited a stall left NO trace anywhere — the one thing the
+	// idle-deadline detector exists to tell you.
+	//
+	// Note the row did not merely COARSEN an upstream failure, it dropped it. Errored
+	// above is a different population: it counts kernel ADJUDICATION error verdicts (see
+	// gateway.AdjudicationSummary.Errored), not upstream turn failures, so it was never
+	// even a lossy proxy for this. Nothing in a pre-#5487 row moves when a turn fails
+	// upstream.
+	//
+	// Carrying the classifier's own string-keyed map (rather than one scalar per kind,
+	// the way DenyAllStops is shaped) means a future kind needs no new field and no
+	// schema bump.
+	//
+	// omitempty, and that is load-bearing for the same reason it is on the self-hosted
+	// split above: a row written before this field existed omits it, and ABSENT must
+	// read NOT INSTRUMENTED, never "zero upstream failures". A session that DID measure
+	// and hit no upstream error also writes nothing here, so this field alone cannot
+	// separate the two — that distinction is a follow-on, not something a reader should
+	// assume today. Keeping it omitempty also leaves every pre-field row byte-identical
+	// and its RowKey unchanged (the key hashes this struct's JSON).
+	UpstreamErrorKinds map[string]uint64 `json:"upstream_error_kinds,omitempty"`
+
 	// Managed-cache 1h TTL upgrade (WITNESSED, epic #1844 C6): outcomes of fak's own
 	// stable-prefix cache_control TTL splice on the outbound Anthropic wire, mirrored
 	// from the in-process fak_gateway_cache_ttl_upgrade_total family so a managed-cache
@@ -158,6 +190,42 @@ type Counters struct {
 	// an ON-but-ineligible session (every head refused) — signal, not a bug.
 	CacheTTLUpgradesUpgraded uint64            `json:"cache_ttl_upgrades_upgraded"`
 	CacheTTLUpgradeReasons   map[string]uint64 `json:"cache_ttl_upgrade_reasons,omitempty"`
+
+	// The two remaining managed-cache levers' INTENT (and the defer lever's EFFECT),
+	// #4349. The configured-but-inert diff loop (cachevaluereport.FoldConfiguredButInert,
+	// #3649) names three levers, but on a real fleet row it could only ever witness the
+	// TTL-upgrade pair above: the other two levers' intent was not in this struct at all,
+	// so a session that armed them and did nothing read exactly like a session that never
+	// armed them.
+	//
+	// ManagedCacheActive is the resolved managed-cache lever state (--managed-cache /
+	// gateway Config.CacheTTL1H), recorded independently of whether any head was
+	// eligible. It has to be its own field because the alternative — INFERRING intent
+	// from the WITNESSED KVPrefix* reuse above — is wrong in a specific, silent way: a
+	// provider-prompt-cache-only session legitimately reuses zero KV-prefix tokens, so
+	// that inference reads "lever off" and "lever on, paying off provider-side" as the
+	// same flat zero.
+	//
+	// DeferColdToolsArmed / DeferColdCount are the same intent/effect pair for the
+	// cold-tool-deferral lever (--defer-cold-tools, #3232): whether the lever was armed,
+	// and how many cold tool definitions were actually deferred — mirrored from
+	// gateway.AdjudicationSummary.DeferColdCount, i.e. the same count the in-process
+	// fak_gateway_tool_defer_cold_total exports. That whole counter family lived only on
+	// /metrics (#3233/#3536) and died with the process, so under `fak guard` (a
+	// per-invocation gateway) an armed-and-inert defer session previously left no durable
+	// trace anywhere.
+	//
+	// All three are omitempty, and as with the self-hosted split above that is
+	// load-bearing: a row written before these fields existed omits them, ABSENT must
+	// read NOT INSTRUMENTED rather than "the lever was off", and every pre-field row
+	// stays byte-identical with its RowKey unchanged (the key hashes this struct's JSON).
+	// The cost of that choice, stated plainly: a measured lever-OFF session serializes
+	// identically to an unmeasured row, so these fields witness the ARMED case only —
+	// separating measured-off from never-measured is a follow-on, not something a reader
+	// may assume today.
+	ManagedCacheActive  bool   `json:"managed_cache_active,omitempty"`
+	DeferColdToolsArmed bool   `json:"defer_cold_tools_armed,omitempty"`
+	DeferColdCount      uint64 `json:"defer_cold_count,omitempty"`
 
 	// ByReason is the deny/quarantine reason breakdown (gateway.AdjudicationSummary.ByReason).
 	ByReason map[string]uint64 `json:"by_reason,omitempty"`

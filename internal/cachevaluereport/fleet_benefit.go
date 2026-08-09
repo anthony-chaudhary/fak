@@ -139,6 +139,35 @@ type FleetBenefitReport struct {
 	ProviderAPICostAvoidedUSD float64 `json:"provider_api_cost_avoided_usd"`
 	FakAPICostAvoidedUSD      float64 `json:"fak_api_cost_avoided_usd"`
 
+	// Billing-seat split of the SAME priced rows (#3664). The blended headline above
+	// prices every row at published list $/MTok with no billing input at all, so it is an
+	// API-key-EQUIVALENT projection over the whole corpus: real-dollar for the
+	// per-token-billed subset, notional for the flat-rate subscription rows sitting in the
+	// same ledger. These two columns partition that total by the posture each row stamped
+	// at write time, so "real dollars even on API-key billing" is auditable from the
+	// ledger rather than asserted over the blend.
+	//
+	// BOTH columns stay OBSERVED — list-priced projections, never a reconciled invoice.
+	// The split does not upgrade either side to a witnessed invoice figure; it only makes
+	// the API-key-vs-OAuth attribution visible. Notional carries oauth AND unknown (and
+	// therefore every row written before the field existed), because a row that cannot
+	// prove its seat is never counted as real money.
+	//
+	// APIKey* + Notional* sum EXACTLY to the blended Observed* triple above; the reduction
+	// percentages do NOT sum, each being its own column's avoided/counterfactual ratio.
+	// Each pct is nil when its column has no priced counterfactual, mirroring the blended
+	// pointer so an absent column renders "-" instead of a 0% claim.
+	APIKeyRows                int      `json:"api_key_rows,omitempty"`
+	APIKeyActualSpendUSD      float64  `json:"api_key_actual_spend_usd,omitempty"`
+	APIKeyAvoidedUSD          float64  `json:"api_key_avoided_usd,omitempty"`
+	APIKeyCounterfactualUSD   float64  `json:"api_key_counterfactual_usd,omitempty"`
+	APIKeyReductionPct        *float64 `json:"api_key_reduction_pct,omitempty"`
+	NotionalRows              int      `json:"notional_rows,omitempty"`
+	NotionalActualSpendUSD    float64  `json:"notional_actual_spend_usd,omitempty"`
+	NotionalAvoidedUSD        float64  `json:"notional_avoided_usd,omitempty"`
+	NotionalCounterfactualUSD float64  `json:"notional_counterfactual_usd,omitempty"`
+	NotionalReductionPct      *float64 `json:"notional_reduction_pct,omitempty"`
+
 	// ProviderCacheReadTokens is the display "cache_read=" provider-token count,
 	// sourced from the Track-2 savings ledger (authoritative and complete) — NOT
 	// from the gateway-usage CacheReadTokens field below, which is only wired at
@@ -323,7 +352,20 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 				rep.ProviderAPICostAvoidedUSD += row.RebateUSD - row.WritePremiumUSD
 				rep.FakAPICostAvoidedUSD += row.CompactionSavedUSD
 			}
-			rep.ObservedAPICostAvoidedUSD += row.RebateUSD + row.CompactionSavedUSD - row.WritePremiumUSD
+			avoided := row.RebateUSD + row.CompactionSavedUSD - row.WritePremiumUSD
+			rep.ObservedAPICostAvoidedUSD += avoided
+			// Partition the SAME dollars by the seat the row stamped (#3664). Only a
+			// proven per-token-billed row lands in the real-$ column; oauth, unknown and
+			// unstamped (every pre-#3664 row) all fold notional.
+			if RealDollarBillingMode(row.BillingMode) {
+				rep.APIKeyRows++
+				rep.APIKeyActualSpendUSD += row.SpendUSD
+				rep.APIKeyAvoidedUSD += avoided
+			} else {
+				rep.NotionalRows++
+				rep.NotionalActualSpendUSD += row.SpendUSD
+				rep.NotionalAvoidedUSD += avoided
+			}
 		}
 	}
 	if rep.ContextExtensionTokens == 0 {
@@ -358,6 +400,19 @@ func FoldFleetBenefit(track1 []cachevalueledger.Row, track2 []SavingsRow, usage 
 	if rep.ObservedCounterfactualUSD != 0 {
 		pct := 100 * rep.ObservedAPICostAvoidedUSD / rep.ObservedCounterfactualUSD
 		rep.ObservedAPICostReductionPct = &pct
+	}
+	// Each seat column gets its OWN counterfactual denominator, so a corpus that is all
+	// one seat reproduces the blended headline exactly in that column and reports the
+	// other as absent ("-") rather than as a 0% reduction (#3664).
+	rep.APIKeyCounterfactualUSD = rep.APIKeyActualSpendUSD + rep.APIKeyAvoidedUSD
+	if rep.APIKeyCounterfactualUSD != 0 {
+		pct := 100 * rep.APIKeyAvoidedUSD / rep.APIKeyCounterfactualUSD
+		rep.APIKeyReductionPct = &pct
+	}
+	rep.NotionalCounterfactualUSD = rep.NotionalActualSpendUSD + rep.NotionalAvoidedUSD
+	if rep.NotionalCounterfactualUSD != 0 {
+		pct := 100 * rep.NotionalAvoidedUSD / rep.NotionalCounterfactualUSD
+		rep.NotionalReductionPct = &pct
 	}
 	if opts.ContextBudgetTokens > 0 {
 		windows := float64(rep.ContextExtensionTokens) / float64(opts.ContextBudgetTokens)
@@ -505,11 +560,19 @@ func apiCostReduction(counterfactual, spend, avoided float64, pct *float64) (str
 	if counterfactual == 0 && spend == 0 && avoided == 0 {
 		return "", false
 	}
-	reduction := "-"
-	if pct != nil {
-		reduction = fmt.Sprintf("%.2f%%", *pct)
+	return reductionCell(pct), true
+}
+
+// reductionCell is the reduction percentage as every lens prints it: "-" when the pointer
+// is nil, because a missing counterfactual denominator has no honest percentage, else a
+// 2-decimal percent. Split out of apiCostReduction so the billing-seat columns (#3664)
+// render the same cell as the blended headline instead of growing a second format string
+// that could drift from it.
+func reductionCell(pct *float64) string {
+	if pct == nil {
+		return "-"
 	}
-	return reduction, true
+	return fmt.Sprintf("%.2f%%", *pct)
 }
 
 // compactionLeverBuckets selects the savings buckets carrying compaction-lever telemetry
@@ -574,6 +637,16 @@ func RenderFleetBenefit(r FleetBenefitReport) string {
 		fmt.Fprintf(&b, "  API cost: observed_spend=$%.4f counterfactual=$%.4f avoided=$%.4f (provider $%.4f + fak $%.4f) reduction=%s\n",
 			r.ObservedActualSpendUSD, r.ObservedCounterfactualUSD, r.ObservedAPICostAvoidedUSD,
 			r.ProviderAPICostAvoidedUSD, r.FakAPICostAvoidedUSD, reduction)
+		// Billing-seat split (#3664): the blended line above prices every row at list
+		// $/MTok with no billing input, so it is an API-key-EQUIVALENT projection over
+		// the whole corpus. These two lines say which half of it was actually billed per
+		// token. BOTH stay OBSERVED — the split re-attributes the same projected dollars,
+		// it does not reconcile either against an invoice.
+		fmt.Fprintf(&b, "    billing seat (OBSERVED both columns — list-priced projection, never a reconciled invoice; #3664):\n")
+		fmt.Fprintf(&b, "      API-key (REAL-$; %d priced row(s)): spend=$%.4f counterfactual=$%.4f avoided=$%.4f reduction=%s\n",
+			r.APIKeyRows, r.APIKeyActualSpendUSD, r.APIKeyCounterfactualUSD, r.APIKeyAvoidedUSD, reductionCell(r.APIKeyReductionPct))
+		fmt.Fprintf(&b, "      OAuth/unknown (NOTIONAL — flat-rate seat, no per-token invoice; %d priced row(s)): spend=$%.4f counterfactual=$%.4f avoided=$%.4f reduction=%s\n",
+			r.NotionalRows, r.NotionalActualSpendUSD, r.NotionalCounterfactualUSD, r.NotionalAvoidedUSD, reductionCell(r.NotionalReductionPct))
 	}
 	if r.SpanDays > 0 {
 		prov := ""

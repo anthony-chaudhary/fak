@@ -13,8 +13,8 @@ package adjudicator
 //     TestRequestPathInterpreterFree. The Go and JSON grammars parse in-process
 //     via the stdlib, so those two — the common agent languages — are checked
 //     here; everything else DEFERs (fail open).
-//   - Bounded disclosure. The deny carries one finding (file:line:col), never
-//     the file body: the deny channel is not a content oracle.
+//   - Bounded disclosure. The deny carries one location plus a fixed diagnostic
+//     class, never parser text or file bytes: the deny channel is not a content oracle.
 //
 // The parse is the same stable stdlib primitive codelint's in-process packs use
 // (go/parser, encoding/json); the small duplication is the price of keeping the
@@ -92,9 +92,9 @@ func goParseWitness(name string, src []byte) string {
 		var el scanner.ErrorList
 		if errors.As(err, &el) && len(el) > 0 {
 			e := el[0] // first error only — bounded disclosure
-			return findingLine(name, e.Pos.Line, e.Pos.Column, e.Msg)
+			return findingLine(name, e.Pos.Line, e.Pos.Column, "invalid Go syntax")
 		}
-		return findingLine(name, 0, 0, err.Error())
+		return findingLine(name, 0, 0, "invalid Go syntax")
 	}
 	return ""
 }
@@ -111,14 +111,15 @@ func jsonParseWitness(name string, src []byte) string {
 		if errors.As(err, &se) {
 			line, col = offsetToLineCol(src, int(se.Offset))
 		}
-		return findingLine(name, line, col, err.Error())
+		return findingLine(name, line, col, "invalid JSON syntax")
 	}
 	return ""
 }
 
 // findingLine renders the bounded file:line:col witness the MALFORMED deny
-// carries. The detail is the checker's message (never the file content); a
-// zero line/col (the checker did not locate it) collapses to "<path>: <msg>".
+// carries. Callers pass a fixed diagnostic class rather than parser text because
+// parser errors may quote attacker-authored tokens. A zero line/col collapses to
+// "<path>: <detail>".
 func findingLine(name string, line, col int, detail string) string {
 	if line <= 0 {
 		return name + ": " + detail

@@ -1,0 +1,52 @@
+{
+  "schema": "fak-microcontext-quality-ledger/1",
+  "run_id": "microcontext-ledger-microcontext-base-v1",
+  "base_id": "microcontext-base-v1",
+  "check_contract": "caller-supplied-independent-outcome-check",
+  "mode": "openai-compatible",
+  "provider": "fak-native-cuda-openai-compatible",
+  "model": "qwen2.5-0.5b-gpu",
+  "submitted": 1000,
+  "retired": 1000,
+  "failed": 0,
+  "cancelled": 0,
+  "retried": 0,
+  "elapsed_ms": 1045554,
+  "verification": {
+    "checked": 1000,
+    "passed": 1000,
+    "failed": 0
+  },
+  "claim_families": {
+    "orchestration": {
+      "submitted_total": 1000,
+      "physical_workers": 1
+    },
+    "inference": {
+      "prompt_tokens": 703890,
+      "completion_tokens": 8000,
+      "usage_responses": 1000
+    },
+    "useful_work": {
+      "verified_completions": 1000,
+      "per_wall_second": 0.9564307534570189
+    }
+  },
+  "error_classes": {},
+  "outcomes": {
+    "error": 0,
+    "refusal": 0,
+    "success": 1000
+  },
+  "sample_ids": [
+    "ctx-00000000",
+    "ctx-00000001",
+    "ctx-00000002",
+    "ctx-00000003",
+    "ctx-00000004",
+    "ctx-00000005",
+    "ctx-00000006",
+    "ctx-00000007"
+  ],
+  "sample_limit": 8
+}

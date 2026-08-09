@@ -74,7 +74,7 @@ prompt to ask *why*, not as an outcome.
 | **Integration recipes shipped** | This repo | Count `docs/integrations/*` / recipe files on the git-tracked tree | The number of stacks fak has a documented drop-in path for | That any reader followed a recipe. Supply, not demand. |
 | **Distinct harnesses covered** | This repo | Enumerate the harnesses in [`docs/supported/agent-harnesses.md`](../supported/agent-harnesses.md) | Breadth of the documented integration surface | Real-world use with each harness; coverage is a claim of *fit*, verified separately. |
 | **Docs reachable** | This repo | `python tools/check_index_sync.py --audit-tree` (every doc linked from `INDEX.md` / `llms.txt`) | That the human- and machine-facing front doors have no orphans | That the docs are read or understood. |
-| **SEO/AEO surface intact** | This repo | `python tools/seo_aeo_scorecard.py` (front-matter present, no regression) | That new docs are machine-discoverable | Discovery itself — findable is not found. |
+| **SEO/AEO surface intact** | This repo | `fak score seo` (front-matter present, no regression) | That new docs are machine-discoverable | Discovery itself — findable is not found. |
 
 `WITNESSED` rows are re-derivable from the tree, so they cannot be inflated by an
 outside party. Their honest ceiling is that they measure *what fak built*, not
@@ -136,7 +136,7 @@ visible and a suspicious spike stays on the record.
 
 ```
 gh api repos/<owner>/<repo> --jq '{stars: .stargazers_count, forks: .forks_count, watchers: .subscribers_count}'
-python tools/seo_aeo_scorecard.py         # this doc has front-matter; no SEO regression
+fak score seo                             # this doc has front-matter; no SEO regression
 python tools/check_index_sync.py --audit-tree   # this doc is reachable from INDEX.md
 ```
 

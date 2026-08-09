@@ -1,0 +1,231 @@
+{
+  "schema": "fak-quality-postselection-receipt/1",
+  "note": "Post-selection pricing receipt (#5666): each case is a committed sweep fixture run through the shipped PriceSearch path. Regenerate with FAK_UPDATE_POSTSELECTION_RECEIPT=1 go test ./internal/quality -run Receipt.",
+  "cases": [
+    {
+      "fixture": "known_positive.json",
+      "name": "known-positive",
+      "note": "A four-threshold sweep whose retained arm survives the price of the search: raw p = 0.004, bonferroni over the complete family = 0.016, still under alpha = 0.05. This is the fixture that proves the signal CAN succeed — the contract is not a refusal machine, it certifies an improvement that is genuinely there.",
+      "decision": {
+        "schema": "fak-quality-postselection/1",
+        "certification": {
+          "alpha": 0.05,
+          "rule": "min-p",
+          "adjustment": "bonferroni",
+          "declared_arms": 4,
+          "winner": "kv-evict-threshold-0.50"
+        },
+        "family_size": 4,
+        "winner": {
+          "index": 0,
+          "id": "kv-evict-threshold-0.50",
+          "point": "kv_evict_threshold=0.50",
+          "p_value": 0.004,
+          "winner": true,
+          "admitted": true
+        },
+        "unadjusted_p": 0.004,
+        "selection_adjusted_p": 0.016,
+        "selection_price": 0.012,
+        "unadjusted_certifies": true,
+        "certified": true,
+        "manufactured_by_breadth": false,
+        "bound": "selection-adjusted at alpha 0.0500: bonferroni min(1, 4*p) over the complete search family, valid under arbitrary dependence between arms",
+        "arms": [
+          {
+            "index": 0,
+            "id": "kv-evict-threshold-0.50",
+            "point": "kv_evict_threshold=0.50",
+            "p_value": 0.004,
+            "winner": true,
+            "admitted": true
+          },
+          {
+            "index": 1,
+            "id": "kv-evict-threshold-0.60",
+            "point": "kv_evict_threshold=0.60",
+            "p_value": 0.21,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 2,
+            "id": "kv-evict-threshold-0.70",
+            "point": "kv_evict_threshold=0.70",
+            "p_value": 0.44,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 3,
+            "id": "kv-evict-threshold-0.80",
+            "point": "kv_evict_threshold=0.80",
+            "p_value": 0.63,
+            "winner": false,
+            "admitted": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture": "manufactured_by_breadth.json",
+      "name": "manufactured-by-breadth",
+      "note": "The adversarial fixture: an eight-arm variant sweep whose retained arm reports raw p = 0.012, which clears alpha = 0.05 and reads as a certified improvement. Priced over the complete family it is bonferroni 0.096 — above alpha. Nothing here is malformed and every arm is admissible, so the contract cannot refuse its way out; it has to price the sweep and return certified=false with manufactured_by_breadth=true. This is what proves the contract cannot pass vacuously: an honest-looking sweep whose only achievement was searching widely does NOT certify.",
+      "decision": {
+        "schema": "fak-quality-postselection/1",
+        "certification": {
+          "alpha": 0.05,
+          "rule": "min-p",
+          "adjustment": "bonferroni",
+          "declared_arms": 8,
+          "winner": "sampler-variant-c"
+        },
+        "family_size": 8,
+        "winner": {
+          "index": 2,
+          "id": "sampler-variant-c",
+          "point": "sampler=topp-0.92",
+          "p_value": 0.012,
+          "winner": true,
+          "admitted": true
+        },
+        "unadjusted_p": 0.012,
+        "selection_adjusted_p": 0.096,
+        "selection_price": 0.084,
+        "unadjusted_certifies": true,
+        "certified": false,
+        "manufactured_by_breadth": true,
+        "bound": "selection-adjusted at alpha 0.0500: bonferroni min(1, 8*p) over the complete search family, valid under arbitrary dependence between arms",
+        "arms": [
+          {
+            "index": 0,
+            "id": "sampler-variant-a",
+            "point": "sampler=topk-40",
+            "p_value": 0.09,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 1,
+            "id": "sampler-variant-b",
+            "point": "sampler=topk-50",
+            "p_value": 0.14,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 2,
+            "id": "sampler-variant-c",
+            "point": "sampler=topp-0.92",
+            "p_value": 0.012,
+            "winner": true,
+            "admitted": true
+          },
+          {
+            "index": 3,
+            "id": "sampler-variant-d",
+            "point": "sampler=topp-0.95",
+            "p_value": 0.23,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 4,
+            "id": "sampler-variant-e",
+            "point": "sampler=minp-0.02",
+            "p_value": 0.35,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 5,
+            "id": "sampler-variant-f",
+            "point": "sampler=minp-0.05",
+            "p_value": 0.48,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 6,
+            "id": "sampler-variant-g",
+            "point": "sampler=typical-0.9",
+            "p_value": 0.61,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 7,
+            "id": "sampler-variant-h",
+            "point": "sampler=greedy",
+            "p_value": 0.77,
+            "winner": false,
+            "admitted": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture": "refused_file_drawer.json",
+      "name": "refused-file-drawer",
+      "note": "The refusal fixture: a sweep that admits searching nine thresholds but hands over only the three arms it liked, including a winner at raw p = 0.004 that reads as a strong improvement. The six unreported arms are exactly the evidence the contract needs to audit the selection, so the certification is refused (search_family_incomplete) rather than priced over the three arms that happened to be shown. Fail-closed: an unauditable family is never a pass, and the naive read that would have certified is preserved on the receipt alongside the refusal.",
+      "decision": {
+        "schema": "fak-quality-postselection/1",
+        "certification": {
+          "alpha": 0.05,
+          "rule": "min-p",
+          "adjustment": "bonferroni",
+          "declared_arms": 9,
+          "winner": "prefetch-depth-3"
+        },
+        "family_size": 3,
+        "winner": {
+          "index": 0,
+          "id": "prefetch-depth-3",
+          "point": "prefetch_depth=3",
+          "p_value": 0.004,
+          "winner": true,
+          "admitted": true
+        },
+        "unadjusted_p": 0.004,
+        "selection_adjusted_p": 1,
+        "selection_price": 0,
+        "unadjusted_certifies": true,
+        "certified": false,
+        "manufactured_by_breadth": false,
+        "bound": "no bound established: search_family_incomplete — the search family could not be reconciled with the certification, so the retained arm was not priced",
+        "arms": [
+          {
+            "index": 0,
+            "id": "prefetch-depth-3",
+            "point": "prefetch_depth=3",
+            "p_value": 0.004,
+            "winner": true,
+            "admitted": true
+          },
+          {
+            "index": 1,
+            "id": "prefetch-depth-4",
+            "point": "prefetch_depth=4",
+            "p_value": 0.31,
+            "winner": false,
+            "admitted": true
+          },
+          {
+            "index": 2,
+            "id": "prefetch-depth-5",
+            "point": "prefetch_depth=5",
+            "p_value": 0.52,
+            "winner": false,
+            "admitted": true
+          }
+        ],
+        "refusals": [
+          {
+            "code": "search_family_incomplete",
+            "detail": "declared_arms 9 but 3 arm(s) handed over: arms were evaluated but not reported, so the selection cannot be audited from the record"
+          }
+        ]
+      }
+    }
+  ]
+}

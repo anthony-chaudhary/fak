@@ -64,14 +64,29 @@ package model
 // import them.
 //
 // WIRING STATUS, stated plainly so nobody reads a capability into it that is
-// not there yet: this file is the artifact and its algebra — construction,
-// folding, normalization, digest, validation, and diff routing — and it is
-// exercised end to end by loadprovenance_test.go. NO PRODUCER CALLS IT YET.
-// internal/ggufload does not emit TransformObservations while canonicalizing,
-// and no command renders the artifact, so a real load does not currently yield
-// one. Wiring the ggufload producer and an operator-facing surface is follow-on
-// work that has to touch those packages; until it lands, treat every function
-// here as available-but-unconsumed rather than as a live provenance feed.
+// not there yet — and, equally, so nobody re-builds a piece that already
+// landed. This file is the artifact and its algebra — construction, folding,
+// normalization, digest, validation, and diff routing — exercised end to end by
+// loadprovenance_test.go.
+//
+// LIVE. A producer calls it: internal/ggufload's (*File).LoadProvenance builds
+// the artifact from a parsed GGUF header, folding TransformObservations copied
+// off the arch-keyed transform contracts (#4744), so a real load does yield a
+// record. The ssm_a domain guard in normalizeCanonicalTensorData refuses through
+// CheckSourceDomain on the live load path. internal/provenance.RunManifest
+// carries the Digest as its load_provenance field, refuses anything that is not
+// a sha256 content address, and orders it directly after model in the
+// fingerprint — so two runs differing only in loader semantics are not
+// Equivalent and Compare localizes the divergence to load_provenance.
+//
+// NOT WIRED. No command renders or diffs the artifact (fak info has no
+// provenance mode), and nothing in production constructs a RunManifest, so the
+// load_provenance field is enforced but unpopulated: the schema refuses a
+// malformed digest, it cannot supply a missing one. DomainChecks and
+// TensorSummaries stay empty until a weight-touching pass appends them, because
+// a header-only producer cannot honestly synthesize value evidence.
+//
+// Operator-facing routing for all of the above: docs/model-load-provenance-troubleshooting.md.
 
 import (
 	"crypto/sha256"

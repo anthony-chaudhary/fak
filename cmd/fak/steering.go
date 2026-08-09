@@ -122,6 +122,7 @@ func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 
 	// The alert path is regression-gated: decide BEFORE building the card whether to
 	// post at all. status/report always post.
+	postReason := ""
 	if mode == "alert" {
 		base, _ := readSteeringBaseline(steeringBaselineRel) // missing floor -> first run fires
 		fire, reason := shouldAlert(snap, base, *indexDelta)
@@ -137,21 +138,20 @@ func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 			}
 			return 0
 		}
-		dog, err := loadSteeringDogfood(*dogfoodJSON)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak steering %s: %v\n", mode, err)
-			return 2
-		}
-		up := buildSteeringUpdate(snap, dog, "alert", src, reason)
-		return postSteering(stdout, stderr, up, *channel, *token, *dryRun)
+		postReason = reason
 	}
 
+	// One post path for every mode. The alert gate above decides only WHETHER to reach here;
+	// what gets posted -- load the dogfood half, build the card under this mode, post it -- is
+	// this one sequence, so a fired alert can never publish a differently shaped card than the
+	// status/report modes that always post. postReason carries the alert's regression reason
+	// and is empty for the ungated modes, which is exactly the difference between them.
 	dog, err := loadSteeringDogfood(*dogfoodJSON)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steering %s: %v\n", mode, err)
 		return 2
 	}
-	up := buildSteeringUpdate(snap, dog, mode, src, "")
+	up := buildSteeringUpdate(snap, dog, mode, src, postReason)
 	return postSteering(stdout, stderr, up, *channel, *token, *dryRun)
 }
 

@@ -7,6 +7,7 @@ package main
 //	fak session compact-audit --since 2026-06-15       # only rollouts touched since then
 //	fak session compact-audit --cwd fak --json         # this repo's sessions, machine form
 //	fak session compact-audit --json --scrub > a.json  # the checkinable aggregate
+//	fak session compact-audit --guarded-only           # only sessions fak actually routed
 //
 // It is an OFFLINE verb: it reads rollout JSONL and dials no gateway. All logic lives in
 // internal/session (compactaudit.go); this file is flags, defaults, and exit codes.
@@ -34,6 +35,17 @@ func defaultCodexSessionsRoot() string {
 	return filepath.Join(home, ".codex", "sessions")
 }
 
+// defaultGuardWitnessDir is where `fak guard` records the sessions it routed. It shares
+// resolvedCodexLoopHome with the writer (sessions_codex_loop.go) so the reader can never
+// drift onto a different Codex home than the one the witnesses were written under.
+func defaultGuardWitnessDir() string {
+	home, err := resolvedCodexLoopHome("")
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, session.GuardWitnessDirName)
+}
+
 func runSessionCompactAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("session compact-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -44,7 +56,12 @@ func runSessionCompactAudit(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the JSON document instead of the human report")
 	scrub := fs.Bool("scrub", false, "--json: drop filesystem paths and cwd so the output is checkinable")
 	aggregateOnly := fs.Bool("aggregate-only", false, "--json: emit only the roll-up, not per-session rows")
-	top := fs.Int("top", 10, "human report: show the N sessions with the most fires (0 = none)")
+	top := fs.Int("top", 10, "human report: show the N highest-ranked sessions (0 = none)")
+	topBy := fs.String("top-by", session.CompactRankFires, "human report ranking: fires, peak-resident, or cumulative-input")
+	// No backquotes in these usage strings: flag.UnquoteUsage reads backquoted text as
+	// the value placeholder, so "`fak guard`" would render as the flag's argument name.
+	guardedOnly := fs.Bool("guarded-only", false, "keep only sessions present in the fak guard witness ledger — the traffic fak actually routed")
+	guardDir := fs.String("guard-witness-dir", defaultGuardWitnessDir(), "--guarded-only: the guard witness ledger directory")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -61,7 +78,10 @@ func runSessionCompactAudit(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	opts := session.CompactAuditOptions{Root: *root, Cwd: *cwd, Limit: *limit}
+	opts := session.CompactAuditOptions{
+		Root: *root, Cwd: *cwd, Limit: *limit,
+		GuardedOnly: *guardedOnly, GuardWitnessDir: *guardDir,
+	}
 	if *since != "" {
 		t, err := parseCompactAuditSince(*since)
 		if err != nil {
@@ -77,8 +97,21 @@ func runSessionCompactAudit(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	if *topBy != session.CompactRankFires && *topBy != session.CompactRankPeakResident && *topBy != session.CompactRankCumulativeInput {
+		fmt.Fprintf(stderr, "fak session compact-audit: --top-by %q: want fires, peak-resident, or cumulative-input\n", *topBy)
+		return 2
+	}
+
 	if !*asJSON {
-		session.RenderCompactAudit(stdout, res, *top)
+		if *topBy == session.CompactRankFires {
+			session.RenderCompactAudit(stdout, res, *top)
+		} else {
+			session.RenderCompactAudit(stdout, res, 0)
+			if err := session.WriteCompactTrajectoryRanking(stdout, res.Sessions, *top, *topBy); err != nil {
+				fmt.Fprintf(stderr, "fak session compact-audit: %v\n", err)
+				return 2
+			}
+		}
 		return 0
 	}
 	if *scrub {

@@ -412,8 +412,10 @@ type State struct {
 //
 // FENCE: advisory, never trust. A goal root affects RETENTION/ranking, never the
 // answer — a scheduler MAY order a session by it but MUST behave identically when it
-// is absent. No consumer exists until the snapshot-reading scheduler (#627) reads it;
-// this carries the data structure so the root is defined ahead of its first reader.
+// is absent. The ranking reader is still pending — no scheduler orders by Goal today —
+// but the field is NOT consumer-free: as of b588466054 cumulative_envelope.go copies
+// State.Goal into SessionRecoveryCheckpoint, so a tripped envelope checkpoints the active
+// root instead of losing it. Re-check both claims against the tree before trusting them.
 type Goal struct {
 	// ID is the opaque goal/root identifier — a digest or the /goal id, structural only.
 	// "" means no goal is set (the zero value). NEVER the goal text or a transcript.
@@ -444,8 +446,11 @@ func (g Goal) IsZero() bool {
 // going); every consumer degrades to the GPU-visible decision when a hint is absent or
 // stale. This is a cost/latency lever only — a hint must NEVER gate correctness. It is
 // a pure projection over Table.Snapshot and adds nothing to the frozen ABI beyond this
-// struct. No consumer exists until the snapshot-reading scheduler (#627) lands; this is
-// filed now so the conduit is defined and sequenced ahead of its first reader.
+// struct. The snapshot-reading scheduler HAS landed: as of 7ad164d0fa (#811)
+// Scheduler.ReserveKnownComing walks Table.Snapshot and reservationFromState consumes
+// Intent.ArrivingInMillis/Prefix/WillDiscard to mint advisory slot reservations. What is
+// still absent is a live DRIVER — no non-test caller invokes ReserveKnownComing — so the
+// hint changes no serving behavior yet. Re-check both halves before trusting them.
 type TurnIntent struct {
 	// EndsSoon: the agent is at a settle point — drain this turn, don't admit new
 	// prefill behind it.

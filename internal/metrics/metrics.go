@@ -196,8 +196,20 @@ func (r *Report) Validate(onHash, offHash string) error {
 }
 
 // JSON renders the report.
+//
+// The instrument-resolution readout (#5667, resolution.go) is stamped in as an
+// ADDITIVE key beside the numbers it qualifies: every existing key keeps its
+// name, type and value, so an existing consumer neither breaks nor silently
+// changes meaning. It is computed here rather than stored on Report so that no
+// emitted report.json can carry an unstamped — i.e. silently unqualified —
+// resolution field.
 func (r *Report) JSON() []byte {
-	b, _ := json.MarshalIndent(r, "", "  ")
+	type wire Report // drops the methods, keeps the field set + tags
+	out := struct {
+		wire
+		InstrumentResolution ResolutionReport `json:"instrument_resolution"`
+	}{wire(*r), r.InstrumentResolution()}
+	b, _ := json.MarshalIndent(out, "", "  ")
 	return b
 }
 

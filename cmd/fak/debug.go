@@ -116,6 +116,21 @@ func cmdDebug(argv []string) {
 	im, err := cdb.Attach(*dir)
 	must(err)
 
+	// The context-query and context-diff arms materialize the SAME image under the SAME
+	// flag-driven policy — only the query string differs (context-diff runs two of them).
+	// Building that request in one place is what keeps the diff a true A/B: a new flag
+	// wired into the query arm cannot silently miss the diff's base and next requests.
+	queryRequest := func(query string) contextq.Request {
+		return contextq.Request{
+			Query:         query,
+			K:             *k,
+			BudgetBytes:   *budgetBytes,
+			Pins:          splitCSV(*pins),
+			Excludes:      splitCSV(*excludes),
+			PolicyVersion: *policyVersion,
+		}
+	}
+
 	switch *cmd {
 	case "info":
 		fmt.Println(string(jsonIndent(im.Info())))
@@ -146,14 +161,7 @@ func cmdDebug(argv []string) {
 		fmt.Printf("page %d tombstoned: %s requested_by=%s reason=%q\n",
 			ch.Step, ch.ID, ch.RequestedBy, ch.Reason)
 	case "context-query":
-		req := contextq.Request{
-			Query:         *query,
-			K:             *k,
-			BudgetBytes:   *budgetBytes,
-			Pins:          splitCSV(*pins),
-			Excludes:      splitCSV(*excludes),
-			PolicyVersion: *policyVersion,
-		}
+		req := queryRequest(*query)
 		if v := strings.TrimSpace(*preferView); v != "" {
 			// Two-pass demo: cold pass builds derived views (FAULT); warm pass with
 			// the SAME shared cache serves them as HIT without paging raw bytes.
@@ -178,10 +186,7 @@ func cmdDebug(argv []string) {
 		// Source-set diff: materialize the SAME image under two queries and report
 		// which evidence handles the second added / dropped / kept, plus the
 		// sealed/poisoned pages each side refused to expand (issue #427).
-		baseReq := contextq.Request{
-			Query: *query, K: *k, BudgetBytes: *budgetBytes,
-			Pins: splitCSV(*pins), Excludes: splitCSV(*excludes), PolicyVersion: *policyVersion,
-		}
+		baseReq := queryRequest(*query)
 		nextReq := baseReq
 		nextReq.Query = *query2
 		base := contextq.Query(ctx(), im, baseReq)

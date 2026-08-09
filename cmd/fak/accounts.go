@@ -68,6 +68,13 @@ import (
 //	fak accounts sync                  project the registry into the dos + job roster views AND
 //	                                   deep-merge defaults.settings into each account's settings.json
 //	                                   (the in-tree replacement for the external csync chore)
+//	fak accounts refresh [--name <n>]  proactively rotate seats' OAuth credentials so an IDLE seat never
+//	                                   decays into a human-/login-only state, and split a SHARED token family
+//	                                   (what copying a credential leaves behind) apart on demand. Graded from
+//	                                   disk — recorded expiry + refresh-token family fingerprint — never the
+//	                                   spawn's exit code. Exit 1 while any seat is stale/hollow/blocked.
+//	                                   A seat sharing its family with THIS session's config dir is REFUSED
+//	                                   without --yes-log-me-out (rotating it ends this session's login)
 //	fak accounts check                 RED (exit 1) if a generated view drifts from the registry
 //	fak accounts validate              load the registry and check every invariant (incl. tombstones resolve)
 //	fak accounts version               this binary's build + the registry schema/family it supports + verb set
@@ -87,6 +94,10 @@ type accountsCmd struct {
 	addEnv                                                     *repeatedString
 	addReserved, addNoLogin, addNoSync, addAdopt               *bool
 	addForce, addProbeIdentity, addNoProbeIdentity, probeIdent *bool
+	addNoDivorce                                               *bool
+
+	refreshTimeout   *time.Duration
+	refreshAckLogout *bool
 
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmByAccount *string
 	rmArchive                                              *bool
@@ -140,9 +151,12 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	addAdopt := fs.Bool("adopt", false, "(add) enroll by ADOPTING an existing login instead of running `claude setup-token`: copy the source seat's live credential bundle (.credentials.json and/or .oauth-token) into the new isolated dir. Turns the current default login into a rotation seat in one command")
 	addFrom := fs.String("from", "", "(add --adopt) source seat to copy the login bundle from: a seat name, a config-dir path, or empty for the default ~/.claude seat")
 	addAPIKeyEnv := fs.String("api-key-env", "", "(add) enroll an API-KEY seat (#5331): NAME of the env var holding the account's Anthropic API key (e.g. ANTHROPIC_API_KEY). The registry stores only this REFERENCE, never the secret; `launch` fronts guard with --api-key-env + ACTIVE managed cache. Mutually exclusive with --adopt/--no-login/--token")
-	addForce := fs.Bool("force", false, "(add --adopt) reconcile an EXISTING target dir/registry row in place (refresh creds + re-derive identity + upsert) instead of refusing")
+	addForce := fs.Bool("force", false, "(add --adopt) reconcile an EXISTING target dir/registry row in place (refresh creds + re-derive identity + upsert) instead of refusing; (refresh) rotate even a credential that is not yet due, by backdating only its recorded expiry so the rotation MUST happen — the difference between assuming a seat can still refresh and witnessing it")
 	addProbeIdentity := fs.Bool("probe-identity", false, "(add --adopt) reconcile the adopted seat's identity against a live OAuth profile probe of its credential, preferring the credential over stale on-disk .claude.json metadata (always on for enroll-current)")
 	addNoProbeIdentity := fs.Bool("no-probe-identity", false, "(add --adopt) opt OUT of the default identity probe: record the adopted seat's on-disk .claude.json metadata as-is and hit no network (the pre-probe disk-only behavior); enroll-current ignores this and always probes")
+	addNoDivorce := fs.Bool("no-divorce", false, "(add --adopt / enroll-current) opt OUT of the default post-copy OAuth token-family divorce. An adopt COPIES the source's credential, so both dirs hold ONE refresh token and the first to refresh silently 401s the other (even hours before its expiresAt). By default the enroll immediately refreshes the NEW seat so it owns its own family — which also proves the seat can refresh, and reports that the SOURCE dir now needs a `/login`. Pass this to control that timing yourself; the shared-family hazard then stays armed")
+	refreshTimeout := fs.Duration("refresh-timeout", defaultRefreshTimeout, "(refresh) per-seat deadline for the throwaway `claude -p` turn that causes the credential rotation")
+	refreshAckLogout := fs.Bool("yes-log-me-out", false, "(refresh) accept that rotating a seat which shares its OAuth token family with the config dir THIS session runs out of will END this session's login. Such a seat is REFUSED without this flag, because a shared family is one login and the first side to refresh silently 401s the other — the operator's own interactive session, mid-task (#5954). With the flag the rotation proceeds and the report names the invalidated dir and its exact `claude /login` recovery")
 	probeIdent := fs.Bool("probe", false, "(status) probe each seat's live credential identity and flag identity-metadata-stale when the on-disk .claude.json disagrees with the account the credential actually serves")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry; (rehome) reason token recorded on the live seat switch")
@@ -154,7 +168,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
-	launchUltracode := fs.String("ultracode", "auto", "(launch) ultracode posture auto|on|off (default auto): run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) via --settings '{\"ultracode\":true}'. auto turns it on only for rigor-class work, so a bare/unclassified launch stays off (ultracode is the slowest posture and is pure overhead on grind work); on forces it, off disables it. true/false are accepted as on/off aliases. Claude-only; ignored for other agents")
+	launchUltracode := fs.String("ultracode", "on", "(launch) ultracode posture auto|on|off (default on): run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) via --settings '{\"ultracode\":true}'. on is the default so every instance this launcher starts is ALREADY in ultracode and nobody has to type /effort ultracode into a fresh session; off disables it; auto defers to the work class and turns it on only for rigor-class work, so `--ultracode=auto` is the lean/fast posture for a grind or unclassified launch. true/false are accepted as on/off aliases. Claude-only; ignored for other agents")
 	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
 	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) comma-separated Claude fallback CHAIN, tried in order when the default Opus 5 startup is unavailable — an unknown/invalid model (-> the previous Opus generation) OR a usage/rate limit such as an Opus weekly cap (-> Fable 5, a separate allocation bucket); empty disables. Default: "+defaultLaunchFallbackModel+". Ignored when --model is explicit")
 	launchManagedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "(launch) managed-cache posture for the guard session: auto|on|off (default: $"+fleetManagedCacheEnv+", else on — best-effort managed cache everywhere). on forces the stable-prefix 1h-TTL cache upgrade regardless of billing; explicit auto restores guard's billing-gated default (PASSIVE on a subscription-OAuth seat unless $"+fleetGuardAPIKeyEnvEnv+" makes it ACTIVE); off is the express opt-out for a seat where on self-blocks")
@@ -223,6 +237,9 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 		addForce:            addForce,
 		addProbeIdentity:    addProbeIdentity,
 		addNoProbeIdentity:  addNoProbeIdentity,
+		addNoDivorce:        addNoDivorce,
+		refreshTimeout:      refreshTimeout,
+		refreshAckLogout:    refreshAckLogout,
 		probeIdent:          probeIdent,
 		rmRehome:            rmRehome,
 		rmReason:            rmReason,
@@ -273,6 +290,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addSuffix, addNoSync, addAdopt, addFrom, addForce := c.addSuffix, c.addNoSync, c.addAdopt, c.addFrom, c.addForce
 	addAPIKeyEnv, addBaseURL, addEnv := c.addAPIKeyEnv, c.addBaseURL, c.addEnv
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
+	addNoDivorce, refreshTimeout, refreshAckLogout := c.addNoDivorce, c.refreshTimeout, c.refreshAckLogout
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
 	rmByAccount := c.rmByAccount
 	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
@@ -389,6 +407,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			apiKeyEnv:       *addAPIKeyEnv,
 			probeIdentity:   *addProbeIdentity,
 			noProbeIdentity: *addNoProbeIdentity,
+			noDivorce:       *addNoDivorce,
 			probeURL:        enrollProfileURL(),
 			dryRun:          *dryRun,
 			homeDir:         *homeDir,
@@ -409,6 +428,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			force:        *addForce,
 			suffix:       *addSuffix,
 			noSync:       *addNoSync,
+			noDivorce:    *addNoDivorce,
 			probeURL:     enrollProfileURL(),
 			dryRun:       *dryRun,
 			homeDir:      *homeDir,
@@ -427,20 +447,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// every active seat resolving to the named account bucket in one audited pass, so a
 		// duplicate seat identity_mismatched onto the account can't leave it live after the
 		// canonical seat is removed.
-		if *rmByAccount != "" {
-			return runAccountsRemoveByAccount(stdout, stderr, removeParams{
-				byAccount:    *rmByAccount,
-				rehomeTo:     *rmRehome,
-				reason:       *rmReason,
-				archive:      *rmArchive,
-				registryPath: *registryPath,
-				dosView:      *dosView,
-				jobView:      *jobView,
-				noSync:       *addNoSync,
-			})
-		}
-		return runAccountsRemove(stdout, stderr, removeParams{
-			name:         *addName,
+		//
+		// Both retirement forms apply the SAME removal policy — rehome target, audit reason,
+		// archive choice, registry and the two generated views — and differ only in the
+		// selector that picks what to retire, so the policy is built once here and each form
+		// sets just its own selector. That is what keeps a by-account retirement from ever
+		// tombstoning under different policy than the by-seat one.
+		rm := removeParams{
 			rehomeTo:     *rmRehome,
 			reason:       *rmReason,
 			archive:      *rmArchive,
@@ -448,7 +461,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			dosView:      *dosView,
 			jobView:      *jobView,
 			noSync:       *addNoSync,
-		})
+		}
+		if *rmByAccount != "" {
+			rm.byAccount = *rmByAccount
+			return runAccountsRemoveByAccount(stdout, stderr, rm)
+		}
+		rm.name = *addName
+		return runAccountsRemove(stdout, stderr, rm)
 
 	case "restore":
 		// Reverse the reversible half of `remove --archive`: bring the .DELETED config dir
@@ -460,6 +479,24 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			dosView:      *dosView,
 			jobView:      *jobView,
 			noSync:       *addNoSync,
+		})
+
+	case "refresh":
+		// Proactively rotate seats' OAuth credentials so an IDLE seat never silently decays into a
+		// state only a human /login can fix, and so a shared token family (what copying a credential
+		// leaves behind) can be split apart on demand. Graded from the FILE — the recorded expiry and
+		// the refresh-token family fingerprint — never from the spawn's exit code. Exit 1 while any
+		// seat is stale/hollow, so a scheduled sweep can alert on the exit code alone. A seat sharing
+		// its family with THIS session's own config dir is refused without --yes-log-me-out: that
+		// rotation ends the operator's own login, and it used to do it silently (#5954).
+		return runAccountsRefresh(stdout, stderr, refreshParams{
+			name:         *addName,
+			timeout:      *refreshTimeout,
+			force:        *addForce,
+			ackLogout:    *refreshAckLogout,
+			registryPath: *registryPath,
+			homeDir:      *homeDir,
+			asJSON:       *asJSON,
 		})
 
 	case "backup":

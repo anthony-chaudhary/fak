@@ -17,11 +17,20 @@ Re-run after changing either metric set:
                                               # and dashboards/fak-guard-adjudication.json
                                               # and dashboards/fak-cache-value-rollup.json
                                               # and dashboards/fak-cache-health.json
+                                              # and dashboards/fak-fleet-overview.json
+                                              # and dashboards/fak-fleet-session.json
 
 The committed JSON is what Grafana provisions; this generator is the maintainable
 source. `METRICS` / `GATEWAY_METRICS` below are the contract —
 `fleet_bottleneck_test.py` asserts dashboard/alert references against emitted
 families.
+
+The two fleet dashboards are a PAIR: the overview answers "what is the fleet doing"
+and its session table data-links into the drill-down, which answers the same
+questions for one named session. They read the `fak_fleet_*` families from
+`fak fleet metrics` (cmd/fak/fleet_metrics.go, scrape job `fak_fleet`) — a different
+source from every other dashboard here, because it is the only one carrying a
+per-session dimension.
 """
 import json
 import os
@@ -34,6 +43,8 @@ OUT_STARTUP = os.path.join(HERE, "dashboards", "fak-startup-load.json")
 OUT_GUARD = os.path.join(HERE, "dashboards", "fak-guard-adjudication.json")
 OUT_ROLLUP = os.path.join(HERE, "dashboards", "fak-cache-value-rollup.json")
 OUT_CACHEHEALTH = os.path.join(HERE, "dashboards", "fak-cache-health.json")
+OUT_FLEET_OVERVIEW = os.path.join(HERE, "dashboards", "fak-fleet-overview.json")
+OUT_FLEET_SESSION = os.path.join(HERE, "dashboards", "fak-fleet-session.json")
 
 DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
 
@@ -230,21 +241,42 @@ def table(title, expr, x, y, w=12, h=9, desc=""):
     }
 
 
-def info_table(title, expr, x, y, w=24, h=6, desc="", exclude=None):
+def info_table(title, expr, x, y, w=24, h=6, desc="", exclude=None, links=None,
+               link_field=None, sort_by=None, filterable=False):
     """A plain label-table: render an instant series' labels as columns, dropping
-    Prometheus bookkeeping + the (always-1) Value. Used for the *_info gauge."""
+    Prometheus bookkeeping + the (always-1) Value. Used for the *_info gauge.
+
+    links/link_field turn one column into the DRILL-DOWN door: `links` is a list of
+    {title, url} data links and `link_field` names the column they hang off (an
+    override, so only that cell is clickable rather than every cell in the row). This
+    is what makes a fleet table a navigation surface instead of a read-only list.
+    """
     drop = {"Time": True, "Value": True, "__name__": True, "job": True, "instance": True}
     for name in (exclude or []):
         drop[name] = True
+    overrides = []
+    if links and link_field:
+        overrides.append({
+            "matcher": {"id": "byName", "options": link_field},
+            "properties": [{"id": "links", "value": links}],
+        })
+    options = {"showHeader": True, "cellHeight": "sm",
+               "footer": {"show": False, "reducer": ["sum"], "fields": ""}}
+    if sort_by:
+        options["sortBy"] = [{"displayName": sort_by, "desc": False}]
+    # filterable defaults OFF so adding it for one dashboard does not churn every other
+    # committed info-table JSON on the next regen.
+    custom = {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": False}
+    if filterable:
+        custom["filterable"] = True
     return {
         "datasource": DS, "title": title, "description": desc, "type": "table",
         "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "fieldConfig": {"defaults": {
             "color": {"mode": "thresholds"},
-            "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": False},
-            "mappings": [], "thresholds": steps((None, "green"))}, "overrides": []},
-        "options": {"showHeader": True, "cellHeight": "sm",
-                    "footer": {"show": False, "reducer": ["sum"], "fields": ""}},
+            "custom": custom,
+            "mappings": [], "thresholds": steps((None, "green"))}, "overrides": overrides},
+        "options": options,
         "pluginVersion": "11.5.2",
         "targets": [{"datasource": DS, "expr": expr, "format": "table",
                      "instant": True, "refId": "A"}],
@@ -1416,12 +1448,409 @@ def build_cache_health():
     }
 
 
+# The exporter is a separate scrape job (fak_fleet, :9098) with its own lifecycle, so
+# "did anyone start it?" is a real operator question and both fleet dashboards lead with
+# the answer instead of showing an all-zero screen that looks like a calm fleet.
+FLEET_EXPORTER_NOTE = (
+    "Source: **`fak fleet metrics --serve --addr 127.0.0.1:9098`** (scrape job "
+    "`fak_fleet`). If every panel reads *No data*, the exporter is not running — start "
+    "it, or check `up{job=\"fak_fleet\"}`.\n\n"
+    "**Two tiers, never blended.** `fak_fleet_session_*` / `fak_fleet_sessions*` are "
+    "**LIVE**, read from the durable session registry by an oracle (PCB state, heartbeat "
+    "freshness, resume's idle-vs-TTL posture) — the same fold `fak session ls --durable` "
+    "prints. `fak_fleet_usage_*` are **HISTORICAL**, folded from the append-only "
+    "gateway-usage ledger, and their token/cache numbers are OBSERVED (provider-relayed) "
+    "except the `kv_prefix_*` pair, which fak authored itself."
+)
+
+# The drill-down door: one data link from the overview's session table into the
+# per-session dashboard, carrying the clicked session id as the template variable.
+# ${__url_time_range} is load-bearing, not decoration: without it Grafana opens the
+# drill-down at ITS OWN default range, so an operator who zoomed the overview to the
+# ten minutes around an incident would land on a dashboard showing the last 6h and
+# read it as the same window. Carrying the range is what makes the two dashboards one
+# surface at two zoom levels rather than two views that happen to link.
+SESSION_DRILL_LINK = [{
+    "title": "Drill down: this session",
+    "url": "/d/fak-fleet-session/fak-fleet-session-drill-down"
+           "?var-session=${__value.raw}&${__url_time_range}",
+}]
+
+
+def build_fleet_overview():
+    panels = []
+
+    panels.append(text_panel(
+        "What this dashboard is",
+        "**The fleet, top down.** Start with how many sessions are alive right now, then "
+        "click a session in the table to drill into it.\n\n" + FLEET_EXPORTER_NOTE,
+        0, 0, w=24, h=7))
+
+    panels.append(row("Fleet right now (LIVE)", 7))
+    panels.append(stat("Sessions", "fak_fleet_sessions or vector(0)", 0, 8, w=3, h=4,
+                       desc="Sessions in the durable inventory — the same population "
+                            "`fak session ls --durable` prints."))
+    panels.append(stat("Live", 'fak_fleet_sessions_by_liveness{liveness="live"} or vector(0)',
+                       3, 8, w=3, h=4, color="fixed",
+                       desc="Running-family sessions whose durable heartbeat is fresh: "
+                            "alive AND progressing."))
+    panels.append(stat("Stalled", 'fak_fleet_sessions_by_liveness{liveness="stalled"} or vector(0)',
+                       6, 8, w=3, h=4, thresholds=ONE_RED,
+                       desc="Sessions that CLAIM a running state but whose heartbeat has "
+                            "not advanced within the stale window — claiming work, not "
+                            "progressing. This is the number worth alerting on."))
+    panels.append(stat("Idle", 'fak_fleet_sessions_by_liveness{liveness="idle"} or vector(0)',
+                       9, 8, w=3, h=4,
+                       desc="Paused / stopped sessions. Idle is a resting state, not a fault."))
+    panels.append(stat("Hosts", "fak_fleet_hosts or vector(0)", 12, 8, w=3, h=4,
+                       desc="Distinct hosts carrying at least one session."))
+    panels.append(stat("Warm cache posture", "fak_fleet_sessions_warm or vector(0)",
+                       15, 8, w=3, h=4,
+                       desc="Sessions projected WARM by resume's idle-vs-TTL rule. A "
+                            "projection, never a witnessed provider-cache hit."))
+    panels.append(stat("Registry readable", "fak_fleet_registry_readable or vector(0)",
+                       18, 8, w=3, h=4, thresholds=UP_TH,
+                       desc="0 means the exporter could not READ the durable registry, so "
+                            "every live panel below is honestly empty rather than calm. "
+                            "This is what separates 'no sessions' from 'could not look'."))
+    panels.append(stat("Per-session rows dropped", "fak_fleet_sessions_truncated or vector(0)",
+                       21, 8, w=3, h=4, thresholds=ONE_RED,
+                       desc="Sessions the --max-sessions cardinality bound kept OUT of the "
+                            "table below. Non-zero means the table is INCOMPLETE."))
+
+    panels.append(row("Which sessions are live — click one to drill down", 12))
+    panels.append(info_table(
+        "Live sessions", "fak_fleet_session_info", 0, 13, w=24, h=10,
+        exclude=["fleet", "service"], links=SESSION_DRILL_LINK, link_field="session",
+        sort_by="session", filterable=True,
+        desc="One row per session, straight off the durable registry. `state` is the "
+             "EFFECTIVE status: a RUNNING session with a lapsed heartbeat reads STALLED "
+             "here, exactly as it does in the CLI headline. Click a session id to open "
+             "the per-session drill-down."))
+    panels.append(timeseries(
+        "Sessions by state over time",
+        [('fak_fleet_sessions_by_state{state="RUNNING"}', "RUNNING"),
+         ('fak_fleet_sessions_by_state{state="STALLED"}', "STALLED"),
+         ('fak_fleet_sessions_by_state{state="THROTTLED"}', "THROTTLED"),
+         ('fak_fleet_sessions_by_state{state="PAUSED"}', "PAUSED"),
+         ('fak_fleet_sessions_by_state{state="DRAINING"}', "DRAINING"),
+         ('fak_fleet_sessions_by_state{state="STOPPED"}', "STOPPED")],
+        0, 23, w=12, h=8,
+        desc="The fleet's shape over the retention window — this is the HISTORICAL view "
+             "of the live tier, accumulated by Prometheus one scrape at a time."))
+    panels.append(timeseries(
+        "Liveness & cache posture over time",
+        [('fak_fleet_sessions_by_liveness{liveness="live"}', "live"),
+         ('fak_fleet_sessions_by_liveness{liveness="stalled"}', "stalled"),
+         ('fak_fleet_sessions_by_liveness{liveness="idle"}', "idle"),
+         ("fak_fleet_sessions_warm", "warm posture"),
+         ("fak_fleet_sessions_cold", "cold posture")],
+        12, 23, w=12, h=8,
+        desc="Stalled climbing while live falls is the fleet wedging."))
+    panels.append(bargauge(
+        "Session age", "fak_fleet_session_age_seconds", "{{session}}", 0, 31, w=12, h=8,
+        unit="s",
+        desc="Seconds since each session was created. A very old session that is also "
+             "STALLED is the classic reap candidate."))
+    panels.append(bargauge(
+        "Sessions per host", "fak_fleet_sessions_by_host", "{{host}}", 12, 31, w=12, h=8,
+        desc="Where the fleet is running. `unknown` is a session whose descriptor carries "
+             "no host stamp, not a missing machine."))
+
+    panels.append(row("Roll-up — historical cost & cache (gateway-usage ledger)", 39))
+    panels.append(stat("Sessions folded", "fak_fleet_usage_sessions or vector(0)",
+                       0, 40, w=3, h=4,
+                       desc="Sessions in the ledger fold. A carryforward row (written by a "
+                            "ledger cut) expands to the row count it stands for, so a cut "
+                            "never silently shrinks this number."))
+    panels.append(stat("Turns", "fak_fleet_usage_turns or vector(0)", 3, 40, w=3, h=4,
+                       desc="OBSERVED served turns across the folded corpus."))
+    panels.append(stat("Cache read ratio", "fak_fleet_usage_cache_read_ratio",
+                       6, 40, w=3, h=4, unit="percentunit", thresholds=CACHE_TH,
+                       desc="cache_read / (input + cache_read + cache_creation). The "
+                            "denominator includes tokens paid to CREATE cache entries, so "
+                            "a session that only wrote cache is not credited with a hit."))
+    panels.append(stat("Cache read tokens", "fak_fleet_usage_cache_read_tokens or vector(0)",
+                       9, 40, w=3, h=4,
+                       desc="OBSERVED prompt tokens the provider served from its cache."))
+    panels.append(stat("Cache creation tokens",
+                       "fak_fleet_usage_cache_creation_tokens or vector(0)", 12, 40, w=3, h=4,
+                       desc="OBSERVED prompt tokens written INTO the provider's cache — a "
+                            "cost, not a saving."))
+    panels.append(stat("Input tokens", "fak_fleet_usage_input_tokens or vector(0)",
+                       15, 40, w=3, h=4, desc="OBSERVED uncached prompt tokens."))
+    panels.append(stat("Output tokens", "fak_fleet_usage_output_tokens or vector(0)",
+                       18, 40, w=3, h=4, desc="OBSERVED completion tokens."))
+    panels.append(stat(
+        "Drill-down coverage",
+        "fak_fleet_usage_sessions_identified / clamp_min("
+        "fak_fleet_usage_sessions_identified + fak_fleet_usage_sessions_unidentified, 1)",
+        21, 40, w=3, h=4, unit="percentunit", thresholds=CACHE_TH,
+        desc="THE HONESTY GAUGE for the per-session panels below. The ledger's session_id "
+             "is optional: a row written without one counts in every fleet total but can "
+             "never appear in a per-session panel. Low coverage means the per-session "
+             "cost view speaks for only a slice of the fleet. `fak serve` rows are "
+             "deliberately unidentified — one serve process hosts a whole session table, "
+             "so no single id would be true for its exit row."))
+    panels.append(timeseries(
+        "Token economy by session type",
+        [('fak_fleet_usage_by_type_input_tokens{session_type="guard"}', "guard input"),
+         ('fak_fleet_usage_by_type_cache_read_tokens{session_type="guard"}', "guard cache read"),
+         ('fak_fleet_usage_by_type_output_tokens{session_type="guard"}', "guard output"),
+         ('fak_fleet_usage_by_type_input_tokens{session_type="serve"}', "serve input"),
+         ('fak_fleet_usage_by_type_cache_read_tokens{session_type="serve"}', "serve cache read"),
+         ('fak_fleet_usage_by_type_output_tokens{session_type="serve"}', "serve output")],
+        0, 44, w=12, h=8,
+        desc="The guard path (one process, one agent session) and the serve path (one "
+             "process, many sessions) have different economics — never read them as one."))
+    panels.append(timeseries(
+        "Cache read ratio by session type",
+        [("fak_fleet_usage_by_type_cache_read_ratio", "{{session_type}}"),
+         ("fak_fleet_usage_cache_read_ratio", "fleet")],
+        12, 44, w=12, h=8, unit="percentunit",
+        desc="A session type whose ratio is ABSENT folded no prompt tokens — unmeasured, "
+             "not 0%."))
+    panels.append(bargauge(
+        "Top sessions by output tokens", "topk(10, fak_fleet_usage_session_output_tokens)",
+        "{{session}}", 0, 52, w=12, h=8,
+        desc="The fleet's biggest spenders, by name. Only sessions whose ledger rows carry "
+             "a session_id can appear — see the drill-down coverage tile."))
+    panels.append(bargauge(
+        "Lowest cache read ratio by session",
+        "bottomk(10, fak_fleet_usage_session_cache_read_ratio)", "{{session}}",
+        12, 52, w=12, h=8, unit="percentunit", maxv=1,
+        desc="Where cache reuse is worst. A session that folded no prompt tokens is "
+             "ABSENT rather than ranked at 0% — unmeasured must not outrank genuinely bad."))
+
+    panels.append(row("Adjudication (fleet)", 60))
+    panels.append(timeseries(
+        "Kernel verdicts across the fleet",
+        [('fak_fleet_usage_adjudications_by_verdict{verdict="allowed"}', "allowed"),
+         ('fak_fleet_usage_adjudications_by_verdict{verdict="denied"}', "denied"),
+         ('fak_fleet_usage_adjudications_by_verdict{verdict="transformed"}', "transformed"),
+         ('fak_fleet_usage_adjudications_by_verdict{verdict="quarantined"}', "quarantined"),
+         ('fak_fleet_usage_adjudications_by_verdict{verdict="deferred"}', "deferred"),
+         ('fak_fleet_usage_adjudications_by_verdict{verdict="escalated"}', "escalated"),
+         ('fak_fleet_usage_adjudications_by_verdict{verdict="errored"}', "errored")],
+        0, 61, w=24, h=8,
+        desc="The fleet-wide verdict mix, folded from the durable ledger. The per-session "
+             "adjudication counts live on the drill-down dashboard."))
+    panels.append(stat("Ledger rows folded", "fak_fleet_usage_rows or vector(0)",
+                       0, 69, w=4, h=4,
+                       desc="Rows the exporter folded after deduping by row key."))
+    panels.append(stat("Duplicate rows dropped",
+                       "fak_fleet_usage_duplicate_rows_dropped or vector(0)", 4, 69, w=4, h=4,
+                       desc="Rows dropped as byte-identical duplicates of an already-folded "
+                            "row key (a retried flush). Ledger health, not fleet activity."))
+    panels.append(stat("Ledger last write",
+                       "time() - fak_fleet_usage_window_end_unixtime", 8, 69, w=4, h=4,
+                       unit="s", thresholds=AGE_TH,
+                       desc="Age of the newest ledger row. A value that keeps climbing "
+                            "means sessions stopped WRITING, which is not the same as the "
+                            "fleet going quiet."))
+    panels.append(stat("Fold freshness", "time() - fak_fleet_snapshot_unixtime",
+                       12, 69, w=4, h=4, unit="s", thresholds=AGE_TH,
+                       desc="Age of the exporter's own fold. It re-folds on every scrape, "
+                            "so this should stay near the scrape interval."))
+
+    return {
+        "uid": "fak-fleet-overview",
+        "title": "FAK Fleet — Live Sessions & Roll-up",
+        "description": "The fleet-first view: which sessions are alive right now (LIVE, "
+                       "from the durable session registry) and what the fleet has spent "
+                       "(HISTORICAL, from the gateway-usage ledger), with a click-through "
+                       "to a per-session drill-down. Source: `fak fleet metrics --serve` "
+                       "(scrape job fak_fleet).",
+        "tags": ["fak", "fleet", "sessions", "observability"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {}, "links": [{
+            "asDropdown": False, "icon": "external link", "includeVars": False,
+            "keepTime": True, "tags": [], "targetBlank": False, "title": "Session drill-down",
+            "tooltip": "Open the per-session view", "type": "link",
+            "url": "/d/fak-fleet-session/fak-fleet-session-drill-down"}],
+        "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
+def build_fleet_session():
+    panels = []
+
+    panels.append(text_panel(
+        "Session drill-down",
+        "Everything the fleet knows about **`$session`**. Pick another from the "
+        "`Session` selector above, or come back via the "
+        "[fleet overview](/d/fak-fleet-overview/fak-fleet-live-sessions-and-roll-up).\n\n"
+        "**If the LIVE panels are populated but the HISTORICAL ones are empty**, this "
+        "session simply has no ledger rows carrying its id yet — the historical row is "
+        "written at session EXIT, and `fak serve` rows are deliberately unidentified. "
+        "That is missing data, not a zero.\n\n" + FLEET_EXPORTER_NOTE,
+        0, 0, w=24, h=8))
+
+    panels.append(row("This session, right now (LIVE)", 8))
+    panels.append(stat("Live", 'fak_fleet_session_live{session="$session"}', 0, 9, w=4, h=4,
+                       thresholds=UP_TH,
+                       desc="1 when the heartbeat is fresh AND the session claims a "
+                            "running-family state."))
+    panels.append(stat("Stalled", 'fak_fleet_session_stalled{session="$session"}',
+                       4, 9, w=4, h=4, thresholds=ONE_RED,
+                       desc="1 when this session claims work but its heartbeat has not "
+                            "advanced within the stale window."))
+    panels.append(stat("Age", 'fak_fleet_session_age_seconds{session="$session"}',
+                       8, 9, w=4, h=4, unit="s",
+                       desc="Seconds since the session was created."))
+    panels.append(stat("Cache posture warm", 'fak_fleet_session_cache_warm{session="$session"}',
+                       12, 9, w=4, h=4, thresholds=UP_TH,
+                       desc="resume's idle-vs-TTL projection. A projection, never a "
+                            "witnessed provider-cache hit."))
+    panels.append(stat("Generation", 'fak_fleet_session_generation{session="$session"}',
+                       16, 9, w=4, h=4,
+                       desc="Re-continuation depth — how many budget-reset generations this "
+                            "session has been through. Absent when it has never reset."))
+    panels.append(stat("Priority", 'fak_fleet_session_priority{session="$session"}',
+                       20, 9, w=4, h=4,
+                       desc="Scheduling priority as persisted in the durable registry. "
+                            "Absent at the default of 0."))
+    panels.append(info_table(
+        "Descriptor", 'fak_fleet_session_info{session="$session"}', 0, 13, w=24, h=5,
+        exclude=["fleet", "service"],
+        desc="The durable descriptor's labels. `reason` carries the closed token a "
+             "THROTTLED/STOPPED session stopped for; `parent` is the re-continuation "
+             "lineage parent."))
+    panels.append(timeseries(
+        "State & liveness over time",
+        [('fak_fleet_session_live{session="$session"}', "live"),
+         ('fak_fleet_session_stalled{session="$session"}', "stalled"),
+         ('fak_fleet_session_cache_warm{session="$session"}', "cache warm")],
+        0, 18, w=12, h=8,
+        desc="The moment a session went from live to stalled is the moment worth "
+             "correlating against everything else on this page."))
+    panels.append(timeseries(
+        "Wall-clock budget",
+        [('fak_fleet_session_time_elapsed_seconds{session="$session"}', "elapsed"),
+         ('fak_fleet_session_time_limit_seconds{session="$session"}', "limit")],
+        12, 18, w=12, h=8, unit="s",
+        desc="Emitted only when a budget LIMIT is set — an unbudgeted session has no "
+             "denominator and is absent here rather than reading as fully burned."))
+
+    panels.append(row("This session's cost & cache (HISTORICAL)", 26))
+    panels.append(stat("Turns", 'fak_fleet_usage_session_turns{session="$session"}',
+                       0, 27, w=4, h=4, desc="OBSERVED served turns."))
+    panels.append(stat("Cache read ratio",
+                       'fak_fleet_usage_session_cache_read_ratio{session="$session"}',
+                       4, 27, w=4, h=4, unit="percentunit", thresholds=CACHE_TH,
+                       desc="cache_read / (input + cache_read + cache_creation). ABSENT "
+                            "when this session folded no prompt tokens — unmeasured, not 0%."))
+    panels.append(stat("Input tokens",
+                       'fak_fleet_usage_session_input_tokens{session="$session"}',
+                       8, 27, w=4, h=4, desc="OBSERVED uncached prompt tokens."))
+    panels.append(stat("Cache read tokens",
+                       'fak_fleet_usage_session_cache_read_tokens{session="$session"}',
+                       12, 27, w=4, h=4,
+                       desc="OBSERVED prompt tokens served from the provider's cache."))
+    panels.append(stat("Cache creation tokens",
+                       'fak_fleet_usage_session_cache_creation_tokens{session="$session"}',
+                       16, 27, w=4, h=4,
+                       desc="OBSERVED prompt tokens written INTO the cache — a cost."))
+    panels.append(stat("Output tokens",
+                       'fak_fleet_usage_session_output_tokens{session="$session"}',
+                       20, 27, w=4, h=4, desc="OBSERVED completion tokens."))
+    panels.append(timeseries(
+        "Token economy for this session",
+        [('fak_fleet_usage_session_input_tokens{session="$session"}', "input"),
+         ('fak_fleet_usage_session_cache_read_tokens{session="$session"}', "cache read"),
+         ('fak_fleet_usage_session_cache_creation_tokens{session="$session"}', "cache creation"),
+         ('fak_fleet_usage_session_output_tokens{session="$session"}', "output")],
+        0, 31, w=12, h=8,
+        desc="Cumulative per-session totals as the ledger fold sees them; they step when "
+             "a new exit row for this session lands."))
+    panels.append(timeseries(
+        "In-kernel KV-prefix reuse (WITNESSED)",
+        [('fak_fleet_usage_session_kv_prefix_prompt_tokens{session="$session"}', "eligible"),
+         ('fak_fleet_usage_session_kv_prefix_reused_tokens{session="$session"}', "reused")],
+        12, 31, w=12, h=8,
+        desc="fak-authored reuse from the kernel-owned KV cache — a different signal from "
+             "the provider prompt-cache axes above, and never summed with them."))
+    panels.append(timeseries(
+        "Kernel verdicts for this session",
+        [('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="allowed"}', "allowed"),
+         ('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="denied"}', "denied"),
+         ('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="transformed"}', "transformed"),
+         ('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="quarantined"}', "quarantined"),
+         ('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="deferred"}', "deferred"),
+         ('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="escalated"}', "escalated"),
+         ('fak_fleet_usage_session_adjudications_by_verdict{session="$session",verdict="errored"}', "errored")],
+        0, 39, w=16, h=8,
+        desc="What the kernel decided on this session's tool calls."))
+    panels.append(stat("Session wall-clock",
+                       'fak_fleet_usage_session_seconds{session="$session"}',
+                       16, 39, w=4, h=8, unit="s",
+                       desc="Summed uptime across this session's ledger rows."))
+    panels.append(stat("Ledger rows for this session",
+                       'fak_fleet_usage_session_sessions{session="$session"}',
+                       20, 39, w=4, h=8,
+                       desc="How many folded rows carry this id. 0 / No data means the "
+                            "session has not exited yet, or its rows were written without "
+                            "an id."))
+
+    return {
+        "uid": "fak-fleet-session",
+        "title": "FAK Fleet — Session Drill-down",
+        "description": "One session, end to end: its LIVE registry state (heartbeat "
+                       "liveness, cache posture, wall-clock budget) beside its HISTORICAL "
+                       "cost and cache economics from the gateway-usage ledger. Reached by "
+                       "clicking a session on the fleet overview. Source: "
+                       "`fak fleet metrics --serve` (scrape job fak_fleet).",
+        "tags": ["fak", "fleet", "sessions", "observability"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {}, "links": [{
+            "asDropdown": False, "icon": "external link", "includeVars": False,
+            "keepTime": True, "tags": [], "targetBlank": False, "title": "Fleet overview",
+            "tooltip": "Back to the whole fleet", "type": "link",
+            "url": "/d/fak-fleet-overview/fak-fleet-live-sessions-and-roll-up"}],
+        "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [
+            {"name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+             "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+             "regex": "", "options": [], "includeAll": False, "multi": False},
+            # The drill-down axis itself. Sourced from the LIVE _info family so the
+            # selector lists sessions that exist right now; a session that has exited
+            # stays reachable by URL (?var-session=...) even after it leaves this list.
+            {"name": "session", "label": "Session", "type": "query",
+             "datasource": DS,
+             "definition": "label_values(fak_fleet_session_info, session)",
+             "query": {"qryType": 1,
+                       "query": "label_values(fak_fleet_session_info, session)",
+                       "refId": "PrometheusVariableQueryEditor-VariableQuery"},
+             "current": {}, "options": [], "refresh": 2, "regex": "", "sort": 1,
+             "hide": 0, "includeAll": False, "multi": False, "skipUrlSync": False},
+        ]},
+        "panels": panels,
+    }
+
+
 def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     for path, dash in ((OUT, build()), (OUT_GATEWAY, build_gateway()),
                        (OUT_DOGFOOD, build_dogfood()), (OUT_STARTUP, build_startup()),
                        (OUT_GUARD, build_guard()), (OUT_ROLLUP, build_cache_ablation_rollup()),
-                       (OUT_CACHEHEALTH, build_cache_health())):
+                       (OUT_CACHEHEALTH, build_cache_health()),
+                       (OUT_FLEET_OVERVIEW, build_fleet_overview()),
+                       (OUT_FLEET_SESSION, build_fleet_session())):
         # newline="\n" pins LF so a Windows regen is byte-identical to the committed
         # (LF) dashboards instead of churning every line to CRLF — the tree stays clean
         # for a reviewer who re-runs the generator.

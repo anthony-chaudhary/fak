@@ -1,0 +1,6 @@
+{
+  "schema": "fak-policy-suppressions/1",
+  "findings": [{"rule":"secret","scope":"src/a.go"}],
+  "remaining": [{"rule":"secret","scope":"src/a.go"}],
+  "suppressions": [{"rule":"secrett","scope":"src/a.go","reason":"typo must fail closed","status":"refused","used":false,"refusal":"UNKNOWN_RULE"}]
+}

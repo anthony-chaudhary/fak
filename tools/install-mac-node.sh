@@ -17,6 +17,15 @@
 # on any Tailscale-connected client (PowerShell or bash). Save the key — it is only
 # printed once. To rotate: --uninstall then --bind-all again.
 #
+# Relationship to `fak node install` (#5555): both write the SAME launchd label,
+# com.fak.serve-gateway, and one label means one loaded gateway. This script installs the
+# ANTHROPIC adjudication gateway (fak serve --provider anthropic --base-url
+# https://api.anthropic.com) alongside the dogfood-fleet and dispatch-supervisor units.
+# A gateway in front of a LOCAL model server is `fak node install`'s job:
+#   fak node install --base-url http://127.0.0.1:8131/v1 --model qwen3.6-27b
+# Either installer replaces the other's gateway unit under that one label; neither needs
+# an --uninstall pass first.
+#
 # Environment:
 #   ANTHROPIC_API_KEY     upstream key to set in the login env (needed for the gateway
 #                         to reach api.anthropic.com; set once, persists across reboots)
@@ -46,7 +55,7 @@ for arg in "$@"; do
     --bind-all)  BIND_ALL=1 ;;
     --uninstall) MODE="uninstall" ;;
     --status)    MODE="status" ;;
-    --help|-h)   sed -n '2,42p' "$0"; exit 0 ;;
+    --help|-h)   sed -n '2,35p' "$0"; exit 0 ;;
     *) die "unknown argument: $arg (want --bind-all | --status | --uninstall)" ;;
   esac
 done

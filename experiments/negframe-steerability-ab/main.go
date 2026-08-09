@@ -11,6 +11,12 @@
 // value standard: an unwitnessed gain is `not yet`, never a shipped claim).
 //
 // What it does:
+//   - Runs the MEASURED A/B (#5851): the same fak-authored SessionStart stream emitted twice
+//     through the real binary, once with #3568's lever set (`FAK_ABLATE=negframe_reframe`, the
+//     unreframed CONTROL arm) and once with it unset (the reframed TREATMENT arm), reading each
+//     run's arm label and negation counts back off the per-turn journal
+//     (`.fak/negframe/journal.jsonl`). See measured.go. The arm labels are measured; the
+//     compliance rate they map to is still the modeled proxy below.
 //   - Holds a fixture corpus of paired guard directives: Arm A (negative/prohibition-framed,
 //     drawn from the repo's own steer-prose idiom) and Arm B (the same instruction reframed
 //     affordance-first -- mechanically via internal/negframe's reframe rules where a rule
@@ -82,9 +88,15 @@ func complianceProxy(mechanical, judgement int) float64 {
 func main() {
 	asJSON := flag.Bool("json", false, "emit machine-readable JSON result")
 	selfCheck := flag.Bool("selfcheck", false, "run corpus + direction self-check, print PASS/FAIL, exit 1 on FAIL")
+	measure := flag.Bool("measure", true, "run the measured A/B arms through the real fak binary (#5851)")
 	flag.Parse()
 
 	report := runExperiment()
+	if *measure {
+		report.Measured, report.MeasuredUnavailable = measureArms()
+	} else {
+		report.MeasuredUnavailable = "skipped (-measure=false)"
+	}
 
 	switch {
 	case *selfCheck:
@@ -128,8 +140,9 @@ type SignTest struct {
 	PValue     float64 `json:"one_sided_p_value"`
 }
 
-// Report is the full experiment output: fixtures + aggregate stats + the sign test + an explicit
-// provenance label. This is what -json emits and what printHuman/selfCheckReport render.
+// Report is the full experiment output: the MEASURED arms (#5851) + the modeled fixture half
+// (fixtures + aggregate stats + the sign test) + an explicit provenance label. This is what -json
+// emits and what printHuman/selfCheckReport render.
 type Report struct {
 	Schema     string       `json:"schema"`
 	Issue      string       `json:"issue"`
@@ -140,9 +153,34 @@ type Report struct {
 	MeanB      float64      `json:"mean_modeled_compliance_arm_b"`
 	MeanDelta  float64      `json:"mean_delta_b_minus_a"`
 	SignTest   SignTest     `json:"sign_test"`
+	// Measured is the #5851 half: the two arms produced by #3568's env lever over the real
+	// injected stream, with their arm labels read back off the per-turn journal. Nil when no fak
+	// binary could be resolved, in which case MeasuredUnavailable states why — the fixture half
+	// below then stands alone and is labelled MODELED throughout.
+	Measured            *MeasuredAB `json:"measured_arms,omitempty"`
+	MeasuredUnavailable string      `json:"measured_arms_unavailable,omitempty"`
 }
 
 const provenanceLabel = "MODELED / OFFLINE PROXY -- not a live-model measurement. See README.md."
+
+// measureArms resolves a fak binary and runs the measured A/B through it, returning either the
+// measured half or a one-line reason it is unavailable. It never fails the run: a host with no
+// fak binary still gets the modeled fixture report, explicitly labelled as standing alone.
+func measureArms() (*MeasuredAB, string) {
+	work, err := os.MkdirTemp("", "negframe-ab-measured-")
+	if err != nil {
+		return nil, "scratch workspace: " + err.Error()
+	}
+	bin, source, err := resolveFakBinary(work)
+	if err != nil {
+		return nil, "resolve fak binary: " + err.Error()
+	}
+	measured, err := runMeasuredAB(bin, source, work)
+	if err != nil {
+		return nil, "run measured arms: " + err.Error()
+	}
+	return measured, ""
+}
 
 func runExperiment() Report {
 	pairs := make([]PairResult, 0, len(fixtures))
@@ -191,7 +229,7 @@ func runExperiment() Report {
 	}
 	return Report{
 		Schema:     "fak-negframe-steerability-ab/1",
-		Issue:      "#3546",
+		Issue:      "#3546 (design) / #3568 (lever) / #5851 (measured-arm consumer wiring)",
 		Provenance: provenanceLabel,
 		Hypothesis: "Affordance-first (positive) guard-directive framing raises modeled compliance vs. the same directive framed as a prohibition.",
 		Pairs:      pairs,

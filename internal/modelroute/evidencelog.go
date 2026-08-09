@@ -199,18 +199,57 @@ type FoldStats struct {
 	Unattributed int `json:"unattributed,omitempty"`
 }
 
+// EvidenceTrail is the audit path from ONE evidence row back to the turns that produced
+// it: the (model, class, provenance) key the fold tallies, plus the ids it counted.
+//
+// It exists because a placement is only as auditable as its evidence. The fold reduces a
+// journal to counts, and a count cannot be re-checked — an operator shown "24 of 25
+// witnessed attempts at ultra-hard work" has no way to ask WHICH 25, so a producer that
+// double-counts, mis-attributes, or grades a model on another model's turns is invisible
+// at exactly the moment that number decides where traffic goes.
+//
+// Turns holds the ids in journal order. Anonymous counts the turns that reached the same
+// row carrying no id: they are still evidence and the fold still counts them, but they
+// cannot be NAMED, so they are reported apart rather than quietly missing from the
+// citation. A row with a non-zero Anonymous is one an operator cannot fully re-walk —
+// which is a fact about the producer, not about the model.
+type EvidenceTrail struct {
+	Model     string       `json:"model"`
+	Class     WorkClass    `json:"class"`
+	Verify    Verification `json:"verify,omitempty"`
+	Turns     []string     `json:"turns,omitempty"`
+	Anonymous int          `json:"anonymous,omitempty"`
+}
+
 // FoldTurnOutcomes turns a journal into the per-model evidence GradeCapability consumes.
 //
 // The result is deterministic: evidence rows come back sorted by class then provenance, so
 // two runs over the same journal produce byte-identical grades.
 func FoldTurnOutcomes(outcomes []TurnOutcome, opt FoldOptions) (map[string][]ClassEvidence, FoldStats) {
+	evidence, stats, _ := FoldTurnOutcomesTrail(outcomes, opt)
+	return evidence, stats
+}
+
+// FoldTurnOutcomesTrail is FoldTurnOutcomes plus the citation: which turns fed which
+// evidence row. The evidence and stats are identical — the trail is recorded by the same
+// pass that does the counting ON PURPOSE, because a citation assembled by a second walk
+// over the journal could disagree with the counts it claims to explain, and an audit trail
+// that can drift from the thing it audits is worse than none.
+//
+// Trails come back sorted by model, then class, then provenance, so the citation of a
+// given journal is as reproducible as the grade built from it.
+func FoldTurnOutcomesTrail(outcomes []TurnOutcome, opt FoldOptions) (map[string][]ClassEvidence, FoldStats, []EvidenceTrail) {
 	type key struct {
 		model  string
 		class  WorkClass
 		verify Verification
 	}
+	type row struct {
+		evidence ClassEvidence
+		trail    EvidenceTrail
+	}
 	var stats FoldStats
-	tally := map[key]*ClassEvidence{}
+	tally := map[key]*row{}
 	seen := map[string]bool{}
 	window := !opt.Since.IsZero()
 	for _, o := range outcomes {
@@ -238,23 +277,33 @@ func FoldTurnOutcomes(outcomes []TurnOutcome, opt FoldOptions) (map[string][]Cla
 			seen[o.ID] = true
 		}
 		k := key{model: o.Model, class: o.Class, verify: o.Verify}
-		e := tally[k]
-		if e == nil {
-			e = &ClassEvidence{Class: o.Class, Verify: o.Verify}
-			tally[k] = e
+		r := tally[k]
+		if r == nil {
+			r = &row{
+				evidence: ClassEvidence{Class: o.Class, Verify: o.Verify},
+				trail:    EvidenceTrail{Model: o.Model, Class: o.Class, Verify: o.Verify},
+			}
+			tally[k] = r
 		}
-		e.Attempts++
+		r.evidence.Attempts++
 		if o.Success {
-			e.Successes++
+			r.evidence.Successes++
+		}
+		if o.ID == "" {
+			r.trail.Anonymous++
+		} else {
+			r.trail.Turns = append(r.trail.Turns, o.ID)
 		}
 		stats.Counted++
 	}
 	if len(tally) == 0 {
-		return nil, stats
+		return nil, stats, nil
 	}
 	out := map[string][]ClassEvidence{}
-	for k, e := range tally {
-		out[k.model] = append(out[k.model], *e)
+	trails := make([]EvidenceTrail, 0, len(tally))
+	for k, r := range tally {
+		out[k.model] = append(out[k.model], r.evidence)
+		trails = append(trails, r.trail)
 	}
 	for model := range out {
 		rows := out[model]
@@ -266,5 +315,50 @@ func FoldTurnOutcomes(outcomes []TurnOutcome, opt FoldOptions) (map[string][]Cla
 		})
 		out[model] = rows
 	}
-	return out, stats
+	sort.Slice(trails, func(i, j int) bool {
+		if trails[i].Model != trails[j].Model {
+			return trails[i].Model < trails[j].Model
+		}
+		if trails[i].Class != trails[j].Class {
+			return trails[i].Class < trails[j].Class
+		}
+		return trails[i].Verify < trails[j].Verify
+	})
+	return out, stats, trails
+}
+
+// TurnsBehind names the turns that earned a grade: the ids the fold counted toward the
+// class the grade was built from, plus the number of contributing turns that carried no
+// id and therefore cannot be named.
+//
+// Two refusals keep the citation from claiming more than the grade did:
+//
+//   - Rows the floor refused are NOT cited. GradeCapability drops evidence whose
+//     provenance is forgeable or whose class the policy table does not know, and counts
+//     it as Dropped instead. Citing those turns would attribute the grade to work that
+//     bought none of it — an audit trail that over-claims in the exact direction the
+//     grader already refused to.
+//   - An UNMEASURED grade cites nothing, because it names no class: there is no set of
+//     turns that earned a capability it did not award. Explaining a refusal is a
+//     different question, and it is answered by reading the whole trail rather than by
+//     inventing a citation for a grade that does not exist.
+//
+// The invariant a caller can check: len(turns)+anonymous equals Grade.Attempts. A
+// citation that does not add up to the number it explains is a producer bug, and it is
+// visible here rather than after the traffic has moved.
+func TurnsBehind(g Grade, trails []EvidenceTrail, floor GradeFloor) (turns []string, anonymous int) {
+	if !g.Measured || g.Model == "" {
+		return nil, 0
+	}
+	for _, t := range trails {
+		if t.Model != g.Model || t.Class != g.Class {
+			continue
+		}
+		if !floor.counts(ClassEvidence{Class: t.Class, Verify: t.Verify}) {
+			continue
+		}
+		turns = append(turns, t.Turns...)
+		anonymous += t.Anonymous
+	}
+	return turns, anonymous
 }

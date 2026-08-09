@@ -86,6 +86,18 @@ func (s *Session) Close() {
 			delete(s.halW, name)
 		}
 	}
+	// Routed-expert weights served by the bounded ring are NOT in halW (that is the point), so they
+	// need their own teardown or their device handles would outlive the session. A SHARED ring
+	// (R7/#5618) is the exception and the reason the branch exists: its residency belongs to the
+	// (model, device) pair, so this conversation ending must DETACH and leave every byte in place for
+	// the agents still using it. Freeing here would page out a peer's working set — and Free a handle
+	// it is about to multiply against.
+	if s.sharedRing != nil {
+		s.sharedRing.Detach(s)
+	} else if s.expertRing != nil {
+		s.expertRing.freeAll()
+		s.expertRing = nil
+	}
 	if kv, ok := s.halKV.(interface{ Free() }); ok {
 		kv.Free()
 	}
@@ -190,10 +202,10 @@ func requireTensorPresent(missing bool, kind, name string) {
 }
 
 func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
-	return s.weightHALStaged("q8:"+name, func() compute.Tensor {
+	return s.weightHALStagedBounded("q8:"+name, name, func() compute.Tensor {
 		requireTensorPresent(qt == nil, "Q8", name)
 		return compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
-	}, compute.Q8_0)
+	}, compute.Q8_0, q8ResidentBytes(qt))
 }
 
 // weightHALQ4K stages a resident Q4_K weight (raw GGUF super-block bytes) onto the backend, the
@@ -203,10 +215,10 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 // lets the GLM-DSA forward run its dense projections from a memory-lean Q4_K model on the device —
 // the Q4_K majority of a 753B GLM-5.2 on the GPU, with only ~0.56 B/weight resident.
 func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
-	return s.weightHALStaged("q4k:"+name, func() compute.Tensor {
+	return s.weightHALStagedBounded("q4k:"+name, name, func() compute.Tensor {
 		requireTensorPresent(qt == nil, "Q4_K", name)
 		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
-	}, compute.Q4_K)
+	}, compute.Q4_K, q4kResidentBytes(qt))
 }
 
 // weightHALKQuant stages verbatim Q5_K/Q6_K GGUF bytes. CUDA dequantizes in the
@@ -227,7 +239,7 @@ func (s *Session) weightHALKQuant(name string, qt *kQuantTensor) compute.Tensor 
 	default:
 		panic("model: unsupported resident expert k-quant: " + qt.kind.String())
 	}
-	return s.weightHALStaged("kquant-raw:"+name, host, dt)
+	return s.weightHALStagedBounded("kquant-raw:"+name, name, host, dt, kQuantResidentBytes(qt))
 }
 
 // supportsRoutedExpertKQuant is the explicit optional capability used both by
@@ -242,6 +254,64 @@ func (s *Session) supportsRoutedExpertKQuant() bool {
 	return ok && routed.SupportsRoutedExpertKQuant()
 }
 
+// expertWeight is one resolved routed-expert projection: its canonical tensor name plus whichever
+// tier can serve it — a resident quantized representation the model carries (q4 or kq), or the
+// R5/#5616 checkpoint descriptor (ck) that says how to fault it out of the fused slab. Exactly one
+// of the three is non-nil.
+//
+// ck carries a DESCRIPTOR, not bytes, and that distinction is the rung: a checkpoint-served weight
+// is resolved, keyed, sized and held without any IO, and its stride is read only when the bounded
+// device ring actually misses it.
+type expertWeight struct {
+	name string
+	q4   *q4kTensor
+	kq   *kQuantTensor
+	ck   *checkpointStaging
+}
+
+// halKey is the dtype-prefixed staging key this weight lands under — the same key weightHALQ4K /
+// weightHALKQuant use for halW and for the routed-expert ring, so a hold names exactly the resident
+// the staging created. A checkpoint-served weight reports the key its own tier derived, which is
+// built to the same rule, so a resident and a faulted copy of one projection are one ring entry.
+func (w expertWeight) halKey() string {
+	if w.ck != nil {
+		return w.ck.key
+	}
+	if w.q4 != nil {
+		return "q4k:" + w.name
+	}
+	return "kquant-raw:" + w.name
+}
+
+// resolveExpertWeight resolves one routed-expert projection to whichever tier is actually reachable:
+// the resident stores first, then — only when both are empty for this name — the R5/#5616 checkpoint
+// tier. The resident stores WIN, so a fully-resident checkpoint never touches the tier and this is
+// the pre-R5 path byte-for-byte; a model with no tier answers exactly as it did before.
+//
+// Resolution reads NOTHING in every case. That is what lets both consumers decide an expert is
+// reachable before staging any of it, and what keeps a checkpoint expert already resident in the
+// ring free of checkpoint IO.
+//
+// It is the single resolution both consumers share — the demand path (expertSwiGLUHAL, below) and
+// the R3 activated-set prefetch (expert_ring_prefetch.go) — because a prefetch that resolved
+// weights by a different rule than the GEMM would stage residents the GEMM then missed.
+func (s *Session) resolveExpertWeight(name string) (expertWeight, bool) {
+	if s == nil || s.M == nil {
+		return expertWeight{}, false
+	}
+	if qt := s.M.q4kw[name]; qt != nil {
+		return expertWeight{name: name, q4: qt}, true
+	}
+	if qt := s.M.kqw[name]; qt != nil {
+		return expertWeight{name: name, kq: qt}, true
+	}
+	ck, ok := s.M.expertCheckpoint.staging(name)
+	if !ok {
+		return expertWeight{}, false
+	}
+	return expertWeight{name: name, ck: ck}, true
+}
+
 // expertSwiGLUHAL keeps routed expert gate/up/down projections and the SwiGLU
 // activation on Backend. It admits only projections with an honest resident Q4_K
 // or one-time-staged F16 Q5_K/Q6_K representation.
@@ -249,39 +319,57 @@ func (s *Session) expertSwiGLUHAL(gateName, upName, downName string, x []float32
 	if s == nil || s.halW == nil || !s.supportsRoutedExpertKQuant() {
 		return nil, false
 	}
-	type expertWeight struct {
-		name string
-		q4   *q4kTensor
-		kq   *kQuantTensor
-	}
-	resolve := func(name string) (expertWeight, bool) {
-		if qt := s.M.q4kw[name]; qt != nil {
-			return expertWeight{name: name, q4: qt}, true
-		}
-		if qt := s.M.kqw[name]; qt != nil {
-			return expertWeight{name: name, kq: qt}, true
-		}
-		return expertWeight{}, false
-	}
 	weights := make([]expertWeight, 3)
 	for i, name := range []string{gateName, upName, downName} {
 		var found bool
-		weights[i], found = resolve(name)
+		weights[i], found = s.resolveExpertWeight(name)
 		if !found {
 			return nil, false
 		}
 	}
 
 	// Raw k-quant residency is already included in the model plan; no expanded F16 copy is created.
+	// A checkpoint-served projection goes through the SAME bounded staging as a resident one — same
+	// key, same dtype, same byte accounting — so the ring cannot tell the two apart and a hit costs
+	// no checkpoint read.
 	resident := func(w expertWeight) compute.Tensor {
-		if w.q4 != nil {
+		switch {
+		case w.q4 != nil:
 			return s.weightHALQ4K(w.name, w.q4)
+		case w.kq != nil:
+			return s.weightHALKQuant(w.name, w.kq)
+		default:
+			return s.weightHALStagedBounded(w.ck.key, w.name, w.ck.mk, w.ck.dt, w.ck.bytes)
 		}
-		return s.weightHALKQuant(w.name, w.kq)
 	}
-	gateW := resident(weights[0])
-	upW := resident(weights[1])
-	downW := resident(weights[2])
+	// One expert is THREE weights used together, so under a bounded routed-expert ring
+	// (Session.ExpertRingBytes, #5611) staging `up` could evict `gate` and Free a handle the GEMMs
+	// below still need. Hold each weight for the rest of this expert's computation and release it on
+	// return; without a ring every hold is a no-op and this is byte-for-byte the previous path.
+	//
+	// Under a SHARED ring (R7/#5618) staging and holding must be ONE span, not two statements: a peer
+	// agent's stage landing between them could evict the handle just returned and Free it — a
+	// use-after-free the per-session ring could not produce, because nothing else could touch it. The
+	// span is reentrant, so weightHALStagedBounded's own span nests inside this one, and it is a
+	// no-op under the per-session default.
+	staged := make([]compute.Tensor, len(weights))
+	for i, w := range weights {
+		r := s.routedExpertRing(w.name)
+		if r == nil {
+			staged[i] = resident(w)
+			continue
+		}
+		done := s.ringEnter(r)
+		staged[i] = resident(w)
+		r.hold(w.halKey())
+		done()
+		defer func(key string) {
+			done := s.ringEnter(r)
+			r.release(key)
+			done()
+		}(w.halKey())
+	}
+	gateW, upW, downW := staged[0], staged[1], staged[2]
 
 	hostX := compute.NewF32(compute.Default(), []int{len(x)}, append([]float32(nil), x...))
 	dx := s.Backend.Upload(hostX, compute.F32)

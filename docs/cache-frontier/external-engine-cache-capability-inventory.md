@@ -39,6 +39,7 @@ future adapter might add.
 | **llama.cpp / llama-server** | `unknown` | No in-tree cache observation adapter. It appears only as a pluggable on-device runtime and as a prefill *baseline*, neither of which observes or controls its cache. | `internal/engine/on_device.go` (named as an `OnDeviceRuntime`, no cache surface); `internal/benchscore` (prefill throughput baseline only). Observation adapter is item 35 / #1553. |
 | **Ollama** | `unknown` | No in-tree cache observation adapter. Named only as a pluggable local daemon and as an "Ollama-style" model-pull alias. | `internal/engine/on_device.go` (local daemon runtime, no cache surface); `internal/devindex/verbs.go` (`fak model pull` alias only). |
 | **LM Studio** | `unknown` | No in-tree adapter, observation lane, or cache-control surface at all. | Named only by `DEFAULT-ENABLEMENT-NEXT-50` row 31. Unknown by honest absence of evidence, not a guessed capability. |
+| **LMCache** | `unknown` | LMCache persists and reuses KV across CPU RAM, local storage, and remote backends, but fak has no adapter, observation feed, or control surface. | Upstream `LMCache/LMCache@4521c3f9f1b8` README documents the external tier and vLLM integration; in-tree absence keeps the verdict unknown rather than inferring support. |
 
 ## Provenance separation
 
@@ -90,7 +91,7 @@ classification, not a guess.
 
 `internal/enginecache/capability_inventory_test.go`
 (`TestExternalEngineCacheCapabilityInventory`) loads the JSONL and asserts (a) a
-row exists for each of SGLang, vLLM, llama.cpp, Ollama, and LM Studio, (b) every
+row exists for each of SGLang, vLLM, llama.cpp, Ollama, LM Studio, and LMCache, (b) every
 verdict is a member of the closed vocabulary, and (c) the SGLang/vLLM rows do not
 claim `exact evict`, tied to the live `enginecache.SupportsExactSpan(...) == false`
 fact so the inventory cannot drift from the code it summarizes. Captured `go test`

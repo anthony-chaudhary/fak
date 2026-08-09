@@ -6,7 +6,11 @@ description: "fak's control-plane claim-space (agent/file partitioning) and its 
 # The claim-space IS the disaggregation primitive — one partition algebra, two planes
 
 Date: 2026-07-08
-Status: synthesis / concept note. Draws a through-line between fak's **control-plane
+Status: synthesis / concept note **plus the first two unification leaves shipped** — the
+note's §6 gap list is no longer wholly open: `dispatchorder`'s compute-resource axis (#3268)
+and the shared compute admission kernel + `Submit`-seam contention pricing
+(`internal/computeadmit`, #3269) both landed, and §6 now records which rungs closed and which
+stayed open. Draws a through-line between fak's **control-plane
 claim-space** (the `dos arbitrate` lane-lease + `dispatchorder` fan-out pricer that decides
 which agent may touch which files) and its **compute-plane disaggregation** work (prefill/decode
 split, KV tiers, MoE expert-parallel, tensor-parallel). Asserts **no benchmark number**. Tags every
@@ -101,10 +105,21 @@ The pattern is exact: each row **claims a region, tests disjointness, and places
 the identical shape to `laneadmit.Decide` claiming a file tree. `ExpertParallelPlan` "fails closed on
 ranks outside [1,NumExperts]" is `regionadmit` refusing an out-of-taxonomy lane. `routeDecode`
 picking the best resident decode worker is cache-aware power-of-two routing — the compute twin of
-`dispatchorder` picking the freshest non-colliding candidate. What is missing is not the mechanisms;
-it is that **they don't share the admission kernel, the closed refusal vocabulary, or the collision
-pricer.** A prefill/decode role does not go through `dispatchorder.Plan`; an expert-rank collision is
-not priced as a `COLLISION_RISK`; a KV-tier overflow does not emit `RepartitionAdvice`.
+`dispatchorder` picking the freshest non-colliding candidate. What was missing was never the
+mechanisms; it was that **they did not share the admission kernel, the closed refusal vocabulary, or
+the collision pricer.**
+
+The **kernel half of that is now shipped** and the table's last column is what remains open. Since
+#3268 and #3269, an expert-rank collision *is* priced as a `COLLISION_RISK` and a compute-region
+overflow *does* emit `RepartitionAdvice` — via `dispatchorder.ComputeClaim` /
+`ComputeClaimsContend` and the shared `computeadmit.Decide(Request, []Lease, Taxonomy)`, which
+refuses an out-of-taxonomy rank band `POLICY_BLOCK`/`out_of_taxonomy` and a contended region
+`COLLISION_RISK` + advice. What is still open is **adoption, not algebra**: each placer keeps its
+own mechanism byte-identical (deliberately — that was the fence), so `routeDecode`,
+`ExpertParallelPlan`, `TPPlan`, and the KV-tier placer do not yet *call* the shared `Decide` from
+their own paths. `computeadmit` ships the request constructors that state each placer's claim
+(`ExpertRanksRequest`/`ExpertTaxonomy`, `DecodeWorkerRequest`/`DecodeTaxonomy`); the call sites are
+the `[SEAM-ONLY]` remainder.
 
 ## 4. The granularity axis: one primitive from a phone to a hyperscaler
 
@@ -138,34 +153,49 @@ independently-adjudicated calls (`modelroute.Combine` over first/vote/best-of/co
 queue (multi-engine / multi-queue)" — and `Ref{Taint, Scope}` with `ShareScope = Agent|Fleet|Tenant`.
 
 That is the seam where the two planes meet: a tool call is a **claim** (it wants a model, an engine, a
-queue, a share-scope), and `Submit` is where an admission kernel *could* price that claim against the
-live compute leases exactly as `dispatchorder` prices a work-unit against live file leases. Today it
-prices policy/reversibility/egress (the adjudicator) but **not compute-region contention** — that is
-the missing wire (§6).
+queue, a share-scope), and `Submit` is where an admission kernel prices that claim against the
+live compute leases exactly as `dispatchorder` prices a work-unit against live file leases. As of
+#3269 that wire exists: `computeadmit.SubmitAdmitter` is an `abi.Adjudicator` that resolves a call's
+compute claim (explicit `compute_*` `Meta` keys, else the bound `Engine`→region route) and refuses a
+contending one `COLLISION_RISK` inside the `Submit` fold, paired with the `abi.ResultAdmitter` half
+that frees the region when the holder's call **reaps** — so two co-targeted ensemble members
+serialize and hand off with no scheduler and no queue. `[SHIPPED]` as a decision, exercised against a
+real `kernel.New`/`Submit`/`Reap`; `[SEAM-ONLY]` as exposure, because both are driver-blind registry
+seams (`internal/kernel` may never import the leaf) and **no production wiring layer registers the
+gate yet** — installing it is one `RegisterAdjudicator` + `RegisterResultAdmitter` pair (§6).
 
-## 6. The genuine gap (honestly marked)
+## 6. The gap, and which rungs of it have since closed (honestly marked)
 
-The mechanisms exist on both planes; the **unification** is the gap. Concretely, none of the following
-exist in-tree today:
+The mechanisms exist on both planes; the **unification** was the gap. Two of its four rungs have since
+landed. Retagged against the tree:
 
-- **`[GAP]` A compute-resource axis on the claim.** `dispatchorder.Candidate` claims `Lane`/`Tree`/`Mode`
-  only. There is no way to claim "prefill role on device 0" or "expert ranks 4–7" and have `Plan` price
-  its collision. A compute claim would need a resource-class + address-range + mode of its own, reusing
-  the exact `collisionOf`/`maxSafeSet` machinery.
-- **`[GAP]` One admission kernel over both.** `laneadmit`/`regionadmit` decide file-tree admission;
-  `NativePDCluster.routeDecode`, `ExpertParallelPlan`, `TPPlan` each decide compute placement privately.
-  They do not call a shared `Decide`, so a compute-plane refusal cannot use the closed vocabulary and a
-  compute-plane overflow cannot emit `RepartitionAdvice`.
-- **`[GAP]` Contention pricing at `Submit`.** The route-before-adjudicate seam writes `Engine` but does
-  not consult live compute leases; two ensemble members targeting the same over-subscribed device are
-  not serialized the way two agents on the same tree are.
+- **`[SHIPPED]` A compute-resource axis on the claim** (#3268, closed). `dispatchorder.Candidate` no
+  longer claims `Lane`/`Tree`/`Mode` only: `ComputeClaim{Class, Range, Mode}` states "prefill role on
+  device 0" or "expert ranks 4–7", and `ComputeClaimsContend`/`RangeWithin` price its collision through
+  the same `collisionOf`/`maxSafeSet`/`RepartitionAdvice` machinery a file tree gets.
+- **`[SHIPPED]` kernel / `[SEAM-ONLY]` adoption — one admission kernel over both** (#3269).
+  `internal/computeadmit.Decide(Request, []Lease, Taxonomy)` is the compute-plane twin of
+  `laneadmit`/`regionadmit.Decide`: pure, strongest-rule-first, refusing `POLICY_BLOCK`/`out_of_taxonomy`
+  for a claim outside its class's declared address space (`ExpertParallelPlan`'s "ranks outside [1,N]"
+  fail-closed in shared form) and `COLLISION_RISK` + `RepartitionAdvice` for a contended region. The
+  *`[SEAM-ONLY]`* remainder is adoption: by design the placers' mechanisms stay byte-identical, so
+  `routeDecode`, `ExpertParallelPlan`, `TPPlan`, and the KV-tier placer still decide privately and do
+  not yet call `Decide` from their own paths.
+- **`[SHIPPED]` decision / `[SEAM-ONLY]` install — contention pricing at `Submit`** (#3269).
+  `computeadmit.SubmitAdmitter` consults live compute leases in the `Kernel.Submit` adjudication fold
+  and frees the region in the `Kernel.Reap` result-admission fold, so two ensemble members targeting the
+  same over-subscribed device serialize and hand off exactly as two agents on one tree do. Decision
+  only — no scheduler, no preemption, no queue. Claim-less calls defer untouched and the release half is
+  no-opinion, which is what makes installing it additive. Not yet installed by any production wiring
+  layer (§5).
 - **`[SEAM-ONLY]` The device backend under the collective seam** (unchanged from `THROUGHPUT-TRUST` §4):
   `DistComm` is real cross-process host-f32; NCCL/RDMA is greenfield and hardware-gated. Any hyperscaler
   row is gated on this regardless of the unification.
 
-Closing these does **not** require new inference kernels — the P/D, EP, TP, KV-tier mechanisms are all
-present. It requires teaching the *existing arbiter* to claim a compute region, and teaching the
-*existing compute partitioners* to answer through it.
+Closing these did **not** require new inference kernels — the P/D, EP, TP, KV-tier mechanisms were all
+already present. It required teaching the *existing arbiter* to claim a compute region (#3268, done) and
+giving the *existing compute partitioners* a shared answer to reach for (#3269, done). What remains is
+the last mile of both: the placers calling that answer, and a wiring layer installing the `Submit` gate.
 
 ## 7. Honest fences
 
@@ -175,9 +205,11 @@ present. It requires teaching the *existing arbiter* to claim a compute region, 
 - **"Claim-space", "resource request", "scheduler" are borrowed OS/distributed terms.** The scope here
   is fak's admission *decision* algebra, not a kernel scheduler with preemption/quanta. Same
   borrow-the-term / disclaim-the-scope discipline as `ReduceAllReduce`.
-- **The unification is a *design judgment this note recommends*, not a fact the tree states.** Today the
-  two planes are genuinely separate; §3's "same algebra" is an observation about shape, and §6 marks the
-  wiring as unbuilt. No code asserts "one admission kernel over files and compute."
+- **The unification began as a *design judgment this note recommended*; two rungs of it are now a fact
+  the tree states.** `internal/computeadmit` asserts exactly "one admission kernel over files and
+  compute" — but only as a **decision algebra**, and only where something asks it. The placers still
+  decide privately, nothing installs the `Submit` gate in a shipped process, and §3's "same algebra" for
+  the rows that have not been retagged remains an observation about shape.
 - **Single-box today.** Every compute-plane row above `[SHIPPED]` is CPU-ref / host-f32 / single-process
   unless a real device mesh exists; the multi-node and hyperscaler rows are `[SEAM-ONLY]`/`[GAP]`.
 
@@ -208,5 +240,6 @@ through one lens:
 - Not claiming fak disaggregates at hyperscale, or beats any engine, today. The device backend is
   greenfield (§6) and no number is asserted.
 - Not a decision doc. It records a through-line and the gap; the concrete "add a compute axis to the
-  claim" work is tracked under **epic #3259** (children #3268 the pricer axis, #3269 the shared admission
-  kernel, #3270 the compute-claim taxonomy, #3271 the polymodel fusion split).
+  claim" work is tracked under **epic #3259** — children #3268 the pricer axis (**landed**), #3269 the
+  shared admission kernel + `Submit`-seam pricing (**landed**, `internal/computeadmit`), #3270 the
+  compute-claim taxonomy, #3271 the polymodel fusion split.

@@ -80,6 +80,26 @@ type anthropicTurn struct {
 	// `fak` extension as the OpenAI wire, and a quarantine also raises an in-band
 	// note so the agent knows its tool output was paged out (not lost).
 	ResultAdmissions []ResultAdmission
+	// Compaction is the continuation contract for the compaction boundary this turn
+	// crossed (#2422), or nil when it crossed none. It rides the `fak` extension as the
+	// orchestrator-readable twin of the in-band `[fak]` boundary note the same record
+	// rendered into this turn's leading text block.
+	Compaction *CompactionContract
+}
+
+// fakExt builds this turn's `fak` response extension: the tool-activity view plus, on a turn
+// that crossed a compaction boundary, the continuation contract (#2422). A turn with neither
+// yields nil, so the `fak` key stays omitted rather than appearing empty.
+func (t *anthropicTurn) fakExt() *FakExt {
+	ext := fakExtFrom(t.Adjs, t.ResultAdmissions)
+	if t.Compaction == nil {
+		return ext
+	}
+	if ext == nil {
+		ext = &FakExt{}
+	}
+	ext.Compaction = t.Compaction
+	return ext
 }
 
 var anthropicStreamPingInterval = 15 * time.Second
@@ -121,6 +141,41 @@ func (s *Server) anthropicUpstreamCredential(r *http.Request) string {
 func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
+	}
+	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
+	// own route (#5528). Everything below — the passthrough turn, the planner turn, and
+	// both streaming arms — blocks for the whole multi-rank decode, and rank-local expert
+	// parallelism makes progress only if every rank runs the same forward pass. Without
+	// this, an Anthropic request left the front rank alone in a collective the other ranks
+	// were never released into. Placement matches the chat and legacy wires: after the
+	// method check, before anything reads the body (the helper reads and restores it).
+	//
+	// Inert on a single-rank serve — with FAK_EP_FANOUT_ADDRS unset there are no follower
+	// URLs and this is a no-op, which is why the gap survived. The consequence on real
+	// multi-rank hardware (hang, timeout, or a silently degraded single-rank answer) is
+	// inferred from the AllReduce contract, not measured.
+	//
+	// NOT under `serve --native` (#5532). The bridge's unit is one inbound body == one
+	// forward pass, which holds for the proxy turn below but NOT for the native branch: a
+	// follower rank is another process running the same binary with the same config, so a
+	// mirrored body reaches the same s.native branch and runs the WHOLE owned loop — its own
+	// N forward passes and its own tool dispatches through the kernel. Measured, not
+	// inferred: with one follower configured a two-turn native request drove 4 forward passes
+	// and 2 tool-result turns instead of 2 and 1. That is the exact property
+	// epFanoutExemptRoutes already refuses to mirror on /v1/fak/agent/sessions
+	// (epExemptOwnedLoop, #5528), and the same judgement applies here: a duplicated REAL tool
+	// side effect per rank is unrecoverable, while a leader alone in a collective is loud.
+	// So the owned-loop arm is left uncovered by the request mirror on purpose. Covering it
+	// wants the in-loop rank barrier that already exists — model.EPDecodeCoordinator /
+	// model.RunEPFollower (#4835), announced from Session.Prefill and Session.Step — which
+	// still has no serve wiring; until that lands, a native multi-rank serve enters its
+	// collectives on rank 0 alone.
+	if !s.native {
+		waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteMessages)
+		if !ok {
+			return
+		}
+		defer waitEPFanout()
 	}
 	req, ok := s.readAnthropicMessagesRequest(w, r)
 	if !ok {
@@ -274,7 +329,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
 		ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 		Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
-		Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+		Fak: turn.fakExt(),
 	})
 }
 
@@ -784,7 +839,14 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		opts.ResidentTokens = int(s.metrics.heldResidentPeakTokens(trace))
 		opts.SolvencyFloorTokens = s.compactSolvencyFloorTokens
 	}
-	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
+	// Survival-class gate (#2421): the byte-level compactor runs UNDER the per-page survival
+	// contract rather than on its own. compactWithSurvivalClasses is a drop-in for
+	// agent.CompactAnthropicHistoryWithOptions — same pair back, so the metric, restore-handle, and
+	// fired/reason handling below are unchanged — that first refuses a budget which cannot hold the
+	// PINNED floor (PIN_EVICT_REFUSED, body forwarded unchanged), then verifies a fired plan still
+	// carries every pinned page byte-identical, retrying against the evictable set only when it does
+	// not. A body with no classifiable eviction domain delegates straight through.
+	out, outcome := s.compactWithSurvivalClasses(req.Raw, opts, trace)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	// Restore handle: when this fire tombstoned the session's originating task, the outcome carries
@@ -840,10 +902,22 @@ func (s *Server) maybeAnchorAnthropicRaw(req *agent.AnthropicMessagesRequest, tr
 }
 
 func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesRequest) bool {
+	upgraded, _ := s.maybeUpgradeAnthropicCacheTTL1HScoped(req)
+	return upgraded
+}
+
+func (s *Server) maybeUpgradeAnthropicCacheTTL1HScoped(req *agent.AnthropicMessagesRequest) (bool, bool) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H {
-		return false
+		return false, false
 	}
-	out, outcome := agent.UpgradeAnthropicStableCacheTTL1h(req.Raw)
+	upgrade := agent.UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes
+	// Explicit control arm for #2186: retain the original system/tools-only
+	// behavior while leaving the managed-cache posture enabled. This makes a
+	// head-only versus message-prefix sweep independent of the lever-off arm.
+	if envEnabled("FAK_ABLATE_TTL_1H_HEAD_ONLY") {
+		upgrade = agent.UpgradeAnthropicStableCacheTTL1hHeadOnly
+	}
+	out, outcome := upgrade(req.Raw)
 	if outcome.Reason == agent.TTLUpgradeReasonNoStableBreakpoint {
 		// #2175: the flagship lever no-ops forever on a caller that sends zero cache_control,
 		// because upgrade only edits an EXISTING stable-head breakpoint. Compose place-then-upgrade
@@ -853,12 +927,12 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 		placed, placement := agent.PlaceAnthropicCacheBreakpointWithOutcome(req.Raw)
 		s.metrics.observePlacement(placement)
 		if placement.Reason == agent.BreakpointReasonNone {
-			if upgraded, upgradeOutcome := agent.UpgradeAnthropicStableCacheTTL1h(placed); upgradeOutcome.Reason == agent.TTLUpgradeReasonNone {
+			if upgraded, upgradeOutcome := upgrade(placed); upgradeOutcome.Reason == agent.TTLUpgradeReasonNone {
 				req.Raw = upgraded
 				// New outcome value distinct from "upgraded" (upgrade-only) and "placed" (placement-only
 				// from the compaction path), so a sweep can attribute the composed case on its own row.
 				s.metrics.observeCacheTTLUpgrade(cacheTTLUpgradePlacedAndUpgraded)
-				return true
+				return true, upgradeOutcome.UpgradedMessageBreakpoints > 0
 			}
 		}
 	}
@@ -866,10 +940,10 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 	// an active-but-never-eligible session is visible on /metrics instead of silent.
 	s.metrics.observeCacheTTLUpgrade(outcome.Reason)
 	if outcome.Reason != agent.TTLUpgradeReasonNone {
-		return false
+		return false, false
 	}
 	req.Raw = out
-	return true
+	return true, outcome.UpgradedMessageBreakpoints > 0
 }
 
 // maybeElideAnthropicRaw shrinks oversized tool_result bodies in the outbound passthrough body
@@ -1263,7 +1337,7 @@ func (s *Server) writeAnthropicTurn(w http.ResponseWriter, stream bool, turn *an
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
-			Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+			Fak: turn.fakExt(),
 		})
 		return
 	}
@@ -1423,6 +1497,27 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	if note := s.ctxExpenseNoteOnce(reqTrace); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
+	// Context-pressure PUSH (#2424): the step_advice verdict ctxvalue.go already computes
+	// every turn was pull-only at /v1/fak/ctxvalue, so an agent that never asked never heard
+	// it — least of all on the turn its window is about to turn over. When the verdict ENTERS
+	// checkpoint or rebuild, say so in-band once (ctxAdviceNoteOnce dedups per state entry),
+	// rendered from the SAME CtxStepAdvice the HTTP/MCP read returns so the pushed line and
+	// the pulled report for one trace cannot disagree. "" for any/bounded/unknown and for a
+	// state already reported, so a steady session's response is byte-for-byte unchanged.
+	if note := s.ctxAdviceNoteOnce(reqTrace); note != "" {
+		blocks = prependTextBlock(blocks, note)
+	}
+	// Compaction continuation contract (#2422): if this turn crossed a compaction boundary,
+	// tell the model what survived, what stays re-derivable, and — the whole point — that the
+	// shortened transcript is not a reason to wrap up. takeCompactionContract CONSUMES the
+	// boundary record, so the note fires exactly once per boundary; the same record rides the
+	// `fak.compaction` extension below for an orchestrator that reads no prose. Prepended LAST
+	// so it lands FIRST, ahead of the per-call notes: the model needs to know its history was
+	// shed before it reads a verdict about a single tool call.
+	compaction := s.takeCompactionContract(reqTrace)
+	if note := compactionContractNote(compaction); note != "" {
+		blocks = prependTextBlock(blocks, note)
+	}
 	// Echo the model the client asked for (Anthropic reflects the requested id);
 	// fall back to the gateway's configured model when the client omitted it.
 	if model == "" {
@@ -1444,6 +1539,13 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 		},
 		Adjs:             adjs,
 		ResultAdmissions: resultAdmissions,
+		// The SAME record the in-band note above rendered, carried on the turn so
+		// fakExt lands it under `fak.compaction` (#2422). Both channels must describe
+		// one boundary: an orchestrator that reads no prose and a model that reads
+		// nothing else have to be told the same thing, and taking the contract twice
+		// (once per channel) would let the take-once latch serve one and starve the
+		// other. nil on a turn that crossed no boundary, so the key stays omitted.
+		Compaction: compaction,
 	}, nil
 }
 
@@ -1550,7 +1652,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
-			Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+			Fak: turn.fakExt(),
 		})
 		return
 	}

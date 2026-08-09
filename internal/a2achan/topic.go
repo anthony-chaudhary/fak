@@ -67,6 +67,11 @@ func (b *Bus) Publish(ctx context.Context, from string, topic ChannelKey, body a
 		return v, 0
 	}
 	b.mu.Lock()
+	if !b.takeRateToken(from, topic) {
+		b.mu.Unlock()
+		atomic.AddInt64(&b.denied, 1)
+		return rateLimitedVerdict(), 0
+	}
 	n := 0
 	dropped := 0
 	for _, inbox := range b.subs[topic] {
@@ -80,6 +85,8 @@ func (b *Bus) Publish(ctx context.Context, from string, topic ChannelKey, body a
 	}
 	if n > 0 {
 		b.cond.Broadcast()
+	} else {
+		b.refundRateToken(from, topic)
 	}
 	b.mu.Unlock()
 	if n > 0 {

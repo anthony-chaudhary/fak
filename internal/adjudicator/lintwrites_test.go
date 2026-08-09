@@ -119,3 +119,46 @@ func TestLintWritesScopedToWholeFileWritesNotEdits(t *testing.T) {
 		t.Fatalf("edit of allowed tool: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
+
+func TestLintWritesMalformedDetailDoesNotEchoWrittenBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		content string
+		want    string
+		secret  string
+	}{
+		{
+			name:    "go string token",
+			path:    "internal/x/x.go",
+			content: "package x\nvar n = 1 \"SYNTHETIC_NOT_A_SECRET_line_one_of_the_file\"\n",
+			want:    "internal/x/x.go:2:11: invalid Go syntax",
+			secret:  "SYNTHETIC_NOT_A_SECRET_line_one_of_the_file",
+		},
+		{
+			name:    "go identifier token",
+			path:    "internal/x/x.go",
+			content: "package x\nconst n = 1 SYNTHETIC_NOT_A_SECRET_identifier\n",
+			want:    "internal/x/x.go:2:13: invalid Go syntax",
+			secret:  "SYNTHETIC_NOT_A_SECRET_identifier",
+		},
+		{
+			name:    "json byte",
+			path:    "policy.json",
+			content: "SYNTHETIC_NOT_A_SECRET_json",
+			want:    "policy.json:1:2: invalid JSON syntax",
+			secret:  "SYNTHETIC_NOT_A_SECRET_json",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lintWriteMalformed(tt.path, map[string]any{"content": tt.content})
+			if got != tt.want {
+				t.Fatalf("finding = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, tt.secret) {
+				t.Fatalf("finding echoed written bytes: %q", got)
+			}
+		})
+	}
+}

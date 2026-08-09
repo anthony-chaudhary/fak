@@ -1,0 +1,647 @@
+{
+  "schema": "fak-third-party-effects/1",
+  "regenerate": "FAK_EFFECTS_DUMP=1 go test ./internal/architest -run TestEffectRegisterDump -v (review every field before committing; license_record and enforcement are human-owned)",
+  "rows": [
+    {
+      "class": "ci_action",
+      "reference": "actions/add-to-project@v1.0.2",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/attest-build-provenance@v1",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Ironic but real: the action that attests release provenance is itself referenced at a moving major tag."
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/cache@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/checkout@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/download-artifact@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/setup-go@v5",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/setup-python@v5",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "actions/upload-artifact@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "docker/build-push-action@v6",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "docker/login-action@v3",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
+      "reference": "docker/setup-buildx-action@v3",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "container_base",
+      "reference": "gcr.io/distroless/static-debian12:nonroot",
+      "consumer_domains": [
+        "Dockerfile"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Runtime base of the shipped default image; a moving tag, so the published image is not byte-reproducible from this reference alone."
+    },
+    {
+      "class": "container_base",
+      "reference": "golang:1.26",
+      "consumer_domains": [
+        "Dockerfile"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "container_base",
+      "reference": "nvidia/cuda:12.6.2-devel-ubuntu22.04",
+      "consumer_domains": [
+        "Dockerfile.cuda"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "container_base",
+      "reference": "nvidia/cuda:12.6.2-runtime-ubuntu22.04",
+      "consumer_domains": [
+        "Dockerfile.cuda"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "downloaded_asset",
+      "reference": "https://developer.download.nvidia.com/compute/cuda/repos/${}/cuda-keyring_1.1-1_all.deb",
+      "consumer_domains": [
+        "scripts"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "downloaded_asset",
+      "reference": "https://go.dev/dl/go${}.linux-amd64.tar.gz",
+      "consumer_domains": [
+        "Dockerfile.cuda"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Go toolchain tarball for the CUDA image, whose build is already outside the reproducibility guarantee (docs/supply-chain-reproducibility.md)."
+    },
+    {
+      "class": "downloaded_asset",
+      "reference": "https://tailscale.com/install.sh",
+      "consumer_domains": [
+        "scripts"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Fetched and piped straight into sh. No digest is recorded, so the bytes that execute are whatever upstream serves at fetch time."
+    },
+    {
+      "class": "go_module",
+      "reference": "golang.org/x/sys@v0.46.0",
+      "consumer_domains": [
+        "go.mod"
+      ],
+      "status": "used",
+      "pin": "immutable",
+      "digest": "",
+      "license_record": "docs/sbom/fak.spdx.json",
+      "enforcement": "internal/architest/sbom_drift_test.go (version + purl + download-url drift)"
+    },
+    {
+      "class": "go_module",
+      "reference": "golang.org/x/term@v0.44.0",
+      "consumer_domains": [
+        "go.mod"
+      ],
+      "status": "used",
+      "pin": "immutable",
+      "digest": "",
+      "license_record": "docs/sbom/fak.spdx.json",
+      "enforcement": "internal/architest/sbom_drift_test.go (version + purl + download-url drift)"
+    },
+    {
+      "class": "package_runner",
+      "reference": "go:golang.org/x/perf/cmd/benchstat@latest",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "package_runner",
+      "reference": "go:golang.org/x/vuln/cmd/govulncheck@latest",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "package_runner",
+      "reference": "pip:dos-kernel",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "package_runner",
+      "reference": "pip:huggingface_hub[hf_transfer,hf_xet]",
+      "consumer_domains": [
+        "scripts"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "package_runner",
+      "reference": "pip:pip",
+      "consumer_domains": [
+        "scripts"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "bash",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "claude",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "An agent CLI this repo shells out to; host-supplied, so its version and behaviour are outside this tree's control entirely."
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "cmd",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "curl.exe",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "docker",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "dos",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "gh",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "git",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "go",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "gofmt",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "harbor",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "launchctl",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "node",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "npm",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "npx",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "nvidia-smi",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "note": "Vendor driver utility, present only on GPU hosts; absence is handled, but its output format is an unpinned external contract."
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "open",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "powershell",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "powershell.exe",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "ps",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "python",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "schtasks.exe",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "sh",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "systemctl",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "tailscale",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "taskkill",
+      "consumer_domains": [
+        "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "xdg-open",
+      "consumer_domains": [
+        "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    }
+  ],
+  "exclusions": []
+}

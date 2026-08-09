@@ -1,0 +1,6 @@
+[
+  {"tool":"shell","arguments":{"command":"printf ready"},"admitted":true,"successful":true},
+  {"tool":"shell","arguments":{"command":"git status --short"},"admitted":true,"successful":true},
+  {"tool":"shell","arguments":{"command":"rm scratch.tmp"},"admitted":true,"successful":true},
+  {"tool":"read_file","arguments":{"path":"README.md"},"admitted":true,"successful":true}
+]

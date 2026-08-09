@@ -264,3 +264,80 @@ groups:
         annotations:
           summary: "fak gateway kernel operation p95 latency is high"
           description: "Gateway syscall/adjudicate/admit p95 latency is {{ $value | printf \"%.2f\" }}s for 5m. Split by operation in the dashboard."
+
+  # ---------------------------------------------------------------------------
+  # Fleet sessions (`fak fleet metrics`, scrape job fak_fleet). These watch the
+  # per-SESSION tier no other job carries: the gateway rules above describe one
+  # process, and the fleet_* rules describe aggregate scores. A wedged session is
+  # invisible to both.
+  - name: fak_fleet_sessions
+    rules:
+      - alert: FakFleetExporterDown
+        expr: up{job="fak_fleet"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak fleet exporter is not scrapeable"
+          description: "The fak_fleet job has been down for 5m, so every fleet-session panel is blank. Start it with `fak fleet metrics --serve --addr 127.0.0.1:9098`. This is an OBSERVABILITY outage, not a fleet outage -- the fleet may be perfectly healthy and unwatched."
+
+      # The load-bearing fleet alert. A STALLED session claims a running state while
+      # its durable heartbeat has stopped advancing: it holds a seat, a lane lease and
+      # an account slot while producing nothing. `for: 15m` is well past the 5m stale
+      # window the exporter classifies on, so a session merely between turns at the
+      # moment of one scrape cannot trip it.
+      - alert: FakFleetSessionsStalled
+        expr: fak_fleet_sessions_by_liveness{liveness="stalled"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak fleet has stalled sessions"
+          description: "{{ $value }} session(s) claim a running state but their heartbeat has not advanced for 15m+. Open the fleet overview (uid fak-fleet-overview), find them in the live-session table, and drill down. `fak fleet monitor` classifies them from process evidence; `fak fleet replace --session S` renders a replacement."
+
+      # Every session stalled at once is a different failure from some sessions
+      # stalling: it points at the harness, the account ceiling or the host, not at
+      # one wedged agent.
+      - alert: FakFleetAllSessionsStalled
+        expr: fak_fleet_sessions > 0 and fak_fleet_sessions_by_liveness{liveness="stalled"} == fak_fleet_sessions
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "every fak fleet session is stalled"
+          description: "All {{ $value }} session(s) in the durable inventory are stalled for 10m+. Suspect a fleet-wide cause (account ceiling, harness wall, host wedge) rather than a per-session one; check `fak fleet capacity` and the account chips first."
+
+      # The registry read failing is NOT the same as an empty fleet, and the two look
+      # identical on every other panel -- which is the whole reason the exporter emits
+      # this gauge separately.
+      - alert: FakFleetRegistryUnreadable
+        expr: fak_fleet_registry_readable == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak fleet exporter cannot read the durable session registry"
+          description: "The exporter is up but could not read the session registry for 10m, so the live panels show zero sessions while knowing nothing. Do NOT read the fleet as idle. Check the registry path and its permissions."
+
+      # A truncated per-session tier renders a table that LOOKS complete. Alerting on
+      # the confession is the only way an operator learns the view is partial.
+      - alert: FakFleetSessionSeriesTruncated
+        expr: fak_fleet_sessions_truncated > 0
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "fak fleet per-session panels are truncated"
+          description: "{{ $value }} session(s) are outside the exporter's --max-sessions cardinality bound, so the live-session table is INCOMPLETE. Either the fleet outgrew the default bound (raise --max-sessions) or the durable registry is accumulating dead rows and needs collecting."
+
+      # The historical drill-down is only as good as its join key. Sustained zero
+      # coverage means every per-session cost panel is empty while the fleet totals
+      # look fine -- a silent hole this makes loud.
+      - alert: FakFleetDrilldownCoverageZero
+        expr: fak_fleet_usage_sessions_identified == 0 and fak_fleet_usage_rows > 0
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "no fak fleet usage row carries a session id"
+          description: "The gateway-usage ledger has {{ $value }} folded rows but none carries a session_id, so every per-session cost/cache panel is blank while the fleet roll-ups are populated. `fak serve` rows are unidentified by design (one process, many sessions); a fleet of `fak guard` sessions should be producing identified rows."

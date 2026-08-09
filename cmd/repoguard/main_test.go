@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -120,5 +121,47 @@ func TestHookOffModeDisables(t *testing.T) {
 	rc, out, _ := runHookString(t, `{"tool_name":"Bash","cwd":"`+wsTest+`","tool_input":{"command":"rm -rf ../tools"}}`)
 	if rc != 0 || strings.TrimSpace(out) != "" {
 		t.Errorf("off mode: rc=%d out=%q, want (0, \"\")", rc, out)
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("synthetic read failure") }
+
+func TestHookMalformedPayloadHasDistinctCountableReason(t *testing.T) {
+	journal := t.TempDir() + "/decisions.jsonl"
+	t.Setenv("FAK_REPO_GUARD_DECISIONS", journal)
+
+	rc, out, errOut := runHookString(t, `{not-json`)
+	if rc != 0 || strings.TrimSpace(out) != "" {
+		t.Fatalf("malformed payload must fail open: rc=%d out=%q", rc, out)
+	}
+	if !strings.Contains(errOut, "malformed hook payload, allowing") || strings.Contains(errOut, "internal error") {
+		t.Fatalf("stderr = %q, want distinct malformed-payload label", errOut)
+	}
+
+	var summary bytes.Buffer
+	if rc := runSummary(journal, 10, true, &summary); rc != 0 {
+		t.Fatalf("summary rc=%d output=%s", rc, summary.String())
+	}
+	var got struct {
+		ByReason map[string]int `json:"by_reason"`
+	}
+	if err := json.Unmarshal(summary.Bytes(), &got); err != nil {
+		t.Fatalf("decode summary: %v (%s)", err, summary.String())
+	}
+	if got.ByReason["MALFORMED_HOOK_PAYLOAD"] != 1 {
+		t.Fatalf("by_reason=%v, want one MALFORMED_HOOK_PAYLOAD", got.ByReason)
+	}
+}
+
+func TestHookInternalReadErrorKeepsGuardBugLabel(t *testing.T) {
+	var out, errOut bytes.Buffer
+	rc := runHook(failingReader{}, &out, &errOut)
+	if rc != 0 || strings.TrimSpace(out.String()) != "" {
+		t.Fatalf("internal error must fail open: rc=%d out=%q", rc, out.String())
+	}
+	if !strings.Contains(errOut.String(), "internal error, allowing (synthetic read failure)") || strings.Contains(errOut.String(), "malformed hook payload") {
+		t.Fatalf("stderr = %q, want unchanged internal-error label", errOut.String())
 	}
 }

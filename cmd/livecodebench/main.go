@@ -499,9 +499,58 @@ func fetchHFRows(dataset, config, split string, offset, length int) ([]byte, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("datasets-server HTTP %d for dataset=%s config=%s", resp.StatusCode, dataset, config)
+		return nil, fmt.Errorf("%s", rowsFetchFailure(resp.StatusCode, dataset, config, datasetViewerRefusal(dataset)))
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// rowsFetchFailure renders the /rows failure a caller sees. A bare
+// "datasets-server HTTP 404" is a dead end for the dataset this tool exists to
+// read: livecodebench/code_generation_lite ships a Python loading script, so the
+// dataset viewer refuses to serve it AT ALL and /rows answers 404 for every
+// config — the release pin is never the problem, and re-probing release_v1..v6
+// (the obvious next move) burns time and finds nothing. The actionable reason
+// only appears on /splits, so fold it in here and name the offline path that
+// does work. Pure so the wording is unit-tested without the network.
+func rowsFetchFailure(status int, dataset, config, viewerRefusal string) string {
+	base := fmt.Sprintf("datasets-server HTTP %d for dataset=%s config=%s", status, dataset, config)
+	if status != http.StatusNotFound || strings.TrimSpace(viewerRefusal) == "" {
+		return base
+	}
+	return base + fmt.Sprintf(": the dataset viewer cannot serve this dataset (%s), so --fetch"+
+		" cannot work for ANY --release-version. Download the rows out of band"+
+		" (e.g. `hf download %s --repo-type dataset --local-dir DIR`) and replay them"+
+		" with `--from FILE`, which needs no network", viewerRefusal, dataset)
+}
+
+// datasetViewerRefusal asks the datasets-server /splits endpoint why a dataset
+// is unreadable and returns its human-readable error, or "" if it has none to
+// give. Best-effort and short-timeout: this runs only to enrich an error that
+// has already happened, so a failure here must never mask the original one.
+func datasetViewerRefusal(dataset string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	u := "https://datasets-server.huggingface.co/splits?dataset=" + url.QueryEscape(dataset)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Error)
 }
 
 // preflightInputFromFlags probes the live host. The classifier

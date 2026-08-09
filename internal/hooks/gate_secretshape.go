@@ -47,6 +47,10 @@ var textExt = map[string]bool{
 func gateSecretShape(d *StagedDiff) ([]Finding, error) {
 	seen := map[string]bool{} // dedupe on (file, hit) like the Python report
 	var findings []Finding
+	// This gate's own filter is narrower than "every staged file": it judges TEXT files only.
+	// Counting after that filter is what makes "scanned forty" distinguishable from "scanned
+	// none" for a security gate whose clean payload is otherwise identical either way (#5602).
+	scanned := 0
 	for _, f := range d.sortedFiles() {
 		norm := strings.ReplaceAll(f, "\\", "/")
 		if selfRefShape[norm] {
@@ -55,10 +59,12 @@ func gateSecretShape(d *StagedDiff) ([]Finding, error) {
 		if !textExt[lowerExt(norm)] {
 			continue
 		}
+		scanned++
 		for _, al := range d.AddedByFile[f] {
 			findings = append(findings, shapeHitFindings(seen, f, al.New, al.Text)...)
 		}
 	}
+	d.NoteCandidates("SECRET_SHAPE", scanned, "staged text file(s) scanned")
 	return findings, nil
 }
 

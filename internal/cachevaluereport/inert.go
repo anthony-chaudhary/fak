@@ -33,9 +33,10 @@ const InertSchema = "fak-cache-configured-but-inert/1"
 // The closed lever vocabulary this loop diffs. Each lever pairs a CONFIG intent (was it
 // armed this session) with the single OBSERVED effect that proves it did something.
 const (
-	// LeverManagedCache — managed-cache posture was ACTIVE; its effect is WITNESSED
-	// KV-prefix realized reuse. A byte-identical body turn-over-turn (reuse ratio 0)
-	// under an active posture is the lever doing nothing.
+	// LeverManagedCache — managed-cache posture was ACTIVE; its effect is realized cache
+	// reuse (fak-authored KV-prefix reuse, the provider's own prompt-cache read, or both).
+	// Nothing reused turn-over-turn (reuse ratio 0) under an active posture is the lever
+	// doing nothing.
 	LeverManagedCache = "managed_cache"
 	// LeverDeferColdTools — --defer-cold-tools was configured on; its effect is cold
 	// tool defs actually deferred. Zero cold-defers under the flag is inert.
@@ -63,9 +64,10 @@ const (
 
 // SessionLevers is one session's CONFIG intent crossed with its OBSERVED effect — the
 // diff loop's input pair. The intent flags say which levers were armed; the effect
-// counters say what each actually did. ReuseRatio is the WITNESSED realized KV-prefix
-// reuse (reused/prompt, 0 = byte-identical body), supplied already computed by the
-// caller so this fold stays pure.
+// counters say what each actually did. ReuseRatio is the realized reuse share
+// (reused/prompt, 0 = nothing was reused turn-over-turn), supplied already computed by
+// the caller so this fold stays pure — see usageRowReuseRatio for what the durable-row
+// caller counts as reuse.
 type SessionLevers struct {
 	Session string `json:"session"` // session id/label for the finding
 
@@ -219,35 +221,63 @@ func (rep *InertReport) inertSummary() string {
 	return strings.Join(parts, ", ")
 }
 
-// LeversFromUsageRow derives a SessionLevers diff-input from a durable gateway-usage
-// exit row for the ONE managed-cache lever that row unambiguously witnesses today: the
-// 1h-TTL upgrade. The lever is "enabled" when it left durable evidence this session — an
-// actual upgrade or a refusal-reason row — the same posture-active witness
-// FoldWeeklyDigest trusts (a zero upgraded count WITH refusal reasons is the "armed but
-// every head refused" session, i.e. CONFIGURED_BUT_INERT). UpgradesFired is the
-// witnessed upgrade count.
+// LeversFromUsageRow derives a SessionLevers diff-input from a durable gateway-usage exit
+// row, arming all THREE managed-cache levers off that row's own intent fields (#4349).
 //
-// HONESTY FENCE — what this adapter does NOT set, and why:
-//   - ManagedCacheActive / ReuseRatio: the durable ledger's WITNESSED reuse (KVPrefix*)
-//     is fak-authored in-kernel KV reuse; a provider-prompt-cache-only session
-//     legitimately shows KVPrefix reuse 0, so treating that as an inert managed_cache
-//     lever would be a FALSE "not working". This adapter leaves that lever unarmed until
-//     a durable managed-cache-posture intent flag exists (follow-on).
-//   - DeferColdTools / ColdDefers: the --defer-cold-tools intent and the cold-defer
-//     effect are not in gatewayusageledger.Counters at all yet (the
-//     fak_gateway_tool_defer_* counters live only on the in-process /metrics) —
-//     follow-on.
+// Each lever's intent comes from the narrowest durable witness the row carries:
+//   - cache_ttl_upgrade is "enabled" when the lever left durable evidence this session —
+//     an actual upgrade or a refusal-reason row — the same active-lever witness
+//     FoldWeeklyDigest trusts (a zero upgraded count WITH refusal reasons is the "armed
+//     but every head refused" session, i.e. CONFIGURED_BUT_INERT).
+//   - managed_cache and defer_cold_tools read their explicit armed flags
+//     (Counters.ManagedCacheActive / Counters.DeferColdToolsArmed). Those fields exist
+//     precisely so intent is never INFERRED here: the previous version of this adapter
+//     left both levers unarmed because deriving managed-cache intent from KVPrefix reuse
+//     alone false-positives on a provider-prompt-cache-only session (legitimately zero
+//     fak-authored KV reuse), and because the --defer-cold-tools intent and its
+//     cold-defer effect were not in the durable row at all.
 //
-// The generic FoldConfiguredButInert covers all three levers (unit-tested); only this
-// durable-row bridge is currently narrowed to the upgrade lever.
+// HONESTY FENCE, still: an armed flag is `omitempty` on the wire, so a row that predates
+// those fields is indistinguishable from a measured lever-OFF row. Both leave the lever
+// unarmed here, which is the safe direction — this loop can under-report an inert lever on
+// an old row, never invent one.
 func LeversFromUsageRow(r gatewayusageledger.Row) SessionLevers {
 	c := r.Counters
 	upgradeArmed := c.CacheTTLUpgradesUpgraded > 0 || len(c.CacheTTLUpgradeReasons) > 0
 	return SessionLevers{
-		Session:        usageRowLabel(r),
-		UpgradeEnabled: upgradeArmed,
-		UpgradesFired:  c.CacheTTLUpgradesUpgraded,
+		Session:            usageRowLabel(r),
+		ManagedCacheActive: c.ManagedCacheActive,
+		DeferColdTools:     c.DeferColdToolsArmed,
+		UpgradeEnabled:     upgradeArmed,
+		UpgradesFired:      c.CacheTTLUpgradesUpgraded,
+		ColdDefers:         c.DeferColdCount,
+		ReuseRatio:         usageRowReuseRatio(c),
 	}
+}
+
+// usageRowReuseRatio is the row's REALIZED reuse share — the effect half of the
+// managed_cache lever. It deliberately counts BOTH reuse mechanisms an active managed-cache
+// session can pay off through: fak-authored in-kernel KV-prefix reuse (WITNESSED,
+// KVPrefixReusedTokens) and the provider's own prompt-cache read (OBSERVED,
+// CachedPromptTokens, which is what the 1h-TTL splice and a pinned prompt_cache_key protect).
+// Counting only the first is the exact false "not working" this bridge must not emit: a
+// passthrough session whose whole payoff is provider-side shows zero KV reuse.
+//
+// The denominator sums the prompt tokens each mechanism saw, so on a row that somehow
+// booked both the share is a blend rather than a per-mechanism ratio — FoldWeeklyDigest is
+// the reader for a mechanism-split number. That imprecision cannot move this fold's answer:
+// FoldConfiguredButInert only reads the zero/nonzero boundary, and the numerator is zero
+// exactly when neither mechanism reused a token.
+func usageRowReuseRatio(c gatewayusageledger.Counters) float64 {
+	reused := c.KVPrefixReusedTokens + c.CachedPromptTokens
+	if reused == 0 {
+		return 0
+	}
+	seen := c.KVPrefixPromptTokens + c.CachedPromptTokens + c.InputTokens + c.CacheCreationTokens
+	if seen == 0 {
+		return 0
+	}
+	return float64(reused) / float64(seen)
 }
 
 // usageRowLabel names a session for a finding, preferring the session id and falling
@@ -260,7 +290,7 @@ func usageRowLabel(r gatewayusageledger.Row) string {
 }
 
 // FoldUsageRowsConfiguredButInert runs the CONFIGURED_BUT_INERT loop over durable
-// gateway-usage rows: it diffs the upgrade lever (the one these rows witness today) for
+// gateway-usage rows: it diffs every lever those rows arm (all three since #4349) for
 // every exit row, skipping periodic/carryforward rows exactly as FoldWeeklyDigest does
 // (a periodic row double-counts a live session; a carryforward is a synthetic pre-cut
 // sum, not a session). It is the file-fed sibling of FoldConfiguredButInert.

@@ -191,8 +191,20 @@ func (p *InKernelPlanner) ElideKVSpans(messages []Message, plan ctxplan.Plan) (f
 		// O(1)-residency invariant). Otherwise residency shrank but the never-saw invariant does not
 		// hold, so report false instead of asserting it.
 		exact := p.residencyIsExact(sess, segIDs, plan)
-		log.Printf("inkernel_chat kvmmu-elide model=%s elided=%d freed=%dpos reposition_exact=%v",
-			p.modelID, len(plan.Elided), freed, exact)
+		// #5123: emit the #3901 retained-mass gauge for THIS elision — the served path's
+		// eviction/selection decision. It grades the resident view the planner kept against the
+		// attention mass actually witnessed over the pre-elision span set, so the line answers
+		// "was the set we kept the valuable one?" next to "how much did we free?". Fail-closed:
+		// with no attention observer installed (#852 is default-off) the gauge is unavailable and
+		// the fraction is reported as absent rather than as a fabricated 0 or 1.
+		g := bridge.LastRetainedMass()
+		if g.Available {
+			log.Printf("inkernel_chat kvmmu-elide model=%s elided=%d freed=%dpos reposition_exact=%v retained_mass_fraction=%.4f token_fraction=%.4f",
+				p.modelID, len(plan.Elided), freed, exact, g.Fraction, g.TokenFraction)
+		} else {
+			log.Printf("inkernel_chat kvmmu-elide model=%s elided=%d freed=%dpos reposition_exact=%v retained_mass_fraction=unavailable",
+				p.modelID, len(plan.Elided), freed, exact)
+		}
 		return freed, exact
 	})
 }

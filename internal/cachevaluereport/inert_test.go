@@ -196,6 +196,97 @@ func TestFoldUsageRowsConfiguredButInert_EffectiveAndSkipsPeriodic(t *testing.T)
 	}
 }
 
+// The #4349 done condition, half one: a captured gateway-usage EXIT row from a session
+// with --defer-cold-tools ARMED but 0 cold-defers folds to CONFIGURED_BUT_INERT naming
+// defer_cold_tools. Before the durable intent flag existed this row was indistinguishable
+// from a session that never armed the lever, so the finding could not be raised at all.
+func TestFoldUsageRowsConfiguredButInert_CapturedArmedDeferZeroColdDefers(t *testing.T) {
+	rows := []gatewayusageledger.Row{{
+		Kind: "exit", SessionType: "guard", SessionID: "guard-defer-inert", PID: 71, UnixMillis: 1_700_000_000_000,
+		Counters: gatewayusageledger.Counters{
+			DeferColdToolsArmed: true,
+			DeferColdCount:      0, // armed, deferred nothing — the inert lever
+			// Reuse is healthy and the upgrade lever is untouched, so defer is the ONLY
+			// dead lever: this pins that the new field alone drives the finding.
+			KVPrefixPromptTokens: 1000, KVPrefixReusedTokens: 600,
+			ManagedCacheActive: true,
+		},
+	}}
+	r := FoldUsageRowsConfiguredButInert(rows, fixedNow)
+	if r.Verdict != VerdictConfiguredButInert {
+		t.Fatalf("verdict = %q, want %q; report=%+v", r.Verdict, VerdictConfiguredButInert, r)
+	}
+	if f := findingFor(r, "guard-defer-inert", LeverDeferColdTools); f == nil {
+		t.Fatalf("want a %s finding on the armed-but-inert defer row; got %+v", LeverDeferColdTools, r.Findings)
+	}
+	if f := findingFor(r, "guard-defer-inert", LeverManagedCache); f != nil {
+		t.Fatalf("managed_cache reused 600/1000 tokens — it must NOT be named inert: %+v", f)
+	}
+}
+
+// Half two: an ACTIVE managed-cache posture that realized zero reuse folds to
+// CONFIGURED_BUT_INERT naming managed_cache. The explicit posture flag is what makes this
+// answerable — inferring intent from KVPrefix reuse alone cannot tell "posture off" from
+// "posture on, reused nothing".
+func TestFoldUsageRowsConfiguredButInert_CapturedActivePostureZeroReuse(t *testing.T) {
+	rows := []gatewayusageledger.Row{{
+		Kind: "exit", SessionType: "serve", SessionID: "serve-posture-inert", PID: 72, UnixMillis: 1_700_000_001_000,
+		Counters: gatewayusageledger.Counters{
+			ManagedCacheActive:   true,
+			KVPrefixPromptTokens: 5000, KVPrefixReusedTokens: 0,
+			CachedPromptTokens: 0, // nothing reused by EITHER mechanism
+			InputTokens:        5000,
+		},
+	}}
+	r := FoldUsageRowsConfiguredButInert(rows, fixedNow)
+	if r.Verdict != VerdictConfiguredButInert {
+		t.Fatalf("verdict = %q, want %q; report=%+v", r.Verdict, VerdictConfiguredButInert, r)
+	}
+	if f := findingFor(r, "serve-posture-inert", LeverManagedCache); f == nil {
+		t.Fatalf("want a %s finding on the active-posture zero-reuse row; got %+v", LeverManagedCache, r.Findings)
+	}
+}
+
+// The false "not working" this bridge must never emit: a provider-prompt-cache-only
+// session legitimately reuses ZERO fak-authored KV-prefix tokens while its whole payoff
+// lands in CachedPromptTokens. Counting only KV reuse would call that active posture
+// inert. It is not — and this is the case that kept the lever unarmed before #4349.
+func TestFoldUsageRowsConfiguredButInert_ProviderCacheOnlyIsNotInert(t *testing.T) {
+	rows := []gatewayusageledger.Row{{
+		Kind: "exit", SessionType: "guard", SessionID: "guard-provider-cache", PID: 73, UnixMillis: 1_700_000_002_000,
+		Counters: gatewayusageledger.Counters{
+			ManagedCacheActive:   true,
+			KVPrefixPromptTokens: 0, KVPrefixReusedTokens: 0, // no fak-authored KV reuse at all
+			CachedPromptTokens: 4000, // the provider read its own cache — the lever DID pay off
+			InputTokens:        1000,
+		},
+	}}
+	r := FoldUsageRowsConfiguredButInert(rows, fixedNow)
+	if f := findingFor(r, "guard-provider-cache", LeverManagedCache); f != nil {
+		t.Fatalf("provider-side reuse is real reuse — managed_cache must not be named inert: %+v", f)
+	}
+	if r.Verdict != VerdictClean {
+		t.Fatalf("verdict = %q, want %q (the only armed lever paid off)", r.Verdict, VerdictClean)
+	}
+}
+
+// An unarmed row stays silent: absent intent flags read NOT INSTRUMENTED, never "the
+// lever was off and therefore inert". This is the under-report-rather-than-invent
+// direction the omitempty fence buys.
+func TestFoldUsageRowsConfiguredButInert_UnarmedRowNamesNothing(t *testing.T) {
+	rows := []gatewayusageledger.Row{{
+		Kind: "exit", SessionType: "serve", SessionID: "serve-bare",
+		Counters: gatewayusageledger.Counters{InputTokens: 900},
+	}}
+	r := FoldUsageRowsConfiguredButInert(rows, fixedNow)
+	if len(r.Findings) != 0 {
+		t.Fatalf("a row with no lever armed must name nothing; got %+v", r.Findings)
+	}
+	if r.Verdict != VerdictInsufficient {
+		t.Fatalf("verdict = %q, want %q", r.Verdict, VerdictInsufficient)
+	}
+}
+
 // The render is deterministic and names each inert lever.
 func TestRenderConfiguredButInert_NamesLevers(t *testing.T) {
 	sessions := []SessionLevers{{Session: "s1", DeferColdTools: true, ColdDefers: 0}}

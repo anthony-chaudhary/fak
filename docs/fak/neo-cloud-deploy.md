@@ -15,7 +15,7 @@ It sits between two neighbours that look similar and are not:
   fronts a hosted model **API** (`fak serve --provider openai --base-url <cloud /v1>`
   for Bedrock, Vertex, Groq, Together, Fireworks). No GPU of yours — you proxy someone
   else's tokens.
-- [Neo-cloud reference architecture](../vendor/neo-cloud-reference-architecture.md) is
+- [Neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) is
   the **binding layer**: how a neo-cloud operator exposes many accelerator *backends*
   through one control plane. That is about the backends behind the gateway; this page
   is about standing the gateway up on one rented box.
@@ -50,16 +50,24 @@ image, built from [`Dockerfile.cuda`](https://github.com/anthony-chaudhary/fak/b
 > **Image status (read this first).** The versioned `-cuda` image is **not yet published**
 > — the first `<version>-cuda` tag publishes with the first release cut after
 > `Dockerfile.cuda` landed (via `.github/workflows/release-cuda-container.yml`). Until
-> then, **build your own**, matching the compute-capability arch to the card you rented:
+> then, **build your own**. The plain build takes no arch flag and covers every
+> supported card:
 >
 > ```bash
-> # sm_80 = A100 · sm_89 = Ada/L4 (default) · sm_90 = H100/H200 · sm_100 = B200
-> docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t REGISTRY/fak:cuda .
+> docker build -f Dockerfile.cuda -t REGISTRY/fak:cuda .
 > ```
 >
-> The image compiles kernels for **one** arch (default `sm_89`); the authoritative set
-> is `internal/compute/cuda_arch.txt`. A mismatch between the built arch and the rented
-> card is the first thing to check when a GPU pod won't decode.
+> With `CUDA_ARCH` unset the builder compiles a cubin for **every** arch in
+> `internal/compute/cuda_arch.txt` — `sm_80` (A100) · `sm_89` (Ada L4/L40, RTX 40xx) ·
+> `sm_90` (H100/H200) · `sm_100` (B100/B200) · `sm_120` (consumer Blackwell, RTX 50xx) —
+> plus a `compute_120` PTX floor the driver JITs forward onto a newer card. That is the
+> build to use when you do not know in advance which card you will be handed.
+>
+> Passing `--build-arg CUDA_ARCH=sm_90` **narrows** the image to one arch — smaller, and
+> the right call on a provider where you know the card you get. The value is validated against
+> `cuda_arch.txt` and fails the build if it is not in that set. A narrowed image carries
+> no PTX floor, so an arch/card mismatch is the first thing to check when a single-arch
+> GPU pod won't decode.
 
 On a **raw GPU VM** (the NVIDIA Container Toolkit installed by the provider image):
 
@@ -113,7 +121,7 @@ Each provider is one of the two primitives above. The provider-specific part is 
 | **Lambda Cloud** | On-demand GPU VM, or their managed k8s | VM: `install.sh` + a systemd unit running `fak serve … --engine inkernel --backend cuda`, or `docker run --gpus all`. k8s: the GPU overlay | VM/k8s: static `fak` in front of local vLLM |
 | **RunPod** | GPU Pod (container-native) | Launch the `-cuda` image as the pod image with the `serve … --engine inkernel --backend cuda` command; expose 8080 as an HTTP port | Two containers/templates: vLLM + the static `fak` image |
 | **Crusoe** | GPU VM, or managed k8s | Same two doors as Lambda (VM: `install.sh`+systemd or `docker --gpus all`; k8s: the GPU overlay) | Static `fak` in front of local vLLM |
-| **Vast.ai** | Marketplace GPU instance (Docker-native, most heterogeneous) | Launch the `-cuda` image (build it for the *exact* card you bid on — arch varies wildly here) as the instance image, map 8080 | Static `fak` in front of local vLLM |
+| **Vast.ai** | Marketplace GPU instance (Docker-native, most heterogeneous) | Launch the `-cuda` image as the instance image, map 8080 — ship the **default all-arch build**, since the card changes with every bid | Static `fak` in front of local vLLM |
 | **Nebius** | GPU VM, or managed k8s | Same two doors as Lambda | Static `fak` in front of local vLLM |
 
 ### Per-provider verification status — read before you quote a row
@@ -129,7 +137,7 @@ and report, not a verified claim. Parent epic: [#1678](https://github.com/anthon
 | **Lambda Cloud** | `not yet` | `install.sh` + systemd and `docker run --gpus all` are the repo's documented VM paths | NVIDIA driver + Container Toolkit on the VM image |
 | **RunPod** | `not yet` | Container-native: takes an image + command, which is what both shapes need | A pod template exposing 8080 as an HTTP port |
 | **Crusoe** | `not yet` | Same two doors as Lambda; no Crusoe-specific step is known to be required | NVIDIA driver + Container Toolkit (VM) or device plugin (k8s) |
-| **Vast.ai** | `not yet` | Marketplace instances are Docker-native | A `CUDA_ARCH` build matching the *exact* card you win the bid on |
+| **Vast.ai** | `not yet` | Marketplace instances are Docker-native | Nothing extra with the default all-arch image; a narrowed `CUDA_ARCH` build must match the card you win |
 | **Nebius** | `not yet` | Same two doors as Lambda | NVIDIA driver + Container Toolkit (VM) or device plugin (k8s) |
 
 No provider here requires a non-default `runtimeClass` as far as the manifests show; if
@@ -148,8 +156,9 @@ the GPU overlay exactly as CoreWeave.
 **RunPod / Vast.ai.** Container-native marketplaces — you hand them an image and a
 command, not a VM to configure. Point the pod/instance at your `-cuda` build with the
 `serve … --engine inkernel --backend cuda` args and expose port 8080. On Vast.ai the
-rented card's arch is whatever you bid on, so building the image for the **matching**
-`CUDA_ARCH` matters more here than anywhere else.
+rented card's arch is whatever you win the bid on — consumer RTX 50xx (`sm_120`)
+included — so this is the one place to ship the **default all-arch image** rather than
+a narrowed `CUDA_ARCH` build.
 
 **Crusoe / Nebius.** GPU VMs or managed k8s — identical to the Lambda doors: VM →
 `install.sh`+systemd or `docker --gpus all`; k8s → the GPU overlay.
@@ -180,13 +189,14 @@ today versus what still needs a live run.
   provider (a gateway answering an adjudicated request from a `.gguf` on that provider's
   GPU). Demotion/retirement evidence: if the neo-cloud in-kernel path is superseded by
   the binding-layer control plane in the
-  [reference architecture](../vendor/neo-cloud-reference-architecture.md), this quickstart
+  [reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md), this quickstart
   folds into that page instead of standing alone.
-- **Invalidating assumption to watch:** that a single `CUDA_ARCH` per image is workable
-  for renters. Marketplace clouds (Vast.ai especially) hand out wildly different cards,
-  so a one-arch image forces a rebuild per card class. If that friction dominates, the
-  image must ship a multi-arch fat binary (every arch in `cuda_arch.txt`) by default, and
-  the "build your own for your card" guidance above becomes wrong.
+- **Invalidating assumption to watch:** that the **default all-arch build** is the right
+  thing to hand a renter. It buys card-independence (five cubins + a `compute_120` PTX
+  floor) at the cost of build time and image size, and nobody has measured that cost on a
+  rented box — where you often build *on* the metered instance itself. If compiling five
+  cubins turns out to dominate the time-to-first-token on a fresh rental, the guidance
+  above flips: narrow to the bid's `CUDA_ARCH` and accept the per-card rebuild.
 
 ## See also
 
@@ -194,7 +204,7 @@ today versus what still needs a live run.
   (Docker, Compose, Kubernetes, bare metal; the auth/policy/binding checklist).
 - [Clouds & hosted providers](../supported/clouds.md) — the opposite shape: fronting a
   hosted model API.
-- [Neo-cloud reference architecture](../vendor/neo-cloud-reference-architecture.md) — the
+- [Neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) — the
   binding layer for exposing heterogeneous accelerator backends.
 - [GPU forward pass](../../GPU.md) — what the in-kernel CUDA decode actually runs, with
   the honest gap to llama.cpp.

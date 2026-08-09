@@ -95,9 +95,10 @@ func TestStaleUntrackedPath_refusesDifferingCopyOfATrunkFile(t *testing.T) {
 	if strings.Contains(res.Detail, "would drop") {
 		t.Errorf("an untracked path has no line-run delta; detail must not claim one, got %q", res.Detail)
 	}
-	if code, ok := RefusalExitCode(ReasonStaleUntrackedPath); !ok || code != ExitPreCommitRefusal {
-		t.Errorf("RefusalExitCode(%s) = (%d, %v), want (%d, true) — nothing landed, so it is retryable",
-			ReasonStaleUntrackedPath, code, ok, ExitPreCommitRefusal)
+	if code, ok := RefusalExitCode(ReasonStaleUntrackedPath); !ok || code != ExitRefused {
+		t.Errorf("RefusalExitCode(%s) = (%d, %v), want (%d, true) — nothing landed, but the path is "+
+			"already on the trunk, so re-running the same commit can never change the answer",
+			ReasonStaleUntrackedPath, code, ok, ExitRefused)
 	}
 }
 

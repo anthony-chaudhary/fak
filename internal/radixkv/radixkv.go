@@ -145,6 +145,16 @@ type Tree struct {
 	policyEvictions int // EvictNode calls (the fak differentiator)
 	splits          int // edge splits performed (a structural RadixAttention event)
 
+	// Prefix-cache LIFECYCLE event counters (#5804, lookupobs.go). The counters above
+	// book evictions and structural splits; these book the other three events a
+	// warm/cold rerun needs — every lookup, its hit/miss verdict with a typed miss
+	// reason, and every fill. Maintained by LookupNS and attachLeaf; read via Stats.
+	lookups             int // LookupNS calls (demand reuse probes)
+	lookupHits          int // lookups that matched at least one cached token
+	lookupMissCold      int // misses where nothing COULD have matched (empty tree / empty request)
+	lookupMissDivergent int // misses where a populated tree shared no leading token
+	fills               int // leaves attached (demand Insert + prewarm WarmInsert)
+
 	lastEvictPolicy       string
 	lastEvictCandidates   int
 	lastEvictLocked       int
@@ -396,7 +406,11 @@ func (t *Tree) Lookup(tokens []int) (*node, int) { return t.LookupNS("", tokens)
 //	leaf = tree.Insert(b, req[m:], kv)   // moves the lease onto the leaf
 func (t *Tree) LookupNS(ns string, tokens []int) (*node, int) {
 	root := t.rootFor(ns)
+	// Lifecycle bookkeeping (#5804): read whether this namespace held anything BEFORE the
+	// walk, so a miss can be attributed to an empty cache rather than a divergent request.
+	populated := len(root.children) > 0
 	boundary, matched := t.boundaryFor(root, tokens)
+	t.countLookup(matched, populated && len(tokens) > 0)
 	for p := boundary; p != nil; p = p.parent {
 		p.lastUsed = t.clock + 1 // freshen the whole hot path
 	}
@@ -544,6 +558,7 @@ func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logit
 	// premature. Covers both demand Insert and WarmInsert; a Lookup-consumed entry is
 	// simply absent here (consumed once).
 	t.probeThrash(boundary, suffix)
+	t.fills++ // one prefix-cache FILL event (#5804): demand Insert or prewarm WarmInsert
 	s := append([]int(nil), suffix...)
 	leaf := &node{
 		key:      s,
@@ -849,6 +864,17 @@ type Stats struct {
 	LedgerConfirmed       int // confirmed deletes settled by ConfirmEvictions
 	LedgerConfirmedTokens int // Σ victim edge tokens over confirmed deletes
 	LedgerPending         int // staged-unconfirmed ledger entries (≤ evictionLedgerCap)
+
+	// Prefix-cache lifecycle events (#5804, lookupobs.go). These count DEMAND, not
+	// residency: they are monotonic for the tree's lifetime and eviction never rolls them
+	// back. The three lookup buckets partition every probe exactly —
+	// Lookups == LookupHits + LookupMissCold + LookupMissDivergent — which is what makes a
+	// 0% hit rate diagnosable: all-cold is warmup, all-divergent is genuine non-overlap.
+	Lookups             int // LookupNS calls (demand reuse probes; MatchLenNS is not counted)
+	LookupHits          int // probes that matched at least one leading token
+	LookupMissCold      int // misses where nothing could have matched (empty namespace / empty request)
+	LookupMissDivergent int // misses against a populated namespace that shared no leading token
+	Fills               int // leaves attached (demand Insert + prewarm WarmInsert)
 }
 
 // Stats walks the tree and returns its current shape.
@@ -887,6 +913,11 @@ func (t *Tree) Stats() Stats {
 		LedgerConfirmed:       t.ledgerConfirmed,
 		LedgerConfirmedTokens: t.ledgerConfirmedTokens,
 		LedgerPending:         len(t.evictLedger),
+		Lookups:               t.lookups,
+		LookupHits:            t.lookupHits,
+		LookupMissCold:        t.lookupMissCold,
+		LookupMissDivergent:   t.lookupMissDivergent,
+		Fills:                 t.fills,
 	}
 	var visit func(n *node)
 	visit = func(n *node) {

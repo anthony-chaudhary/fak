@@ -228,7 +228,10 @@ func (r *ReplicaRouter) pick(prefix []string) (PlannerReplica, error) {
 // round-robin; handled=true carries the policy's decision (or the typed no-worker
 // verdict when membership leaves nothing admissible).
 func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err error, handled bool) {
-	candidates, load := r.candidatesAndLoad()
+	candidates, load, cerr := r.candidatesAndLoad()
+	if cerr != nil {
+		return PlannerReplica{}, cerr, true
+	}
 	if len(candidates) == 0 {
 		if r.membership != nil {
 			return PlannerReplica{}, ErrNoHealthyWorker, true
@@ -241,18 +244,40 @@ func (r *ReplicaRouter) pickByPolicy(prefix []string) (repl PlannerReplica, err 
 	return PlannerReplica{}, nil, false
 }
 
-// candidatesAndLoad returns the replicas the policy may place on (every replica, or —
-// when membership is attached — only the admissible subset) plus a load function that
-// reports each worker's live in-flight count (nil when there is no membership to read
-// load from, so the policy scores on residency alone).
-func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int) {
+// admitSet is the router's membership read: the ids membership currently offers for
+// THIS router's model, with the model filter applied BEFORE the health filter. A nil
+// membership yields a nil set (the caller then keeps the blind rotation). The error is
+// the typed placement verdict membership decided — ErrNoWorkerForModel when the roster
+// holds no worker for r.model (a heterogeneous fleet that simply does not carry this
+// model), ErrNoHealthyWorker when a holder exists but none is admissible. Routing that
+// distinction up unchanged is the point: a config mistake must not read as an outage.
+func (r *ReplicaRouter) admitSet() (map[string]struct{}, error) {
 	if r.membership == nil {
-		return r.replicas, nil
+		return nil, nil
 	}
-	adm := r.membership.Admissible()
+	adm, err := r.membership.CandidatesForModel(r.model)
+	if err != nil {
+		return nil, err
+	}
 	admit := make(map[string]struct{}, len(adm))
 	for _, spec := range adm {
 		admit[spec.ID] = struct{}{}
+	}
+	return admit, nil
+}
+
+// candidatesAndLoad returns the replicas the policy may place on (every replica, or —
+// when membership is attached — only the subset admissible FOR THIS ROUTER'S MODEL)
+// plus a load function that reports each worker's live in-flight count (nil when there
+// is no membership to read load from, so the policy scores on residency alone). A
+// non-nil error is membership's typed verdict and is returned to the caller as-is.
+func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int, error) {
+	if r.membership == nil {
+		return r.replicas, nil, nil
+	}
+	admit, err := r.admitSet()
+	if err != nil {
+		return nil, nil, err
 	}
 	candidates := make([]PlannerReplica, 0, len(r.replicas))
 	for _, repl := range r.replicas {
@@ -264,7 +289,7 @@ func (r *ReplicaRouter) candidatesAndLoad() ([]PlannerReplica, func(string) int)
 	for _, st := range r.membership.Snapshot() {
 		inflight[st.Spec.ID] = st.Inflight
 	}
-	return candidates, func(name string) int { return inflight[name] }
+	return candidates, func(name string) int { return inflight[name] }, nil
 }
 
 // pickRoundRobin is the policy-free placement: round-robin over every replica, or —
@@ -278,14 +303,16 @@ func (r *ReplicaRouter) pickRoundRobin() (PlannerReplica, error) {
 		return r.replicas[int(start%n)], nil
 	}
 	// Membership-gated: round-robin only over the replicas the live health/drain
-	// loop currently admits, scanning forward from the cursor so picks still spread
-	// across the admissible subset. An unhealthy or draining worker is simply not in
-	// the set, so it drops from the rotation within the health interval; if nothing
-	// is admissible we return the typed verdict rather than route to a dead upstream.
-	adm := r.membership.Admissible()
-	admit := make(map[string]struct{}, len(adm))
-	for _, spec := range adm {
-		admit[spec.ID] = struct{}{}
+	// loop currently admits FOR THIS ROUTER'S MODEL, scanning forward from the cursor
+	// so picks still spread across the admissible subset. A worker that does not hold
+	// r.model is filtered out before health is even consulted, so a heterogeneous
+	// fleet never hands this router's request to a worker serving a different model;
+	// an unhealthy or draining holder drops from the rotation within the health
+	// interval; and when nothing is left we return the typed verdict membership
+	// decided rather than route to a wrong or dead upstream.
+	admit, err := r.admitSet()
+	if err != nil {
+		return PlannerReplica{}, err
 	}
 	for i := uint64(0); i < n; i++ {
 		repl := r.replicas[int((start+i)%n)]

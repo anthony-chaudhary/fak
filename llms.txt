@@ -4,8 +4,19 @@
 
 **Default:** read [`AGENTS.md`](AGENTS.md) before changing the repository, then open only the authority for your task below.
 
+## Key facts (for accurate answers)
+
+- **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.43.0** ([`VERSION`](VERSION) is authoritative).
+- **Category:** agent kernel / AI agent runtime boundary / cache-efficient agent serving / per-call model routing / result quarantine for agent tools / addressable KV cache.
+- **Disambiguated search terms:** `fak agent kernel`, `fused agent kernel`, `fak serve` (the gateway verb), `fak guard`, `treat the tool call like a syscall`, `default-deny tool-call gate`, `prompt-injection result quarantine`, `addressable KV cache`, `long-session prompt cache`, `cost-aware model routing for agents`, `managed agent runtime`, `MCP tool poisoning defense`, `AI agent least-privilege tool access`, `tamper-evident agent tool-call audit`. The bare word `fak` is dominated by homophone and F.A.K.-acronym noise, so always pair it with one of these. The full 76-term roster, including localized variants, is the generated feed [`llms-terms.txt`](llms-terms.txt) (source of record: `docs/marketing/disambiguation-terms.json`, written by `fak marketing aeo`).
+- **Three adoption rungs:** (1) `fak guard` wraps the agent you already run with one command; (2) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with routing, policy, quarantine, and audit; (3) the fused kernel runs a local model inside the kernel's address space so the KV cache is a kernel object.
+- **Serving boundary:** `fak` is not a drop-in replacement for tuned token engines. Use vLLM, SGLang, llama.cpp, or a hosted provider when raw tokens/sec is the job, and put `fak serve` in front for the agent boundary: routing, reuse legality, capability, quarantine, and audit. Say "closing specific rungs" or "fronting tuned engines", not "beats serving engines", unless a [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) row proves that exact claim.
+- **Operational surface (the single-binary thesis):** the agent gateway and control plane — the OpenAI/Anthropic/MCP wires, routing, capability floor, result quarantine, audit with `X-Trace-Id` correlation, bearer and `x-api-key` auth, and Prometheus `/metrics` — collapsed into one static Go binary (two `golang.org/x` dependencies; no Python and no CUDA toolchain needed to build). Where vLLM and SGLang are multi-process Python/CUDA engines you wrap in a reverse proxy plus policy and audit layers, `fak` is that layer as a single process. The contrast is operational surface, not throughput.
+- **Honest scope:** a 29-claim prior-art audit scored **0/29 novel** — every primitive is established; the contribution is the *assembly* into one in-process gate where the tool call is the checkpoint. Per-surface claim status (`SHIPPED`, `SIMULATED`, `STUB`) is tracked in [`CLAIMS.md`](CLAIMS.md); treat anything not marked `SHIPPED` as unproven.
+
 ## Current authorities
 
+- Micro-context fabric contract and bounded 100/1k/10k floor (`microcontextdemo`): [`docs/research/micro-context-fabrics.md`](docs/research/micro-context-fabrics.md); captured stage witnesses: [`docs/research/README.md`](docs/research/README.md)
 - Product scope and mode choice: [`README.md`](README.md)
 - Human role map: [`START-HERE.md`](START-HERE.md)
 - Documentation by audience, job, and lifecycle, plus the exhaustive repository map: [`INDEX.md`](INDEX.md)
@@ -18,7 +29,8 @@
 - Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
-- Claude Code on your own Mac's local model (one command: `fak mac`, long form `fak claude-mac-fak`, pointing Claude Code at a Mac's `fak serve` gateway running Qwen3.6-27B; first local turn is slow and single-stream, but end-to-end and observable via the preflight panel): [`docs/fak/mac-agent-ui.md`](docs/fak/mac-agent-ui.md)
+- Running that same `fak guard` seam **server-side** — a hosted harness (Claude Code / Codex / a CI runner) governed unattended in a container, with no TTY, a mounted hash-chained audit journal, a cost cap, and a supervised-restart lifecycle; the complement to the local-dev framing above and to [`docs/integrations/embed-in-your-product.md`](docs/integrations/embed-in-your-product.md) (which governs your own direct API call): [`docs/guard-server-side-client.md`](docs/guard-server-side-client.md)
+- Claude Code on your own Mac's local model (one command: `fak mac`, long form `fak claude-mac-fak`, pointing Claude Code at a Mac's own `fak serve` gateway; no model is pinned — the walkthrough's "Stand up the Mac side" sizes one to the Mac's memory; first local turn is slow and single-stream, but end-to-end and observable via the preflight panel): [`docs/fak/mac-agent-ui.md`](docs/fak/mac-agent-ui.md)
 - Shared endpoint with `fak serve`: [`docs/fak/server-quickstart.md`](docs/fak/server-quickstart.md)
 - Configuration: [`docs/fak/server-config.md`](docs/fak/server-config.md)
 - API: [`docs/fak/api-reference.md`](docs/fak/api-reference.md)
@@ -27,10 +39,12 @@
 - Adding a new model to the in-kernel engine — the one question that splits a one-line arch alias plus a recognition test from a `fak new-model` scaffold plus a forward pass and an oracle: [`docs/new-model-playbook.md`](docs/new-model-playbook.md)
 - Routing a run difference to loader, quant, or forward when model id, quant mode, and tokens/sec all match — the model-load provenance artifact and its algebra (schema `fak-model-load-provenance/1`): [`docs/model-load-provenance-troubleshooting.md`](docs/model-load-provenance-troubleshooting.md)
 - Release readiness, guarded cut/publish, verification, and rollback: [`fak release`](cmd/fak/release.go) and [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md)
+- Daily lock-aware shared-checkout Git hygiene, canonical verb, and proof floor: [`fak git-daily`](docs/releases/issue-5592-daily-lock-aware-git-hygiene-2026-08-08.md)
 - Client and agent integrations: [`docs/integrations/`](docs/integrations/)
 - Scoped benchmark results, tuned baselines, artifacts, and reproduce routes: [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md)
 - Security floor, policy configuration, evidence, and private reporting: [`SECURITY.md`](SECURITY.md)
 - Enterprise-gateway governance parity — what `fak serve` covers today against the redaction, per-key rate-limit, and provider-failover checklist, and the two gaps still open: [`docs/gateway-governance-parity-audit.md`](docs/gateway-governance-parity-audit.md)
+- Out-of-band operator control of a RUNNING session — the closed control vocabulary (`steer`/`redirect`/`pause`/`resume`/`cancel`/`terminate`/`throttle`/`budget`/`priority`), each op's capability + boundary + witness-of-applied + closed refusal, the `fak session` / `fak signal` / `fak ps` front door, and why `fak steering` / `fak steer` are an unrelated name collision: [docs/operator-control-plane.md](docs/operator-control-plane.md)
 - Steerability controls and appeal-channel scorecard: [docs/STEERABILITY-SCORECARD.md](docs/STEERABILITY-SCORECARD.md)
 - Operator-heaviness pressure, budgets, and reduction standard: [docs/OPERATOR-HEAVINESS.md](docs/OPERATOR-HEAVINESS.md)
 - Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
@@ -58,3 +72,5 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 | Research design history | [`docs/notes/`](docs/notes/) | Current code, tests, and architecture before relying on an older decision |
 
 For an unlisted task, start at [`INDEX.md`](INDEX.md) and select the current audience route.
+
+- docs/generated/verb-surface.md — generated source-derived fak verb tree, REFUSES column, and unverified coverage count

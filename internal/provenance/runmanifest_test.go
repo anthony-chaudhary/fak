@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+// loaderSemanticsA / loaderSemanticsB are two well-formed load-provenance
+// digests standing for two loads of the SAME model bytes under different loader
+// semantics — the #4273 shape, where every other recorded fact agrees.
+var (
+	loaderSemanticsA = "sha256:" + strings.Repeat("a1", 32)
+	loaderSemanticsB = "sha256:" + strings.Repeat("b2", 32)
+)
+
 // goodManifest is a fully-populated, valid baseline quality-run manifest — the
 // starting point every acceptance test perturbs by exactly one field.
 func goodManifest() RunManifest {
@@ -14,12 +22,16 @@ func goodManifest() RunManifest {
 		Model:     "glm-4.6@sha256:1111",
 		Tokenizer: "glm-bpe@sha256:2222",
 		Backend:   "fak-engine",
-		Seed:      42,
-		CodeRev:   "github.com/anthony-chaudhary/fak@abc1234",
-		Baseline:  "nightly-2026-06-25/decode-parity",
-		Tolerance: "exact",
-		BinaryRev: "fak-0.9.0+abc1234",
-		Hardware:  "cpu-avx512",
+		// The loader-semantics content address (#4746). Synthetic here on
+		// purpose: this package must stay stdlib-only, so it carries the digest
+		// model.LoadProvenance.Digest emits without importing the loader.
+		LoadProvenance: loaderSemanticsA,
+		Seed:           42,
+		CodeRev:        "github.com/anthony-chaudhary/fak@abc1234",
+		Baseline:       "nightly-2026-06-25/decode-parity",
+		Tolerance:      "exact",
+		BinaryRev:      "fak-0.9.0+abc1234",
+		Hardware:       "cpu-avx512",
 		DecodeParams: map[string]string{
 			"temperature": "0",
 			"top_p":       "1",
@@ -153,6 +165,7 @@ func TestRequiredProvenanceFields(t *testing.T) {
 		want string
 	}{
 		{"model", func(m *RunManifest) { m.Model = "" }, "model"},
+		{"load_provenance", func(m *RunManifest) { m.LoadProvenance = "" }, "load_provenance"},
 		{"tokenizer", func(m *RunManifest) { m.Tokenizer = "" }, "tokenizer"},
 		{"backend", func(m *RunManifest) { m.Backend = "" }, "backend"},
 		{"code_rev", func(m *RunManifest) { m.CodeRev = "" }, "code_rev"},
@@ -178,6 +191,93 @@ func TestRequiredProvenanceFields(t *testing.T) {
 	m.Oracle = "golden/decode-parity-greedy"
 	if err := m.Validate(); err != nil {
 		t.Fatalf("a deterministic oracle must substitute for a seed: %v", err)
+	}
+}
+
+// TestLoaderSemanticsDivergeUnderIdenticalRecordedFacts is the #4746 acceptance
+// criterion "run evidence records the artifact digest, so publication claims are
+// bound to the actual loader semantics" — stated as the #4273 failure it exists
+// to catch.
+//
+// The two runs here are the broken load and the fixed load: SAME model bytes,
+// tokenizer, backend, hardware, quant, seed, and decode params — agreement on
+// every fact the manifest recorded before this field existed. They differ only
+// in what the loader DID to those bytes. Without load_provenance the pair is
+// indistinguishable and Compare returns pass, certifying a run whose tensors
+// were built under different semantics than its baseline.
+func TestLoaderSemanticsDivergeUnderIdenticalRecordedFacts(t *testing.T) {
+	baseline := goodManifest()
+	candidate := goodManifest()
+	candidate.LoadProvenance = loaderSemanticsB
+
+	if baseline.Fingerprint() == candidate.Fingerprint() {
+		t.Fatalf("two loads under different loader semantics must not fingerprint identically")
+	}
+
+	art := Compare(baseline, candidate)
+	if art.Pass() {
+		t.Fatalf("a loader-semantics difference must not pass, got verdict %q", art.Verdict)
+	}
+	if art.Divergence == nil {
+		t.Fatalf("a failing compare must localize its divergence")
+	}
+	if art.Divergence.Field != "load_provenance" {
+		t.Fatalf("divergence must localize to load_provenance, got %q", art.Divergence.Field)
+	}
+	if art.Divergence.Baseline != loaderSemanticsA || art.Divergence.Candidate != loaderSemanticsB {
+		t.Fatalf("divergence must publish both loader digests, got %q vs %q",
+			art.Divergence.Baseline, art.Divergence.Candidate)
+	}
+
+	// The loader delta must be read BEFORE any downstream flag: a difference in
+	// loader semantics invalidates the comparison of everything below it, so an
+	// operator must not be sent chasing a decode param first.
+	candidate.DecodeParams = map[string]string{"temperature": "0.9"}
+	if d := Compare(baseline, candidate).Divergence; d == nil || d.Field != "load_provenance" {
+		t.Fatalf("load_provenance must outrank a downstream decode param, got %+v", d)
+	}
+
+	// Negative control: agreeing on loader semantics still passes, so the field
+	// discriminates rather than failing everything put through it.
+	same := goodManifest()
+	if art := Compare(baseline, same); !art.Pass() {
+		t.Fatalf("identical loader semantics must still pass, got %q (%s)", art.Verdict, art.Reason)
+	}
+}
+
+// TestMalformedLoadProvenanceIsInconclusive pins the shape check. A
+// present-but-unshaped digest is worse than an absent one: it satisfies the
+// presence check while addressing no artifact, so the manifest LOOKS bound to
+// its loader semantics and proves nothing.
+func TestMalformedLoadProvenanceIsInconclusive(t *testing.T) {
+	malformed := []struct{ name, val string }{
+		{"no algorithm prefix", strings.Repeat("a1", 32)},
+		{"wrong algorithm", "sha1:" + strings.Repeat("a1", 32)},
+		{"prefix only", "sha256:"},
+		{"too short", "sha256:" + strings.Repeat("a1", 16)},
+		{"too long", "sha256:" + strings.Repeat("a1", 48)},
+		{"uppercase hex", "sha256:" + strings.Repeat("A1", 32)},
+		{"non-hex", "sha256:" + strings.Repeat("zz", 32)},
+		{"a model id, not a digest", "qwen3.6@sha256:1111"},
+	}
+	for _, bad := range malformed {
+		m := goodManifest()
+		m.LoadProvenance = bad.val
+		err := m.Validate()
+		if err == nil {
+			t.Fatalf("%s: %q must not validate as a content address", bad.name, bad.val)
+		}
+		if !strings.Contains(err.Error(), "load_provenance") {
+			t.Fatalf("%s: error must name the field, got %v", bad.name, err)
+		}
+		// Fail-closed all the way through: an unshaped digest can never reach a
+		// pass verdict from either side of a comparison.
+		if art := Compare(m, goodManifest()); art.Pass() {
+			t.Fatalf("%s: an unshaped baseline digest must never pass", bad.name)
+		}
+		if art := Compare(goodManifest(), m); art.Pass() {
+			t.Fatalf("%s: an unshaped candidate digest must never pass", bad.name)
+		}
 	}
 }
 

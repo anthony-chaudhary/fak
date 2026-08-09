@@ -29,11 +29,13 @@ target and host clean), 1 when something needs an operator's eye.
 from __future__ import annotations
 
 import argparse
+import bisect
 import calendar
 import concurrent.futures
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -136,6 +138,63 @@ _GUARD_RECENT_LOOKBACK_MIN = 90
 _GUARD_LIVELOCK_THRESHOLD = 3
 _GUARD_LIVELOCK_MIN_COUNT = 10
 _GUARD_LIVELOCK_LIMIT = 10
+
+# --- Empty-guard-session cause split (#5862 done-condition 2) --------------------
+# `empty=N` on the guard card used to be one opaque number: some sessions booted under
+# guard and adjudicated nothing, but not WHY -- so an operator could not tell a fleet
+# parked behind a provider wall (benign, the supervisor resumes the same command) from
+# one that is silently failing to spawn (not benign at all). These name the causes.
+#
+# The terminal-row kinds. A guard session's LAST row can be a supervisor-written child
+# exit witness (internal/journal.KindChildExit / KindChildCrash) rather than an
+# adjudication. It is a genuine chained row but carries NO verdict, so it must not
+# count as "this session adjudicated something" -- see _GUARD_EMPTY note below.
+_GUARD_TERMINAL_KINDS = ("CHILD_EXIT", "CHILD_CRASH")
+# The child-exit reason vocabulary, lowercased from internal/journal/crash.go's Crash*
+# constants plus guardCrashRestartExhaustedReason (cmd/fak/guard_crash_restart.go).
+# A reason outside this set folds to "unknown" rather than inventing a bucket -- the
+# same closed-set discipline internal/dispatchconservation.noCommitReasons enforces on
+# the Go side. Kept as a literal COPY, not an import (Python cannot import Go); the
+# drift test parses the Go source and fails CI when the two sides diverge.
+_GUARD_EMPTY_WITNESS_REASONS = (
+    "clean_exit", "signal_crash", "oom", "nonzero_exit", "rate_limit_exit",
+    "crash_restart_exhausted",
+)
+# Causes derived from the worker log tail. These are literal copies of
+# internal/dispatchconservation's Reason* constants so the guard card and the
+# conservation ledger name the SAME outcome with the SAME string; a cause this repo
+# already knows must not be re-spelled here.
+_GUARD_EMPTY_PROVIDER_QUOTA_WALL = "provider_quota_wall"
+_GUARD_EMPTY_SPAWN_FAILED = "guard_child_spawn_failed"
+_GUARD_EMPTY_DIED_BEFORE_EPILOGUE = "died_before_epilogue"
+_GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT = "clean_exit_no_commit"
+_GUARD_EMPTY_MISSING_LOG = "missing_log_artifact"
+# Not a dispatch spawn at all. guardDefaultAuditPath (cmd/fak/guard_support.go) names
+# the journal `interactive-<pid>-<repo-root-hash>.jsonl` when the operator named no
+# --audit path and set no FAK_AUDIT_JOURNAL -- i.e. an attended/ad-hoc `fak guard`,
+# which consumed NO dispatch slot, NO account rotation and NO spawn. Folding these in
+# with dispatch sessions is what made `empty=N` read as spawn waste when it was not.
+_GUARD_EMPTY_INTERACTIVE = "interactive_not_dispatch"
+_GUARD_EMPTY_UNKNOWN = "unknown"
+_GUARD_INTERACTIVE_PREFIX = "interactive-"
+# Marker literals, copied from internal/dispatchconservation/conservation.go (which
+# documents why each was chosen over a looser one -- e.g. LONG_RETRY_AFTER rather than
+# a bare "429", which also matches a worker that merely READ a rate-limit source file).
+_GUARD_PARK_MARKER = "LONG_RETRY_AFTER"
+_GUARD_SPAWN_FAILED_MARKER = "fak guard: could not run"
+_GUARD_EPILOGUE_MARKER = "── guard · "
+# The guard epilogue prints AFTER the terminal marker, at a median offset of ~7.2 KiB.
+# A 4 KiB tail read misses every marker and returns a confident wrong answer, so read a
+# tail with real margin over that median.
+_GUARD_EMPTY_LOG_TAIL_BYTES = 32768
+# Journal mtime vs worker-log mtime for the same session is exact in practice (max
+# observed skew 14s over the 26 joinable empties in this repo's corpus), so a 10-minute
+# window is generous. Joining on the two FILE mtimes also dodges the trap that bit an
+# earlier pass: the resolve-log FILENAME stamp is UTC while file times are local, so a
+# name-derived correlation silently finds nothing.
+_GUARD_EMPTY_LOG_WINDOW_S = 600.0
+# Hard cap on log tails read per fold so the card stays cheap on a large .dispatch-runs.
+_GUARD_EMPTY_LOG_SCAN_CAP = 400
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
 _LEASEREF_PREFIX = "refs/fak/locks/"
@@ -1342,15 +1401,545 @@ def scan_live_dispatch_workers(
     return {"available": True, "workers": workers}
 
 
+# ---------------------------------------------------------------------------
+# Lane-lease holder liveness — the cross-check's missing scope (#5859).
+# ---------------------------------------------------------------------------
+#
+# `cross_check_worker_leases` below reconciles LOCAL dispatch-worker sidecars
+# against the `refs/fak/locks/*` leaseref store (`read_leaseref_records`). That
+# store is NOT the lane-lease substrate. The exclusive lane leases every agent
+# actually contends for live in the DOS kernel's WAL (`.dos/lane-journal.jsonl`)
+# and are read back with `dos lease-lane live`. The two sets are disjoint by
+# construction — on the reference tree `refs/fak/locks/*` held 2 `resolve-*`
+# records while `dos lease-lane live` held 23 exclusive lane leases — so the card
+# printed `lease chk : clean=N orphan-process=0 unmatched-live-lease=0` and rolled
+# "worker/lease cross-check clean" into its summary while EVERY lane lease on the
+# box was fenced by a process that no longer exists, `cmd/**` (the largest lane in
+# the backlog) and `internal/modver/**` included, the oldest for 22 days. The
+# scope was never widened past the resolver leases; this fold widens it.
+#
+# Liveness is judged the way the KERNEL judges it — TTL/heartbeat staleness as the
+# PRIMARY evidence, the holder pid only as corroboration. The first cut of this fold
+# had it backwards: it decided deadness from the recorded `(pid, proc_starttime)`
+# alone, and that predicate cannot discriminate at all.
+#
+# A recorded lane-lease `pid` is an EPHEMERAL `dos lease-lane acquire` subprocess
+# that journals the ACQUIRE and exits immediately (`dos/lane_lease.py:466-492`); the
+# reservation it books is DESIGNED to outlive it (`acquire()` at `:453` says so in
+# as many words). So a perfectly healthy, actively-held lease ALWAYS probes
+# "dead" by that test — and it did: the card rendered `live=0 dead-holder=25`
+# while several of those lanes were held by agents running at that instant, four of
+# them acquired MINUTES earlier. In a 9-minute window five of the "dead" holders
+# self-released their own leases. A signal that fires for 100% of the population
+# separates nothing.
+#
+# The kernel's own live-set fold (`dos.lane_lease._lease_is_dead` / `_expire_dead`,
+# what `pretool_sensor`, `decisions.py`, `dispatch_top` and `dos arbitrate` all read
+# through `live_leases(expire_dead=True)`) gets the ordering right, and this fold now
+# mirrors it:
+#
+#   (a) PRIMARY — WAL freshness. The lease's newest stamp (`heartbeat_at`, else
+#       `acquired_at`) inside a grace window ⇒ LIVE, no matter what the pid does.
+#       Past its own `ttl_minutes` (or the kernel's 50-minute backstop) plus that
+#       grace ⇒ DEAD. This is time evidence the WAL carries itself.
+#   (b) CORROBORATION — a confidently-dead holder pid on THIS host, which may only
+#       speed the reclaim of a lease whose OBSERVED heartbeat has already gone
+#       quiet. It may never, on its own, kill a fresh lease.
+#   (c) Everything else is `unknown` — never `live`, never `dead`.
+#
+# One deliberate narrowing vs the kernel, in the fail-safe direction: the kernel
+# lets (b) fire off `acquired_at` when no beat exists, but NOTHING on this fleet
+# writes one (2871 journal entries: 107 ACQUIRE, 81 RELEASE, 2619 ENFORCE, 64
+# REFUSE — and ZERO HEARTBEAT; 0 live records carry `heartbeat_at`). With no beat
+# writer, "the heartbeat went quiet" degenerates back into "older than the grace"
+# and (b) once again fires for every lease. So the card requires (b) to actually
+# corroborate an OBSERVED beat; absent one, TTL expiry is the only positive death
+# evidence, and a lease inside its TTL whose ephemeral acquirer has exited reads
+# `unknown` — which is the normal, healthy shape, not a reapable orphan.
+#
+# The pid rung, when it does apply, still checks `(pid, proc_starttime)` and never
+# bare pid existence — pids are recycled, and a recycled pid is exactly how a dead
+# holder reads "alive". The reference tree carries a live instance: lane `guard`
+# recorded pid 44396, and pid 44396 today is a `conhost.exe` that started ~47
+# minutes AFTER the recorded start time.
+
+_LANE_LEASE_SCHEMA = "fleet-lane-lease-liveness/1"
+# Windows FILETIME epoch (1601-01-01) -> Unix epoch (1970-01-01), in seconds.
+_FILETIME_EPOCH_DELTA_S = 11644473600.0
+# The plausible wall-clock window a decoded process start time must land in. Used
+# to pick the right interpretation of `proc_starttime` (Windows FILETIME ticks vs
+# unix ns/us/ms/s) without hard-coding the producer's platform.
+_PROC_START_MIN_EPOCH_S = 946684800.0    # 2000-01-01
+_PROC_START_MAX_EPOCH_S = 4102444800.0   # 2100-01-01
+# How far a probed start time may sit from the recorded one and still be the SAME
+# process. The Windows probe reads back the same FILETIME the kernel recorded, so
+# this only absorbs float rounding; it is deliberately far tighter than any
+# realistic pid-reuse interval, because the whole point is to catch reuse.
+_PROC_START_TOLERANCE_S = 2.0
+# The kernel's own staleness constants, mirrored so the card and the admission fold
+# cannot drift apart. `dos.lane_lease._DEFAULT_LIVE_TTL_MINUTES` /
+# `_LIVE_TTL_GRACE_MINUTES`.
+_LANE_LEASE_DEFAULT_TTL_MIN = 50.0
+_LANE_LEASE_GRACE_MIN = 5.0
+# The reap action this card USED to print was actively dangerous, and saying so is
+# the point of the line (#5859):
+#
+#   * `dos lease-lane release` performs NO liveness check whatsoever — `cmd_lease_lane`
+#     calls `lane_lease.release()` straight through, and that function evicts a live
+#     holder exactly as happily as a dead one. Its owner filter
+#     (`holder not in (owner, None) and owner != ""`) also short-circuits on an empty
+#     string, so `--owner ""` matches ANY lease on the lane regardless of holder.
+#     Running it across a 25-lane set would have destroyed live work.
+#   * There is no sanctioned per-lane reap verb to point at instead. `lane_lease.adopt()`
+#     (the ownership transfer) and the `OP_SCAVENGE` journal op both exist in the kernel
+#     but neither has a CLI surface — `dos lease-lane` exposes only
+#     acquire/release/heartbeat/spawn/live.
+#   * And no reap is needed for the thing the operator actually cares about: the
+#     ADMISSION view already self-heals. `live_leases(config, expire_dead=True)` — what
+#     `pretool_sensor`, `decisions.py`, `dispatch_top` and `dos arbitrate` read — drops
+#     these leases at read time without touching the WAL. A stale STRUCTURAL lease
+#     therefore blocks exactly one consumer: `lane_lease.acquire()` at
+#     `dos/lane_lease.py:453`, the single caller that deliberately folds without
+#     dead-elision (so a serialized acquirer cannot double-book a fresh reservation).
+#
+# So the honest next action is "observe, do not reap", plus the one narrow symptom
+# worth watching for.
+_LANE_LEASE_NEXT_ACTION_STEPS = (
+    "do NOT reap: `dos lease-lane release` runs NO liveness check (#5859) and its "
+    "`--owner \"\"` matches any holder, so releasing across the lane set evicts live work",
+    "there is no sanctioned per-lane reap verb to use instead — `lane_lease.adopt()` and "
+    "the `OP_SCAVENGE` journal op have no CLI surface (`dos lease-lane` = "
+    "acquire|release|heartbeat|spawn|live)",
+    "none is needed: the admission fold `live_leases(config, expire_dead=True)` already "
+    "elides these at read time for `pretool_sensor`/`decisions.py`/`dispatch_top`/"
+    "`dos arbitrate`, without mutating the WAL",
+    "a stale STRUCTURAL lease therefore blocks exactly one consumer — `lane_lease.acquire()` "
+    "(dos/lane_lease.py:453) — so watch for a repeated acquire REFUSE on one of these lanes "
+    "and escalate THAT lane to the operator; releasing blind is the larger risk",
+)
+_LANE_LEASE_NEXT_ACTION = " · ".join(_LANE_LEASE_NEXT_ACTION_STEPS)
+
+# Holder states. `unknown` is a first-class verdict: anything we cannot PROVE is
+# never folded into `live`, because a false "alive" is how this stayed hidden.
+LANE_HOLDER_LIVE = "live"
+LANE_HOLDER_DEAD = "dead"
+LANE_HOLDER_UNKNOWN = "unknown"
+
+
+def _proc_starttime_epoch(value: Any) -> float | None:
+    """Decode a lane-lease record's ``proc_starttime`` to Unix epoch seconds.
+
+    The DOS lane record stamps the holder's process start time in the host's
+    native unit — on Windows (the platform that matters here) a FILETIME: 100ns
+    ticks since 1601-01-01. Rather than hard-code one platform, each candidate
+    scale is tried and the first that decodes into a plausible wall-clock window
+    wins; the scales are far enough apart that only one can land in it. An
+    undecodable stamp returns ``None``, which the classifier treats as "cannot
+    prove either way" — never as proof of life.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    v = float(value)
+    if v <= 0:
+        return None
+    for candidate in (
+        v / 1e7 - _FILETIME_EPOCH_DELTA_S,  # Windows FILETIME (100ns ticks since 1601)
+        v / 1e9,                            # unix nanoseconds
+        v / 1e6,                            # unix microseconds
+        v / 1e3,                            # unix milliseconds
+        v,                                  # unix seconds
+    ):
+        if _PROC_START_MIN_EPOCH_S <= candidate <= _PROC_START_MAX_EPOCH_S:
+            return candidate
+    return None
+
+
+def process_start_times() -> dict[int, float] | None:
+    """``{pid: create_time_epoch_seconds}`` for every process on this host.
+
+    Returns ``None`` when no liveness oracle is available (psutil absent). ``None``
+    is NOT "nothing is running": it means the fold cannot judge, and the caller
+    must report the whole set unavailable rather than either `live` or `dead`.
+    Mirrors the optional-psutil convention `silent_workers` already uses, except
+    that here the *absence* of an oracle must never render as clean.
+    """
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return None
+    out: dict[int, float] = {}
+    try:
+        procs = psutil.process_iter(["pid", "create_time"])
+    except Exception:  # noqa: BLE001 - probe seam: report no oracle, never crash the card
+        return None
+    for proc in procs:
+        try:
+            info = proc.info
+            pid, created = info.get("pid"), info.get("create_time")
+        except Exception:  # noqa: BLE001 - a process can exit mid-iteration
+            continue
+        if isinstance(pid, int) and isinstance(created, (int, float)):
+            out[pid] = float(created)
+    return out
+
+
+def _lane_lease_ttl_min(rec: dict[str, Any]) -> float:
+    """The lease's own declared ``ttl_minutes``, else the kernel's 50-minute backstop.
+
+    Mirrors `dos.lane_lease._lease_is_dead`: a malformed/legacy ACQUIRE that declared
+    no TTL still cannot be immortal.
+    """
+    ttl = rec.get("ttl_minutes")
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl <= 0:
+        return _LANE_LEASE_DEFAULT_TTL_MIN
+    return float(ttl)
+
+
+def probe_lane_lease_pid(
+    rec: dict[str, Any],
+    starts: dict[int, float] | None,
+    *,
+    host_id: str = "",
+    tolerance: float = _PROC_START_TOLERANCE_S,
+) -> tuple[bool | None, str]:
+    """The OS-process rung ALONE: ``(alive, evidence)``, with ``alive`` THREE-valued.
+
+    ``True`` only when the pid is running AND its start time matches the one the
+    lease recorded. ``False`` only on positive evidence (the pid is gone, or the pid
+    exists but was RECYCLED into a different process — a pid that merely *exists* is
+    not a live holder). Everything else — no oracle, a foreign host, no usable pid,
+    or a live pid with no recorded ``proc_starttime`` to check it against — is
+    ``None``, "cannot tell", which is never proof of either.
+
+    Deliberately SEPARATE from the verdict: on its own this is NOT evidence of
+    death, because the pid a lane lease records is the ephemeral `dos lease-lane
+    acquire` child that exits by design. `classify_lane_lease_holder` consumes it
+    strictly as a corroborator of WAL staleness.
+    """
+    pid = _int(rec.get("pid"))
+    rec_host = str(rec.get("host_id") or "").strip()
+    if starts is None:
+        return (None, "no process-liveness oracle on this host (psutil unavailable)")
+    if rec_host and host_id and rec_host != host_id:
+        return (None,
+                f"holder recorded on host {rec_host}; this host cannot probe a remote pid")
+    if pid is None or pid <= 0:
+        return (None, "lease carries no usable pid")
+    observed = starts.get(pid)
+    if observed is None:
+        return (False, f"pid {pid} is not a running process")
+    recorded = _proc_starttime_epoch(rec.get("proc_starttime"))
+    if recorded is None:
+        return (None,
+                f"pid {pid} exists but the lease records no readable proc_starttime; "
+                "pid existence alone is not proof of life")
+    if abs(observed - recorded) <= tolerance:
+        return (True,
+                f"pid {pid} running, start time matches the lease ({recorded:.0f})")
+    return (False,
+            f"pid {pid} was RECYCLED: the running process started {observed:.0f}, "
+            f"the lease recorded {recorded:.0f}")
+
+
+def classify_lane_lease_holder(
+    rec: dict[str, Any],
+    starts: dict[int, float] | None,
+    *,
+    host_id: str = "",
+    tolerance: float = _PROC_START_TOLERANCE_S,
+    now_ts: float | None = None,
+) -> tuple[str, str]:
+    """Judge ONE lane-lease record's holder. Returns ``(state, evidence)``.
+
+    Mirrors the kernel's own live-set predicate (`dos.lane_lease._lease_is_dead`):
+    **WAL heartbeat/TTL staleness is the PRIMARY evidence; the holder pid only
+    corroborates.** In rung order —
+
+      1. LIVE — the lease's newest WAL stamp (``heartbeat_at``, else ``acquired_at``)
+         is inside the freshness grace. This holds *regardless of the pid*, and it is
+         precisely the case the first cut got wrong: the recorded pid is the ephemeral
+         `dos lease-lane acquire` child, so a fresh, healthy, actively-held lease
+         normally has an ABSENT pid.
+      2. LIVE — the recorded holder process is confidently up on this host with a
+         matching start time. The strongest signal available, when it applies.
+      3. UNKNOWN — no readable stamp at all, so staleness cannot be judged and the
+         pid says nothing on its own.
+      4. DEAD — past the lease's own ``ttl_minutes`` (or the kernel's backstop) plus
+         the grace. TTL expiry is positive, WAL-carried death evidence, and it is what
+         the admission fold `live_leases(expire_dead=True)` itself acts on.
+      5. DEAD — an OBSERVED heartbeat gone quiet past the grace, corroborated by a
+         confidently-dead pid: dead *and* silent, so reclaimable before the full TTL.
+         Requires a real ``heartbeat_at``; a bare ``acquired_at`` is not a beat, and
+         letting it stand in is how the pid rung came to fire for every lease on a
+         fleet whose WAL contains zero HEARTBEAT ops.
+      6. UNKNOWN — inside its TTL but not fresh. Unproven either way, never `live`.
+    """
+    now_ts = time.time() if now_ts is None else now_ts
+    pid_alive, pid_note = probe_lane_lease_pid(
+        rec, starts, host_id=host_id, tolerance=tolerance)
+
+    beat_stamp = str(rec.get("heartbeat_at") or "").strip()
+    stamp_epoch = _lease_acquired_epoch(rec)
+    age_min = None if stamp_epoch is None else max(0.0, (now_ts - stamp_epoch) / 60.0)
+    ttl_min = _lane_lease_ttl_min(rec)
+    kind = "heartbeat" if beat_stamp else "acquire stamp"
+
+    # (1) PRIMARY: WAL freshness outranks every process signal.
+    if age_min is not None and age_min <= _LANE_LEASE_GRACE_MIN:
+        return (LANE_HOLDER_LIVE,
+                f"{kind} is {_age_text(age_min)} old — fresh inside the "
+                f"{_LANE_LEASE_GRACE_MIN:.0f}-minute grace, so the lease is held "
+                f"regardless of its ephemeral acquirer pid [{pid_note}]")
+
+    # (2) The holder process itself is confidently up.
+    if pid_alive is True:
+        return (LANE_HOLDER_LIVE, pid_note)
+
+    # (3) No credible stamp — the pid alone cannot decide it.
+    if age_min is None:
+        return (LANE_HOLDER_UNKNOWN,
+                "lease carries no readable heartbeat/acquire stamp, so staleness "
+                f"cannot be judged [{pid_note}]")
+
+    # (4) TTL expiry — the kernel's primary death evidence.
+    if age_min > ttl_min + _LANE_LEASE_GRACE_MIN:
+        return (LANE_HOLDER_DEAD,
+                f"TTL EXPIRED: no {kind} for {_age_text(age_min)}, past its "
+                f"{ttl_min:.0f}-minute TTL + {_LANE_LEASE_GRACE_MIN:.0f}-minute grace "
+                f"[{pid_note}]")
+
+    # (5) A real beat that went quiet, corroborated by a confidently-dead pid.
+    if beat_stamp and pid_alive is False:
+        return (LANE_HOLDER_DEAD,
+                f"heartbeat went quiet {_age_text(age_min)} ago and the holder process "
+                f"is confirmed gone [{pid_note}]")
+
+    # (6) Inside its TTL, not fresh, ephemeral acquirer gone — the normal shape.
+    return (LANE_HOLDER_UNKNOWN,
+            f"inside its {ttl_min:.0f}-minute TTL ({_age_text(age_min)} since the "
+            f"{kind}) but not beaten within the grace; the recorded pid is the "
+            f"ephemeral `dos lease-lane acquire` child, so its absence is not "
+            f"evidence of death [{pid_note}]")
+
+
+def _lease_acquired_epoch(rec: dict[str, Any]) -> float | None:
+    """Epoch seconds for a lane record's acquire/heartbeat stamp (ISO-8601 or epoch)."""
+    for key in ("heartbeat_at", "loop_ts", "acquired_at"):
+        value = rec.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                import datetime as _dt
+
+                return _dt.datetime.fromisoformat(
+                    value.strip().replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+    return None
+
+
+def summarize_lane_lease_holders(
+    records: list[dict[str, Any]],
+    *,
+    starts: dict[int, float] | None = None,
+    host_id: str = "",
+    now_ts: float | None = None,
+    read_error: str | None = None,
+) -> dict[str, Any]:
+    """Fold `dos lease-lane live` records into a holder-liveness verdict.
+
+    PURE over (records, starts, host_id, now) so it is table-testable: the process
+    probe and the `dos` call both live in the callers. ``available`` is False when
+    the set could not be read OR no liveness oracle exists — in both cases the
+    caller must refuse to render "clean", because an unread lease set is not a
+    clean one.
+    """
+    now_ts = time.time() if now_ts is None else now_ts
+    available = read_error is None and starts is not None
+    rows: list[dict[str, Any]] = []
+    for rec in records or []:
+        if not isinstance(rec, dict):
+            continue
+        state, evidence = classify_lane_lease_holder(
+            rec, starts, host_id=host_id, now_ts=now_ts)
+        acquired = _lease_acquired_epoch(rec)
+        age_min = round(max(0.0, (now_ts - acquired) / 60.0), 1) if acquired is not None else None
+        rows.append({
+            "lane": str(rec.get("lane") or ""),
+            "holder": str(rec.get("holder") or ""),
+            "host_id": str(rec.get("host_id") or ""),
+            "mode": str(rec.get("mode") or ""),
+            "pid": _int(rec.get("pid")),
+            "acquired_at": rec.get("acquired_at"),
+            "age_min": age_min,
+            "tree": _string_list(rec.get("tree")),
+            "holder_state": state,
+            "holder_evidence": evidence,
+        })
+    # Dead first, then oldest first: the operator's reap order.
+    rows.sort(key=lambda r: (
+        {LANE_HOLDER_DEAD: 0, LANE_HOLDER_UNKNOWN: 1, LANE_HOLDER_LIVE: 2}.get(
+            str(r.get("holder_state")), 3),
+        -(r.get("age_min") or 0.0),
+        str(r.get("lane") or ""),
+    ))
+    dead = [r for r in rows if r.get("holder_state") == LANE_HOLDER_DEAD]
+    unknown = [r for r in rows if r.get("holder_state") == LANE_HOLDER_UNKNOWN]
+    live = [r for r in rows if r.get("holder_state") == LANE_HOLDER_LIVE]
+    out: dict[str, Any] = {
+        "schema": _LANE_LEASE_SCHEMA,
+        "source": "dos lease-lane live",
+        "available": available,
+        "total": len(rows),
+        "dead_count": len(dead),
+        "unknown_count": len(unknown),
+        "live_count": len(live),
+        "rows": rows,
+        "dead": dead[:12],
+        "next_action": _LANE_LEASE_NEXT_ACTION if dead else "",
+    }
+    if read_error:
+        out["read_error"] = read_error
+    elif starts is None:
+        out["read_error"] = "no process-liveness oracle (psutil unavailable)"
+    return out
+
+
+def read_lane_leases(root: Path, *,
+                     runner: Any | None = None) -> tuple[list[dict[str, Any]], str | None]:
+    """Read the DOS kernel's live lane-lease set (`dos lease-lane live`).
+
+    Note the deliberate absence of `--workspace`: the kernel resolves its WAL from
+    the cwd, and an explicit path argument makes `dos lease-lane live` re-resolve
+    to a different/empty `.dos/` and emit non-JSON — the same trap
+    `tools/dos_fleet_lease.kernel_live` documents. `runner` is injectable so tests
+    never shell a real `dos`.
+    """
+    cmd = ["dos", "lease-lane", "live"]
+    if runner is not None:
+        try:
+            proc_out, err = runner(cmd, root)
+        except Exception as exc:  # noqa: BLE001 - injected seam: report, never crash
+            return [], str(exc)
+        if err:
+            return [], err
+        text = proc_out or ""
+    else:
+        try:
+            proc = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=30,
+                                  creationflags=_win_creationflags())
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return [], str(exc)
+        if proc.returncode != 0:
+            return [], (proc.stderr or proc.stdout or "dos lease-lane live failed").strip()[-300:]
+        text = proc.stdout or ""
+    text = text.strip()
+    if not text:
+        return [], None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            break
+        else:
+            return [], "dos lease-lane live emitted no parseable JSON"
+    if not isinstance(data, list):
+        return [], "dos lease-lane live did not emit a JSON array"
+    return [r for r in data if isinstance(r, dict)], None
+
+
+def lane_lease_liveness(root: Path, *, runner: Any | None = None,
+                        starts: dict[int, float] | None = None,
+                        host_id: str | None = None,
+                        now_ts: float | None = None) -> dict[str, Any]:
+    """Impure wrapper: read the lane-lease set + probe this host, then fold."""
+    records, err = read_lane_leases(root, runner=runner)
+    if starts is None and err is None:
+        starts = process_start_times()
+    if host_id is None:
+        try:
+            host_id = socket.gethostname()
+        except OSError:
+            host_id = ""
+    return summarize_lane_lease_holders(
+        records, starts=starts, host_id=host_id or "", now_ts=now_ts, read_error=err)
+
+
+def _lane_lease_bits(rows: list[dict[str, Any]], *, limit: int = 4) -> str:
+    """`lane(holder, pid N, 22.1d)` bits for the card/reason renders."""
+    bits: list[str] = []
+    for row in rows[:limit]:
+        lane = row.get("lane") or "?"
+        holder = row.get("holder") or "?"
+        pid = row.get("pid")
+        age = _age_text(row.get("age_min"))
+        bits.append(f"{lane}({holder}, pid {pid if pid is not None else '?'}, {age})")
+    if len(rows) > limit:
+        bits.append(f"+{len(rows) - limit} more")
+    return ", ".join(bits)
+
+
+def _fold_lane_leases(out: dict[str, Any],
+                      lane_leases: dict[str, Any] | None) -> dict[str, Any]:
+    """Fold the lane-lease holder verdict into the worker/lease cross-check dict.
+
+    Kept as a mutation of the SAME dict the card already threads (`worker_lease_check`)
+    so every existing consumer — card, reasons, markdown, slack, JSON — sees the new
+    `dead_holder_count` without a payload-schema change.
+    """
+    lane = lane_leases or {}
+    if not lane:
+        return out
+    out["lane_leases"] = lane
+    out["lane_lease_available"] = bool(lane.get("available"))
+    out["lane_lease_count"] = _int(lane.get("total"), 0) or 0
+    out["dead_holder_count"] = _int(lane.get("dead_count"), 0) or 0
+    out["unknown_holder_count"] = _int(lane.get("unknown_count"), 0) or 0
+    out["live_holder_count"] = _int(lane.get("live_count"), 0) or 0
+    out["dead_holder"] = lane.get("dead") or []
+    if lane.get("next_action"):
+        out["lane_lease_next_action"] = lane.get("next_action")
+    return out
+
+
+def lane_lease_verdict_clean(worker_leases: dict[str, Any]) -> bool:
+    """May this cross-check be described as CLEAN?
+
+    False the moment a lane lease is held by a non-existent process, and false when
+    the lane-lease set could not be read or judged at all — an unread lease set is
+    not a clean one. Absent the fold entirely (a legacy caller), the historic
+    behaviour is preserved.
+    """
+    lane = worker_leases.get("lane_leases")
+    if not lane:
+        return True
+    if not lane.get("available"):
+        return False
+    return not (_int(lane.get("dead_count"), 0) or 0)
+
+
 def cross_check_worker_leases(worker_state: dict[str, Any],
-                              leases: dict[str, Any]) -> dict[str, Any]:
+                              leases: dict[str, Any],
+                              lane_leases: dict[str, Any] | None = None) -> dict[str, Any]:
     active_leases = {
         str(row.get("id") or ""): row
         for row in (leases.get("active") or [])
         if row.get("id")
     }
     if not worker_state.get("available", True):
-        return {
+        # The lane-lease verdict is folded in even here: an unreadable LOCAL worker
+        # sidecar set says nothing about the kernel's lane leases, and a dead holder
+        # must never be swallowed by an unrelated probe failure.
+        return _fold_lane_leases({
             "available": False,
             "error": worker_state.get("error"),
             "clean_count": 0,
@@ -1359,7 +1948,7 @@ def cross_check_worker_leases(worker_state: dict[str, Any],
             "clean": [],
             "orphan_process": [],
             "orphan_lease": [],
-        }
+        }, lane_leases)
 
     clean: list[dict[str, Any]] = []
     orphan_process: list[dict[str, Any]] = []
@@ -1381,7 +1970,7 @@ def cross_check_worker_leases(worker_state: dict[str, Any],
         for lease_id, lease in sorted(active_leases.items())
         if lease_id not in matched
     ]
-    return {
+    return _fold_lane_leases({
         "available": True,
         "clean_count": len(clean),
         "orphan_process_count": len(orphan_process),
@@ -1389,7 +1978,7 @@ def cross_check_worker_leases(worker_state: dict[str, Any],
         "clean": clean,
         "orphan_process": orphan_process,
         "orphan_lease": orphan_lease,
-    }
+    }, lane_leases)
 
 
 def _active_worker_rows(worker_leases: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1429,9 +2018,10 @@ def worker_lease_crosscheck(
     *,
     alive: set[int] | None = None,
     probe: Any | None = None,
+    lane_leases: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     workers = scan_live_dispatch_workers(runs_dir, alive=alive, probe=probe)
-    return cross_check_worker_leases(workers, leases)
+    return cross_check_worker_leases(workers, leases, lane_leases)
 
 
 def has_key_named(obj: Any, key: str) -> bool:
@@ -2282,6 +2872,124 @@ def _guard_livelock_label(row: dict[str, Any]) -> str:
             f"count={row.get('count')} run={row.get('longest_run')}")
 
 
+def _guard_empty_cause_bit(guard: dict[str, Any]) -> str:
+    """``(cause=n, cause=n)`` for the empty-session split, worst cause first, or "".
+
+    One renderer for all three guard-card surfaces (the box line, the reasons list and
+    the markdown report) so the three can never disagree about what ``empty=N`` meant.
+    Empty string when there is nothing to explain — a fleet with no empty sessions
+    should not grow a bucket list that is all zeroes."""
+    by_cause = guard.get("empty_by_cause") or {}
+    if not by_cause:
+        return ""
+    bits = ", ".join(f"{k}={v}" for k, v in by_cause.items())
+    return f" ({bits})"
+
+
+def _guard_worker_log_index(runs_dir: Path) -> list[tuple[float, Path]]:
+    """``(mtime, path)`` for every worker log under ``.dispatch-runs``, oldest first.
+
+    Only ``stat()`` -- no reads. The reads are paid lazily, per empty session, over the
+    tiny mtime window ``_guard_empty_log_cause`` selects."""
+    out: list[tuple[float, Path]] = []
+    try:
+        for lp in runs_dir.glob("*.log"):
+            try:
+                out.append((lp.stat().st_mtime, lp))
+            except OSError:
+                continue
+    except OSError:
+        return []
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def _guard_log_tail(path: Path) -> str:
+    """The last ``_GUARD_EMPTY_LOG_TAIL_BYTES`` of a worker log, decoded leniently."""
+    try:
+        with path.open("rb") as fh:
+            try:
+                fh.seek(-_GUARD_EMPTY_LOG_TAIL_BYTES, os.SEEK_END)
+            except OSError:
+                fh.seek(0)
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _guard_cause_from_tail(tail: str) -> str:
+    """Name an empty session's cause from its worker log tail, worst-first.
+
+    Order matters and is not arbitrary: a session can carry BOTH a park and an
+    epilogue, and the park is the cause while the epilogue is merely evidence the guard
+    shut down tidily afterwards."""
+    if _GUARD_PARK_MARKER in tail:
+        return _GUARD_EMPTY_PROVIDER_QUOTA_WALL
+    if _GUARD_SPAWN_FAILED_MARKER in tail:
+        return _GUARD_EMPTY_SPAWN_FAILED
+    if _GUARD_EPILOGUE_MARKER not in tail:
+        return _GUARD_EMPTY_DIED_BEFORE_EPILOGUE
+    return _GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT
+
+
+def _guard_empty_log_cause(
+    name: str,
+    mtime: float,
+    log_index: list[tuple[float, Path]],
+    budget: list[int],
+) -> str:
+    """Join one empty journal to its worker log by mtime proximity, then classify it.
+
+    ``budget`` is a one-element list used as a mutable read counter shared across the
+    fold, so a pathological ``.dispatch-runs`` cannot turn the status card into a
+    full-corpus scan: once ``_GUARD_EMPTY_LOG_SCAN_CAP`` tails have been read the rest
+    degrade to ``missing_log_artifact`` (an honest "we did not look" rather than a
+    fabricated cause)."""
+    lo = bisect.bisect_left(log_index, (mtime - _GUARD_EMPTY_LOG_WINDOW_S,))
+    hi = bisect.bisect_right(log_index, (mtime + _GUARD_EMPTY_LOG_WINDOW_S, Path("￿")))
+    for _, lp in log_index[lo:hi]:
+        if budget[0] <= 0:
+            break
+        budget[0] -= 1
+        tail = _guard_log_tail(lp)
+        if name in tail:
+            return _guard_cause_from_tail(tail)
+    return _GUARD_EMPTY_MISSING_LOG
+
+
+def _guard_empty_cause(
+    name: str,
+    witness_reason: str,
+    mtime: float,
+    log_index: list[tuple[float, Path]],
+    budget: list[int],
+) -> str:
+    """The cause for ONE decision-empty guard session, cheapest evidence first.
+
+    1. A supervisor-written child-exit witness row IS the answer, and costs nothing --
+       it was already parsed out of the journal. This is the path #5862's shipped
+       producer fix (ae47d2911d, the exit witness on parked teardowns) feeds, so the
+       breakdown gets sharper on its own as the fleet picks up that build.
+    2. Otherwise the journal NAME already settles whether this was a dispatch spawn at
+       all: `interactive-*` is guardDefaultAuditPath, an attended run.
+    3. Only then pay for a log tail.
+
+    A witness row whose Reason is absent or outside the closed set does NOT short to
+    "unknown": older CHILD_CRASH rows predate the Reason field entirely, and stamping
+    them "unknown" would throw away the name and log evidence that can still explain
+    them. "unknown" is the last resort, never a shortcut."""
+    low = witness_reason.strip().lower()
+    if low in _GUARD_EMPTY_WITNESS_REASONS:
+        return low
+    if name.startswith(_GUARD_INTERACTIVE_PREFIX):
+        return _GUARD_EMPTY_INTERACTIVE
+    cause = _guard_empty_log_cause(name, mtime, log_index, budget)
+    if cause == _GUARD_EMPTY_MISSING_LOG and low:
+        # A terminal row exists but names nothing we recognise and no log survives.
+        return _GUARD_EMPTY_UNKNOWN
+    return cause
+
+
 def guard_coverage(
     runs_dir: Path,
     *,
@@ -2303,8 +3011,17 @@ def guard_coverage(
 
       * ``sessions`` — guarded worker sessions on record (= journal files)
       * ``recent_sessions`` — journals touched within ``lookback_min``
-      * ``empty_sessions`` — journals with 0 decision rows (booted under guard but
-        proposed no adjudicated tool call — the silent empty-turn signature)
+      * ``empty_sessions`` — journals with 0 DECISION rows (booted under guard but
+        proposed no adjudicated tool call — the silent empty-turn signature). A
+        supervisor-written child-exit witness row (CHILD_EXIT/CHILD_CRASH) is NOT a
+        decision: it carries no verdict, it is written by the guard at teardown rather
+        than by the child, and counting it would let #5862's own producer fix
+        (ae47d2911d, which adds that row on parked teardowns) silently DEFLATE this
+        number without explaining a single session. ``zero_row_sessions`` keeps the
+        older literal "the file is empty" count visible beside it.
+      * ``empty_by_cause`` — that count split by a CLOSED cause vocabulary (#5862
+        done-condition 2), so an operator can tell a fleet parked behind a provider
+        wall from one that is failing to spawn. See ``_guard_empty_cause``.
       * ``rows`` / ``recent_rows`` — total / recent kernel decisions
       * ``by_kind`` — the decision mix (DECIDE/DENY/RESULT_DENY/QUARANTINE/VDSO_HIT/…)
       * ``denied`` / ``quarantined`` — derived refusal counts
@@ -2320,6 +3037,8 @@ def guard_coverage(
         "sessions": 0,
         "recent_sessions": 0,
         "empty_sessions": 0,
+        "zero_row_sessions": 0,
+        "empty_by_cause": {},
         "rows": 0,
         "recent_rows": 0,
         "by_kind": {},
@@ -2338,6 +3057,10 @@ def guard_coverage(
     by_kind: dict[str, int] = {}
     livelock_candidates: list[dict[str, Any]] = []
     files: list[tuple[float, str, int]] = []  # (mtime, name, rows) for evidence/recency
+    # (journal stem, witness reason, mtime) for every DECISION-empty session, resolved
+    # to causes after the walk so the log index is built at most once and only when
+    # there is something to explain.
+    empties: list[tuple[str, str, float]] = []
     for jp in audit_dir.glob("*.jsonl"):
         try:
             mtime = jp.stat().st_mtime
@@ -2345,25 +3068,48 @@ def guard_coverage(
         except OSError:
             continue
         rows = 0
+        decisions = 0
+        witness_reason = ""
         for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
             rows += 1
             try:
-                kind = str(json.loads(line).get("kind") or "UNKNOWN")
+                row = json.loads(line)
+                kind = str(row.get("kind") or "UNKNOWN")
             except ValueError:
-                kind = "MALFORMED"
+                row, kind = {}, "MALFORMED"
+            if kind in _GUARD_TERMINAL_KINDS:
+                # Last one wins: the terminal witness is written at teardown, so a
+                # restarted session's FINAL exit is the one that explains the session.
+                witness_reason = str(row.get("reason") or "") or _GUARD_EMPTY_UNKNOWN
+            else:
+                decisions += 1
             by_kind[kind] = by_kind.get(kind, 0) + 1
         payload["sessions"] += 1
         payload["rows"] += rows
         if rows == 0:
+            payload["zero_row_sessions"] += 1
+        if decisions == 0:
             payload["empty_sessions"] += 1
+            empties.append((jp.name[:-6] if jp.name.endswith(".jsonl") else jp.name,
+                            witness_reason, mtime))
         if mtime >= horizon:
             payload["recent_sessions"] += 1
             payload["recent_rows"] += rows
             livelock_candidates.extend(_guard_livelock_candidates(jp.name, text))
         files.append((mtime, jp.name, rows))
+
+    if empties:
+        log_index = _guard_worker_log_index(runs_dir)
+        budget = [_GUARD_EMPTY_LOG_SCAN_CAP]
+        by_cause: dict[str, int] = {}
+        for name, witness_reason, mtime in empties:
+            cause = _guard_empty_cause(name, witness_reason, mtime, log_index, budget)
+            by_cause[cause] = by_cause.get(cause, 0) + 1
+        payload["empty_by_cause"] = dict(
+            sorted(by_cause.items(), key=lambda kv: (-kv[1], kv[0])))
 
     payload["by_kind"] = dict(sorted(by_kind.items()))
     payload["denied"] = sum(by_kind.get(k, 0) for k in _GUARD_DENY_KINDS)
@@ -2681,6 +3427,12 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         run_status_f = pool.submit(read_run_status_digests, root)
         merge_f = pool.submit(merge_state, root)
         leases_f = pool.submit(read_lease_state, root, backlog)
+        # The KERNEL's exclusive lane leases (#5859) — a different substrate from the
+        # `refs/fak/locks/*` set `read_lease_state` folds, and the one the whole fleet
+        # actually contends for. Without it the cross-check reported "clean" while 18
+        # lanes (`cmd/**` included) were fenced by processes that no longer existed.
+        # Local `dos` + a local process probe, no gh, so --fast keeps it.
+        lane_leases_f = pool.submit(lane_lease_liveness, root)
         seat_inventory_f = pool.submit(read_seat_inventory, root)
         lab_readiness_f = pool.submit(read_lab_readiness)
         resolve_ticks_f = pool.submit(read_resolve_ticks, root)
@@ -2714,7 +3466,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         run_status = run_status_f.result()
         merge = merge_f.result()
         leases = leases_f.result()
-        worker_leases = worker_lease_crosscheck(root / RUNS_DIRNAME, leases)
+        worker_leases = worker_lease_crosscheck(root / RUNS_DIRNAME, leases,
+                                                lane_leases=lane_leases_f.result())
         seat_inventory = annotate_seat_inventory_from_preflight(
             seat_inventory_f.result(), pre)
         lab_readiness = lab_readiness_f.result()
@@ -3503,7 +4256,8 @@ def _guard_reasons(guard: dict[str, Any]) -> list[str]:
     elif g_sessions:
         reasons.append(
             f"fak guard ran {g_sessions} dispatch session(s) but recorded 0 decisions "
-            f"({guard.get('empty_sessions', 0)} empty) — workers booted under guard "
+            f"({guard.get('empty_sessions', 0)} empty"
+            f"{_guard_empty_cause_bit(guard)}) — workers booted under guard "
             f"but proposed no adjudicated tool call")
     return reasons
 
@@ -3592,28 +4346,76 @@ def _lease_reasons(leases: dict[str, Any]) -> list[str]:
     return reasons
 
 
-def _worker_lease_reasons(worker_leases: dict[str, Any]) -> list[str]:
-    """The worker/lease cross-check: clean pairs, orphan processes, orphan leases."""
+def _lane_lease_reasons(worker_leases: dict[str, Any]) -> list[str]:
+    """The KERNEL lane-lease holder verdict (#5859).
+
+    Emitted whether or not the worker-sidecar half of the cross-check is available:
+    a dead lane-lease holder fences a whole tree for every agent in the fleet, and it
+    must never be silent behind an unrelated probe failure.
+    """
+    lane = worker_leases.get("lane_leases")
+    if not lane:
+        return []
     reasons: list[str] = []
+    dead = _int(lane.get("dead_count"), 0) or 0
+    unknown = _int(lane.get("unknown_count"), 0) or 0
+    live = _int(lane.get("live_count"), 0) or 0
+    total = _int(lane.get("total"), 0) or 0
+    if not lane.get("available"):
+        reasons.append(
+            "lane-lease holder liveness UNKNOWN (not clean): "
+            f"{lane.get('read_error') or 'lane-lease set unreadable'}; "
+            "next action: re-run from the workspace root so `dos lease-lane live` resolves")
+        return reasons
+    if dead:
+        bits = _lane_lease_bits(lane.get("dead") or [])
+        reasons.append(
+            f"lane-lease STALE HOLDERS: dead-holder={dead} of {total} lane lease(s) "
+            f"(live={live}, unknown={unknown}) — these leases are past their TTL, so the "
+            f"admission fold already elides them; they still sit in the structural WAL "
+            f"fold{': ' + bits if bits else ''}")
+        reasons.append(f"next action: {lane.get('next_action') or _LANE_LEASE_NEXT_ACTION}")
+    elif unknown:
+        reasons.append(
+            f"lane-lease holders: live={live}, dead-holder=0, unknown={unknown} of {total} "
+            "(unknown holders are unproven, not clean)")
+    elif total:
+        reasons.append(f"lane-lease holders all live ({live} lease(s), dead-holder=0)")
+    return reasons
+
+
+def _worker_lease_reasons(worker_leases: dict[str, Any]) -> list[str]:
+    """The worker/lease cross-check: clean pairs, orphan processes, orphan leases,
+    and (#5859) the kernel lane-lease holder verdict.
+
+    The word "clean" is now gated on `lane_lease_verdict_clean`: the local
+    worker<->resolver-lease pairs can all match while every exclusive lane lease on
+    the box is held by a dead process, and reporting THAT as clean is precisely the
+    blindness that let 18 fenced lanes go unnoticed for three weeks.
+    """
+    reasons: list[str] = []
+    lane_clean = lane_lease_verdict_clean(worker_leases)
     if worker_leases.get("available") is False:
         reasons.append(f"worker/lease cross-check unavailable: {worker_leases.get('error')}")
-    elif worker_leases:
+        return reasons + _lane_lease_reasons(worker_leases)
+    if worker_leases:
         op = _int(worker_leases.get("orphan_process_count"), 0) or 0
         ol = _int(worker_leases.get("orphan_lease_count"), 0) or 0
         clean = _int(worker_leases.get("clean_count"), 0) or 0
-        if op or ol:
+        dead = _int(worker_leases.get("dead_holder_count"), 0) or 0
+        if op or ol or not lane_clean:
             lease_note = ""
             if ol:
                 lease_note = "; unmatched live leases are not necessarily reapable"
             reasons.append(
                 f"worker/lease cross-check: clean={clean}, orphan-process={op}, "
-                f"unmatched-live-lease={ol}{lease_note}")
+                f"unmatched-live-lease={ol}, dead-holder={dead}{lease_note}")
         elif clean:
             reasons.append(f"worker/lease cross-check clean ({clean} matched worker/lease pair(s))")
         active_worker_line = _active_worker_summary(worker_leases)
         if active_worker_line:
             reasons.append(active_worker_line)
-    return reasons
+    return reasons + _lane_lease_reasons(worker_leases)
 
 
 def _seat_inventory_reasons(seat_inventory: dict[str, Any]) -> list[str]:
@@ -4288,7 +5090,8 @@ def _card_health_lines(p: dict[str, Any]) -> list[str]:
         lines.append(
             f"║ guard     : {gd.get('sessions')} session(s) ({gd.get('recent_sessions', 0)} recent), "
             f"{gd.get('rows', 0)} decision(s) [DENY={gd.get('denied', 0)} "
-            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  empty={gd.get('empty_sessions', 0)}{loop_bit}")
+            f"QUAR={gd.get('quarantined', 0)}{crash_bit}]  "
+            f"empty={gd.get('empty_sessions', 0)}{_guard_empty_cause_bit(gd)}{loop_bit}")
     rs = p.get("run_status") or {}
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
@@ -4324,10 +5127,43 @@ def _card_lease_lines(p: dict[str, Any]) -> list[str]:
         lines.append(
             f"║ lease chk : clean={wl.get('clean_count', 0)} "
             f"orphan-process={wl.get('orphan_process_count', 0)} "
-            f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}{detail}")
+            f"unmatched-live-lease={wl.get('orphan_lease_count', 0)} "
+            f"dead-holder={wl.get('dead_holder_count', 0)}{detail}")
         active_worker_line = _active_worker_summary(wl)
         if active_worker_line:
             lines.append("║ live work : " + active_worker_line.removeprefix("active resolver worker(s): "))
+    lines += _card_lane_lease_lines(wl)
+    return lines
+
+
+def _card_lane_lease_lines(wl: dict[str, Any]) -> list[str]:
+    """The kernel lane-lease holder rows (#5859) — dead holders and the reap action.
+
+    Rendered from the SAME `worker_lease_check` dict the card already threads, and
+    rendered even when the worker-sidecar half is unavailable, so a fenced `cmd/**`
+    can never be hidden behind an unrelated probe failure.
+    """
+    lane = wl.get("lane_leases")
+    if not lane:
+        return []
+    if not lane.get("available"):
+        return [f"║ lane lease: UNKNOWN, not clean ({lane.get('read_error') or 'unreadable'})"]
+    total = _int(lane.get("total"), 0) or 0
+    if not total:
+        return ["║ lane lease: none held"]
+    dead = _int(lane.get("dead_count"), 0) or 0
+    lines = [
+        f"║ lane lease: {total} held — live={_int(lane.get('live_count'), 0) or 0} "
+        f"dead-holder={dead} unknown={_int(lane.get('unknown_count'), 0) or 0}"]
+    if dead:
+        lines.append(f"║   DEAD    : {_lane_lease_bits(lane.get('dead') or [])}")
+        # The action is deliberately multi-clause (#5859) — one clause per line so
+        # the "do NOT reap" verdict is legible on the card instead of wrapping into
+        # the terminal. A payload from an older producer carries a single string.
+        action = lane.get("next_action") or _LANE_LEASE_NEXT_ACTION
+        steps = [s.strip() for s in str(action).split(" · ") if s.strip()]
+        for i, step in enumerate(steps):
+            lines.append(f"║   {'next' if i == 0 else '    '}    : {step}")
     return lines
 
 
@@ -4503,10 +5339,20 @@ def _md_lease_bullets(payload: dict[str, Any]) -> list[str]:
     elif wl:
         out.append(f"- **worker/lease cross-check**: clean={wl.get('clean_count', 0)}, "
                    f"orphan-process={wl.get('orphan_process_count', 0)}, "
-                   f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}")
+                   f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}, "
+                   f"dead-holder={wl.get('dead_holder_count', 0)}")
         active_worker_line = _active_worker_summary(wl)
         if active_worker_line:
             out.append(f"- **active resolver workers**: {active_worker_line.removeprefix('active resolver worker(s): ')}")
+    lane = wl.get("lane_leases") or {}
+    if lane and not lane.get("available"):
+        out.append("- **lane-lease holders**: UNKNOWN, not clean "
+                   f"(`{lane.get('read_error') or 'unreadable'}`)")
+    elif lane:
+        out.append(f"- **lane-lease holders**: {_int(lane.get('total'), 0) or 0} held — "
+                   f"live={_int(lane.get('live_count'), 0) or 0}, "
+                   f"dead-holder={_int(lane.get('dead_count'), 0) or 0}, "
+                   f"unknown={_int(lane.get('unknown_count'), 0) or 0}")
     return out
 
 
@@ -4679,7 +5525,8 @@ def _md_worker_lease_section(payload: dict[str, Any]) -> list[str]:
         out.append(
             f"clean={wl.get('clean_count', 0)}, "
             f"orphan-process={wl.get('orphan_process_count', 0)}, "
-            f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}.")
+            f"unmatched-live-lease={wl.get('orphan_lease_count', 0)}, "
+            f"dead-holder={wl.get('dead_holder_count', 0)}.")
         if wl.get("orphan_lease_count"):
             out.append("")
             out.append(
@@ -4727,6 +5574,37 @@ def _md_worker_lease_section(payload: dict[str, Any]) -> list[str]:
                 lease = row.get("lease") or {}
                 out.append(f"| `{lease.get('id')}` | {lease.get('lane') or '—'} | "
                            f"`{lease.get('holder') or '—'}` | {row.get('reason')} |")
+    out += _md_lane_lease_section(wl)
+    return out
+
+
+def _md_lane_lease_section(wl: dict[str, Any]) -> list[str]:
+    """`### Kernel lane leases` — every `dos lease-lane live` record and its holder
+    verdict (#5859). Rendered unconditionally so a fenced lane is never silent."""
+    lane = wl.get("lane_leases")
+    if not lane:
+        return []
+    out: list[str] = ["", "### Kernel lane leases (`dos lease-lane live`)", ""]
+    if not lane.get("available"):
+        out.append("_Lane-lease holder liveness UNKNOWN — not clean: "
+                   f"`{lane.get('read_error') or 'unreadable'}`._")
+        return out
+    rows = lane.get("rows") or []
+    if not rows:
+        out.append("_No lane lease is held._")
+        return out
+    out.append(f"{len(rows)} held — live={_int(lane.get('live_count'), 0) or 0}, "
+               f"dead-holder={_int(lane.get('dead_count'), 0) or 0}, "
+               f"unknown={_int(lane.get('unknown_count'), 0) or 0}.")
+    if lane.get("dead_count"):
+        out += ["", f"**Next action:** {lane.get('next_action') or _LANE_LEASE_NEXT_ACTION}"]
+    out += ["", "| lane | holder | pid | held | state | evidence |", "|---|---|---:|---:|---|---|"]
+    for row in rows:
+        out.append(
+            f"| `{row.get('lane') or '—'}` | `{row.get('holder') or '—'}` | "
+            f"{row.get('pid') if row.get('pid') is not None else '—'} | "
+            f"{_age_text(row.get('age_min'))} | **{row.get('holder_state')}** | "
+            f"{row.get('holder_evidence') or ''} |")
     return out
 
 
@@ -4844,7 +5722,8 @@ def _md_guard_section(payload: dict[str, Any]) -> list[str]:
             f"- **denied** (DENY + RESULT_DENY): {gd.get('denied', 0)}",
             f"- **quarantined**: {gd.get('quarantined', 0)}",
             f"- **empty sessions** (booted under guard, no adjudicated tool call): "
-            f"{gd.get('empty_sessions', 0)}",
+            f"{gd.get('empty_sessions', 0)}"
+            f"{_guard_empty_cause_bit(gd)}",
             "",
             "| decision kind | count |",
             "|---|---:|",
@@ -5066,7 +5945,16 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     if wl and wl.get("available") is not False:
         parts.append(f"lease-check clean {wl.get('clean_count', 0)}"
                      f"/orphan-proc {wl.get('orphan_process_count', 0)}"
-                     f"/unmatched-live-lease {wl.get('orphan_lease_count', 0)}")
+                     f"/unmatched-live-lease {wl.get('orphan_lease_count', 0)}"
+                     f"/dead-holder {wl.get('dead_holder_count', 0)}")
+    # A dead lane-lease holder fences a whole tree for the fleet — it rides the
+    # capacity line even when the worker-sidecar half is unavailable (#5859).
+    lane = wl.get("lane_leases") or {}
+    if lane and not lane.get("available"):
+        parts.append("lane-lease liveness UNKNOWN")
+    elif _int(lane.get("dead_count"), 0):
+        parts.append(f"LANE LEASES TTL-EXPIRED: dead-holder {lane.get('dead_count')}"
+                     f"/{lane.get('total')} (admission fold already elides; do not reap)")
     return "capacity: " + " · ".join(parts) if parts else ""
 
 
@@ -5274,13 +6162,29 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
     elif wl:
         op = wl.get("orphan_process_count") or 0
         ol = wl.get("orphan_lease_count") or 0
-        if op or ol:
+        dead = wl.get("dead_holder_count") or 0
+        lane_clean = lane_lease_verdict_clean(wl)
+        if op or ol or not lane_clean:
             buckets["action"].append(
                 f"worker/lease mismatch: clean={wl.get('clean_count', 0)}, "
-                f"orphan-process={op}, unmatched-live-lease={ol}")
+                f"orphan-process={op}, unmatched-live-lease={ol}, dead-holder={dead}")
         elif wl.get("clean_count"):
             buckets["expected"].append(
                 f"worker/lease cross-check clean ({wl.get('clean_count')} matched)")
+    # Fenced lanes are an ACTION item on their own, independent of the sidecar half.
+    lane = wl.get("lane_leases") or {}
+    if lane and not lane.get("available"):
+        buckets["action"].append(
+            "lane-lease holder liveness UNKNOWN (not clean): "
+            f"{lane.get('read_error') or 'lane-lease set unreadable'}")
+    elif _int(lane.get("dead_count"), 0):
+        buckets["action"].append(
+            f"{lane.get('dead_count')} of {lane.get('total')} lane lease(s) are TTL-EXPIRED "
+            f"in the structural WAL fold ({_lane_lease_bits(lane.get('dead') or [], limit=3)}) — "
+            f"{lane.get('next_action') or _LANE_LEASE_NEXT_ACTION}")
+    elif lane.get("total"):
+        buckets["expected"].append(
+            f"lane-lease holders all live ({lane.get('live_count')} lease(s), dead-holder=0)")
     util = payload.get("utilization") or {}
     if util.get("schema"):
         state = str(util.get("state") or "")

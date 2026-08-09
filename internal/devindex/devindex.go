@@ -226,14 +226,103 @@ func (c *Catalog) joinModuleVersions(ledger []byte) {
 // never contain '#', so the first '#' after the closing ']' starts the comment.
 var laneTokenRE = regexp.MustCompile(`"([^"]+)"`)
 
+// splitTOMLComment cuts a line at the first '#' that is outside a quoted string,
+// so a glob containing '#' cannot truncate the entry. Globs do not contain '#'
+// today; the quote-awareness is here so the array joiner below cannot be the
+// thing that breaks when one does.
+func splitTOMLComment(line string) (body, comment string) {
+	inQuote := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			inQuote = !inQuote
+		case '#':
+			if !inQuote {
+				return line[:i], strings.TrimSpace(line[i+1:])
+			}
+		}
+	}
+	return line, ""
+}
+
+// arrayDepthDelta counts unquoted '[' minus unquoted ']' in a line's body. A
+// section header (`[lanes.trees]`) and an inline entry both net to zero; only an
+// array left open at end-of-line is positive.
+func arrayDepthDelta(body string) int {
+	depth, inQuote := 0, false
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '"':
+			inQuote = !inQuote
+		case '[':
+			if !inQuote {
+				depth++
+			}
+		case ']':
+			if !inQuote {
+				depth--
+			}
+		}
+	}
+	return depth
+}
+
+// joinLaneArrays collapses a TOML array spanning several lines into the single
+// logical line parseLanes's scanner expects.
+//
+// Why this exists: parseLanes is a line scanner, so the multi-line spelling puts
+// a lane's NAME and its GLOBS on different lines. The name alone reaches
+// `c.declared[name] = true`, which is what every "is this lane real?" check
+// consults — so the lane validates while contributing no prefixes and no exact
+// entries, and LaneForPath falls through to `unknown` for every path it owns.
+// Nothing errors and no gate goes red; resolution just quietly stops. fak's own
+// dos.toml writes every tree inline so the tree is blind to it; it was reported
+// by a downstream adopter whose dos.toml wraps its wider doc trees across lines.
+//
+// Only the final line's comment survives, because the per-leaf description is by
+// convention the comment trailing the closing bracket.
+func joinLaneArrays(text string) string {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	var buf strings.Builder
+	depth := 0
+	for _, raw := range lines {
+		body, comment := splitTOMLComment(strings.TrimSpace(raw))
+		if depth == 0 {
+			if arrayDepthDelta(body) <= 0 {
+				out = append(out, raw) // untouched: headers, inline entries, comments
+				continue
+			}
+			buf.Reset()
+			buf.WriteString(strings.TrimSpace(body))
+			depth = arrayDepthDelta(body)
+			continue
+		}
+		buf.WriteByte(' ')
+		buf.WriteString(strings.TrimSpace(body))
+		if depth += arrayDepthDelta(body); depth <= 0 {
+			if comment != "" {
+				buf.WriteString(" # " + comment)
+			}
+			out = append(out, buf.String())
+			depth = 0
+		}
+	}
+	if depth > 0 { // unterminated array: emit what we have rather than drop the lane
+		out = append(out, buf.String())
+	}
+	return strings.Join(out, "\n")
+}
+
 // parseLanes scans the `[lanes.trees]` table out of dos.toml. It is a deliberately
 // tiny line scanner (the repo carries no TOML dependency): a lane entry is
 // `name = ["glob", ...]  # description`, and the comment after the array is the
 // per-leaf description this view surfaces (the commit-stamp reader strips it; we
-// keep it).
+// keep it). Multi-line arrays are folded to that one-line shape first, by
+// joinLaneArrays, so the scanner never sees a name without its globs.
 func (c *Catalog) parseLanes(text string) {
 	section := ""
-	for _, raw := range strings.Split(text, "\n") {
+	for _, raw := range strings.Split(joinLaneArrays(text), "\n") {
 		t := strings.TrimSpace(raw)
 		if t == "" || strings.HasPrefix(t, "#") {
 			continue // blank or comment-only line (e.g. the new-leaf:tree marker)

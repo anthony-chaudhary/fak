@@ -17,9 +17,11 @@ import (
 // HookEvents closes it with two bridge derivations, both pure:
 //
 //   - a launch post whose response announces a background id spawns a SECOND
-//     proc "bg:<id>" (tool "<tool>[bg]") — the job itself, now subject to the
-//     deadline/stall/orphan machinery its launch call escaped by returning
-//     early;
+//     proc "bg:<session>:<id>" (tool "<tool>[bg]") — the job itself, now subject
+//     to the deadline/stall/orphan machinery its launch call escaped by
+//     returning early. The harness's background id is per-session and the
+//     journal is workspace-shared, so the identity carries the owning session
+//     (bgident.go, #5880);
 //   - a poll post whose input names that id pulses the bg proc (Via = the
 //     poll's own call id), and a poll response that reports the job finished
 //     exits it — streamed output becomes liveness, so a healthy polled job
@@ -48,24 +50,26 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 		out = append(out, ev)
 	}
 	if kind != "post" {
-		return out, nil
+		return withSessionResume(out, nowMS, existing), nil
 	}
 
 	// Launch bridge: the response announces a background id => spawn the job.
 	if id := hookBackgroundID(p.ToolResponse); id != "" {
-		callID := "bg:" + id
+		callID := backgroundCallID(p.SessionID, id)
 		if _, known := hookCallState(callID, existing); !known {
 			env := envFor(p.ToolName + "[bg]")
 			out = append(out, Event{Kind: EvSpawn, CallID: callID, Tool: p.ToolName + "[bg]",
 				Session: p.SessionID, AtMS: nowMS,
 				DeadlineMS: env.DeadlineMS, HeartbeatEveryMS: env.HeartbeatEveryMS})
 		}
-		return out, nil
+		return withSessionResume(out, nowMS, existing), nil
 	}
 
 	// Poll bridge: the input names a background id => pulse (or finish) the job.
+	// Resolved through the same constructor as the launch, so the poll can only
+	// reach a job in its OWN session (bgident.go).
 	if id := hookPolledID(p.ToolInput); id != "" {
-		callID := "bg:" + id
+		callID := backgroundCallID(p.SessionID, id)
 		state, known := hookCallState(callID, existing)
 		if !known {
 			return out, nil // job never journaled; a pulse would refuse the fold
@@ -85,7 +89,20 @@ func HookEvents(kind string, p HookPayload, envFor func(tool string) HookEnvelop
 			out = append(out, Event{Kind: EvPulse, CallID: callID, AtMS: nowMS, Via: via})
 		}
 	}
-	return out, nil
+	return withSessionResume(out, nowMS, existing), nil
+}
+
+// withSessionResume prepends the session_resume retraction when this firing's
+// own spawn refutes a session_end still standing in the journal (#3152). The
+// retraction must lead: Fold consumes the journal in order, so a spawn placed
+// ahead of it would still hit the armed boundary. Returns out unchanged when no
+// boundary is standing, which is the overwhelmingly common case.
+func withSessionResume(out []Event, nowMS int64, existing []Event) []Event {
+	resume, ok := hookSessionResume(out, nowMS, existing)
+	if !ok {
+		return out
+	}
+	return append([]Event{resume}, out...)
 }
 
 // hookCallState reports whether callID was ever journaled and, if so, whether

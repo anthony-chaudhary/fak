@@ -134,6 +134,23 @@ func isolatedLandRetryCap() int {
 // fails open. Injectable so the whole path is testable against a fake.
 type GitRunner func(root string, args []string) (int, string)
 
+// IsolationBackend materializes and releases a worker's private writable tree.
+// Materialize must preserve git linkage so `git diff <baseSHA>` run in the
+// returned path observes the worker's complete patch; Release must remove only
+// that materialization. The seam exists so follow-on backends can attack the
+// roughly 450 MB per-worker cost of detached git worktrees tracked by #3165.
+type IsolationBackend interface {
+	Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result
+	Release(root, wtPath string, git GitRunner) Result
+}
+
+type gitWorktree struct{}
+
+var defaultIsolationBackend IsolationBackend = gitWorktree{}
+
+// IsolationBackends returns all registered implementations for conformance tests.
+func IsolationBackends() []IsolationBackend { return []IsolationBackend{gitWorktree{}} }
+
 // Result is the fail-open outcome of a git-touching op. OK is the one bit callers
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
@@ -151,6 +168,8 @@ type Result struct {
 	// surfacing the count makes that otherwise-silent loss observable (#4599).
 	DroppedOutOfLane int                      `json:"dropped_out_of_lane,omitempty"`
 	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
+	RecoveryRef      string                   `json:"recovery_ref,omitempty"`
+	RemoteRecovery   *RemoteReadback          `json:"remote_recovery,omitempty"`
 }
 
 // VerifyHook is a build/adjudication witness run IN the isolated worktree before
@@ -350,7 +369,25 @@ func TrunkHeadSHA(root string, git GitRunner) string {
 // wedges a spawn. Detached on purpose: pinned to a SHA, never a branch, so git
 // does not refuse it and it can never trip OFF_TRUNK. Idempotent: a target path
 // already tracked as this worktree is reported Reused rather than re-added.
+//
+// With the warm pool on (PoolCapEnv, off by default) a miss on that same-key reuse
+// falls to a POOL lease first: an idle worktree of this lane, re-pointed at base, also
+// reported Reused — so a NEW worker can inherit a materialized tree, which the same-key
+// check alone never allowed (#3572). Result.Path is authoritative; a leased member does
+// NOT sit at Path(lane, key, wtRoot).
 func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
+	return PrepareWithBackend(root, lane, key, baseSHA, wtRoot, git, defaultIsolationBackend)
+}
+
+// PrepareWithBackend is the injectable form of Prepare.
+func PrepareWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend) Result {
+	if backend == nil {
+		backend = defaultIsolationBackend
+	}
+	return backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
+}
+
+func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 	base := baseSHA
 	if base == "" {
 		base = TrunkHeadSHA(root, git)
@@ -371,6 +408,16 @@ func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 			}
 		}
 	}
+	// #3572 warm pool: hand this worker an ALREADY-materialized idle worktree of its
+	// lane (a fast reset to the new base) instead of paying `worktree add`'s full
+	// checkout. Runs AFTER the same-lane+key reuse check above, which is the cheaper
+	// hit, and falls straight through to the create path below on any miss — so with
+	// the pool off (the default) this is one env read and nothing else changes.
+	if k := PoolCap(); k > 0 {
+		if res, ok := leasePooled(root, lane, base, wtRoot, git); ok {
+			return res
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
 		return Result{OK: false, Path: wt, BaseSHA: base,
 			Reason: "could not create worktree root: " + err.Error() + " — fail open"}
@@ -388,10 +435,36 @@ func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
 // only durable output is the commit Land already placed on the trunk. Best-effort:
 // a removal failure is reported, never raised, and a trailing `worktree prune`
 // clears the admin record. Refuses any non-marker path as a guardrail.
+//
+// With the warm pool on (PoolCapEnv, off by default) the worktree is instead RETURNED
+// to its lane's idle set while that lane is under the cap — reset clean and marked
+// idle, so the next Prepare leases it rather than re-adding one (#3572). A return
+// reports OK with Removed=false; overflow and every failure path force-remove as above.
 func Reap(root, wtPath string, git GitRunner) Result {
+	return ReapWithBackend(root, wtPath, git, defaultIsolationBackend)
+}
+
+// ReapWithBackend is the injectable form of Reap.
+func ReapWithBackend(root, wtPath string, git GitRunner, backend IsolationBackend) Result {
+	if backend == nil {
+		backend = defaultIsolationBackend
+	}
+	return backend.Release(root, wtPath, git)
+}
+
+func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
 	if !IsWorkerWorktree(wtPath) {
 		return Result{OK: false, Path: wtPath, Removed: false,
 			Reason: "refusing to reap a non-worker worktree"}
+	}
+	// #3572 warm pool: RETURN the worktree to its lane's idle set instead of destroying
+	// it, up to the cap; past the cap (or on any hiccup) it force-removes exactly as
+	// below. Removed stays false for a return — the worktree really is still there, and
+	// a caller counting reclaimed dirs must not be told otherwise.
+	if k := PoolCap(); k > 0 {
+		if res, ok := returnPooled(root, wtPath, k, git); ok {
+			return res
+		}
 	}
 	rc, out := run(git, root, []string{"worktree", "remove", "--force", wtPath})
 	removed := rc == 0
@@ -421,6 +494,12 @@ func Reap(root, wtPath string, git GitRunner) Result {
 // when non-empty, scopes the commit to the worker's declared region — never an
 // add -A. verify (when non-nil) is a witness run in the worktree before anything
 // touches the trunk; a failed witness refuses the land. FAIL-OPEN on git errors.
+//
+// ONE exception to fail-open: the hard-self core lock (#5392, corelock.go). A diff
+// touching a core-locked kernel path is REFUSED unless a maintenance witness
+// resolves CONFIRMED — supplied by the WithCoreLockWitness option or by the
+// CoreLockWitnessTrailer in the commit message. That gate runs before any apply, so
+// a refused land leaves the trunk exactly as it found it.
 // CountPathsOutsideTrees counts how many of `changed` fall outside every declared tree in
 // `trees`. Both sides are normalised to forward slashes and stripped of leading/trailing
 // separators first, and a tree matches a path exactly or as a "<tree>/" prefix; an empty
@@ -448,7 +527,8 @@ func CountPathsOutsideTrees(changed, trees []string) int {
 	return outside
 }
 
-func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner) Result {
+func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
+	cfg := newLandConfig(opts)
 	diffRef := baseSHA
 	if diffRef == "" {
 		diffRef = "HEAD"
@@ -463,11 +543,18 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		return Result{OK: true, Applied: false, Committed: false,
 			Reason: "no net diff in worktree vs " + diffRef + " to land"}
 	}
+	// The landing pathset, read ONCE: it feeds both the out-of-lane ledger and the
+	// hard-self core-lock gate below, so the two can never disagree about what this
+	// land actually carries. An unreadable name list leaves it empty — the ledger
+	// then counts 0 exactly as before, and the gate falls back to the captured
+	// diff's own headers rather than treating "unreadable" as "nothing locked".
+	namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef})
+	if namesRC != 0 {
+		names = ""
+	}
 	droppedOutOfLane := 0
-	if len(paths) > 0 {
-		if namesRC, names := run(git, wtPath, []string{"diff", "--name-only", diffRef}); namesRC == 0 {
-			droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
-		}
+	if len(paths) > 0 && names != "" {
+		droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
 	}
 	if verify != nil {
 		if ok, detail := verify(wtPath); !ok {
@@ -484,6 +571,20 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	}
 	defer cleanup()
 
+	// HARD-SELF CORE LOCK (#5392). The last gate before anything touches the trunk:
+	// a diff carrying a core-locked kernel path (internal/adjudicator/**,
+	// internal/abi/**, internal/corelocks/**) lands only with a maintenance witness
+	// that resolves CONFIRMED — supplied by WithCoreLockWitness (the CLI flag) or by
+	// the CoreLockWitnessTrailer in the commit message. This runs HERE, in the
+	// lander, because the sanctioned worktree cannot use `fak commit` (OFF_TRUNK on a
+	// detached HEAD) and the default isolated path commits through commit-tree, which
+	// runs no git hook. Refusing here leaves the trunk index, worktree and HEAD
+	// untouched; the worker's diff stays in its worktree.
+	if refusal, fired := coreLockLandGate(root, names, diff, msgFile, cfg, git); fired {
+		refusal.DroppedOutOfLane = droppedOutOfLane
+		return refusal
+	}
+
 	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
 	// index so the shared index is never a sweep target. handled=false means it could
 	// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
@@ -491,7 +592,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
 	// safe isolated form here).
 	if isolatedLandEnabled() && len(paths) > 0 {
-		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv); handled {
+		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
 			res.DroppedOutOfLane = droppedOutOfLane
 			return res
 		}
@@ -611,7 +712,11 @@ func writePatch(diff string) (string, func(), error) {
 // working tree is synced for `paths` (git checkout <new> -- paths) so trunk builders
 // see the landed change, matching the baseline post-state; a sync hiccup is reported
 // but does NOT unland.
-func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner) (Result, bool) {
+func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner, configs ...landConfig) (Result, bool) {
+	cfg := landConfig{}
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
 	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
@@ -703,6 +808,20 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		if rc != 0 || newCommit == "" {
 			return Result{}, false
 		}
+		// Name the off-branch commit before trunk CAS. A process crash from here on
+		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
+		recoveryRef, anchorErr := AnchorRecoveryEntry(root, wtPath, newCommit, func(r string, a []string) (int, string) { return runEnv(genv, r, env, a) })
+		if anchorErr != nil {
+			return Result{OK: false, Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error()}, true
+		}
+		var remoteReceipt *RemoteReadback
+		if cfg.recoveryRemote != "" {
+			receipt := PublishRecoveryRef(root, cfg.recoveryRemote, recoveryRef, newCommit, git)
+			remoteReceipt = &receipt
+			if cfg.requireRemote && !receipt.Witnessed {
+				return Result{OK: false, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt, Reason: "required remote recovery witness failed — trunk unchanged", Detail: receipt.Reason}, true
+			}
+		}
 		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
 		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
 		// commit built on the stale base is simply abandoned, unreferenced.
@@ -712,14 +831,14 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		// The ref moved but the shared working tree still holds OLD content for `paths`
 		// (we never touched it). Sync just those paths so trunk builders see the landed
 		// change, matching the baseline post-state. A sync failure does NOT unland.
-		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts)
+		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts) + "; recovery-ref=" + recoveryRef
 		coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
 		if rc, out := run(git, root, coArgs); rc != 0 {
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
 		}
 		return Result{OK: true, Applied: true, Committed: true,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
-			Detail: detail, Disambiguation: disambiguation}, true
+			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 	}
 	// Every bounded attempt lost its CAS — genuine sustained contention. Fall back to
 	// the baseline shared path as the final resort rather than loop unbounded.

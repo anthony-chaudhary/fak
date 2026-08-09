@@ -172,3 +172,14 @@ func TestCoverageDiscipline_FoldsIntoCardDebt(t *testing.T) {
 		t.Errorf("verdict = %q, want ACTION when coverage is in debt", payload.Verdict)
 	}
 }
+
+func TestCoverageDiscipline_RaceAcceptsRepoRelativePackage(t *testing.T) {
+	cov := map[string]float64{
+		"github.com/anthony-chaudhary/fak/internal/foo": 90,
+		"github.com/anthony-chaudhary/fak/internal/bar": 90,
+	}
+	k := CoverageDiscipline(cov, CoverageBaseline{Floor: 80}, map[string]bool{"./internal/foo": true})
+	if len(k.Soft) != 1 || !strings.Contains(k.Soft[0], "internal/bar") {
+		t.Fatalf("soft = %v, want only the genuinely unchecked package", k.Soft)
+	}
+}

@@ -12,7 +12,9 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,14 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
+
+// dispatchHostProbeShellReuseAtInit snapshots the seam's value at package
+// initialization, BEFORE any test has run. Package-level variables initialize in
+// dependency order, so this is the genuine declared default of
+// dispatchHostProbeShellReuse and not whatever a neighbouring test last wrote --
+// which is the only way to pin a package-var default that every other test in
+// this file deliberately flips.
+var dispatchHostProbeShellReuseAtInit = dispatchHostProbeShellReuse
 
 const (
 	probeProcJSON   = `[{"pid":11,"name":"claude","threads":7,"handles":300,"ws_mb":512}]`
@@ -102,6 +112,13 @@ func newProbeSeamHarness(t *testing.T) *probeSeamHarness {
 	prevSpawner, prevOneShot := dispatchHostProbeSpawner, dispatchHostProbeOneShot
 	prevReuse := dispatchHostProbeShellEnabled()
 	dispatchCloseHostProbeShells()
+	// Start every harness test from the DISARMED posture rather than from whatever the
+	// previous test left behind. The seam is process-wide, so once the tick's own arming
+	// witness runs on Windows it stays on, and a test that deliberately does not arm --
+	// the BEFORE number the spine is measured against -- would silently inherit a warm
+	// shell it never asked for. Saving prevReuse only restores the neighbour's posture on
+	// the way out; it is this line that makes the way IN hermetic.
+	setDispatchHostProbeShellReuse(false)
 	dispatchHostProbeSpawner = h.spawn
 	dispatchHostProbeOneShot = h.oneShot
 	t.Cleanup(func() {
@@ -310,6 +327,15 @@ func TestHostProbeShellReuseIsOffByDefault(t *testing.T) {
 	prev := dispatchHostProbeShellEnabled()
 	t.Cleanup(func() { setDispatchHostProbeShellReuse(prev) })
 
+	// The PACKAGE default, not just the setter round-trip: every caller that shares
+	// dispatchRunHostProbe without declaring anything -- another verb, a helper, a
+	// test -- must keep the historical one-shot spawn. Only a caller that arms the
+	// seam (the dispatch tick, below) moves off it.
+	if dispatchHostProbeShellReuseAtInit {
+		t.Fatalf("the process-wide seam initialized armed: an undeclared caller would " +
+			"silently route its probes through a warm console it never asked for")
+	}
+
 	setDispatchHostProbeShellReuse(false)
 	if dispatchHostProbeShellEnabled() {
 		t.Fatalf("a disarmed seam must leave the reuse spine off")
@@ -337,6 +363,174 @@ func TestHostProbeSeamReadsNoEnvironmentKnob(t *testing.T) {
 		if strings.Contains(string(src), banned) {
 			t.Fatalf("the host-probe seam calls %s: behavioral settings belong on the config "+
 				"surface, not the environment (internal/envconfiglint CONFIG_NOT_ENV)", banned)
+		}
+	}
+}
+
+// boolRef is the declaration helper: a *bool field distinguishes "the caller
+// declared this" from "the caller declared nothing", and a test needs both.
+func boolRef(v bool) *bool { return &v }
+
+// TestHostProbeShellReuseDefaultsPerGOOS pins WHERE the spine is on. Windows is
+// the only GOOS whose host probes go through PowerShell, so it is the only one
+// that pays a ConPTY/conhost per probe and the only one with churn to collapse;
+// arming it elsewhere would add a moving part to a `ps` one-shot for no dividend.
+func TestHostProbeShellReuseDefaultsPerGOOS(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		want bool
+	}{
+		{"windows", true},
+		{"linux", false},
+		{"darwin", false},
+		{"freebsd", false},
+	} {
+		if got := dispatchHostProbeShellReuseForOS(tc.goos); got != tc.want {
+			t.Errorf("default on %s = %v, want %v", tc.goos, got, tc.want)
+		}
+	}
+	// The host default this box actually gets is that same rule applied to runtime.GOOS,
+	// so the flag's printed default and the tick's resolved posture cannot drift apart.
+	if got, want := dispatchHostProbeShellReuseDefault(), runtime.GOOS == "windows"; got != want {
+		t.Errorf("host default = %v on GOOS=%s, want %v", got, runtime.GOOS, want)
+	}
+}
+
+// TestHostProbeShellReuseResolvesTheDeclaredSetting pins the tri-state: an
+// undeclared tick (the wave/sweep/garden callers, which build the options struct
+// directly and fill no flag) takes the host default, and an explicit declaration
+// wins in BOTH directions -- which is what makes --host-probe-shell-reuse=false a
+// real off switch and not just an absent opt-in.
+func TestHostProbeShellReuseResolvesTheDeclaredSetting(t *testing.T) {
+	hostDefault := dispatchHostProbeShellReuseDefault()
+	for _, tc := range []struct {
+		name     string
+		declared *bool
+		want     bool
+	}{
+		{"undeclared takes the host default", nil, hostDefault},
+		{"declared on", boolRef(true), true},
+		{"declared off", boolRef(false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dispatchResolveHostProbeShellReuse(tc.declared); got != tc.want {
+				t.Fatalf("resolved = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDispatchTickArmsHostProbeShellReuse is the ANTI-DARKNESS witness for #3405:
+// the spine was landed, tested, and reachable by nobody, so the fleet got zero
+// spawn reduction from green code. Here the tick's own arming call is driven and
+// the seam is read back -- on Windows a bare tick arms the spine, everywhere else
+// it stays on the one-shot path, and an explicit declaration overrides both.
+func TestDispatchTickArmsHostProbeShellReuse(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared *bool
+		want     bool
+	}{
+		{"a bare tick follows the host", nil, runtime.GOOS == "windows"},
+		{"an operator can arm it anywhere", boolRef(true), true},
+		{"an operator can disarm it on any host", boolRef(false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := dispatchHostProbeShellEnabled()
+			t.Cleanup(func() { setDispatchHostProbeShellReuse(prev) })
+			// Start from the opposite posture so a no-op arm cannot pass by accident.
+			setDispatchHostProbeShellReuse(!tc.want)
+
+			closeShells := dispatchArmHostProbeShellReuse(tc.declared)
+			if closeShells == nil {
+				t.Fatal("arming handed back no teardown: the tick has nothing to defer")
+			}
+			if got := dispatchHostProbeShellEnabled(); got != tc.want {
+				t.Fatalf("after arming, the spine is %v, want %v", got, tc.want)
+			}
+			closeShells()
+		})
+	}
+}
+
+// TestDispatchTickArmingTearsDownTheWarmShell witnesses the other half of the arm:
+// the teardown the tick defers really closes the console the spine opened, so a
+// warm shell cannot outlive the tick that opened it (the leak the whole rack would
+// otherwise trade the spawn saving for).
+func TestDispatchTickArmingTearsDownTheWarmShell(t *testing.T) {
+	h := newProbeSeamHarness(t)
+
+	closeShells := dispatchArmHostProbeShellReuse(boolRef(true))
+	runThreeHostProbes(t)
+
+	shell := h.shellAt(t, 0)
+	if got := shell.taskCount(); got != 3 {
+		t.Fatalf("warm shell ran %d tasks, want 3 (the arm did not route the probes)", got)
+	}
+	if got := shell.closeCount(); got != 0 {
+		t.Fatalf("shell closed %d times while the tick was still running, want 0", got)
+	}
+
+	closeShells()
+
+	if got := shell.closeCount(); got != 1 {
+		t.Fatalf("the deferred teardown closed the shell %d times, want exactly 1", got)
+	}
+	if st := dispatchHostProbeRackStats(); st != (dispatchtick.ShellRackStats{}) {
+		t.Fatalf("the rack survived the tick with stats %+v, want it dropped", st)
+	}
+}
+
+// TestHostProbeShellReuseIsOnTheTickConfigSurface pins the DECLARATION channel:
+// the setting must be a named flag `--help` prints, not an environment read
+// (internal/envconfiglint CONFIG_NOT_ENV), and a bare tick must resolve to the
+// host default rather than to Go's zero value.
+func TestHostProbeShellReuseIsOnTheTickConfigSurface(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		argv []string
+		want bool
+	}{
+		{"a bare tick", nil, dispatchHostProbeShellReuseDefault()},
+		{"declared off", []string{"--host-probe-shell-reuse=false"}, false},
+		{"declared on", []string{"--host-probe-shell-reuse=true"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argv := append([]string{"--workspace", t.TempDir()}, tc.argv...)
+			opts, _, code := parseDispatchTickFlags(io.Discard, argv)
+			if code != 0 {
+				t.Fatalf("parse failed with code %d", code)
+			}
+			if opts.HostProbeShellReuse == nil {
+				t.Fatal("the CLI left the setting undeclared: the flag never reached the options")
+			}
+			if got := dispatchResolveHostProbeShellReuse(opts.HostProbeShellReuse); got != tc.want {
+				t.Fatalf("the tick resolved %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDispatchTickWiresTheHostProbeSpine is the regression pin against the exact
+// staleness this ticket exists to fix: the spine going DARK again. A green rack
+// with no caller looks shipped in the commit log and changes nothing on the fleet,
+// and no behavioral test can catch that -- the seam simply never runs. So assert
+// the wiring itself: the tick both ARMS the spine and DEFERS the teardown it was
+// handed. Dropping either line reds here instead of quietly costing the fleet a
+// console per probe again.
+func TestDispatchTickWiresTheHostProbeSpine(t *testing.T) {
+	src, err := os.ReadFile("dispatch_tick.go")
+	if err != nil {
+		t.Fatalf("read the tick: %v", err)
+	}
+	for _, want := range []string{
+		"dispatchArmHostProbeShellReuse(opts.HostProbeShellReuse)",
+		"defer closeHostProbeShells()",
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("the dispatch tick no longer contains %q: the #3405 reuse spine is "+
+				"landed but unreachable, so every Windows probe is back to its own "+
+				"process and its own ConPTY/conhost", want)
 		}
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accountobs"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -57,29 +58,33 @@ func cmdGuard(argv []string) {
 		cmdGuardDeny(argv[1:])
 		return
 	}
-	// `fak guard policy <verb>` is the read-only FLOOR REPORT surface (#5424, epic
-	// #5170 Track A): `explain` groups the effective floor by amendment class, `diff`
-	// reports the widen-drift from the shipped floor with a CI-gateable exit code.
-	// Peeled like `allow`/`deny` — a bare leading verb is unambiguous because a real
-	// wrap always names the agent after `--`, so the wrapped program's own `policy`
-	// argument can never sit here. This peel is the ONLY registration of those verbs
-	// (guard_policy.go holds the table); removing it makes them unreachable rather
-	// than quietly reachable by some other path. Note the exact-match: the flag
-	// spelling `--policy FILE` is untouched.
-	if len(argv) > 0 && argv[0] == "policy" {
-		os.Exit(runGuardPolicy(os.Stdout, os.Stderr, argv[1:]))
-	}
-	// `fak guard compile` performs one authoring-time model extraction and emits
-	// a review-only policy diff. Runtime policy enforcement remains model-free.
-	if len(argv) > 0 && argv[0] == "compile" {
-		os.Exit(runGuardCompile(os.Stdout, os.Stderr, argv[1:]))
-	}
-	// `fak guard restart-audit` is the read-only restart-chain scanner (#3057):
-	// joins RESTART_HOP journal rows against carryover seed files and backfills
-	// the orphans. Peeled like `allow` — a bare leading verb, never a program to
-	// wrap — and returns without binding a gateway.
-	if len(argv) > 0 && argv[0] == "restart-audit" {
-		os.Exit(runGuardRestartAudit(os.Stdout, os.Stderr, argv[1:]))
+	// The read-only `fak guard <verb>` report surfaces, peeled like `allow`/`deny` before the
+	// wrap-a-command flag parse. All three obey ONE argv contract — an exact-match bare leading
+	// verb (unambiguous because a real wrap always names the agent after `--`, so the wrapped
+	// program's own `policy`/`compile` argument can never sit here, and the flag spelling
+	// `--policy FILE` is untouched), the rest of argv handed to the handler, and the handler's
+	// code as the exit status without ever binding a gateway. One table so a verb added here
+	// cannot quietly acquire a different contract from its siblings. These rows are also the
+	// ONLY registration of these verbs: dropping a row makes it unreachable rather than
+	// reachable by some other path.
+	for _, peel := range []struct {
+		verb string
+		run  func(stdout, stderr io.Writer, argv []string) int
+	}{
+		// `policy` is the FLOOR REPORT surface (#5424, epic #5170 Track A): `explain` groups the
+		// effective floor by amendment class, `diff` reports the widen-drift from the shipped
+		// floor with a CI-gateable exit code (guard_policy.go holds the verb table).
+		{"policy", runGuardPolicy},
+		// `compile` performs one authoring-time model extraction and emits a review-only policy
+		// diff. Runtime policy enforcement remains model-free.
+		{"compile", runGuardCompile},
+		// `restart-audit` is the read-only restart-chain scanner (#3057): joins RESTART_HOP
+		// journal rows against carryover seed files and backfills the orphans.
+		{"restart-audit", runGuardRestartAudit},
+	} {
+		if len(argv) > 0 && argv[0] == peel.verb {
+			os.Exit(peel.run(os.Stdout, os.Stderr, argv[1:]))
+		}
 	}
 	// `fak guard sessions [id]` is the read-only registry browser. Peel it before the
 	// wrap-a-command parser so the handler is reachable from the public command tree.
@@ -100,6 +105,18 @@ func cmdGuard(argv []string) {
 		return
 	}
 	t0 := time.Now()
+	// --core-lock-all (#5423, epic #5170 Track C) is the session-wide RATCHET posture:
+	// for the life of this launch no channel — operator allow/deny overlay reload, the
+	// allow watcher, POST /v1/fak/policy/reload, or a self-authored overlay — may WIDEN
+	// the capability floor; only tighten-only and no-op amendments are installed. It is
+	// PEELED here rather than registered on the FlagSet below because fs is
+	// flag.ExitOnError: the posture has to be recorded before any parse, and the peel
+	// keeps the flag off the wrapped child's argv (see guardLaunchCoreLockAll). Recorded
+	// before the verb peels' successors and long before the gateway binds, so every
+	// amendment site that reads guardCoreLockAllActive() sees the final value.
+	var guardCoreLock bool
+	guardCoreLock, argv = guardLaunchCoreLockAll(argv)
+	setGuardCoreLockAll(guardCoreLock)
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	rotateMode := fs.String("rotate", "", "account rotation: auto|off|<seat> (default auto headless, off interactive)")
 	verbFlagUsage(fs, "guard")
@@ -146,14 +163,14 @@ func cmdGuard(argv []string) {
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: refresh interval for the fak-info pane")
 	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
 	ctxViewBudget := fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
-	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
+	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON, but NOTE the resolved default for `fak guard` is NOT the value printed here: unless you pass this flag explicitly, every guard launch resolves gateway.HeadlessCompactHistoryBudget (96000) instead, because a guard always fronts Claude Code and its fixed system+tools floor (resolveGuardCompactBudget, #4888). The number compared against it is the COMPACTIBLE messages[] span — the system/tools head is a separate top-level block and is NOT counted — so read the live figure off /debug/vars metrics.compaction (budget, last_suffix_tokens, peak_suffix_tokens) rather than inferring it from this line. Once that span sprawls past the resolved budget the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	compactAnchorHead := fs.Bool("compact-anchor-head", true, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything (see the 'anchor-starved' diagnostic). DEFAULT-ON, and every fire stays gated on the burst economics (CacheBurstPaysBack, #1408): a WARM session with no bounded turns budget never bursts — it fires only when a wired session-turn horizon repays the one-time burst, or when the trace OBSERVABLY idled past the message-breakpoint cache TTL since its last served turn (the suffix re-bills cold that turn anyway, so the cut is penalty-free — the long-session firing path a plain `fak guard -- claude` actually hits). Pass =false to pin the old warm-only first-breakpoint anchor.")
 	compactSolvencyFloor := fs.Int("compact-solvency-floor", 0, "resident-token occupancy at or above which CONTEXT SOLVENCY overrides the head-anchored burst gate's cache economics: once this trace's OBSERVED peak resident window reaches it, --compact-history-budget fires even when the burst does not repay (CacheBurstPaysBack says no). It fixes the measured inversion where the pure-economics gate refuses HARDEST exactly where refusing is most expensive — over 3191 real served turns the fire rate ran 33% at 96-125k, 14% at 140-155k, 3% at 155-170k and 0% above 170k, and 100% of traces that ever fired never fired again, drifting a median +33.8k further into the window before the run ended. Above the floor the question stops being 'does this burst pay?' and becomes 'can we afford not to?': the burst penalty is one-time and bounded, hitting the context wall costs the whole session. Set it to a fraction (~0.85) of (model context window − output reserve); the gateway cannot derive it because it never sees a window size. 0 (the default) keeps the gate on pure economics, byte-for-byte. Forced fires are counted apart as 'solvency-forced' in the exit summary so they are never booked as cache wins. Consulted only when --compact-anchor-head is on and the head re-anchor engages; it can only ever turn a burst_unprofitable BAIL into a fire, never the reverse.")
 	assumeSessionTurns := fs.Int("assume-session-turns", gateway.DefaultAssumedSessionTurns, "the session length the head-anchored burst gate (--compact-anchor-head) ASSUMES when no bounded turn horizon is wired — the common `fak guard -- claude` case, where the wrapped harness owns the turn loop and hands the gateway no Budget.TurnsLeft. It lets a WARM continuously-active long session shed early instead of waiting to OBSERVABLY idle past the message-span cache TTL: the gate maps the trace's real served-turn depth to CurrentTurn and this value to TotalTurns, fires early (many repaying turns left) and refuses near the presumed end — the same one-time-burst break-even economics (CacheBurstPaysBack, #1408), just given a history-based length instead of refusing outright. DEFAULT-ON at gateway.DefaultAssumedSessionTurns; a genuine wired Budget.TurnsLeft horizon always WINS over this prior, and a large invalidated suffix still refuses regardless. Pass 0 to disable (byte-for-byte the conservative no-horizon behavior). Consulted only when --compact-anchor-head is on and the head re-anchor engages; inert on every other path.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "ON by default (gateway.DefaultElideStaleReads): replace a Read tool_result whose file was Edited/Written in a LATER in-session turn (a stale, superseded snapshot no longer reflecting disk) with a compact fak_context_restore marker, in the SAME cache-safe working-set band as --elide-result-bytes and stashing the pre-edit body behind a restore handle. The safer, restorable sibling of --elide-result-bytes: strictly more conservative predicate (superseded, not merely big), fail-safe identity on any ambiguity, protected cache prefix proven byte-identical. Size-independent; lossy but restorable. Pass =false to opt out. Anthropic passthrough only.")
 	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "M2 star-anchor pre-flight gate (#1493): on the Anthropic passthrough, APPLY cachemeta.RecommendLayout before send — hoist volatile system blocks behind a byte-stable cacheable anchor and splice a cache_control breakpoint onto the stable head a no-breakpoint caller did NOT send, so the first natural request warms provider prefix caching and later siblings read it. DEFAULT-ON, DECOUPLED from --compact-history-budget (that path only placed the anchor while its own budget was >0, so --compact-history-budget=0 silently took anchoring down with it). Fail-safe identity on any ambiguity — a hoist that would change the model-visible prefix is REFUSED, not applied — and idempotent with the compaction/TTL placements (a body already carrying a breakpoint bails already_set). Pass =false to opt out. Anthropic passthrough only.")
-	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools); every deferred def stays byte-complete in tools[], so a first real use still resolves — nothing goes silently missing. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B token-delta x held-accuracy x poison gates reported PASS, the #3200 pin/quarantine guards the fault-in). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
+	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one 	ool_search_tool`, so the provider loads only the HOT core (the floor's built-ins Read/Edit/Write/Bash/Grep/Glob/Task/TodoWrite + web, plus the search tool) into context and faults a cold schema in on demand. The systemic tool-schema slice is ~35.8k of the ~41k fresh-session floor, and to fak's gateway it is all just req.Tools — this is the one seam that reaches it. Deterministic + cache-safe (byte-stable tools[] turn-over-turn, so the provider prompt-cache prefix survives) and fail-safe identity on any ambiguity (non-JSON, no tools, only hot tools); every deferred def stays byte-complete in tools[], so a first real use still resolves — nothing goes silently missing. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B token-delta x held-accuracy x poison gates reported PASS, the #3200 pin/quarantine guards the fault-in). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	exposeProfile := fs.String("expose-profile", "", "in-kernel fak_* MCP tool-surface profile (#3607): \"\" (full registry, default) | \"headless\" — a curated allowlist for a single-issue dispatch worker (fak_index_work, fak_admit, fak_adjudicate, fak_memory_run, fak_tools_search), pruning the ~9.9k-token full-registry schema floor every worker otherwise pays each turn; the rest page in on demand through the still-exposed fak_tools_search. `fak dispatch` launches workers with =headless. The FAK_GUARD_EXPOSE_PROFILE env OVERRIDES this flag (the fleet opt-out: set it to `full`/`off` to restore the whole registry). Any value other than \"headless\" keeps the full registry.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: a fresh launch id derived from host, cwd, and wrapped argv; pass this flag for a stable resumable id)")
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist. Spec: THRESHOLD[,days=N][,max=N][,report=PATH][,justify=TEXT] — THRESHOLD is high|medium|none|off (off by default, so a bare `--session-pressure-gate high` is the common form); days (default 7) and max (default 40) size the audit window over this workspace's transcript namespace; report=PATH writes the fak.session_audit.actions.v1 launch-gate report before allowing or refusing; justify=TEXT, with an explicit Opus --model, is the justification that allows the launch while still recording that report. justify= takes the REST of the spec so prose may contain commas — put it last. e.g. --session-pressure-gate high,days=3,report=pressure.json")
@@ -184,6 +201,10 @@ func cmdGuard(argv []string) {
 	piExtension := fs.Bool("pi-extension", true, "when wrapping Pi (earendil-works), prepend a session-scoped -e extension that calls pi.registerProvider(\"anthropic\", {baseUrl}) so Pi talks to the in-process gateway. Pi-only; Pi's Anthropic client reads baseUrl from provider config, not ANTHROPIC_BASE_URL, so the env repoint alone cannot route it. Pass --pi-extension=false if you already registered the fak provider yourself.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
+	fleetBus := fs.Bool("fleet-bus", true, "JOIN THE FLEET CONTROL BUS (#5953, epic #5599): announce this guard as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak dev fleet control send` reaches every live guard at once instead of none of them. ON BY DEFAULT, unlike `fak serve`'s: a guard is the process that is already running unattended in bulk, and a fleet-control instance nobody remembered to arm is worth exactly as much as no fleet control. What a guard applies is REAL and bounded: pause/resume/cancel/terminate/throttle ride the same session.Table.Transition write the single-session verbs use, and seat-refresh re-reads the accounts registry and retires the goal parks holding this box's workers once a seat can serve again. What it CANNOT do it declares rather than discovering at fan-out time — a guard wraps somebody else's agent and owns no session loop, so it announces steer as unsupported and `instances` reports \"0 of N can steer\" up front. Pass --fleet-bus=false for a total opt-out: no announce, no directory, no filesystem touch.")
+	fleetBusDir := fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
+	fleetBusID := fs.String("fleet-bus-id", "", "with --fleet-bus: this instance's stable bus identity (default: guard-<host>-<pid>). Pass a name to keep one identity across restarts — the id is what the exactly-once apply claim is keyed on, so two live processes sharing one id deliberately share one claim (only one of them applies a given directive).")
+	fleetBusInterval := fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live guard flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	guardHelpAll := guardArgvHasAll(argv)
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, guardHelpAll) }
 	_ = fs.Parse(argv)
@@ -551,12 +572,42 @@ func cmdGuard(argv []string) {
 	guardActiveAccountDir, guardWalledAccounts := posture.activeAccountDir, posture.walledAccounts
 	guardAccountRehome := posture.accountRehome
 
+	// Prompt-shrink lever WIRE admission (#5538, the `fak guard` sibling of #5493):
+	// --compact-history-budget, --elide-stale-reads and --defer-cold-tools are each gated,
+	// inside the gateway, on the Anthropic passthrough (Server.anthropicPassthroughFor), so
+	// on any other upstream wire all three stand down to identity — and all three ship
+	// default-ON, which makes silently-inert the DEFAULT experience for a self-hosted guard
+	// (--local forces provider=openai; --remote-serve forces the OpenAI-compatible wire; a
+	// bare --gguf makes the in-kernel planner the upstream). Refuse by name when the operator
+	// EXPLICITLY enabled one here, and name the default-on ones that are merely inert, so
+	// "enabled but inert" is never silent and a ~0-saving A/B on this wire cannot be read as
+	// a verdict on the kernel.
+	//
+	// Placed HERE — not beside the flag parse, where serve.go puts its twin — because guard's
+	// raw --provider/--base-url are not its wire: they are auto-detected from the agent name
+	// and rewritten by --local/--remote-serve, and an empty --base-url means the provider's
+	// public API rather than serve's mock. Only the just-resolved posture (up, resolvedBase)
+	// names the wire the gateway will actually build. Still ahead of every expensive stage:
+	// the GGUF resolve/download and weight load are below, and nothing has bound yet
+	// (shrink_lever_wire.go).
+	if !admitGuardShrinkLevers(guardShrinkLeverInputs{
+		SetFlags:             guardSetFlags,
+		Provider:             up,
+		BaseURL:              resolvedBase,
+		GGUFPath:             *ggufPath,
+		CompactHistoryBudget: *compactHistoryBudget,
+		ElideStaleReads:      *elideStaleReads,
+		DeferColdTools:       *deferColdTools,
+	}, os.Stderr) {
+		os.Exit(2)
+	}
+
 	// Managed-cache posture (epic #1844 C6): decide from the JUST-resolved upstream whether
 	// this session actively manages the provider prompt-cache (the stable-prefix 1h TTL
 	// upgrade). AUTO keys on provable API-key billing — the OAuth branch above rewrote
 	// apiKey to the subscription token but stamped oauthSource, so the pair distinguishes
 	// the two credentials. Fail loud on an unknown mode before any gateway binds.
-	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
+	mcIn := guardManagedCacheInputs{
 		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
 		// PURE local branch (no upstream at all) turns the cache posture off.
 		localModel:     localModel && !localAlongside,
@@ -564,11 +615,18 @@ func cmdGuard(argv []string) {
 		apiKey:         apiKey,
 		oauthSource:    oauthSource,
 		keychainAPIKey: keychainAPIKey,
-	})
+	}
+	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, mcIn)
 	if mcErr != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
 		os.Exit(2)
 	}
+	// Publish the billing seat off the SAME resolved credential (#3664) so the Track-2
+	// savings rows this session writes at exit record whether their list-priced dollars
+	// were billed per token (API-key, real) or against a flat-rate subscription
+	// (OAuth, notional). Without it the fleet reduction blends both seats into one
+	// API-key-equivalent headline that the ledger cannot decompose.
+	recordBillingMode(billingModeFrom(mcIn))
 
 	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
 	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
@@ -793,6 +851,12 @@ func cmdGuard(argv []string) {
 
 	wireErrors := &guardWireErrorGauge{}
 	parkStore := goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}
+	quotaStore := accountobs.Store{Dir: filepath.Join(repoRoot(), ".fak", "account-observations")}
+	quotaKey := strings.TrimSpace(os.Getenv("FAK_ACCOUNT_ADMISSION_KEY"))
+	if quotaKey == "" {
+		quotaKey = "default"
+	}
+	quotaHarvester := accountobs.NewHarvester(quotaStore, quotaKey)
 	parkGoal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
 	if parkGoal == "" {
 		parkGoal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
@@ -804,6 +868,8 @@ func cmdGuard(argv []string) {
 	}
 	longRetryParked := false
 	observeUpstreamResponse := func(status int, header http.Header) {
+		// Passive, zero-request harvest; persistence failures never fail the response path.
+		_ = quotaHarvester.Observe(status, header)
 		if parkGoal == "" || longRetryParked {
 			return
 		}
@@ -819,6 +885,12 @@ func cmdGuard(argv []string) {
 			}
 		}
 	}
+
+	// Pin the compaction anchor mode this launch runs under for the durable per-session
+	// compaction-health witness (#3152). Stamped here, next to the CompactAnchorHead the
+	// gateway is about to be built with, so the row can never disagree with the server; the
+	// exit funnel reads it when it writes the witness.
+	setGuardCompactionAnchorMode(*compactAnchorHead)
 
 	srv, err := gateway.New(gateway.Config{
 		EngineID: "inkernel",
@@ -956,6 +1028,20 @@ func cmdGuard(argv []string) {
 		}
 	}
 	installGuardFleetProvider(srv, ctx, fleetLogf)
+	// Arm the CONTROL bus (guard_fleetbus.go) — distinct from the display pane above:
+	// the provider answers "what does this box look like", this answers "and here is
+	// something that can be told to change". Armed here, beside the pane and BEFORE
+	// Serve, because nothing this guard can apply depends on the gateway being healthy:
+	// the lifecycle ops write the process-wide session table, and seat-refresh is
+	// registry-and-disk work. Waiting for MarkReady would therefore hide a guard that
+	// is genuinely applyable, and a control point that refuses FLEETBUS_NO_TARGET
+	// against a booting fleet is correct about the roster and wrong about the world.
+	// The other direction is bounded and honest: a guard that announces and then dies
+	// before ready ages out of the roster within one TTL, and until it does it folds as
+	// OUTSTANDING — "addressed, never answered" — never as an apply.
+	// --fleet-bus=false makes this a total no-op.
+	stopGuardFleetBus := startGuardFleetBus(ctx, *fleetBus, *fleetBusDir, *fleetBusID, *fleetBusInterval)
+	defer stopGuardFleetBus()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()
 
@@ -1146,9 +1232,7 @@ func cmdGuard(argv []string) {
 	installersStarted := time.Now()
 	command, preCompactEnv, preCompactInstall, err = installGuardPreCompactHook(command, *preCompactHook, gwURL)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude PreCompact hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Claude PreCompact hook setup", err, 1)
 	}
 	injected = append(injected, preCompactEnv...)
 	// Install the deny-all auto-continue Stop hook, MERGING it into the SAME --settings file the
@@ -1164,17 +1248,19 @@ func cmdGuard(argv []string) {
 		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], guardChildInteractive(command), *probeMode),
 	)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
-		os.Exit(2)
+		abortChildWiring(cancel, "task handoff setup", err, 2)
 	}
 	handoffFile := strings.TrimSpace(*taskHandoffFile)
 	if handoffMode != guardPreCompactModeOff && handoffFile == "" {
-		dir, err := os.MkdirTemp("", "fak-guard-handoff-*")
+		// Allocate through the shared creation seam so the dir carries this guard's PID
+		// (#5527). "handoff" was already listed in guardTempDirHooks, but this call site
+		// used a raw os.MkdirTemp whose name had no <pid> segment, so guardTempDirOwner
+		// refused to claim it and the reaper buried none of them. Lifetime is unchanged:
+		// the child reads this file for its whole run, so there is no setup-time defer to
+		// remove it — a LATER guard's dead-owner sweep is what reclaims it.
+		dir, err := guardSessionTempDir("handoff")
 		if err != nil {
-			cancel()
-			fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
-			os.Exit(1)
+			abortChildWiring(cancel, "task handoff setup", err, 1)
 		}
 		handoffFile = filepath.Join(dir, "task-handoff.json")
 	}
@@ -1189,9 +1275,7 @@ func cmdGuard(argv []string) {
 	var stopHookEnv [][2]string
 	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, *denyAllSameStop, operatorDirectedMode, handoffCfg)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Claude Stop hook setup", err, 1)
 	}
 	injected = append(injected, stopHookEnv...)
 	// Seam 4 of the tool process table: observation hooks (PreToolUse/PostToolUse/
@@ -1203,11 +1287,10 @@ func cmdGuard(argv []string) {
 		toolprocSettings = preCompactInstall.SettingsPath
 	}
 	var toolprocHookEnv [][2]string
-	command, toolprocHookEnv, _, err = installGuardToolprocHooks(command, *toolprocHooks, toolprocSettings)
+	var toolprocInstall guardToolprocInstall
+	command, toolprocHookEnv, toolprocInstall, err = installGuardToolprocHooks(command, *toolprocHooks, toolprocSettings)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: toolproc hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "toolproc hook setup", err, 1)
 	}
 	injected = append(injected, toolprocHookEnv...)
 	// Discoverability affordance (#3092): a SessionStart hook that injects a one-line hint
@@ -1215,13 +1298,7 @@ func cmdGuard(argv []string) {
 	// Code's deferred-tool wall instead of running as a generic coder. Merged into the SAME
 	// --settings file the hooks above wrote. On by default; FAK_GUARD_AFFORDANCE_MODE=off opts
 	// out for a lean harness.
-	sessionStartSettings := toolprocSettings
-	if sessionStartSettings == "" {
-		sessionStartSettings = stopHookInstall.SettingsPath
-	}
-	if sessionStartSettings == "" {
-		sessionStartSettings = preCompactInstall.SettingsPath
-	}
+	sessionStartSettings := guardSharedHookSettingsPath(toolprocInstall, stopHookInstall, preCompactInstall)
 	// A headless/fleet worker (a `-p` child, not an attended TUI) is admitted onto the
 	// long-horizon MANAGED posture: its SessionStart injection carries the persistence +
 	// managed-context rule (#3512), where keep-going-past-a-long-window matters most and no
@@ -1232,9 +1309,7 @@ func cmdGuard(argv []string) {
 	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
 	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude SessionStart hook setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Claude SessionStart hook setup", err, 1)
 	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
@@ -1257,9 +1332,7 @@ func cmdGuard(argv []string) {
 	// provider at the gateway. Pi-only; no-ops for every other child. See guard_pi.go.
 	command, piInstall, err := installGuardPiExtension(command, *piExtension, gwURL)
 	if err != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Pi extension setup failed: %v\n", err)
-		os.Exit(1)
+		abortChildWiring(cancel, "Pi extension setup", err, 1)
 	}
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 	// Headless workers: make editor/pager-opening git forms (a `git commit` with no message
@@ -1361,4 +1434,41 @@ func cmdGuard(argv []string) {
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+}
+
+// abortChildWiring aborts a launch whose child wiring could not be completed. By the time the
+// hook/extension installers run the gateway is already up, so every one of these failures has
+// to end the same way: tear the gateway's context down FIRST, then say which setup died, then
+// exit. Routing them through one abort is what keeps a half-wired child from ever being
+// spawned against a gateway that outlives the failure. what names the setup in the message
+// ("Claude Stop hook setup", "Pi extension setup", ...) and code is its exit status.
+func abortChildWiring(cancel context.CancelFunc, what string, err error, code int) {
+	cancel()
+	fmt.Fprintf(os.Stderr, "fak guard: %s failed: %v\n", what, err)
+	os.Exit(code)
+}
+
+// guardSharedHookSettingsPath resolves the ONE `--settings` file every guard hook installer
+// converges on. The installers run in a fixed order (PreCompact, Stop, toolproc, SessionStart):
+// the first one enabled creates the file and injects `--settings`, and each later one
+// read-modify-writes that same file instead of writing a second.
+//
+// Convergence therefore has to be resolved from what the earlier installers CREATED — which is
+// what their install records report — not from what they were OFFERED. SessionStart used to be
+// handed toolproc's INPUT path, so with PreCompact and Stop both off it saw an empty path even
+// though toolproc had just created a file: it wrote a SECOND settings file and appended a second
+// `--settings`. Claude resolves `--settings` last-wins, so the fold in appendClaudeSettingsArg
+// (#5510) strips the earlier occurrence and refuses its `hooks` key with SETTINGS_HOOKS_DROPPED
+// — the argv still carries exactly one `--settings`, but the child starts with toolproc's three
+// observation hooks missing (#5526).
+//
+// Records are consulted newest-installer-first: an installer that MERGED records the file it
+// merged into, so the latest non-empty SettingsPath always names the converged file.
+func guardSharedHookSettingsPath(toolproc guardToolprocInstall, stop guardStopHookInstall, preCompact guardPreCompactInstall) string {
+	for _, path := range []string{toolproc.SettingsPath, stop.SettingsPath, preCompact.SettingsPath} {
+		if strings.TrimSpace(path) != "" {
+			return path
+		}
+	}
+	return ""
 }

@@ -47,11 +47,13 @@ enforce that boundary; see the
 A failed readback is not one condition. The bridge client separates the classes because
 they have different fixes, and until #5103 they all surfaced under a single
 `READBACK_WEDGED` token — which sent operators to restart sessions that were never the
-problem. Read the class before acting.
+problem. Read the class before acting. The liveness-probe verb has its own verdict string
+that predates this split and is not in the table; if your symptom is `STALE` rather than a
+readback token, read [the probe section below](#the-probe-verbs-own-verdict-stale-on-every-thread-at-once) first.
 
 | Class | What it proves | Operator action |
 |---|---|---|
-| `READBACK_WEDGED: sentinel_missing` | The hub answered this session's tail request and the client parsed the reply, but the command's completion marker was not in it. The transport is healthy; the session's shell is wedged. | Restart the control bridge for that session on the server. This is the only class that warrants it, and it is server-side: an authorized operator must do it from the server console, because the boundary allows no inbound login. |
+| `READBACK_WEDGED: sentinel_missing` | The hub answered this session's tail request and the client parsed a reply, but the command's completion marker was not in *the reply this client assembled*. That is a claim about the client's view of the transcript, not proof about the shell — read the resolved cause below before acting. | Confirm your client is current first: a client that drops part of a long reply reports this about a perfectly healthy shell. Only when it persists on a current client is the session implicated, and then the fix is server-side — an authorized operator restarts that session's control bridge from the server console, because the boundary allows no inbound login. |
 | `HUB_UNRESPONSIVE: hub_timeout` | The poll itself deadlined or errored, so no reply was ever inspected. A slow or unreachable control transport. | Retry in a quieter window with a longer timeout. Do not restart anything; the session is not implicated. The transport oscillates, so a failure here is not durable. |
 | `HUB_UNRESPONSIVE: no_tail_reply` | Every poll succeeded and the hub answered nothing at all. | Check that the hub process is running and still joined to the control channel. Again a hub-side condition, not a session one. |
 | `HUB_UNRESPONSIVE: tail_reply_unrecognized` | The hub replied, but no reply matched the shape this client parses — client/hub protocol drift. | Update the client's reply parser in the private tree. Restarting sessions cannot fix a parser mismatch. |
@@ -60,12 +62,90 @@ Two consequences worth keeping. First, a spent probe budget never reports a wedg
 if the loop never polled, it cannot have observed a missing marker, and it says so.
 Second, the same session can produce different classes minutes apart — a short fail-fast
 probe can deadline (`hub_timeout`) while a full-budget check on the same session reaches
-the hub and reports `sentinel_missing`. That is not a contradiction; it means the shell is
-wedged *and* the transport is slow, and only the first needs an operator.
+the hub and reports `sentinel_missing`. That is not a contradiction: the two are
+independent conditions, and the second one means only that this client could not find the
+marker in what it assembled.
 
 Run the client's `selftest` verb before committing to a long command. It uses the full
 timeout instead of the short fail-fast probe budget, so it is the cheapest way to learn
 which class you are in.
+
+### What #5103 turned out to be
+
+The 2026-07-16 incident behind this table read `sentinel_missing` on every live session at
+once. Of the two candidate causes — a wedged session on the box, or client/hub parser drift
+— it was the second, with every shell healthy.
+
+The hub splits a long transcript tail across several control-channel messages at the
+transport's per-message size limit, and heads only the *first* of them with the tail
+header. The client demanded that header, so it discarded every later message — and because
+a tail is chronological, the completion markers for the command just sent sit in the
+*last* message, the header-less one. The client threw away the only evidence it was looking
+for and reported a wedged shell about a session that had run the command and exited zero.
+Retrying with a longer tail window made it strictly worse: a longer tail splits into more
+messages. Two smaller parse defects hid behind that one — an escape-stripping pattern that
+did not match the form the hub actually posts, and an event scanner that kept only the
+first physical line of a multi-line event.
+
+The fix is client-side: reassemble the messages oldest-first, stopping at any foreign post
+so one session can never read another's output. It lives in the private client and is
+tracked under #5112. The offline witness holds it down: the reassembly regression parses the
+verbatim pair of hub messages captured during the incident and finds both completion markers
+and their zero exit codes in the header-less one — the evidence the old client discarded. The
+live half is still owed. Step 3 below — a trivial fixed-token command through the normal run
+path — is the witness that closes this out, and it needs lab credentials, so it cannot be
+taken from a host that has none. Read the root cause as settled and the live restoration as
+claimed-but-unwitnessed until someone records that round-trip.
+
+Three things an operator should carry out of this. Restarting sessions could never have
+fixed it. `sessions` reporting every session `running` was correct rather than
+contradictory, so a clean enumeration alongside a failing readback is evidence about the
+client, not a puzzle. And a class whose evidence the client assembles is only ever as
+trustworthy as that assembly — which is why the `sentinel_missing` row now sends you to
+check the client before you touch a session.
+
+### The probe verb's own verdict: `STALE` on every thread at once
+
+The same 2026-07-16 outage was witnessed a second time from the operator side, on the
+liveness-probe verb rather than the readback path, and filed separately as #5144. That
+reading was: the hub answers, `sessions` lists three persistent (tmux) sessions `running`,
+`status -probe` returns `STALE (no control reply within timeout)` on **all eight** candidate
+control threads, and the bridge concludes *"No live session: a banner exists but no shell
+answers. An operator must (re)start the control shell/bridge."*
+
+Read that verdict as a category error, not as a finding about the box. A probe that
+deadlines waiting for a control reply has inspected nothing, so it cannot have observed a
+shell — by the table above it is the probe verb's version of the two hub-side classes
+(`hub_timeout` when the poll deadlines, `tail_reply_unrecognized` when the hub does answer
+in a shape the client will not parse), and neither of those implicates a session. The
+table's first consequence governs this verb too: a spent probe budget never reports a wedged
+shell. The pre-#5103 client did not honor that on the probe path — it converted "I heard
+nothing I recognized" into "no shell answers" and sent the operator to restart. So the
+`STALE` string is the same conflation as the old single `READBACK_WEDGED` token, surfacing
+under a different verb and phrased as an operator instruction.
+
+For that specific day the answer is already settled and needs no new evidence: the same
+run's `exec` failed `completion sentinel not found in this thread's transcript`, which is
+`sentinel_missing`, whose root cause is recorded above as client-side reassembly with every
+shell healthy. #5144's first two "Operator action" steps — restart the control sessions,
+then confirm each answers a probe — would have changed nothing, and the sessions they name
+were never the fault. Its third step, re-checking that the GPU watcher is armed, is an
+independent question this record does not settle either way.
+
+The divergence direction is the part worth carrying, because #5144 recorded it backwards.
+The listing and the probe disagreed, and **the listing was the correct one**. "Probe before
+trusting the listing" is therefore the wrong lesson from this signature: a clean `running`
+enumeration standing next to an all-threads `STALE` is not a stale banner, it is a client
+that cannot recognize a reply. Unanimity is the tell. A genuinely dead shell is one
+session's problem; every thread failing at once, against a listing that enumerates cleanly,
+points at the single thing all of them share — the client, or the transport in front of it.
+Check that before you touch a session, and prefer `selftest` (full timeout) over the short
+fail-fast probe budget when you want the class rather than the headline.
+
+What is still owed here is the same live half #5112 owes, not a separate restart: step 3
+below, a trivial fixed-token command round-tripped through the normal run path. It needs lab
+credentials, so a host without them cannot record it, and until someone does, read the
+probe-side restoration as claimed-but-unwitnessed exactly as the readback side is.
 
 ## Prove a readback is restored
 
@@ -75,9 +155,22 @@ declaring a session usable again — and before a hardware-gated task depends on
 fresh round-trip witness in this order.
 
 1. `dgxbridge doctor` — network-free. It resolves a token and a control channel and stops
-   there. An unauthorized or public-only checkout reports `NOT READY` with both checks
-   missing; that is the boundary working as designed, not a bridge fault, and no later step
-   can run from that host.
+   there. An unauthorized checkout reports `NOT READY`; that is the boundary working as
+   designed, not a bridge fault, and no later step can run from that host. Read *which*
+   check failed rather than the headline: `control_channel` is the one that decides lab
+   access. Expect *which* checks fail to depend on your working directory, because `doctor`
+   resolves `.env.slack.local` relative to the directory you run it from. One unauthorized
+   fleet dev host therefore reports two different `NOT READY` shapes: run from the `fak`
+   clone root — where this note sends you — and **both** checks read missing; run from a
+   directory that happens to hold a token-bearing `.env.slack.local` and `slack_token` reads
+   green with `control_channel` missing alone. Neither shape is partial authorization, and
+   neither is evidence that the block described here does not apply to your host; they are
+   the same unauthorized host seen from two directories. Nor is finding a token-bearing
+   `.env.slack.local` evidence of lab access — the checked-in ones carry a scoreboard token
+   and no channel, and none of the channel paths `doctor` names in its own hint
+   (`-channel <id>`, `SLACK_CHANNEL`, `FAK_SLACK_CHANNEL`) is populated on such a host. If
+   you want the token half out of the picture, run `doctor` from the clone root and read
+   `control_channel` alone.
 2. `dgxbridge doctor -probe` — adds the live round-trip against the resolved session. The
    `readback` sub-check is the gate: green means a command's output actually came back, not
    merely that the session answered a control verb.
@@ -92,8 +185,8 @@ green probe is weaker evidence than one captured round-trip of known content. Re
 rather than trusting an earlier green when the answer is close to a decision bar.
 
 Steps 2 and 3 need live credentials. A host without them cannot reach any session — `doctor`
-reports `NOT READY` with both checks missing and stops there — so the round-trip witness is
-unavailable from that host, but the class logic is still checkable. The bridge package's own
+reports `NOT READY`, in the common case on `control_channel` alone, and stops there — so the
+round-trip witness is unavailable from that host, but the class logic is still checkable. The bridge package's own
 tests are network-free and pin which condition maps to which class, so building the client
 from the private snapshot into a scratch Go module and running that package's tests confirms
 that a slow transport reports a hub class and never a wedged-shell one. Use that when a
@@ -123,6 +216,17 @@ narrow — that one check failing, with every expected-reaped artifact reported 
 while the classification test passes. Until the guard probes whether the shell can work in
 the test directory rather than merely exist, read a lone prune failure on a Windows host as
 host noise. Any other failure, and the classification test above all, is a real regression.
+
+One real regression has a shape worth naming, because it reads like a test-fixture gap and is
+not one. When the client's default command-send path changes — sending a command as an
+attached file rather than as a message, say — the readback preflight can fail inside that new
+send step and surface as `READBACK_WEDGED: exec_error` naming an upload stage. That is the
+#5103 conflation returning by a new route: preflight dies before it classifies anything, so a
+transport-side failure carries the wedged-shell token and sends an operator to restart a
+healthy session. The signature is both `TestPreflightReports…` checks failing on that error
+while `TestClassifyReadbackSeparatesFailureClasses` still passes — the classifier is intact,
+the path into it is not. A change to how commands are sent is therefore a change to the class
+split, and it needs these tests re-run even when it looks unrelated to readback.
 
 Keep a captured transcript in the private repository whenever it names a host, node, or
 channel; a public note carries the outcome in generic terms only.

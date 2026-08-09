@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
@@ -176,6 +180,77 @@ func TestHeadroomFromRosterEmptyIsNil(t *testing.T) {
 	if hr := headroomFromRoster([]fleetaccounts.Account{{Product: "opencode", AccountUUID: hrStr("u-glm")}}, hrNow); hr != nil {
 		t.Fatalf("no-claude roster -> %v, want nil signal", hr)
 	}
+}
+
+// hrIsolate points every fleet path env at one temp dir so the roster resolves EMPTY and the
+// cooldown store lands somewhere writable — the verb then reads no real accounts off the dev
+// box and the test is hermetic. Returns the temp dir (also the cooldown store's directory).
+func hrIsolate(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, k := range []string{"FLEET_STATE_DIR", "FLEET_USER_HOME", "FLEET_CONFIG_HOME", "FLEET_REG_DIR", "FLEET_POLICY_DIR"} {
+		t.Setenv(k, dir)
+	}
+	t.Setenv("FLEET_POLICY_PATH", filepath.Join(dir, "accounts_policy.json"))
+	return dir
+}
+
+// hrCool writes an ACTIVE usage-limit cooldown for account into the fleet-shared store that
+// defaultCooldownStorePath resolves under the isolated FLEET_STATE_DIR.
+func hrCool(t *testing.T, account string, now time.Time) {
+	t.Helper()
+	cd, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		t.Fatalf("load cooldown store: %v", err)
+	}
+	cd.Cool(account, accounts.CooldownUsageLimit, "weekly limit reached", now, now.Add(time.Hour))
+	if err := cd.Save(); err != nil {
+		t.Fatalf("save cooldown store: %v", err)
+	}
+}
+
+// TestAccountsHeadroomVerbHonorsCooldown is the regression for #5853: `fak accounts headroom`
+// used to call headroomFromRoster bare, skipping the cooldown override rotationHeadroom
+// applies, so it printed a bucket `fak accounts cooldown` reported walled as offerable/absent.
+// Both paths now fold through rosterHeadroom, so the two verbs agree.
+func TestAccountsHeadroomVerbHonorsCooldown(t *testing.T) {
+	hrIsolate(t)
+	const bucket = "uuid:u-cooled"
+	hrCool(t, bucket, time.Now().UTC())
+
+	var stdout, stderr bytes.Buffer
+	if code := runAccountsHeadroom(&stdout, &stderr, []string{"--required", "1"}); code != 0 {
+		t.Fatalf("runAccountsHeadroom = %d, stderr=%s", code, stderr.String())
+	}
+	var payload accountsHeadroomPayload
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload %q: %v", stdout.String(), err)
+	}
+	got, ok := payload.Headroom[bucket]
+	if !ok {
+		t.Fatalf("cooled bucket %q missing from headroom %v — the verb is cooldown-blind", bucket, payload.Headroom)
+	}
+	if got >= 0 {
+		t.Fatalf("cooled bucket %q scored %v, want walled (<0) — headroom must not offer a cooled seat", bucket, got)
+	}
+}
+
+// TestRosterHeadroomWallsCooledOfferableBucket pins the exact reported misread: the live
+// roster still says the seat is available (an offerable +1.x read), while the durable store
+// holds an active usage-limit cooldown. The cooldown is the fresher, certain signal, so the
+// single fold must land the bucket in the walled band.
+func TestRosterHeadroomWallsCooledOfferableBucket(t *testing.T) {
+	hrIsolate(t)
+	now := hrNow
+	hrCool(t, "uuid:u-cooled", now)
+
+	rows := []fleetaccounts.Account{
+		{Product: "claude", AccountUUID: hrStr("u-cooled"), Available: hrBool(true), LiveSessions: hrInt(0)},
+		{Product: "claude", AccountUUID: hrStr("u-open"), Available: hrBool(true), LiveSessions: hrInt(0)},
+	}
+	hr := rosterHeadroom(rows, now)
+	assertWalled(t, "cooled bucket must be walled despite an offerable roster row", hr["uuid:u-cooled"])
+	assertOfferable(t, "uncooled bucket keeps its roster read", hr["uuid:u-open"])
 }
 
 func TestBuildAccountsSeatDeficitUnderCapacity(t *testing.T) {

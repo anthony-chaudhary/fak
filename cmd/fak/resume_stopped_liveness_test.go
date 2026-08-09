@@ -105,11 +105,14 @@ func TestResumeStoppedDriverLivenessThroughArgv(t *testing.T) {
 
 	cases := []struct {
 		name string
-		// procs/scanErr/self stage the observation; ledger stages the durable launch record.
+		// procs/scanErr/self stage the observation; ledger stages the durable launch record
+		// and identity the durable session-start identity store (the second recorded-pid
+		// producer, #5542).
 		procs      []procguard.Proc
 		scanErr    string
 		self       int
 		ledger     string
+		identity   string
 		wantDisp   stopped.Disp
 		wantLive   stopped.Liveness
 		wantBucket string // "resume" | "defer" | "skip"
@@ -201,6 +204,66 @@ func TestResumeStoppedDriverLivenessThroughArgv(t *testing.T) {
 			wantBucket: "defer",
 			wantBlock:  stopped.MidtoolUnknownBlockedBy,
 		},
+		{
+			// #5542, the case the whole ticket is about: a FIRST-GENERATION worker. Nothing ever
+			// resumed it, so the launch ledger holds no pid for it and it deferred forever. Its
+			// SessionStart hook witnessed the driver and recorded the pid on the identity row, and
+			// that pid is absent from a table that can see its own reader — so the crash is
+			// finally witnessed and the row is offered for resume.
+			name:       "a session-start identity pid absent from a complete table resumes",
+			procs:      baseTable,
+			self:       selfPID,
+			ledger:     "",
+			identity:   `{"ts":"t","uuid":"` + stoppedLivenessSID + `","trace":"guard","pid":9001,"via":"guard-sessionstart"}` + "\n",
+			wantDisp:   stopped.DispStoppedMidtool,
+			wantLive:   stopped.LivenessGone,
+			wantBucket: "resume",
+		},
+		{
+			// The safety half of the same seam. A first-generation driver carries no session id on
+			// its argv, so the command-line scan cannot find it — only the recorded pid can. It is
+			// STILL RUNNING, so the mid-tool tail is a slow tool call and the row must be left
+			// alone. Resolving this arm as gone would resume a lane under a live driver.
+			name: "a running session-start identity pid is left alone",
+			procs: append(append([]procguard.Proc{}, baseTable...),
+				procguard.Proc{PID: 9001, Name: "claude", Cmdline: "claude -p do the work"}),
+			self:       selfPID,
+			ledger:     "",
+			identity:   `{"ts":"t","uuid":"` + stoppedLivenessSID + `","trace":"guard","pid":9001,"via":"guard-sessionstart"}` + "\n",
+			wantDisp:   stopped.DispLive,
+			wantLive:   stopped.LivenessLive,
+			wantBucket: "skip",
+		},
+		{
+			// Every identity row written before the pid field existed decodes with pid 0, and a
+			// producer that could not WITNESS its driver records 0 rather than guessing. Absence
+			// must read as "not recorded", never as "gone" — so this row keeps deferring.
+			name:       "an identity row carrying no pid is not evidence of death",
+			procs:      baseTable,
+			self:       selfPID,
+			ledger:     "",
+			identity:   `{"ts":"t","uuid":"` + stoppedLivenessSID + `","trace":"guard","via":"guard-sessionstart"}` + "\n",
+			wantDisp:   stopped.DispMidtoolUnknown,
+			wantLive:   stopped.LivenessUnknown,
+			wantBucket: "defer",
+			wantBlock:  stopped.MidtoolUnknownBlockedBy,
+		},
+		{
+			// Precedence, pinned in the direction that matters for safety. The launcher recorded a
+			// pid at the NEWEST spawn and that process is alive; the identity row is from the
+			// generation that spawn replaced and its pid is long gone. The launch ledger must win,
+			// or a stale identity pid would manufacture a `gone` for a session whose driver is
+			// running right now.
+			name: "a stale identity pid never overrides a live launch-ledger pid",
+			procs: append(append([]procguard.Proc{}, baseTable...),
+				procguard.Proc{PID: 9001, Name: "claude", Cmdline: "claude -p do the work"}),
+			self:       selfPID,
+			ledger:     `{"ts":"t","session":"` + stoppedLivenessSID + `","pid":9001,"phase":"launched"}` + "\n",
+			identity:   `{"ts":"t","uuid":"` + stoppedLivenessSID + `","trace":"guard","pid":9002,"via":"guard-sessionstart"}` + "\n",
+			wantDisp:   stopped.DispLive,
+			wantLive:   stopped.LivenessLive,
+			wantBucket: "skip",
+		},
 	}
 
 	for _, c := range cases {
@@ -208,6 +271,9 @@ func TestResumeStoppedDriverLivenessThroughArgv(t *testing.T) {
 			home, regDir := stageStoppedLivenessHome(t)
 			if err := os.WriteFile(filepath.Join(regDir, "resume_ledger.jsonl"), []byte(c.ledger), 0o644); err != nil {
 				t.Fatalf("stage launch ledger: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(regDir, "resume_identity.jsonl"), []byte(c.identity), 0o644); err != nil {
+				t.Fatalf("stage identity store: %v", err)
 			}
 			procs, scanErr, self := c.procs, c.scanErr, c.self
 			prevProcs, prevSelf := stoppedProcRelations, stoppedSelfPID
@@ -312,12 +378,13 @@ func TestStoppedDriverFactsNeverGuessesFromTheClock(t *testing.T) {
 		return []procguard.Proc{{PID: 11, Cmdline: "fak resume stopped"}}, ""
 	}
 	stoppedSelfPID = func() int { return 11 }
-	ledger := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
+	regDir := t.TempDir()
+	ledger := filepath.Join(regDir, "resume_ledger.jsonl")
 	if err := os.WriteFile(ledger, []byte(`{"session":"`+stoppedLivenessSID+`","pid":9001,"phase":"launched"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("stage ledger: %v", err)
 	}
-	first, _ := foldStoppedDriverFacts(ledger).livenessFor(stoppedLivenessSID)
-	second, _ := foldStoppedDriverFacts(ledger).livenessFor(stoppedLivenessSID)
+	first, _ := foldStoppedDriverFacts(ledger, regDir).livenessFor(stoppedLivenessSID)
+	second, _ := foldStoppedDriverFacts(ledger, regDir).livenessFor(stoppedLivenessSID)
 	if first != stopped.LivenessGone || second != first {
 		t.Fatalf("liveness must be stable and evidence-derived: first=%q second=%q", first, second)
 	}
@@ -326,7 +393,7 @@ func TestStoppedDriverFactsNeverGuessesFromTheClock(t *testing.T) {
 	stoppedProcRelations = func() ([]procguard.Proc, string) {
 		return []procguard.Proc{{PID: 11, Cmdline: "fak resume stopped"}, {PID: 9001, Cmdline: ""}}, ""
 	}
-	facts := foldStoppedDriverFacts(ledger)
+	facts := foldStoppedDriverFacts(ledger, regDir)
 	if facts.cmdlineUnread != 1 {
 		t.Fatalf("cmdline_not_examined = %d, want 1 (the unexaminable remainder must stay visible)", facts.cmdlineUnread)
 	}

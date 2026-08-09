@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +21,16 @@ SCRIPT = ROOT / "tools" / "dispatch_status.py"
 
 
 def load():
-    spec = importlib.util.spec_from_file_location("dispatch_status", SCRIPT)
+    """Import `tools/dispatch_status.py` fresh.
+
+    `DISPATCH_STATUS_SCRIPT` repoints this at another copy of the script — the hook
+    that makes a fail-before/pass-after proof reproducible by anyone: dump the
+    pre-fix module with `git show <sha>:tools/dispatch_status.py > /tmp/pristine.py`,
+    point the env var at it, and re-run this same suite against it. Unset (the
+    normal case) it loads the in-tree script, byte-identically to before.
+    """
+    script = Path(os.environ.get("DISPATCH_STATUS_SCRIPT") or SCRIPT)
+    spec = importlib.util.spec_from_file_location("dispatch_status", script)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1400,6 +1410,479 @@ class WorkerLeaseCrossCheckTest(unittest.TestCase):
         self.assertEqual(out["orphan_lease_count"], 0)
 
 
+# Windows FILETIME (100ns ticks since 1601-01-01) for a known Unix epoch second.
+def _filetime(epoch_s: float) -> int:
+    return int((epoch_s + 11644473600.0) * 1e7)
+
+
+class LaneLeaseHolderLivenessTest(unittest.TestCase):
+    """The cross-check must cover ALL lane leases, and judge holders on
+    (pid, proc_starttime) — never on bare pid existence (#5859).
+
+    Regression guard for the real defect: `dos lease-lane live` returned 24 exclusive
+    lane leases, 18 held by processes that no longer existed (the oldest 22 days old,
+    fencing `cmd/**` and `internal/modver/**`), while the card printed
+    `lease chk : clean=3 orphan-process=0 unmatched-live-lease=0` and folded
+    "worker/lease cross-check clean" into its summary. The cross-check only ever saw
+    the `refs/fak/locks/*` resolver leases, a different substrate entirely.
+    """
+
+    NOW = 1786080000.0
+    HOST = "fleet-box"
+
+    def _lane_records(self) -> list[dict]:
+        """One live holder, one dead (pid gone), one dead by PID RECYCLING."""
+        return [
+            {"lane": "docs", "holder": "worker-live", "host_id": self.HOST,
+             "mode": "exclusive", "pid": 1001, "tree": ["docs/**"],
+             "acquired_at": "2026-08-06T12:00:00Z",
+             "proc_starttime": _filetime(self.NOW - 600)},
+            {"lane": "cmd", "holder": "claude-5031", "host_id": self.HOST,
+             "mode": "exclusive", "pid": 51980, "tree": ["cmd/**"],
+             "acquired_at": "2026-07-19T09:00:00Z",
+             "proc_starttime": _filetime(self.NOW - 1_600_000)},
+            {"lane": "guard", "holder": "worker-2461", "host_id": self.HOST,
+             "mode": "exclusive", "pid": 44396, "tree": ["internal/modver/**"],
+             "acquired_at": "2026-08-06T11:00:00Z",
+             "proc_starttime": _filetime(self.NOW - 4000)},
+        ]
+
+    def _starts(self) -> dict[int, float]:
+        """The live process table. pid 51980 is GONE. pid 44396 EXISTS but was
+        recycled — it started long after the lease recorded it."""
+        return {1001: self.NOW - 600, 44396: self.NOW - 100, 2: self.NOW}
+
+    def _fold(self, **over):
+        mod = load()
+        kwargs = {"starts": self._starts(), "host_id": self.HOST, "now_ts": self.NOW}
+        kwargs.update(over)
+        return mod, mod.summarize_lane_lease_holders(self._lane_records(), **kwargs)
+
+    def test_dead_holder_counted_including_recycled_pid(self) -> None:
+        _, lane = self._fold()
+        self.assertTrue(lane["available"])
+        self.assertEqual(lane["total"], 3)
+        self.assertEqual(lane["live_count"], 1)
+        # BOTH dead holders — the missing pid AND the recycled one. A bare
+        # pid-existence check would score the recycled holder "alive" and report 1.
+        self.assertEqual(lane["dead_count"], 2)
+        dead_lanes = sorted(r["lane"] for r in lane["dead"])
+        self.assertEqual(dead_lanes, ["cmd", "guard"])
+        self.assertIn("RECYCLED", next(
+            r["holder_evidence"] for r in lane["dead"] if r["lane"] == "guard"))
+        # The action must never hand the operator a blind reap (#5859). The verb may
+        # be NAMED — as the thing not to run — but never as a command to execute.
+        action = lane["next_action"]
+        self.assertIn("do NOT reap", action)
+        self.assertNotIn("--owner <holder>", action)
+        self.assertNotIn("release --lane", action)
+
+    def test_pid_existence_alone_is_not_proof_of_life(self) -> None:
+        """A live pid with no readable proc_starttime is UNKNOWN, never live."""
+        mod = load()
+        state, evidence = mod.classify_lane_lease_holder(
+            {"lane": "cmd", "pid": 1001, "host_id": self.HOST}, self._starts(),
+            host_id=self.HOST)
+        self.assertEqual(state, "unknown")
+        self.assertIn("pid existence alone is not proof of life", evidence)
+
+    def test_verdict_is_not_clean_with_a_dead_holder(self) -> None:
+        """THE defect, at the verdict seam: a cross-check whose local worker/lease
+        pairs all match must still not read "clean" while a lane is fenced."""
+        mod, lane = self._fold()
+        out = mod.cross_check_worker_leases(
+            {"available": True, "workers": []}, {"active": []}, lane)
+        self.assertEqual(out["dead_holder_count"], 2)
+        self.assertFalse(mod.lane_lease_verdict_clean(out))
+        reasons = " | ".join(mod._worker_lease_reasons(out))
+        self.assertNotIn("cross-check clean", reasons)
+        self.assertIn("dead-holder=2", reasons)
+        self.assertIn("next action:", reasons)
+
+    def test_unreadable_lane_lease_set_is_not_clean(self) -> None:
+        """An unread lease set is not a clean one — and neither is one this host has
+        no liveness oracle for.
+
+        Note the oracle case is now judged from the WAL, not the process table:
+        TTL expiry is time evidence the lease record carries itself, so a host with
+        no psutil can still prove a 452-hour-old lease stale. `available` stays
+        False (the pid corroboration rung is blind), so the card still withholds
+        "clean" — the fail-safe direction is preserved without pretending the WAL
+        said nothing.
+        """
+        mod, lane = self._fold(read_error="dos: command not found")
+        self.assertFalse(lane["available"])
+        out = mod.cross_check_worker_leases({"available": True, "workers": []},
+                                            {"active": []}, lane)
+        self.assertFalse(mod.lane_lease_verdict_clean(out))
+        no_oracle = mod.summarize_lane_lease_holders(
+            self._lane_records(), starts=None, host_id=self.HOST, now_ts=self.NOW)
+        self.assertFalse(no_oracle["available"])
+        self.assertFalse(mod.lane_lease_verdict_clean(
+            mod.cross_check_worker_leases({"available": True, "workers": []},
+                                          {"active": []}, no_oracle)))
+        # All three fixtures are hours-to-weeks past the 50m TTL, and that is WAL
+        # evidence — no process probe involved.
+        self.assertEqual(no_oracle["dead_count"], 3)
+        self.assertEqual(no_oracle["live_count"], 0)
+        for row in no_oracle["rows"]:
+            self.assertIn("TTL EXPIRED", row["holder_evidence"])
+            self.assertIn("psutil unavailable", row["holder_evidence"])
+
+    def test_foreign_host_holder_is_unknown_not_dead(self) -> None:
+        """This host cannot probe another host's pid — and must not call it dead."""
+        mod = load()
+        state, _ = mod.classify_lane_lease_holder(
+            {"lane": "cmd", "pid": 51980, "host_id": "other-box"},
+            self._starts(), host_id=self.HOST)
+        self.assertEqual(state, "unknown")
+
+    def test_proc_starttime_decodes_windows_filetime(self) -> None:
+        mod = load()
+        # The real record observed on the reference tree.
+        self.assertAlmostEqual(
+            mod._proc_starttime_epoch(134305505540666317), 1786076954.07, places=1)
+        self.assertIsNone(mod._proc_starttime_epoch(None))
+        self.assertIsNone(mod._proc_starttime_epoch(0))
+
+    def test_read_lane_leases_parses_kernel_json(self) -> None:
+        mod = load()
+        seen = {}
+
+        def runner(cmd, cwd):
+            seen["cmd"], seen["cwd"] = cmd, cwd
+            return (json.dumps(self._lane_records()), None)
+
+        records, err = mod.read_lane_leases(ROOT, runner=runner)
+        self.assertIsNone(err)
+        self.assertEqual(len(records), 3)
+        self.assertEqual(seen["cmd"], ["dos", "lease-lane", "live"])
+        # `--workspace` makes the kernel re-resolve to a different .dos/ and emit
+        # non-JSON; the cwd carries the workspace instead.
+        self.assertNotIn("--workspace", seen["cmd"])
+
+    def test_render_surfaces_dead_holder_on_every_operator_surface(self) -> None:
+        mod, lane = self._fold()
+        worker_leases = mod.cross_check_worker_leases(
+            {"available": True, "workers": []}, {"active": []}, lane)
+        p = build(mod, worker_leases=worker_leases)
+
+        text = mod.render(p)
+        self.assertIn("dead-holder=2", text)
+        self.assertIn("lane lease: 3 held", text)
+        self.assertIn("do NOT reap", text)
+        self.assertNotIn("release --lane", text)
+        self.assertNotIn("cross-check clean", text)
+
+        md = mod.render_md(p, date="2026-08-06")
+        self.assertIn("dead-holder=2", md)
+        self.assertIn("Kernel lane leases", md)
+        self.assertIn("`cmd`", md)
+        self.assertIn("do NOT reap", md)
+
+        slack = mod.slack_text(p)
+        self.assertIn("dead-holder", slack)
+        self.assertIn("TTL-EXPIRED", slack)
+        self.assertIn("do NOT reap", slack)
+        self.assertNotIn("release --lane", slack)
+        self.assertNotIn("worker/lease cross-check clean", slack)
+
+    def test_all_live_holders_still_read_clean(self) -> None:
+        """The guard must not cry wolf: with every holder live the card is clean."""
+        mod = load()
+        lane = mod.summarize_lane_lease_holders(
+            self._lane_records()[:1], starts=self._starts(), host_id=self.HOST,
+            now_ts=self.NOW)
+        self.assertEqual(lane["dead_count"], 0)
+        self.assertEqual(lane["live_count"], 1)
+        out = mod.cross_check_worker_leases(
+            {"available": True,
+             "workers": [{"worker": "w", "issue": 1, "pid": 1001, "lane": "tools",
+                          "backend": "claude", "lease_id": "resolve-tools-1765"}]},
+            {"active": [{"id": "resolve-tools-1765", "lane": "tools", "holder": "peer-a"}]},
+            lane)
+        self.assertTrue(mod.lane_lease_verdict_clean(out))
+        self.assertIn("worker/lease cross-check clean",
+                      " | ".join(mod._worker_lease_reasons(out)))
+
+    def test_lane_lease_verdict_absent_fold_preserves_legacy_behaviour(self) -> None:
+        mod = load()
+        out = mod.cross_check_worker_leases({"available": True, "workers": []},
+                                            {"active": []})
+        self.assertTrue(mod.lane_lease_verdict_clean(out))
+        self.assertNotIn("lane_leases", out)
+
+    def test_card_must_not_read_clean_with_a_dead_holder_lease(self) -> None:
+        """THE reported symptom, asserted on the rendered card.
+
+        Deliberately built from a LITERAL payload rather than the fold's own
+        helpers, so it exercises only the pre-existing `worker_lease_check` ->
+        render seam. That makes it a real fail-first guard: against the unfixed
+        `dispatch_status.py` this reaches `render()` and fails on the assertions
+        below (the card printed `clean=3 orphan-process=0 unmatched-live-lease=0`
+        and "worker/lease cross-check clean" with 18 lanes fenced), rather than
+        erroring out on a missing symbol.
+        """
+        mod = load()
+        worker_leases = {
+            "available": True,
+            # Every LOCAL worker/lease pair matches — this is the state that used to
+            # print "clean" while the kernel's lane leases were all fenced.
+            "clean_count": 3,
+            "orphan_process_count": 0,
+            "orphan_lease_count": 0,
+            "clean": [], "orphan_process": [], "orphan_lease": [],
+            "dead_holder_count": 2,
+            "lane_leases": {
+                "schema": "fleet-lane-lease-liveness/1",
+                "source": "dos lease-lane live",
+                "available": True,
+                "total": 3, "live_count": 1, "dead_count": 2, "unknown_count": 0,
+                "next_action": ("do NOT reap: `dos lease-lane release` runs NO "
+                                "liveness check (#5859) · the admission fold already "
+                                "elides these"),
+                "rows": [], "dead": [
+                    {"lane": "cmd", "holder": "claude-5031", "pid": 51980,
+                     "age_min": 31680.0, "holder_state": "dead",
+                     "holder_evidence": "TTL EXPIRED: no acquire stamp for 528h"},
+                    {"lane": "modver", "holder": "worker-2461", "pid": 56980,
+                     "age_min": 17280.0, "holder_state": "dead",
+                     "holder_evidence": "TTL EXPIRED: no acquire stamp for 288h"},
+                ],
+            },
+        }
+        p = build(mod, worker_leases=worker_leases)
+
+        text = mod.render(p)
+        self.assertIn("dead-holder=2", text)
+        self.assertNotIn("worker/lease cross-check clean", text)
+        self.assertIn("cmd(claude-5031, pid 51980", text)
+        self.assertIn("do NOT reap", text)
+        self.assertNotIn("release --lane", text)
+
+        self.assertTrue(any("dead-holder=2" in r for r in p["reasons"]),
+                        f"no dead-holder counter in reasons: {p['reasons']}")
+        self.assertFalse(any("cross-check clean" in r for r in p["reasons"]),
+                         f"card still reads clean with 2 dead holders: {p['reasons']}")
+
+
+class LaneLeaseEphemeralAcquirerTest(unittest.TestCase):
+    """The holder predicate must judge a lease by the WAL, not by its acquirer pid.
+
+    The first cut of the lane-lease fold decided deadness from `(pid,
+    proc_starttime)` alone. That predicate cannot discriminate: a lane lease's
+    recorded pid is the EPHEMERAL `dos lease-lane acquire` subprocess, which
+    journals the ACQUIRE and exits immediately (`dos/lane_lease.py:466-492`), and
+    the reservation is designed to outlive it (`acquire()` at `:453` says so). So
+    a healthy, actively-held lease always probes "dead", and the card rendered
+    `lane lease: 25 held - live=0 dead-holder=25` while several of those lanes
+    were held by agents running at that instant — four of them acquired MINUTES
+    earlier, and five holders self-released their own leases inside one 9-minute
+    window while probing "dead" throughout.
+
+    The corrected predicate mirrors the kernel's own live-set fold
+    (`dos.lane_lease._lease_is_dead`): heartbeat/TTL staleness is PRIMARY, the pid
+    only corroborates.
+
+    Run this class against the pre-fix module to see it fail:
+
+        git show <sha>:tools/dispatch_status.py > $SCRATCH/pristine_dispatch_status.py
+        DISPATCH_STATUS_SCRIPT=$SCRATCH/pristine_dispatch_status.py \\
+            python tools/dispatch_status_test.py LaneLeaseEphemeralAcquirerTest
+    """
+
+    NOW = 1786080000.0            # 2026-08-07T05:20:00Z
+    HOST = "fleet-box"
+
+    def _classify(self, rec, starts=None):
+        """Classify one record, pinning the clock when the module accepts a pin.
+
+        `now_ts` is passed only if the loaded classifier takes it, so that against a
+        PRE-FIX module these tests still reach the real predicate and fail on its
+        VERDICT rather than erroring out on a missing keyword. The pre-fix classifier
+        reads no clock at all, so omitting the pin changes nothing for it; every
+        fixture below is dated relative to `NOW` and judged only on the resulting
+        state.
+        """
+        import inspect
+        mod = load()
+        fn = mod.classify_lane_lease_holder
+        kwargs = {"host_id": self.HOST}
+        if "now_ts" in inspect.signature(fn).parameters:
+            kwargs["now_ts"] = self.NOW
+        return fn(rec, {} if starts is None else starts, **kwargs)
+
+    @staticmethod
+    def _iso(now: float, minutes_ago: float) -> str:
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp(
+            now - minutes_ago * 60.0, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_absent_pid_with_fresh_heartbeat_is_live(self) -> None:
+        """THE decisive assertion. A lease whose pid is gone but whose heartbeat is
+        FRESH is live — that is the normal, healthy shape of a held lane lease, not
+        a reapable orphan.
+
+        Against the pre-fix classifier this returns `dead` on the strength of the
+        absent pid alone, with no reference to the heartbeat at all.
+        """
+        state, evidence = self._classify({
+            "lane": "tools", "holder": "guard-livelock-5858", "host_id": self.HOST,
+            "pid": 33784, "proc_starttime": _filetime(self.NOW - 4000),
+            "acquired_at": self._iso(self.NOW, 240.0),
+            "heartbeat_at": self._iso(self.NOW, 0.5),
+        }, starts={})       # pid 33784 is NOT in the process table
+        self.assertEqual(state, "live", f"fresh heartbeat judged {state}: {evidence}")
+        self.assertIn("fresh", evidence)
+        self.assertIn("not a running process", evidence)  # the pid IS reported…
+        self.assertIn("ephemeral", evidence)              # …and explicitly discounted
+
+    def test_absent_pid_with_fresh_acquire_stamp_is_live(self) -> None:
+        """The same, for the shape this fleet actually writes: no heartbeat op has
+        ever been journaled here, so `acquired_at` IS the newest stamp. A lease
+        acquired seconds ago must never read dead."""
+        state, evidence = self._classify({
+            "lane": "docs", "holder": "claude-5842", "host_id": self.HOST,
+            "pid": 84412, "proc_starttime": _filetime(self.NOW - 900),
+            "acquired_at": self._iso(self.NOW, 0.75),
+        }, starts={})
+        self.assertEqual(state, "live", f"45s-old lease judged {state}: {evidence}")
+
+    def test_absent_pid_inside_ttl_is_unknown_not_dead(self) -> None:
+        """Past the freshness grace but inside the TTL, with the ephemeral acquirer
+        gone: unproven. `unknown` — never `live`, and never `dead` either, because
+        an absent acquirer pid is the expected state of a healthy lease."""
+        state, evidence = self._classify({
+            "lane": "session", "holder": "claude-5254", "host_id": self.HOST,
+            "pid": 61696, "proc_starttime": _filetime(self.NOW - 3000),
+            "acquired_at": self._iso(self.NOW, 20.0),
+        }, starts={})
+        self.assertEqual(state, "unknown", f"20m-old lease judged {state}: {evidence}")
+        self.assertIn("ephemeral", evidence)
+
+    def test_ttl_expiry_is_the_death_evidence(self) -> None:
+        """A lease past its TTL + grace IS dead — that is the kernel's own primary
+        signal, and it is what `live_leases(expire_dead=True)` elides. The pid rung
+        rides along as corroboration only."""
+        state, evidence = self._classify({
+            "lane": "adjudicator", "holder": "fable-superloop-23874",
+            "host_id": self.HOST, "pid": 63712,
+            "proc_starttime": _filetime(self.NOW - 2_000_000),
+            "acquired_at": self._iso(self.NOW, 31680.0),   # 22 days
+        }, starts={})
+        self.assertEqual(state, "dead")
+        self.assertIn("TTL EXPIRED", evidence)
+
+    def test_declared_ttl_minutes_is_honoured_over_the_backstop(self) -> None:
+        """A lease that declares a long `ttl_minutes` is not dead at the 50-minute
+        backstop — the backstop only catches a record that declared none."""
+        rec = {"lane": "bench", "holder": "long-runner", "host_id": self.HOST,
+               "pid": 4242, "acquired_at": self._iso(self.NOW, 300.0),
+               "ttl_minutes": 600}
+        state, _ = self._classify(rec, starts={})
+        self.assertEqual(state, "unknown")
+        state, evidence = self._classify(dict(rec, ttl_minutes=60), starts={})
+        self.assertEqual(state, "dead")
+        self.assertIn("60-minute TTL", evidence)
+
+    def test_dead_pid_alone_never_kills_a_lease(self) -> None:
+        """The load-bearing inversion, stated directly: across the whole freshness
+        range, a confidently-dead pid on its own produces ZERO `dead` verdicts.
+
+        Pre-fix, every one of these is `dead` — the predicate returned the same
+        answer for a 30-second-old lease and a three-week-old one, which is why it
+        reported live=0 of 25.
+        """
+        states = []
+        for minutes in (0.1, 1.0, 4.9, 5.0, 9.0, 20.0, 45.0):
+            rec = {"lane": f"l{minutes}", "holder": "h", "host_id": self.HOST,
+                   "pid": 999, "proc_starttime": _filetime(self.NOW - 5000),
+                   "acquired_at": self._iso(self.NOW, minutes)}
+            states.append(self._classify(rec, starts={})[0])
+        self.assertNotIn("dead", states, f"dead pid alone still kills leases: {states}")
+        self.assertEqual(states[:4], ["live", "live", "live", "live"])
+
+    def test_whole_set_does_not_collapse_to_all_dead(self) -> None:
+        """The reality check: fold a set shaped like the real one and assert the
+        verdict actually discriminates. A classifier that answers `dead` for every
+        lease is not fixed, whatever its internals say."""
+        mod = load()
+        records = [
+            # freshly acquired, acquirer already exited — the healthy shape
+            {"lane": "docs", "holder": "claude-5842", "host_id": self.HOST,
+             "pid": 84412, "acquired_at": self._iso(self.NOW, 0.75)},
+            {"lane": "hooks", "holder": "claude-5026", "host_id": self.HOST,
+             "pid": 50584, "acquired_at": self._iso(self.NOW, 4.0)},
+            # inside the TTL, unprovable either way
+            {"lane": "tools", "holder": "guard-5858", "host_id": self.HOST,
+             "pid": 33784, "acquired_at": self._iso(self.NOW, 9.0)},
+            {"lane": "cmd", "holder": "claude-5254", "host_id": self.HOST,
+             "pid": 3388, "acquired_at": self._iso(self.NOW, 20.0)},
+            # genuinely aged out
+            {"lane": "adjudicator", "holder": "fable-superloop", "host_id": self.HOST,
+             "pid": 63712, "acquired_at": self._iso(self.NOW, 31680.0)},
+        ]
+        lane = mod.summarize_lane_lease_holders(
+            records, starts={}, host_id=self.HOST, now_ts=self.NOW)
+        self.assertEqual(lane["total"], 5)
+        self.assertEqual(lane["live_count"], 2)
+        self.assertEqual(lane["unknown_count"], 2)
+        self.assertEqual(lane["dead_count"], 1)
+        self.assertLess(lane["dead_count"], lane["total"],
+                        "every lease still reads dead — the predicate is still wrong")
+
+    def test_card_never_calls_dead_what_the_kernel_still_admits(self) -> None:
+        """The safety invariant: the card's `dead` set is a SUBSET of what the
+        kernel's admission fold drops, never a superset.
+
+        It holds because `dead` now requires the same TTL+grace expiry the kernel
+        uses, and the one rung the card narrows (dead-pid corroboration, which the
+        card demands an OBSERVED heartbeat for) only ever moves a verdict toward
+        `unknown`. Asserted here as monotonicity over age: the verdict may only walk
+        live -> unknown -> dead, and it may not reach `dead` before TTL+grace.
+
+        Verified live at authoring time against `dos lease-lane live` on the
+        reference tree: the kernel's `live_leases(expire_dead=True)` dropped 25 of
+        26 leases, the card called 18 of them dead, and `card_dead - kernel_dropped`
+        was empty — the 7 differences were all card-`unknown`, the safe direction.
+        """
+        order = {"live": 0, "unknown": 1, "dead": 2}
+        seen = []
+        for minutes in (0.0, 1.0, 5.0, 5.1, 20.0, 54.9, 55.0, 55.1, 600.0, 31680.0):
+            state, _ = self._classify({
+                "lane": "cmd", "holder": "h", "host_id": self.HOST, "pid": 3388,
+                "proc_starttime": _filetime(self.NOW - 9000),
+                "acquired_at": self._iso(self.NOW, minutes),
+            }, starts={})
+            seen.append((minutes, state))
+            if state == "dead":
+                self.assertGreater(minutes, 50.0 + 5.0,
+                                   f"dead at {minutes}m, before TTL+grace: {seen}")
+        ranks = [order[s] for _, s in seen]
+        self.assertEqual(ranks, sorted(ranks), f"verdict is not monotone in age: {seen}")
+        self.assertEqual(seen[-1][1], "dead")
+        self.assertEqual(seen[0][1], "live")
+
+    def test_next_action_never_recommends_a_blind_release(self) -> None:
+        """`dos lease-lane release` runs no liveness check and its `--owner ""`
+        matches any holder (#5859), so the card must never hand an operator a reap
+        loop over the lane set. It must instead say what IS true: the admission
+        fold self-heals, and a stale structural lease blocks only
+        `lane_lease.acquire()`."""
+        mod = load()
+        action = mod._LANE_LEASE_NEXT_ACTION
+        self.assertNotIn("--owner <holder>", action)
+        self.assertNotIn("release --lane", action)
+        self.assertNotIn("reap each", action)
+        self.assertIn("do NOT reap", action)
+        self.assertIn("#5859", action)
+        self.assertIn("OP_SCAVENGE", action)
+        self.assertIn("adopt()", action)
+        self.assertIn("expire_dead=True", action)
+        self.assertIn("lane_lease.acquire()", action)
+        self.assertIn("dos/lane_lease.py:453", action)
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_minimal_payload(self) -> None:
         mod = load()
@@ -1512,7 +1995,8 @@ class RenderTest(unittest.TestCase):
         self.assertTrue(any("orphan-process=1" in r for r in p["reasons"]))
         self.assertTrue(any("unmatched-live-lease=1" in r for r in p["reasons"]))
         text = mod.render(p)
-        self.assertIn("lease chk : clean=1 orphan-process=1 unmatched-live-lease=1", text)
+        self.assertIn(
+            "lease chk : clean=1 orphan-process=1 unmatched-live-lease=1 dead-holder=0", text)
         self.assertIn("orphan-process resolve-1770-20260701-120001", text)
         self.assertIn("unmatched-live-lease resolve-model-1700", text)
         slack = mod.slack_text(p)
@@ -2398,6 +2882,181 @@ class GuardCoverageScanTest(unittest.TestCase):
         top = next(c for c in candidates if c["tool"] == "tool_result")
         self.assertEqual(top["count"], 10)
         self.assertEqual(top["longest_run"], 1)
+
+
+class GuardEmptyCauseSplitTest(unittest.TestCase):
+    """`empty=N` on the guard card is split by a CLOSED cause vocabulary (#5862 dc-2).
+
+    An empty guard session used to be one opaque number, so an operator could not tell a
+    fleet parked behind a provider wall (benign — the supervisor resumes the same
+    command) from one silently failing to spawn. Hermetic over a tmp .dispatch-runs."""
+
+    def _corpus(self, d: Path, *, journal: str, rows: list[str],
+                log_tail: str | None = None, at: float = 3_000_000.0) -> None:
+        import os
+        audit = d / load().GUARD_AUDIT_DIRNAME
+        audit.mkdir(parents=True, exist_ok=True)
+        jp = audit / journal
+        jp.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+        os.utime(jp, (at, at))
+        if log_tail is not None:
+            lp = d / "resolve-1-20260807-000000.log"
+            # Name the journal in the log the way the guard's banner does — that string
+            # IS the join key.
+            lp.write_text(f"  audit log  : {jp}\n{log_tail}\n", encoding="utf-8")
+            os.utime(lp, (at, at))
+
+    def test_park_on_a_provider_wall_is_named_not_opaque(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="model-claude-1-aaaa.jsonl", rows=[],
+                         log_tail=("fak guard: goal parked outside active context budget "
+                                   "until 1786402799; reason=LONG_RETRY_AFTER\n"
+                                   "── guard · audit ──\n"))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_sessions"], 1)
+        self.assertEqual(out["empty_by_cause"],
+                         {mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL: 1})
+
+    def test_child_that_never_launched_is_split_from_the_park(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            # A partial epilogue is present, as it is on the real spawn failures: the
+            # spawn marker must still win, or the fleet's only "did not launch" signal
+            # is booked as a clean exit.
+            self._corpus(Path(d), journal="tools-claude-2-bbbb.jsonl", rows=[],
+                         log_tail=("── guard · audit ──\n"
+                                   'fak guard: could not run "claude": snapshot generated '
+                                   "child config: The system cannot find the path specified.\n"))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_SPAWN_FAILED: 1})
+
+    def test_interactive_journal_is_not_counted_as_a_dispatch_spawn(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            # guardDefaultAuditPath's name: an attended `fak guard`, which consumed no
+            # dispatch slot, no account rotation and no spawn.
+            self._corpus(Path(d), journal="interactive-4242-16daf1ca84d5.jsonl", rows=[])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_INTERACTIVE: 1})
+
+    def test_terminal_witness_row_is_not_a_decision_and_names_the_cause(self) -> None:
+        """The regression #5862's own producer fix would otherwise cause.
+
+        ae47d2911d makes a parked teardown write a CHILD_EXIT row. Counting that row as
+        a decision would drop the session out of `empty` entirely — the number would
+        deflate while explaining nothing. It must stay counted AND carry its reason."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="session-claude-3-cccc.jsonl", rows=[
+                '{"seq":1,"kind":"CHILD_EXIT","reason":"CLEAN_EXIT","exit_code":0}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["rows"], 1)
+        self.assertEqual(out["zero_row_sessions"], 0)   # the file is NOT empty ...
+        self.assertEqual(out["empty_sessions"], 1)      # ... but it adjudicated nothing
+        self.assertEqual(out["empty_by_cause"], {"clean_exit": 1})
+
+    def test_a_real_decision_is_never_counted_empty(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="docs-claude-4-dddd.jsonl", rows=[
+                '{"seq":1,"kind":"DECIDE","verdict":"ALLOW"}',
+                '{"seq":2,"kind":"CHILD_EXIT","reason":"CLEAN_EXIT"}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_sessions"], 0)
+        self.assertEqual(out["empty_by_cause"], {})
+
+    def test_unrecognised_witness_reason_falls_through_to_better_evidence(self) -> None:
+        """"unknown" is the last resort, never a shortcut.
+
+        Older CHILD_CRASH rows predate the Reason field; stamping them "unknown" throws
+        away the name/log evidence that still explains them."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="interactive-99-16daf1ca84d5.jsonl", rows=[
+                '{"seq":1,"kind":"CHILD_CRASH"}',
+            ])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_INTERACTIVE: 1})
+
+    def test_no_joinable_log_is_missing_artifact_not_a_fabricated_cause(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="repair-claude-5-eeee.jsonl", rows=[])
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_MISSING_LOG: 1})
+
+    def test_log_outside_the_mtime_window_is_not_joined(self) -> None:
+        """The join is bounded, so the card cannot become a full-corpus scan."""
+        mod = load()
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(Path(d), journal="model-claude-6-ffff.jsonl", rows=[],
+                         log_tail="reason=LONG_RETRY_AFTER\n")
+            lp = Path(d) / "resolve-1-20260807-000000.log"
+            far = 3_000_000.0 + mod._GUARD_EMPTY_LOG_WINDOW_S * 3
+            os.utime(lp, (far, far))
+            out = mod.guard_coverage(Path(d), now_ts=3_000_000.0)
+        self.assertEqual(out["empty_by_cause"], {mod._GUARD_EMPTY_MISSING_LOG: 1})
+
+    def test_causes_are_rendered_on_every_guard_surface(self) -> None:
+        mod = load()
+        bit = mod._guard_empty_cause_bit(
+            {"empty_by_cause": {mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL: 25,
+                                mod._GUARD_EMPTY_INTERACTIVE: 21}})
+        self.assertIn("provider_quota_wall=25", bit)
+        self.assertIn("interactive_not_dispatch=21", bit)
+        # A fleet with nothing to explain grows no all-zero bucket list.
+        self.assertEqual(mod._guard_empty_cause_bit({"empty_by_cause": {}}), "")
+
+    def test_cause_vocabulary_does_not_drift_from_the_go_side(self) -> None:
+        """The closed vocabulary is a literal COPY of Go constants (Python cannot import
+        Go). Parse those constants back OUT of the Go source so a rename on either side
+        fails CI instead of silently producing a cause the other half cannot name.
+
+        This matters concretely: internal/dispatchconservation folds any reason outside
+        its registered set to "unknown", so a cause string invented only here would
+        vanish on the Go side rather than error."""
+        mod = load()
+        root = Path(__file__).resolve().parents[1]
+        cons = (root / "internal" / "dispatchconservation" / "conservation.go")
+        crash = (root / "internal" / "journal" / "crash.go")
+        if not cons.is_file() or not crash.is_file():
+            self.skipTest("Go sources absent")
+        cons_src = cons.read_text(encoding="utf-8", errors="replace")
+        crash_src = crash.read_text(encoding="utf-8", errors="replace")
+        # 1. Every log-derived cause is a dispatchconservation Reason* constant AND is
+        #    registered in noCommitReasons (an unregistered one folds to "unknown").
+        for cause in (mod._GUARD_EMPTY_PROVIDER_QUOTA_WALL,
+                      mod._GUARD_EMPTY_SPAWN_FAILED,
+                      mod._GUARD_EMPTY_DIED_BEFORE_EPILOGUE,
+                      mod._GUARD_EMPTY_CLEAN_EXIT_NO_COMMIT,
+                      mod._GUARD_EMPTY_MISSING_LOG,
+                      mod._GUARD_EMPTY_UNKNOWN):
+            self.assertIn(f'"{cause}"', cons_src,
+                          f"{cause} is not a reason internal/dispatchconservation knows")
+        # 2. Every marker literal is byte-identical to the Go one it copies.
+        for marker in (mod._GUARD_PARK_MARKER, mod._GUARD_SPAWN_FAILED_MARKER,
+                       mod._GUARD_EPILOGUE_MARKER):
+            self.assertIn(f'"{marker}"', cons_src,
+                          f"marker {marker!r} drifted from conservation.go")
+        # 3. Every witness reason is a Crash* constant in internal/journal/crash.go
+        #    (compared upper-cased: the journal stamps them upper, the card renders
+        #    them lower).
+        for reason in mod._GUARD_EMPTY_WITNESS_REASONS:
+            if reason == "crash_restart_exhausted":
+                continue  # cmd/fak/guard_crash_restart.go, checked below
+            self.assertIn(f'"{reason.upper()}"', crash_src,
+                          f"witness reason {reason} is not in the journal's closed set")
+        restart = (root / "cmd" / "fak" / "guard_crash_restart.go")
+        if restart.is_file():
+            self.assertIn('"CRASH_RESTART_EXHAUSTED"',
+                          restart.read_text(encoding="utf-8", errors="replace"))
+        # 4. The terminal kinds are the journal's own Kind constants.
+        for kind in mod._GUARD_TERMINAL_KINDS:
+            self.assertIn(f'"{kind}"', crash_src)
 
 
 class GuardCoverageFoldTest(unittest.TestCase):

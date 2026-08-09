@@ -40,6 +40,7 @@ func usageWallText() string {
 
 const usageCoreText = `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
+  fak launch   [install|uninstall|default|enable|disable|status|doctor] [claude|codex] [--direct]
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
   fak commit status [--dir DIR] [--json]
   fak commit preflight --path P [--path P ...] [--dir DIR] [--json]
@@ -410,9 +411,13 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                 run <id> <state> | budget <id> [--turns N] [--tokens N] [--context-tokens N] |
                 pace <id> [--max-tokens N] |
                 audit [summary|discover|audit|deep] [--days N] |
+                terminate <id> [--reason R] |
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
-                 and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
+                 and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes.
+                 One of the three verbs forming the OUT-OF-BAND CONTROL PLANE with
+                 fak signal and fak ps - the closed op vocabulary, each op's boundary,
+                 witness-of-applied, and refusal: docs/operator-control-plane.md)
   fak resume    plan [--resident-tokens N] [--idle-seconds S] [--ttl 5m|1h] [--horizon N]
                 [--shed-budget N] [--seed-tokens N] [--input-price F] [--output-price F]
                 [--image DIR] [--json]
@@ -426,7 +431,8 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak top       (= fak ps --watch)
                 (the READ-ONLY PROCESS TABLE: one aligned row per live session folded
                  from GET /v1/fak/sessions; --watch is the top mode. Issues no control
-                 verb - control a session with fak session)
+                 verb - control a session with fak session or fak signal; the plane
+                 they form: docs/operator-control-plane.md)
   fak windowgate [scan|report] [--workspace DIR] [--json] [--fail-on-candidates]
                 (NO-DESKTOP-POPUP audit: hard-ratcheted scheduled-task, Python, and
                  Go background helper launches must suppress Windows console windows;
@@ -434,7 +440,10 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."
                 (JOB CONTROL for a running session - the OS process-model names over the
                  control plane; steer sends INPUT to a running agent, taken at its next
-                 turn boundary. Answers Claude Code #21419, the SIGCONT+stdin gap)
+                 turn boundary. Answers Claude Code #21419, the SIGCONT+stdin gap.
+                 NOT a second control plane: the same /v1/fak/session routes fak session
+                 uses. The whole plane: docs/operator-control-plane.md. Unrelated despite
+                 the name: fak steering (Slack reporting), fak steer (pull requests))
   fak task      sample [--json] [--done N --total N --unit UNIT]
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
@@ -507,6 +516,9 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
                  enqueue a durable Slack digest — counts + the vault-head chain
                  anchor — through the slack outbox, so a hijacked/corrupted vault is
                  witnessed off-box even if the local anchor is tampered)
+  fak token-profile [--input N --cached-input N --max-output N] [--json|--halo]
+      Shift token economics and scheduler load left into a typed preflight forecast.
+
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--plan-json] [--require-key-env VAR] [--vdso=true]

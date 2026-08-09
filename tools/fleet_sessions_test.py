@@ -21,17 +21,20 @@ import fleet_sessions  # noqa: E402
 
 def _row(account, disp, autonomous=True, cwd=None, project="C--work-fleet",
          supervised=False, session="11111111-2222-3333-4444-555555555555",
-         task_sig="", records=1, seen_utc=""):
+         task_sig="", records=1, seen_utc="", last_ts=""):
     """A minimal session row shaped like classify() output for decide().
 
     task_sig/records/seen_utc default to the no-dedup case (empty sig) so the
-    existing re-home tests are untouched; dedup tests set them explicitly."""
+    existing re-home tests are untouched; dedup tests set them explicitly.
+    last_ts (the terminal turn's OWN timestamp) defaults empty for the same
+    reason -- it is the #3459 newest-copy key, set only by the copy-gate tests."""
     return {
         "account": account, "disp": disp, "autonomous": autonomous,
         "supervised": supervised, "cwd": cwd if cwd is not None else os.getcwd(),
         "project": project, "session": session, "git": "master",
         "age_min": 5.0, "last": "", "throttle_reset": None,
         "task_sig": task_sig, "records": records, "seen_utc": seen_utc,
+        "last_ts": last_ts,
     }
 
 
@@ -827,6 +830,106 @@ class DedupTaskTest(unittest.TestCase):
         fleet_sessions.decide(rows, {}, avail)
         primary = next(r for r in rows if r["action"] == "AUTO_RESUME")
         self.assertEqual(primary["session"], sids[1])   # records=20, not the blocked 99
+
+
+class LiveCopyGateTest(unittest.TestCase):
+    """#3459: one session id exists as many on-disk COPIES (a re-home writes the same
+    uuid under another config dir), and scan() classifies every copy independently. The
+    plan must (1) never queue a sid a live `claude --resume` driver is already advancing
+    and (2) let only the NEWEST copy speak for the session, so a stale copy's synthetic
+    "API Error" tail cannot become the whole session's verdict.
+
+    The witnessed harm: resume_plan.json queued 94aea02a as STOPPED_APIERR/crashed while
+    a live process was advancing a newer copy of it under .claude-day26NEW-netra; a
+    `--live` watchdog tick would have fired a SECOND driver onto a live transcript."""
+
+    SID = "94aea02a-0000-4000-8000-000000000000"
+
+    @staticmethod
+    def _plan(rows):
+        """The rows that would reach resume_plan.json -- decide()'s own plan filter
+        (fleet_sessions.py: `[plan_entry(r) for r in rows if r["action"] == "AUTO_RESUME"]`)."""
+        return [r for r in rows if r["action"] == "AUTO_RESUME"]
+
+    def test_apierr_copy_not_queued_when_a_live_copy_shares_the_uuid(self) -> None:
+        # The acceptance fixture: same UUID, one alive copy + one APIERR copy.
+        rows = [_row(".claude-stale-acct", "STOPPED_APIERR", session=self.SID,
+                     last_ts="2026-08-04T10:00:00Z"),
+                _row(".claude-day26NEW-netra", "LIVE", session=self.SID,
+                     last_ts="2026-08-04T12:00:00Z")]
+        avail = [_avail(".claude-stale-acct", available=True),
+                 _avail(".claude-day26NEW-netra", available=True)]
+        fleet_sessions.decide(rows, {}, avail)
+        self.assertEqual(rows[0]["action"], "SKIP_LIVE_DRIVER")
+        self.assertEqual(rows[1]["action"], "SKIP_LIVE")   # the live copy names itself
+        self.assertEqual(self._plan(rows), [])             # never reaches resume_plan.json
+        self.assertIsNone(rows[0]["resume_cmd"])           # and carries no launch command
+
+    def test_apierr_copy_alone_is_still_queued(self) -> None:
+        # Negative control: the SAME row with no live sibling and no census must still be
+        # resumed -- the gate must not strand genuinely-crashed sessions.
+        rows = [_row(".claude-stale-acct", "STOPPED_APIERR", session=self.SID,
+                     last_ts="2026-08-04T10:00:00Z")]
+        avail = [_avail(".claude-stale-acct", available=True)]
+        fleet_sessions.decide(rows, {}, avail)
+        self.assertEqual(rows[0]["action"], "AUTO_RESUME")
+        self.assertEqual(len(self._plan(rows)), 1)
+
+    def test_process_census_alone_suppresses_the_sid(self) -> None:
+        # The 94aea02a case: NO on-disk copy classified LIVE (the live copy sat in an
+        # account dir this scan never read) -- only the process table proves it alive.
+        rows = [_row(".claude-stale-acct", "STOPPED_APIERR", session=self.SID,
+                     last_ts="2026-08-04T10:00:00Z")]
+        avail = [_avail(".claude-stale-acct", available=True)]
+        fleet_sessions.decide(rows, {}, avail, live_sids={self.SID})
+        self.assertEqual(rows[0]["action"], "SKIP_LIVE_DRIVER")
+        self.assertEqual(self._plan(rows), [])
+
+    def test_newest_copy_speaks_for_the_session(self) -> None:
+        # Two crashed copies of one sid: the NEWER terminal turn decides, the older is
+        # stamped SKIP_STALE_COPY so it can neither re-home nor consume a cap slot.
+        old = _row(".claude-stale-acct", "STOPPED_APIERR", session=self.SID,
+                   last_ts="2026-08-04T10:00:00Z")
+        new = _row(".claude-day26NEW-netra", "DEAD_MIDTOOL", session=self.SID,
+                   last_ts="2026-08-04T12:00:00Z")
+        rows = [old, new]
+        avail = [_avail(".claude-stale-acct", available=True),
+                 _avail(".claude-day26NEW-netra", available=True)]
+        fleet_sessions.decide(rows, {}, avail)
+        self.assertEqual(old["action"], "SKIP_STALE_COPY")
+        self.assertEqual(new["action"], "AUTO_RESUME")
+        self.assertEqual(self._plan(rows), [new])
+
+    def test_newest_copy_ranks_by_last_turn_not_file_mtime(self) -> None:
+        # The mtime trap: a dead driver appends a synthetic "API Error" banner to a stale
+        # PREFIX, so that copy's mtime (seen_utc) is the freshest on disk while its last
+        # REAL turn is older. The turn timestamp must win over the file stamp.
+        stale = _row(".claude-stale-acct", "STOPPED_APIERR", session=self.SID,
+                     last_ts="2026-08-04T10:00:00Z", seen_utc="2026-08-04T23:59:00Z")
+        real = _row(".claude-day26NEW-netra", "DEAD_MIDTOOL", session=self.SID,
+                    last_ts="2026-08-04T12:00:00Z", seen_utc="2026-08-04T12:00:30Z")
+        rows = [stale, real]
+        avail = [_avail(".claude-stale-acct", available=True),
+                 _avail(".claude-day26NEW-netra", available=True)]
+        fleet_sessions.decide(rows, {}, avail)
+        self.assertEqual(stale["action"], "SKIP_STALE_COPY")
+        self.assertEqual(self._plan(rows), [real])
+
+    def test_distinct_sids_are_untouched_by_the_copy_gate(self) -> None:
+        # The newest-copy gate is keyed on the session id: two DIFFERENT crashed sessions
+        # are not copies of each other and must both stay queued.
+        a = _row(".claude-good-acct", "DEAD_MIDTOOL", session="aaaaaaaa-0000-4000-8000-000000000001")
+        b = _row(".claude-good-acct", "DEAD_MIDTOOL", session="bbbbbbbb-0000-4000-8000-000000000002")
+        rows = [a, b]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(len(self._plan(rows)), 2)
+
+    def test_live_census_failure_leaves_the_gate_inert(self) -> None:
+        # FAIL-OPEN: an unreadable process table (the census is Windows-only today) must
+        # never strand a crashed session -- _live_resume_sids swallows it and returns
+        # empty, so the on-disk evidence alone decides.
+        with mock.patch.dict(sys.modules, {"resume_sweep": None}):
+            self.assertEqual(fleet_sessions._live_resume_sids(), set())
 
 
 class ResumeEscalationTest(unittest.TestCase):

@@ -34,7 +34,7 @@ Related routes, which this page does **not** restate:
 | Generated SBOM ([`sbom/fak.spdx.json`](sbom/fak.spdx.json)) | **Shipped** |
 | SBOM/`go.mod` drift gate (`go test ./internal/architest -run TestSBOM`) | **Shipped** — see [Regenerate and verify](#regenerate-and-verify-this-sbom) |
 | Captured zero-network governed session, **`--gguf` model-backed seam** | **Not yet witnessed** — see [Not yet witnessed](#not-yet-witnessed) |
-| A *guard* that refuses an auth-less bind on a routable interface | **Not built** — the default is safe, the guard is not. See [Bind safety](#bind-safety-read-this-one) |
+| A *guard* that refuses an auth-less bind on a routable interface | **Shipped** (#5373) — startup refusal `UNAUTHENTICATED_OFF_HOST_BIND`. See [Bind safety](#bind-safety-read-this-one) |
 
 ## Stage the artifacts (what crosses the boundary, once)
 
@@ -91,25 +91,50 @@ Flags used, all verified live in [`cmd/fak/serve.go`](../cmd/fak/serve.go):
 
 ### Bind safety (read this one)
 
-The default `--addr` is loopback, which is the right default. **But there is no guard
-that refuses an auth-less bind on a routable interface** — a search of
-`cmd/fak/serve.go` finds no loopback check, and `--require-key-env` defaults to empty.
-So this combination starts, silently, and is exactly the 175,108-server footgun:
+The default `--addr` is loopback, and since #5373 the 175,108-server shape is a **kernel
+refusal, not a convention**: `fak serve` will not come up on an interface reachable from
+off this host while no inbound token door is named. Captured on this host from the staged
+binary — it exits before any socket is bound:
 
-```sh
-./fak serve --addr 0.0.0.0:8080        # routable AND auth-less — NOT refused today
+```
+$ ./fak serve --addr 0.0.0.0:8080
+fak serve: UNAUTHENTICATED_OFF_HOST_BIND — refusing to bind 0.0.0.0:8080, which is
+reachable from off this host, with no inbound token door: every request would be served
+unauthenticated. Fix it one of three ways: bind loopback (--addr 127.0.0.1:8080, the
+default), require a bearer (--require-key-env FAK_API_KEY, with that env var set), or bind
+per-tenant keys (--key-principal acme=ACME_KEY). If this host really is meant to serve an
+unauthenticated interface, pass --unsafe-allow-unauthenticated-bind to proceed anyway.
+  next:   fak recover UNAUTHENTICATED_OFF_HOST_BIND
+$ echo $?
+2
 ```
 
-Until the guard is built, this is **operator discipline plus a host control**, not a
-kernel refusal. In a regulated boundary, enforce it below fak:
+What a reviewer needs to know about the rule's edges, all of it in
+[`cmd/fak/serve_bind_safety.go`](../cmd/fak/serve_bind_safety.go):
 
-- Set `--require-key-env` **whenever** `--addr` is not a loopback address.
-- Bind to loopback and put an authenticating reverse proxy in front, or
-- Deny inbound on the listener port at the host firewall / network policy, and
-- Assert it in your bring-up check, not just in the runbook.
+- It fires only on the **conjunction** — reachable off-host **and** no token door. An
+  off-host bind that names `--require-key-env` or `--key-principal` is admitted, and so is
+  every loopback bind (`127.0.0.0/8`, `::1`, `localhost`) and `--stdio`, which binds
+  nothing.
+- It classifies by **IP value, not string prefix**, so `127.0.0.1.evil.example` is not
+  mistaken for loopback. Wildcards (`0.0.0.0`, `::`, a bare `:8080`) are off-host.
+- It **fails open on ambiguity**: a host that is not a parseable IP (a DNS name) cannot be
+  proven off-host at boot, so it is admitted rather than wedging a boot. That is the one
+  gap this refusal does not cover — see the checklist below.
+- `UNAUTHENTICATED_OFF_HOST_BIND` is a stable token declared in `dos.toml`, so log scrapes
+  can match the refusal by token rather than by prose.
+- The escape hatch is `--unsafe-allow-unauthenticated-bind`, for the isolated lab segment
+  or the host firewall genuinely doing the work. It prints a loud stderr warning **every
+  boot** naming the overridden refusal. Deliberate ATO-visible risk, not a default.
 
-Filed as a follow-up so the default becomes a refusal rather than a convention — see
-[Not yet witnessed](#not-yet-witnessed).
+In a regulated boundary the host controls are still yours to own, because the refusal
+governs *this* process and not the network around it:
+
+- Deny inbound on the listener port at the host firewall / network policy.
+- If `--addr` names a **DNS host** rather than an IP, the refusal cannot classify it —
+  assert the token door yourself in your bring-up check.
+- If anyone passes the override, record it as a residual risk with its compensating
+  control.
 
 ## The zero-network governed-session witness
 
@@ -243,7 +268,12 @@ Work top to bottom; each line is checkable, not aspirational.
 - [ ] `--require-key-env` is set and the token comes from a secret store, not a file in
       the image.
 - [ ] `--addr` is loopback, **or** it is routable *and* the token door is on *and* a
-      firewall rule backs it (see [Bind safety](#bind-safety-read-this-one)).
+      firewall rule backs it (see [Bind safety](#bind-safety-read-this-one)). fak refuses
+      the auth-less routable case itself; the firewall rule is yours.
+- [ ] `--addr` names an **IP, not a DNS host** — the bind refusal cannot classify a name,
+      so a name is the one shape it admits unchecked.
+- [ ] `--unsafe-allow-unauthenticated-bind` is **not** passed (`grep` your unit file); if
+      it is, record it as residual risk with its compensating control.
 - [ ] The 401-without-bearer check above was run and passed post-deploy.
 
 **Governance**
@@ -266,10 +296,10 @@ Work top to bottom; each line is checkable, not aspirational.
 
 **Residual risk to record in your ATO package**
 
-- [ ] The auth-less-routable-bind case is not refused by the kernel today; note the
-      compensating control you used.
 - [ ] The `--gguf` model-backed air-gapped run is not yet covered by a captured
       upstream witness — you own that evidence for your own bring-up.
+- [ ] If `--addr` is a DNS name, or the bind override was passed, record the compensating
+      control — those are the two shapes the bind refusal does not cover.
 
 ## Not yet witnessed
 
@@ -287,13 +317,25 @@ compute node ([`fleet-compute-nodes.md`](fleet-compute-nodes.md)), capture the
 
 **Generation bookkeeping** (`gen/next`, per [`generation.md`](generation.md)):
 
-- **Promotion evidence** — what moves #3279 toward `now`: the captured `--gguf`
-  model-backed air-gapped transcript above, plus a kernel-side bind-safety refusal
-  (rather than the operator convention documented here). Either one landing makes this
-  page's honest fences shorter.
+- **Promotion evidence** — what moves #3279 toward `now`. Two were named; **one has now
+  landed.** The kernel-side bind-safety refusal shipped (#5373, `serve_bind_safety.go`,
+  witnessed above), which retired this page's largest fence: the Direction's
+  "never expose auth-less on a routable interface" is a startup refusal rather than the
+  operator convention this page used to document. The remaining one is the captured
+  `--gguf` model-backed air-gapped transcript (#5372). When that lands, the
+  [Not yet witnessed](#not-yet-witnessed) section empties and this page promotes.
 - **Demotion / retirement evidence**: if epic #3256 re-scopes away from air-gap, or a
   supported distro/image path subsumes the single-binary kit, this kit demotes in favor
   of that path and the checklist moves with it.
+- **Invalidating assumption (live, from #5373)**: that "reachable from off this host" is
+  decidable from the `--addr` string. It is not, for a DNS name — the refusal deliberately
+  admits what it cannot prove, so that a malformed-but-harmless address never wedges a
+  boot. An operator who binds `--addr fak.internal:8080` with no token door gets **no
+  refusal**, and this page's table row still reads **Shipped**. That is the honest edge of
+  the guard, and it is why the checklist keeps an IP-not-a-name line rather than treating
+  the refusal as total coverage. Falsify it by binding a resolvable off-host name with no
+  token door: if that must be refused too, the rule needs a boot-time resolve it does not
+  do today.
 - **Invalidating assumption (retired, #5374)**: that the dependency set stays at two
   `golang.org/x` modules. It is not a law — it went from zero to two without this page
   noticing, which is precisely how the stale "zero deps" claim survived. The freshness of

@@ -37,10 +37,19 @@ func TestComputeTargetCredMissing(t *testing.T) {
 	if !missing {
 		t.Fatalf("mac with empty FAK_GATEWAY_KEY: missing=false, want true")
 	}
-	for _, want := range []string{`"mac"`, "FAK_GATEWAY_KEY", "claude-mac-fak"} {
+	// The target, the env var, and the mac shortcut are the substance; the reason
+	// token and the `next:` line are what make it a config bail rather than a
+	// well-worded dead end — `fak recover KEY_ENV_UNSET` has to be reachable from
+	// what the operator is looking at.
+	for _, want := range []string{`"mac"`, "FAK_GATEWAY_KEY", "claude-mac-fak", "reason: " + bailKeyEnvUnset, "fak recover " + bailKeyEnvUnset} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("cred-missing message missing %q:\n%s", want, msg)
 		}
+	}
+	// The env var is named in the bail, so the recovery it points at must arrive
+	// pre-bound rather than telling the operator to set a literal <env>.
+	if !strings.Contains(msg, "--set env=FAK_GATEWAY_KEY") {
+		t.Errorf("cred-missing message does not pre-bind the env into its recovery:\n%s", msg)
 	}
 
 	// Key present -> not missing.

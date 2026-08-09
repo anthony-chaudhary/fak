@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -146,6 +147,112 @@ type a2aSecurityScheme struct {
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
 }
+
+// a2aSelfBaseURL derives the absolute origin ("scheme://authority") a peer must dial
+// to reach THIS process, from the request this process is answering right now.
+//
+// Before #5642 the served card carried a literal `https://fleet.example.com/...`.
+// example.com is reserved for documentation, so it always resolves and never to fak:
+// a peer that fetched the card and dialed what it said failed as a timeout or a DNS
+// error attributed to the peer's own config, which is worse than serving no card.
+//
+// Which source wins, most authoritative first:
+//
+//  1. r.Host — the authority the caller actually dialed to arrive here. For a direct
+//     bind this IS the listener, including the ephemeral-port case: a gateway on
+//     127.0.0.1:0 advertises the port the kernel handed it, because that is the port
+//     the request came in on. It is also the only source that survives a bare
+//     Handler with no listener of our own.
+//  2. boundAddr — the address Serve bound, used only when the request carries no
+//     authority at all (an HTTP/1.0 client may omit Host). Emitting "http:///a2a"
+//     there would be the same undialable-descriptor bug in a new costume.
+//
+// The scheme comes from the connection: https when the request arrived over TLS,
+// http otherwise. We never upgrade on a guess.
+//
+// NOT a source: X-Forwarded-Host / X-Forwarded-Proto. This gateway deliberately does
+// not trust forwarded headers (see isLoopbackRequest's note on X-Forwarded-For), and
+// honoring them here would let any direct caller dictate the authority in its own
+// card. Behind a reverse proxy r.Host is the proxy's Host header, which is usually
+// already the public name; a deployment that terminates TLS at the proxy and needs
+// https advertised wants an explicit operator override, which is a stated follow-on
+// on #5642 rather than a guess made here.
+func (s *Server) a2aSelfBaseURL(r *http.Request) string {
+	scheme := "http"
+	host := ""
+	if r != nil {
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		host = strings.TrimSpace(r.Host)
+	}
+	if !validAuthority(host) {
+		host = ""
+	}
+	if host == "" {
+		if p := s.boundAddr.Load(); p != nil {
+			host = dialableAuthority(*p)
+		}
+	}
+	if host == "" {
+		// Nothing told us who we are and we own no listener. Loopback is the one
+		// authority that is true of every live process, so it beats an empty one.
+		host = "127.0.0.1"
+	}
+	return scheme + "://" + host
+}
+
+// dialableAuthority turns a bound listener address into one a peer can dial. A
+// wildcard bind (":8080", "0.0.0.0:8080", "[::]:8080") names no reachable host, so
+// advertising it verbatim would trade one undialable descriptor for another; the
+// process is always reachable on loopback at that port, so that is what we say.
+func dialableAuthority(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		if validAuthority(addr) {
+			return addr
+		}
+		return ""
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// validAuthority rejects an authority that cannot appear in a URL — a Host header is
+// attacker-supplied, and splicing a stray space, control byte, or path separator into
+// the endpoint would emit a malformed descriptor rather than a wrong-but-parseable one.
+func validAuthority(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	return !strings.ContainsAny(host, "/?#\\ \t\r\n\x00")
+}
+
+// a2aIdentity is the card's (id, name) for THIS process. An A2A id is how a peer
+// tells two agents apart, so a gateway that was configured with an engine identity
+// says so instead of every process in the fleet answering to the same "fleet-fak"
+// (#5642). An unconfigured gateway keeps the historical literals, so a peer holding
+// today's expectations sees no change it did not ask for.
+func (s *Server) a2aIdentity() (id, name string) {
+	id, name = "fleet-fak", "Fleet fak Agent"
+	if eng := strings.TrimSpace(s.engineID); eng != "" {
+		id = "fleet-fak-" + eng
+		name = "Fleet fak Agent (" + eng + ")"
+	}
+	return id, name
+}
+
+// a2aEndpointFor and a2aCardURLFor keep the card's two URL fields derived from ONE
+// origin and pinned to the routes actually registered in Server.routeTable(): the
+// A2A methods live under /a2a/v1, and the card is served at /a2a/v1/agent-card. The
+// old literals advertised a /a2a prefix and a /a2a/agent-card path, neither of which
+// this gateway has ever served.
+func (s *Server) a2aEndpointFor(r *http.Request) string { return s.a2aSelfBaseURL(r) + "/a2a/v1" }
+
+func (s *Server) a2aCardURLFor(r *http.Request) string { return s.a2aEndpointFor(r) + "/agent-card" }
 
 // a2aAuditLog represents an audit log entry for task transitions
 type a2aAuditLog struct {
@@ -307,6 +414,19 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #2439: resolve the TARGET before anything is dispatched. A `to` carrying the
+	// kernel's lease prefix is a kernel-minted lease identity and is resolved strictly —
+	// an id the kernel never minted refuses LEASE_UNKNOWN, one past its expiry refuses
+	// LEASE_EXPIRED. Neither refusal falls back to name routing: that fallback IS the
+	// misroute this closes, where an expired lease id is delivered to whichever agent
+	// holds the underlying NAME now. A plain name still routes as before.
+	if _, reason, ok := s.resolveLeaseTarget(msg.To, time.Now()); !ok {
+		writeErrCode(w, http.StatusGone, strings.ToLower(reason),
+			reason+": the message addresses a kernel-minted lease that is no longer deliverable; "+
+				"it is refused rather than routed to the name's current holder — re-resolve the peer's live lease id")
+		return
+	}
+
 	// Extract tenant from headers
 	tenantID := r.Header.Get("X-Tenant-ID")
 
@@ -367,7 +487,7 @@ func (s *Server) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		Params:       params,
 		CallerID:     callerID,
 		TenantID:     tenantID,
-		AgentCardURL: "https://fleet.example.com/a2a/agent-card",
+		AgentCardURL: s.a2aCardURLFor(r),
 		Message:      msg.Content,
 		SessionTrace: sessionTrace,
 	}
@@ -721,13 +841,16 @@ func (s *Server) handleA2AGetExtendedAgentCard(w http.ResponseWriter, r *http.Re
 		})
 	}
 
-	// Generate Agent Card with skills from method registry
+	// Generate Agent Card with skills from method registry. Identity and endpoint
+	// come from THIS process — the configured engine and the request we are
+	// answering — not from literals (#5642).
+	cardID, cardName := s.a2aIdentity()
 	card := a2aAgentCard{
-		ID:          "fleet-fak",
-		Name:        "Fleet fak Agent",
+		ID:          cardID,
+		Name:        cardName,
 		Description: "A Fleet agent with reviewed method registry and policy-scoped skills",
 		Version:     a2aVersion,
-		Endpoint:    "https://fleet.example.com/a2a",
+		Endpoint:    s.a2aEndpointFor(r),
 		Skills:      skills,
 		Security: a2aSecurity{
 			Schemes: []a2aSecurityScheme{

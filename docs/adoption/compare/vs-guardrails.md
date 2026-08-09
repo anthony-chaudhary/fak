@@ -162,5 +162,5 @@ the [concept-popularization epic](../../notes/CONCEPT-POPULARIZATION-EPIC-2026-0
 
 ```
 test -f docs/adoption/compare/vs-guardrails.md       # this artifact exists
-python tools/seo_aeo_scorecard.py                    # new doc does not red the SEO scorecard
+fak score seo                                        # new doc does not red the SEO scorecard
 ```

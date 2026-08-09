@@ -44,12 +44,31 @@ const PreflightRefuseChurn = "REFUSE_HOST_CHURN"
 // so the token this fold emits is the one `dos check-reason` verifies and the loop routes on.
 const HostChurnBackoff = "HOST_CHURN_BACKOFF"
 
-// DefaultChurnBurstThreshold is the burst floor: the fewest processes born on the host within
-// one sample interval that arm the backoff. It mirrors stallscan's own SpawnBurstStall default
-// (8), the calibrated crossing at which a spawn storm coincided with a desktop freeze on the
-// reference box. Below it, ordinary process turnover is noise and the term abstains. The impure
-// shell overlays FAK_CHURN_BURST_THRESHOLD.
+// DefaultChurnBurstThreshold is the WINDOW-UNKNOWN burst floor: the fewest processes born on
+// the host within one sample interval that arm the backoff, compared as a bare count. It
+// mirrors stallscan's own SpawnBurstStall default (8), the calibrated crossing at which a spawn
+// storm coincided with a desktop freeze on the reference box, measured there as a NET process
+// delta. Below it, ordinary process turnover is noise and the term abstains. The impure shell
+// overlays FAK_CHURN_BURST_THRESHOLD.
+//
+// Prefer the rate path (DefaultChurnBurstRate) whenever the caller knows its window: see the
+// warning there for why a bare count cannot be calibrated.
 const DefaultChurnBurstThreshold = 8
+
+// DefaultChurnBurstRate is the burst floor in the only unit that can be calibrated across
+// callers: gross process births per SECOND. It tracks stallscan's SpawnBurstRateStall (150/sec)
+// and MUST move with it — the two gates read the same signal, so a split calibration would let
+// admission refuse a host the classifier calls calm, or vice versa.
+//
+// WHY A RATE AND NOT A COUNT. A count of 8 means "storm" only relative to some unstated
+// interval. Live capture on the reference box (2026-08-05, 101 one-second ticks under ordinary
+// fleet load) measured a median of 22 gross births/sec, p95 63, max 83 — every one of which
+// clears a count threshold of 8. Feeding a gross birth count into the count path would refuse
+// dispatch on ~95% of ticks of a healthy box: a gate that always refuses is not safer than one
+// that never fires, it is the same defect pointed the other way. 150/sec sits ~1.8x above that
+// measured max. As with stallscan, this bounds FALSE POSITIVES against a measured negative
+// class; sensitivity is unproven until a freeze is captured with a window attached.
+const DefaultChurnBurstRate = 150.0
 
 // DefaultChurnMinWorkers is the cold-start floor: the fewest workers the churn term admits even
 // under a live host storm. Backoff throttles GROWTH, never liveness -- a floor of 0 would let a
@@ -68,11 +87,36 @@ type ChurnCheck struct {
 	// (stallscan Sample.SpawnBurst). It is a WHOLE-HOST count, not scoped to this dispatcher,
 	// which is precisely what makes the term see co-launching PEER dispatchers.
 	Recent int
-	// Threshold is the burst floor that arms the backoff; <= 0 means DefaultChurnBurstThreshold.
+	// WindowSeconds is the wall-clock span Recent was counted over (stallscan
+	// Sample.SpawnWindowSeconds). > 0 selects the RATE comparison against RateThreshold; 0
+	// means the window is unknown and the legacy bare-count comparison applies. A count with
+	// no window is not a rate, and the two are not interchangeable: see DefaultChurnBurstRate.
+	WindowSeconds float64
+	// Threshold is the window-unknown burst floor that arms the backoff; <= 0 means
+	// DefaultChurnBurstThreshold.
 	Threshold int
+	// RateThreshold is the births/sec floor used when WindowSeconds > 0; <= 0 means
+	// DefaultChurnBurstRate.
+	RateThreshold float64
 	// MinWorkers is the cold-start floor the backoff holds to even under a storm; <= 0 means
 	// DefaultChurnMinWorkers. The shell sets it from FAK_CHURN_MIN_WORKERS.
 	MinWorkers int
+}
+
+// rate converts Recent to births/sec, reporting ok only when the window is known. Pure.
+func (c ChurnCheck) rate() (float64, bool) {
+	if c.Recent <= 0 || c.WindowSeconds <= 0 {
+		return 0, false
+	}
+	return float64(c.Recent) / c.WindowSeconds, true
+}
+
+// rateThreshold resolves the births/sec floor, defaulting to DefaultChurnBurstRate.
+func (c ChurnCheck) rateThreshold() float64 {
+	if c.RateThreshold <= 0 {
+		return DefaultChurnBurstRate
+	}
+	return c.RateThreshold
 }
 
 // threshold resolves the burst floor, defaulting a zero/negative Threshold to the built-in
@@ -94,8 +138,12 @@ func (c ChurnCheck) floor() int {
 }
 
 // pressured reports whether the measured host burst clears the arming threshold. Pure: state
-// in, decision out; a sub-threshold count abstains (no-op).
+// in, decision out; a sub-threshold burst abstains (no-op). Compares a RATE when the caller
+// carried its window, and a bare count otherwise — never the two against each other.
 func (c ChurnCheck) pressured() bool {
+	if r, ok := c.rate(); ok {
+		return r >= c.rateThreshold()
+	}
 	return c.Recent >= c.threshold()
 }
 
@@ -154,6 +202,13 @@ func ApplyChurnBackpressure(res PreflightResult, c ChurnCheck) PreflightResult {
 // measured burst (processes born in one interval) so a reader -- and `dos check-reason` -- can
 // bind both the refusal class and its evidence.
 func hostChurnBackoffReason(c ChurnCheck, live int) string {
-	return fmt.Sprintf("%s: %d process(es) spawned on this host within one sample interval (>= %d) -- a whole-host spawn storm, typically several dispatchers co-launching waves at once; holding the fleet at %d live worker(s). Admit no new concurrent load onto a saturated scheduler until the burst subsides. This is a CROSS-dispatcher gate the per-loop cadence floor cannot see (each loop passes its own floor yet they still co-arrive).",
+	const tail = " -- a whole-host spawn storm, typically several dispatchers co-launching waves at once; holding the fleet at %d live worker(s). Admit no new concurrent load onto a saturated scheduler until the burst subsides. This is a CROSS-dispatcher gate the per-loop cadence floor cannot see (each loop passes its own floor yet they still co-arrive)."
+	if r, ok := c.rate(); ok {
+		// Cite the rate AND the raw count/window it came from, so a reader can audit the
+		// conversion instead of taking the derived number on trust.
+		return fmt.Sprintf("%s: %.0f process(es)/sec spawned on this host (%d in %.2fs, >= %.0f/sec)"+tail,
+			HostChurnBackoff, r, c.Recent, c.WindowSeconds, c.rateThreshold(), live)
+	}
+	return fmt.Sprintf("%s: %d process(es) spawned on this host within one sample interval (>= %d)"+tail,
 		HostChurnBackoff, c.Recent, c.threshold(), live)
 }

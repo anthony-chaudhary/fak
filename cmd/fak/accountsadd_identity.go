@@ -144,10 +144,23 @@ func writeClaudeJSONIdentity(dir string, id accounts.ProbedIdentity) error {
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &doc) // best-effort: a corrupt file is replaced wholesale
 	}
-	doc["oauthAccount"] = map[string]any{
+	doc["oauthAccount"] = claudeOAuthAccountBlock(id)
+	return writeClaudeJSONDoc(path, doc)
+}
+
+// claudeOAuthAccountBlock renders the .claude.json "oauthAccount" object for a probed
+// identity. Both writers in this file emit the same two keys, so the roster reads the same
+// shape whether a seat was seeded fresh or reconciled in place.
+func claudeOAuthAccountBlock(id accounts.ProbedIdentity) map[string]any {
+	return map[string]any{
 		"emailAddress": id.Email,
 		"accountUuid":  id.AccountUUID,
 	}
+}
+
+// writeClaudeJSONDoc writes doc to path in claude's own 2-space-indented layout with a
+// trailing newline -- the exact byte form both writers here have always produced.
+func writeClaudeJSONDoc(path string, doc map[string]any) error {
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
@@ -166,15 +179,5 @@ func seedClaudeJSON(dir string, id accounts.ProbedIdentity) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil // never clobber claude's own file
 	}
-	doc := map[string]any{
-		"oauthAccount": map[string]any{
-			"emailAddress": id.Email,
-			"accountUuid":  id.AccountUUID,
-		},
-	}
-	b, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return writeClaudeJSONDoc(path, map[string]any{"oauthAccount": claudeOAuthAccountBlock(id)})
 }

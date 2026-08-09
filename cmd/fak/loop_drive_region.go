@@ -60,9 +60,102 @@ type loopDriveRegionHold struct {
 	ttl    int64
 	held   bool
 
+	// stderr is the operator stream this hold announces its NONFATAL
+	// degradations on — the same stream the region REFUSAL path already takes
+	// explicitly (refuseLoopDriveRegion) and the same one the caller's
+	// fail-open warning uses. nil means the surface has no operator stream:
+	// superloopDriveRegionAdmit returns its verdict as a structured record
+	// instead, so the hold there stays silent rather than writing to a stream
+	// nobody plumbed.
+	stderr io.Writer
+
+	// leaseRefSyncDegraded is the lease-ref sync state this hold has already
+	// ANNOUNCED — the prior an emission edge is judged against, kept per hold
+	// rather than per process because it describes THIS drive's tick stream.
+	// See noteLeaseRefSync.
+	leaseRefSyncDegraded bool
+
 	// afterAcquire is a test seam for injecting a registration into the
 	// check-then-write window. Production holds leave it nil.
 	afterAcquire func()
+}
+
+// announceOn attaches the operator stream the hold writes its nonfatal
+// degradations to (see noteLeaseRefSync). Nil-safe and chainable, so a caller
+// whose drive declares no region — newLoopDriveRegionHold returns nil there —
+// keeps one construction line and gets a hold that announces nothing.
+func (h *loopDriveRegionHold) announceOn(w io.Writer) *loopDriveRegionHold {
+	if h == nil {
+		return nil
+	}
+	h.stderr = w
+	return h
+}
+
+// noteLeaseRefSync surfaces the ambient lease-ref sync report a tick boundary
+// just produced. It is EDGE-TRIGGERED: one line when the boundary goes clean ->
+// degraded, one line when it comes back, and nothing at all in between.
+//
+// WHY AN EDGE AND NOT EVERY CROSSING. This runs in a loop: ensure is called once
+// per turn and crosses the sync boundary up to twice inside a single call
+// (fetch-before-decide, push-after-write). A wedged remote degrades EVERY
+// crossing, so a per-crossing print would put two lines a turn on the operator's
+// terminal forever — on precisely the box this signal exists for. An invisible
+// signal traded for an unreadable one is not a fix.
+//
+// THE PRECEDENT IS internal/assumecheck.Tick, this repo's existing answer to the
+// same shape (a loop re-witnessing a standing condition every tick): it emits on
+// the HOLDS -> VIOLATED edge only — "a still-violated premise does not re-emit
+// every tick (the edge already fired)" — and it seeds an unknown prior as the
+// HEALTHY value so a first violation still speaks up, "conservative in the
+// direction of speaking up, never of suppressing". Both halves are kept: the
+// zero value of leaseRefSyncDegraded is the healthy prior, so the first degraded
+// crossing of a drive always prints.
+//
+// WHERE IT DIVERGES, AND WHY. assumecheck writes a ledger ROW every tick, calm
+// ones included, so an operator reads recovery out of the rows and its recovery
+// edge stays row-only. This boundary has no per-crossing row anywhere — the loop
+// ledger records TURN outcomes, and the region hold only appends to it on a
+// refusal — so silence after a degradation would be indistinguishable from
+// "still wedged". The recovery edge therefore prints one line too, bounded by
+// the same rule: at most one line per transition.
+//
+// WHY THE OUTCOME IS THE WHOLE KEY. A degraded report's TEXT changes while the
+// condition does not: #5569's breaker skip carries a remaining-crossings count
+// that decrements on every crossing, so keying the edge on the message would
+// re-print the exact run this exists to quiet. The first line names the real
+// cause; the breaker skips that follow are its consequence.
+//
+// WHY STDERR AND NOT THE LEDGER. The hold's other nonfatal outcomes already go
+// there (this file's header: infra errors fail OPEN with a stderr warning), and
+// a sync degradation is that same class of fact. The loop ledger was the
+// alternative and does not fit: this hold is also constructed by
+// superloopDriveRegionAdmit, which passes no LedgerPath at all, so a ledger-only
+// surfacing would be silently dead on that surface — and giving a nonfatal
+// advisory its own loop-event kind is a vocabulary decision beyond this wire.
+func (h *loopDriveRegionHold) noteLeaseRefSync(report loopdrive.LeaseRefSyncReport) {
+	if h == nil {
+		return
+	}
+	degraded := report.Outcome == loopdrive.LeaseRefSyncDegraded
+	if degraded == h.leaseRefSyncDegraded {
+		return
+	}
+	// Record the edge even with no stream attached, so the state machine a
+	// stream would observe is the same one either way.
+	h.leaseRefSyncDegraded = degraded
+	if h.stderr == nil {
+		return
+	}
+	if !degraded {
+		fmt.Fprintf(h.stderr, "fak loop drive: lease-ref sync recovered for region lease %s: %s\n", h.id, report.Summary)
+		return
+	}
+	detail := strings.TrimSpace(report.Summary)
+	if len(report.Failures) != 0 {
+		detail = strings.TrimSpace(detail + "; " + strings.Join(report.Failures, "; "))
+	}
+	fmt.Fprintf(h.stderr, "fak loop drive: lease-ref sync degraded (%s, nonfatal) for region lease %s: %s\n", report.Reason, h.id, detail)
 }
 
 // newLoopDriveRegionHold resolves the drive's region config: flag overrides
@@ -133,8 +226,10 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		switch {
 		case verdict.OK:
 			// #2302: a renewed lease ref is a write — publish it promptly so a
-			// peer node's next decide sees this hold. Nonfatal (see helper doc).
-			syncLoopDriveTickLeaseRefs(h.store, true)
+			// peer node's next decide sees this hold. Nonfatal (see helper doc),
+			// but never invisible: #5571 folds the report onto the edge-triggered
+			// announcement below.
+			h.noteLeaseRefSync(syncLoopDriveTickLeaseRefs(h.store, true))
 			return nil, nil
 		case string(verdict.Reason) == leaseref.ReasonNoLease:
 			h.held = false // lapsed, untaken: fall through to reacquire
@@ -148,18 +243,15 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 	}
 	// #2302: converge peer lease refs BEFORE the decide read so admission sees
 	// other nodes' holds. Fetch-only, nonfatal — a node offline from origin
-	// decides on local evidence, exactly as it did before this wire.
-	syncLoopDriveTickLeaseRefs(h.store, false)
+	// decides on local evidence, exactly as it did before this wire — while
+	// SAYING SO once (#5571), since a node deciding on local evidence alone is
+	// the isolation this boundary exists to make visible.
+	h.noteLeaseRefSync(syncLoopDriveTickLeaseRefs(h.store, false))
 	live, _, err := h.store.Live(ctx, now)
 	if err != nil {
 		return nil, fmt.Errorf("read live leases: %w", err)
 	}
-	dec := regionadmit.Decide(regionadmit.Request{
-		Actor:  h.holder,
-		Lane:   h.lane,
-		Tree:   h.tree,
-		SelfID: h.id,
-	}, regionLeases(live), h.tax)
+	dec := h.decide(live)
 	if !dec.Admit {
 		return &loopDriveRegionRefusal{Reason: dec.Reason, Detail: dec.Detail}, nil
 	}
@@ -193,12 +285,7 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		h.release()
 		return nil, fmt.Errorf("reverify region lease %s: %w", h.id, err)
 	}
-	dec = regionadmit.Decide(regionadmit.Request{
-		Actor:  h.holder,
-		Lane:   h.lane,
-		Tree:   h.tree,
-		SelfID: h.id,
-	}, regionLeases(live), h.tax)
+	dec = h.decide(live)
 	if !dec.Admit {
 		h.release()
 		return &loopDriveRegionRefusal{
@@ -209,8 +296,23 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 
 	// #2302: publish only a reverified lease, so peers never observe a hold we
 	// already know must be rolled back.
-	syncLoopDriveTickLeaseRefs(h.store, true)
+	h.noteLeaseRefSync(syncLoopDriveTickLeaseRefs(h.store, true))
 	return nil, nil
+}
+
+// decide asks the region-admission kernel whether THIS hold may take its region against a
+// live lease set. The pre-acquire admission and the post-acquire reverify ask the very same
+// question — same actor, lane and tree, and the hold's own id as SelfID so it is never
+// treated as conflicting with itself — differing only in WHEN the lease set was read. Asking
+// it in one place is what makes the reverify a true re-run of the admission it confirms,
+// rather than a second, independently drifting judgement.
+func (h *loopDriveRegionHold) decide(live []leaseref.Record) regionadmit.Decision {
+	return regionadmit.Decide(regionadmit.Request{
+		Actor:  h.holder,
+		Lane:   h.lane,
+		Tree:   h.tree,
+		SelfID: h.id,
+	}, regionLeases(live), h.tax)
 }
 
 // renewOnce renews the held lease, retrying a single LEASE_CONTENDED (a lost

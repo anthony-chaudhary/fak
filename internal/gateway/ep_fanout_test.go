@@ -10,20 +10,48 @@ import (
 	"time"
 )
 
+// TestEPFanoutURLsFromEnv covers address parsing — scheme defaulting, delimiter
+// variety, trailing-slash trimming — and, per route, that every follower URL carries
+// the route the FRONT rank is serving. The legacy row is #5523: the suffix used to be
+// hardcoded to the chat wire, so a legacy front rank would have asked its followers
+// for a route with a different request schema.
 func TestEPFanoutURLsFromEnv(t *testing.T) {
 	t.Setenv("FAK_EP_FANOUT_ADDRS", "127.0.0.1:8001, http://127.0.0.1:8002/ ;https://rank3.example")
-	got := epFanoutURLsFromEnv()
-	want := []string{
-		"http://127.0.0.1:8001/v1/chat/completions",
-		"http://127.0.0.1:8002/v1/chat/completions",
-		"https://rank3.example/v1/chat/completions",
+	for _, tc := range []struct {
+		route string
+		want  []string
+	}{
+		{epRouteChatCompletions, []string{
+			"http://127.0.0.1:8001/v1/chat/completions",
+			"http://127.0.0.1:8002/v1/chat/completions",
+			"https://rank3.example/v1/chat/completions",
+		}},
+		{epRouteCompletions, []string{
+			"http://127.0.0.1:8001/v1/completions",
+			"http://127.0.0.1:8002/v1/completions",
+			"https://rank3.example/v1/completions",
+		}},
+	} {
+		got := epFanoutURLsFromEnv(tc.route)
+		if len(got) != len(tc.want) {
+			t.Fatalf("route %s: urls len = %d, want %d: %v", tc.route, len(got), len(tc.want), got)
+		}
+		for i := range tc.want {
+			if got[i] != tc.want[i] {
+				t.Fatalf("route %s: urls[%d] = %q, want %q (all=%v)", tc.route, i, got[i], tc.want[i], got)
+			}
+		}
 	}
-	if len(got) != len(want) {
-		t.Fatalf("urls len = %d, want %d: %v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("urls[%d] = %q, want %q (all=%v)", i, got[i], want[i], got)
+}
+
+// TestEPFanoutURLsFromEnvIsInertUnconfigured pins what makes this bug survivable on a
+// single-rank serve — and what makes any fanout assertion vacuous unless the test
+// configures a follower: with no addresses there are no follower URLs on any route.
+func TestEPFanoutURLsFromEnvIsInertUnconfigured(t *testing.T) {
+	t.Setenv("FAK_EP_FANOUT_ADDRS", "")
+	for _, route := range []string{epRouteChatCompletions, epRouteCompletions} {
+		if got := epFanoutURLsFromEnv(route); len(got) != 0 {
+			t.Fatalf("route %s: unconfigured bridge yielded %v, want no follower URLs", route, got)
 		}
 	}
 }
@@ -46,7 +74,7 @@ func TestStartEPFanoutFollowersMirrorsBodyAndMarksFollower(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	rr := httptest.NewRecorder()
 	srv := &Server{logf: t.Logf}
-	wait, ok := srv.startEPFanoutFollowers(rr, req)
+	wait, ok := srv.startEPFanoutFollowers(rr, req, epRouteChatCompletions)
 	if !ok {
 		t.Fatalf("startEPFanoutFollowers refused: %d %s", rr.Code, rr.Body.String())
 	}
@@ -88,7 +116,7 @@ func TestStartEPFanoutFollowersMirrorsStreamingRequest(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	rr := httptest.NewRecorder()
 	srv := &Server{logf: t.Logf}
-	wait, ok := srv.startEPFanoutFollowers(rr, req)
+	wait, ok := srv.startEPFanoutFollowers(rr, req, epRouteChatCompletions)
 	if !ok {
 		t.Fatalf("startEPFanoutFollowers refused streaming request: %d %s", rr.Code, rr.Body.String())
 	}
@@ -123,7 +151,7 @@ func TestStartEPFanoutFollowersSkipsFollowerRequests(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[]}`))
 	req.Header.Set(epFollowerHeader, "1")
-	wait, ok := (&Server{}).startEPFanoutFollowers(httptest.NewRecorder(), req)
+	wait, ok := (&Server{}).startEPFanoutFollowers(httptest.NewRecorder(), req, epRouteChatCompletions)
 	if !ok {
 		t.Fatal("follower request should bypass fanout, not refuse")
 	}
@@ -151,7 +179,7 @@ func TestEPFanoutClientInheritsRequestCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"slow"}]}`)).WithContext(ctx)
-	wait, ok := (&Server{logf: t.Logf}).startEPFanoutFollowers(httptest.NewRecorder(), req)
+	wait, ok := (&Server{logf: t.Logf}).startEPFanoutFollowers(httptest.NewRecorder(), req, epRouteChatCompletions)
 	if !ok {
 		t.Fatal("fanout refused")
 	}

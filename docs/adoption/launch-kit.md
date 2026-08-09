@@ -221,7 +221,7 @@ grep -n "^title:" docs/adoption/launch-kit.md
 grep -n "launch-post-draft-kit\|launch-kit" INDEX.md
 
 # the SEO/AEO scorecard does not regress for this new doc
-python tools/seo_aeo_scorecard.py
+fak score seo
 
 # the 60-second proof the post promises actually fires
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)

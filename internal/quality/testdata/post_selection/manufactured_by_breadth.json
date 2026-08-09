@@ -1,0 +1,149 @@
+{
+  "name": "manufactured-by-breadth",
+  "note": "The adversarial fixture: an eight-arm variant sweep whose retained arm reports raw p = 0.012, which clears alpha = 0.05 and reads as a certified improvement. Priced over the complete family it is bonferroni 0.096 — above alpha. Nothing here is malformed and every arm is admissible, so the contract cannot refuse its way out; it has to price the sweep and return certified=false with manufactured_by_breadth=true. This is what proves the contract cannot pass vacuously: an honest-looking sweep whose only achievement was searching widely does NOT certify.",
+  "certification": {
+    "alpha": 0.05,
+    "rule": "min-p",
+    "adjustment": "bonferroni",
+    "declared_arms": 8,
+    "winner": "sampler-variant-c"
+  },
+  "family": [
+    {
+      "id": "sampler-variant-a",
+      "point": "sampler=topk-40",
+      "p_value": 0.09,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-b",
+      "point": "sampler=topk-50",
+      "p_value": 0.14,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-c",
+      "point": "sampler=topp-0.92",
+      "p_value": 0.012,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-d",
+      "point": "sampler=topp-0.95",
+      "p_value": 0.23,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-e",
+      "point": "sampler=minp-0.02",
+      "p_value": 0.35,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-f",
+      "point": "sampler=minp-0.05",
+      "p_value": 0.48,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-g",
+      "point": "sampler=typical-0.9",
+      "p_value": 0.61,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "sampler-variant-h",
+      "point": "sampler=greedy",
+      "p_value": 0.77,
+      "evidence": {
+        "case_id": "sampler-distribution/short-prompt",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    }
+  ]
+}

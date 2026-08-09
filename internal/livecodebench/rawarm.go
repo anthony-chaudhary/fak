@@ -41,6 +41,8 @@ type RawSampleUsage struct {
 	PromptTokens       int
 	CompletionTokens   int
 	CachedPromptTokens int
+	FinishReason       string
+	ReasoningOnly      bool
 }
 
 // RawArmSampler produces ONE completion for problem p at sample index i. The real
@@ -52,26 +54,29 @@ type RawArmSampler func(ctx context.Context, p Problem, i int) (content string, 
 // (model / endpoint / n / temperature) plus per-problem completions and the folded
 // provider-cache-aware token usage.
 type RawArmReport struct {
-	Arm         string          `json:"arm"` // always "raw"
-	Model       string          `json:"model"`
-	Endpoint    string          `json:"endpoint"`
-	N           int             `json:"n"`
-	Temperature float64         `json:"temperature"`
-	Seed        int64           `json:"seed,omitempty"` // 0 = provider default, omitted
-	Concurrency int             `json:"concurrency"`
-	MaxRetries  int             `json:"max_retries"`       // per-sample retry budget the run honored (#2106)
-	Release     string          `json:"release,omitempty"` // dataset release the suite pinned (stamped by RunRawArmCached)
-	Problems    []RawArmProblem `json:"problems"`
-	Usage       RawArmUsage     `json:"usage"`
+	Arm                string          `json:"arm"` // always "raw"
+	Model              string          `json:"model"`
+	Endpoint           string          `json:"endpoint"`
+	N                  int             `json:"n"`
+	Temperature        float64         `json:"temperature"`
+	Seed               int64           `json:"seed,omitempty"` // 0 = provider default, omitted
+	Concurrency        int             `json:"concurrency"`
+	MaxRetries         int             `json:"max_retries"`       // per-sample retry budget the run honored (#2106)
+	Release            string          `json:"release,omitempty"` // dataset release the suite pinned (stamped by RunRawArmCached)
+	Problems           []RawArmProblem `json:"problems"`
+	Usage              RawArmUsage     `json:"usage"`
+	ResultClaimAllowed bool            `json:"result_claim_allowed"`
 }
 
 // RawArmProblem holds the n completions collected for one problem, in sample order.
 // PromptSHA256 is the hash of the exact rendered prompt this arm sent, so a
 // cross-arm comparison can assert SamePromptHash from the artifacts alone (#2105).
 type RawArmProblem struct {
-	QuestionID   string   `json:"question_id"`
-	PromptSHA256 string   `json:"prompt_sha256,omitempty"`
-	Completions  []string `json:"completions"`
+	QuestionID    string   `json:"question_id"`
+	PromptSHA256  string   `json:"prompt_sha256,omitempty"`
+	Completions   []string `json:"completions"`
+	FinishReasons []string `json:"finish_reasons,omitempty"`
+	ReasoningOnly []bool   `json:"reasoning_only,omitempty"`
 }
 
 // promptSHA256 is the per-problem prompt identity both arms stamp on their
@@ -90,6 +95,8 @@ type RawArmUsage struct {
 	CompletionTokens   int `json:"completion_tokens"`
 	CachedPromptTokens int `json:"cached_prompt_tokens"`
 	Retries            int `json:"retries"` // failed sample attempts that were retried (#2106) — counted, never silently dropped
+	Truncated          int `json:"truncated"`
+	ReasoningOnly      int `json:"reasoning_only"`
 }
 
 // RunRawArm fans the sampler out over every (problem, sample) pair with at most
@@ -117,15 +124,16 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 	}
 
 	report := RawArmReport{
-		Arm:         "raw",
-		Model:       cfg.Model,
-		Endpoint:    cfg.Endpoint,
-		N:           cfg.N,
-		Temperature: cfg.Temperature,
-		Seed:        cfg.Seed,
-		Concurrency: conc,
-		MaxRetries:  maxRetries,
-		Problems:    make([]RawArmProblem, len(problems)),
+		Arm:                "raw",
+		Model:              cfg.Model,
+		Endpoint:           cfg.Endpoint,
+		N:                  cfg.N,
+		Temperature:        cfg.Temperature,
+		Seed:               cfg.Seed,
+		Concurrency:        conc,
+		MaxRetries:         maxRetries,
+		Problems:           make([]RawArmProblem, len(problems)),
+		ResultClaimAllowed: true,
 	}
 
 	type slot struct {
@@ -197,15 +205,26 @@ func RunRawArm(ctx context.Context, cfg RawArmConfig, problems []Problem, sample
 
 	for pi := range problems {
 		comps := make([]string, cfg.N)
+		finishReasons := make([]string, cfg.N)
+		reasoningOnly := make([]bool, cfg.N)
 		for si := 0; si < cfg.N; si++ {
 			comps[si] = slots[pi][si].content
+			finishReasons[si] = slots[pi][si].usage.FinishReason
+			reasoningOnly[si] = slots[pi][si].usage.ReasoningOnly
 			u := slots[pi][si].usage
 			report.Usage.Samples++
 			report.Usage.PromptTokens += u.PromptTokens
 			report.Usage.CompletionTokens += u.CompletionTokens
 			report.Usage.CachedPromptTokens += u.CachedPromptTokens
+			if u.FinishReason == "length" {
+				report.Usage.Truncated++
+				report.ResultClaimAllowed = false
+			}
+			if u.ReasoningOnly {
+				report.Usage.ReasoningOnly++
+			}
 		}
-		report.Problems[pi] = RawArmProblem{QuestionID: problems[pi].QuestionID, PromptSHA256: promptSHA256(problems[pi].Prompt), Completions: comps}
+		report.Problems[pi] = RawArmProblem{QuestionID: problems[pi].QuestionID, PromptSHA256: promptSHA256(problems[pi].Prompt), Completions: comps, FinishReasons: finishReasons, ReasoningOnly: reasoningOnly}
 	}
 
 	return report, nil

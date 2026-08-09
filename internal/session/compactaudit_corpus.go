@@ -32,14 +32,26 @@ type CompactAuditOptions struct {
 	// Limit caps the number of rollouts scanned (0 = unbounded), so an operator can
 	// smoke the sweep on a big corpus.
 	Limit int
+	// GuardedOnly keeps only sessions present in the `fak guard` witness ledger — the
+	// fak-routed cohort. Without it a sweep over ~/.codex/sessions measures every Codex
+	// session on the box, most of which never crossed fak's wire, which makes any
+	// gateway-side before/after unfalsifiable (#5254). See compactaudit_provenance.go.
+	GuardedOnly bool
+	// GuardWitnessDir is the ledger directory GuardedOnly reads (the caller resolves the
+	// Codex home; this package does not guess it).
+	GuardWitnessDir string
 }
 
 // CompactAuditResult is a whole sweep: the per-session reports plus the roll-up.
 type CompactAuditResult struct {
-	Root      string                 `json:"root,omitempty"`
-	Generated string                 `json:"generated,omitempty"`
-	Aggregate CompactAggregate       `json:"aggregate"`
-	Sessions  []CompactSessionReport `json:"sessions,omitempty"`
+	Root      string `json:"root,omitempty"`
+	Generated string `json:"generated,omitempty"`
+	// Provenance says which corpus subset this sweep measured (#5254). It survives
+	// --scrub: it carries no paths, and without it a guarded-only aggregate is
+	// indistinguishable from a whole-corpus one.
+	Provenance CompactProvenance      `json:"provenance"`
+	Aggregate  CompactAggregate       `json:"aggregate"`
+	Sessions   []CompactSessionReport `json:"sessions,omitempty"`
 }
 
 // AuditCompactCorpus streams every rollout under opts.Root and reports compaction
@@ -47,6 +59,20 @@ type CompactAuditResult struct {
 // size drives wall time, not memory.
 func AuditCompactCorpus(opts CompactAuditOptions) (CompactAuditResult, error) {
 	res := CompactAuditResult{Root: opts.Root}
+	res.Provenance.GuardedOnly = opts.GuardedOnly
+
+	// Resolve the ledger BEFORE the walk: a guarded-only sweep with no ledger must fail
+	// loudly, not scan the corpus and report an empty cohort as a clean result.
+	var guarded map[string]struct{}
+	if opts.GuardedOnly {
+		ids, err := LoadGuardWitnessIDs(opts.GuardWitnessDir)
+		if err != nil {
+			return res, err
+		}
+		guarded = ids
+		res.Provenance.LedgerSessions = len(ids)
+	}
+
 	var paths []string
 	err := filepath.WalkDir(opts.Root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -84,6 +110,15 @@ func AuditCompactCorpus(opts CompactAuditOptions) (CompactAuditResult, error) {
 		}
 		if opts.Cwd != "" && !strings.Contains(rep.Cwd, opts.Cwd) {
 			continue
+		}
+		if guarded != nil {
+			// A rollout whose session_meta id never landed in the ledger is traffic fak
+			// did not route, so no gateway-side transform could have touched its bytes.
+			if _, ok := guarded[rep.SessionID]; !ok {
+				res.Provenance.Unguarded++
+				continue
+			}
+			res.Provenance.Guarded++
 		}
 		res.Sessions = append(res.Sessions, rep)
 	}

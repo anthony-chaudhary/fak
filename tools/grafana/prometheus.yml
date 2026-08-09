@@ -58,3 +58,27 @@ scrape_configs:
       - targets: ["host.docker.internal:9097"]
         labels:
           service: fak-cachevalue
+
+  - job_name: fak_fleet
+    # `fak fleet metrics --serve` re-folds the durable session registry + the
+    # gateway-usage ledger on each scrape and exposes the FLEET-FIRST families at
+    # :9098/metrics: the LIVE per-session inventory (fak_fleet_session_*, "which
+    # sessions are alive right now") and the HISTORICAL roll-ups (fak_fleet_usage_*).
+    # This is the only job carrying a per-`session` label, so it is what makes the
+    # fleet dashboards drill down. Start it with:
+    #   ./fak fleet metrics --serve --addr 127.0.0.1:9098
+    # Feeds "FAK Fleet — Live Sessions & Roll-up" (uid fak-fleet-overview) and
+    # "FAK Fleet — Session Drill-down" (uid fak-fleet-session).
+    #
+    # 30s (the global default) is deliberate here where the cache-value job takes 5m:
+    # the live tier answers "is this session alive", and a 5m scrape would make a
+    # session that started and died between scrapes invisible.
+    #
+    # If you run the exporter with --fleet (folding peer nodes' C2 session refs), each
+    # scrape runs a BOUNDED git fetch — raise scrape_interval and scrape_timeout to
+    # match, or run a second exporter on another port for the peer view.
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9098"]
+        labels:
+          service: fak-fleet

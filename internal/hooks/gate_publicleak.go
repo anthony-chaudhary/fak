@@ -68,11 +68,15 @@ const privateNeedlesRel = "tools/_registry/scrub_needles.private.json"
 func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 	needles := effectiveAuditNeedles(d)
 	var findings []Finding
+	// scanned is this gate's candidate denominator (#5602): the staged files it actually read,
+	// counted here rather than re-derived, so the number can never disagree with the set judged.
+	scanned := 0
 	for _, f := range d.sortedFiles() {
 		norm := strings.ReplaceAll(f, "\\", "/")
 		if selfReferentialLeak[norm] {
 			continue
 		}
+		scanned++
 		findings = append(findings, publicLeakLineFindings(norm, 0, norm, needles)...)
 		pinned := isPinnedUpstreamArtifact(d, norm)
 		for _, al := range d.AddedByFile[f] {
@@ -98,6 +102,7 @@ func gatePublicLeak(d *StagedDiff) ([]Finding, error) {
 			}
 		}
 	}
+	d.NoteCandidates("PUBLIC_LEAK", scanned, "staged file(s) scanned")
 	return findings, nil
 }
 

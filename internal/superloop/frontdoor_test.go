@@ -1,6 +1,9 @@
 package superloop
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestFrontDoorForClassifiesEachKind pins the four-way classification the drive's
 // execution rung branches on: a container descends, a "/skill" is agent-only, an empty
@@ -25,12 +28,12 @@ func TestFrontDoorForClassifiesEachKind(t *testing.T) {
 		{
 			name: "runnable shell command",
 			dec:  DriveDecision{Member: Member{Kind: KindLoop, Ref: "throughput", Enter: "go run ./cmd/fak dispatch auto --goal throughput"}},
-			want: FrontRunnable, wantCmd: "go run ./cmd/fak dispatch auto --goal throughput",
+			want: FrontRunnable, wantCmd: "go run ./cmd/fak git-daily --root . && go run ./cmd/fak dispatch auto --goal throughput",
 		},
 		{
 			name: "compound command line is still runnable (a shell runs it)",
 			dec:  DriveDecision{Member: Member{Kind: KindUtilization, Ref: "account-limits", Enter: "go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput"}},
-			want: FrontRunnable, wantCmd: "go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput",
+			want: FrontRunnable, wantCmd: "go run ./cmd/fak git-daily --root . && go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput",
 		},
 		{
 			name: "python scorecard is runnable",
@@ -47,7 +50,7 @@ func TestFrontDoorForClassifiesEachKind(t *testing.T) {
 			// status per ledgered loop) classifies like any leaf — a concrete Enter runs.
 			name: "loop-fleet enumerated member with a command is runnable",
 			dec:  DriveDecision{Member: Member{Kind: KindLoopFleet, Ref: "dispatch", Enter: "go run ./cmd/fak dispatch auto --goal throughput"}},
-			want: FrontRunnable, wantCmd: "go run ./cmd/fak dispatch auto --goal throughput",
+			want: FrontRunnable, wantCmd: "go run ./cmd/fak git-daily --root . && go run ./cmd/fak dispatch auto --goal throughput",
 		},
 		{
 			name: "loop-fleet enumerated member without a command is surfaced, not run",
@@ -76,6 +79,76 @@ func TestFrontDoorForClassifiesEachKind(t *testing.T) {
 				t.Error("every classification must carry a one-line note")
 			}
 		})
+	}
+}
+
+// TestFrontDoorAutomaticallyRunsGitDailyBeforeDispatch is the captured loop-turn
+// witness for #5590: every runnable super-loop front door that reaches dispatch first
+// invokes the once-per-day Git hygiene verb, without requiring an operator prompt.
+// A front door already carrying the hook stays single-fired.
+func TestFrontDoorAutomaticallyRunsGitDailyBeforeDispatch(t *testing.T) {
+	const daily = "go run ./cmd/fak git-daily --root ."
+	cases := []struct {
+		name  string
+		enter string
+		want  string
+	}{
+		{
+			name:  "direct dispatch",
+			enter: "go run ./cmd/fak dispatch auto --goal high-priority",
+			want:  daily + " && go run ./cmd/fak dispatch auto --goal high-priority",
+		},
+		{
+			name:  "dispatch after account rotation",
+			enter: "go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput",
+			want:  daily + " && go run ./cmd/fak accounts next && go run ./cmd/fak dispatch auto --goal throughput",
+		},
+		{
+			name:  "already hooked does not double fire",
+			enter: daily + " && go run ./cmd/fak dispatch auto --goal throughput",
+			want:  daily + " && go run ./cmd/fak dispatch auto --goal throughput",
+		},
+		{
+			name:  "non-dispatch command remains unchanged",
+			enter: "go run ./cmd/fak accounts next",
+			want:  "go run ./cmd/fak accounts next",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FrontDoorFor(DriveDecision{Member: Member{
+				Kind:  KindLoop,
+				Ref:   "captured-loop-turn",
+				Enter: tc.enter,
+			}})
+			if got.Command != tc.want {
+				t.Fatalf("captured front-door command = %q, want %q", got.Command, tc.want)
+			}
+			if strings.Contains(tc.want, daily) && strings.Count(got.Command, daily) != 1 {
+				t.Fatalf("git-daily invocation count = %d, want 1 in %q", strings.Count(got.Command, daily), got.Command)
+			}
+		})
+	}
+
+	dispatchMembers := 0
+	for _, loop := range Registry() {
+		for _, member := range loop.Members {
+			if !strings.Contains(member.Enter, "go run ./cmd/fak dispatch auto") {
+				continue
+			}
+			dispatchMembers++
+			got := FrontDoorFor(DriveDecision{Member: member})
+			if !strings.HasPrefix(got.Command, daily+" && ") {
+				t.Errorf("%s/%s captured command = %q; git-daily must run first", loop.Name, member.Ref, got.Command)
+			}
+			if strings.Count(got.Command, daily) != 1 {
+				t.Errorf("%s/%s git-daily invocation count = %d, want 1", loop.Name, member.Ref, strings.Count(got.Command, daily))
+			}
+		}
+	}
+	if dispatchMembers == 0 {
+		t.Fatal("registry contains no dispatch front doors; loop-turn witness is vacuous")
 	}
 }
 

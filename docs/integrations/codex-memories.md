@@ -17,7 +17,7 @@ independent `use-only` and `generate` controls.
 | `AGENTS.md` | Checked-in contributor contract | Authoritative repository guidance |
 | Codex Memories | Experimental cross-session suggestions | Untrusted context; never closure/test evidence |
 | fak recall/core images | Kernel-managed resumable context | Revalidate against current repo state |
-| `fak memq` | Query/inspection boundary | Read-back aid, not proof by itself |
+| `fak memory` (the `memq` query algebra) | Query/inspection boundary | Read-back aid, not proof by itself |
 | Skills | Checked-in reusable workflow | Reviewed and versioned |
 | MCP/tools | Effectful capabilities | Governed by fak policy and independent witnesses |
 | Chronicle | Historical observation | Provenance-bearing context, not current truth |

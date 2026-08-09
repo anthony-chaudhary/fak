@@ -5,6 +5,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,10 +49,39 @@ func sampleAcceptanceManifest(t *testing.T) acceptanceManifest {
 	return m
 }
 
+// TestAcceptancePinsWitnessedCampaignArtifact guards the pin against the failure that
+// silently disabled acceptance mode: it drifted onto the checkpoint internal/modelreg
+// blocks as stale (HTTP 404), so every parity run refused on identity before comparing a
+// logit. Asserting literals here could not catch that — the literals were the bug. So
+// assert against the launcher that actually serves the checkpoint; if either side moves
+// without the other, this fails.
 func TestAcceptancePinsWitnessedCampaignArtifact(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "tools", "qwen36_a100_fak_serve.sh"))
+	if err != nil {
+		t.Fatalf("read launcher: %v", err)
+	}
+	field := func(key string) string {
+		m := regexp.MustCompile(`(?m)^` + key + `="([^"]*)"`).FindSubmatch(raw)
+		if m == nil {
+			t.Fatalf("launcher does not declare %s", key)
+		}
+		return string(m[1])
+	}
+	wantSize, err := strconv.ParseInt(field("EXPECTED_SIZE"), 10, 64)
+	if err != nil {
+		t.Fatalf("launcher EXPECTED_SIZE: %v", err)
+	}
+	wantSHA := field("EXPECTED_SHA256")
+
 	got := expectedAcceptanceModel()
-	if got.SizeBytes != 16547398784 || got.SHA256 != "sha256:33625d8dc3a5dd8d88c324d47db58561b11f7072816287078bfe58b4c55782f9" {
-		t.Fatalf("campaign identity drift: bytes=%d sha=%s", got.SizeBytes, got.SHA256)
+	if got.SizeBytes != wantSize || got.SHA256 != "sha256:"+wantSHA {
+		t.Fatalf("acceptance pin drifted from tools/qwen36_a100_fak_serve.sh:\n"+
+			" acceptance: bytes=%d sha=%s\n launcher:   bytes=%d sha=sha256:%s",
+			got.SizeBytes, got.SHA256, wantSize, wantSHA)
+	}
+	// The known-dead source internal/modelreg fails closed on must never reappear here.
+	if got.SizeBytes == 16547398784 {
+		t.Fatal("acceptance pinned to the source modelreg blocks as stale (HTTP 404)")
 	}
 }
 func TestAcceptanceManifestDeterministicRoundTrip(t *testing.T) {

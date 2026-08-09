@@ -527,9 +527,23 @@ type HTTPPlanner struct {
 	// caller/session sampling overrides. Zero leaves the request unchanged. This is for
 	// OpenAI-compatible providers that reject Claude Code's large default max_tokens even
 	// when the account has no token-rate quota.
-	MaxTokensCap         int
-	Client               *http.Client
-	QuarantineTranscript bool
+	MaxTokensCap int
+	// StreamProgressTimeout is the streaming CONTENT-progress deadline (#5486): how long a
+	// stream may stay WARM — keepalives arriving, so the inter-byte deadline never fires —
+	// without one frame that advances the turn. It is the CONFIG-SURFACE home for that knob,
+	// the same shape MaxTokensCap and ForceResponsesStream take: the value is passed IN by
+	// whoever builds the planner (gateway.newConfiguredHTTPPlanner threads every such knob
+	// through in one place) rather than re-read from the process environment.
+	//
+	// Zero — every planner nobody configures — means DefaultStreamProgressTimeout. A NEGATIVE
+	// value DISABLES the deadline, the one escape hatch for a provider whose prefill
+	// legitimately outlasts the window. A positive value outside the [5s, 600s] band falls
+	// back to the default: a window past `fak guard`'s 600s whole-request ceiling could never
+	// fire, and one under the idle deadline would only mislabel a plain dead socket.
+	// Resolved by streamProgressWindow.
+	StreamProgressTimeout time.Duration
+	Client                *http.Client
+	QuarantineTranscript  bool
 
 	// CoherenceShaper, when non-nil, is applied to the outbound messages just before
 	// the request is marshaled — the GLM52-HOSTED-CACHE-COHERENCE §A4 hook. The agent

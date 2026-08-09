@@ -237,7 +237,9 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 	}
 	if group == nil {
 		fmt.Fprintf(stderr, "fak sweep --apply: no dirty, stampable paths in lane %q\n", lane)
-		return 3
+		// A verdict on the lane, not contention (#5505 W4): re-running finds the same
+		// empty lane, so exit 4 tells a loop to replan rather than back off.
+		return safecommit.ExitRefused
 	}
 
 	// --unit N selects one sub-unit of the lane's split BEFORE the --path narrowing. It resolves
@@ -267,7 +269,7 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 		paths = intersectPaths(paths, only)
 		if len(paths) == 0 {
 			fmt.Fprintf(stderr, "fak sweep --apply: none of the --path values are dirty stampable paths in lane %q\n", lane)
-			return 3
+			return safecommit.ExitRefused
 		}
 	}
 
@@ -278,7 +280,7 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 	if !rep.OK {
 		fmt.Fprintln(stderr, "fak sweep --apply: refused — the subject/stamp did not pass preview:")
 		renderPreview(stderr, rep, safecommit.ExpectedTrunk(root, ""))
-		return 3
+		return safecommit.ExitRefused
 	}
 
 	res, err := commitFn(ctx(), safecommit.Options{

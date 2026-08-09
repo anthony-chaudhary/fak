@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -649,6 +650,10 @@ func TestInKernelPlannerRadixReuseIsDefaultOnForInkernelEngine(t *testing.T) {
 	off := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false)
 	if off.tree != nil {
 		t.Fatal("FAK_INKERNEL_RADIX=off must disable reuse (the A/B tree-OFF arm)")
+	}
+	entry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: "synthetic", PromptTokens: int64(len(turn2)), CachedTokens: int64(len(sys))})
+	if entry.Metrics.PrefillTokensSaved != int64(len(sys)) || entry.ID.Length != int64(len(turn2)) {
+		t.Fatalf("kernel reuse metadata=%+v", entry.Metrics)
 	}
 	t.Logf("DEFAULT[#14]: --engine inkernel enables radix/prefix reuse with no env opt-in and no harness; reused %d-token shared prefix, off-arm disables it", len(sys))
 }

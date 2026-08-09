@@ -565,14 +565,20 @@ func (r Registry) ServeAt(name string, cd *CooldownStore, now time.Time) (Home, 
 		walked++
 		return false
 	}
+	// refused names every seat this walk has already turned down, so the fall-forward never
+	// re-offers one. Without it, two unserveable ROLE seats (a dead active plus a dead
+	// anchor) bounce off each other — anchor→active→anchor — and the walk dies on its own
+	// cycle guard while a perfectly ready seat sits unexamined in the pool.
+	refused := map[string]bool{}
 	next := func(h Home) (string, error) {
+		refused[h.Name] = true
 		nxt := h.RehomeTo
 		if nxt == "" {
-			// No explicit rehome target: fall forward to a ROLE seat. Prefer the anchor (its
-			// whole job is to be the always-available fall-forward); if no anchor is set, the
-			// active seat is the next-best stable target. A role pointing back at the seat we
-			// just failed on can't help, so skip it.
-			fb, ok := r.fallbackSeat(h.Name)
+			// No explicit rehome target: fall forward to a ROLE seat, then to the pool. Prefer
+			// the anchor (its whole job is to be the always-available fall-forward); if no
+			// anchor is set, the active seat is the next-best stable target. A role pointing
+			// back at a seat this walk already refused can't help, so skip it.
+			fb, ok := r.fallbackSeat(h.Name, refused, cd, now)
 			if !ok {
 				return "", fmt.Errorf("accounts: %q cannot serve and has no rehome_to, anchor, or active seat to fall forward to", h.Name)
 			}
@@ -602,14 +608,41 @@ func (r Registry) ServeAt(name string, cd *CooldownStore, now time.Time) (Home, 
 	return best.home, chain[:best.chainLen], &entry, nil
 }
 
-// fallbackSeat returns the role seat to fall forward onto when the seat named avoid can't
-// serve and carries no rehome_to: the anchor first (its purpose), then the active seat. It
-// never returns avoid itself (that would loop). ok is false when neither role offers a
-// different seat.
-func (r Registry) fallbackSeat(avoid string) (string, bool) {
+// fallbackSeat returns the seat to fall forward onto when the seat named avoid can't serve
+// and carries no rehome_to. It offers, in order:
+//
+//  1. the anchor role (its whole purpose is to be the always-available fall-forward);
+//  2. the active role, the next-best stable target when no anchor is set;
+//  3. any OTHER seat that can serve right now, in registry order — the pool rung;
+//  4. any other seat refused ONLY by the cooldown overlay, so the walk still reaches it and
+//     ServeAt's all-cooled terminal can degrade onto the soonest-reset seat.
+//
+// It never returns avoid, nor any seat in refused — the ones this walk already turned down.
+// That skip is what makes rungs 3 and 4 reachable at all: with both role seats dead they
+// point at each other, and re-offering a walked seat used to end the walk on ServeAt's
+// cycle guard ("rehome cycle through …") while ready seats sat unexamined. A cycle among
+// UNSERVEABLE seats is still fail-loud — the walk simply exhausts every rung first, so the
+// error now means "nowhere left to go", not "the two role seats point at each other".
+//
+// ok is false when no rung offers a different seat.
+func (r Registry) fallbackSeat(avoid string, refused map[string]bool, cd *CooldownStore, now time.Time) (string, bool) {
+	skip := func(name string) bool { return name == avoid || refused[name] }
 	for _, role := range []string{RoleAnchor, RoleActive} {
-		if h, ok := r.Role(role); ok && h.Name != avoid {
+		if h, ok := r.Role(role); ok && !skip(h.Name) {
 			return h.Name, true
+		}
+	}
+	// Both roles are exhausted (unset, or already refused by this walk). Rather than dead-end,
+	// sweep the pool: a seat that serves right now first, then one held back only by an active
+	// cooldown — a seat that resets in 20 minutes still beats refusing to resolve at all.
+	for _, want := range []func(Home) bool{
+		func(h Home) bool { return serveableAt(h, cd, now) },
+		Home.CanServe,
+	} {
+		for _, h := range r.Homes {
+			if !skip(h.Name) && want(h) {
+				return h.Name, true
+			}
 		}
 	}
 	return "", false

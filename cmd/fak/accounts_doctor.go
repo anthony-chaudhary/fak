@@ -211,13 +211,66 @@ func buildAccountsDoctorReport(registryPath string, reg accounts.Registry) acctD
 		Registry:    registryPath,
 		ProbeLedger: strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != "",
 	}
-	login := reg.LoginReport()
+	// Fold fresh canary evidence into the durable store BEFORE the login fold, so the
+	// same doctor run renders the wall (or the repair) it just witnessed.
+	if report.ProbeLedger {
+		persistFreshProbeHealth(reg, time.Now().UTC())
+	}
+	// The cooldown overlay is load-bearing here (#4998): the durable org-auth-wall
+	// evidence lives in the fleet-shared cooldown store, and only LoginReportAt folds
+	// it over the config-plane statuses. A plain LoginReport would re-collapse a
+	// witnessed wall into needs_login and doctor would prescribe the futile relogin.
+	// Fail-open (io.Discard swallows the unreadable-store note): a bad state file
+	// degrades doctor to config-plane verdicts, never blocks it.
+	login := loginReportWithCooldown(io.Discard, reg)
 	for _, obs := range login.Seats {
 		report.Seats = append(report.Seats, foldDoctorSeat(obs, report.ProbeLedger))
 	}
 	markHydrateRepairs(&report, login.Seats)
 	foldDoctorReportCounts(&report)
 	return report
+}
+
+// persistFreshProbeHealth folds each seat's FRESH probe-ledger verdict into the durable
+// cooldown store (#4998) — the production write seam between the prober's bounded live
+// canary and the typed org-auth-wall record. A fresh ACCESS verdict (the org-disable
+// banner class) records/extends the wall under the seat's canonical account key; a fresh
+// OK newer than the wall's witness clears it (the witnessed upstream repair). Every
+// other kind is left alone — a usage cap or a credential auth block is not evidence
+// about the org either way. Without this fold the wall lives only as long as the
+// ledger's entitlement freshness window (fleetaccounts.ProbeLedgerEntitlementFreshMin):
+// past it the headroom allocator re-admits the dead seat and routes straight back into
+// the same terminal 403. Fail-open: an unreadable store or ledger never blocks doctor.
+func persistFreshProbeHealth(reg accounts.Registry, now time.Time) {
+	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		return
+	}
+	changed := false
+	for _, h := range reg.Homes {
+		key := h.Identity.AccountKey()
+		if key == "" || h.Dir == "" {
+			continue
+		}
+		fp := fleetaccounts.FreshProbeFromLedger(filepath.Base(h.Dir), "", now, 0)
+		if fp == nil {
+			continue
+		}
+		probedAt := now.Add(-time.Duration(fp.AgeMin * float64(time.Minute)))
+		switch {
+		case !fp.Available && fp.BlockKind == "access":
+			changed = store.ObserveSeatHealth(key, accounts.SeatHealthOrgAuthWall, probedAt) || changed
+		case fp.Available:
+			// Only an OK probed AFTER the wall was witnessed may clear it: a stale OK
+			// from before the 403 is not evidence the org was repaired.
+			if e, ok := store.OrgAuthWall(key, now); ok && probedAt.After(e.CooledAt) {
+				changed = store.ObserveSeatHealth(key, accounts.SeatHealthReady, probedAt) || changed
+			}
+		}
+	}
+	if changed {
+		_ = store.Save()
+	}
 }
 
 func foldDoctorReportCounts(report *acctDoctorReport) {
@@ -358,6 +411,20 @@ func hydrateSourceRank(obs accounts.LoginObservation) int {
 	return 2
 }
 
+// backupAndCopyCredential snapshots whatever the target already holds under name into
+// backupDir and only then copies the source's file over it, so a hydrate is always
+// reversible. The source keeps its own copy. Both credential shapes a seat can carry
+// (.credentials.json and .oauth-token) are installed by this one back-up-then-overwrite
+// rule; which files a hydrate touches still differs by shape (a .credentials.json hydrate
+// additionally retires the target's stale .oauth-token), but no shape can ever be
+// overwritten without being snapshotted first.
+func backupAndCopyCredential(sourceDir, targetDir, backupDir, name, stamp string) error {
+	if err := backupIfExists(targetDir, backupDir, name, stamp); err != nil {
+		return err
+	}
+	return copyFile(filepath.Join(sourceDir, name), filepath.Join(targetDir, name))
+}
+
 func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (string, error) {
 	target, ok := homeByName(reg, targetName)
 	if !ok {
@@ -383,10 +450,7 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 	stamp := time.Now().UTC().Format("20060102T150405Z")
 	copiedCred := ""
 	if fileExists(filepath.Join(source.Dir, ".credentials.json")) {
-		if err := backupIfExists(target.Dir, backupDir, ".credentials.json", stamp); err != nil {
-			return "", err
-		}
-		if err := copyFile(filepath.Join(source.Dir, ".credentials.json"), filepath.Join(target.Dir, ".credentials.json")); err != nil {
+		if err := backupAndCopyCredential(source.Dir, target.Dir, backupDir, ".credentials.json", stamp); err != nil {
 			return "", err
 		}
 		if err := backupIfExists(target.Dir, backupDir, ".oauth-token", stamp); err != nil {
@@ -395,10 +459,7 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 		_ = os.Remove(filepath.Join(target.Dir, ".oauth-token"))
 		copiedCred = ".credentials.json"
 	} else if fileExists(filepath.Join(source.Dir, ".oauth-token")) {
-		if err := backupIfExists(target.Dir, backupDir, ".oauth-token", stamp); err != nil {
-			return "", err
-		}
-		if err := copyFile(filepath.Join(source.Dir, ".oauth-token"), filepath.Join(target.Dir, ".oauth-token")); err != nil {
+		if err := backupAndCopyCredential(source.Dir, target.Dir, backupDir, ".oauth-token", stamp); err != nil {
 			return "", err
 		}
 		copiedCred = ".oauth-token"
@@ -409,7 +470,19 @@ func applyAccountHydrate(reg accounts.Registry, targetName, sourceName string) (
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("hydrated %s from %s: copied %s and %d missing project file(s)", targetName, sourceName, copiedCred, copiedSessions), nil
+	note := fmt.Sprintf("hydrated %s from %s: copied %s and %d missing project file(s)", targetName, sourceName, copiedCred, copiedSessions)
+	// A COPIED .credentials.json leaves both dirs on ONE OAuth token family, and Claude Code rotates
+	// the refresh token when it refreshes — so the first of the pair to refresh silently invalidates
+	// the other (internal/accounts/credfamily.go carries the 401 witness). A hydrate therefore cannot
+	// produce two independently-refreshable seats, and this repair is reachable unattended from
+	// `accounts doctor --write`, where the loser would be the HEALTHY source seat that was working
+	// fine. The enroll path resolves its own copy immediately; here the choice of which seat to keep
+	// is the operator's, so surface the hazard on the repair note rather than silently picking.
+	if share := accounts.DetectSharedRefreshFamily(source.Dir, target.Dir); share.Shared {
+		note += fmt.Sprintf("; WARNING: %s and %s now share OAuth token family %s — the first to refresh will silently 401 the other; split them with `fak accounts refresh --name %s --force`",
+			sourceName, targetName, share.FamilyID, targetName)
+	}
+	return note, nil
 }
 
 func fileExists(path string) bool {
@@ -570,6 +643,16 @@ func foldDoctorSeat(obs accounts.LoginObservation, consultLedger bool) doctorSea
 		return seat
 	case accounts.LoginTombstoned:
 		return seat // already retired; Resolve/Serve fall forward past it
+	case accounts.LoginOrgAuthWall:
+		// The DURABLE org wall (#4998): a typed upstream 403 witnessed in an earlier
+		// process and persisted in the cooldown store. It arrives here already folded
+		// over the local status — even when Claude has since blanked the tokens to
+		// needs_login underneath — because re-login only mints another token for the
+		// SAME walled org. Route to the operator-judgment action, never doctorRelogin.
+		seat.Action = doctorAccessBlocked
+		seat.Command = "fak accounts remove --name " + obs.Name +
+			"  (org auth wall witnessed upstream; switch seats or bill via an API key — after an org admin re-enables access, `fak accounts cooldown --clear` returns the seat to the pool)"
+		return seat
 	}
 	// Ready seat: overlay the freshest active-probe verdict, when the prober is wired.
 	if consultLedger && obs.Dir != "" {

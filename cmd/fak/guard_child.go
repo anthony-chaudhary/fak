@@ -441,8 +441,25 @@ type guardHeadlessRehydrateVerdict struct {
 // non-Anthropic wire, local --gguf) has no credential file this rung understands, so it is
 // also skipped (Ran=false) — resolveGuardUpstream's own noTokenAnywhere/passthroughFallback
 // handling already covers those postures.
-func guardRunHeadlessRehydrate(stdinInteractive, pinUpstream bool, credPath string) guardHeadlessRehydrateVerdict {
+//
+// An explicit env token (tokenEnv, default CLAUDE_CODE_OAUTH_TOKEN) is ALSO left alone
+// (Ran=false) — see the #3267 note at the guard below.
+func guardRunHeadlessRehydrate(stdinInteractive, pinUpstream bool, credPath, tokenEnv string) guardHeadlessRehydrateVerdict {
 	if stdinInteractive || !pinUpstream || strings.TrimSpace(credPath) == "" {
+		return guardHeadlessRehydrateVerdict{}
+	}
+	// #3267: the env token OUTRANKS the credential file — resolveAnthropicOAuthToken's
+	// precedence is tokenEnv, THEN <claude-config>/.credentials.json, THEN .oauth-token — so
+	// when it is set, the file this rung inspects is not the credential the upstream will be
+	// authenticated with. Checking it can only produce a false STALE_CRED, and the #2260 park
+	// below then waits for a re-login that cannot change which token is sent. Server-side that
+	// is the whole failure: a container running `fak guard -- <harness>` with
+	// CLAUDE_CODE_OAUTH_TOKEN exported has no interactive `claude` to re-login and usually no
+	// credential file at all, so the launch parks for the full 24h budget — before binding the
+	// gateway or spawning the child — and an unattended worker hangs silently instead of
+	// running or failing loud. Defer to the env token: it is the explicit headless/automation
+	// override, and a bad one still surfaces through the reactive per-request 401 path.
+	if strings.TrimSpace(tokenEnv) != "" && strings.TrimSpace(os.Getenv(tokenEnv)) != "" {
 		return guardHeadlessRehydrateVerdict{}
 	}
 	check := guardHeadlessCredCheck(credPath, nil, nil)

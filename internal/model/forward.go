@@ -88,15 +88,27 @@ func (m *Model) forwardHiddenRows(x [][]float32) *Activations {
 // transitive HF-oracle gate — so the tail is one function rather than one copy per twin
 // that could drift a norm, a head name or a scale apart from the others.
 func (m *Model) fillSeqLogits(act *Activations, x [][]float32) {
-	cfg := m.Cfg
-	mat := residentKernel{m}
 	act.Logits = make([][]float32, act.Seq)
 	for t := 0; t < act.Seq; t++ {
-		xf := m.finalNorm(x[t])
-		logits := mat.mul(m.headName(), mat.prep(xf), cfg.VocabSize, cfg.HiddenSize)
-		logitScaleInPlace(logits, cfg)
-		act.Logits[t] = logits
+		act.Logits[t] = m.logitsFromHidden(x[t])
 	}
+}
+
+// logitsFromHidden is the per-position forward TAIL: the final norm, the (tied) LM head
+// through the resident kernel (so a checkpoint whose head is resident Q8/Q4_K/k-quant is
+// read from that store, not an absent f32 copy), and the architecture's logit scale /
+// soft-cap / forced-token suppression. fillSeqLogits runs it at every position; a
+// single-position caller that needs only the last token's distribution — the gemma4
+// Session bridge (gemma4_session.go) — runs it once. Sharing the one tail is what makes
+// that bridge BIT-EXACT with Forward rather than a second transcription that could drift
+// a norm, a head name or a scale apart.
+func (m *Model) logitsFromHidden(x []float32) []float32 {
+	cfg := m.Cfg
+	mat := residentKernel{m}
+	xf := m.finalNorm(x)
+	logits := mat.mul(m.headName(), mat.prep(xf), cfg.VocabSize, cfg.HiddenSize)
+	logitScaleInPlace(logits, cfg)
+	return logits
 }
 
 // layer applies one decoder block to x in place. The default (Llama, PreNorm) is

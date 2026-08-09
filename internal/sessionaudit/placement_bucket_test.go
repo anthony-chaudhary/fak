@@ -43,6 +43,42 @@ func TestPricedModelsNeverLandInTheUnpricedBucket(t *testing.T) {
 	}
 }
 
+// TestOpenWeightsFamiliesAreNeverPricedAsVendor guards the seam #5115 has to cross.
+// #5115 asks for "pricingOrder keys for gpt and gemini" from the vendors' published
+// per-MTok cards, while its own Out-of-scope line requires self-hosted weights to stay
+// UNPRICED. Those two instructions collide, and nothing in the package caught it:
+// PriceFor matches by SUBSTRING, first hit wins, so the literal key "gpt" also matches
+// gpt-oss — an open-weights family fak serves on its own hardware.
+//
+// The failure is silent and one-directional. Adding the key flips PriceFor from
+// ok=false to ok=true, which REMOVES the id from Aggregate.UnpricedModels: instead of
+// an honest UNMEASURED hold (#4490) the KPI emits a confident dollar figure computed
+// from an OpenAI vendor rate card for tokens that were never billed by OpenAI.
+//
+// So this test is total over pricingOrder rather than a fixed expectation: any future
+// key that reaches an open-weights id reds here, naming the id it captured.
+func TestOpenWeightsFamiliesAreNeverPricedAsVendor(t *testing.T) {
+	// Open-weights ids fak can serve itself. gpt-oss leads because it is the one that
+	// embeds a vendor family name; the rest pin the families already in the bucket row.
+	ids := []string{
+		"gpt-oss-120b", "gpt-oss:20b", "gptoss-120b", "openai/gpt_oss-20b",
+		"qwen2.5:14b", "llama3.2", "mistral-large", "gemma-3-27b",
+	}
+	for _, id := range ids {
+		if r, ok := PriceFor(id); ok {
+			t.Fatalf("PriceFor(%q) = %+v, but %q names OPEN WEIGHTS that fak can serve itself. "+
+				"A pricingOrder key (%v) captured it by substring and attached a VENDOR rate card, "+
+				"so the provider-cost KPI will report billed dollars for tokens no vendor billed. "+
+				"Price the vendor's own tier ids instead of the bare family name (#5115).",
+				id, r, id, pricingOrder)
+		}
+		if got := ModelTier(id); got != "unpriced" {
+			t.Fatalf("ModelTier(%q) = %q, want \"unpriced\" — an open-weights id must not "+
+				"inherit a vendor tier (#5115)", id, got)
+		}
+	}
+}
+
 // TestOpenWeightsBucketMakesNoPlacementClaim is the honesty witness: an open-weights
 // family id must report placement as NOT KNOWN, rather than defaulting to either
 // answer. Every one of these ids is servable both ways — from a machine the company
@@ -51,6 +87,14 @@ func TestOpenWeightsBucketMakesNoPlacementClaim(t *testing.T) {
 	ids := []string{
 		"qwen2.5:14b", "qwen/qwen3.6-27b", "llama3.2", "mistral-large",
 		"mixtral-8x7b", "phi-4", "deepseek-v4-pro", "glm-5.2", "kimi-k3",
+		// The gpt-oss family embeds a VENDOR family name ("gpt") in an
+		// OPEN-WEIGHTS id, so it is the one case where substring order decides
+		// the answer. fak serves these weights itself — MXFP4 dequant-on-load in
+		// internal/ggufload, and a CI oracle in internal/covmatrix
+		// ({Name: "gpt-oss-MoE", ResolverToken: "gptoss", OracleInCI: true}) — so
+		// bucketing them "OpenAI" asserts a vendor placement fak's own tree
+		// disproves (#5115).
+		"gpt-oss-120b", "gpt-oss:20b", "gptoss-120b", "openai/gpt_oss-20b",
 	}
 	for _, id := range ids {
 		bucket := ProviderBucket(id)
@@ -119,6 +163,16 @@ func TestBucketForPlacementCoversEveryZone(t *testing.T) {
 		{"vendor", "claude-opus-4-6", BucketAnthropic, false, true},
 		{"vendor", "gpt-5.5", BucketOpenAI, false, true},
 		{"vendor", "gemini-3-pro", BucketGoogle, false, true},
+		// gpt-4o pins the boundary the gpt-oss fix moved (#5115): the open-weights
+		// row is matched BEFORE the vendor rows, so it must still let a genuine
+		// OpenAI tier id through. internal/gateway's deepseek_pricing_test.go
+		// attributes on this exact id, so a regression here is cross-package.
+		{"vendor", "gpt-4o", BucketOpenAI, false, true},
+		// ...while the open-weights family that embeds "gpt" keeps its honest
+		// unknown placement even when a vendor zone is asserted for it.
+		{"vendor", "gpt-oss-120b", BucketVendorOpen, false, true},
+		{"fleet", "gpt-oss-120b", BucketFleet, true, true},
+		{"", "gpt-oss-120b", BucketOpenWeights, false, false},
 		// Case and whitespace tolerated, like the residency floor's parser.
 		{" FLEET ", "glm-5.2", BucketFleet, true, true},
 		// No signal => no claim, in either direction.

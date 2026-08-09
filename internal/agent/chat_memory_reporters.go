@@ -130,3 +130,15 @@ type InKernelMemoryPressureTrimStats struct {
 type InKernelMemoryPressureTrimReporter interface {
 	InKernelMemoryPressureTrimStats() InKernelMemoryPressureTrimStats
 }
+
+// MoEResidencyReporter is implemented by local planners that can report activated-expert
+// residency across the requests they served (R6, #5617). Proxy planners do not implement it, so
+// the gateway emits no local MoE-residency series for upstream providers.
+//
+// Unlike the reporters above it has a second silence: a local planner whose operator declared no
+// expert budget builds no ring, so its ledger stays at Requests==0 forever. Surfaces must render
+// that as "not engaged" — an absent block — rather than as a ring reporting zero hits, which is
+// what a row of zeros reads like on a dashboard.
+type MoEResidencyReporter interface {
+	MoEResidencyStats() MoEResidencyLedger
+}

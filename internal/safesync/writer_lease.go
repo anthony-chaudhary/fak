@@ -125,8 +125,10 @@ type WriterLease struct {
 	path string
 	ttl  time.Duration
 
-	mu   sync.Mutex // guards info: the keepAlive heartbeat renews it concurrently with Release
-	info WriterLeaseInfo
+	mu       sync.Mutex // guards info: the keepAlive heartbeat renews it concurrently with Release
+	info     WriterLeaseInfo
+	lost     chan struct{}
+	lostOnce sync.Once
 }
 
 // Info returns the owner record of a held lease.
@@ -135,6 +137,23 @@ func (l *WriterLease) Info() WriterLeaseInfo {
 	defer l.mu.Unlock()
 	return l.info
 }
+
+// Lost reports whether this holder has observed that a peer displaced its lease. Writers
+// must consult it immediately before publishing work produced inside the leased window.
+func (l *WriterLease) Lost() bool {
+	select {
+	case <-l.lost:
+		return true
+	default:
+		return false
+	}
+}
+
+// LostSignal closes when a refresh proves that this holder no longer owns the lease.
+// It never closes for transient I/O failures.
+func (l *WriterLease) LostSignal() <-chan struct{} { return l.lost }
+
+func (l *WriterLease) markLost() { l.lostOnce.Do(func() { close(l.lost) }) }
 
 // AcquireWriterLease takes the cooperative worktree writer lease for repo. It returns
 // (lease, nil) on success; (nil, *WriterLeaseHeldError) when a live peer holds it; and
@@ -167,7 +186,7 @@ func AcquireWriterLease(repo, owner string, now func() time.Time, ttl time.Durat
 			return nil, err
 		}
 		if ok {
-			return &WriterLease{path: path, ttl: ttl, info: rec}, nil
+			return &WriterLease{path: path, ttl: ttl, info: rec, lost: make(chan struct{})}, nil
 		}
 		// Someone holds it: read the record and decide live-vs-stale.
 		cur, rerr := readLease(path)
@@ -194,7 +213,7 @@ func AcquireWriterLease(repo, owner string, now func() time.Time, ttl time.Durat
 			if ok, werr := writeLeaseExclusive(path, rec); werr != nil {
 				return nil, werr
 			} else if ok {
-				return &WriterLease{path: path, ttl: ttl, info: rec}, nil
+				return &WriterLease{path: path, ttl: ttl, info: rec, lost: make(chan struct{})}, nil
 			}
 			cur, rerr = readLease(path)
 			if rerr != nil {
@@ -248,11 +267,13 @@ func (l *WriterLease) Refresh(now func() time.Time) error {
 	cur, err := readLease(l.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			l.markLost()
 			return ErrWriterLeaseLost
 		}
 		return err
 	}
 	if cur != l.info {
+		l.markLost()
 		return ErrWriterLeaseLost
 	}
 	next := l.info

@@ -17,6 +17,15 @@
 // string mirror of internal/gateway.StepClass (any|bounded|checkpoint|rebuild|unknown) so the
 // core carries no dependency on the gateway package (and cannot form an import cycle with it);
 // callers map gateway.StepClass -> Advice by its string value.
+//
+// The package also carries the repeat-injection bound (#5922): InjectionLedger limits how
+// often a named rule may re-inject, in `once` / `after-gap` modes with the gap counted in
+// COMPLETED turns (stream chunks never advance the counter). Restored-age decision:
+// persistence stores rule NAMES, not ages, so a rule restored on resume is treated as
+// injected at the resume point — a restored after-gap rule waits a full fresh gap and a
+// restored once rule stays suppressed. Abort/error decision: a record whose turn dies
+// before delivery is erased via Rollback so live state matches what a resume would
+// rebuild. Both decisions are documented at length in injectledger.go and pinned by tests.
 package sessionsteer
 
 import (
@@ -263,4 +272,14 @@ func SessionStartRule(d SteerDirective) string {
 		"bullets, and make the last line a bullet naming the next checkable step. Session-state tools: " +
 		"mcp__fak__fak_context_value (window left + step advice), mcp__fak__fak_context_spans / " +
 		"mcp__fak__fak_context_restore (recover a compacted originating task)."
+}
+
+// IndependentToolHint is the shadow-first launch-time nudge for independent tool work.
+// It is advisory only: callers opt in explicitly and no Stop/admission decision depends on it.
+func IndependentToolHint(shadow bool) string {
+	mode := "advisory"
+	if shadow {
+		mode = "shadow-advisory"
+	}
+	return "TOOL_WIDTH_HINT (" + mode + "): when two or more tool calls are independent, prefer issuing them in one assistant turn; keep dependent calls sequential. This is a latency/width optimization, never permission to skip verification or batch conflicting writes."
 }

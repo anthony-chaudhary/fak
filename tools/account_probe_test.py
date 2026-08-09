@@ -529,6 +529,23 @@ class ClassifyOpencodeProbeTest(unittest.TestCase):
             {"reachable": True, "status": 401, "body": "", "error": ""})
         self.assertEqual(v["status"], "AUTH")
 
+    def test_relay_borrowed_401_is_retryable_not_auth(self) -> None:
+        for body in (
+                "blocked by upstream provider",
+                "REQUEST BLOCKED BY UPSTREAM",
+        ):
+            with self.subTest(body=body):
+                v = account_probe.classify_opencode_probe(
+                    {"reachable": True, "status": 401, "body": body, "error": ""})
+                self.assertEqual(v["status"], "APIERR")
+                self.assertEqual(v["block_kind"], "apierr")
+
+    def test_expired_token_401_remains_auth(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": 401,
+             "body": "upstream relay rejected expired token", "error": ""})
+        self.assertEqual(v["status"], "AUTH")
+
     def test_5xx_is_apierr(self) -> None:
         v = account_probe.classify_opencode_probe(
             {"reachable": True, "status": 503, "body": "", "error": ""})

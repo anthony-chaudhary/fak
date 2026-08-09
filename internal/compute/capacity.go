@@ -103,10 +103,48 @@ type MemoryPlan []MemoryDemand
 // default is three f32 rows; the denser q8 tier quantizes the two attended rows to q8_0 and
 // keeps the pre-RoPE K row f32 so evict stays exact. Invalid or incomplete geometry returns
 // 0 so callers can fail open when a config does not carry enough evidence for a cache plan.
+// cfg.WindowPerLayer, when a layer's window actually bites at this token count, replaces
+// the flat NumLayers x tokens layer-slot count with the per-layer sum — see
+// windowCappedPositions.
 func EstimateKVStoreBytes(cfg KVConfig, tokens int) int64 {
 	elemsPerRow := saturatingMulInt64(int64(cfg.NumKVHeads), int64(cfg.HeadDim))
 	perTokenPerLayer := cfg.Precision.perTokenPerLayerBytes(elemsPerRow)
+	if positions := cfg.windowCappedPositions(tokens); positions >= 0 {
+		return saturatingMulInt64(positions, perTokenPerLayer)
+	}
 	return saturatingMulInt64(int64(cfg.NumLayers), int64(tokens), perTokenPerLayer)
+}
+
+// windowCappedPositions is the total token-slots a KV store keeps resident across every
+// layer when cfg declares a per-layer attention window: a windowed layer holds
+// min(window, tokens) positions (a position older than its window is provably never
+// attended to again), a full-attention layer holds all `tokens`.
+//
+// It returns -1 — "no layer's window bites here" — whenever the answer would equal the
+// uniform NumLayers x tokens product, so EstimateKVStoreBytes takes its ORIGINAL
+// expression untouched in that case. That is a bit-identity guarantee, not an
+// optimization: a config with no window, a window wider than the context, or a window
+// slice the caller left nil must produce byte-for-byte the number it produced before this
+// path existed, at every precision tier. Layers past the end of WindowPerLayer are read as
+// full attention, matching the non-positive "no window" spelling of the entries themselves.
+func (cfg KVConfig) windowCappedPositions(tokens int) int64 {
+	if tokens <= 0 || cfg.NumLayers <= 0 || len(cfg.WindowPerLayer) == 0 {
+		return -1
+	}
+	total, capped := int64(0), false
+	for l := 0; l < cfg.NumLayers; l++ {
+		slots := int64(tokens)
+		if l < len(cfg.WindowPerLayer) {
+			if w := cfg.WindowPerLayer[l]; w > 0 && int64(w) < slots {
+				slots, capped = int64(w), true
+			}
+		}
+		total = saturatingAddInt64(total, slots)
+	}
+	if !capped {
+		return -1
+	}
+	return total
 }
 
 // EstimateKVStoreMemoryPlan is the classed form of EstimateKVStoreBytes. The demand's DType

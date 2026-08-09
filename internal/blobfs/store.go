@@ -80,10 +80,12 @@ type Store struct {
 	order    *list.List               // evictable (unpinned) digests; back = oldest
 	orderIdx map[string]*list.Element // digest -> its order element (unpinned, resident)
 
-	puts    int64
-	hits    int64 // Put of an already-present digest (content dedup)
-	resolv  int64
-	evicted int64 // digests deleted by the byte budget
+	puts                int64
+	hits                int64 // Put of an already-present digest (content dedup)
+	novelBytes          int64 // bytes stored by first referrers
+	dedupedBytesAvoided int64 // bytes not rewritten by later referrers
+	resolv              int64
+	evicted             int64 // digests deleted by the byte budget
 
 	// Async durable-write pipeline (PutAsync), additive over the synchronous
 	// Put/commit path above. A non-blocking Put copies the caller's bytes into an
@@ -232,6 +234,7 @@ func (s *Store) commit(ctx context.Context, d string, b []byte) error {
 	atomic.AddInt64(&s.puts, 1)
 	if _, ok := s.index[d]; ok {
 		atomic.AddInt64(&s.hits, 1)
+		atomic.AddInt64(&s.dedupedBytesAvoided, int64(len(b)))
 		s.mu.Unlock()
 		return nil
 	}
@@ -249,6 +252,7 @@ func (s *Store) commit(ctx context.Context, d string, b []byte) error {
 	if _, ok := s.index[d]; !ok {
 		s.index[d] = int64(len(b))
 		s.bytes += int64(len(b))
+		atomic.AddInt64(&s.novelBytes, int64(len(b)))
 		if s.pins[d] == 0 {
 			s.orderIdx[d] = s.order.PushFront(d)
 		}
@@ -430,6 +434,21 @@ func (s *Store) evictLocked() {
 // Stats reports store activity (puts, dedup hits, resolves) for KPI taps.
 func (s *Store) Stats() (puts, dedupHits, resolves int64) {
 	return atomic.LoadInt64(&s.puts), atomic.LoadInt64(&s.hits), atomic.LoadInt64(&s.resolv)
+}
+
+// ByteStats reports first-referrer-pays byte accounting. NovelBytes counts each
+// digest only when it is first stored; DedupedBytesAvoided counts the payload
+// bytes skipped by later puts of an already-resident digest.
+type ByteStats struct {
+	NovelBytes          int64 `json:"novel_bytes"`
+	DedupedBytesAvoided int64 `json:"deduped_bytes_avoided"`
+}
+
+func (s *Store) ByteStats() ByteStats {
+	return ByteStats{
+		NovelBytes:          atomic.LoadInt64(&s.novelBytes),
+		DedupedBytesAvoided: atomic.LoadInt64(&s.dedupedBytesAvoided),
+	}
 }
 
 // Resident reports the current resident store size (blob count, total bytes) and

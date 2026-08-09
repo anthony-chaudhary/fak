@@ -57,9 +57,10 @@ func TestRunCommitPreflight_allTrackedExit0(t *testing.T) {
 	}
 }
 
-// TestRunCommitPreflight_untrackedExit3NamesFix is the DoD refusal witness: an untracked path
-// exits 3 and the human output names the path and the `git add` fix.
-func TestRunCommitPreflight_untrackedExit3NamesFix(t *testing.T) {
+// TestRunCommitPreflight_untrackedIsRefusedAndNamesFix is the DoD refusal witness: an untracked
+// path exits with the refused-on-the-merits code and the human output names the path and the
+// `git add` fix.
+func TestRunCommitPreflight_untrackedIsRefusedAndNamesFix(t *testing.T) {
 	withCommitPreflightFn(t, func(context.Context, string, []string) (safecommit.PathPreflightReport, error) {
 		return safecommit.PathPreflightReport{
 			OK:        false,
@@ -72,8 +73,9 @@ func TestRunCommitPreflight_untrackedExit3NamesFix(t *testing.T) {
 	})
 	var out, errb bytes.Buffer
 	code := runCommitPreflight(&out, &errb, []string{"--path", "cmd/fak/new.go"})
-	if code != 3 {
-		t.Fatalf("want exit 3 for a pre-commit refusal, got %d", code)
+	if code != safecommit.ExitRefused {
+		t.Fatalf("want exit %d for a refusal on the merits (never the retryable contention 3), got %d",
+			safecommit.ExitRefused, code)
 	}
 	got := out.String()
 	if !strings.Contains(got, "cmd/fak/new.go") || !strings.Contains(got, "git add") {
@@ -100,8 +102,8 @@ func TestRunCommitPreflight_jsonShape(t *testing.T) {
 	})
 	var out, errb bytes.Buffer
 	code := runCommitPreflight(&out, &errb, []string{"--json", "--path", "stale/plan.go"})
-	if code != 3 {
-		t.Fatalf("want exit 3, got %d", code)
+	if code != safecommit.ExitRefused {
+		t.Fatalf("want exit %d, got %d", safecommit.ExitRefused, code)
 	}
 	var rep safecommit.PathPreflightReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {

@@ -150,3 +150,17 @@ func TestRenderTwoTrackMarkdown_surfacesFeedFreshness(t *testing.T) {
 		t.Fatalf("a report with no freshness row must render no feed banner:\n%s", md)
 	}
 }
+
+func TestRenderMarkdownDebitsRecallInjectionInsideKPI(t *testing.T) {
+	r := sampleTwoTrack()
+	r.CumulativeNetUSD = 1.0
+	r.BrokeEven = true
+	r.RecallInjectionDebit = RecallInjectionDebit{Injections: 1, Records: 2, EstimatedTokens: 400, EstimatedUSD: 0.25}
+	md := RenderTwoTrackMarkdown(r)
+	if !strings.Contains(md, "| recall injection debit | -$0.2500") {
+		t.Fatalf("missing measured recall debit row: %s", md)
+	}
+	if !strings.Contains(md, "| cumulative net | $0.7500") {
+		t.Fatalf("net did not subtract recall debit: %s", md)
+	}
+}

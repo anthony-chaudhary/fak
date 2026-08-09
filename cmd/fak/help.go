@@ -43,8 +43,10 @@ type overviewEntry struct {
 // of the kernel is doing. Membership is no longer taste — it is C1's tier
 // classification (internal/devindex): help_test.go's TestOverviewIsExactlyFrontdoor
 // asserts this set EQUALS the frontdoor tier, so the visible front door and the
-// classification can never drift. The dev/repo tooling (~170 verbs) lives one
+// classification can never drift. The dev/repo tooling (~240 verbs) lives one
 // level down under `fak dev`; the compact overview names the count and the door.
+// INSTALL.md "What's in the binary" is the ADOPTER-facing half of that split (#5465):
+// why a gateway binary carries them, and why they are inert in a production image.
 //
 // The replay/top/pull/ls frontdoor companions fold into run/ps/model (see
 // frontdoorCompanions) and are named in their primary's blurb rather than given

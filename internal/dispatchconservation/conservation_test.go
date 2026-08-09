@@ -210,6 +210,257 @@ func TestModelSwitchableReasonsAccountedNotFolded(t *testing.T) {
 	}
 }
 
+// TestPythonSweepReasonsAccountedNotFolded pins the classes that ONLY the Python
+// witness sweep stamps (tools/issue_resolve_dispatch.py: NO_COMMIT_RESTART_EXHAUSTED,
+// NO_COMMIT_PREVIEW_CONFIRM, NO_COMMIT_MISSING_LOG) as first-class buckets. That sweep
+// writes the very .witness sidecars this package reads, but its vocabulary is wider
+// than internal/dispatchtick's NoCommit* consts, and noCommitReasons had only copied
+// the dispatchtick half — so these three hit the fold and were booked as "unknown".
+//
+// Regression witnessed on this repo's own .dispatch-runs, 78h window ending
+// 2026-08-07T06:19:45Z: the sidecars held unknown=143 + restart_exhausted=26, and
+// `fak dispatch-conservation --window-h 78` reported `unknown=169` with
+// restart_exhausted missing from the breakdown — 15% of the window's no-commit units
+// relabelled from a named, actionable guard terminal to the residual bucket.
+func TestPythonSweepReasonsAccountedNotFolded(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 34, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "restart_exhausted"}})
+	mkWorker(t, runs, 35, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "preview_confirm_feedback"}})
+	mkWorker(t, runs, 36, 1.0, workerOpts{witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "missing_log_artifact"}})
+	rep := report(runs, aliveSet(), 6.0)
+	r := rep.Units.NoCommitReasons
+	if r["restart_exhausted"] != 1 || r["preview_confirm_feedback"] != 1 || r["missing_log_artifact"] != 1 || r["unknown"] != 0 {
+		t.Errorf("no_commit_reasons = %v, want each python-sweep class = 1 and no unknown", r)
+	}
+}
+
+// guardEpilogueFixture is a worker log tail carrying the guard exit summary: two real
+// section rules from cmd/fak/guard_format_layout.go guardSection(). The second one is
+// deliberately the "cache window" section #5867 proposed keying on, so the
+// zero-cache-turn fixture below can drop it while keeping a complete epilogue.
+const guardEpilogueFixture = "" +
+	"fak-turn trace=win-deadbeef ok prov=80.0k tok cache=healthy_cache\n" +
+	"── guard · audit journal ──────────────────────────────\n" +
+	"  appended                  38 decision(s) appended this session\n" +
+	"── guard · cache window ───────────────────────────────\n" +
+	"  recorded                  20 turn(s)\n"
+
+// TestUnknownNoCommitSplitByGuardEpilogue is the #5867 fail-before/pass-after pin: the
+// witness sweep's residual "unknown" — the fleet's LARGEST terminal disposition — must
+// be split by the evidence the worker log tail already carries, instead of booking half
+// the fleet under the one label that means "we could not tell".
+//
+// Measured on this repo's own .dispatch-runs over the clean current-fleet window
+// (2026-08-04T00:00Z..08-07T06:15Z; the 07-28..08-03 -compact-solvency-floor spawn
+// outage is excluded on purpose, a trailing-7d slice would measure that instead):
+// 283 graded resolve units, of which unknown=149 (52.8% of runs, 55.2 of 102.3
+// wall-to-witness seat-hours = 54.0%). `fak dispatch-conservation --window-h 78.6`
+// printed a single opaque `unknown=149`. The same 149 split 114 / 30 / 2 on the tail
+// markers pinned here — no new log retention needed, the sweep's own 4 KiB window
+// already holds every marker (re-running the split at 24 KiB moves zero units).
+func TestUnknownNoCommitSplitByGuardEpilogue(t *testing.T) {
+	runs := t.TempDir()
+	noCommit := map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "unknown"}
+	// A session that reached its guard epilogue and simply landed nothing.
+	mkWorker(t, runs, 40, 1.0, workerOpts{body: guardEpilogueFixture, witness: noCommit})
+	// A session killed MID-TURN: the log ends on an in-flight fak-turn row with no
+	// guard summary at all. 30/30 of the real died-before-epilogue units look like this.
+	mkWorker(t, runs, 41, 1.0, workerOpts{
+		body:    "fak-turn trace=win-cafebabe ok prov=104.4k tok (89% of prompt)\n",
+		witness: noCommit})
+	// The guard never exec'd the agent. Checked FIRST: this run also prints a partial
+	// epilogue, and "the child never ran" is the more specific, more fixable statement.
+	mkWorker(t, runs, 42, 1.0, workerOpts{
+		body: guardEpilogueFixture +
+			"fak guard: could not run \"claude\": snapshot generated child config\n",
+		witness: noCommit})
+
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r[ReasonCleanExitNoCommit] != 1 || r[ReasonDiedBeforeEpilogue] != 1 ||
+		r[ReasonGuardChildSpawnFailed] != 1 || r["unknown"] != 0 {
+		t.Errorf("no_commit_reasons = %v, want one of each split class and NO residual unknown", r)
+	}
+}
+
+// TestCleanExitKeysOnSectionRuleNotCacheWindow refutes the marker #5867 proposed. That
+// issue keys "epilogue present" on the final `guard · cache window` section, but
+// formatVCacheSnapshotPointer (cmd/fak/guard_child_supervision.go) returns "" when the
+// session recorded zero cache turns — so a complete epilogue with no cached turn carries
+// no cache-window section and would be mis-booked as a death.
+//
+// This is not hypothetical: over the full retained history (2382 graded resolve units)
+// the cache-window marker finds 0/69 auth_wall runs, every one of which carries an
+// epilogue the section rule finds (69/69). Inside the unknown bucket the same gate hides
+// 7 runs. Keying on the section rule instead costs nothing and loses none of them.
+func TestCleanExitKeysOnSectionRuleNotCacheWindow(t *testing.T) {
+	runs := t.TempDir()
+	zeroTurnEpilogue := "" +
+		"fak-turn trace=win-deadbeef ok prov=80.0k tok cache=n/a\n" +
+		"── guard · audit journal ──────────────────────────────\n" +
+		"  appended                  12 decision(s) appended this session\n" +
+		"  Track 2 OBSERVED-$ row not written: no provider-cache tokens\n"
+	if strings.Contains(zeroTurnEpilogue, "cache window") {
+		t.Fatal("fixture must NOT contain the cache-window section; that is the point")
+	}
+	mkWorker(t, runs, 43, 1.0, workerOpts{body: zeroTurnEpilogue,
+		witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "unknown"}})
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r[ReasonCleanExitNoCommit] != 1 || r[ReasonDiedBeforeEpilogue] != 0 {
+		t.Errorf("no_commit_reasons = %v, want a zero-cache-turn epilogue read as a CLEAN EXIT", r)
+	}
+}
+
+// bulkyEpilogue pads a fixture epilogue past a byte budget with real guard section
+// rules, so a test can prove a marker survives being pushed AWAY from EOF by the
+// summary the guard prints after it. The live epilogue is a median 7199 bytes over the
+// 118 measured clean-exit units (112 of 118 exceed 4096), so this is not a synthetic
+// worry: it is the actual geometry of every worker log the sweep grades.
+func bulkyEpilogue(t *testing.T, atLeast int) string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("── guard · avoided-spend attribution ──────────────────\n")
+	for b.Len() < atLeast {
+		b.WriteString("  owner split               provider ~1.4M (100%) + fak ~0 (0%)\n")
+	}
+	b.WriteString(guardEpilogueFixture)
+	return b.String()
+}
+
+// TestCleanExitSplitsProviderQuotaAndWallClockTerminals is the fail-before/pass-after pin
+// for #5870. clean_exit_no_commit — 118 of 291 graded resolve units over the clean
+// current-fleet window (2026-08-04..08-07), ~41% of fleet seat-time — was read as a
+// THROUGHPUT problem: sessions that ran a full ~26 minutes and simply landed nothing.
+// It is not. 105 of those 118 (89.0%) end on a TYPED guard terminal the ledger was not
+// looking for:
+//
+//   - 67 (56.8%) hit a provider quota wall: a 429 whose Retry-After exceeds
+//     goalpark.LongWaitFloor parks the goal with reason=LONG_RETRY_AFTER
+//     (internal/goalpark.RecordLongRetry), and/or the account is dropped from the
+//     servable pool by cmd/fak/accounts_cooldown.go. The turn stream shows
+//     `FAILED reason=rate_limited ... kind=weekly_limit announced_wait=1h13m40s`.
+//   - 38 (32.2%) hit the wall-clock envelope: dispatch always passes --max-duration
+//     (1740s) and the guard drains the session with TIME_BUDGET_EXHAUSTED
+//     (internal/session.ReasonTimeBudgetExhausted).
+//   - 13 (11.0%) are the residual — a session that really did end quietly with nothing.
+//
+// The two named classes are DISJOINT in the measured window (a parked goal tears down
+// immediately, so it never also reaches the 29m envelope), and neither is an agent
+// behaviour the worker prompt can fix: one is purchased capacity, one is a configured
+// envelope. Booking them as "the agent under-produced" pointed the fleet's largest
+// remaining loss at the wrong lever.
+func TestCleanExitSplitsProviderQuotaAndWallClockTerminals(t *testing.T) {
+	runs := t.TempDir()
+	noCommit := map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "unknown"}
+	// A 429 weekly-limit park. The terminal line sits ABOVE the epilogue, exactly as it
+	// does on disk.
+	mkWorker(t, runs, 50, 1.0, workerOpts{witness: noCommit, body: "" +
+		"fak guard: PARKED goal=\"compute\" parked_until=1785815999 reason=LONG_RETRY_AFTER\n" +
+		"fak-turn trace=win-611ca8 FAILED reason=rate_limited kind=weekly_limit announced_wait=1h13m40s\n" +
+		bulkyEpilogue(t, 6000)})
+	// An account dropped from the servable pool by a live usage cap, with no park line.
+	// 2 of the 67 look only like this.
+	mkWorker(t, runs, 51, 1.0, workerOpts{witness: noCommit, body: "" +
+		"fak guard: account cooled by a live usage cap until 2026-08-04T01:35:27Z — it drops from the servable pool\n" +
+		bulkyEpilogue(t, 6000)})
+	// The wall-clock envelope.
+	mkWorker(t, runs, 52, 1.0, workerOpts{witness: noCommit, body: "" +
+		"fak guard: TIME_BUDGET_EXHAUSTED — wall-clock --max-duration envelope elapsed for compute-claude-54880\n" +
+		bulkyEpilogue(t, 6000)})
+	// The residual: a complete epilogue and no typed terminal at all. This one must KEEP
+	// clean_exit_no_commit — the class has to keep meaning "we looked and found nothing",
+	// or the split has just moved the blindness somewhere else.
+	mkWorker(t, runs, 53, 1.0, workerOpts{witness: noCommit, body: bulkyEpilogue(t, 6000)})
+
+	// The two new class names are asserted as LITERALS, not as the ReasonProviderQuotaWall
+	// / ReasonWallClockExhausted consts the rest of this file would use. That is
+	// deliberate on both counts: it keeps the assertion behavioral rather than tautological
+	// (a const on both sides can be renamed in lockstep and still pass), and it let this
+	// test compile and RED against the pre-#5870 implementation, where it reported
+	// `map[clean_exit_no_commit:4]` — all four fixtures folded into the one bucket.
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r["provider_quota_wall"] != 2 || r["wall_clock_exhausted"] != 1 ||
+		r[ReasonCleanExitNoCommit] != 1 {
+		t.Errorf("no_commit_reasons = %v, want provider_quota_wall=2 wall_clock_exhausted=1 clean_exit_no_commit=1", r)
+	}
+}
+
+// TestProducerStampedCleanExitIsStillRefined is the forward-compatibility pin for the
+// change landing NEXT DOOR. Every affected .witness on disk today reads
+// reason="unknown", because tools/issue_resolve_dispatch.py has no signature for the
+// epilogue split and falls through to it — so the #5870 refinement is reached via the
+// unknown branch. That producer is in the middle of mirroring #5867's three classes
+// into its own NO_COMMIT_* vocabulary, and once it lands, these units arrive already
+// stamped "clean_exit_no_commit".
+//
+// Without this case the split would keep passing every other test in this file while
+// firing on none of the runs it exists for. Pinning it here means the producer can land
+// its half whenever it likes and the ledger keeps naming the terminal.
+func TestProducerStampedCleanExitIsStillRefined(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 55, 1.0, workerOpts{
+		witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil,
+			"reason": ReasonCleanExitNoCommit},
+		body: "fak guard: TIME_BUDGET_EXHAUSTED — wall-clock envelope elapsed\n" + bulkyEpilogue(t, 6000)})
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r["wall_clock_exhausted"] != 1 || r[ReasonCleanExitNoCommit] != 0 {
+		t.Errorf("no_commit_reasons = %v, want a PRODUCER-stamped clean exit refined to its typed terminal", r)
+	}
+}
+
+// TestTypedTerminalSurvivesTheEpilogueThatBuriesIt is the mechanism pin, kept separate
+// from the classification pin above because it is the whole reason those 105 units were
+// invisible. The witness sweep classifies from a 4 KiB tail
+// (tools/issue_resolve_dispatch.py _CAP_TAIL_BYTES), and the guard prints its exit
+// summary AFTER the terminal that caused the exit. Measured over the 118 units: the
+// TIME_BUDGET_EXHAUSTED marker is a median 7671 bytes from EOF and lands inside the
+// 4 KiB window 0/38 times — but 38/38 inside 16 KiB. Same for the 429 park (4/65 vs
+// 65/65) and the usage cap (0/34 vs 34/34).
+//
+// 16 KiB is not a new liberty: it is _RESTART_EXHAUSTED_TAIL_BYTES, the window the
+// producer's OWN classify_restart_exhaustion already reads for the same reason ("the
+// live epilogue can exceed the generic 4 KiB quota-banner tail"). So this package still
+// never claims to see something the producer could not have seen.
+func TestTypedTerminalSurvivesTheEpilogueThatBuriesIt(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "resolve-54-20260804-000000.log")
+	body := "fak guard: TIME_BUDGET_EXHAUSTED — wall-clock envelope elapsed\n" + bulkyEpilogue(t, 6000)
+	if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadTailBytes(log, unknownRefineTailBytes); strings.Contains(got, "TIME_BUDGET_EXHAUSTED") {
+		t.Fatal("fixture must bury the terminal past the 4 KiB window; that is the point")
+	}
+	if got := refineUnknownNoCommit(log); got != "wall_clock_exhausted" {
+		t.Errorf("refineUnknownNoCommit = %q, want the terminal read through the epilogue that buries it", got)
+	}
+}
+
+// TestUnrecognizedReasonStaysUnknownNotRefined keeps the #5866 lesson intact. The split
+// above runs ONLY on a reason a producer itself stamped "unknown". A reason string this
+// package merely fails to recognize must still fold to a bare "unknown" — after this
+// change that residual is a VOCABULARY-DRIFT alarm ("a sidecar writer stamped a class we
+// have never heard of"), which is worth acting on, and silently dressing it up as
+// clean_exit_no_commit would re-hide exactly what #5866 uncovered.
+func TestUnrecognizedReasonStaysUnknownNotRefined(t *testing.T) {
+	runs := t.TempDir()
+	mkWorker(t, runs, 44, 1.0, workerOpts{body: guardEpilogueFixture,
+		witness: map[string]any{"claim": "CLAIM_NO_COMMIT", "sha": nil, "reason": "a_future_producers_class"}})
+	r := report(runs, aliveSet(), 6.0).Units.NoCommitReasons
+	if r["unknown"] != 1 || r[ReasonCleanExitNoCommit] != 0 {
+		t.Errorf("no_commit_reasons = %v, want an UNRECOGNIZED reason to stay a bare unknown", r)
+	}
+}
+
+// TestUnknownRefinementFailsOpenOnMissingLog pins the read-only fail-open rule: this
+// package never invents evidence. A graded unknown whose log artifact is gone has no
+// tail to read, so it must land in died_before_epilogue (no exit evidence exists) and
+// must not panic or claim a clean exit.
+func TestUnknownRefinementFailsOpenOnMissingLog(t *testing.T) {
+	if got := refineUnknownNoCommit(filepath.Join(t.TempDir(), "absent.log")); got != ReasonDiedBeforeEpilogue {
+		t.Errorf("refineUnknownNoCommit(missing) = %q, want %q", got, ReasonDiedBeforeEpilogue)
+	}
+}
+
 func TestRepairUnitsCountedSeparately(t *testing.T) {
 	runs := t.TempDir()
 	mkWorker(t, runs, 30, 1.0, workerOpts{kind: "repair", lane: "contract-repair"})

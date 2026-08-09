@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/model"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
@@ -56,7 +57,9 @@ type NativeScheduler struct {
 	// the pre-queue behaviour). A positive cap is the BARE structural admission knob the
 	// issue scopes ("the bare admit/evict loop and queues it sits on") — NOT a priority/
 	// fairness/KV-budget policy, which is the sibling issue's job.
-	maxRunning int
+	maxRunning      int
+	promotionPicker PromotionPicker
+	sessionAffinity map[string]int
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
@@ -125,6 +128,10 @@ func (s *NativeScheduler) WeightBearing() bool { return true }
 // StepBatch loop. A surviving lane's output is independent of when it is promoted —
 // each lane owns its KV and StepBatch is bit-exact regardless of co-batch membership.
 func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+	return s.AdmitWithHint(ctx, c, dispatchtick.WaveHint{})
+}
+
+func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hint dispatchtick.WaveHint) (abi.EngineRequest, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -166,6 +173,7 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 		kvPinUntil:  kvPinUntil,
 		tokens:      make(chan abi.EngineToken, 1),
 		done:        make(chan struct{}),
+		hint:        hint,
 	}
 
 	s.mu.Lock()
@@ -249,6 +257,31 @@ func (s *NativeScheduler) run() {
 		s.readmitPreemptedLocked()
 		// 3. Promote waiting lanes into the running set, FIFO, up to maxRunning. A lane
 		// cancelled while it was still waiting is retired here rather than promoted.
+		if s.promotionPicker != nil && len(s.waiting) > 1 {
+			slots := len(s.waiting)
+			if s.maxRunning > 0 {
+				slots = s.maxRunning - len(s.lanes)
+			}
+			c := make([]PromotionCandidate, len(s.waiting))
+			for i, ln := range s.waiting {
+				c[i] = PromotionCandidate{Index: i, Hint: ln.hint}
+			}
+			order := s.promotionPicker(c, slots, s.sessionAffinity)
+			reordered := make([]*schedLane, 0, len(s.waiting))
+			used := map[int]bool{}
+			for _, i := range order {
+				if i >= 0 && i < len(s.waiting) && !used[i] {
+					reordered = append(reordered, s.waiting[i])
+					used[i] = true
+				}
+			}
+			for i, ln := range s.waiting {
+				if !used[i] {
+					reordered = append(reordered, ln)
+				}
+			}
+			s.waiting = reordered
+		}
 		kept := s.waiting[:0]
 		for _, ln := range s.waiting {
 			if ln.ctx.Err() != nil {
@@ -387,6 +420,89 @@ func anyQ4K(lanes []*schedLane) bool {
 }
 
 // schedLane is one admitted request's state + its EngineRequest handle.
+// PromotionPicker is an opt-in WAITING-queue order. Nil preserves FIFO.
+type PromotionPicker func([]PromotionCandidate, int, map[string]int) []int
+
+type PromotionCandidate struct {
+	Index int
+	Hint  dispatchtick.WaveHint
+}
+
+// SetSessionAffinity records the worker holding an agent's warm state. The wave
+// picker may prefer it; capacity is still filled by work stealing.
+func (s *NativeScheduler) SetSessionAffinity(agent string, worker int) {
+	s.mu.Lock()
+	if s.sessionAffinity == nil {
+		s.sessionAffinity = make(map[string]int)
+	}
+	s.sessionAffinity[agent] = worker
+	s.mu.Unlock()
+	s.signal()
+}
+
+func (s *NativeScheduler) SetPromotionPicker(p PromotionPicker) {
+	s.mu.Lock()
+	s.promotionPicker = p
+	s.mu.Unlock()
+	s.signal()
+}
+
+// WavePromotionPicker co-promotes a ready-set, prefers session affinity, and fills
+// spare slots by work stealing. The input hints were authored by dispatchtick.
+func WavePromotionPicker(c []PromotionCandidate, slots int, affinity map[string]int) []int {
+	if slots <= 0 || len(c) == 0 {
+		return nil
+	}
+	type score struct {
+		wave                          string
+		count, first, steps, affinity int
+	}
+	groups := map[string]*score{}
+	for _, x := range c {
+		if x.Hint.Wave == "" {
+			continue
+		}
+		g := groups[x.Hint.Wave]
+		if g == nil {
+			g = &score{wave: x.Hint.Wave, first: x.Index, steps: x.Hint.StepsToExecution}
+			groups[x.Hint.Wave] = g
+		}
+		g.count++
+		if x.Hint.StepsToExecution < g.steps {
+			g.steps = x.Hint.StepsToExecution
+		}
+		if w, ok := affinity[x.Hint.Agent]; ok && w == x.Hint.Worker {
+			g.affinity++
+		}
+	}
+	var best *score
+	for _, g := range groups {
+		if best == nil || (g.count <= slots && best.count > slots) || ((g.count <= slots) == (best.count <= slots) && (g.affinity > best.affinity || (g.affinity == best.affinity && (g.count > best.count || (g.count == best.count && (g.steps < best.steps || (g.steps == best.steps && g.first < best.first))))))) {
+			best = g
+		}
+	}
+	chosen := make([]int, 0, slots)
+	seen := map[int]bool{}
+	if best != nil {
+		for _, x := range c {
+			if x.Hint.Wave == best.wave && len(chosen) < slots {
+				chosen = append(chosen, x.Index)
+				seen[x.Index] = true
+			}
+		}
+	}
+	for _, x := range c {
+		if len(chosen) >= slots {
+			break
+		}
+		if !seen[x.Index] {
+			chosen = append(chosen, x.Index)
+			seen[x.Index] = true
+		}
+	}
+	return chosen
+}
+
 type schedLane struct {
 	sched  *NativeScheduler // back-pointer so Cancel can wake the run loop
 	ctx    context.Context
@@ -407,6 +523,7 @@ type schedLane struct {
 	kvPinned    bool
 	kvPinUntil  time.Time
 	terminal    bool
+	hint        dispatchtick.WaveHint
 	seqNo       int64
 
 	// Preemption state. A preempted lane is removed from the running set without closing

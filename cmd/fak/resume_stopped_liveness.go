@@ -17,9 +17,19 @@ package main
 //
 //	live — a process that is running RIGHT NOW names this session on its command line
 //	       (the `claude --resume <sid>` form the rest of this package already keys on), or
-//	       the pid a launcher durably recorded for this session is still running.
-//	gone — the pid a launcher durably recorded for this session is ABSENT from a process
-//	       table that is provably complete.
+//	       the pid durably recorded for this session is still running.
+//	gone — the pid durably recorded for this session is ABSENT from a process table that is
+//	       provably complete.
+//
+// There are TWO producers of that recorded pid, and both are read here (#5542). The resume
+// watchdog's launch ledger records one for a session IT resumed — but a FIRST-GENERATION
+// worker (`claude -p …`, no session id anywhere on its argv) was never resumed by anything,
+// so no launch row exists for it and it resolved to "no recorded driver pid" every time: the
+// deferral was correct and permanent for that whole population. The second producer is the
+// guard SessionStart hook, which witnesses its own driver process at start and records the pid
+// on the durable identity row. The launch ledger keeps precedence where both answer, because a
+// launch row is written at the newest spawn; the identity store only fills sessions the launch
+// ledger has no pid for, so no verdict this file already reached can change.
 //
 // Everything else is LivenessUnknown and says so: an unreadable or empty table (#5385
 // reports the POSIX census comes back empty on some hosts, which makes `gone` unwitnessable
@@ -38,6 +48,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/resume/stopped"
 )
 
@@ -79,10 +90,16 @@ type stoppedDriverFacts struct {
 	// own error text — both echoed so an operator can tell "no drivers" from "no census".
 	scanned int
 	scanErr string
-	// launchPIDs maps a session id to the LAST driver pid a launcher durably recorded for
-	// it. This is the "recorded driver PID" internal/resume/stopped names as a fact that may
-	// assert a liveness value; without one, this triage has no handle on the process at all.
+	// launchPIDs maps a session id to the LAST driver pid durably recorded for it, folded
+	// across BOTH producers (the launch ledger first, then the session-start identity store
+	// for the sessions it does not cover). This is the "recorded driver PID"
+	// internal/resume/stopped names as a fact that may assert a liveness value; without one,
+	// this triage has no handle on the process at all.
 	launchPIDs map[string]int
+	// identityPIDs counts how many of those entries came from the session-start identity
+	// store rather than the launch ledger, so the operator line can show that the
+	// first-generation population is being covered at all rather than silently deferring.
+	identityPIDs int
 }
 
 // stoppedLivenessReason values are the closed set of explanations livenessFor attaches to
@@ -148,6 +165,9 @@ func (f stoppedDriverFacts) summary() string {
 			stoppedWhyTableUnread, f.scanned, f.scanErr)
 	}
 	s := fmt.Sprintf("driver liveness: %d processes scanned, %d recorded driver pids", f.scanned, len(f.launchPIDs))
+	if f.identityPIDs > 0 {
+		s += fmt.Sprintf(" (%d from session-start identity rows)", f.identityPIDs)
+	}
 	if !f.selfSeen {
 		s += "; table does NOT contain its own reader (incomplete) — no row can be witnessed gone"
 	}
@@ -163,18 +183,28 @@ func (f stoppedDriverFacts) summary() string {
 type stoppedDriverProbe struct {
 	once       sync.Once
 	ledgerPath string
-	folded     stoppedDriverFacts
+	// regDir is the fleet registry holding the durable identity store — the SECOND source of
+	// recorded driver pids, and the only one that covers a first-generation worker (#5542).
+	regDir string
+	folded stoppedDriverFacts
+}
+
+// newStoppedDriverProbe binds the probe to the host's real evidence: the launch ledger and the
+// identity store. Both resolve through the SAME registry-dir rule (FLEET_REG_DIR, else the host
+// Fleet registry), so the two producers and this reader cannot drift onto different files.
+func newStoppedDriverProbe() *stoppedDriverProbe {
+	return &stoppedDriverProbe{ledgerPath: defaultResumeLedger(), regDir: resolveSweepRegDir("")}
 }
 
 func (p *stoppedDriverProbe) facts() stoppedDriverFacts {
-	p.once.Do(func() { p.folded = foldStoppedDriverFacts(p.ledgerPath) })
+	p.once.Do(func() { p.folded = foldStoppedDriverFacts(p.ledgerPath, p.regDir) })
 	return p.folded
 }
 
 // foldStoppedDriverFacts takes the snapshot and folds it, together with the launch ledger,
 // into the evidence base. It never fails: an unobtainable table yields readable=false,
 // which resolves every session to LivenessUnknown.
-func foldStoppedDriverFacts(ledgerPath string) stoppedDriverFacts {
+func foldStoppedDriverFacts(ledgerPath, regDir string) stoppedDriverFacts {
 	procs, errStr := stoppedProcRelations()
 	f := stoppedDriverFacts{
 		pids:       map[int]string{},
@@ -182,6 +212,7 @@ func foldStoppedDriverFacts(ledgerPath string) stoppedDriverFacts {
 		scanErr:    errStr,
 		launchPIDs: stoppedLaunchDriverPIDs(ledgerPath),
 	}
+	f.identityPIDs = mergeStoppedIdentityDriverPIDs(f.launchPIDs, regDir)
 	if errStr != "" || len(procs) == 0 {
 		return f
 	}
@@ -238,4 +269,35 @@ func stoppedLaunchDriverPIDs(path string) map[string]int {
 		out[sid] = row.PID
 	}
 	return out
+}
+
+// mergeStoppedIdentityDriverPIDs folds the durable identity store's witnessed driver pids into
+// an existing launch-ledger map and reports how many entries it ADDED. It is deliberately
+// fill-only: a session the launch ledger already answers keeps that pid, because a launch row
+// is written at the newest spawn while an identity row is written at the start of the
+// generation that spawn replaced — preferring the identity row there could hand the resolver a
+// stale pid, and a stale pid that has since exited is exactly the false `gone` this whole file
+// exists to avoid. So the identity store can only cover sessions that had NO answer, which is
+// the first-generation population (#5542) and nothing else.
+//
+// A row with no pid contributes nothing (the store's contract: absent means NOT RECORDED, never
+// gone), and a missing/unreadable store yields zero additions — the same honest empty the
+// launch-ledger reader returns.
+func mergeStoppedIdentityDriverPIDs(launchPIDs map[string]int, regDir string) int {
+	if launchPIDs == nil || strings.TrimSpace(regDir) == "" {
+		return 0
+	}
+	added := 0
+	for sid, pid := range resume.FoldIdentityDriverPIDs(resume.LoadIdentityRows(regDir)) {
+		sid = strings.ToLower(strings.TrimSpace(sid))
+		if sid == "" || pid <= 0 {
+			continue
+		}
+		if _, ok := launchPIDs[sid]; ok {
+			continue // the launch ledger already answers this session; it wins
+		}
+		launchPIDs[sid] = pid
+		added++
+	}
+	return added
 }

@@ -35,10 +35,11 @@ const Schema = "fak-module-versions/1"
 
 // Module is one versioned unit: an internal/<leaf> package, a cmd/<dir> binary,
 // a .github/workflows/<file> CI workflow, a tools/<family> script, an
-// examples/<file>.json policy manifest, or a .claude/skills/<name> agent skill.
+// examples/<file>.json policy manifest, a .claude/skills/<name> agent skill, or a
+// docs/ prose page (a top-level docs/<file>.md or a docs/<dir> section).
 type Module struct {
-	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe", "examples/repo-guard-policy.json", ".claude/skills/commit-clean"
-	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools" | "policy" | "skill"
+	Name       string   `json:"module"` // e.g. "internal/modver", "cmd/fak", ".github/workflows/ci.yml", "tools/account_probe", "examples/repo-guard-policy.json", ".claude/skills/commit-clean", "docs/architecture.md", "docs/fak"
+	Kind       string   `json:"kind"`   // "internal" | "cmd" | "workflow" | "tools" | "policy" | "skill" | "docs"
 	Rev        int      `json:"rev"`    // distinct commits touching the module
 	LastCommit string   `json:"last_commit"`
 	LastDate   string   `json:"last_date"` // committer date (ISO) of the last touch
@@ -113,9 +114,10 @@ func RealRunner(ctx context.Context, dir string, args ...string) ([]byte, error)
 // (each workflow file is its own module), the tools/ script keyspace (each
 // top-level script family is a module), and the examples/ policy-manifest
 // keyspace (each top-level examples/<file>.json is a module — see moduleOf), and
-// the .claude/skills/ agent-skill keyspace (each skill directory is a module).
-// (docs/ is a follow-on key space — see the version-everything backlog.)
-var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools", "examples", ".claude/skills"}
+// the .claude/skills/ agent-skill keyspace (each skill directory is a module),
+// and the docs/ prose keyspace (each top-level page and each docs/<dir> section
+// is a module — #2460).
+var trackedRoots = []string{"internal", "cmd", ".github/workflows", "tools", "examples", ".claude/skills", "docs"}
 
 // Snapshot computes the module-version report for the repo at dir: one
 // `git ls-files` to bound the LIVE module set, one `git log --name-only`
@@ -236,6 +238,17 @@ func liveModules(lsFilesOut []byte) map[string]bool {
 // repo's slash-command definition, so the same key space versions both. Other
 // .claude/ subtrees (settings, goal-prompts, the memory mirror) are not skill
 // definitions and belong to no module.
+// The docs/ prose keyspace (#2460) is the one hybrid, because docs/ is itself a
+// hybrid: a top-level page (docs/<file>.md) stands alone, so it is file-keyed
+// like the workflow and policy keyspaces, while a docs/<dir>/… page belongs to a
+// section that is revised as a unit, so it is directory-keyed like internal/ and
+// cmd/ — docs/fak/edge-quickstart.md is the module docs/fak, at any nesting
+// depth. ONLY .md prose counts: docs/ also carries generated data and site
+// config (the .jsonl nightrun ledgers — including this package's own
+// module-versions.jsonl — plus .json, .txt, .svg, _config.yml), and versioning
+// those would make a doc "revised" every time a nightly job appended a row.
+// Excluding them keeps rev a statement about PROSE, and keeps the ledger
+// convergent: stamping the ledger cannot bump the module the ledger lives in.
 // Files sitting directly under a directory root (no module directory) belong to
 // no module — including .claude/skills/README.md and .claude/skills/.gitignore,
 // which document and configure the keyspace rather than steer an agent — as do
@@ -284,6 +297,18 @@ func moduleOf(path string) (name, kind string, ok bool) {
 		if parts[1] == "skills" && len(parts) >= 4 {
 			return ".claude/skills/" + parts[2], "skill", true
 		}
+	case "docs":
+		// Hybrid prose keyspace, .md only (see the doc comment): a top-level page
+		// is its own module; a page in a section keys the section directory at any
+		// depth. Non-.md paths (generated ledgers, site config, images) are data,
+		// not prose, and belong to no module.
+		if !strings.HasSuffix(parts[len(parts)-1], ".md") {
+			return "", "", false
+		}
+		if len(parts) == 2 {
+			return path, "docs", true
+		}
+		return "docs/" + parts[1], "docs", true
 	}
 	return "", "", false
 }
@@ -322,9 +347,18 @@ func toolsFamily(file string) (fam string, ok bool) {
 // a path belongs to is a pure function of the path string. That is what lets the
 // commit-preview advisory (#2495) name the bumped modules within the preview's
 // latency budget — it costs a string split per path, nothing more. Paths under no
-// tracked keyspace (a file directly under a root, docs/*, nested tools/ or
-// examples/ fixtures) bump no module and are simply skipped; an empty or all-
-// untracked path set returns nil.
+// tracked keyspace (a file directly under a root, a non-.md docs/ data file,
+// nested tools/ or examples/ fixtures) bump no module and are simply skipped; an
+// empty or all-untracked path set returns nil.
+//
+// This is also the RESERVED docfreshrsi integration seam (#2460) — reserved, not
+// yet wired: nothing in internal/docfreshrsi calls this today. The intended shape
+// is that a docs-freshness pass holding a corpus key ("docs/fak/edge-quickstart.md")
+// would call ModulesForPaths to resolve it to its module key ("docs/fak"), then read
+// that module's rev from the fak-module-versions/1 ledger
+// (docs/nightrun/module-versions.jsonl), making staleness a rev delta against the
+// ledger rather than an ad-hoc signal. The mapping is git-free and pure, so such a
+// pass would pay no history walk for it.
 func ModulesForPaths(paths []string) []string {
 	seen := map[string]bool{}
 	var out []string

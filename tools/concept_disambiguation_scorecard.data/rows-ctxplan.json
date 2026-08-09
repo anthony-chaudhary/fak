@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "id": "planturntax",
+      "canonical": "PlanTurnTax",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The pure per-turn function that scores the three context-acquisition strategies (prefix reuse, session-index query, cold prefill) by their token tax and returns the single cheapest AVAILABLE one together with the reason it won.",
+      "distinction": "PlanTurnTax CHOOSES BETWEEN per-turn strategies; ProbePlan is one of the options it chooses among (ProbePlan plans the spans a single O(1) index query would retrieve). PlanTurnTax retrieves nothing itself. It is also not turntaxmeter, which MEASURES per-rung overhead after a run rather than deciding before a turn.",
+      "distinct_from": [
+        "x-goal25-plan-probeplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanTurnTax",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "turntaxdecision",
+      "canonical": "TurnTaxDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The recorded outcome of one PlanTurnTax call: the strategy chosen for a turn, the operator-readable reason it was chosen, and the three per-strategy token taxes plus availability flags the choice was made from.",
+      "distinction": "TurnTaxDecision records WHICH context-acquisition strategy a whole turn took and what it cost in tokens; PageFaultDecision records how ONE missing context item is admitted or refused. A turn produces exactly one TurnTaxDecision and any number of PageFaultDecisions.",
+      "distinct_from": [
+        "x-goal25-decision-pagefaultdecision"
+      ],
+      "aliases": [],
+      "grounding": "TurnTaxDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

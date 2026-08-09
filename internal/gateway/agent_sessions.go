@@ -113,7 +113,9 @@ func (s *Server) handleFakAgentSessions(w http.ResponseWriter, r *http.Request) 
 
 	began := time.Now()
 	ensureGovernedRungs()
-	m, calls, err := agent.RunGovernedArm(r.Context(), s.planner, req.Goal, maxTurns, s.nativeRunOptions(r.Context(), reqTrace)...)
+	opts, release := s.nativeRunOptions(r.Context(), reqTrace)
+	defer release()
+	m, calls, err := agent.RunGovernedArm(r.Context(), s.planner, req.Goal, maxTurns, opts...)
 	if err != nil {
 		// The stream is already open (200 written), so the failure is reported as the
 		// terminal in-stream event. Detail goes to the operator log only — the raw

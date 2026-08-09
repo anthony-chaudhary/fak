@@ -1,8 +1,10 @@
 package resume
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -250,6 +252,125 @@ func TestLoadIdentityRows(t *testing.T) {
 	// Round-trips through ResolveIdentity end-to-end.
 	if m := ResolveIdentity(rows, "u2"); !m.OK || m.Paired != "t2" || m.Row.Account != "worker-a" {
 		t.Fatalf("resolve over loaded rows = %+v, want ok -> t2 (worker-a)", m)
+	}
+}
+
+// FoldIdentityDriverPIDs answers "which process was witnessed driving this transcript?" —
+// last recorded pid per uuid wins, an unrecorded pid contributes nothing and never clobbers a
+// prior witness, and the join's Trace endpoint is not required for the (transcript, pid) fact.
+func TestFoldIdentityDriverPIDs(t *testing.T) {
+	cases := []struct {
+		name string
+		rows []IdentityRow
+		want map[string]int
+	}{
+		{
+			name: "nil rows yield an empty map",
+			rows: nil,
+			want: map[string]int{},
+		},
+		{
+			name: "a witnessed pid is recorded per transcript",
+			rows: []IdentityRow{{UUID: "u1", Trace: "t1", PID: 9001}, {UUID: "u2", Trace: "t2", PID: 9002}},
+			want: map[string]int{"u1": 9001, "u2": 9002},
+		},
+		{
+			// SessionStart re-fires on compact, so a transcript is observed repeatedly; the newest
+			// witness is the one that owns it.
+			name: "last recorded pid per uuid wins",
+			rows: []IdentityRow{{UUID: "u1", Trace: "t1", PID: 9001}, {UUID: "u1", Trace: "t1", PID: 9007}},
+			want: map[string]int{"u1": 9007},
+		},
+		{
+			// The forward-compat case that motivates the whole field: every row written before it
+			// existed decodes with PID 0. That is NOT RECORDED, and it must not erase a real one.
+			name: "a row with no pid contributes nothing and clobbers nothing",
+			rows: []IdentityRow{{UUID: "u1", Trace: "t1", PID: 9001}, {UUID: "u1", Trace: "t1"}, {UUID: "u2", Trace: "t2"}},
+			want: map[string]int{"u1": 9001},
+		},
+		{
+			name: "a negative pid is not a witness",
+			rows: []IdentityRow{{UUID: "u1", Trace: "t1", PID: -1}},
+			want: map[string]int{},
+		},
+		{
+			// Unlike FoldIdentity, a missing trace does not disqualify the row: the fact folded
+			// here is (transcript, driver pid), which the row still carries truthfully.
+			name: "a row missing the trace endpoint still carries its pid",
+			rows: []IdentityRow{{UUID: "u1", PID: 9001}},
+			want: map[string]int{"u1": 9001},
+		},
+		{
+			name: "a row missing the transcript has nothing to key on",
+			rows: []IdentityRow{{Trace: "t1", PID: 9001}, {UUID: "  ", Trace: "t2", PID: 9002}},
+			want: map[string]int{},
+		},
+		{
+			// The consumer keys on the lowercased transcript stem, so the fold normalizes.
+			name: "the transcript key is normalized to lower case",
+			rows: []IdentityRow{{UUID: "U1-ABC", Trace: "t1", PID: 9001}},
+			want: map[string]int{"u1-abc": 9001},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := FoldIdentityDriverPIDs(c.rows)
+			if got == nil {
+				t.Fatal("FoldIdentityDriverPIDs returned nil, want a non-nil map")
+			}
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v (len %d), want %v (len %d)", got, len(got), c.want, len(c.want))
+			}
+			for k, wv := range c.want {
+				if gv, ok := got[k]; !ok || gv != wv {
+					t.Fatalf("pid[%q] = %d (present=%v), want %d", k, gv, ok, wv)
+				}
+			}
+		})
+	}
+}
+
+// TestIdentityRowPIDWireForm pins the durable shape both directions: a row written before the
+// pid field existed still decodes (as NOT RECORDED), and a row carrying one round-trips. The
+// store is append-only, so an old row is not rewritable and the reader must handle it forever.
+func TestIdentityRowPIDWireForm(t *testing.T) {
+	dir := t.TempDir()
+	content := `{"ts":"t","uuid":"u-legacy","trace":"guard","via":"guard-sessionstart"}
+{"ts":"t","uuid":"u-witnessed","trace":"guard","pid":9001,"via":"guard-sessionstart"}
+`
+	if err := os.WriteFile(IdentityLedgerPath(dir), []byte(content), 0o644); err != nil {
+		t.Fatalf("write store: %v", err)
+	}
+	rows := LoadIdentityRows(dir)
+	if len(rows) != 2 {
+		t.Fatalf("LoadIdentityRows = %+v, want 2 rows", rows)
+	}
+	if rows[0].PID != 0 {
+		t.Fatalf("legacy row decoded PID = %d, want 0 (not recorded)", rows[0].PID)
+	}
+	if rows[1].PID != 9001 {
+		t.Fatalf("forward row decoded PID = %d, want 9001", rows[1].PID)
+	}
+	// Both rows still join, so adding the field cost the store nothing it already answered.
+	traceByUUID, _ := LoadIdentity(dir)
+	if traceByUUID["u-legacy"] != "guard" || traceByUUID["u-witnessed"] != "guard" {
+		t.Fatalf("the uuid<->trace join regressed: %v", traceByUUID)
+	}
+	pids := FoldIdentityDriverPIDs(rows)
+	if _, ok := pids["u-legacy"]; ok {
+		t.Fatalf("a legacy row must contribute no pid: %v", pids)
+	}
+	if pids["u-witnessed"] != 9001 {
+		t.Fatalf("witnessed pid = %v, want 9001", pids)
+	}
+	// The pid is omitted from the wire form when nothing was witnessed, so an unwitnessed row
+	// is byte-identical to the shape every prior reader already handles.
+	raw, err := json.Marshal(IdentityRow{UUID: "u1", Trace: "t1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "pid") {
+		t.Fatalf("unwitnessed row carries a pid key: %s", raw)
 	}
 }
 

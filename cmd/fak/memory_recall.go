@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 	"github.com/anthony-chaudhary/fak/internal/memoryread"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 	"github.com/anthony-chaudhary/fak/internal/memvaluescore"
@@ -73,6 +74,7 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the envelope as JSON (the full struct, unaffected by --format)")
 	explain := fs.Bool("explain", false, "print the byte budget and, if the index overflowed it, the typed MEMORY_INDEX_OVERFLOW count and the named entries dropped past the line (#2430)")
 	format := fs.String("format", "markdown", "surface encoding: markdown (default, rich prose) | json | toon | any memview.Register'd format")
+	injectionLedger := fs.String("injection-ledger", cachevaluereport.DefaultRecallInjectionLedger, "numbers-only recall injection debit ledger")
 	listFormats := fs.Bool("list-formats", false, "print the registered surface formats and exit")
 	ablateFormats := fs.String("ablate-formats", "", "measure this note set's byte/token cost under every named format (comma-separated, or \"all\") instead of rendering")
 	ledger := fs.String("ledger", "", "append witnessed recall events to this JSONL ledger ("+memvaluescore.LedgerSchema+"). Default: "+memvaluescore.DefaultLedgerRel+" under the repo root when recalling from the default store; an explicit --store never appends unless this flag names a path. \"off\" disables")
@@ -128,6 +130,13 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 					fmt.Fprintf(stderr, "fak memory recall: ledger append: %v (recall output unaffected)\n", err)
 				}
 			}
+		}
+	}
+
+	if *ablateFormats == "" && len(env.Rendered) > 0 {
+		if err := cachevaluereport.AppendRecallInjection(*injectionLedger, len(env.Rendered), env.Stats.EstimatedTokens, time.Now()); err != nil {
+			fmt.Fprintf(stderr, "fak memory recall: injection ledger: %v\n", err)
+			return 1
 		}
 	}
 

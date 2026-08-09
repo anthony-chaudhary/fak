@@ -20,10 +20,10 @@ package accounts
 //
 // The merge is a faithful port of csync's `deep_merge`: the defaults win for every leaf key
 // they name, dict values recurse, and every other key the account already has (theme,
-// effortLevel, …) is left untouched. The one exception is `model` (see seatSettingsDefaults and
-// #3091): it is SEAT-OWNED, so an already-set per-seat model is preserved and a fresh seat is
-// seeded with the launch default (Opus 4.8), never the registry-pinned fallback. It is
-// idempotent — a second projection reports no change
+// effortLevel, …) is left untouched. The exceptions are the SEAT-OWNED keys handled in
+// seatSettingsDefaults — `model` (#3091) and `askUserQuestionTimeout` — where an already-set
+// per-seat value is preserved and a fresh seat is seeded with the launch default rather than
+// whatever the registry pinned. It is idempotent — a second projection reports no change
 // — because the serialized form is byte-stable (sorted keys, 2-space indent, trailing newline),
 // exactly matching csync's `json.dumps(..., indent=2, sort_keys=True) + "\n"` so the two
 // implementations cannot drift.
@@ -82,29 +82,53 @@ func (r Registry) DefaultsSettings() (map[string]any, bool) {
 // model as seat-owned. Fable 5 stays the launch fallback CHAIN and is not touched here.
 const ProjectedDefaultModel = "claude-opus-5"
 
+// questionTimeoutKey is the harness setting behind the "Question auto-continue timeout" config
+// row: the idle time before a pending AskUserQuestion auto-continues with whatever answers are
+// selected so far. The harness accepts a closed enum — "60s", "5m", "10m", "never" — and
+// defaults to "never", i.e. a question a seat cannot answer blocks that session forever.
+const questionTimeoutKey = "askUserQuestionTimeout"
+
+// ProjectedQuestionTimeout is the value the projection seeds into a seat that carries none:
+// the shortest rung the harness offers, so an unattended launch never parks on a question. A
+// guarded fleet seat has no operator at the keyboard, so the harness default ("never") turns
+// every ask into an indefinite stall; auto-continuing after 60s of idle keeps the session moving
+// while still leaving a real operator a full minute to answer an interactive launch.
+//
+// It MUST stay one of the harness's accepted enum values — the setting is parsed with a
+// `.catch(undefined)`, so a typo degrades silently back to "never" rather than erroring.
+const ProjectedQuestionTimeout = "60s"
+
 // seatSettingsDefaults specializes the registry defaults overlay for one seat's current settings,
-// applying the `model` carve-out (#3091). When the defaults pin a model:
+// applying the SEAT-OWNED carve-outs. For `model` (#3091), when the defaults pin one:
 //   - if the seat already carries its own model, model is DROPPED from the overlay so the merge
 //     preserves the seat's choice (a hand-set "model":"sonnet" survives the next sync/add);
 //   - otherwise model is SEEDED as ProjectedDefaultModel (the launch default), not whatever the
 //     registry pinned (historically the fable-5 fallback).
 //
-// When the defaults name no model at all there is nothing to reconcile, so the defaults are
-// returned as-is. The shared registry defaults map is never mutated: a shallow copy is taken only
-// on the model-adjusting paths, and that is sufficient because model is a top-level scalar in the
-// settings block (the recursion in deepMergeJSON never reaches inside it).
+// When the defaults name no model at all there is nothing to reconcile for that key.
+// `askUserQuestionTimeout` follows the same shape but needs no registry pin to fire: a seat that
+// has never chosen one is seeded with ProjectedQuestionTimeout so every launched account carries
+// the auto-continue default, and a seat that HAS chosen one keeps it.
+//
+// The shared registry defaults map is never mutated — the overlay is a shallow copy, which is
+// sufficient because both carve-out keys are top-level scalars in the settings block (the
+// recursion in deepMergeJSON never reaches inside them).
 func seatSettingsDefaults(defaults, seat map[string]any) map[string]any {
-	if _, pins := defaults["model"]; !pins {
-		return defaults
-	}
-	overlay := make(map[string]any, len(defaults))
+	overlay := make(map[string]any, len(defaults)+1)
 	for k, v := range defaults {
 		overlay[k] = v
 	}
-	if _, seatHasModel := seat["model"]; seatHasModel {
-		delete(overlay, "model")
+	if _, pins := defaults["model"]; pins {
+		if _, seatHasModel := seat["model"]; seatHasModel {
+			delete(overlay, "model")
+		} else {
+			overlay["model"] = ProjectedDefaultModel
+		}
+	}
+	if _, seatHasTimeout := seat[questionTimeoutKey]; seatHasTimeout {
+		delete(overlay, questionTimeoutKey)
 	} else {
-		overlay["model"] = ProjectedDefaultModel
+		overlay[questionTimeoutKey] = ProjectedQuestionTimeout
 	}
 	return overlay
 }
@@ -118,7 +142,8 @@ func seatSettingsDefaults(defaults, seat map[string]any) map[string]any {
 // A home is skipped — recorded, never written — when it is tombstoned (an inactive seat must
 // not be reseeded) or carries no dir. For an active seat the existing settings.json is read
 // tolerantly (a missing or unparseable file reads as {} and is (re)created), the defaults are
-// merged in — with the seat-owned `model` carve-out (seatSettingsDefaults) applied first — and
+// merged in — with the seat-owned carve-outs (seatSettingsDefaults) applied first, which is also
+// what seeds `askUserQuestionTimeout` onto a seat the registry says nothing about — and
 // the file is rewritten ONLY when the merge changed something, so a re-run over an already-synced
 // roster writes nothing.
 func (r Registry) ProjectSettings(homes []Home, writeFn func(path string, b []byte) error) ([]SettingsResult, bool, error) {

@@ -344,6 +344,13 @@ class EvaluateTest(unittest.TestCase):
         # Neutralize the #4747 observed-effect gate (own behavior in
         # ObservedEffectGateTest) so these cases never make its body/label probe.
         mod.observed_effect_binds_closure = lambda root, row: (True, None)
+        # Neutralize the #5865 author-disclaimer gate (own behavior in
+        # DisclaimedResolutionGateTest). It is the one gate that reads the COMMIT
+        # rather than the issue, so it shells out to `git show` through the same
+        # run_capture these cases replace with a raising stub -- leaving it live
+        # would trip that stub on a local read, not on the `gh issue close` the
+        # stub exists to catch.
+        mod.disclaimer_binds_closure = lambda root, row: (True, None)
 
         def fake_reverify(root, sha):
             return reverify_map[sha]
@@ -706,6 +713,7 @@ class CoverageGateTest(unittest.TestCase):
         mod.load_audit = lambda root, audit_json, max_commits: audit
         mod.origin_main_resolvable = lambda root: False
         mod.reopen_blocks_close = lambda root, row: (True, None)  # inert #4374 gate
+        mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -899,6 +907,7 @@ class ReopenGateTest(unittest.TestCase):
         mod.load_audit = lambda root, audit_json, max_commits: self._audit_one()
         mod.origin_main_resolvable = lambda root: False
         mod.coverage_binds_closure = lambda root, row: (True, None)
+        mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -1076,6 +1085,7 @@ class ObservedEffectGateTest(unittest.TestCase):
         mod.load_audit = lambda root, audit_json, max_commits: audit
         mod.origin_main_resolvable = lambda root: False
         mod.reopen_blocks_close = lambda root, row: (True, None)
+        mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -1129,6 +1139,253 @@ class ObservedEffectGateTest(unittest.TestCase):
         self.assertEqual(p["results"][0]["action"], "skip_effect_unobserved")
         self.assertEqual(p["counts"]["would_close"], 0)
         self.assertEqual(p["counts"]["skipped_effect_unobserved"], 1)
+
+
+class DisclaimedResolutionGateTest(unittest.TestCase):
+    """The #5865 author-disclaimer gate: a commit whose OWN message says it does not
+    resolve the issue cannot witness that it does. Every other gate here reasons over
+    the issue (labels, body, timeline) or the diff shape (claim kind, touched paths);
+    none read the commit MESSAGE, which is exactly where an author states scope. The
+    witnessed harm: #2694 was planned `would_close` on 2726d19, whose body says "No
+    artifact is claimed under `visuals/` [...] The issue stays open."
+
+    The fixture bodies below are verbatim excerpts of the real commits."""
+
+    # verbatim from 2726d19 -- the #2694 harm.
+    BODY_2694 = (
+        "docs(mac): add a reachability re-check gate to the blocked showcase-capture "
+        "note (#2694) (fak docs)\n\n"
+        "The capture itself is still blocked and this commit does not claim it. #2694\n"
+        "wants a real terminal capture under `visuals/` showing the preflight panel.\n\n"
+        "No artifact is claimed under `visuals/` and no README link is added, because\n"
+        "neither would be true yet. The issue stays open.\n\nRefs #2694\n")
+    # verbatim from 3dbe6bf2 -- the #3258 case, a `code_effect` claim over real source.
+    BODY_3258 = (
+        "feat(agent): add the agent-runtime spine endpoint as a standalone tested unit "
+        "(#3258) (fak cmd)\n\n"
+        "Scope fence, stated rather than implied: this does NOT wire the route onto the "
+        "served\ngateway mux. Nothing in the shipped serving path changes, and the "
+        "endpoint is reachable\nonly from its own tests. The gateway-side route composes "
+        "with this contract when it\nlands; claiming it as a served endpoint now would be "
+        "claiming an integration that has no\nwitness.\n")
+    # verbatim from fec8da6f76 -- a LEGITIMATE #2299 witness that a naive marker eats.
+    BODY_2299 = (
+        "feat(gateway): add the single-arbiter fenced lease write plane over the "
+        "coordinator store (fak gateway)\n\n"
+        "Adds handleLeaseWrite: a single-arbiter fenced acquire/renew/release over\n"
+        "internal/leaseref's AcquireFenced/Renew/ReleaseFenced, serialized through a\n"
+        "package-level mutex so the coordinator clone is the one arbiter.\n"
+        "The cmd/fak host wiring (installing the leaseref-backed func + origin publish)\n"
+        "is a deferred follow-on.\n\nIssue: #2299\n")
+
+    # ---- pure classifier -------------------------------------------------
+
+    def test_fixture_2694_disclaimer_is_refused(self) -> None:
+        mod = load()
+        binds, reason = mod.commit_disclaims_resolution(2694, self.BODY_2694)
+        self.assertFalse(binds)
+        self.assertIn(mod.DISCLAIMED_HOLD, reason)
+        # the hold quotes the author's own sentence, so a human reading the plan can
+        # check it without going back to git.
+        self.assertIn("The issue stays open", reason)
+        self.assertIn("#2694", reason)
+
+    def test_fixture_3258_is_refused_at_the_code_effect_rung(self) -> None:
+        # the gate is deliberately RUNG-BLIND: 3dbe6bf2 is a `code_effect` claim over
+        # real source paths, so every diff-shape gate passes it -- only the author's
+        # own "would be claiming an integration that has no witness" catches it.
+        mod = load()
+        rv = {"witness_ok": True, "claim_kind": "code_effect", "touches_code": True}
+        row = {"number": 3258, "title": "feat(agent): agent-runtime spine endpoint"}
+        self.assertEqual(mod.claim_binds_resolution(rv, row), (True, None))  # passes
+        binds, reason = mod.commit_disclaims_resolution(3258, self.BODY_3258)
+        self.assertFalse(binds)                                              # held here
+        self.assertIn(mod.DISCLAIMED_HOLD, reason)
+
+    def test_ordinary_witness_commit_binds(self) -> None:
+        mod = load()
+        body = ("fix(gateway): treat same-tick ready as positive (fak gateway)\n\n"
+                "The readiness probe compared strictly greater-than, so a lease that "
+                "became ready on the same tick read as not-ready. Tests cover both "
+                "edges.\n\nIssue: #77\n")
+        self.assertEqual(mod.commit_disclaims_resolution(77, body), (True, None))
+
+    def test_deferred_follow_on_near_miss_binds(self) -> None:
+        # fec8da6f76 is one of #2299's OWN legitimate witnesses. A bare `follow-on`
+        # marker was rejected for this set on measurement -- it matches ~4% of recent
+        # commits and would falsely refuse exactly this row. Naming a deferred piece of
+        # adjacent work is not disclaiming THIS commit's resolution.
+        mod = load()
+        self.assertEqual(mod.commit_disclaims_resolution(2299, self.BODY_2299),
+                         (True, None))
+
+    def test_smart_quote_negation_is_caught(self) -> None:
+        # commit prose uses the smart apostrophe U+2019 freely; a marker that only
+        # matched the ASCII form would be trivially evadable.
+        mod = load()
+        for glyph in ("'", "’", ""):
+            with self.subTest(glyph=glyph):
+                body = f"feat(x): thing\n\nThis commit does n{glyph}t close the issue.\n"
+                binds, reason = mod.commit_disclaims_resolution(9, body)
+                self.assertFalse(binds)
+                self.assertIn(mod.DISCLAIMED_HOLD, reason)
+
+    def test_numbered_disclaimer_is_scoped_to_the_issue_it_names(self) -> None:
+        # "#5847 stays OPEN" disclaims THAT issue. Holding every other issue's close on
+        # it would be an over-refusal, so the numbered marker compiles per candidate.
+        mod = load()
+        body = "feat(x): partial rung\n\nRefs #5847. #5847 stays OPEN for the device rung.\n"
+        binds, reason = mod.commit_disclaims_resolution(5847, body)
+        self.assertFalse(binds)
+        self.assertIn(mod.DISCLAIMED_HOLD, reason)
+        # a DIFFERENT issue witnessed by the same commit is untouched.
+        self.assertEqual(mod.commit_disclaims_resolution(5848, body), (True, None))
+
+    def test_empty_body_binds(self) -> None:
+        # silence is not a disclaimer: this gate refuses on POSITIVE evidence only.
+        mod = load()
+        self.assertEqual(mod.commit_disclaims_resolution(5, ""), (True, None))
+
+    # ---- the git-reading seam --------------------------------------------
+
+    def test_reads_the_witness_sha_and_holds(self) -> None:
+        mod = load()
+        seen = []
+
+        def fake(cmd, cwd, timeout):
+            seen.append(cmd)
+            return 0, self.BODY_2694, ""
+
+        mod.run_capture = fake
+        binds, reason = mod.disclaimer_binds_closure(
+            ROOT, {"number": 2694, "sha": "2726d19806"})
+        self.assertFalse(binds)
+        self.assertIn(mod.DISCLAIMED_HOLD, reason)
+        self.assertEqual(seen[0][:4], ["git", "show", "-s", "--format=%B"])
+        self.assertEqual(seen[0][4], "2726d19806")
+
+    def test_unreadable_commit_body_allows_with_a_note(self) -> None:
+        # ASYMMETRY ON PURPOSE: unlike the issue-side gates, an unreadable input here
+        # ALLOWS with an audit note instead of failing closed. This gate only ever adds
+        # a refusal on positive evidence -- a disclaimer the author wrote -- and an
+        # absent commit message is not evidence of one. Failing closed would convert
+        # every workspace where `git show` cannot resolve the witness into a blanket
+        # hold. The row remains subject to every other gate, exactly as before #5865.
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (128, "", "fatal: bad object")
+        binds, note = mod.disclaimer_binds_closure(ROOT, {"number": 1, "sha": "deadbeef"})
+        self.assertTrue(binds)
+        self.assertIn(mod.DISCLAIM_UNREADABLE_NOTE, note)
+        self.assertNotIn(mod.DISCLAIMED_HOLD, note)
+
+    def test_missing_sha_allows_with_a_note_and_never_shells_out(self) -> None:
+        mod = load()
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("an empty sha must not reach git")
+
+        mod.run_capture = boom
+        binds, note = mod.disclaimer_binds_closure(ROOT, {"number": 1, "sha": ""})
+        self.assertTrue(binds)
+        self.assertIn(mod.DISCLAIM_UNREADABLE_NOTE, note)
+
+    def test_clean_body_binds_with_no_note(self) -> None:
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "fix(x): a real fix\n", "")
+        self.assertEqual(
+            mod.disclaimer_binds_closure(ROOT, {"number": 1, "sha": "abc"}), (True, None))
+
+    # ---- evaluate-level wiring -------------------------------------------
+
+    def _patch_through_to_disclaimer(self, mod, number, sha, subject) -> None:
+        """Witness + claim-bind all PASS, so the disclaimer gate decides. It runs FIRST
+        (ahead of every gh probe), because it is a local git read and a self-disclaimed
+        witness needs no tracker round-trip to refuse."""
+        mod.load_audit = lambda root, audit_json, max_commits: {
+            "closure_rate": 0.5, "issues": [
+                {"number": number, "title": "docs(mac): showcase capture",
+                 "bucket": "OPEN_WITNESSED",
+                 "witnessed_commits": [{"sha": sha, "subject": subject}]}]}
+        mod.origin_main_resolvable = lambda root: False
+        mod.coverage_binds_closure = lambda root, row: (True, None)
+        mod.reopen_blocks_close = lambda root, row: (True, None)
+        mod.observed_effect_binds_closure = lambda root, row: (True, None)
+        mod.reverify = lambda root, sha_: {
+            "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+            "claim_kind": "code_effect", "touches_code": True, "reason": None}
+
+    def test_evaluate_holds_disclaimed_and_never_calls_gh(self) -> None:
+        mod = load()
+        self._patch_through_to_disclaimer(
+            mod, 2694, "2726d19806", "docs(mac): reachability re-check gate (#2694)")
+
+        def git_only(cmd, cwd, timeout):
+            if cmd[:2] != ["git", "show"]:
+                raise AssertionError(
+                    "a self-disclaimed witness must never reach gh issue close")
+            return 0, self.BODY_2694, ""
+
+        mod.run_capture = git_only
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_disclaimed")
+        self.assertIn(mod.DISCLAIMED_HOLD, r["reason"])
+        self.assertEqual(p["counts"]["skipped_disclaimed"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(p["counts"]["would_close"], 0)
+        # the hold renders as a "hold" decision, not a close/failure.
+        self.assertEqual(mod.close_decision("skip_disclaimed"), "hold")
+        self.assertIn("disclaimed=1", mod.render(p))
+
+    def test_evaluate_dry_run_reflects_disclaimed_hold(self) -> None:
+        # the acceptance shape: #2694 was planned `would_close` before #5865.
+        mod = load()
+        self._patch_through_to_disclaimer(
+            mod, 2694, "2726d19806", "docs(mac): reachability re-check gate (#2694)")
+        mod.run_capture = lambda cmd, cwd, timeout: (0, self.BODY_2694, "")
+        p = mod.evaluate(ROOT, limit=10, live=False, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "skip_disclaimed")
+        self.assertEqual(p["counts"]["would_close"], 0)
+        self.assertEqual(p["counts"]["skipped_disclaimed"], 1)
+
+    def test_evaluate_undisclaimed_witness_still_closes(self) -> None:
+        # the regression side: fec8da6f76 (a real #2299 witness) closes normally.
+        mod = load()
+        self._patch_through_to_disclaimer(
+            mod, 2299, "fec8da6f76", "feat(gateway): fenced lease write plane")
+        base = gh_close_then_state()
+
+        def run(cmd, cwd, timeout):
+            if cmd[:2] == ["git", "show"]:
+                return 0, self.BODY_2299, ""
+            return base(cmd, cwd, timeout)
+
+        mod.run_capture = run
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "closed")
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["skipped_disclaimed"], 0)
+
+    def test_evaluate_unreadable_body_notes_the_gate_and_still_closes(self) -> None:
+        # the abstention is VISIBLE on the row: a gate that declined to apply must not
+        # be invisible in the plan.
+        mod = load()
+        self._patch_through_to_disclaimer(
+            mod, 2299, "fec8da6f76", "feat(gateway): fenced lease write plane")
+        base = gh_close_then_state()
+
+        def run(cmd, cwd, timeout):
+            if cmd[:2] == ["git", "show"]:
+                return 128, "", "fatal: bad object"
+            return base(cmd, cwd, timeout)
+
+        mod.run_capture = run
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "closed")
+        self.assertEqual(p["counts"]["skipped_disclaimed"], 0)
+        self.assertTrue(any(mod.DISCLAIM_UNREADABLE_NOTE in n
+                            for n in r.get("gate_notes", [])))
 
 
 if __name__ == "__main__":

@@ -229,3 +229,12 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestIndependentToolHintIsAdvisoryAndConditional(t *testing.T) {
+	rule := IndependentToolHint(true)
+	for _, want := range []string{"shadow-advisory", "independent", "dependent calls sequential", "never permission"} {
+		if !strings.Contains(rule, want) {
+			t.Fatalf("rule %q missing %q", rule, want)
+		}
+	}
+}

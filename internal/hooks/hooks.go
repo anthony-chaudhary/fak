@@ -5,9 +5,21 @@
 // a Windows box (process create + Defender scan), so a single `git commit` paid ~12-16s of
 // pure interpreter-spawn tax before any checking happened. None of the gates does real work:
 // each is regex/substring/os.Stat over `git diff --cached`, sub-millisecond once the
-// interpreter is up. This package collapses all 8 gates into one Go process that reads the
+// interpreter is up. This package collapses those gates into one Go process that reads the
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
+//
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 17 gates
+// today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
+// registry and fails when the two disagree, so this sentence cannot quietly decay the way the
+// count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
+//
+// The pattern, named once here so it is reusable: an exhaustiveness claim in this tree — "all N
+// gates", "the only caller", "every package" — carries the witness that would refute it. Either a
+// count is bound to the registry it quantifies over (this doc + exhaustiveness_claim_test.go), or
+// membership is asserted in both directions (failclosed_ledger_test.go), or the claim names the
+// test that enforces it (architest's TestEveryPackageDeclaresTier). A claim carrying none of those
+// is prose, and prose decays silently.
 //
 // Each gate is a byte-faithful port of its tools/check_*.py / scrub_public_copy.py oracle;
 // a `parity_test.go` differential harness asserts identical verdicts against the Python
@@ -48,12 +60,21 @@ type AddedLine struct {
 }
 
 // Finding is one gate violation. A gate returns zero findings for a clean staged set.
+//
+// Severity is the one OPTIONAL, gate-specific grade (#4328): a 0-100 magnitude a gate may
+// attach when it can measure HOW BAD this finding is, so a caller can act on the degree
+// rather than only on the gate's blanket block/warn mode. It is `omitempty` and every gate
+// but DUPLICATION leaves it zero, so the JSON report of every other gate is byte-unchanged.
+// Zero therefore means UNGRADED, never "graded as harmless" — a consumer must not read an
+// absent severity as a low one.
 type Finding struct {
 	Gate     string `json:"gate"`               // PUBLIC_LEAK, SECRET_SHAPE, ...
 	File     string `json:"file"`               // repo-relative path ("" when not file-scoped)
 	Line     int    `json:"line"`               // 0 when not applicable
 	Detail   string `json:"detail"`             // the human message
 	Advisory bool   `json:"advisory,omitempty"` // visible but non-blocking in this push
+	Severity int    `json:"severity,omitempty"` // 0 = ungraded; DUPLICATION: copied-coverage percent (0-100)
+	View     string `json:"view,omitempty"`     // WORKTREE, LANDS_TREE, or WORKTREE_FALLBACK
 }
 
 // Gate is one commit-boundary check. ModeEnv/EscapeEnv name the env vars that soften or skip
@@ -75,7 +96,7 @@ type Gate struct {
 // invoked them, with their mode/escape env vars. Order is preserved so operator output and any
 // first-failure behavior match the Python path.
 func PreCommitGates() []Gate {
-	return []Gate{
+	return scopeGates([]Gate{
 		{Name: "PUBLIC_LEAK", ModeEnv: "FLEET_SCRUB_GUARD", EscapeEnv: "FLEET_ALLOW_LEAK", Check: gatePublicLeak},
 		{Name: "SECRET_SHAPE", ModeEnv: "FLEET_SHAPE_GUARD", EscapeEnv: "ALLOW_SECRET_SHAPE", Check: gateSecretShape},
 		{Name: "DOC_PLACEMENT", ModeEnv: "FLEET_DOC_GUARD", EscapeEnv: "ALLOW_ROOT_DOC", Check: gateDocPlacement},
@@ -113,6 +134,7 @@ func PreCommitGates() []Gate {
 		// the exact one-line edit (or `fak new-leaf`). Set FLEET_TIER_GUARD=block to hard-enforce it,
 		// ALLOW_UNTIERED_LEAF=1 to skip it once.
 		{Name: "UNTIERED_LEAF", ModeEnv: "FLEET_TIER_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNTIERED_LEAF", Check: gateUntieredLeaf},
+		{Name: "PARALLEL_FABRIC_NUDGE", ModeEnv: "FLEET_PF_NUDGE", DefaultMode: "warn", EscapeEnv: "ALLOW_PF_NUDGE", Check: checkParallelFabricNudge},
 		// GOFMT is ADVISORY (DefaultMode "warn"): the commit-boundary sibling of make ci's
 		// gofmt-check. It fires when a staged .go file is not gofmt-clean, before the drift reds
 		// every peer's `make ci` at the trunk — a recurring red the release notes keep clearing
@@ -127,7 +149,7 @@ func PreCommitGates() []Gate {
 		// flag ("call the sibling helper"). Cross-package clones stay the whole-tree scorecard's job.
 		// Set FLEET_DUP_GUARD=block to hard-enforce it, ALLOW_DUP=1 to skip it once. It runs LAST.
 		{Name: "DUPLICATION", ModeEnv: "FLEET_DUP_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_DUP", Check: gateDuplication},
-	}
+	})
 }
 
 // realRunner runs the real git binary. Like witness.gitRunner: non-zero exit => code (not err);
@@ -176,6 +198,20 @@ type StagedDiff struct {
 	// timeout path would crash the very commit the bound exists to let through.
 	cacheMu   sync.Mutex
 	fileCache map[string]fileEntry // rel path -> cached read
+
+	// candMu guards candidates, the per-gate CANDIDATE DENOMINATOR ledger (#5602) — how many
+	// staged items each gate's own filter admitted for judgement. It is written from inside a
+	// gate's Check, so it is reachable by an abandoned over-budget gate concurrently with the
+	// next one for exactly the reason cacheMu exists. See candidates.go.
+	candMu     sync.Mutex
+	candidates map[string]candidateNote // gate name -> what that gate judged over
+
+	// probe replaces working-tree file reads for a scoped view. landsView memoizes the one
+	// HEAD-plus-index sibling shared by all LANDS_TREE gates in a run.
+	probe      fileReader
+	viewMu     sync.Mutex
+	landsView  *StagedDiff
+	landsTried bool
 }
 
 type fileEntry struct {
@@ -366,6 +402,9 @@ func (d *StagedDiff) sortedFiles() []string {
 // FileBytes reads a repo-relative file once and caches it. Missing file => (nil, false), never
 // an error — the gates treat an absent target as "does not resolve", matching os.path.exists.
 func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
+	if d.probe != nil {
+		return d.probe.FileBytes(rel)
+	}
 	if e, ok := d.cachedFile(rel); ok {
 		return e.data, e.exists
 	}
@@ -413,6 +452,9 @@ func (d *StagedDiff) storeFile(rel string, e fileEntry) {
 // Exists reports whether a repo-relative path exists on disk (file or dir), mirroring
 // os.path.exists used by the link/index resolvers.
 func (d *StagedDiff) Exists(rel string) bool {
+	if d.probe != nil {
+		return d.probe.Exists(rel)
+	}
 	full := filepath.Join(d.Root, filepath.FromSlash(rel))
 	_, err := os.Stat(full)
 	return err == nil
@@ -421,6 +463,9 @@ func (d *StagedDiff) Exists(rel string) bool {
 // Size returns the byte size of a repo-relative file, or (0,false) on error — the size cap
 // gate's os.path.getsize twin.
 func (d *StagedDiff) Size(rel string) (int64, bool) {
+	if d.probe != nil {
+		return d.probe.Size(rel)
+	}
 	fi, err := os.Stat(filepath.Join(d.Root, filepath.FromSlash(rel)))
 	if err != nil {
 		return 0, false

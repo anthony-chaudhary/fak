@@ -1004,3 +1004,64 @@ func TestServedTurnCountIncrementsPerFold(t *testing.T) {
 		t.Fatalf("nil-metrics servedTurnCount=%d, want 0", got)
 	}
 }
+
+func TestManagedCacheMessagePrefixUpgradeAndCreationAttribution(t *testing.T) {
+	s := anthropicPassthroughServer(0)
+	s.cacheTTL1H = true
+	s.metrics = newGatewayMetrics(time.Now())
+	req, err := agent.DecodeAnthropicMessagesRequest([]byte(`{"model":"claude-test","system":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"stable history","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded, messagePrefix := s.maybeUpgradeAnthropicCacheTTL1HScoped(req)
+	if !upgraded || !messagePrefix {
+		t.Fatalf("upgrade = %v, message prefix = %v; want true/true", upgraded, messagePrefix)
+	}
+	s.noteCtxValueTTL1hScope("trace-message", messagePrefix)
+	s.metrics.recordCacheCreationTierSplit(1200, s.ttl1hActiveFor("trace-message"), s.ttl1hMessagePrefixFor("trace-message"))
+
+	// The original head-only arm remains separately sweepable and attributable.
+	s.noteCtxValueTTL1hScope("trace-head", false)
+	s.metrics.recordCacheCreationTierSplit(300, s.ttl1hActiveFor("trace-head"), s.ttl1hMessagePrefixFor("trace-head"))
+	summary := s.metrics.adjudicationSummary()
+	if summary.CacheCreationTokensMessagePrefix != 1200 || summary.CacheCreationTokensHeadOnly != 300 {
+		t.Fatalf("creation split = message %d head %d, want 1200/300", summary.CacheCreationTokensMessagePrefix, summary.CacheCreationTokensHeadOnly)
+	}
+	if summary.CacheCreationTokensUpgraded != 1500 {
+		t.Fatalf("upgraded total = %d, want 1500", summary.CacheCreationTokensUpgraded)
+	}
+}
+
+func TestCacheCreationSpanLabel(t *testing.T) {
+	for _, tc := range []struct {
+		tokens  int
+		up, msg bool
+		want    string
+	}{
+		{0, true, true, "none"},
+		{10, false, false, "head_5m"},
+		{10, true, false, "head_1h"},
+		{10, true, true, "message_prefix_1h"},
+	} {
+		if got := cacheCreationSpanLabel(tc.tokens, tc.up, tc.msg); got != tc.want {
+			t.Errorf("label(%d,%v,%v) = %q, want %q", tc.tokens, tc.up, tc.msg, got, tc.want)
+		}
+	}
+}
+
+func TestManagedCacheHeadOnlyEnvironmentAblation(t *testing.T) {
+	t.Setenv("FAK_ABLATE_TTL_1H_HEAD_ONLY", "1")
+	s := anthropicPassthroughServer(0)
+	s.cacheTTL1H = true
+	req, err := agent.DecodeAnthropicMessagesRequest([]byte(`{"model":"claude-test","system":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"history","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded, messagePrefix := s.maybeUpgradeAnthropicCacheTTL1HScoped(req)
+	if !upgraded || messagePrefix {
+		t.Fatalf("head-only ablation = upgraded %v message %v, want true/false", upgraded, messagePrefix)
+	}
+	if got := bytes.Count(req.Raw, []byte(`"ttl":"1h"`)); got != 1 {
+		t.Fatalf("1h count = %d, want head only: %s", got, req.Raw)
+	}
+}

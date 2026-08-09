@@ -160,8 +160,10 @@ apt-get update -y || true
 apt-get install -y git python3 python3-pip curl build-essential cmake || true
 
 # Optional: join the Tailscale overlay so this machine can dial the gateway privately.
+# Bounded (#3479): this startup script runs SEQUENTIALLY and unattended, so a stalled
+# download here wedges provisioning of the GPU VM and everything installed after it.
 if [ -n "${RENDER_TS_AUTHKEY}" ]; then
-  curl -fsSL https://tailscale.com/install.sh | sh
+  curl -fsSL --connect-timeout 15 --max-time 120 https://tailscale.com/install.sh | sh
   tailscale up --authkey "${RENDER_TS_AUTHKEY}" --hostname "${VM_NAME}" || true
 fi
 

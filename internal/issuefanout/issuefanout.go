@@ -339,6 +339,35 @@ type Refusal struct{ msg string }
 
 func (r *Refusal) Error() string { return r.msg }
 
+// ContractRefusedReason is the closed-vocabulary code this leaf's contract refusals carry
+// (dos.toml [reasons.ISSUEFANOUT_CONTRACT_REFUSED], documented in AGENTS.md, which names this
+// package as the reason's floor).
+//
+// The vocabulary declared and documented this code, and no code path produced it (#5608): the
+// planner refused correctly through the typed *Refusal, but a refusal never named the reason the
+// table promised for it, so a consumer routing on reason codes could not attribute an
+// issuefanout refusal at all. A declared reason nothing can emit is a documented capability the
+// tree does not have — worse than an undeclared one, because the table reads as total.
+const ContractRefusedReason = "ISSUEFANOUT_CONTRACT_REFUSED"
+
+// Reason returns the closed-vocabulary refusal code for a contract refusal. It is deliberately
+// NOT folded into Error(): the message format is load-bearing for existing substring witnesses
+// and for callers that only read Error(), so the code rides alongside the message rather than
+// inside it.
+func (r *Refusal) Reason() string { return ContractRefusedReason }
+
+// RefusalReason reports the closed-vocabulary code for err when err is (or wraps) a contract
+// refusal, and ok=false otherwise. It is the join a consumer needs: ClassifyOutcome says WHICH
+// bucket a result fell into, this says which declared reason to route on, without the caller
+// reaching for the concrete type.
+func RefusalReason(err error) (string, bool) {
+	var r *Refusal
+	if err != nil && errors.As(err, &r) {
+		return r.Reason(), true
+	}
+	return "", false
+}
+
 // refusef builds a Refusal with a formatted message — the one constructor Build
 // uses for every contract rejection, so all of Build's refusals classify as
 // OutcomeRefused and any other error is a genuine failure.

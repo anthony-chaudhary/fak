@@ -32,6 +32,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditDeep(stdout, stderr, argv[1:])
 	case "budget":
 		return runSessionAuditBudget(stdout, stderr, argv[1:])
+	case "batch":
+		return runSessionAuditBatch(stdout, stderr, argv[1:])
 	case "feed":
 		return runSessionAuditFeed(stdout, stderr, argv[1:])
 	case "codex":
@@ -53,6 +55,8 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json] [--fail-on high|medium|none]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
 	fmt.Fprintln(w, "       fak session-audit budget  [--json] [--target-tokens N] [--target-turns N] <session.jsonl>")
+	fmt.Fprintln(w, "       fak session-audit batch   [--json] [--ledger docs/nightrun/turnbatch.jsonl] [--dry-run] <session.jsonl>")
+	fmt.Fprintln(w, "            (fold ONE transcript into the fak.turnbatch.v1 tool-call batching KPI and APPEND it to the durable ledger)")
 	fmt.Fprintln(w, "       fak session-audit feed    [--since-days N] [--all] [--ledger docs/nightrun/session-audit.jsonl] [--json] [--dry-run]")
 	fmt.Fprintln(w, "            (fold the window into ONE scrubbed row and APPEND it to the durable ledger)")
 	fmt.Fprintln(w, "       fak session-audit codex   [--json] [--root DIR] [--cwd DIR|--here] [--fresh-mins N] [--top N] [--max N]")

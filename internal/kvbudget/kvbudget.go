@@ -105,6 +105,13 @@ type Shape struct {
 	NumKVHeads int
 	HeadDim    int
 	VHeadDim   int
+	// PerLayer is the OPTIONAL per-layer refinement of the uniform geometry above
+	// — a sliding-window cap and, for MHA, differing head widths on the layers
+	// that have them (#5498). Nil (the zero value, and what every Shape built
+	// today carries) means uniform: every layer attends over the whole context at
+	// the scalar geometry, and every figure below is bit-for-bit what it was
+	// before this field existed. It is a POINTER so Shape stays comparable.
+	PerLayer *LayerProfile
 }
 
 // GLM52DSA is the DeepSeek-lineage ESTIMATE the triage doc §3.2 pins as the
@@ -177,16 +184,18 @@ func (s Shape) KVBytesPerToken(q Quant) float64 {
 }
 
 // KVGiBPerStream is the full KV cache GiB one stream of ctx tokens holds at the
-// given quant: ctx × KV_bytes/token ÷ 1024³ (doc §3.3). This is the exact
-// value; reportGiB rounds it to the doc's tabulated precision.
+// given quant: ctx × KV_bytes/token ÷ 1024³ (doc §3.3) for a uniform Shape, and
+// the per-layer sum bounded at min(window, ctx) for one that declares a
+// PerLayer profile (#5498). This is the exact value; reportGiB rounds it to the
+// doc's tabulated precision.
 func (s Shape) KVGiBPerStream(ctx int, q Quant) float64 {
-	return float64(ctx) * s.KVBytesPerToken(q) / GiB
+	return s.KVBytesPerStream(ctx, q) / GiB
 }
 
 // MLAGiBPerStream is the MLA-only cache GiB per stream (the doc's "MLA only"
 // column) — what would fit if DSA's separate index cache were not counted.
 func (s Shape) MLAGiBPerStream(ctx int, q Quant) float64 {
-	return float64(ctx) * s.MLABytesPerToken(q) / GiB
+	return s.MLABytesPerStream(ctx, q) / GiB
 }
 
 // MaxStreams is how many streams of a given per-stream KV footprint fit in a

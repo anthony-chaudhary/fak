@@ -29,9 +29,27 @@ package agent
 // prints the same owner label (Law A2 — every value carries its provenance).
 const FootprintProvenance = "ESTIMATED"
 
-// bytesPerTokenEstimate is the house ~4-chars/token divisor EstimateAnthropicTokens
-// uses. Named here so the footprint and the scalar estimate can never silently drift.
-const bytesPerTokenEstimate = 4
+// tokenDivisor is a rational characters-per-token calibration. Keeping it rational
+// makes the estimator deterministic without rounding a measured ratio to an integer.
+type tokenDivisor struct {
+	chars  int
+	tokens int
+}
+
+var (
+	// These calibrations are pinned by TestAnthropicTokenDivisorsAgainstRecordedFixtures.
+	// Prose and JSON Schema are deliberately separate surfaces: one shared divisor can
+	// turn an accounting error into a bad headroom/eviction decision.
+	proseTokenDivisor      = tokenDivisor{chars: 15, tokens: 4} // 3.75 chars/token
+	jsonSchemaTokenDivisor = tokenDivisor{chars: 9, tokens: 2}  // 4.50 chars/token
+)
+
+func estimateTokens(bytes int, divisor tokenDivisor) int {
+	if bytes <= 0 {
+		return 0
+	}
+	return bytes * divisor.tokens / divisor.chars
+}
 
 // FootprintBucket is one labeled slice of a request's estimated input-token cost.
 // Bytes is the exact, additive quantity (bucket bytes sum to Total.Bytes); Tokens is
@@ -76,10 +94,10 @@ type Footprint struct {
 	MessageCount int             `json:"message_count"`
 }
 
-// bucketFromBytes builds a bucket from an exact byte count against a shared token
-// total (so every bucket's Pct is a share of the SAME denominator).
-func bucketFromBytes(bytes, totalTokens int) FootprintBucket {
-	b := FootprintBucket{Bytes: bytes, Tokens: bytes / bytesPerTokenEstimate}
+// bucketFromEstimate builds a bucket from exact byte and estimated-token counts
+// against a shared token total (so every bucket's Pct has the SAME denominator).
+func bucketFromEstimate(bytes, tokens, totalTokens int) FootprintBucket {
+	b := FootprintBucket{Bytes: bytes, Tokens: tokens}
 	if totalTokens > 0 {
 		b.Pct = float64(b.Tokens) * 100 / float64(totalTokens)
 	}
@@ -151,7 +169,7 @@ func RequestFootprint(req *AnthropicMessagesRequest) Footprint {
 		perTool = append(perTool, ToolFootprint{
 			Name:   t.Function.Name,
 			Bytes:  tb,
-			Tokens: tb / bytesPerTokenEstimate,
+			Tokens: estimateTokens(tb, jsonSchemaTokenDivisor),
 		})
 	}
 
@@ -167,14 +185,18 @@ func RequestFootprint(req *AnthropicMessagesRequest) Footprint {
 	}
 
 	totalBytes := systemBytes + toolsBytes + historyBytes + tailBytes
-	totalTokens := totalBytes / bytesPerTokenEstimate
+	systemTokens := estimateTokens(systemBytes, proseTokenDivisor)
+	toolsTokens := estimateTokens(toolsBytes, jsonSchemaTokenDivisor)
+	historyTokens := estimateTokens(historyBytes, proseTokenDivisor)
+	tailTokens := estimateTokens(tailBytes, proseTokenDivisor)
+	totalTokens := systemTokens + toolsTokens + historyTokens + tailTokens
 
-	fp.System = bucketFromBytes(systemBytes, totalTokens)
-	fp.Tools = bucketFromBytes(toolsBytes, totalTokens)
-	fp.History = bucketFromBytes(historyBytes, totalTokens)
-	fp.Tail = bucketFromBytes(tailBytes, totalTokens)
-	fp.Floor = bucketFromBytes(systemBytes+toolsBytes, totalTokens)
-	fp.Total = bucketFromBytes(totalBytes, totalTokens)
+	fp.System = bucketFromEstimate(systemBytes, systemTokens, totalTokens)
+	fp.Tools = bucketFromEstimate(toolsBytes, toolsTokens, totalTokens)
+	fp.History = bucketFromEstimate(historyBytes, historyTokens, totalTokens)
+	fp.Tail = bucketFromEstimate(tailBytes, tailTokens, totalTokens)
+	fp.Floor = bucketFromEstimate(systemBytes+toolsBytes, systemTokens+toolsTokens, totalTokens)
+	fp.Total = bucketFromEstimate(totalBytes, totalTokens, totalTokens)
 	fp.PerTool = perTool
 	fp.ToolCount = len(req.Tools)
 	fp.MessageCount = len(req.Messages)

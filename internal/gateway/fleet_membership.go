@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -64,11 +65,22 @@ const (
 // router reads to place (and, on failover, re-place) a request. It supersedes a
 // flat endpoint-list entry by carrying role + engine kind; the registry adds live
 // health on top.
+//
+// Models is what makes a HETEROGENEOUS worker set describable: the model ids this
+// worker actually holds. An EMPTY Models means UNCONSTRAINED — the worker is a
+// candidate for every model — which is exactly the pre-labeling behavior, so an
+// existing configuration that never sets the field routes byte-identically. It is
+// deliberately NOT read as "serves nothing": a fail-closed reading here would
+// silently empty every deployed configuration the moment the field landed.
+// The registry copies the slice on Add (a caller may reuse its own); a slice
+// handed BACK by Admissible/Snapshot/Pick aliases the registry's copy and must be
+// treated read-only.
 type WorkerSpec struct {
 	ID       string
 	Role     WorkerRole
 	Engine   EngineKind
 	Endpoint string
+	Models   []string
 }
 
 var (
@@ -76,6 +88,16 @@ var (
 	// admissible worker exists to route (or re-route) a request to. A caller
 	// surfaces it rather than dropping the request silently.
 	ErrNoHealthyWorker = errors.New("gateway: no admissible worker in fleet membership")
+	// ErrNoWorkerForModel is the typed verdict a placement returns when the
+	// roster holds no worker for the requested model at all — a CONFIGURATION
+	// fault, deliberately distinct from ErrNoHealthyWorker, which is an OUTAGE
+	// (a worker holds the model but is unhealthy or draining). Folding the two
+	// together would make a misconfigured model id look like a fleet failure and
+	// send an operator hunting a health problem that does not exist. It is never
+	// returned for an empty roster: with nothing registered there is no evidence
+	// of a model mismatch, so an empty fleet stays ErrNoHealthyWorker exactly as
+	// before.
+	ErrNoWorkerForModel = errors.New("gateway: no worker in fleet membership holds the requested model")
 	// ErrWorkerExists guards a duplicate registration.
 	ErrWorkerExists = errors.New("gateway: worker already registered")
 	// ErrWorkerUnknown guards a mutation of an unregistered worker.
@@ -126,6 +148,45 @@ func (w *memberWorker) admissible() bool {
 	return w.health == HealthHealthy && !w.draining
 }
 
+// servesModel reports whether this worker holds model — the MODEL filter, which
+// runs BEFORE the health filter so "nobody holds this model" is decided
+// independently of liveness. Unconstrained on BOTH sides: a worker with no
+// declared Models serves every model (today's behavior), and an empty model
+// query means the caller did not constrain the request, so every worker matches
+// (which is what keeps the un-modeled Pick/Dispatch path unchanged). The caller
+// must hold the registry lock.
+func (w *memberWorker) servesModel(model string) bool {
+	if len(w.spec.Models) == 0 || model == "" {
+		return true
+	}
+	for _, held := range w.spec.Models {
+		if held == model {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeModels copies the caller's slice (so a caller that reuses its own
+// backing array cannot mutate the registry afterwards) and drops blank entries.
+// A spec whose entries are all blank normalizes to nil — i.e. UNCONSTRAINED, the
+// fail-open reading; a malformed label must not silently strand a worker.
+func normalizeModels(models []string) []string {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // FleetMembership is the live membership + health/drain/failover registry the
 // router reads. All methods are safe for concurrent use.
 type FleetMembership struct {
@@ -169,7 +230,10 @@ func NewFleetMembership(cfg MembershipConfig) *FleetMembership {
 }
 
 // Add registers a worker. Role defaults to unified and Engine to external when
-// unset. A new worker starts unknown (not admissible) until its first probe.
+// unset. Models is copied and blank-stripped; leaving it empty registers an
+// UNCONSTRAINED worker (a candidate for every model), which is the pre-labeling
+// default every existing caller gets for free. A new worker starts unknown (not
+// admissible) until its first probe.
 func (m *FleetMembership) Add(spec WorkerSpec) error {
 	if spec.ID == "" {
 		return errors.New("gateway: worker spec has empty id")
@@ -180,6 +244,7 @@ func (m *FleetMembership) Add(spec WorkerSpec) error {
 	if spec.Engine == "" {
 		spec.Engine = EngineExternal
 	}
+	spec.Models = normalizeModels(spec.Models)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.workers[spec.ID]; ok {
@@ -425,38 +490,94 @@ func (m *FleetMembership) Release(id string) {
 // rather than dropping the request). Pick does NOT acquire; use Dispatch for the
 // acquire / failover / release lifecycle.
 func (m *FleetMembership) Pick() (WorkerSpec, bool) {
-	return m.pickExcept(nil)
+	spec, err := m.pickExceptForModel("", nil)
+	return spec, err == nil
 }
 
-// pickExcept returns the next admissible worker not in skip, advancing the
-// round-robin cursor so repeated calls spread across the admissible set.
-func (m *FleetMembership) pickExcept(skip map[string]struct{}) (WorkerSpec, bool) {
+// PickForModel is Pick constrained to the workers that hold model: the model
+// filter runs FIRST, so the two failure modes stay typed apart —
+// ErrNoWorkerForModel when the roster holds no such worker (configuration) and
+// ErrNoHealthyWorker when a holder exists but none is currently admissible
+// (outage). An empty model is unconstrained and behaves exactly like Pick.
+func (m *FleetMembership) PickForModel(model string) (WorkerSpec, error) {
+	return m.pickExceptForModel(model, nil)
+}
+
+// CandidatesForModel returns the admissible workers that hold model, in
+// registration order — the candidate set a router filters its replicas against.
+// It applies the same model-before-health ordering as PickForModel and returns
+// the same two typed verdicts instead of an empty set, so a caller never has to
+// guess which of the two conditions emptied the set.
+func (m *FleetMembership) CandidatesForModel(model string) ([]WorkerSpec, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	adm := m.admissibleIDsLocked()
-	n := uint64(len(adm))
-	if n == 0 {
-		return WorkerSpec{}, false
+	ids, err := m.classifyForModelLocked(model)
+	if err != nil {
+		return nil, err
 	}
+	out := make([]WorkerSpec, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, m.workers[id].spec)
+	}
+	return out, nil
+}
+
+// classifyForModelLocked partitions the roster for model and is the single place
+// the two typed verdicts are decided. It runs the MODEL filter over EVERY
+// registered worker regardless of health, and only then the HEALTH filter over
+// the holders — the ordering the whole design turns on:
+//
+//   - no registered worker holds model (roster non-empty) -> ErrNoWorkerForModel
+//   - holders exist but none is admissible                -> ErrNoHealthyWorker
+//   - an empty roster                                     -> ErrNoHealthyWorker
+//
+// The empty-roster arm is deliberate: with nothing registered there is no
+// evidence distinguishing a bad model id from a fleet that has not come up, so
+// it keeps the pre-existing verdict rather than inventing a configuration fault.
+// The caller must hold the registry lock.
+func (m *FleetMembership) classifyForModelLocked(model string) ([]string, error) {
+	var ids []string
+	held := false
+	for _, id := range m.order {
+		w := m.workers[id]
+		if w == nil || !w.servesModel(model) {
+			continue
+		}
+		held = true
+		if w.admissible() {
+			ids = append(ids, id)
+		}
+	}
+	if !held && len(m.order) > 0 {
+		return nil, fmt.Errorf("%w: %q", ErrNoWorkerForModel, model)
+	}
+	if len(ids) == 0 {
+		return nil, ErrNoHealthyWorker
+	}
+	return ids, nil
+}
+
+// pickExceptForModel is the one placement primitive: it applies the
+// model-before-health classification, then round-robins over the surviving
+// candidates, skipping ids already tried. The cursor advances exactly as the
+// un-modeled path always did, so an unconstrained call is unchanged.
+func (m *FleetMembership) pickExceptForModel(model string, skip map[string]struct{}) (WorkerSpec, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	adm, err := m.classifyForModelLocked(model)
+	if err != nil {
+		return WorkerSpec{}, err
+	}
+	n := uint64(len(adm))
 	for i := uint64(0); i < n; i++ {
 		id := adm[int((m.rr+i)%n)]
 		if _, done := skip[id]; done {
 			continue
 		}
 		m.rr += i + 1
-		return m.workers[id].spec, true
+		return m.workers[id].spec, nil
 	}
-	return WorkerSpec{}, false
-}
-
-func (m *FleetMembership) admissibleIDsLocked() []string {
-	var ids []string
-	for _, id := range m.order {
-		if w := m.workers[id]; w != nil && w.admissible() {
-			ids = append(ids, id)
-		}
-	}
-	return ids
+	return WorkerSpec{}, ErrNoHealthyWorker
 }
 
 // Dispatch routes a request to an admissible worker and retries on the NEXT
@@ -471,11 +592,27 @@ func (m *FleetMembership) admissibleIDsLocked() []string {
 // verdict the caller surfaces, never a dropped request. On success it returns the
 // worker that served the request.
 func (m *FleetMembership) Dispatch(ctx context.Context, send func(ctx context.Context, spec WorkerSpec) error) (WorkerSpec, error) {
+	return m.DispatchForModel(ctx, "", send)
+}
+
+// DispatchForModel is Dispatch constrained to the workers that hold model. The
+// model filter runs before placement, so failover re-places the request only
+// onto OTHER holders of the same model — never onto a worker holding a different
+// one. When the roster holds no worker for model it returns ErrNoWorkerForModel
+// WITHOUT calling send even once: a configuration mistake must never become a
+// dial to a wrong upstream. An empty model is unconstrained and is exactly
+// Dispatch.
+func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, send func(ctx context.Context, spec WorkerSpec) error) (WorkerSpec, error) {
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
-		spec, ok := m.pickExcept(tried)
-		if !ok {
+		spec, pickErr := m.pickExceptForModel(model, tried)
+		if pickErr != nil {
+			// A model nobody holds is a configuration verdict, never an outage —
+			// it is not wrapped in ErrNoHealthyWorker even mid-failover.
+			if errors.Is(pickErr, ErrNoWorkerForModel) {
+				return WorkerSpec{}, pickErr
+			}
 			if lastErr != nil {
 				return WorkerSpec{}, fmt.Errorf("%w: every admissible worker failed: %w", ErrNoHealthyWorker, lastErr)
 			}

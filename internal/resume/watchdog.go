@@ -67,6 +67,13 @@ type WatchdogPlanRow struct {
 	// Rehomed marks a plan row whose transcript must be copied onto ResumeConfigDir
 	// before the resume can find it.
 	Rehomed bool `json:"rehomed,omitempty"`
+	// PartialBlocks is the interrupted trailing turn's emitted blocks (#5927), attached by
+	// the SHELL from the newest transcript tail at decision time — never part of the
+	// fleet_sessions.py plan JSON. The shell feeds blocks only for a turn the transcript
+	// proves INCOMPLETE (the model still owes a reply, or a tool call has no matching
+	// result); a cleanly-completed trailing answer is not a partial turn. Nil/empty
+	// (unreadable transcript, nothing pending) leaves the replay-safety gate inert.
+	PartialBlocks []EmittedBlock `json:"partial_blocks,omitempty"`
 }
 
 // ResumeTarget is the config dir a launch must pin CLAUDE_CONFIG_DIR to: the re-home
@@ -194,6 +201,24 @@ func DecideWatchdogRow(row WatchdogPlanRow, g WatchdogGuards, history []Attempt,
 	}
 	if d := RetryGate(history, outcome, g.MaxAttempts); d.Blocked {
 		return WatchdogRowDecision{Action: WatchdogSkipBlocked, Reason: d.Reason}
+	}
+	// Replay-safety conjunct (#5927): the retry gate above judged the ERROR; this judges
+	// what the interrupted turn already EMITTED. It is an additional conjunct only — it can
+	// narrow an eligible retry, never overturn a Blocked verdict or reclassify the error.
+	// A partial whose tool calls all carry matching results is preserve-and-continued:
+	// `claude --resume` continues the preserved transcript, which is exactly that
+	// actuation, so it launches with the distinct reason. A partial that emitted
+	// replay-unsafe output — flagship: a tool call with no matching result, whose side
+	// effect cannot be proven absent — suppresses the auto-retry with the reason on the
+	// row, never silently.
+	switch pd := DecidePartialRetry(RetryableError, row.PartialBlocks); pd.Action {
+	case PartialRetrySuppressed:
+		return WatchdogRowDecision{Action: WatchdogSkipBlocked,
+			Reason: fmt.Sprintf("interrupted turn emitted replay-unsafe output; auto-retry suppressed (%s)", pd.Reason)}
+	case PartialPreserveContinue:
+		return WatchdogRowDecision{Action: WatchdogLaunch,
+			Reason:  fmt.Sprintf("resume continues the preserved partial turn (%s)", pd.Reason),
+			Attempt: CountAttempts(history) + 1}
 	}
 	return WatchdogRowDecision{Action: WatchdogLaunch,
 		Reason: "retry gate allows a resume", Attempt: CountAttempts(history) + 1}

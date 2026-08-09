@@ -139,7 +139,14 @@ func TestRunAccountsListJSONShowsAPIKeySeat(t *testing.T) {
 // posture, so guard bills the key and the managed cache resolves ACTIVE.
 func TestRunAccountsLaunchAPIKeySeat(t *testing.T) {
 	const env = "FAK_TEST_5331_LAUNCH_KEY"
-	t.Setenv(env, "sk-ant-api03-live")
+	// The placeholder is deliberately NOT secret-SHAPED. The #2358 inherited-secret floor
+	// strips an `sk-…` value held under any name outside providerAPIKeyNames, so the original
+	// `sk-ant-api03-live` fixture pinned a launch whose child could never read the very
+	// variable its argv referenced (#5503). That contradiction is now a refusal
+	// (launchStrippedAPIKeyEnvRefusal), covered in accounts_launch_apikeyenv_test.go; this
+	// test's subject is the argv SPLICING, so it uses a reference that survives the floor.
+	const fakeKey = "placeholder-not-a-real-key"
+	t.Setenv(env, fakeKey)
 	t.Setenv(fleetManagedCacheEnv, "")
 	t.Setenv(fleetGuardAPIKeyEnvEnv, "") // the seat's OWN reference must be spliced, not the fleet knob
 	home := t.TempDir()
@@ -175,7 +182,7 @@ func TestRunAccountsLaunchAPIKeySeat(t *testing.T) {
 	if !strings.Contains(errb.String(), "$"+env) {
 		t.Fatalf("launch plan should name the env-var reference:\n%s", errb.String())
 	}
-	if strings.Contains(errb.String(), "sk-ant-api03") || strings.Contains(joined, "sk-ant-api03") {
+	if strings.Contains(errb.String(), fakeKey) || strings.Contains(joined, fakeKey) {
 		t.Fatalf("launch must never surface the secret itself")
 	}
 }

@@ -1,0 +1,311 @@
+{
+  "schema": "effect-receipt.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run TestEffectReceipt -count=1",
+    "generated_by": "fak/internal/bench.RunEffectSequence",
+    "note": "Arms run against a labeled in-memory adapter fixture (SyntheticEnv) with injected faults: the run witnesses the stage machine, the subject-set binding, and the typed refusals. A real harness feeds the same receipt shape by implementing Adapter over its own environment."
+  },
+  "arms": [
+    {
+      "arm": "baseline",
+      "subject_binding": "bind:5bf083e79f7e66be",
+      "stages": [
+        {
+          "stage": "BEFORE",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:f03ca1cfa95e1bbb",
+              "normalized_digest": "sha256:f03ca1cfa95e1bbb"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:1ecdddbde167f222"
+            }
+          ]
+        },
+        {
+          "stage": "REQUESTED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": false,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:14693bd55ac9de31",
+              "normalized_digest": "sha256:14693bd55ac9de31",
+              "request": "accepted"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:ebfb23c1664176b6",
+              "request": "accepted"
+            }
+          ]
+        },
+        {
+          "stage": "EFFECTIVE",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:0f224a6909f6d879",
+              "normalized_digest": "sha256:14693bd55ac9de31",
+              "effect": "effective"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:ebfb23c1664176b6",
+              "effect": "effective"
+            }
+          ]
+        },
+        {
+          "stage": "RESTORE_ATTEMPTED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": false,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:f03ca1cfa95e1bbb",
+              "request": "accepted"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:1ecdddbde167f222",
+              "request": "accepted"
+            }
+          ]
+        },
+        {
+          "stage": "RESTORED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:456583b6a4e94e50",
+              "normalized_digest": "sha256:f03ca1cfa95e1bbb",
+              "restoration": "restored"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:1ecdddbde167f222",
+              "restoration": "restored"
+            }
+          ]
+        }
+      ],
+      "restoration_rule": [
+        {
+          "subject": "bench.run_label",
+          "rule": "semantic",
+          "normalizer": "drop-volatile-write-marker"
+        },
+        {
+          "subject": "bench.threads",
+          "rule": "exact",
+          "normalizer": "identity"
+        }
+      ],
+      "measurement_ran": true,
+      "compensation_accepted": true,
+      "state_verified_clean": true,
+      "outcome": "restored",
+      "finding": "applied, independently observed effective, measured, compensated, and independently observed back at the captured value for all 2 subject(s)."
+    },
+    {
+      "arm": "leaky-cleanup",
+      "subject_binding": "bind:5bf083e79f7e66be",
+      "stages": [
+        {
+          "stage": "BEFORE",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:456583b6a4e94e50",
+              "normalized_digest": "sha256:f03ca1cfa95e1bbb"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:1ecdddbde167f222"
+            }
+          ]
+        },
+        {
+          "stage": "REQUESTED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": false,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:14693bd55ac9de31",
+              "normalized_digest": "sha256:14693bd55ac9de31",
+              "request": "accepted"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:ebfb23c1664176b6",
+              "request": "accepted"
+            }
+          ]
+        },
+        {
+          "stage": "EFFECTIVE",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:18434949a77bb4a4",
+              "normalized_digest": "sha256:14693bd55ac9de31",
+              "effect": "effective"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:ebfb23c1664176b6",
+              "effect": "effective"
+            }
+          ]
+        },
+        {
+          "stage": "RESTORE_ATTEMPTED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": false,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:456583b6a4e94e50",
+              "request": "accepted"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:1ecdddbde167f222",
+              "request": "accepted"
+            }
+          ]
+        },
+        {
+          "stage": "RESTORED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": [
+            {
+              "subject": "bench.run_label",
+              "readable": true,
+              "value_digest": "sha256:41eed212ef449f5b",
+              "normalized_digest": "sha256:f03ca1cfa95e1bbb",
+              "restoration": "restored"
+            },
+            {
+              "subject": "bench.threads",
+              "readable": true,
+              "value_digest": "sha256:ebfb23c1664176b6",
+              "restoration": "changed"
+            }
+          ]
+        }
+      ],
+      "restoration_rule": [
+        {
+          "subject": "bench.run_label",
+          "rule": "semantic",
+          "normalizer": "drop-volatile-write-marker"
+        },
+        {
+          "subject": "bench.threads",
+          "rule": "exact",
+          "normalizer": "identity"
+        }
+      ],
+      "measurement_ran": true,
+      "compensation_accepted": true,
+      "state_verified_clean": false,
+      "outcome": "restore_failed",
+      "finding": "restoration FAILED: bench.threads did not return to the captured value under the declared rule; state is left changed and no measurement from this arm may be compared."
+    },
+    {
+      "arm": "successor",
+      "subject_binding": "bind:5bf083e79f7e66be",
+      "stages": [
+        {
+          "stage": "BEFORE",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": null,
+          "refusal": "predecessor_state_unclean"
+        },
+        {
+          "stage": "REQUESTED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": false,
+          "subjects": null,
+          "refusal": "predecessor_state_unclean"
+        },
+        {
+          "stage": "EFFECTIVE",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": null,
+          "refusal": "predecessor_state_unclean"
+        },
+        {
+          "stage": "RESTORE_ATTEMPTED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": false,
+          "subjects": null,
+          "refusal": "predecessor_state_unclean"
+        },
+        {
+          "stage": "RESTORED",
+          "subject_binding": "bind:5bf083e79f7e66be",
+          "independently_observed": true,
+          "subjects": null,
+          "refusal": "predecessor_state_unclean"
+        }
+      ],
+      "restoration_rule": [
+        {
+          "subject": "bench.run_label",
+          "rule": "semantic",
+          "normalizer": "drop-volatile-write-marker"
+        },
+        {
+          "subject": "bench.threads",
+          "rule": "exact",
+          "normalizer": "identity"
+        }
+      ],
+      "measurement_ran": false,
+      "compensation_accepted": true,
+      "state_verified_clean": false,
+      "outcome": "predecessor_state_unclean",
+      "finding": "refused before any observation: a preceding arm left bench.threads (changed) in a state this arm depends on; running it would compare against unverified state."
+    }
+  ],
+  "verdict": "effect_transaction_flagged",
+  "finding": "2 of 3 arm(s) reached a non-success outcome (leaky-cleanup=restore_failed, successor=predecessor_state_unclean); 1 arm(s) completed with verified clean state."
+}

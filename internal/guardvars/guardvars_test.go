@@ -83,6 +83,8 @@ func populatedCacheAttributionVars() CacheAttributionVars {
 
 		ProviderPromptCacheReadTokenEquiv:         8.5,
 		ProviderPromptCacheWritePremiumTokenEquiv: -6.25,
+		CacheCreationTokensHeadOnly:               17,
+		CacheCreationTokensMessagePrefix:          19,
 		FakCompactionShedTokens:                   101,
 		FakCompactionCacheReadTokens:              103,
 		FakKVPrefixReusedTokens:                   107,
@@ -101,6 +103,8 @@ const cacheAttributionVarsWire = `{
 	"total_token_equiv": 3.75,
 	"fak_vdso_avoided_calls": 109,
 	"provider_prompt_cache_write_premium_token_equiv": -6.25,
+	"cache_creation_tokens_head_only": 17,
+	"cache_creation_tokens_message_prefix": 19,
 	"fak_compaction_shed_tokens": 101,
 	"fak_defer_finding": "DEFER_ENABLED_BUT_INERT",
 	"provider_token_equiv": 1.5,
@@ -229,6 +233,8 @@ func TestCacheAttributionVarsWireKeys(t *testing.T) {
 		"total_token_equiv",
 		"provider_prompt_cache_read_token_equiv",
 		"provider_prompt_cache_write_premium_token_equiv",
+		"cache_creation_tokens_head_only",
+		"cache_creation_tokens_message_prefix",
 		"fak_compaction_shed_tokens",
 		"fak_compaction_cache_read_tokens",
 		"fak_kv_prefix_reused_tokens",
@@ -290,6 +296,8 @@ func TestWireKeysCarryTheRightValues(t *testing.T) {
 				"total_token_equiv":                               3.75,
 				"provider_prompt_cache_read_token_equiv":          8.5,
 				"provider_prompt_cache_write_premium_token_equiv": -6.25,
+				"cache_creation_tokens_head_only":                 float64(17),
+				"cache_creation_tokens_message_prefix":            float64(19),
 				"fak_compaction_shed_tokens":                      float64(101),
 				"fak_compaction_cache_read_tokens":                float64(103),
 				"fak_kv_prefix_reused_tokens":                     float64(107),
@@ -353,7 +361,7 @@ func TestFieldCountsMatchThePinnedKeySets(t *testing.T) {
 		want int
 	}{
 		{"SessionVars", reflect.TypeOf(SessionVars{}), 14},
-		{"CacheAttributionVars", reflect.TypeOf(CacheAttributionVars{}), 14},
+		{"CacheAttributionVars", reflect.TypeOf(CacheAttributionVars{}), 16},
 		{"ManagedCacheVars", reflect.TypeOf(ManagedCacheVars{}), 6},
 	} {
 		if got := tc.typ.NumField(); got != tc.want {

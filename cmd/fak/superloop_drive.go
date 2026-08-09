@@ -172,7 +172,7 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	// the single worst-first member (one member per walk). The walk mutates nothing.
 	// A declared issue-target folds its live progress in here (surface-only until a
 	// dispatch ledger exists), so the headline gates the drive, not just decorates it.
-	rep := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
+	rep := superloopWalkNow(root, s)
 	decision := superloop.Drive(rep)
 	report := superloopDriveReport{Schema: superloop.DriveSchema, Intent: s.Name, Decision: decision}
 
@@ -223,12 +223,8 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	// unsatisfied, so it can never satisfy the intent — the exit reflects that honestly.
 	// The issue-target gate re-folds too: a member run that progressed issues moves the
 	// live count, and an unmet headline keeps the re-fold unsatisfied.
-	refold := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
-	report.Refold = &refold
-	code := 1
-	if refold.Satisfied {
-		code = 0
-	}
+	refold, code := superloopRefoldExit(root, s)
+	report.Refold = refold
 	return finishSuperloopDrive(stdout, stderr, *asJSON, report, code)
 }
 
@@ -311,7 +307,7 @@ type superloopDriveBatchEntry struct {
 // and are skipped (no private spawn path). One re-fold over the whole intent is the
 // exit check.
 func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, s superloop.Super, lane string, tree []string, ledger string, k int, execute bool, execTimeout time.Duration) int {
-	rep := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
+	rep := superloopWalkNow(root, s)
 	bdec := superloop.DriveBatch(rep, k)
 	report := superloopDriveBatchReport{Schema: superloop.BatchDriveSchema, Intent: s.Name, Batch: k, Decision: bdec, Offered: len(bdec.Members)}
 
@@ -373,13 +369,31 @@ func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, 
 	// A driven-but-unwitnessed member keeps the re-fold unsatisfied, so a batch can
 	// never satisfy the intent on surfacing alone.
 	report.Outcome = "entered"
-	refold := superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
-	report.Refold = &refold
-	code := 1
-	if refold.Satisfied {
-		code = 0
-	}
+	refold, code := superloopRefoldExit(root, s)
+	report.Refold = refold
 	return finishSuperloopDriveBatch(stdout, stderr, asJSON, report, code)
+}
+
+// superloopWalkNow reads every member's status off the cheap committed surfaces and folds
+// ONE walk report, with the issue-target progress opts applied. Both drives walk twice --
+// once to select the worst-first member(s), once to re-fold as the exit check -- and every
+// one of those walks has to read the intent the same way, or a re-fold could disagree with
+// the selection that preceded it for no reason but a drifted argument list. The walk mutates
+// nothing.
+func superloopWalkNow(root string, s superloop.Super) superloop.WalkReport {
+	return superloop.Walk(s, collectSuperloopStatuses(root, s), issueProgressWalkOpts(root, s)...)
+}
+
+// superloopRefoldExit performs the post-run re-fold and returns it together with the drive's
+// exit code. The rule is the same for the single and the batch drive: 0 only when the
+// re-folded intent is SATISFIED, otherwise 1. A driven-but-unwitnessed (unmeasured/dark)
+// member keeps the re-fold unsatisfied, so neither drive can report done on surfacing alone.
+func superloopRefoldExit(root string, s superloop.Super) (*superloop.WalkReport, int) {
+	refold := superloopWalkNow(root, s)
+	if refold.Satisfied {
+		return &refold, 0
+	}
+	return &refold, 1
 }
 
 // superloopBatchMemberScope builds a per-member intent token so the shared gate

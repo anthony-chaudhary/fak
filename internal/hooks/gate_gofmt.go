@@ -40,6 +40,10 @@ const gofmtListCap = 12
 // staged set with no .go files, or all-gofmt-clean .go files, returns clean.
 func gateGofmt(d *StagedDiff) ([]Finding, error) {
 	var unformatted []string
+	// judged counts the staged .go files this gate actually formatted and compared — after the
+	// unreadable and unparseable skips, so the denominator names the set it truly judged rather
+	// than the set it was offered (#5602).
+	judged := 0
 	for _, p := range d.StagedPaths {
 		if !strings.HasSuffix(p, ".go") {
 			continue
@@ -52,10 +56,12 @@ func gateGofmt(d *StagedDiff) ([]Finding, error) {
 		if err != nil {
 			continue // unparseable — the build/vet gate owns syntax, not gofmt
 		}
+		judged++
 		if !bytes.Equal(formatted, src) {
 			unformatted = append(unformatted, strings.ReplaceAll(p, "\\", "/"))
 		}
 	}
+	d.NoteCandidates("GOFMT", judged, "staged .go file(s)")
 	if len(unformatted) == 0 {
 		return nil, nil
 	}

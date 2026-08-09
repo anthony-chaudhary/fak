@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -82,5 +84,55 @@ func TestRunRawEndToEndViaGateway(t *testing.T) {
 	}
 	if rep.Usage.Samples != 6 || rep.Usage.CachedPromptTokens != 6*20 {
 		t.Fatalf("usage fold wrong: %+v", rep.Usage)
+	}
+}
+
+// TestGatewayBearerPrecedence pins the env order the raw arm reads its
+// credential from, and that an unauthenticated endpoint gets no header at all
+// (an empty return, not a "Bearer " with nothing after it).
+func TestGatewayBearerPrecedence(t *testing.T) {
+	for _, env := range []string{"LCB_API_KEY", "FAK_GATEWAY_KEY", "OPENAI_API_KEY"} {
+		t.Setenv(env, "")
+	}
+	if got := bearerFromEnv(); got != "" {
+		t.Fatalf("no credential set: want %q, got %q", "", got)
+	}
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	if got := bearerFromEnv(); got != "sk-openai" {
+		t.Fatalf("OPENAI_API_KEY only: got %q", got)
+	}
+	t.Setenv("FAK_GATEWAY_KEY", "sk-fak")
+	if got := bearerFromEnv(); got != "sk-fak" {
+		t.Fatalf("FAK_GATEWAY_KEY outranks OPENAI_API_KEY: got %q", got)
+	}
+	t.Setenv("LCB_API_KEY", "  sk-lcb  ")
+	if got := bearerFromEnv(); got != "sk-lcb" {
+		t.Fatalf("LCB_API_KEY wins and is trimmed: got %q", got)
+	}
+}
+
+func TestGatewaySamplerRetainsFinishReasonAndReasoningOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","reasoning_content":"unfinished reasoning"},"finish_reason":"length"}],"usage":{"prompt_tokens":2,"completion_tokens":8}}`))
+	}))
+	defer srv.Close()
+	sample := gatewaySampler(srv.Client(), livecodebench.RawArmConfig{Endpoint: srv.URL, Model: "m"}, 8)
+	content, usage, err := sample(context.Background(), livecodebench.Problem{QuestionID: "q", Prompt: "p"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "unfinished reasoning" || usage.FinishReason != "length" || !usage.ReasoningOnly {
+		t.Fatalf("content=%q usage=%+v", content, usage)
+	}
+}
+
+func TestRawArmSummarySurfacesTerminationCounts(t *testing.T) {
+	report := livecodebench.RawArmReport{Model: "m", Endpoint: "e", N: 2, Problems: make([]livecodebench.RawArmProblem, 3), Usage: livecodebench.RawArmUsage{CachedPromptTokens: 7, Truncated: 2, ReasoningOnly: 1}}
+	got := rawArmSummary(report)
+	for _, want := range []string{"2 truncated", "1 reasoning-only"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary %q does not contain %q", got, want)
+		}
 	}
 }

@@ -15,10 +15,31 @@
 // the fold is hermetically testable and the dataset is reproducible.
 //
 // REDACTION IS INHERITED, NEVER RE-DERIVED. Every field an Example carries
-// (ArgsLabel, Witness) is one the journal producer already bounded and scrubbed
-// (internal/journal ArgsLabelForBytes / secretish). This package copies those
-// already-safe fields verbatim and never reaches for a rawer source, so the
-// dataset cannot be a looser disclosure surface than the journal it folds.
+// (ArgsLabel, Witness) is one the journal producer already bounded and scrubbed,
+// by a rule chosen per field:
+//
+//   - ArgsLabel — internal/journal ArgsLabelForBytes: reduced to a shape label
+//     (command stem / path stem / key names), bounded to 96 bytes, and dropped
+//     WHOLE when secretish() fires.
+//   - Witness — internal/journal boundWitness: bounded to 512 bytes with the
+//     value of any secretish `key=value` assignment redacted. Deliberately NOT
+//     the ArgsLabel rule. The 96-byte bound would truncate ~9% of witness rows
+//     and a quarter of all witness prose bytes, and the long values are the
+//     gate's own remedy text — the thing that makes a refusal recoverable. The
+//     whole-string secretish() drop would blank the witness on exactly the
+//     SECRET_EXFIL refusals an operator most needs to read.
+//
+// This package copies those already-safe fields verbatim and never reaches for a
+// rawer source, so the dataset cannot be a looser disclosure surface than the
+// journal it folds.
+//
+// WHAT THE WITNESS BOUND DOES NOT PROMISE. The claim is not rung-authored by
+// construction — several live rungs concatenate call-derived bytes into it (an
+// egress host parsed from the call args; under the opt-in LintWrites rung, the
+// target path plus a parser message that embeds the offending source token). The
+// journal cannot tell rung prose from call bytes, so it bounds and scrubs rather
+// than admitting a closed vocabulary the way DenyRule does. A rung that wants a
+// hard guarantee should stamp a DenyRule, not lengthen its claim.
 package guardcorpus
 
 import (

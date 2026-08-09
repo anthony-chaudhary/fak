@@ -58,6 +58,31 @@ func TestUnparseableClaimAbstains(t *testing.T) {
 	}
 }
 
+// TestChangedClaimAbstainsInTheSharedResolver pins the boundary of the gate-local
+// `changed:<path>` verb. It is resolved by internal/corelockgate against the changed
+// pathset THAT gate holds; every producer reaching this resolver (the file-admission
+// hook, the dispatch-tick witness, the agent turn and workflow journals) has no
+// changed set at all, so the question is unanswerable here and must fall through to
+// the fail-to-abstain default — which the kernel's fail-closed posture turns into a
+// deny. A future "completion" of the grammar that made this CONFIRM (e.g. by testing
+// the filesystem, which is what `path:` already means) would hand every one of those
+// producers a witness that corroborates nothing.
+func TestChangedClaimAbstainsInTheSharedResolver(t *testing.T) {
+	ctx := context.Background()
+	// code 0 is the shape that would CONFIRM for committed:/grep:, so a claim that
+	// abstains here is abstaining on the KIND, not on a failed git call.
+	r := NewWithRunner((&fakeGit{code: 0}).run, "")
+	for _, claim := range []string{"changed:go.mod", "changed:internal/adjudicator/decide.go"} {
+		if got := r.Resolve(ctx, nil, claim); got != abi.WitnessAbstain {
+			t.Fatalf("claim %q must Abstain in the shared resolver, got %v", claim, got)
+		}
+	}
+	// The rung it is most easily confused with is unaffected.
+	if got := r.Resolve(ctx, nil, "committed:go.mod"); got != abi.WitnessConfirmed {
+		t.Fatalf("committed: must be untouched by the new verb, got %v", got)
+	}
+}
+
 func TestCommittedAndGrep(t *testing.T) {
 	ctx := context.Background()
 	// committed: ls-files --error-unmatch exits 0 => tracked.

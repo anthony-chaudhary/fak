@@ -1,0 +1,129 @@
+{
+  "schema": "fak-microcontext-descriptor-benchmark/1",
+  "verdict": "PASS",
+  "observed_at": "2026-08-06T19:50:18Z",
+  "contexts": 1000,
+  "descriptor_schema": "fak-micro-context-descriptor/1",
+  "base_installs": 1,
+  "arms": [
+    {
+      "name": "fak full CLI",
+      "kind": "full-cli-version-probe",
+      "available": true,
+      "provenance": "observed local process spawn",
+      "contexts": 5,
+      "startup_p50_us": 160330,
+      "startup_p95_us": 184187,
+      "descriptor_bytes": 0,
+      "peak_alloc_delta_bytes": 0,
+      "model_calls": 0,
+      "prompt_tokens": 0,
+      "limitation": "version/help process startup only; no model task and no reliable child RSS/token accounting"
+    },
+    {
+      "name": "Claude Code / Ultracode-style CLI",
+      "kind": "full-cli-version-probe",
+      "available": true,
+      "provenance": "observed local process spawn",
+      "contexts": 5,
+      "startup_p50_us": 124590,
+      "startup_p95_us": 134590,
+      "descriptor_bytes": 0,
+      "peak_alloc_delta_bytes": 0,
+      "model_calls": 0,
+      "prompt_tokens": 0,
+      "limitation": "version/help process startup only; no model task and no reliable child RSS/token accounting"
+    },
+    {
+      "name": "Codex API-oriented CLI",
+      "kind": "full-cli-version-probe",
+      "available": true,
+      "provenance": "observed local process spawn",
+      "contexts": 5,
+      "startup_p50_us": 104893,
+      "startup_p95_us": 116859,
+      "descriptor_bytes": 0,
+      "peak_alloc_delta_bytes": 0,
+      "model_calls": 0,
+      "prompt_tokens": 0,
+      "limitation": "version/help process startup only; no model task and no reliable child RSS/token accounting"
+    },
+    {
+      "name": "micro-context descriptor",
+      "kind": "in-process-adapter",
+      "available": true,
+      "provenance": "observed deterministic fixture through internal/microagent Host+Gateway",
+      "contexts": 1000,
+      "startup_p50_us": 0,
+      "startup_p95_us": 0,
+      "descriptor_bytes": 210,
+      "peak_alloc_delta_bytes": 2432320,
+      "model_calls": 1000,
+      "prompt_tokens": 30000,
+      "limitation": "fixture output; allocation delta sampled after drain, not peak RSS"
+    }
+  ],
+  "assumptions": [
+    {
+      "name": "model endpoint",
+      "class": "semantic",
+      "descriptor_carrier": "base_id"
+    },
+    {
+      "name": "task/input",
+      "class": "semantic",
+      "descriptor_carrier": "task_delta"
+    },
+    {
+      "name": "tool authority",
+      "class": "semantic",
+      "descriptor_carrier": "capability_set"
+    },
+    {
+      "name": "turn/token limit",
+      "class": "semantic",
+      "descriptor_carrier": "budget"
+    },
+    {
+      "name": "prior messages",
+      "class": "semantic",
+      "descriptor_carrier": "continuation"
+    },
+    {
+      "name": "result acceptance",
+      "class": "semantic",
+      "descriptor_carrier": "output_contract"
+    },
+    {
+      "name": "OS process",
+      "class": "session convenience"
+    },
+    {
+      "name": "terminal/TUI",
+      "class": "session convenience"
+    },
+    {
+      "name": "working directory",
+      "class": "adapter concern",
+      "descriptor_carrier": "capability/lease adapter"
+    },
+    {
+      "name": "ambient credentials",
+      "class": "unsafe convenience",
+      "descriptor_carrier": "explicit capability adapter"
+    },
+    {
+      "name": "interactive approval channel",
+      "class": "adapter concern",
+      "descriptor_carrier": "effect policy adapter"
+    }
+  ],
+  "claims": [
+    "the versioned descriptor executes through the existing microagent Host and Gateway seams",
+    "one immutable base is installed once while each context carries only its task delta and semantic controls"
+  ],
+  "non_claims": [
+    "CLI version probe latency is not full task completion latency or resident harness RAM",
+    "the deterministic fixture is not model quality, TTFT, or token-throughput evidence"
+  ]
+}

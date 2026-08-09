@@ -136,7 +136,11 @@ func (s *Session) glmDsaMatKernel() matKernel {
 		device = backendKernel{s}
 	}
 	if s.CPUOffloadExperts {
-		return splitKernel{host: host, device: device, onHost: isExpertWeight}
+		// The predicate is GRADED by ExpertSpillLayers (#5612, expert_spill_placement.go): unset (the
+		// default) it is exactly isExpertWeight, so this line is byte-for-byte the ungraded split;
+		// set to N it spills only the first N MoE layers' experts and leaves the rest on the device,
+		// where R0's ring (#5611) bounds what they may hold resident.
+		return splitKernel{host: host, device: device, onHost: s.expertSpillOnHost()}
 	}
 	return device
 }

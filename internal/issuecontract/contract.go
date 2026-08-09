@@ -139,6 +139,9 @@ type Candidate struct {
 	BatchPolicy            string          `json:"batch_policy,omitempty"`
 	InScope                string          `json:"in_scope,omitempty"`
 	OutOfScope             string          `json:"out_of_scope,omitempty"`
+	RootPoint              string          `json:"root_point,omitempty"`
+	OriginSignal           string          `json:"origin_signal,omitempty"`
+	PreventsRecurrence     string          `json:"prevents_recurrence,omitempty"`
 	DoneCondition          string          `json:"done_condition,omitempty"`
 	Witness                string          `json:"witness,omitempty"`
 	AcceptanceGate         string          `json:"acceptance_gate,omitempty"`
@@ -192,6 +195,8 @@ type Options struct {
 	// StrictProjectWork holds dispatchable tickets missing or contradicting the
 	// canonical effort/contribution/completion contract.
 	StrictProjectWork bool
+	// StrictRootPoint holds QA-dogfood candidates missing origin controls.
+	StrictRootPoint bool
 }
 
 // Score explains the spine-first readiness score. The four axes are intentionally
@@ -319,6 +324,20 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	witnessGradeReadout := witnessGrade(c, opt.StrictWitness)
 	if opt.StrictWitness && witnessGradeReadout.Grade != WitnessGradeStrong {
 		reasons.add(ReasonWitnessForgeable)
+	}
+	if opt.StrictRootPoint {
+		if c.RootPoint == "" {
+			missing = append(missing, "root_point")
+		}
+		if c.OriginSignal == "" {
+			missing = append(missing, "origin_signal")
+		}
+		if c.PreventsRecurrence == "" {
+			missing = append(missing, "prevents_recurrence")
+		}
+		if c.RootPoint == "" || c.OriginSignal == "" || c.PreventsRecurrence == "" {
+			reasons.add(ReasonScopeIncomplete)
+		}
 	}
 	projectWorkReadout := projectWork(c)
 	if opt.StrictProjectWork {
@@ -708,6 +727,9 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		BatchPolicy:            agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
 		InScope:                section("In scope"),
 		OutOfScope:             section("Out of scope"),
+		RootPoint:              section("Root point"),
+		OriginSignal:           section("Origin signal"),
+		PreventsRecurrence:     section("Prevents recurrence"),
 		DoneCondition:          strmatch.FirstTrimmed(section("Done condition"), prefixedSectionValue(doneWitness, "Done condition")),
 		Witness:                strmatch.FirstTrimmed(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
 		AcceptanceGate:         section("Acceptance gate"),
@@ -1070,6 +1092,9 @@ func normalize(c Candidate) Candidate {
 	c.BatchPolicy = strings.TrimSpace(c.BatchPolicy)
 	c.InScope = strings.TrimSpace(c.InScope)
 	c.OutOfScope = strings.TrimSpace(c.OutOfScope)
+	c.RootPoint = strings.TrimSpace(c.RootPoint)
+	c.OriginSignal = strings.TrimSpace(c.OriginSignal)
+	c.PreventsRecurrence = strings.TrimSpace(c.PreventsRecurrence)
 	c.DoneCondition = strings.TrimSpace(c.DoneCondition)
 	c.Witness = strings.TrimSpace(c.Witness)
 	c.AcceptanceGate = strings.TrimSpace(c.AcceptanceGate)

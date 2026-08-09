@@ -246,6 +246,32 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if n := guardApplyDenyOverlay(&rt, denyOverlay); n > 0 {
 		floorSource += fmt.Sprintf(" + repo-local deny overlay (%d tool(s); fak guard deny --list)", n)
 	}
+	// Union the SELF-authored tighten overlay (#5181, epic #5170 Track F) — the one
+	// amendment channel the WRAPPED AGENT itself may write. Unlike the two operator
+	// overlays above it is not trusted on arrival: it is admitted only through the
+	// amendment gate (guard_self_tighten.go), which classifies base -> base∪overlay
+	// via policy.DiffAmendment and admits a no-op or tighten-only delta only. It runs
+	// AFTER both operator overlays so the agent tightens the floor an operator actually
+	// configured, and BEFORE protectGuardPolicyConfig so its own file is deliberately
+	// left OUT of SelfModifyGlobs — the agent must be able to write it, which is why it
+	// does not live under the self-modify-protected .fak/guard/ (see the overlay file).
+	//
+	// A malformed overlay REFUSES the overlay wholesale and leaves the base floor
+	// standing (byte-identical to the pre-#5181 launch) rather than os.Exit(2)ing like
+	// the operator overlays do: this file is agent-writable, so a fatal path would hand
+	// the wrapped agent a launch-denial lever over its own operator. Either way the
+	// refusal is loud on stderr and recorded in the floor-source provenance.
+	selfTightenPath := guardSelfTightenOverlayPath()
+	selfTighten, selfTightenErr := loadGuardSelfTightenOverlay(selfTightenPath)
+	if selfTightenErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v (self-tighten overlay REFUSED; base floor stands)\n", selfTightenErr)
+		floorSource += "; agent self-tighten overlay REFUSED (unreadable)"
+	} else if admit, class, reason, n := guardApplySelfTightenOverlay(&rt, selfTighten); !admit {
+		fmt.Fprintf(os.Stderr, "fak guard: self-tighten overlay %s refused (%s): %s\n", selfTightenPath, class, reason)
+		floorSource += guardSelfTightenFloorNote(selfTightenPath, admit, class, reason, n)
+	} else {
+		floorSource += guardSelfTightenFloorNote(selfTightenPath, admit, class, reason, n)
+	}
 	// The adjudicator runs in this parent process. Declare the narrow Claude
 	// scratch tree here so structural write/delete gates can prove containment;
 	// never widen this default to the whole OS temp directory. Whatever is
@@ -259,6 +285,14 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 		declaredScratch = filepath.Join(os.TempDir(), "claude")
 	}
 	_ = os.Setenv("FAK_GUARD_SCRATCHPAD_ROOTS", guardScratchpadRootsValue(declaredScratch))
+	// The core-lock-all posture (#5423) is NOT applied to this assembly — the launch
+	// floor is what the posture clamps, not an amendment to it, so gating here would
+	// refuse the session its own first floor. It is announced in the provenance so the
+	// banner states the posture the operator is running under, and every LIVE amendment
+	// site below (guardReloadDefaultFloor, applyPolicyRuntimeLocked) enforces it.
+	if guardCoreLockAllActive() {
+		floorSource += "; --core-lock-all ACTIVE (session is ratchet-tighten-only: no channel may widen this floor)"
+	}
 	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay, denyOverlay)
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, policyPath)...)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
@@ -296,6 +330,19 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 		overlayWarning += "\ndeny_overlay_error: " + ovErr.Error()
 	}
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath)...)
+	// CORE-LOCK-ALL (#5423). This is the reload path an ordinary `fak guard -- claude`
+	// actually takes — the allow watcher and POST /v1/fak/policy/reload both land here —
+	// and it had NO widening gate of its own: an edit to the operator allow overlay was
+	// installed live, unconditionally. Under --core-lock-all that is exactly the move the
+	// posture exists to refuse, so the re-derived floor is classified against the LIVE one
+	// and a widening is refused BEFORE SetPolicy, leaving the last-good floor standing.
+	// The refusal is an error (not a warning) so the watcher reports "rejected; keeping
+	// last-good floor" and the reload route answers non-2xx rather than silently no-oping.
+	if admit, reason := guardCoreLockAllAdmitAmendment(adjudicator.Default.PolicySnapshot(), rt.Adjudicator); !admit {
+		err := fmt.Errorf("guard floor reload refused: %s", reason)
+		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapRejected, err.Error())
+		return policy.Runtime{}, "", err
+	}
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	// Audit parity with the --policy reload path (reloadPolicy): the security boundary was

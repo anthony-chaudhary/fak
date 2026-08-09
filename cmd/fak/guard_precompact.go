@@ -41,6 +41,26 @@ const (
 	// carries when armed, mirroring internal/relay ArmFire.Reason and
 	// session.ReasonRelayArmed.
 	guardPreCompactRelayArmedReason = "RELAY_ARMED"
+
+	// guardClaudeSettingsFlag is Claude Code's settings flag. It is LAST-WINS, not
+	// merged: when an argv carries two `--settings` occurrences the earlier one's keys
+	// are dropped wholesale. Guard injects its hook-settings file through this flag, so
+	// a launcher that appends a second `--settings` later on the SAME argv used to
+	// silently disarm guard's entire hook stack (#5510) — the session still looked
+	// guarded because the guard process was there and the argv even mentioned
+	// `--settings`. appendClaudeSettingsArg now guarantees exactly ONE occurrence.
+	guardClaudeSettingsFlag = "--settings"
+
+	// guardClaudeSettingsHooksKey is the one settings.json key guard owns and writes.
+	// Every other top-level key belongs to the caller and is merged through verbatim.
+	guardClaudeSettingsHooksKey = "hooks"
+
+	// guardClaudeSettingsConflictReason / guardClaudeSettingsHooksReason are the named,
+	// closed reasons appendClaudeSettingsArg prints when a later `--settings` payload
+	// cannot be folded into guard's file. They exist so the residue this fix cannot
+	// merge is LOUD rather than silent, which is the whole point of #5510.
+	guardClaudeSettingsConflictReason = "SETTINGS_UNMERGEABLE"
+	guardClaudeSettingsHooksReason    = "SETTINGS_HOOKS_DROPPED"
 )
 
 type guardPreCompactInstall struct {
@@ -51,8 +71,59 @@ type guardPreCompactInstall struct {
 	Reason       string
 }
 
+// guardPreCompactClaudeSettings is the slice of Claude Code's settings.json that guard
+// writes: the `hooks` map. Extra carries every OTHER top-level key VERBATIM across the
+// read-modify-write round-trips the installers perform (mergeGuardStopHookIntoSettings,
+// mergeGuardToolprocIntoSettings, mergeGuardSessionStartIntoSettings). Without that,
+// anything folded into the file by appendClaudeSettingsArg — notably the reasoning-posture
+// key a launcher used to hand the child on a SECOND `--settings` (#5510) — would be erased
+// by the very next installer, because an unmodeled key vanishes on unmarshal→marshal.
 type guardPreCompactClaudeSettings struct {
 	Hooks map[string][]guardPreCompactClaudeMatcher `json:"hooks"`
+	Extra map[string]json.RawMessage                `json:"-"`
+}
+
+// UnmarshalJSON decodes `hooks` into the typed map and parks every other top-level key in
+// Extra untouched.
+func (s *guardPreCompactClaudeSettings) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.Hooks = nil
+	s.Extra = nil
+	for key, value := range raw {
+		if key == guardClaudeSettingsHooksKey {
+			if err := json.Unmarshal(value, &s.Hooks); err != nil {
+				return err
+			}
+			continue
+		}
+		if s.Extra == nil {
+			s.Extra = map[string]json.RawMessage{}
+		}
+		s.Extra[key] = append(json.RawMessage(nil), value...)
+	}
+	return nil
+}
+
+// MarshalJSON re-emits `hooks` plus every preserved key. Marshalling through a map keeps the
+// output key order deterministic (encoding/json sorts map keys), and a settings file with no
+// Extra keys serializes byte-identically to the previous plain-struct encoding.
+func (s guardPreCompactClaudeSettings) MarshalJSON() ([]byte, error) {
+	raw := make(map[string]json.RawMessage, len(s.Extra)+1)
+	for key, value := range s.Extra {
+		if key == guardClaudeSettingsHooksKey {
+			continue
+		}
+		raw[key] = value
+	}
+	hooks, err := json.Marshal(s.Hooks)
+	if err != nil {
+		return nil, err
+	}
+	raw[guardClaudeSettingsHooksKey] = hooks
+	return json.Marshal(raw)
 }
 
 type guardPreCompactClaudeMatcher struct {
@@ -306,13 +377,131 @@ func guardPreCompactHookCommand(fakBin string) string {
 	return fakBin
 }
 
+// appendClaudeSettingsArg points the child at guard's hook-settings file and guarantees that
+// file is the argv's ONLY `--settings`.
+//
+// Claude Code's `--settings` is last-wins, not merged, so simply inserting guard's file after
+// argv[0] was not enough: any launcher that appended its own `--settings` later on the same
+// argv — the interactive `--ultracode=on` shortcut, a tier/T0 fleet worker's launch profile —
+// silently discarded guard's whole file, taking the Stop auto-continue hook, the PreToolUse
+// commit-boundary gate, the toolproc journal hooks, the SessionStart affordance and the
+// PreCompact coherence gate with it (#5510). Nothing reported it: the guard process was
+// present and the argv still mentioned `--settings`.
+//
+// So a later occurrence is now FOLDED into guard's file rather than left to override it: its
+// non-hook keys are merged into the file (the caller's keys win, since guard writes none of
+// them) and the occurrence is removed from the argv. Guard's `hooks` key is never overridable
+// from the child argv — a payload carrying one is dropped with a named line on stderr, as is
+// a payload that cannot be read or parsed. Both residues are LOUD; neither is silent.
 func appendClaudeSettingsArg(command []string, settingsPath string) []string {
 	if len(command) == 0 {
 		return command
 	}
-	out := make([]string, 0, len(command)+2)
-	out = append(out, command[0], "--settings", settingsPath)
-	return append(out, command[1:]...)
+	rest, payloads := splitLaterClaudeSettingsArgs(command[1:])
+	if len(payloads) > 0 {
+		if err := foldClaudeSettingsIntoGuardFile(settingsPath, payloads); err != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: %s: a later %s on the child argv was not folded into guard's hook settings %s: %v\n",
+				guardClaudeSettingsConflictReason, guardClaudeSettingsFlag, settingsPath, err)
+		}
+	}
+	out := make([]string, 0, len(rest)+3)
+	out = append(out, command[0], guardClaudeSettingsFlag, settingsPath)
+	return append(out, rest...)
+}
+
+// splitLaterClaudeSettingsArgs strips every `--settings <value>` / `--settings=<value>` pair
+// out of the child's own args, returning the remaining args and the payloads it removed (in
+// argv order, so the last one still wins among themselves). A trailing bare `--settings` with
+// no value yields an empty payload, which the fold reports rather than silently ignoring.
+func splitLaterClaudeSettingsArgs(args []string) (rest, payloads []string) {
+	rest = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == guardClaudeSettingsFlag {
+			value := ""
+			if i+1 < len(args) {
+				value = args[i+1]
+				i++
+			}
+			payloads = append(payloads, value)
+			continue
+		}
+		if value, ok := strings.CutPrefix(args[i], guardClaudeSettingsFlag+"="); ok {
+			payloads = append(payloads, value)
+			continue
+		}
+		rest = append(rest, args[i])
+	}
+	return rest, payloads
+}
+
+// foldClaudeSettingsIntoGuardFile merges the caller's `--settings` payloads into the settings
+// file at path, which the calling installer has already written. Later payloads win over
+// earlier ones, matching Claude's own last-wins order. The `hooks` key is guard's and is never
+// taken from a payload; every unmergeable payload is reported (joined) so the caller can say so
+// out loud. The file is only rewritten when something actually merged.
+func foldClaudeSettingsIntoGuardFile(path string, payloads []string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var settings guardPreCompactClaudeSettings
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return fmt.Errorf("parse guard hook settings %s: %w", path, err)
+	}
+	var problems []error
+	merged := false
+	for _, payload := range payloads {
+		keys, err := loadClaudeSettingsPayload(payload)
+		if err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		for key, value := range keys {
+			if key == guardClaudeSettingsHooksKey {
+				problems = append(problems, fmt.Errorf("%s: guard owns the %q key, so the child argv's hooks were not merged",
+					guardClaudeSettingsHooksReason, guardClaudeSettingsHooksKey))
+				continue
+			}
+			if settings.Extra == nil {
+				settings.Extra = map[string]json.RawMessage{}
+			}
+			settings.Extra[key] = value
+			merged = true
+		}
+	}
+	if merged {
+		if err := writeGuardHookSettings(path, settings); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	return errors.Join(problems...)
+}
+
+// loadClaudeSettingsPayload resolves one `--settings` value to its top-level keys. Claude
+// accepts either inline JSON (`{"ultracode":true}`) or a path to a settings file, so both are
+// read here; a caller-supplied FILE is snapshotted at launch, which is the same instant guard's
+// own file is written.
+func loadClaudeSettingsPayload(payload string) (map[string]json.RawMessage, error) {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty %s value on the child argv", guardClaudeSettingsFlag)
+	}
+	data := []byte(trimmed)
+	if !strings.HasPrefix(trimmed, "{") {
+		fileData, err := os.ReadFile(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("read child settings file %q: %w", trimmed, err)
+		}
+		data = fileData
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return nil, fmt.Errorf("parse child %s payload %q: %w", guardClaudeSettingsFlag, trimmed, err)
+	}
+	if keys == nil {
+		return nil, fmt.Errorf("child %s payload %q is not a JSON object", guardClaudeSettingsFlag, trimmed)
+	}
+	return keys, nil
 }
 
 // writeGuardSettingsFileAtomic writes data to path atomically: it writes a sibling

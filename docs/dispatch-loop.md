@@ -179,6 +179,38 @@ open-work lens visible: `/issue-triage` may still need to cut taxonomy debt or a
 ownership pass may still need to claim/defer orphan P0/P1 work before issue-dispatch
 spawns the next worker.
 
+### Reading the seat inventory line: slots vs seats
+
+The operator card's seat line mixes two different units, and reading it as one unit
+invents seats that do not exist:
+
+```
+seat inventory: 28 seat(s) - available=4 busy=1 cooling=1 unavailable=2; slots free=14 leased=5
+```
+
+- **`28 seat(s)`** is a **slot** total — `Σ session_cap` over every seat pool
+  ([`fleet_accounts.seat_pool`](https://github.com/anthony-chaudhary/fak/blob/main/tools/fleet_accounts.py),
+  `total += capacity`). A Claude pool contributes `FAK_SESSIONS_PER_ACCOUNT` slots
+  (6); a non-Claude pool contributes `DEFAULT_ACCOUNT_SESSION_CAP` (1). So four
+  Claude pools plus four opencode pools is `4x6 + 4x1 = 28` slots.
+- **`available/busy/cooling/unavailable`** count **seat rows** — one row per
+  rate-limit pool (`by_dispatch_state`, `+= 1` per row). Above, they sum to **8**,
+  which is the *entire* seat list. Nothing is missing.
+
+The two numbers are never expected to match, and `4+1+1+2 != 28` is not a gap. Check
+that the state counts sum to the pool count, and that `slots free + slots leased +
+slots on blocked seats` sums to the slot total — those are the two closure checks.
+`fak accounts status` adds a third, unrelated number to the confusion: its trailing
+`N distinct account(s)` counts account buckets across every registry home, live and
+tombstoned.
+
+Two seats sharing one account bucket (`uuid:` / `tok:` / `apikey:`) are **one** row
+and one rate-limit pool, so recovering a duplicate seat adds zero capacity. And seat
+supply is often not the binding term at all: `seat_adaptive_target` takes
+`min(live + seat_free, host_cap, hard_ceiling, live + ramp_delta)`, and with a
+healthy pool the binding term is usually `ramp_delta` (`+2/tick`) or the arrival
+rate — the card names which one under `seat cap: adaptive N (bound by ...)`.
+
 ## Run it
 
 ```bash
