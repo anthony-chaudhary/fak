@@ -17,6 +17,8 @@ func TestClassifyHardcodedRef(t *testing.T) {
 		{".github/workflows/ci.yml", "branches: [main, master]", RefClassWorkflowCovered},
 		{"tools/extend_preflight.py", `branch == "master"`, RefClassDevelopmentSource},
 		{"tools/fleet_control_pane.py", `DEFAULT_WORKTREE_MASTER_REF = "origin/master"`, RefClassDevelopmentSource},
+		{"tools/dispatch_worker.py", "fresh origin/main worktree", RefClassDevelopmentSource},
+		{"internal/corelockgate/corelockgate.go", "HEAD and origin/main move", RefClassDevelopmentSource},
 		{"docs/stable-releases/2026-06-stable.md", "committed to `master`", RefClassHistorical},
 		{"tools/bench_migrate.py", `"branch": "master"`, RefClassFixture},
 		{"tools/demo_robustness_scorecard.py", `@(latest|main|master)`, RefClassPublicGuard},
