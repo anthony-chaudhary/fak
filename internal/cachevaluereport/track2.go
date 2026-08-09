@@ -737,10 +737,11 @@ type TwoTrackReport struct {
 	// LatestNetUSD / CumulativeNetUSD are the most-recent period's net and the
 	// running total through it — the P&L headline. BrokeEven is whether the running
 	// total has crossed zero.
-	LatestNetUSD     float64 `json:"latest_net_usd"`
-	CumulativeNetUSD float64 `json:"cumulative_net_usd"`
-	BrokeEven        bool    `json:"broke_even"`
-	DollarBlindRows  int     `json:"dollar_blind_rows,omitempty"`
+	LatestNetUSD         float64              `json:"latest_net_usd"`
+	CumulativeNetUSD     float64              `json:"cumulative_net_usd"`
+	RecallInjectionDebit RecallInjectionDebit `json:"recall_injection_debit,omitempty"`
+	BrokeEven            bool                 `json:"broke_even"`
+	DollarBlindRows      int                  `json:"dollar_blind_rows,omitempty"`
 
 	// ProjectionFence is the constant honesty self-label: the $ NET is a COST
 	// PROJECTION over OBSERVED quantities, never a fak-WITNESSED claim, and tracks
