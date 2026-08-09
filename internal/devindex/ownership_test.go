@@ -1,6 +1,7 @@
 package devindex
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -20,13 +21,13 @@ func TestCommandOwnershipIsTotalAndPinsProductBoundary(t *testing.T) {
 		byName[item.Name] = item
 	}
 	for _, name := range []string{"serve", "guard", "policy", "preflight", "agent"} {
-		if got := byName[name]; got.Owner != OwnerRuntime || got.DispatchTarget != "fak" {
-			t.Errorf("%s ownership = %+v, want runtime/fak", name, got)
+		if got := byName[name]; got.Owner != OwnerRuntime || got.DispatchTarget != "fak" || got.DevReuse != DevReuseNA {
+			t.Errorf("%s ownership = %+v, want runtime/fak/not-applicable", name, got)
 		}
 	}
 	for _, name := range []string{"issue", "commit", "ci-preflight", "release", "fleet", "bench"} {
-		if got := byName[name]; got.Owner != OwnerDev || got.DispatchTarget != "fak-dev" {
-			t.Errorf("%s ownership = %+v, want dev/fak-dev", name, got)
+		if got := byName[name]; got.Owner != OwnerDev || got.DispatchTarget != "fak-dev" || got.DevReuse == DevReuseNA {
+			t.Errorf("%s ownership = %+v, want classified dev/fak-dev", name, got)
 		}
 	}
 }
@@ -34,8 +35,8 @@ func TestCommandOwnershipIsTotalAndPinsProductBoundary(t *testing.T) {
 func TestValidateCommandOwnershipRejectsMissingDuplicateUnknownAndIncomplete(t *testing.T) {
 	verbs := []Verb{{Name: "serve", Tier: TierFrontdoor}, {Name: "issue", Tier: TierDev}}
 	inventory := []CommandOwnership{
-		{Name: "serve", Owner: OwnerRuntime, Rationale: "runtime", CompatibilityName: "serve", DispatchTarget: "fak"},
-		{Name: "serve", Owner: OwnerRuntime, Rationale: "runtime", CompatibilityName: "serve", DispatchTarget: "fak"},
+		{Name: "serve", Owner: OwnerRuntime, Rationale: "runtime", CompatibilityName: "serve", DispatchTarget: "fak", DevReuse: DevReuseNA, DevReuseRationale: "runtime"},
+		{Name: "serve", Owner: OwnerRuntime, Rationale: "runtime", CompatibilityName: "serve", DispatchTarget: "fak", DevReuse: DevReuseNA, DevReuseRationale: "runtime"},
 		{Name: "ghost", Owner: "elsewhere"},
 	}
 	got := strings.Join(ValidateCommandOwnership(verbs, inventory), "\n")
@@ -87,6 +88,63 @@ func TestRuntimeGraphWitnessReportsCurrentDevLeaks(t *testing.T) {
 	for _, leak := range report.Leaks {
 		if len(leak.Path) < 2 || leak.Path[0] != report.Root || leak.Path[len(leak.Path)-1] != leak.Forbidden {
 			t.Errorf("invalid witnessed path: %+v", leak)
+		}
+	}
+}
+
+func TestDevReuseSeparatesPortablePatternsFromFakInternals(t *testing.T) {
+	cat, err := Load(FindRoot("."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verbs := OwnershipVerbs(cat.Verbs())
+	byName := make(map[string]CommandOwnership, len(verbs))
+	for _, item := range CommandOwnerships(verbs) {
+		byName[item.Name] = item
+	}
+	for name, want := range map[string]DevReuse{
+		"serve":          DevReuseNA,
+		"commit":         DevReusePortable,
+		"worktree":       DevReusePortable,
+		"validate":       DevReusePortable,
+		"release":        DevReuseMaintainer,
+		"index":          DevReuseMaintainer,
+		"lab":            DevReuseLab,
+		"fleet-accounts": DevReuseLab,
+	} {
+		got, ok := byName[name]
+		if !ok {
+			t.Fatalf("missing command %q", name)
+		}
+		if got.DevReuse != want || got.DevReuseRationale == "" {
+			t.Errorf("%s dev reuse = %q (%q), want %q with rationale", name, got.DevReuse, got.DevReuseRationale, want)
+		}
+	}
+}
+
+func TestCommandOwnershipJSONCarriesReuseAxis(t *testing.T) {
+	item := CommandOwnerships([]Verb{{Name: "commit", Tier: TierDev}})[0]
+	b, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"dev_reuse":"portable-pattern"`, `"dev_reuse_rationale":`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("ownership JSON missing %s: %s", want, b)
+		}
+	}
+}
+
+func TestValidateCommandOwnershipRejectsInvalidDevReuse(t *testing.T) {
+	verbs := []Verb{{Name: "serve", Tier: TierFrontdoor}, {Name: "commit", Tier: TierDev}}
+	inventory := []CommandOwnership{
+		{Name: "serve", Owner: OwnerRuntime, Rationale: "runtime", CompatibilityName: "serve", DispatchTarget: "fak", DevReuse: DevReusePortable, DevReuseRationale: "wrong axis"},
+		{Name: "commit", Owner: OwnerDev, Rationale: "dev", CompatibilityName: "commit", DispatchTarget: "fak-dev", DevReuse: DevReuseNA},
+	}
+	got := strings.Join(ValidateCommandOwnership(verbs, inventory), "\n")
+	for _, want := range []string{"non-dev command \"serve\" has dev reuse", "empty dev reuse rationale", "dev command \"commit\" has not-applicable"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("problems missing %q:\n%s", want, got)
 		}
 	}
 }

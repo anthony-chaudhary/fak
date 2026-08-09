@@ -21,6 +21,7 @@ type PackageOwnership struct {
 // intrinsically repository-development control-plane work. The list expands as
 // command families move; every entry is enforced immediately by GraphLeaks.
 var DevOnlyPackages = []PackageOwnership{
+	{Path: moduleInternalPrefix + "devcmd", Owner: OwnerDev, Rationale: "hosts repository-development command implementations for fak-dev"},
 	{Path: moduleInternalPrefix + "devindex", Owner: OwnerDev, Rationale: "indexes and audits the fak repository command surface"},
 	{Path: moduleInternalPrefix + "issuecontract", Owner: OwnerDev, Rationale: "validates GitHub project-work issue contracts"},
 	{Path: moduleInternalPrefix + "issuesync", Owner: OwnerDev, Rationale: "synchronizes fak repository GitHub issues"},
