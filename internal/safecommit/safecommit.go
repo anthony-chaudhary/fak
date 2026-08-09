@@ -887,7 +887,15 @@ func runPreCommitReview(ctx context.Context, run Runner, dir string, paths []str
 		res.DiffSHA256 = modelroute.DiffSHA256(diff)
 	}
 	if res.Verdict != modelroute.ReviewPass && res.Verdict != modelroute.ReviewRefute {
-		return unavailableReview(model, diff, fmt.Sprintf("reviewer returned verdict %q", res.Verdict))
+		// The reviewer ran and answered, so an unusable verdict is not
+		// unavailability. Fail closed instead of letting malformed output read as
+		// the same permissive state as an absent reviewer.
+		return modelroute.ReviewResult{
+			Model:      res.Model,
+			Verdict:    modelroute.ReviewRefute,
+			Reason:     fmt.Sprintf("reviewer returned unusable verdict %q", res.Verdict),
+			DiffSHA256: res.DiffSHA256,
+		}
 	}
 	return res
 }
