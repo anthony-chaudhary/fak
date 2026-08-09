@@ -402,6 +402,7 @@ var tier = map[string]int{
 	"timeoutphase":     1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
 	"vllmcompile":      1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":   1,
+	"orchestration":    1, // pure portable workflow-plan/profile resolution contract; stdlib-only, no provider adapters, off the hot path.
 	"devexmeter":       1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
 	"toolproc":         2,
 	"regionadmit":      2,
@@ -493,6 +494,7 @@ var tier = map[string]int{
 	"docrender":             1,
 	"learningobservation":   1, // #5982 (parent #2908): content-addressed observation/candidate/witness/verdict records plus the seven closed-enum lineage relations. Pure stdlib durable substrate; admission policy remains outside this leaf. Off the hot path.
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
+	"testenv":               1, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
