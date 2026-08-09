@@ -362,6 +362,55 @@ var providerAPIKeyNames = map[string]bool{
 // values) so a caller can audit or emit a LeakEnvStripped event without echoing
 // a secret.
 func StripInheritedSecrets(ambient []string) (kept []string, stripped []string) {
+	return StripInheritedSecretsExcept(ambient, nil)
+}
+
+// StripInheritedSecretsExcept is StripInheritedSecrets with an explicit,
+// caller-DECLARED keep-set of variable NAMES that survive the floor.
+//
+// The floor exists to stop INCIDENTAL inheritance: a credential that happens to
+// sit in a worker's ambient environment and would ride along to a child that was
+// never meant to hold it. A declared name is the opposite case — the launch
+// surface knows this specific variable IS the child's configured credential,
+// because an operator wrote its NAME into the seat/worker config on purpose. The
+// hardcoded providerAPIKeyNames exemption is the same idea reached the narrow
+// way; this generalizes it so the surface that actually knows which variable
+// authenticates the child gets to say so, instead of internal/policy carrying a
+// list of vendor variable names it cannot keep current.
+//
+// A declared name is exempt from BOTH halves of the floor — the name shape and
+// the value shape — since a real credential normally trips both (a bearer token
+// named ANTHROPIC_AUTH_TOKEN, a PAT whose value has a vendor prefix). Without
+// this, naming such a variable as a seat's credential is silently useless: the
+// reference survives into the child's argv while the value does not, and the
+// child fails auth against a configuration that reads as correct.
+//
+// The exemption does NOT weaken the floor for anything else, and three
+// properties keep it narrow:
+//
+//   - It is per-launch, not transitive. A declared credential reaching a child
+//     does not follow that child's own spawns: each surface runs the floor again
+//     with its own keep-set, so a descendant that declares nothing inherits
+//     nothing. The exfiltration path #2358 closed stays closed one hop down.
+//   - Matching is EXACT on the trimmed name, not case-folded. POSIX env names
+//     are case-sensitive, so case-folding would let a mistyped `anthropic_auth_token`
+//     in a config exempt the real ANTHROPIC_AUTH_TOKEN — a typo must not widen a
+//     security boundary.
+//   - A declared name that is not present in ambient does nothing. Declaring is
+//     permission for a variable to pass, never an instruction to invent one.
+//
+// Empty/whitespace entries in declared are ignored. A declared name that the
+// floor would have kept anyway is a no-op. stripped still holds NAMES only.
+func StripInheritedSecretsExcept(ambient []string, declared []string) (kept []string, stripped []string) {
+	var allow map[string]bool
+	if len(declared) > 0 {
+		allow = make(map[string]bool, len(declared))
+		for _, name := range declared {
+			if name = strings.TrimSpace(name); name != "" {
+				allow[name] = true
+			}
+		}
+	}
 	kept = make([]string, 0, len(ambient))
 	for _, kv := range ambient {
 		i := strings.IndexByte(kv, '=')
@@ -370,6 +419,10 @@ func StripInheritedSecrets(ambient []string) (kept []string, stripped []string) 
 			continue
 		}
 		name, value := kv[:i], kv[i+1:]
+		if allow[strings.TrimSpace(name)] {
+			kept = append(kept, kv)
+			continue
+		}
 		bySecretName := secretShapedName(name)
 		bySecretValue := secretShapedValue(value) && !providerAPIKeyNames[strings.ToUpper(strings.TrimSpace(name))]
 		if bySecretName || bySecretValue {

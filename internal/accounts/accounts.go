@@ -176,6 +176,33 @@ type Home struct {
 	// modelroute.Account.CredEnv. Set only on a CredKindAPIKey seat; `fak accounts launch`
 	// fronts the guard with `--api-key-env <APIKeyEnv>` so the child reads the key from env.
 	APIKeyEnv string `json:"api_key_env,omitempty"`
+	// BaseURL points this seat at a THIRD-PARTY Anthropic-compatible endpoint (a vendor
+	// gateway that speaks the Messages API under its own tenant credential) instead of
+	// first-party api.anthropic.com. Empty — every registry written before this field — means
+	// first-party, so the historical launch is byte-for-byte unchanged.
+	//
+	// It is AUTHORED, like the policy attributes above, so a rescan preserves it. It is NOT a
+	// secret (it is a URL), but it IS load-bearing for correctness: `fak guard` fronts the
+	// child with its OWN ANTHROPIC_BASE_URL at guard's loopback gateway and proxies using the
+	// credential guard holds, so a guarded launch would silently ignore this endpoint and bill
+	// the wrong upstream. `fak accounts launch` therefore REFUSES a guarded launch of a seat
+	// that carries a BaseURL rather than quietly routing elsewhere (see accounts_launch.go).
+	BaseURL string `json:"base_url,omitempty"`
+	// ExtraEnv is extra environment handed to the agent this seat launches. It exists because
+	// a third-party endpoint is not describable by CLAUDE_CONFIG_DIR alone: the vendor's model
+	// id, its required custom headers, and the client-side bootstrap toggles it needs
+	// (ANTHROPIC_MODEL, ANTHROPIC_CUSTOM_HEADERS, CLAUDE_CODE_USE_GATEWAY, …) are read from the
+	// ENVIRONMENT by the agent binary at startup, not from any file fak controls. Before this
+	// field the launch env was exactly `os.Environ() + CLAUDE_CONFIG_DIR`, with no seam for
+	// them, so such a seat could not be expressed at all.
+	//
+	// It holds NON-SECRET values only, and that is ENFORCED, not merely asked for
+	// (ValidateExtraEnv): the registry is a plaintext file that `fak accounts list --json`
+	// prints, so a credential parked here would leak into ordinary operator output and into
+	// any log capturing it. A seat's credential keeps the existing reference posture — fak
+	// stores the env var's NAME (APIKeyEnv) and the operator supplies the value in the
+	// launching environment, so the secret never enters the registry.
+	ExtraEnv map[string]string `json:"extra_env,omitempty"`
 	// Tombstone audit trail, canonical here so the generated views need not strand it: when
 	// this seat was retired and why. RehomeTo (above) is the third audit field. Empty for a
 	// live seat. These move the job roster's tombstoned_accounts prose into the registry.
@@ -1156,7 +1183,8 @@ func Discover(home string) ([]Home, error) {
 // MergeDiscovered folds a fresh disk scan of home/.claude* INTO an existing canonical
 // registry, returning the merged registry. It is the non-destructive regenerator the
 // single-source model needs: identity is disk-derived truth, but the policy ATTRIBUTES
-// (Status, Default, RehomeTo, Role, Note, Enabled, Reserved, ChromeProfile, HistoryAt) are
+// (Status, Default, RehomeTo, Role, Note, Enabled, Reserved, ChromeProfile, BaseURL,
+// ExtraEnv, HistoryAt) are
 // AUTHORED and must survive a rescan. So for every home already in the registry it refreshes
 // ONLY Identity (and self-heals Dir to the scan's canonical path form) and keeps every
 // authored field; every config dir on disk that the registry does not yet know becomes a NEW
