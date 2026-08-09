@@ -52,7 +52,7 @@ func InspectAncestry(ctx context.Context, repo string, run GitRunner) (Ancestry,
 	}
 	remoteBranch := strings.TrimPrefix(merge, "refs/heads/")
 	out.RemoteRef = "refs/remotes/" + out.Remote + "/" + remoteBranch
-	remoteSHA, code, err := run(ctx, repo, "rev-parse", "--verify", "--quiet", out.RemoteRef)
+	_, code, err = run(ctx, repo, "rev-parse", "--verify", "--quiet", out.RemoteRef)
 	if err != nil || code != 0 {
 		out.Stale = true
 		out.Reason = "observed remote-tracking ref missing; run fak sync check --fetch before shipment decisions"
@@ -63,9 +63,11 @@ func InspectAncestry(ctx context.Context, repo string, run GitRunner) (Ancestry,
 		return out, fmt.Errorf("read local HEAD")
 	}
 	out.Head = strings.TrimSpace(head)
-	if out.Head != "" && out.Head == strings.TrimSpace(remoteSHA) {
-		out.HeadOnRemote = true
+	_, ancestorCode, ancestorErr := run(ctx, repo, "merge-base", "--is-ancestor", "HEAD", out.RemoteRef)
+	if ancestorErr != nil || (ancestorCode != 0 && ancestorCode != 1) {
+		return out, fmt.Errorf("read remote commit ancestry")
 	}
+	out.HeadOnRemote = ancestorCode == 0
 	log, code, err := run(ctx, repo, "log", "--format=%H%x09%s", out.RemoteRef+"..HEAD")
 	if err != nil || code != 0 {
 		return out, fmt.Errorf("read local commit ancestry")

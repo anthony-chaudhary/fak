@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/commitlifecycle"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/wiprecon"
 )
 
@@ -78,6 +79,7 @@ func commitLifecycleActionText(action commitlifecycle.Action) string {
 func commitLifecycleGit(ctx context.Context, repo string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repo
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), 0, nil

@@ -63,6 +63,24 @@ func TestInspectAncestryCommittedThenShipped(t *testing.T) {
 	if len(a.Commits) != 0 || len(rows) != 1 || rows[0].State != Shipped || !a.HeadOnRemote {
 		t.Fatalf("after push is not remotely witnessed SHIPPED: ancestry=%+v rows=%+v", a, rows)
 	}
+
+	// A remote branch ahead of local still contains local HEAD and therefore
+	// witnesses shipment; equality with the tracking ref tip is too strict.
+	peer := filepath.Join(root, "peer")
+	mustGit(t, root, "clone", "-q", "-b", "main", bare, peer)
+	mustGit(t, peer, "config", "user.name", "test")
+	mustGit(t, peer, "config", "user.email", "[redacted:pii:14B]")
+	mustWriteCommit(t, peer, "peer.txt", "peer", "feat(x): remote ahead (#2) (fak x)")
+	mustGit(t, peer, "push", "-q", "origin", "main")
+	mustGit(t, repo, "fetch", "-q", "upstream", "main")
+	a, err = InspectAncestry(ctx, repo, ancestryGit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows = AncestryRows(a)
+	if len(a.Commits) != 0 || len(rows) != 1 || rows[0].State != Shipped || !a.HeadOnRemote {
+		t.Fatalf("remote-ahead ancestry is not witnessed SHIPPED: ancestry=%+v rows=%+v", a, rows)
+	}
 }
 
 func TestInspectAncestryMissingRemoteFailsTowardOperator(t *testing.T) {
