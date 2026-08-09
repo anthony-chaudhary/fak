@@ -17,6 +17,15 @@
 // string mirror of internal/gateway.StepClass (any|bounded|checkpoint|rebuild|unknown) so the
 // core carries no dependency on the gateway package (and cannot form an import cycle with it);
 // callers map gateway.StepClass -> Advice by its string value.
+//
+// The package also carries the repeat-injection bound (#5922): InjectionLedger limits how
+// often a named rule may re-inject, in `once` / `after-gap` modes with the gap counted in
+// COMPLETED turns (stream chunks never advance the counter). Restored-age decision:
+// persistence stores rule NAMES, not ages, so a rule restored on resume is treated as
+// injected at the resume point — a restored after-gap rule waits a full fresh gap and a
+// restored once rule stays suppressed. Abort/error decision: a record whose turn dies
+// before delivery is erased via Rollback so live state matches what a resume would
+// rebuild. Both decisions are documented at length in injectledger.go and pinned by tests.
 package sessionsteer
 
 import (
