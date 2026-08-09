@@ -362,6 +362,26 @@
           "category": "incidental",
           "reason": "Issue #2830's local descriptor interface, not a new cache architecture concept",
           "token": "CacheLever"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type for issue #2830 descriptors",
+          "token": "identityCacheLever"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private issue #2830 descriptor slice, not a distinct cache concept",
+          "token": "builtinCacheLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #2830 registry accessor, not a distinct cache mechanism",
+          "token": "CacheLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private issue #2830 registration helper, not a distinct cache mechanism",
+          "token": "registerCacheLevers"
         }
       ],
       "id": "cache",
@@ -369,6 +389,7 @@
         "CacheCreationTokensHeadOnly",
         "CacheCreationTokensMessagePrefix",
         "CacheLever",
+        "CacheLevers",
         "CacheStateAllowlist",
         "CacheValueBaseline",
         "CacheValueFacts",
@@ -396,6 +417,7 @@
         "WindowCache",
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
+        "builtinCacheLevers",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheValueGateFactsFromReport",
@@ -462,6 +484,7 @@
         "droppedcachedtokens",
         "fakcachevalueinputpermtokusd",
         "flushcache",
+        "identityCacheLever",
         "inferCacheCreationTokensHeadOnly",
         "inferCacheCreationTokensMessagePrefix",
         "infercachecreationtokens",
@@ -482,6 +505,7 @@
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
+        "registerCacheLevers",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
         "tokencache",
@@ -2515,12 +2539,18 @@
           "category": "incidental",
           "reason": "machine-readable KPI key within the existing git-daily health scorecard",
           "token": "calendar_coverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #2830 CacheLever interface method, not a standalone maturity concept",
+          "token": "CorrectnessGate"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "BAD_ACHIEVED_MATURITY",
         "ClaudeKeychainSupported",
+        "CorrectnessGate",
         "DecodeInterleaveUnsupported",
         "DefaultSetupParityPairs",
         "DefaultSetupParityReport",
@@ -3021,6 +3051,16 @@
           "category": "incidental",
           "reason": "Issue #4400 local indexing helper",
           "token": "indexPlanSteps"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed transport result row, not a planning abstraction",
+          "token": "RemoteDrainCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure checkpoint deletion policy fold, not a project planning abstraction",
+          "token": "PlanRemoteDrain"
         }
       ],
       "exclude": [
@@ -3044,9 +3084,11 @@
         "PlanLog",
         "PlanLogEntry",
         "PlanReconciliation",
+        "PlanRemoteDrain",
         "PlanResolver",
         "PlanStepDecision",
         "ReconcilePlan",
+        "RemoteDrainCandidate",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
