@@ -232,6 +232,7 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		if hasOrigin {
 			originSeq = s.originSeqFor(traceID, origin)
 		}
+		resultShape, shapeVerdict, shapeContent := resultContractAdmission(tool, tools, messages[i].Content)
 		resultDigest := guardrsi.ArgsDigest(messages[i].Content)
 		// Screen this result EXACTLY ONCE per (trace, content) (#2417). On first arrival
 		// the ledger runs the closure — the real result-side stack — and records the
@@ -239,6 +240,12 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		// without re-screening, so the kernel work, the vDSO fill, the proxy_admit metric,
 		// and the eviction/reset below all happen once per unique result, not once per turn.
 		rec, fresh := s.admitLedger.admit(traceID, resultDigest, func() (WireVerdict, string, bool) {
+			// Exhaustive result contracts are a pre-consumer boundary: a shape mutant
+			// is replaced before ordinary admission, cache fill, observers, or the
+			// upstream model can consume its values.
+			if shapeVerdict != nil {
+				return *shapeVerdict, shapeContent, true
+			}
 			wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
 			if aerr != nil {
 				// A result we cannot even admit is held out fail-closed rather than
@@ -301,6 +308,7 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			Tool:         tool,
 			ResultDigest: resultDigest,
 			Verdict:      wv,
+			ResultShape:  resultShape,
 			fresh:        fresh,
 		}
 		admissions = append(admissions, adm)

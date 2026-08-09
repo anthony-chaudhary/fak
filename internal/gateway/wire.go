@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
+	"github.com/anthony-chaudhary/fak/internal/toolshape"
 )
 
 // ---------------------------------------------------------------------------
@@ -642,11 +643,12 @@ type ToolAdjudication struct {
 // ResultAdmission is one inbound tool result admitted before it is forwarded to
 // an upstream model on the OpenAI-compatible proxy path.
 type ResultAdmission struct {
-	ToolCallID   string                     `json:"tool_call_id,omitempty"`
-	Tool         string                     `json:"tool"`
-	ResultDigest string                     `json:"result_digest,omitempty"`
-	Verdict      WireVerdict                `json:"verdict"`
-	Livelock     *guardrsi.LivelockEnvelope `json:"livelock,omitempty"`
+	ToolCallID   string                        `json:"tool_call_id,omitempty"`
+	Tool         string                        `json:"tool"`
+	ResultDigest string                        `json:"result_digest,omitempty"`
+	Verdict      WireVerdict                   `json:"verdict"`
+	Livelock     *guardrsi.LivelockEnvelope    `json:"livelock,omitempty"`
+	ResultShape  *toolshape.ResultShapeReceipt `json:"result_shape,omitempty"`
 	// fresh marks a result the admission ledger screened for the FIRST time this turn
 	// (#2417) — the held-out banner is announced once, when a result is first admitted,
 	// not on every client replay. Request-local and unexported, so it never rides the
