@@ -218,6 +218,7 @@ type Result struct {
 	// TickLockErr is set when the serializer itself could not be opened or locked. This
 	// is an incident, not TICK_BUSY: proceeding would violate the one-mutator contract,
 	// while reporting a healthy contender would hide a persistent permissions failure.
+	ConfigErr   string `json:"config_err,omitempty"`
 	TickLockErr string `json:"tick_lock_err,omitempty"`
 	// LastRunDay is the day key of the newest applied run in the ledger ("" on first run).
 	LastRunDay string              `json:"last_run_day,omitempty"`
@@ -284,6 +285,12 @@ func Run(ctx context.Context, run Runner, opts Options) Result {
 		At:         now.Format(time.RFC3339),
 		Apply:      opts.Apply,
 		LedgerPath: ledger,
+	}
+
+	if err := opts.Validate(); err != nil {
+		res.ConfigErr = err.Error()
+		res.Incident = true
+		return res
 	}
 
 	// Serialize mutating ticks. A dry run takes no lock: it mutates nothing, so it can
