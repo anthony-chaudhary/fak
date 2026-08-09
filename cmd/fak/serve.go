@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -105,6 +107,8 @@ func configureServeToolEngines() {
 // definition order, so the boot stages consume them without threading four dozen
 // locals through every call.
 type serveFlags struct {
+	configPath                   *string
+	printEffectiveConfig         *bool
 	addr                         *string
 	stdio                        *bool
 	provider                     *string
@@ -145,6 +149,7 @@ type serveFlags struct {
 	elideStaleReads              *bool
 	sessionID                    *string
 	sessionStatePath             *string
+	sessionRegistry              *string
 	contextBudgetTokens          *int
 	resetOnBudget                *bool
 	cpuOffloadExperts            *bool
@@ -177,6 +182,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	verbFlagUsage(fs, "serve")
 	sf := &serveFlags{}
+	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
+	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
@@ -217,6 +224,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.deferColdTools = fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "the 10x floor lever (#3232, epic #3229): on the OUTBOUND Anthropic body, mark every allowed-but-COLD custom tool `defer_loading:true` and inject one `tool_search_tool`, so the provider loads only the HOT core into context and faults a cold schema in on demand. Deterministic + cache-safe (byte-stable tools[] turn-over-turn) and fail-safe identity on any ambiguity; every deferred def stays byte-complete in tools[], so a first real use still resolves. DEFAULT ON (gateway.DefaultDeferColdTools, the #3537 flip; the A/B and #3200 fault-in gates reported PASS). Pass =false to opt out; ablate an A/B arm with FAK_ABLATE_DEFER_TOOLS=1 (FAK_DEFER_COLD_TOOLS=1 still forces it on). Anthropic passthrough only.")
 	sf.sessionID = fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
+	sf.sessionRegistry = fs.String("session-registry", "", "session registry path for fleet-wide lifecycle operations; empty uses the shared per-user default (#5825)")
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
@@ -249,9 +257,34 @@ func cmdServe(argv []string) {
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
 	t0 := time.Now()
 	fs, sf := newServeFlagSet()
+	configPath, err := serveConfigPath(argv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	var manifest deploymanifest.Manifest
+	manifestPresent := false
+	if configPath != "" {
+		manifest, err = deploymanifest.Load(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
+			os.Exit(2)
+		}
+		applyServeManifestDefaults(sf, manifest)
+		manifestPresent = true
+	}
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
+
+	explicit := explicitFlagNames(fs)
+	if *sf.printEffectiveConfig {
+		if err := json.NewEncoder(os.Stdout).Encode(effectiveServeConfig(sf, manifest, manifestPresent, explicit)); err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: print effective config: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	resolveServeModelSources(sf)
 

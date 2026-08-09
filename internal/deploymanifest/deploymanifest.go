@@ -142,6 +142,7 @@ type Manifest struct {
 	Tenants        Tenants
 	AgentTemplates AgentTemplates
 	Observability  Observability
+	present        map[string]bool
 }
 
 // Defaults returns the built-in defaults — the lowest-precedence layer. A
@@ -157,6 +158,14 @@ func Defaults() Manifest {
 		AgentTemplates: AgentTemplates{},
 		Observability:  Observability{Metrics: false, Bind: "127.0.0.1:9090"},
 	}
+}
+
+// Present reports whether the operator explicitly declared section.key in the
+// manifest, as distinct from receiving the same value from built-in defaults.
+// Consumers use it to preserve truthful provenance and avoid treating omitted
+// zero values as customization.
+func (m Manifest) Present(section, key string) bool {
+	return m.present[section+"."+key]
 }
 
 // knownSections maps each closed-vocabulary section to its closed set of keys.
@@ -192,6 +201,7 @@ func Load(path string) (Manifest, error) {
 // with a *LoadError naming a closed-vocabulary Reason.
 func Parse(b []byte) (Manifest, error) {
 	m := Defaults()
+	m.present = make(map[string]bool)
 	section := ""
 	seen := map[string]bool{} // "section.key" already set
 	scanner := bufio.NewScanner(bytes.NewReader(b))
@@ -233,6 +243,7 @@ func Parse(b []byte) (Manifest, error) {
 				Message: fmt.Sprintf("key %q set twice in [%s]", key, section)}
 		}
 		seen[dotted] = true
+		m.present[dotted] = true
 		if err := assign(&m, section, key, rawVal, lineNo); err != nil {
 			return m, err
 		}

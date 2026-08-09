@@ -11,6 +11,40 @@ This document catalogs all configuration options for `fak serve`, the gateway se
 
 ---
 
+## Opinionated Defaults, Reviewable Overrides
+
+`fak serve` works without a configuration file and keeps its tested built-in
+settings. When your deployment disagrees with an operational default, opt into
+the reviewable manifest explicitly:
+
+```bash
+fak init                         # writes the small starting fak.toml
+fak serve --config fak.toml --print-effective-config
+fak serve --config fak.toml
+```
+
+Precedence is **explicit CLI flag > declared `fak.toml` value > built-in
+default**. An explicit flag wins even when its value happens to equal the
+built-in default. `--print-effective-config` exits before opening a listener and
+reports both each supported effective value and its source (`flag`, `manifest`,
+or `built-in`). Unknown sections, typo'd keys, duplicate keys, and malformed
+values fail closed with a named reason rather than silently changing behavior.
+There is intentionally no implicit search for an ambient `fak.toml`: changing
+the working directory cannot silently change a serve.
+
+The first runtime spine maps these manifest fields directly to serve:
+
+| `fak.toml` field | Equivalent explicit flag |
+|---|---|
+| `policy.floor` | `--policy` |
+| `auth.require_key_env` | `--require-key-env` |
+| `budgets.default_tokens` | `--context-budget-tokens` |
+| `observability.bind` | `--addr` |
+
+Secrets remain in the named environment variable; the manifest stores only its
+name. Other typed deployment sections remain reserved for the all-in-one
+orchestrator and are not reported as applied serve values.
+
 ## Server Command-Line Flags
 
 ### Basic Server Options

@@ -153,3 +153,16 @@ func TestFakTomlDefaults(t *testing.T) {
 		t.Errorf("default auth must be empty (opt-in), got %q", d.Auth.RequireKeyEnv)
 	}
 }
+
+func TestPresentDistinguishesDeclaredValuesFromDefaults(t *testing.T) {
+	m, err := Parse([]byte("[observability]\nbind = \"127.0.0.1:9090\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Present("observability", "bind") {
+		t.Fatal("declared observability.bind not recorded as present")
+	}
+	if m.Present("runtimes", "gateway") {
+		t.Fatal("omitted default runtimes.gateway recorded as user-declared")
+	}
+}
