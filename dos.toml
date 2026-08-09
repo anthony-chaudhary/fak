@@ -2106,6 +2106,53 @@ see_also = ["cmd/fak/serve_bind_safety.go", "cmd/fak/serve_bind_safety_test.go",
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
+# Daily Git hygiene refusal vocabulary (#5589). These tokens are emitted by
+# internal/gitdaily.Refusal when a scheduled tick cannot establish its serializer, safely
+# clean proven-orphan locks, complete guarded maintenance, or persist its witness. TICK_BUSY
+# is advisory because another live tick already owns the mutator; the remaining outcomes
+# require operator recovery before the scheduler retries.
+[reasons.INVALID_OPTIONS]
+category = "MISROUTE"
+refusal  = true
+summary  = "fak git-daily was invoked without a complete repository identity, so the unattended tick cannot safely choose its Git common directory or ledger."
+fix      = "Run fak git-daily from the target clone, or set RepoRoot from `git rev-parse --show-toplevel` and GitCommonDir from `git rev-parse --git-common-dir`, then retry."
+see_also = ["fak git-daily --help", "internal/gitdaily/refusal.go"]
+
+[reasons.TICK_BUSY]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A live fak git-daily tick already owns this clone's serializer, so the overlapping scheduler fire was skipped without mutation."
+fix      = "Wait for the active tick to finish, then read `fak git-daily status`; retry only if no fresh ledger row appears."
+see_also = ["fak git-daily status", "internal/gitdaily/refusal.go"]
+
+[reasons.TICK_LOCK_ERROR]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "fak git-daily could not open or inspect its per-clone serializer in the Git common directory."
+fix      = "Check permissions and filesystem health for the Git common directory, confirm no unsupported lock object replaced the serializer path, then retry."
+see_also = ["fak git-daily --json", "internal/gitdaily/refusal.go"]
+
+[reasons.LOCK_CLEANUP_FAILED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The daily tick found a lock that its evidence-gated cleanup could not safely reclaim, so maintenance did not proceed as if the clone were clean."
+fix      = "Inspect the lock sweep in `fak git-daily --json`; resolve the named live, ambiguous, or failed lock condition, then rerun the tick."
+see_also = ["fak git-daily --json", "internal/gitdaily", "docs/cli-reference.md"]
+
+[reasons.MAINTENANCE_INCIDENT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Daily object maintenance reached a guarded safety gate or failed command and recorded an incident instead of continuing unattended."
+fix      = "Inspect the maintenance refusal in `fak git-daily --json`, correct the reported repository condition, and rerun only after the safety gate is satisfied."
+see_also = ["fak git-daily --json", "internal/gitdaily", "fak buildcheck"]
+
+[reasons.LEDGER_WRITE_FAILED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Daily cleanup and maintenance completed, but fak could not append the bounded JSONL witness in the Git common directory."
+fix      = "Make the Git common directory and ledger writable, then rerun `fak git-daily --force` so completion is independently recorded."
+see_also = ["fak git-daily --force --json", "internal/gitdaily/refusal.go"]
+
 [reasons.MICROCONTEXT_LEDGER_REFUSED]
 category = "MISROUTE"
 refusal  = true
