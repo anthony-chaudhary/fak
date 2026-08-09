@@ -461,6 +461,7 @@ var tier = map[string]int{
 	"supervisoragent":       3, // #4478 (epic #4477, supervisor-seat fence #1): the closed, payload-free SupervisorInput contract a supervisor agent consumes + the pure assembler that projects it. Folds fleetmon(1) per-worker class -> WorkerState and leaseref(1) ArbiterLease -> Lease, passing the dos_status/escalation heads through payload-free; no transcript/free-text field by construction. Off the hot path.
 	"modedebt":              4, // #4416 (epic #4397, permission regimes #2389/#2405): the CONSUMER half of the mode-debt scorer/dispatcher pair. Reads the sibling scorer's scorecard JSON, selects HARD un-lifted permission dials, and maps each onto dogfoodissues(3).ActionItem with a content-stable dedup key, capped at the family --cap. Composer twin of qaprocessscore: imports dogfoodissues(3)+stdlib only, off the hot path.
 	"deploymanifest":        1, // unified fak.toml all-in-one deployment manifest (#3421, epic #3256): typed schema for the eight deployment sections + a fail-closed loader (unknown/typo'd key refuses at load with a closed-vocabulary reason) + the `fak init` minimal-emit bytes; stdlib-only, imports nothing internal, off the hot path.
+	"configguide":           2, // intent-level posture composer over deploymanifest: emits explained minimal fak.toml deltas and validates them through the foundation parser; no runtime side effects.
 	"systemservice":         2, // pure service-manager definition renderer; stdlib-only and off the hot path.
 	"guardcompile":          4,
 	"operatorquestion":      3,
