@@ -3,6 +3,7 @@
 package windowgate
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 )
