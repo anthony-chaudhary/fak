@@ -72,7 +72,9 @@ import (
 //	                                   decays into a human-/login-only state, and split a SHARED token family
 //	                                   (what copying a credential leaves behind) apart on demand. Graded from
 //	                                   disk — recorded expiry + refresh-token family fingerprint — never the
-//	                                   spawn's exit code. Exit 1 while any seat is stale/hollow
+//	                                   spawn's exit code. Exit 1 while any seat is stale/hollow/blocked.
+//	                                   A seat sharing its family with THIS session's config dir is REFUSED
+//	                                   without --yes-log-me-out (rotating it ends this session's login)
 //	fak accounts check                 RED (exit 1) if a generated view drifts from the registry
 //	fak accounts validate              load the registry and check every invariant (incl. tombstones resolve)
 //	fak accounts version               this binary's build + the registry schema/family it supports + verb set
@@ -93,7 +95,8 @@ type accountsCmd struct {
 	addForce, addProbeIdentity, addNoProbeIdentity, probeIdent *bool
 	addNoDivorce                                               *bool
 
-	refreshTimeout *time.Duration
+	refreshTimeout   *time.Duration
+	refreshAckLogout *bool
 
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmByAccount *string
 	rmArchive                                              *bool
@@ -147,6 +150,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	addNoProbeIdentity := fs.Bool("no-probe-identity", false, "(add --adopt) opt OUT of the default identity probe: record the adopted seat's on-disk .claude.json metadata as-is and hit no network (the pre-probe disk-only behavior); enroll-current ignores this and always probes")
 	addNoDivorce := fs.Bool("no-divorce", false, "(add --adopt / enroll-current) opt OUT of the default post-copy OAuth token-family divorce. An adopt COPIES the source's credential, so both dirs hold ONE refresh token and the first to refresh silently 401s the other (even hours before its expiresAt). By default the enroll immediately refreshes the NEW seat so it owns its own family — which also proves the seat can refresh, and reports that the SOURCE dir now needs a `/login`. Pass this to control that timing yourself; the shared-family hazard then stays armed")
 	refreshTimeout := fs.Duration("refresh-timeout", defaultRefreshTimeout, "(refresh) per-seat deadline for the throwaway `claude -p` turn that causes the credential rotation")
+	refreshAckLogout := fs.Bool("yes-log-me-out", false, "(refresh) accept that rotating a seat which shares its OAuth token family with the config dir THIS session runs out of will END this session's login. Such a seat is REFUSED without this flag, because a shared family is one login and the first side to refresh silently 401s the other — the operator's own interactive session, mid-task (#5954). With the flag the rotation proceeds and the report names the invalidated dir and its exact `claude /login` recovery")
 	probeIdent := fs.Bool("probe", false, "(status) probe each seat's live credential identity and flag identity-metadata-stale when the on-disk .claude.json disagrees with the account the credential actually serves")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry; (rehome) reason token recorded on the live seat switch")
@@ -227,6 +231,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 		addNoProbeIdentity:  addNoProbeIdentity,
 		addNoDivorce:        addNoDivorce,
 		refreshTimeout:      refreshTimeout,
+		refreshAckLogout:    refreshAckLogout,
 		probeIdent:          probeIdent,
 		rmRehome:            rmRehome,
 		rmReason:            rmReason,
@@ -277,7 +282,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addSuffix, addNoSync, addAdopt, addFrom, addForce := c.addSuffix, c.addNoSync, c.addAdopt, c.addFrom, c.addForce
 	addAPIKeyEnv := c.addAPIKeyEnv
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
-	addNoDivorce, refreshTimeout := c.addNoDivorce, c.refreshTimeout
+	addNoDivorce, refreshTimeout, refreshAckLogout := c.addNoDivorce, c.refreshTimeout, c.refreshAckLogout
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
 	rmByAccount := c.rmByAccount
 	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
@@ -471,11 +476,14 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// state only a human /login can fix, and so a shared token family (what copying a credential
 		// leaves behind) can be split apart on demand. Graded from the FILE — the recorded expiry and
 		// the refresh-token family fingerprint — never from the spawn's exit code. Exit 1 while any
-		// seat is stale/hollow, so a scheduled sweep can alert on the exit code alone.
+		// seat is stale/hollow, so a scheduled sweep can alert on the exit code alone. A seat sharing
+		// its family with THIS session's own config dir is refused without --yes-log-me-out: that
+		// rotation ends the operator's own login, and it used to do it silently (#5954).
 		return runAccountsRefresh(stdout, stderr, refreshParams{
 			name:         *addName,
 			timeout:      *refreshTimeout,
 			force:        *addForce,
+			ackLogout:    *refreshAckLogout,
 			registryPath: *registryPath,
 			homeDir:      *homeDir,
 			asJSON:       *asJSON,

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
@@ -39,6 +40,13 @@ type refreshParams struct {
 	// so Claude Code must refresh. That is what turns "probably fine" into a witnessed
 	// can-still-refresh fact; without it a fresh seat is reported `fresh` and left alone.
 	force bool
+	// ackLogout acknowledges that a seat sharing an OAuth token family with the CALLER's own config
+	// dir may be rotated — which ends the caller's own login. Without it that one rotation is
+	// refused (accounts_refresh_selfguard.go, #5954); every other seat still refreshes.
+	ackLogout bool
+	// callerDir is the config dir this session runs out of. Empty resolves it the way every other
+	// verb does ($CLAUDE_CONFIG_DIR, else ~/.claude); set explicitly by tests. Test seam.
+	callerDir string
 
 	// spawn overrides the refresh mechanism (nil = the real `claude -p`). Test seam.
 	spawn accounts.RefreshSpawn
@@ -58,10 +66,15 @@ type refreshRow struct {
 	FamilyAfter  string `json:"family_after,omitempty"`
 	// Status is the closed verdict: ok (rotated / expiry advanced) | fresh (nothing was due, so
 	// nothing was spawned — healthy, NOT a failure) | stale (was due, ran, moved nothing) | hollow
-	// (no usable credential left) | skipped (nothing refreshable in the first place).
+	// (no usable credential left) | skipped (nothing refreshable in the first place) | blocked
+	// (rotating it would have logged the CALLER's own session out, and nobody said that was ok).
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
 	Err    string `json:"error,omitempty"`
+	// LoggedOutDir is the caller's own config dir this seat's rotation just invalidated ("" when it
+	// invalidated none). Reported in the payload too, so a --json consumer sees the logout the
+	// table prints as a NOTE rather than discovering it as a dead session later.
+	LoggedOutDir string `json:"logged_out_dir,omitempty"`
 }
 
 const (
@@ -70,7 +83,13 @@ const (
 	refreshStatusStale   = "stale"
 	refreshStatusHollow  = "hollow"
 	refreshStatusSkipped = "skipped"
+	refreshStatusBlocked = "blocked"
 )
+
+// refreshForceHint is the `fresh` row's standing invitation to witness a rotation. It is a named
+// const because the self-logout guard REPLACES it: on a seat that shares the caller's own token
+// family, "pass --force to prove it can rotate" is an invitation to a hard logout.
+const refreshForceHint = "pass --force to prove it can rotate"
 
 // defaultRefreshTimeout bounds each seat's throwaway refresh turn. Seats are refreshed serially so
 // a roster-wide sweep never fans out N concurrent `claude` processes across the box — the spawn
@@ -107,9 +126,33 @@ func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 	}
 	sort.Strings(names)
 
+	// The config dir THIS session is running out of. Every seat is checked against it before it is
+	// touched, because the one cost a refresh can impose that no snapshot reverses is logging the
+	// operator out mid-task (#5954).
+	callerDir := p.callerDir
+	if callerDir == "" {
+		callerDir = currentSessionDir(p.homeDir, "")
+	}
+	now := time.Now()
+
 	rows := make([]refreshRow, 0, len(names))
 	backupRoot := refreshBackupRoot(p.homeDir)
 	for _, seat := range names {
+		// Would this rotation end the caller's own login? Decided from disk FIRST — before a
+		// snapshot, before a spawn — because the honest place to refuse is ahead of the cost.
+		hz := detectRefreshSelfHazard(callerDir, dirs[seat])
+		if hz.Hit && !p.ackLogout && refreshWouldRotate(dirs[seat], p.force, now) {
+			rows = append(rows, refreshRow{
+				Seat:         seat,
+				Dir:          dirs[seat],
+				FamilyBefore: hz.FamilyID,
+				FamilyAfter:  hz.FamilyID, // nothing was touched, so nothing moved
+				Status:       refreshStatusBlocked,
+				Detail:       refreshSelfBlockDetail(hz),
+			})
+			continue
+		}
+
 		// Snapshot BEFORE the refresh. A refresh is a credential-overwrite path like any other: when
 		// the refresh grant fails, Claude Code can leave the file HOLLOW (both tokens blanked). This
 		// verb hit that on its first roster-wide run — july16-netra's refresh token had already
@@ -122,7 +165,21 @@ func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 		} else if len(snaps) > 0 && !p.asJSON {
 			fmt.Fprintf(stdout, "%-20s %-8s snapshotted %d blob(s) before refresh\n", seat, "backup", len(snaps))
 		}
-		rows = append(rows, refreshSeat(seat, dirs[seat], timeout, p.force, p.spawn))
+		row := refreshSeat(seat, dirs[seat], timeout, p.force, p.spawn)
+		if hz.Hit {
+			switch {
+			case row.Status == refreshStatusFresh:
+				// Nothing was touched — but the standing "pass --force" hint would send the operator
+				// straight into the logout this guard exists to announce. Amend it in place.
+				row.Detail = strings.Replace(row.Detail, refreshForceHint, refreshSelfForceHint(hz), 1)
+			case row.FamilyAfter != row.FamilyBefore:
+				// The rotation happened, with the operator's acknowledgement. The caller's dir is now
+				// holding the OLD half of a family that no longer exists, so record the dir that died;
+				// the report prints it with the command that revives it.
+				row.LoggedOutDir = hz.CallerDir
+			}
+		}
+		rows = append(rows, row)
 	}
 
 	if p.asJSON {
@@ -132,13 +189,20 @@ func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
 	}
 	for _, r := range rows {
 		fmt.Fprintf(stdout, "%-20s %-8s %s\n", r.Seat, r.Status, r.Detail)
+		// A logout the operator agreed to still has to be SAID, with the repair — the divorce path's
+		// rule, applied to the path that was missing it.
+		printRefreshSelfLogout(stdout, r)
 		if r.Err != "" {
 			fmt.Fprintf(stderr, "  %s: refresh spawn: %s\n", r.Seat, r.Err)
 		}
 	}
 	sum := refreshSummary(rows)
-	fmt.Fprintf(stdout, "summary: %d seat(s): ok=%d fresh=%d stale=%d hollow=%d skipped=%d\n",
-		len(rows), sum["ok"], sum["fresh"], sum["stale"], sum["hollow"], sum["skipped"])
+	fmt.Fprintf(stdout, "summary: %d seat(s): ok=%d fresh=%d stale=%d hollow=%d skipped=%d blocked=%d\n",
+		len(rows), sum["ok"], sum["fresh"], sum["stale"], sum["hollow"], sum["skipped"], sum["blocked"])
+	if sum["blocked"] > 0 {
+		fmt.Fprintf(stdout, "a blocked seat is one login with the config dir this session runs out of (%s): rotating it logs THIS session out, so it is refused until you say so with %s (or run the refresh from a session on another seat)\n",
+			callerDir, refreshAckLogoutFlag)
+	}
 	if sum["hollow"] > 0 {
 		fmt.Fprintln(stdout, "a hollow seat has no usable credential left: `fak accounts restore-credential --name <seat>` reverses the blanking (the pre-refresh snapshot above), but a credential whose REFRESH token has itself expired can only be revived by a human /login")
 	}
@@ -180,10 +244,10 @@ func refreshSeat(seat, dir string, timeout time.Duration, force bool, spawn acco
 		row.Status = refreshStatusFresh
 		row.FamilyAfter = row.FamilyBefore
 		if exp, ok := accounts.CredentialExpiry(dir); ok {
-			row.Detail = fmt.Sprintf("not due yet (expires %s, in %s); pass --force to prove it can rotate",
-				exp.UTC().Format("2006-01-02 15:04Z"), time.Until(exp).Round(time.Minute))
+			row.Detail = fmt.Sprintf("not due yet (expires %s, in %s); %s",
+				exp.UTC().Format("2006-01-02 15:04Z"), time.Until(exp).Round(time.Minute), refreshForceHint)
 		} else {
-			row.Detail = "not due yet; pass --force to prove it can rotate"
+			row.Detail = "not due yet; " + refreshForceHint
 		}
 		return row
 	}
@@ -237,6 +301,7 @@ func refreshSummary(rows []refreshRow) map[string]int {
 		refreshStatusStale:   0,
 		refreshStatusHollow:  0,
 		refreshStatusSkipped: 0,
+		refreshStatusBlocked: 0,
 	}
 	for _, r := range rows {
 		sum[r.Status]++
@@ -245,10 +310,14 @@ func refreshSummary(rows []refreshRow) map[string]int {
 }
 
 // accountsRefreshExit is nonzero exactly when a seat needs attention a refresh could not provide
-// (hollow or stale), so a scheduled `fak accounts refresh` can alert on the exit code alone.
+// (hollow or stale) or was REFUSED because rotating it would have ended the caller's own session,
+// so a scheduled `fak accounts refresh` can alert on the exit code alone. A blocked seat counts:
+// its work did not happen, and a sweep that reported 0 there would be claiming a rotation it
+// declined to perform.
 func accountsRefreshExit(rows []refreshRow) int {
 	for _, r := range rows {
-		if r.Status == refreshStatusHollow || r.Status == refreshStatusStale {
+		switch r.Status {
+		case refreshStatusHollow, refreshStatusStale, refreshStatusBlocked:
 			return 1
 		}
 	}

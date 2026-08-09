@@ -50,7 +50,11 @@ func divorceAdoptedFamily(stdout, stderr io.Writer, src, dir string, p addParams
 		if share := accounts.DetectSharedRefreshFamily(src, dir); share.Shared {
 			fmt.Fprintf(stderr, "fak accounts: warning: --no-divorce: seat %q and %s share OAuth token family %s\n", p.name, src, share.FamilyID)
 			fmt.Fprintln(stderr, "  the FIRST of the two to refresh will silently invalidate the other (a 401 long before its expiresAt)")
-			fmt.Fprintf(stderr, "  resolve it deliberately with: fak accounts refresh --name %s\n", p.name)
+			// --force, because a not-yet-due credential is graded `fresh` and rotates nothing — the
+			// bare retry looked like it worked while leaving the hazard armed. If src is the dir this
+			// session runs out of, that refresh now refuses until the logout is acknowledged (#5954).
+			fmt.Fprintf(stderr, "  resolve it deliberately with: fak accounts refresh --name %s --force\n", p.name)
+			fmt.Fprintf(stderr, "  (%s is the dir that gets logged out; add %s if it is the session you are typing in)\n", src, refreshAckLogoutFlag)
 		}
 		return
 	}
