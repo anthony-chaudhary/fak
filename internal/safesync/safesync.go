@@ -261,6 +261,9 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	if opts.barrier != nil {
 		opts.barrier()
 	}
+	if lease.Lost() {
+		return Assessment{OK: false, State: "refused", Reason: "writer lease lost before apply; displaced result suppressed", Lease: func() *WriterLeaseInfo { info := lease.Info(); return &info }()}, nil
+	}
 
 	info, err = Assess(ctx, opts)
 	if err != nil {
@@ -273,7 +276,7 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		info.Applied = false
 		return info, nil
 	}
-	applied, detail, indeterminate, err := applyFastForward(ctx, run, opts.Repo, info)
+	applied, detail, indeterminate, err := applyFastForward(ctx, run, opts.Repo, info, lease)
 	if err != nil {
 		return info, err
 	}
@@ -480,7 +483,7 @@ func worktreeBytes(repo, path string) ([]byte, bool) {
 	return b, true
 }
 
-func applyFastForward(ctx context.Context, run Runner, repo string, info Assessment) (applied bool, detail string, indeterminate bool, err error) {
+func applyFastForward(ctx context.Context, run Runner, repo string, info Assessment, lease *WriterLease) (applied bool, detail string, indeterminate bool, err error) {
 	// The assessment is a snapshot, not a lease over arbitrary raw file writers. Do not pre-clean
 	// "identical" paths here: a peer can edit or create one after classify reads it,
 	// and checkout/remove would then destroy that newer work. Git's merge worktree
@@ -506,6 +509,9 @@ func applyFastForward(ctx context.Context, run Runner, repo string, info Assessm
 	}
 	if info.Head != "" && head != info.Head {
 		return false, "HEAD changed after assessment", false, nil
+	}
+	if lease.Lost() {
+		return false, "writer lease lost before fast-forward; displaced result suppressed", false, nil
 	}
 	args := []string{"merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", info.Target}
 	res := run(ctx, repo, args...)

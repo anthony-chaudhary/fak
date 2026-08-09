@@ -322,6 +322,72 @@ func TestWriterLeaseRefreshMovesWindowAndIsOwnerChecked(t *testing.T) {
 	}
 }
 
+// TestApplySuppressesFastForwardAfterWriterLeaseLoss is the #5974 write-boundary
+// witness: a displaced holder may finish its assessment, but it must not publish the
+// fast-forward after the heartbeat observes that a peer reclaimed the lease.
+func TestApplySuppressesFastForwardAfterWriterLeaseLoss(t *testing.T) {
+	clone := behindClone(t)
+	headBefore := revString(t, clone, "HEAD")
+	gitDir, err := worktreeGitDir(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leasePath := filepath.Join(gitDir, writerLeaseFile)
+	mergeCalls := 0
+	runner := func(ctx context.Context, repo string, args ...string) RunResult {
+		if len(args) > 0 && args[0] == "merge" {
+			mergeCalls++
+		}
+		return RealRunner(ctx, repo, args...)
+	}
+	opts := Options{
+		Repo: clone, Remote: "origin", Branch: "work", Runner: runner,
+		LeaseOwner: "displaced-holder", WriterLeaseTTL: 40 * time.Millisecond,
+	}
+	opts.barrier = func() {
+		if err := os.Remove(leasePath); err != nil {
+			t.Fatal(err)
+		}
+		peer := WriterLeaseInfo{Owner: "reclaiming-peer", PID: os.Getpid(), AcquiredUnix: time.Now().Unix()}
+		ok, err := writeLeaseExclusive(leasePath, peer)
+		if err != nil || !ok {
+			t.Fatalf("install reclaiming peer lease: ok=%v err=%v", ok, err)
+		}
+		deadline := time.Now().Add(time.Second)
+		for {
+			// The heartbeat stops only after observing the displacement. Waiting for its
+			// goroutine count indirectly would be racy; the peer record remaining stable
+			// across several heartbeat intervals plus a bounded delay gives it time to
+			// close the holder's lost signal before Apply crosses the write boundary.
+			if time.Now().After(deadline) {
+				t.Fatal("heartbeat did not observe displaced lease in time")
+			}
+			time.Sleep(15 * time.Millisecond)
+			cur, readErr := readLease(leasePath)
+			if readErr == nil && cur.Owner == peer.Owner {
+				// Two intervals are enough for the 10ms heartbeat; wait one more to avoid
+				// scheduling the Apply goroutine ahead of the observation.
+				time.Sleep(15 * time.Millisecond)
+				return
+			}
+		}
+	}
+
+	info, err := Apply(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mergeCalls != 0 {
+		t.Fatalf("displaced holder published %d merge(s), want none", mergeCalls)
+	}
+	if got := revString(t, clone, "HEAD"); got != headBefore {
+		t.Fatalf("displaced holder changed HEAD: got %s want %s", got, headBefore)
+	}
+	if info.OK || info.Applied || !strings.Contains(info.Reason, "lease lost") {
+		t.Fatalf("apply = %+v, want refused lost-lease suppression", info)
+	}
+}
+
 // TestApplyReturnsIndeterminateOnPartialFastForward proves a fast-forward that dies
 // partway (leaving an in-progress MERGE_HEAD) is reported as a typed, content-preserving
 // INDETERMINATE verdict — not a clean refusal and not a swallowed plain error — so a
