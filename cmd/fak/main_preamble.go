@@ -50,6 +50,10 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		recordUsage(*verb, *argv, 2, start)
 		os.Exit(2)
 	}
+	if os.Args[1] == "orchestration" {
+		cmdOrchestration(os.Args[2:])
+		return true
+	}
 	if os.Args[1] == "dev" {
 		v, rest, code := resolveDevVerb(os.Args[2:], os.Stdout, os.Stderr)
 		if code >= 0 {
