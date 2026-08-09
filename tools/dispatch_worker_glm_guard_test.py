@@ -22,6 +22,7 @@ or `python -m pytest tools/dispatch_worker_glm_guard_test.py -q`.
 """
 from __future__ import annotations
 
+import ast
 import atexit
 import itertools
 import json
@@ -288,6 +289,25 @@ def test_opencode_does_not_get_the_codex_loop_gate_flag() -> None:
     assert "--codex-loop-gate" not in cmd, cmd
 
 
+
+def test_glm_docs_spawn_passes_prompt_payload() -> None:
+    """The dedicated opencode launcher passes the full prompt out-of-band."""
+    src = (ROOT / "tools" / "dispatch_glm_docs.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "ird"
+        and node.func.attr == "spawn_issue_worker"
+    ]
+    assert len(calls) == 1, "expected one dedicated GLM spawn seam"
+    kws = {kw.arg: kw.value for kw in calls[0].keywords if kw.arg}
+    assert "prompt_payload" in kws
+    assert isinstance(kws["prompt_payload"], ast.Subscript)
+    assert ast.unparse(kws["prompt_payload"]) == "rb['prompt']"
+
 def main() -> int:
     failures = 0
     for name, fn in sorted(globals().items()):
@@ -303,6 +323,7 @@ def main() -> int:
         return 1
     print("\nall GLM/opencode guard-lane tests passed")
     return 0
+
 
 
 if __name__ == "__main__":

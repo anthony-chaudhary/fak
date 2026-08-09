@@ -266,7 +266,8 @@ def main(argv=None) -> int:
         env["FLEET_RESOLVE_ISSUE"] = str(issue)
         cmd = ird.build_worker_command("opencode", rb["prompt"], GLM_MODEL)
         res = ird.spawn_issue_worker(cmd, env, REPO, RUNS, issue, "docs", "opencode",
-                                     account=acct, spawn_probe_s=8.0)
+                                     account=acct, spawn_probe_s=8.0,
+                                     prompt_payload=rb["prompt"])
         spawned.append({"issue": issue, "pid": res.get("pid"), "log": res.get("log")})
 
     out = {"pool": "glm-docs", "live_before": have, "reaped": n_reaped,
