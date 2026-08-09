@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/commitlifecycle"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/wiprecon"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // commitLifecycleQueue folds the existing checkpoint reconciler into the shared
@@ -74,6 +75,22 @@ func commitLifecycleQueue(ctx context.Context, repo string) ([]commitlifecycle.R
 			continue
 		}
 		rows = append(rows, commitlifecycle.Fold(facts))
+	}
+	workerRows, err := workerworktree.Inventory(repo, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, worker := range workerRows {
+		switch worker.State {
+		case "LAND_READY":
+			if len(worker.LandArgv) < 2 || worker.LandArgv[0] != "fak" {
+				rows = append(rows, commitlifecycle.Row{State: commitlifecycle.Unknown, Action: commitlifecycle.Action{NeedsOperator: true, Reason: "worker inventory returned invalid land argv"}})
+				continue
+			}
+			rows = append(rows, commitlifecycle.Row{State: commitlifecycle.LandReady, Action: commitlifecycle.Action{Tool: worker.LandArgv[0], Args: append([]string(nil), worker.LandArgv[1:]...)}})
+		case "NEEDS_OPERATOR":
+			rows = append(rows, commitlifecycle.Row{State: commitlifecycle.Unknown, Action: commitlifecycle.Action{NeedsOperator: true, Reason: worker.Reason}})
+		}
 	}
 	rows = append(rows, ancestryRows...)
 	return rows, nil

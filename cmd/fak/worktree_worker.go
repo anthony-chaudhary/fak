@@ -144,6 +144,9 @@ func worktreeWorkerPrepare(argv []string) {
 	lane := fs.String("lane", "", "worker's lane (e.g. cmd, gateway) — a segment of the worktree dir name")
 	key := fs.String("key", "", "worker's unique key (issue number, wave id, pid) — hashed into the dir name")
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
+	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
+	var paths repeatedString
+	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
 	wtRoot := fs.String("wt-root", "", "parent dir for the worktree (default: FLEET_WORKER_WORKTREE_ROOT or per-OS scratch)")
 	root := fs.String("root", "", "repo root (default: discover from cwd)")
 	fs.Parse(argv)
@@ -153,6 +156,15 @@ func worktreeWorkerPrepare(argv []string) {
 	out := worktreePrepareOut{Result: res}
 	if res.OK && res.Path != "" {
 		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
+		if strings.TrimSpace(*message) != "" || len(paths) > 0 {
+			if strings.TrimSpace(*message) == "" || len(paths) == 0 {
+				res.OK, res.Reason = false, "--message and at least one --path must be supplied together"
+				out.Result = res
+			} else if err := workerworktree.SaveIntent(res.Path, res.BaseSHA, *message, paths); err != nil {
+				res.OK, res.Reason = false, "save worker land intent: "+err.Error()
+				out.Result = res
+			}
+		}
 	}
 	worktreeWorkerEmit(out)
 	if !res.OK {
@@ -431,8 +443,9 @@ func worktreeDirBytes(dir string) int64 {
 // worktreeWorkerListOut is the list JSON: a count and the sorted live-worktree
 // paths (never null — an empty slice renders `[]`), mirroring the Python CLI.
 type worktreeWorkerListOut struct {
-	Count int      `json:"count"`
-	Paths []string `json:"paths"`
+	Count     int                           `json:"count"`
+	Paths     []string                      `json:"paths"`
+	Inventory []workerworktree.InventoryRow `json:"inventory"`
 }
 
 type worktreeWorkerRecoverOut struct {
@@ -508,7 +521,15 @@ func worktreeWorkerList(argv []string) {
 	if paths == nil {
 		paths = []string{}
 	}
-	worktreeWorkerEmit(worktreeWorkerListOut{Count: n, Paths: paths})
+	rows, err := workerworktree.Inventory(repoRoot, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak worktree worker list: %v\n", err)
+		os.Exit(1)
+	}
+	if rows == nil {
+		rows = []workerworktree.InventoryRow{}
+	}
+	worktreeWorkerEmit(worktreeWorkerListOut{Count: n, Paths: paths, Inventory: rows})
 }
 
 // worktreeWorkerGoBuildVerify is the `--verify go-build` witness: run `go build

@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 
 	"github.com/anthony-chaudhary/fak/internal/commitlifecycle"
 )
@@ -77,5 +80,46 @@ func TestCommitLifecycleActionTextPreservesOperatorGate(t *testing.T) {
 	got := commitLifecycleActionText(commitlifecycle.Action{NeedsOperator: true, Reason: "conflict needs review"})
 	if got != "operator: conflict needs review" {
 		t.Fatalf("action text = %q", got)
+	}
+}
+
+func TestCommitLifecycleQueueIncludesExactWorkerLandAction(t *testing.T) {
+	dir, _ := wipTestRepo(t)
+	baseOut, err := gitWipOut(context.Background(), dir, nil, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := strings.TrimSpace(baseOut)
+	prep := workerworktree.Prepare(dir, "cmd", "5994", base, filepath.Join(t.TempDir(), "workers"), nil)
+	if !prep.OK {
+		t.Fatalf("prepare = %+v", prep)
+	}
+	t.Cleanup(func() { _ = workerworktree.Reap(dir, prep.Path, nil) })
+	message := "feat(workerworktree): queue detached land (#5994) (fak workerworktree)"
+	if err := workerworktree.SaveIntent(prep.Path, base, message, []string{"note.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prep.Path, "note.txt"), []byte("worker edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := commitLifecycleQueue(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *commitlifecycle.Row
+	for i := range rows {
+		if rows[i].State == commitlifecycle.LandReady && len(rows[i].Action.Args) > 2 && rows[i].Action.Args[0] == "worktree" {
+			got = &rows[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("rows = %+v, want worker LAND_READY", rows)
+	}
+	text := commitLifecycleActionText(got.Action)
+	for _, want := range []string{"fak worktree worker land", "--worktree " + prep.Path, "--base-sha " + base, "--msg-file", "--paths note.txt"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("action %q lacks %q", text, want)
+		}
 	}
 }
