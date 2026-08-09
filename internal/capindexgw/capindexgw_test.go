@@ -147,3 +147,28 @@ var (
 	_ capindex.Resolver = (*MCPResolver)(nil)
 	_ capindex.Resolver = (*A2AResolver)(nil)
 )
+
+func TestCoreToolAdmissionRefusesReachableMCPCapability(t *testing.T) {
+	r := NewMCPResolver(gateway.NewServer())
+	cards := r.Index()
+	if len(cards) == 0 {
+		t.Fatal("MCP catalog is empty; refusal witness requires one reachable capability")
+	}
+	mcp := cards[0].Ref
+
+	got := r.AdmitCoreTool(CoreToolProposal{Name: "new_permanent_tool", Capability: mcp.Name})
+	if got.Allowed {
+		t.Fatalf("reachable MCP capability %q was admitted as a core tool", mcp.Name)
+	}
+	if got.Sidestep != mcp {
+		t.Fatalf("sidestep = %+v, want %+v", got.Sidestep, mcp)
+	}
+	if !strings.Contains(got.Reason, mcp.Name) || !strings.Contains(got.Reason, "MCP catalog sidestep") {
+		t.Fatalf("refusal reason %q does not name the MCP sidestep", got.Reason)
+	}
+
+	unmatched := r.AdmitCoreTool(CoreToolProposal{Name: "novel_tool", Capability: "not-in-the-catalog"})
+	if !unmatched.Allowed || unmatched.Reason != "" {
+		t.Fatalf("novel capability was refused: %+v", unmatched)
+	}
+}
