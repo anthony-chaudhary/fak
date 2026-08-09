@@ -1,3 +1,8 @@
+---
+title: "Micro-context S4d: bounded multi-turn continuation"
+description: "Descriptor v2 adds a positive turn budget and a stable continuation token, refusing an unmatched final turn and any gateway call beyond that budget."
+---
+
 # Micro-context S4d: bounded multi-turn continuation
 
 **Status:** observed deterministic 1,000-context contract witness, 2026-08-06; resolves #5818.
@@ -15,7 +20,7 @@ go run ./cmd/microcontextdemo -verify-multi-turn-descriptor experiments/microcon
 
 The ledger reconciles exactly:
 
-- 1,000 logical contexts × 3 budgeted turns = 3,000 expected and 3,000 accounted gateway turns;
+- 1,000 logical contexts Ã— 3 budgeted turns = 3,000 expected and 3,000 accounted gateway turns;
 - 1,000/1,000 output contracts completed, with zero failures;
 - 1,000 stable continuation tokens and zero trace mismatches;
 - 1,000 mid-task parks and 1,000 byte-verified restores;

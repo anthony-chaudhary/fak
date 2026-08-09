@@ -1,3 +1,8 @@
+---
+title: "Research route: hypotheses, evidence, and promotion"
+description: "Index of fak research notes and captured stage witnesses, with the lifecycle rule that keeps a hypothesis out of the maintained authority set."
+---
+
 # Research: hypotheses, evidence, and promotion
 
 **Primary audience:** research readers evaluating an idea's provenance, evidence, and maturity before using it to guide implementation.
@@ -51,17 +56,17 @@ Research often depends on a specific backend, model, release, hardware tier, dat
 
 The repository's studies and dated investigations currently live under [`docs/notes/`](../notes/); the curated [Notes & research index](../../INDEX.md#notes--research-docsnotes) is the human route. [`docs/sota/`](../sota/) tracks state-of-the-art comparisons. Use [`llms.txt`](../../llms.txt) for machine-oriented discovery.
 
-- [Micro-context cache-value Track-1 fold](micro-context-cachevalue-track1.md) — controlled S2b reuse enters the witnessed P&L while synthetic and provider-dollar evidence remain fenced out.
-- [Micro-context S2b controlled in-kernel prefix-cache A/B](micro-context-s2b-kernel-cache-ab.md) — fresh-process arms reconcile response usage with RadixAttention counters and observe a fixture-scoped 2.16x shared-base service gain.
+- [Micro-context cache-value Track-1 fold](micro-context-cachevalue-track1.md) â€” controlled S2b reuse enters the witnessed P&L while synthetic and provider-dollar evidence remain fenced out.
+- [Micro-context S2b controlled in-kernel prefix-cache A/B](micro-context-s2b-kernel-cache-ab.md) â€” fresh-process arms reconcile response usage with RadixAttention counters and observe a fixture-scoped 2.16x shared-base service gain.
 - [Micro-context S3 hibernation/restart](micro-context-s3-hibernation-restart.md)
 - [Micro-context S4a lightweight descriptor](micro-context-s4-lightweight-descriptor.md)
 - [Micro-context S4b compatibility scheduler](micro-context-s4-compatibility-scheduler.md)
 - [Micro-context S4c effect safety](micro-context-s4-effect-safety.md)
-- [Micro-context S4d: bounded multi-turn continuation](micro-context-s4d-multi-turn-descriptor.md) — exact 1,000×3 turn accounting with continuation-token and byte-verified mid-task restore.
-- [Micro-context S4e real compatibility-batch execution](micro-context-s4e-compat-batch-execution.md) — planner batches execute through the in-kernel batch seam; the first mixed-length CPU fixture is an honest 0.539x negative result.
+- [Micro-context S4d: bounded multi-turn continuation](micro-context-s4d-multi-turn-descriptor.md) â€” exact 1,000Ã—3 turn accounting with continuation-token and byte-verified mid-task restore.
+- [Micro-context S4e real compatibility-batch execution](micro-context-s4e-compat-batch-execution.md) â€” planner batches execute through the in-kernel batch seam; the first mixed-length CPU fixture is an honest 0.539x negative result.
 - [Micro-context S5a controlled-kernel 1,000-context ramp](micro-context-s5a-controlled-kernel-1k.md)
 - [Micro-context S6 API-only adapter](micro-context-s6-api-only.md)
-- [Micro-context health scorecard](micro-context-health-scorecard.md) — deterministic witness fold grades the controlled 1k CUDA ledger A/100 and names the missing second-run drift baseline.
-- [Micro-context outcome counters](micro-context-outcome-counters.md) — the existing quality ledger exposes reconciled success/error/refusal totals; controlled 1k CUDA readout is 1000/0/0.
+- [Micro-context health scorecard](micro-context-health-scorecard.md) â€” deterministic witness fold grades the controlled 1k CUDA ledger A/100 and names the missing second-run drift baseline.
+- [Micro-context outcome counters](micro-context-outcome-counters.md) â€” the existing quality ledger exposes reconciled success/error/refusal totals; controlled 1k CUDA readout is 1000/0/0.
 - [Micro-context quality and observability ledger](micro-context-quality-ledger.md)
 - [Micro-context S7 mixed-tenant fairness](micro-context-s7-fairness.md)

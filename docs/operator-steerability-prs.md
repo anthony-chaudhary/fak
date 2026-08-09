@@ -1,3 +1,8 @@
+---
+title: "Operator-steerability PRs: observability, not a merge gate"
+description: "How `fak steer prs` bundles continuous-merge trunk commits into operator-legible PR units, and why that overlay must never become a merge gate."
+---
+
 # Operator-steerability PRs — observability without a merge gate
 
 **The doctrine note for epic [#5015](https://github.com/anthony-chaudhary/fak/issues/5015).**

@@ -1,3 +1,8 @@
+---
+title: "Micro-context reconciled outcome counters"
+description: "The success, error, and refusal counters the quality ledger reconciles against retired, failed, and cancelled totals so a hand-edited count cannot pass."
+---
+
 # Micro-context outcome counters
 
 The existing `fak-microcontext-quality-ledger/1` surface now carries a reconciled `outcomes` map with `success`, `error`, and `refusal` counts. The verifier requires those counters to equal retired, failed, and cancelled totals, so a hand-edited green count cannot disagree with the run accounting.

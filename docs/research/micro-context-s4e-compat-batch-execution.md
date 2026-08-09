@@ -1,3 +1,8 @@
+---
+title: "Micro-context S4e: compatibility-batch execution"
+description: "An observed negative result for real compatibility-batch execution over the micro-context substrate, and the measurement that withheld the speedup claim."
+---
+
 # Micro-context S4e: real compatibility-batch execution
 
 **Maturity:** observed negative result. **Captured:** 2026-08-07. **Issue:** #5819.

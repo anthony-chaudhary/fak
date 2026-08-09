@@ -1,3 +1,8 @@
+---
+title: "Out-of-band operator control plane"
+description: "The closed steer, pause, resume, cancel, and throttle vocabulary for a running fak session, with each op's capability, boundary, and witness."
+---
+
 # The out-of-band operator control plane
 
 **The doctrine page for epic [#2753](https://github.com/anthony-chaudhary/fak/issues/2753)

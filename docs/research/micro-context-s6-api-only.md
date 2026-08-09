@@ -1,3 +1,8 @@
+---
+title: "Micro-context S6: API-only shared-base adapter"
+description: "A process-local provider admission seam declaring only observable controls — requests, tokens, concurrency, spend, and cache telemetry — around the endpoint."
+---
+
 # Micro-context S6: API-only shared-base adapter
 
 **Status:** witnessed on 2026-08-06 with a keyed billing credential. The adapter makes no controlled-kernel claim.

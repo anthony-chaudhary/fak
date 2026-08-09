@@ -1,3 +1,8 @@
+---
+title: "Micro-context S5a: 1,000 contexts on controlled CUDA"
+description: "One bounded worker driving a thousand real-model contexts against the native controlled-CUDA serve path on a sanctioned L4 node — the small-first ramp."
+---
+
 # Micro-context S5a: 1,000 real-model contexts on controlled CUDA
 
 **Status:** witnessed on 2026-08-06. This is the small-first ramp in #5820; it does not close the 10,000-context S5 soak in #5792.

@@ -1,3 +1,8 @@
+---
+title: "Micro-context S4b: compatibility-class scheduler"
+description: "Classifying model turns by model, sampling, tools, prefix, phase, and length so only exact keys coalesce, with bounded queues and a padding cap."
+---
+
 # Micro-context S4b: compatibility-class scheduler
 
 **Status:** deterministic controlled-kernel planner witness, 2026-08-06.

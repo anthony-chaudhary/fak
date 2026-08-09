@@ -1,3 +1,8 @@
+---
+title: "Micro-context quality and observability ledger"
+description: "The `fak-microcontext-quality-ledger/1` surface: submitted equals retired plus failed plus cancelled, with three claim families kept structurally separate."
+---
+
 # Micro-context quality and observability ledger
 
 **Status:** witnessed on 2026-08-06 for a 10,000-context synthetic run and a keyed model-backed API run.

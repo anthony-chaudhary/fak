@@ -1,3 +1,8 @@
+---
+title: "Micro-context cache-value Track-1 ingestion fold"
+description: "How `fak cachevalue feed --microcontext-ledger` maps controlled micro-context reuse into the witnessed Track-1 ledger and never emits a Track-2 row."
+---
+
 # Micro-context cache-value Track-1 fold
 
 **Maturity:** promoted ingestion contract. **Captured source:** S2b, 2026-08-07. **Issue:** #5821.

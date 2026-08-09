@@ -1,3 +1,8 @@
+---
+title: "Micro-context S4a: the lightweight descriptor"
+description: "The `fak-micro-context-descriptor/1` contract capturing only the semantics needed to schedule one logical context, plus the harness assumptions behind it."
+---
+
 # Micro-context S4a: harness assumptions and lightweight descriptor
 
 **Status:** observed local contract/bring-up witness, 2026-08-06. This is the harness-assumption child #5789, not the tool/effect-safety S4 child #5791.

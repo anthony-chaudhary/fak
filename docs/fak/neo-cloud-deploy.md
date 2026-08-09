@@ -15,7 +15,7 @@ It sits between two neighbours that look similar and are not:
   fronts a hosted model **API** (`fak serve --provider openai --base-url <cloud /v1>`
   for Bedrock, Vertex, Groq, Together, Fireworks). No GPU of yours — you proxy someone
   else's tokens.
-- [Neo-cloud reference architecture](../vendor/neo-cloud-reference-architecture.md) is
+- [Neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) is
   the **binding layer**: how a neo-cloud operator exposes many accelerator *backends*
   through one control plane. That is about the backends behind the gateway; this page
   is about standing the gateway up on one rented box.
@@ -189,7 +189,7 @@ today versus what still needs a live run.
   provider (a gateway answering an adjudicated request from a `.gguf` on that provider's
   GPU). Demotion/retirement evidence: if the neo-cloud in-kernel path is superseded by
   the binding-layer control plane in the
-  [reference architecture](../vendor/neo-cloud-reference-architecture.md), this quickstart
+  [reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md), this quickstart
   folds into that page instead of standing alone.
 - **Invalidating assumption to watch:** that the **default all-arch build** is the right
   thing to hand a renter. It buys card-independence (five cubins + a `compute_120` PTX
@@ -204,7 +204,7 @@ today versus what still needs a live run.
   (Docker, Compose, Kubernetes, bare metal; the auth/policy/binding checklist).
 - [Clouds & hosted providers](../supported/clouds.md) — the opposite shape: fronting a
   hosted model API.
-- [Neo-cloud reference architecture](../vendor/neo-cloud-reference-architecture.md) — the
+- [Neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) — the
   binding layer for exposing heterogeneous accelerator backends.
 - [GPU forward pass](../../GPU.md) — what the in-kernel CUDA decode actually runs, with
   the honest gap to llama.cpp.

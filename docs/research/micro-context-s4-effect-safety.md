@@ -1,3 +1,8 @@
+---
+title: "Micro-context S4c: parallel effect safety"
+description: "How the effect coordinator composes existing fak seams instead of trusting parallel model turns, checked against an adversarial controlled-kernel fixture."
+---
+
 # Micro-context S4c: parallel effect safety
 
 **Status:** observed controlled-kernel adversarial fixture, 2026-08-06.

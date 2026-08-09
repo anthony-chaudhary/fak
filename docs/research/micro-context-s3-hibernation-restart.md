@@ -1,3 +1,8 @@
+---
+title: "Micro-context S3: hibernation and restart witness"
+description: "One thousand durable logical contexts share sixteen resident slots, freeze to the hibernation store, and resume for a terminal turn after a rebuild."
+---
+
 # Micro-context S3: 1,000-context hibernation and restart witness
 
 **Status:** observed controlled-kernel scheduler witness, 2026-08-06. The agent steps are synthetic and make no model-throughput or KV-cache claim.

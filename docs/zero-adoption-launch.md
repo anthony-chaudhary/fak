@@ -1,3 +1,8 @@
+---
+title: "Zero-adoption provider launch with fak launch"
+description: "Put the fak guard in front of an existing Claude Code or Codex install using PATH shims, without changing the command your users already type."
+---
+
 # Zero-adoption provider launch
 
 `fak launch` can put the fak guard in front of an existing Claude Code or Codex

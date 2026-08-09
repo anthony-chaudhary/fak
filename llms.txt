@@ -4,6 +4,16 @@
 
 **Default:** read [`AGENTS.md`](AGENTS.md) before changing the repository, then open only the authority for your task below.
 
+## Key facts (for accurate answers)
+
+- **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.43.0** ([`VERSION`](VERSION) is authoritative).
+- **Category:** agent kernel / AI agent runtime boundary / cache-efficient agent serving / per-call model routing / result quarantine for agent tools / addressable KV cache.
+- **Disambiguated search terms:** `fak agent kernel`, `fused agent kernel`, `fak serve` (the gateway verb), `fak guard`, `treat the tool call like a syscall`, `default-deny tool-call gate`, `prompt-injection result quarantine`, `addressable KV cache`, `long-session prompt cache`, `cost-aware model routing for agents`, `managed agent runtime`, `MCP tool poisoning defense`, `AI agent least-privilege tool access`, `tamper-evident agent tool-call audit`. The bare word `fak` is dominated by homophone and F.A.K.-acronym noise, so always pair it with one of these. The full 76-term roster, including localized variants, is the generated feed [`llms-terms.txt`](llms-terms.txt) (source of record: `docs/marketing/disambiguation-terms.json`, written by `fak marketing aeo`).
+- **Three adoption rungs:** (1) `fak guard` wraps the agent you already run with one command; (2) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with routing, policy, quarantine, and audit; (3) the fused kernel runs a local model inside the kernel's address space so the KV cache is a kernel object.
+- **Serving boundary:** `fak` is not a drop-in replacement for tuned token engines. Use vLLM, SGLang, llama.cpp, or a hosted provider when raw tokens/sec is the job, and put `fak serve` in front for the agent boundary: routing, reuse legality, capability, quarantine, and audit. Say "closing specific rungs" or "fronting tuned engines", not "beats serving engines", unless a [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) row proves that exact claim.
+- **Operational surface (the single-binary thesis):** the agent gateway and control plane — the OpenAI/Anthropic/MCP wires, routing, capability floor, result quarantine, audit with `X-Trace-Id` correlation, bearer and `x-api-key` auth, and Prometheus `/metrics` — collapsed into one static Go binary (two `golang.org/x` dependencies; no Python and no CUDA toolchain needed to build). Where vLLM and SGLang are multi-process Python/CUDA engines you wrap in a reverse proxy plus policy and audit layers, `fak` is that layer as a single process. The contrast is operational surface, not throughput.
+- **Honest scope:** a 29-claim prior-art audit scored **0/29 novel** — every primitive is established; the contribution is the *assembly* into one in-process gate where the tool call is the checkpoint. Per-surface claim status (`SHIPPED`, `SIMULATED`, `STUB`) is tracked in [`CLAIMS.md`](CLAIMS.md); treat anything not marked `SHIPPED` as unproven.
+
 ## Current authorities
 
 - Micro-context fabric contract and bounded 100/1k/10k floor (`microcontextdemo`): [`docs/research/micro-context-fabrics.md`](docs/research/micro-context-fabrics.md); captured stage witnesses: [`docs/research/README.md`](docs/research/README.md)

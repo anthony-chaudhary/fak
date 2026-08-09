@@ -1,3 +1,8 @@
+---
+title: "Micro-context S7: mixed-tenant fairness"
+description: "A tenant-aware weighted scheduler over the micro-context substrate: normalized served-per-weight debt, interactive and deadline tie-breaks, fail-closed limits."
+---
+
 # Micro-context S7: mixed-tenant fairness and economics
 
 **Status:** offline scheduler witness captured on 2026-08-06.

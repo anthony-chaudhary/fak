@@ -1,3 +1,8 @@
+---
+title: "Micro-context health scorecard"
+description: "A deterministic grade over the micro-context quality ledger: scale floor, reconciled terminal outcomes, verification rate, and useful-work throughput."
+---
+
 # Micro-context health scorecard
 
 `microcontextdemo -health-scorecard` grades the existing quality ledger rather than self-report. The score is deterministic: scale floor, reconciled terminal outcomes, independent verification, and useful-work throughput. Drift remains explicitly `baseline-only` until a second comparable ledger exists.

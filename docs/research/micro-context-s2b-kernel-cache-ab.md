@@ -1,3 +1,8 @@
+---
+title: "Micro-context S2b: in-kernel prefix-cache A/B"
+description: "A controlled, fixture-scoped A/B of the in-kernel prefix cache for micro-context runs, and the reconciled reuse counters that decide its verdict."
+---
+
 # Micro-context S2b: controlled in-kernel prefix-cache A/B
 
 **Maturity:** observed, fixture-scoped. **Captured:** 2026-08-07. **Issues:** #5817; partial witness for #5804.
