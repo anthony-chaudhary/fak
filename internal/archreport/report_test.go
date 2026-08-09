@@ -1,10 +1,12 @@
 package archreport
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -282,6 +284,74 @@ func TestAnalyzeErrorsNameRecovery(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnalyzeDeterminismUnderConcurrency(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"abi":0,"alpha":2,"beta":2,"gamma":2}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	writeArchitectureFixture(t, root, "internal/abi/abi.go", "package abi\n")
+	writeArchitectureFixture(t, root, "internal/alpha/alpha.go", `package alpha
+import (
+ _ "github.com/anthony-chaudhary/fak/internal/beta"
+ _ "github.com/anthony-chaudhary/fak/internal/abi"
+)
+`)
+	writeArchitectureFixture(t, root, "internal/beta/beta.go", `package beta
+import _ "github.com/anthony-chaudhary/fak/internal/abi"
+`)
+	writeArchitectureFixture(t, root, "internal/gamma/gamma.go", `package gamma
+import _ "github.com/anthony-chaudhary/fak/internal/beta"
+`)
+
+	wantReport, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := wantReport.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const workers = 16
+	results := make(chan []byte, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			report, err := Analyze(root, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			raw, err := report.JSON()
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- raw
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	seen := 0
+	for got := range results {
+		seen++
+		if !bytes.Equal(got, want) {
+			t.Fatalf("non-deterministic report\nwant:\n%s\ngot:\n%s", want, got)
+		}
+	}
+	if seen != workers {
+		t.Fatalf("results=%d want=%d", seen, workers)
 	}
 }
 
