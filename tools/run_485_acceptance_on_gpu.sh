@@ -66,7 +66,7 @@ echo "[485] witness   : Q8_0 + Q4_K MatMul/BatchedMatMul gates + VRAM witness (-
 echo "[485] benchmarks: BenchmarkCUDABatchedMatMulF32 / ...Q8BatchedMatMul / ...Q4KBatchedMatMul"
 
 # ---- resolve the CUDA toolchain (mirrors internal/compute/build_cuda.sh, portable) -
-CUDA_HOME="${CUDA_HOME:-$HOME/cudaenv}"
+CUDA_HOME="${CUDA_HOME:-${HOME:-/tmp/fakgpu/home}/cudaenv}"
 NVCC="$CUDA_HOME/bin/nvcc"
 if [ ! -x "$NVCC" ]; then
   if command -v nvcc >/dev/null 2>&1; then

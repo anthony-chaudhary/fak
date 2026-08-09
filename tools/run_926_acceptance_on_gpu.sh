@@ -66,7 +66,7 @@ echo "[926] witness   : AWQ MatMul + BatchedMatMul gates (-tags cuda)"
 echo "[926] benchmarks: BenchmarkCUDABatchedMatMulF32 / ...AWQBatchedMatMul"
 
 # ---- resolve the CUDA toolchain (mirrors internal/compute/build_cuda.sh, portable) -
-CUDA_HOME="${CUDA_HOME:-$HOME/cudaenv}"
+CUDA_HOME="${CUDA_HOME:-${HOME:-/tmp/fakgpu/home}/cudaenv}"
 NVCC="$CUDA_HOME/bin/nvcc"
 if [ ! -x "$NVCC" ]; then
   if command -v nvcc >/dev/null 2>&1; then

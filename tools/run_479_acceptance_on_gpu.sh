@@ -45,7 +45,7 @@ echo "[479] repo root : $MOD_DIR"
 echo "[479] test      : $TEST_NAME (-tags cuda, ./internal/compute/)"
 
 # ---- resolve the CUDA toolchain (mirrors internal/compute/build_cuda.sh, portable) -
-CUDA_HOME="${CUDA_HOME:-$HOME/cudaenv}"
+CUDA_HOME="${CUDA_HOME:-${HOME:-/tmp/fakgpu/home}/cudaenv}"
 NVCC="$CUDA_HOME/bin/nvcc"
 if [ ! -x "$NVCC" ]; then
   if command -v nvcc >/dev/null 2>&1; then
