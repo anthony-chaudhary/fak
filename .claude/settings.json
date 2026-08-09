@@ -18,10 +18,10 @@
       {
         "hooks": [
           {
-            "command": "python",
+            "command": "sh",
             "args": [
               "-c",
-              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); d=os.path.join(root,'tools','.bin'); bins=[os.path.join(d,'repoguard.exe')]+([] if os.name=='nt' else [os.path.join(d,'repoguard')]); ex=[x for x in bins if os.path.exists(x)]; p=max(ex,key=os.path.getmtime) if ex else None; srcdirs=[os.path.join(root,'cmd','repoguard'),os.path.join(root,'internal','repoguard')]; src=[os.path.join(dp,f) for base in srcdirs if os.path.isdir(base) for dp,_,fs in os.walk(base) for f in fs if f.endswith('.go')]; src.append(os.path.join(root,'tools','repo_guard.py')); newest=max((os.path.getmtime(x) for x in src if os.path.exists(x)),default=0); stale=bool(p and os.path.getmtime(p)<newest); sys.stderr.write('repoguard binary is stale -- rebuild; using source fallback\\n') if stale else None; p=None if stale else p; args=[p,'--hook'] if p else [sys.executable,os.path.join(root,'tools','repo_guard.py'),'--hook']; subprocess.call(args); sys.exit(0)"
+              "R=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; B=\"$R/tools/.bin/repoguard.exe\"; [ -x \"$B\" ] || B=\"$R/tools/.bin/repoguard\"; [ -x \"$B\" ] && exec \"$B\" --hook; exec python \"$R/tools/repo_guard.py\" --hook"
             ],
             "type": "command"
           }
