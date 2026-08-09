@@ -500,6 +500,7 @@ var tier = map[string]int{
 	"testenv":               1, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
 	"estimatecal":           1, // #5899 (epic #3229): pure in-memory estimate-vs-billed correction ratio fold keyed by provider/model; stdlib-only, imports nothing internal, off the hot path.
 	"docreach":              1, // Pure document-reachability census; repository I/O stays in cmd/fak.
+	"testquality":           0, // #5936: pure stdlib Go test AST quality findings plus counted baseline ratchet; repository I/O and CLI wiring stay in cmd/fak.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
