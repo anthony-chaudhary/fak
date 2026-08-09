@@ -1823,10 +1823,32 @@
           "category": "incidental",
           "reason": "Unexported single-file helper calling vdso.Revoke on the emitters the fill targets. Implementation detail of the already-positioned vDSO revocation concept.",
           "token": "revokeProxyFillWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed plugin pipeline stage for requesting evidence, not a new witness proof concept",
+          "token": "StageWitnessRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed plugin pipeline stage for verifying evidence, not a new witness proof concept",
+          "token": "StageAttest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed plugin action constant corresponding to the existing witness requirement, not a new proof concept",
+          "token": "ActionRequireWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Data field carrying plugin-produced evidence, not a newly defined witness mechanism",
+          "token": "Attestation"
         }
       ],
       "id": "witness-proof",
       "ignore": [
+        "ActionRequireWitness",
+        "Attestation",
         "ClaimUnwitnessedCount",
         "CoreLockWitnessTrailer",
         "FairnessWitnessed",
@@ -1838,6 +1860,8 @@
         "NewTreeWitness",
         "QualityWitness",
         "REVOCABLE",
+        "StageAttest",
+        "StageWitnessRequest",
         "TurnOutcomesFromWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
@@ -2098,6 +2122,11 @@
           "category": "incidental",
           "reason": "Human-readable rendering helper for an already-computed posture; not a capability-policy primitive.",
           "token": "orgPostureGloss"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed plugin pipeline stage name, not a policy capability",
+          "token": "StageAdjudicate"
         }
       ],
       "exclude": [
@@ -2116,6 +2145,7 @@
         "ReusePolicy",
         "ReviseForCapabilityFailure",
         "SpawnPlacementPolicy",
+        "StageAdjudicate",
         "StrengthToolPolicyGrammar",
         "ToolPolicyVersion",
         "adjudicate",
