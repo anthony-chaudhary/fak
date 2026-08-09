@@ -301,3 +301,45 @@ func TestFoldAuditFlagsPerSessionEfficiencyRegressions(t *testing.T) {
 		t.Errorf("clean render should not mention outliers")
 	}
 }
+
+func TestCheckTrack2QualityRejectsBelowSLOCorpus(t *testing.T) {
+	rows := []QualityObservation{
+		track2FidelityRow(true, true, true),
+		track2FidelityRow(true, true, false),
+		track2FidelityRow(true, true, false),
+	}
+	got := CheckTrack2Quality(rows, QualityFloor{Floor: 0.75, MinRows: 3})
+	if got.Passed || got.Code != "fidelity_below_floor" {
+		t.Fatalf("expected below-floor refusal, got %+v", got)
+	}
+	if got.EligibleRows != 3 || got.LosslessRows != 1 || got.Fidelity != 1.0/3.0 {
+		t.Fatalf("unexpected fidelity fold: %+v", got)
+	}
+}
+
+func TestCheckTrack2QualityPassesLosslessCorpusAndExcludesDollarBlindRows(t *testing.T) {
+	rows := []QualityObservation{
+		track2FidelityRow(true, true, true),
+		track2FidelityRow(true, true, true),
+		track2FidelityRow(false, false, false),
+		track2FidelityRow(true, false, false),
+	}
+	got := CheckTrack2Quality(rows, QualityFloor{Floor: 1, MinRows: 2})
+	if !got.Passed {
+		t.Fatalf("expected lossless corpus to pass, got %+v", got)
+	}
+	if got.EligibleRows != 2 || got.LosslessRows != 2 || got.Fidelity != 1 {
+		t.Fatalf("dollar-blind rows entered judgment: %+v", got)
+	}
+}
+
+func TestCheckTrack2QualityRefusesThinCorpus(t *testing.T) {
+	got := CheckTrack2Quality([]QualityObservation{track2FidelityRow(true, true, true)}, QualityFloor{Floor: 1, MinRows: 2})
+	if got.Passed || got.Code != "fidelity_corpus_too_thin" {
+		t.Fatalf("expected thick-corpus refusal, got %+v", got)
+	}
+}
+
+func track2FidelityRow(gateDollarKnown, baselineDollarKnown, lossless bool) QualityObservation {
+	return QualityObservation{ManagedDollarKnown: gateDollarKnown, BaselineDollarKnown: baselineDollarKnown, Lossless: lossless}
+}
