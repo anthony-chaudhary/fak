@@ -90,12 +90,15 @@ type Response struct {
 	Clarifications *ClarificationPlan `json:"clarifications,omitempty"`
 }
 
+const DefaultResultLimit = 50
+
 type Request struct {
 	Root           string
 	Query          string
 	Plane          Plane
 	Detail         string
 	Limit          int
+	All            bool
 	MissingContext []string
 }
 
@@ -252,8 +255,12 @@ func runQuery(req Request, p queryPaths) (Response, error) {
 	}
 	all := p.cards(plane)
 	cards := rankCards(all, q)
-	if req.Limit > 0 && len(cards) > req.Limit {
-		cards = cards[:req.Limit]
+	limit := req.Limit
+	if limit == 0 && !req.All {
+		limit = DefaultResultLimit
+	}
+	if limit > 0 && len(cards) > limit {
+		cards = cards[:limit]
 	}
 	rungs := p.rungs(all)
 	p.apply(cards, rungs)

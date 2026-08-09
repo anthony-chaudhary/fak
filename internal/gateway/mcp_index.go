@@ -248,6 +248,7 @@ type FeatureQueryRequest struct {
 	Query  string `json:"query,omitempty"`
 	Plane  string `json:"plane,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
+	All    bool   `json:"all,omitempty"`
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -257,7 +258,8 @@ var featureQueryInputSchema = json.RawMessage(`{
     "root": {"type": "string", "description": "optional repo root; omitted means search upward for dos.toml from the server working directory"},
     "query": {"type": "string", "description": "non-empty intent to match against feature cards"},
     "plane": {"type": "string", "enum": ["dev", "live", "all"], "description": "which catalog plane to query; default all"},
-    "limit": {"type": "integer", "description": "maximum result count; 0 or omitted means no cap"},
+    "limit": {"type": "integer", "description": "maximum result count; 0 or omitted uses the bounded feature-query default"},
+    "all": {"type": "boolean", "description": "return every match; explicit opt-out from the default feature-query result cap"},
     "detail": {"type": "string", "description": "optional card name/detail_ref to fault schema, doc snippet, or memory explain plan for"}
   },
   "required": ["query"]
@@ -277,6 +279,7 @@ func (s *Server) featureQuery(req FeatureQueryRequest) (selfquery.Response, erro
 		Query:  req.Query,
 		Plane:  selfquery.Plane(req.Plane),
 		Limit:  req.Limit,
+		All:    req.All,
 		Detail: req.Detail,
 	})
 }

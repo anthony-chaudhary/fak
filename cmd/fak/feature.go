@@ -40,7 +40,8 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
 	plane := fs.String("plane", "all", "catalog plane: dev, live, or all")
 	detail := fs.String("detail", "", "fault detail for one selected card name/detail_ref")
-	limit := fs.Int("limit", 0, "cap the number of query cards (0 = all)")
+	limit := fs.Int("limit", 0, "cap query cards (0 = bounded default)")
+	all := fs.Bool("all", false, "return every matching card")
 	missingContext := fs.String("missing-context", "", "comma-separated missing context keys to turn into bounded clarification questions")
 	asJSON := fs.Bool("json", false, "emit stable JSON")
 	var args []string
@@ -74,6 +75,7 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 		Plane:          selfquery.Plane(*plane),
 		Detail:         *detail,
 		Limit:          *limit,
+		All:            *all,
 		MissingContext: splitCSV(*missingContext),
 	})
 	if err != nil {
