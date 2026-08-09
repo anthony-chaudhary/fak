@@ -273,6 +273,8 @@ type Coordinator struct {
 
 	// pruneRefusals counts rejected individual prune proposals by stable reason.
 	pruneRefusals RefusalCounters
+	// resultPrunes counts selected tool-result evictions, including the producer-flagged subset.
+	resultPrunes ToolResultPruneCounters
 }
 
 // Config is the coordinator's tunable policy. A zero value is valid: New/NewWith fill it with
@@ -350,6 +352,17 @@ func (c *Coordinator) CheckPrune(spanTokens int, transcript []TranscriptItem, cu
 
 // PruneRefusals reports coordinator-local refused-prune counters by reason.
 func (c *Coordinator) PruneRefusals() RefusalCounters { return c.pruneRefusals }
+
+// SelectToolResults applies the producer preference behind the existing prefix-event
+// cache-safety gate and records the selected-result counters for observability.
+func (c *Coordinator) SelectToolResults(event PrefixEvent, candidates []ToolResultEntry, limit int) ToolResultSelection {
+	selection := SelectToolResults(event, candidates, limit)
+	c.resultPrunes = CountToolResultPrunes(c.resultPrunes, selection)
+	return selection
+}
+
+// ToolResultPrunes reports coordinator-local tool-result eviction counters.
+func (c *Coordinator) ToolResultPrunes() ToolResultPruneCounters { return c.resultPrunes }
 
 // Observe folds one served turn into the coordinator and returns the per-turn Decision. It
 // updates the standing posture (block while fak copes; allow once fak's compaction has
