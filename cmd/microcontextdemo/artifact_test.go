@@ -40,7 +40,7 @@ func TestVerifyReportRejectsUnsupportedOrIncompleteScale(t *testing.T) {
 }
 
 func validRealEndpointReport(contexts int) report {
-	return report{
+	r := report{
 		Schema: "fak-microcontext-spine/1", Verdict: "PASS", Mode: "openai-compatible",
 		LogicalShards: contexts, PhysicalWorkers: 1, Completed: contexts, TurnCount: int64(contexts),
 		UsageResponses: contexts, SharedBaseInstalls: 1, PeakInFlight: 1, ElapsedMS: 1,
@@ -50,4 +50,15 @@ func validRealEndpointReport(contexts int) report {
 		ResourceSamples: 2, ClientPeakRSSBytes: 1, ServerPeakRSSBytes: 1, ServerPeakHeapBytes: 1, EndpointPeakRequests: 1,
 		KVCapacityEvidence: "fixture", QueueEvidence: "fixture", ResultCheck: "fixture", VerifiedResultsPerSec: 1,
 	}
+	if contexts == 10000 {
+		r.SoakContract = "controlled-10k-v1"
+		r.CanaryContexts, r.CanaryPassed, r.BaseRollbackCount = 1, 1, 1
+		r.RetryInjected, r.RetryRecovered = 1, 1
+		r.CancellationInjected, r.CancellationRecovered = 1, 1
+		r.MaxAttempts = 3
+		r.QueuePeakContexts = contexts
+		r.HibernatedContexts = contexts - r.PhysicalWorkers
+		r.RestoredContexts = r.HibernatedContexts
+	}
+	return r
 }

@@ -36,6 +36,7 @@ type config struct {
 	Hardware       string
 	RequestTimeout time.Duration
 	RunTimeout     time.Duration
+	ControlledSoak bool
 	PrefixMode     string
 	APIShape       microagent.APIProviderShape
 }
@@ -81,6 +82,20 @@ type report struct {
 	QueueEvidence         string  `json:"queue_evidence,omitempty"`
 	ResultCheck           string  `json:"result_check,omitempty"`
 	VerifiedResultsPerSec float64 `json:"verified_nonempty_results_per_wall_second,omitempty"`
+	SoakContract          string  `json:"soak_contract,omitempty"`
+	CanaryContexts        int     `json:"canary_contexts,omitempty"`
+	CanaryPassed          int     `json:"canary_passed,omitempty"`
+	BaseRollbackCount     int     `json:"base_rollback_count,omitempty"`
+	RetryInjected         int     `json:"retry_injected,omitempty"`
+	RetryRecovered        int     `json:"retry_recovered,omitempty"`
+	CancellationInjected  int     `json:"cancellation_injected,omitempty"`
+	CancellationRecovered int     `json:"cancellation_recovered,omitempty"`
+	ProviderFailures      int     `json:"provider_transient_failures,omitempty"`
+	ProviderRecovered     int     `json:"provider_transient_recovered,omitempty"`
+	MaxAttempts           int     `json:"max_attempts,omitempty"`
+	QueuePeakContexts     int     `json:"queue_peak_contexts,omitempty"`
+	HibernatedContexts    int     `json:"hibernated_contexts,omitempty"`
+	RestoredContexts      int     `json:"restored_contexts,omitempty"`
 }
 
 type sharedBase struct {
@@ -145,16 +160,31 @@ func (g *fakeEndpoint) Complete(ctx context.Context, messages []agent.Message, _
 }
 
 type shardAgent struct {
-	id    string
-	done  bool
-	exact bool
+	id         string
+	done       bool
+	exact      bool
+	maxRetries int
+	attempts   int
 }
 
 func (a *shardAgent) Step(ctx context.Context, gw microagent.Gateway) (bool, error) {
 	if a.done {
 		return true, nil
 	}
-	resp, err := gw.Complete(ctx, []agent.Message{{Role: agent.RoleUser, Content: a.id}}, nil)
+	var resp *agent.Completion
+	var err error
+	for {
+		a.attempts++
+		resp, err = gw.Complete(ctx, []agent.Message{{Role: agent.RoleUser, Content: a.id}}, nil)
+		if err == nil || a.attempts > a.maxRetries {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(time.Duration(a.attempts) * 100 * time.Millisecond):
+		}
+	}
 	if err != nil {
 		return false, err
 	}
@@ -184,6 +214,8 @@ func run(ctx context.Context, cfg config) (report, error) {
 	base := &sharedBase{instructions: canonicalBaseInstructions(), fingerprint: canonicalBaseFingerprint()}
 	var gw microagent.Gateway
 	var live *openAIEndpoint
+	var faults *controlledSoakGateway
+	var soak controlledSoakEvidence
 	mode := "synthetic"
 	if cfg.Endpoint != "" {
 		var err error
@@ -199,8 +231,19 @@ func run(ctx context.Context, cfg config) (report, error) {
 			return report{}, err
 		}
 		gw = live
+		if cfg.ControlledSoak {
+			soak, err = runControlledSoakPreflight(ctx, cfg, live, base)
+			if err != nil {
+				return report{}, err
+			}
+			faults = newControlledSoakGateway(live)
+			gw = faults
+		}
 		mode = "openai-compatible"
 	} else {
+		if cfg.ControlledSoak {
+			return report{}, fmt.Errorf("controlled soak requires a live endpoint")
+		}
 		gw = newFakeEndpoint(base, cfg.Delay)
 	}
 	host, err := microagent.NewHost(gw, microagent.Config{Workers: cfg.Workers, Queue: cfg.Contexts})
@@ -211,7 +254,11 @@ func run(ctx context.Context, cfg config) (report, error) {
 	start := time.Now()
 	for i := 0; i < cfg.Contexts; i++ {
 		id := "ctx-" + strconv.Itoa(i)
-		if err := host.Spawn(id, &shardAgent{id: id, exact: live == nil}); err != nil {
+		retries := 0
+		if cfg.ControlledSoak {
+			retries = 2
+		}
+		if err := host.Spawn(id, &shardAgent{id: id, exact: live == nil, maxRetries: retries}); err != nil {
 			return report{}, fmt.Errorf("spawn %s: %w", id, err)
 		}
 	}
@@ -268,6 +315,17 @@ func run(ctx context.Context, cfg config) (report, error) {
 		r.PromptTokensPerSec = float64(stats.promptTokens) / elapsed.Seconds()
 		r.DecodeTokensPerSec = float64(stats.completionTokens) / elapsed.Seconds()
 		r.Scope = "real streaming endpoint; token rates are aggregate observed usage divided by wall time, not server-internal kernel rates; critical-path latency is reported separately"
+		if cfg.ControlledSoak {
+			r.SoakContract = "controlled-10k-v1"
+			r.CanaryContexts, r.CanaryPassed, r.BaseRollbackCount = soak.canaryContexts, soak.canaryPassed, soak.baseRollbackCount
+			r.RetryInjected, r.RetryRecovered = int(faults.retryInjected.Load()), int(faults.retryRecovered.Load())
+			r.CancellationInjected, r.CancellationRecovered = int(faults.cancelInjected.Load()), int(faults.cancelRecovered.Load())
+			r.ProviderFailures, r.ProviderRecovered = int(faults.innerFailures.Load()), int(faults.innerRecovered.Load())
+			r.MaxAttempts = 3
+			r.QueuePeakContexts = soak.queuePeakContexts
+			r.HibernatedContexts = soak.hibernatedContexts
+			r.RestoredContexts = soak.restoredContexts
+		}
 		if stats.usageResponses != cfg.Contexts || len(stats.ttfts) != cfg.Contexts {
 			r.Verdict = "FAIL"
 			return r, fmt.Errorf("live telemetry incomplete: usage=%d ttft=%d want=%d", stats.usageResponses, len(stats.ttfts), cfg.Contexts)
@@ -313,6 +371,7 @@ func main() {
 	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
 	flag.DurationVar(&cfg.RunTimeout, "run-timeout", 15*time.Minute, "overall run timeout (0 disables the deadline)")
+	flag.BoolVar(&cfg.ControlledSoak, "controlled-soak", false, "exercise the S5 canary/rollback, overload queue, cancellation, bounded retry, and hibernation contract")
 	flag.IntVar(&cfg.APIShape.RequestsPerMinute, "api-rpm", 0, "API-only request-per-minute admission limit (0 disables adapter admission)")
 	flag.IntVar(&cfg.APIShape.TokensPerMinute, "api-tpm", 0, "API-only estimated token-per-minute admission limit")
 	flag.IntVar(&cfg.APIShape.Concurrency, "api-concurrency", 0, "API-only provider concurrency admission limit")

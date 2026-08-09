@@ -60,6 +60,23 @@ func verifyReport(r report) error {
 			return fmt.Errorf("scale claim-boundary evidence incomplete")
 		}
 	}
+	if r.LogicalShards == 10000 {
+		if r.SoakContract != "controlled-10k-v1" {
+			return fmt.Errorf("10k controlled soak contract missing")
+		}
+		if r.CanaryContexts < 1 || r.CanaryPassed != r.CanaryContexts || r.BaseRollbackCount != 1 {
+			return fmt.Errorf("canary/rollback evidence incomplete")
+		}
+		if r.RetryInjected != 1 || r.RetryRecovered != 1 || r.CancellationInjected != 1 || r.CancellationRecovered != 1 || r.MaxAttempts != 3 {
+			return fmt.Errorf("bounded fault recovery evidence incomplete")
+		}
+		if r.ProviderFailures != r.ProviderRecovered {
+			return fmt.Errorf("provider transient recovery mismatch: failures=%d recovered=%d", r.ProviderFailures, r.ProviderRecovered)
+		}
+		if r.QueuePeakContexts != r.LogicalShards || r.HibernatedContexts != r.LogicalShards-r.PhysicalWorkers || r.RestoredContexts != r.HibernatedContexts {
+			return fmt.Errorf("overload/hibernation accounting incomplete")
+		}
+	}
 	return nil
 }
 

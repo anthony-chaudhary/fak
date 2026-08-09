@@ -196,3 +196,9 @@ func (g *openAIEndpoint) snapshot() endpointStats {
 	out.ttfts = append([]time.Duration(nil), g.stats.ttfts...)
 	return out
 }
+
+func (g *openAIEndpoint) resetStats() {
+	g.statsMu.Lock()
+	g.stats = endpointStats{}
+	g.statsMu.Unlock()
+}
