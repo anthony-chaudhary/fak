@@ -3,7 +3,6 @@ package gitdaily
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -20,10 +19,9 @@ func TestDeterminism(t *testing.T) {
 		opts.Now = fixed
 		var calls []string
 		got := Run(context.Background(), recordingRunner(&calls), opts)
-		// Absolute roots are environmental inputs, not scheduler output. Normalize
-		// them before comparing otherwise-identical snapshots.
-		got.RepoRoot = filepath.ToSlash("/repo")
-		got.GitCommonDir = filepath.ToSlash("/repo/.git")
+		// The ledger's absolute location is environmental input rather than
+		// scheduler output; normalize it before comparing the two snapshots.
+		got.LedgerPath = "/repo/.git/fak-git-daily.jsonl"
 		return got
 	}
 
