@@ -14,14 +14,29 @@ This document catalogs all configuration options for `fak serve`, the gateway se
 ## Opinionated Defaults, Reviewable Overrides
 
 `fak serve` works without a configuration file and keeps its tested built-in
-settings. When your deployment disagrees with an operational default, opt into
-the reviewable manifest explicitly:
+settings. You do not need to learn the knob vocabulary before starting. Ask the
+intent-level guide first; its default posture recommends no file at all:
 
 ```bash
-fak init                         # writes the small starting fak.toml
+fak config guide                                      # excellent defaults; no file
+fak config guide --posture long-session               # inspect a minimal delta
+fak config guide --posture team-gateway --write fak.toml
 fak serve --config fak.toml --print-effective-config
 fak serve --config fak.toml
 ```
+
+The guide offers four coherent postures: `default`, `long-session`,
+`team-gateway`, and `hardened`. Each non-default posture emits only values that
+differ from built-ins, explains why every value changed, and shows its equivalent
+explicit flag. Intent overrides such as `--budget`, `--bind`, `--key-env`, and
+`--policy` let users express their own constraints without dropping into a giant
+example file. `--json` is deterministic for agents and automation; `--write`
+refuses to clobber an existing file unless `--force`. Every generated manifest
+round-trips through the same fail-closed `deploymanifest` parser used at runtime,
+so postures are data over the real config system, not a second source of truth.
+
+`fak init` remains available when you want the small deployment-topology
+starting artifact rather than a minimal intent delta.
 
 Precedence is **explicit CLI flag > declared `fak.toml` value > built-in
 default**. An explicit flag wins even when its value happens to equal the

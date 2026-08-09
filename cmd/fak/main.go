@@ -81,6 +81,8 @@ func main() {
 		cmdRecover(os.Args[2:])
 	case "concept":
 		os.Exit(runConceptCLI(os.Stdout, os.Stderr, os.Args[2:]))
+	case "config":
+		cmdConfig(os.Args[2:])
 	case "rename-concept":
 		cmdRenameConcept(os.Args[2:])
 	case "session":
@@ -251,8 +253,6 @@ func main() {
 		cmdInit(os.Args[2:])
 	case "feature":
 		cmdFeature(os.Args[2:])
-	case "index", "devindex":
-		cmdIndex(os.Args[2:])
 	case "orient":
 		cmdOrient(os.Args[2:])
 	case "workflow":
