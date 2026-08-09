@@ -495,6 +495,7 @@ var tier = map[string]int{
 	"learningobservation":   1, // #5982 (parent #2908): content-addressed observation/candidate/witness/verdict records plus the seven closed-enum lineage relations. Pure stdlib durable substrate; admission policy remains outside this leaf. Off the hot path.
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
 	"testenv":               1, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
+	"estimatecal":           1, // #5899 (epic #3229): pure in-memory estimate-vs-billed correction ratio fold keyed by provider/model; stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
