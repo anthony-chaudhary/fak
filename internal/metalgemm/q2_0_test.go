@@ -234,9 +234,9 @@ func TestMetalQ2_0UploadRejectsBadShapes(t *testing.T) {
 func q2UploadTest(t *testing.T, out, in int, seed int64) (*Q2_0Weight, []byte, []float32) {
 	t.Helper()
 	codes, scales := q2_0RandomWeight(rand.New(rand.NewSource(seed)), out, in)
-	w, err := UploadQ2_0(codes, scales, out, in)
-	if err != nil {
-		t.Fatal(err)
+	w := UploadQ2_0(codes, scales, out, in)
+	if w == nil {
+		t.Fatal("UploadQ2_0 returned nil for valid payload")
 	}
 	return w, codes, scales
 }
@@ -267,7 +267,7 @@ func TestQ2_0GEMMParity(t *testing.T) {
 	got := make([]float32, p*out)
 	w.GEMM(X, p, got)
 	for tok := 0; tok < p; tok++ {
-		q2RequireClose(t, got[tok*out:(tok+1)*out], q2_0RefGEMV(codes, scales, out, in, X[tok*in:(tok+1)*in]))
+		q2RequireClose(t, got[tok*out:(tok+1)*out], q2_0RefGEMV(codes, scales, X[tok*in:(tok+1)*in], out, in))
 	}
 }
 
@@ -284,13 +284,13 @@ func TestFusedMLPQ2_0Parity(t *testing.T) {
 	for i := range x {
 		x[i] = float32((i%9)-4) / 7
 	}
-	g := q2_0RefGEMV(gc, gs, 64, 64, x)
-	u := q2_0RefGEMV(uc, us, 64, 64, x)
+	g := q2_0RefGEMV(gc, gs, x, 64, 64)
+	u := q2_0RefGEMV(uc, us, x, 64, 64)
 	inter := make([]float32, 64)
 	for i := range inter {
 		inter[i] = (g[i] / (1 + float32(math.Exp(float64(-g[i]))))) * u[i]
 	}
-	want := q2_0RefGEMV(dc, ds, 7, 64, inter)
+	want := q2_0RefGEMV(dc, ds, inter, 7, 64)
 	got := make([]float32, 7)
 	if !FusedMLPQ2_0(gate, up, down, x, got) {
 		t.Fatal("FusedMLPQ2_0 refused valid shapes")
