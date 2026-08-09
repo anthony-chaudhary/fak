@@ -1,6 +1,7 @@
 package capindexgw
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
@@ -149,7 +150,7 @@ var (
 )
 
 func TestCoreToolAdmissionRefusesReachableMCPCapability(t *testing.T) {
-	r := NewMCPResolver(gateway.NewServer())
+	r := NewMCPResolver(nil)
 	cards := r.Index()
 	if len(cards) == 0 {
 		t.Fatal("MCP catalog is empty; refusal witness requires one reachable capability")
