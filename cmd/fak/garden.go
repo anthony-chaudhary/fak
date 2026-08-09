@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/wiprecon"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -116,6 +117,8 @@ func emitGardenJSON(w io.Writer, p gardenbundle.Payload) {
 // run in the loop ledger and registers itself in the loop registry, so the tick
 // is visible in `fak loop health` and re-arms at boot (the #1281 durable-loop
 // registration precedent: a schedule definition that survives a restart).
+var gardenReclaimInspect = inspectGardenReclaim
+
 const gardenTickLoopID = "garden-stale-work-tick"
 
 // gardenTickIntervalSeconds is the registered cadence: hourly. The stale-work
@@ -183,6 +186,7 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	results := gardenbundle.Collect(root, "", time.Duration(*timeout)*time.Second, false)
+	results = append(results, gardenReclaimInspect(stderr, root))
 	plan := gardenbundle.PlanTick(results, *dryRun)
 
 	growthApply := growthApplyEnabled(*growthApplyFlag)
@@ -536,6 +540,36 @@ func growthReapLedgerPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".fak", "growthgate-reap.jsonl")
+}
+
+// inspectGardenReclaim reads the existing RECLAIM worklist and surfaces only its
+// actionable head. It deliberately does not land, delete, or update checkpoint refs.
+func inspectGardenReclaim(stderr io.Writer, root string) gardenbundle.MemberResult {
+	res, err := wipReconcileAt(context.Background(), root, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak garden tick: reclaim worklist: %v\n", err)
+		return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "errored"}
+	}
+	if len(res.Reclaim) == 0 {
+		return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "ok", Counts: map[string]int{"reclaimable": 0}}
+	}
+	head := res.Reclaim[0]
+	detail := fmt.Sprintf("%d reclaimable; most-decayed session=%s drift=%s age=%s", len(res.Reclaim), head.Session, gardenReclaimDrift(head), gardenReclaimAge(head.AgeHours))
+	return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "action", Detail: detail, Counts: map[string]int{"reclaimable": len(res.Reclaim)}}
+}
+
+func gardenReclaimDrift(row wiprecon.ReclaimRow) string {
+	if row.TrunkDistance < 0 {
+		return "?"
+	}
+	return strconv.Itoa(row.TrunkDistance)
+}
+
+func gardenReclaimAge(ageHours float64) string {
+	if ageHours < 0 {
+		ageHours = 0
+	}
+	return (time.Duration(ageHours * float64(time.Hour))).Round(time.Second).String()
 }
 
 // collectGrowthLogs is the schedule-driven growthgate collector wired to the

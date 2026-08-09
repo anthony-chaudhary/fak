@@ -38,8 +38,12 @@ func runWipCensus(ctx context.Context, stdout, stderr io.Writer, repo string, as
 	fmt.Fprintf(stdout, "  LANDED                    %6d  delta already in HEAD (today's reap collects these)\n", c.Landed)
 	fmt.Fprintf(stdout, "  LIVE                      %6d  owning session still live (kept)\n", c.Live)
 	fmt.Fprintf(stdout, "  CLOSED_CLEAN_ESTIMATE    %6d  dead session, delta empty or subsumed by HEAD (safe to collect)\n", c.ClosedCleanEstimate)
-	fmt.Fprintf(stdout, "  CLOSED_DIRTY_RECOVERABLE  %6d  dead session, unlanded delta (MUST be kept)\n", c.ClosedDirtyRecoverable)
+	fmt.Fprintf(stdout, "  CLOSED_DIRTY_RECOVERABLE  %6d  recoverable unlanded deliverable (ACTION REQUIRED; kept)\n", c.ClosedDirtyRecoverable)
 	fmt.Fprintf(stdout, "  UNKNOWN                   %6d  unresolved (kept, fail-safe)\n", c.Unknown)
+	fmt.Fprintf(stdout, "  safely reapable (LANDED only): %d\n", c.Landed)
+	if c.ClosedDirtyRecoverable > 0 {
+		fmt.Fprintf(stdout, "  recovery backlog (not reapable): %d unlanded deliverable(s) require reconcile --reclaim\n", c.ClosedDirtyRecoverable)
+	}
 	return 0
 }
 

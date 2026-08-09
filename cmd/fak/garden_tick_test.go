@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -165,5 +167,45 @@ func TestGardenTickUnmeasuredCountsOnlyErroredMembers(t *testing.T) {
 	}, false)
 	if got := gardenTickUnmeasured(plan); got != 2 {
 		t.Fatalf("gardenTickUnmeasured = %d, want 2 (only the errored members)", got)
+	}
+}
+
+func TestInspectGardenReclaimSurfacesQueueWithoutMutatingRefs(t *testing.T) {
+	dir, _ := wipReclaimFixture(t)
+	before, err := gitWipOut(context.Background(), dir, nil, "for-each-ref", "--format=%(refname) %(objectname)", "refs/fak/wip/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := inspectGardenReclaim(io.Discard, dir)
+	after, err := gitWipOut(context.Background(), dir, nil, "for-each-ref", "--format=%(refname) %(objectname)", "refs/fak/wip/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("read-only inspection changed checkpoint refs:\nbefore=%s\nafter=%s", before, after)
+	}
+	if got.State != "action" || got.Counts["reclaimable"] != 2 {
+		t.Fatalf("result = %+v, want two actionable reclaim rows", got)
+	}
+	if !strings.Contains(got.Detail, "most-decayed session=alpha") || !strings.Contains(got.Detail, "drift=1") {
+		t.Fatalf("detail = %q, want ranked head", got.Detail)
+	}
+}
+
+func TestGardenTickIncludesReclaimInspection(t *testing.T) {
+	old := gardenReclaimInspect
+	t.Cleanup(func() { gardenReclaimInspect = old })
+	gardenReclaimInspect = func(io.Writer, string) gardenbundle.MemberResult {
+		return gardenbundle.MemberResult{Key: "wip_reclaim", Label: "WIP reclaim queue", State: "action", Detail: "2 reclaimable; most-decayed session=oldest drift=7"}
+	}
+	t.Setenv("FAK_GARDEN", "1")
+	root := t.TempDir()
+	var out, stderr bytes.Buffer
+	code := runGardenTick(&out, &stderr, []string{"--workspace", root, "--dir", root, "--dry-run", "--timeout", "1", "--json"})
+	if code != 0 {
+		t.Fatalf("runGardenTick code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(out.String(), `"key": "wip_reclaim"`) || !strings.Contains(out.String(), "most-decayed session=oldest") {
+		t.Fatalf("tick omitted reclaim queue: %s", out.String())
 	}
 }

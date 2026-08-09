@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
@@ -181,5 +183,28 @@ func TestWipCensusNewFileIsRecoverable(t *testing.T) {
 
 	if got := wipCensusClassOf(t, dir, "newfile"); got != wipref.CensusClosedDirtyRecoverable {
 		t.Fatalf("a never-landed new file classified %s, want CLOSED_DIRTY_RECOVERABLE (kept)", got)
+	}
+}
+
+func TestRunWIPCensusNamesRecoverableBacklogAsActionNotGarbage(t *testing.T) {
+	dir, file := wipTestRepo(t)
+	if err := os.WriteFile(file, []byte("base line\nrecover me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := wipCheckpoint(context.Background(), dir, "recoverable-wording", true, time.Now().Unix()); err != nil {
+		t.Fatalf("checkpoint: %v (%+v)", err, r)
+	}
+	if err := os.WriteFile(file, []byte("base line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if code := runWipCensus(context.Background(), &out, &stderr, dir, false); code != 0 {
+		t.Fatalf("runWIPCensus code=%d stderr=%s", code, stderr.String())
+	}
+	text := out.String()
+	for _, want := range []string{"recoverable unlanded deliverable", "ACTION REQUIRED", "recovery backlog (not reapable): 1", "reconcile --reclaim"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("census output missing %q:\n%s", want, text)
+		}
 	}
 }
