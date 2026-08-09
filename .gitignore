@@ -1,6 +1,11 @@
-# DOS kernel runtime state (regenerated on every tool call)
-.dos/
-**/.dos/
+# DOS kernel runtime state (regenerated on every tool call). ANCHORED on purpose
+# (#5933): an unanchored `.dos/` matches at every depth, so a state root nested
+# inside the tree is invisible to `git status`, returns 0 from `git ls-files`,
+# and is excluded from `ls-files --others --exclude-standard` by construction —
+# while the positional walk still resolves the lease journal there and reports
+# every lane free. The toplevel's own root stays ignored; a nested one is now a
+# visible untracked directory, which is the only cheap way to notice it.
+/.dos/
 
 # Slack control bridge runtime state (regenerated on each control operation)
 fak/.slack_control_*
