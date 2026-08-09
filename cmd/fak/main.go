@@ -495,6 +495,8 @@ func main() {
 		cmdSkill(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
+	case "test-quality":
+		cmdTestQuality(os.Args[2:])
 	case "quality":
 		// The missing-middle quality ladder spine (epic #4509): `fak quality run|explain`
 		// runs one versioned case through a reference path and an engine path, applies a

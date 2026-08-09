@@ -1,0 +1,73 @@
+# internal/testquality baseline — the accepted FLOOR, not a list of approved defects.
+#
+# Format: CODE<TAB>file<TAB>func<TAB>count. Regenerate with:
+#   fak test-quality --write-baseline
+#
+# Every row is a CANDIDATE: a test whose SHAPE means it can pass with the code
+# under test broken. Some are correct as written, so nothing here should be
+# "fixed" without reading it first. This gate's whole contract is that the list
+# does not GROW; it never claims the tree is clean.
+#
+# The key is (code, file, func) and the value is a COUNT, never a line number, so
+# the floor survives the file being reformatted or the finding moving.
+TESTQ_NO_ASSERTION	cmd/fak/claude_mac_fak_test.go	TestClaudeMacFakSSHHelperProcess	1
+TESTQ_NO_ASSERTION	cmd/fak/dispatch_tick_test.go	TestDispatchSpawnHelper	1
+TESTQ_NO_ASSERTION	cmd/fak/macbench_test.go	TestMacBenchSSHHelperProcess	1
+TESTQ_NO_ASSERTION	cmd/fak/worktree_worker_test.go	TestLandVerifyFlagParsesGoBuild	1
+TESTQ_NO_ASSERTION	internal/blobfs/store_test.go	TestResolverInterface	1
+TESTQ_NO_ASSERTION	internal/blobhttp/store_test.go	TestResolverInterface	1
+TESTQ_NO_ASSERTION	internal/codexmcphealth/reap_realtree_test.go	TestHelperChildSpawnsGrandchild	1
+TESTQ_NO_ASSERTION	internal/codexmcphealth/reap_realtree_test.go	TestHelperGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/dispatchaudit/dispatchaudit_test.go	TestDispatchAuditDeadPIDHelper	1
+TESTQ_NO_ASSERTION	internal/edittx/proctree_realtree_test.go	TestHelperEdittxChildSpawnsGrandchild	1
+TESTQ_NO_ASSERTION	internal/edittx/proctree_realtree_test.go	TestHelperEdittxGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/fleetpane/procbind_realtree_test.go	TestHelperFleetpaneChildSpawnsGrandchild	1
+TESTQ_NO_ASSERTION	internal/fleetpane/procbind_realtree_test.go	TestHelperFleetpaneGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/guard/landlock_acceptance_linux_test.go	TestLandlockApplyDoesNotPanicOnEmptySpec	1
+TESTQ_NO_ASSERTION	internal/guard/landlock_acceptance_linux_test.go	TestLandlockProbeHelper	1
+TESTQ_NO_ASSERTION	internal/policy/inherited_test.go	TestInheritedChildEnvProbe	1
+TESTQ_NO_ASSERTION	internal/policy/secretfloor_test.go	TestSecretFloorChildProbe	1
+TESTQ_NO_ASSERTION	internal/procguard/collect_posix_test.go	TestProcguardHelperProcess	1
+TESTQ_NO_ASSERTION	internal/storedrv/storedrv_test.go	TestRouterInterfaces	1
+TESTQ_NO_ASSERTION	internal/swebench/proctree_realtree_test.go	TestHelperSwebenchGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/swebench/runner_test.go	TestDeepSWEHelperProcess	1
+TESTQ_NO_ASSERTION	internal/tokenizer/vision_test.go	TestVisionPlaceholdersInterface	1
+TESTQ_NO_ASSERTION	internal/toolprocgate/consolefault_test.go	TestHelperConsoleCrashChild	1
+TESTQ_NO_ASSERTION	internal/toolprocgate/procbind_realtree_test.go	TestHelperChildSpawnsGrandchild	1
+TESTQ_NO_ASSERTION	internal/toolprocgate/procbind_realtree_test.go	TestHelperGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/witness/proctree_realtree_test.go	TestHelperWitnessChildSpawnsGrandchild	1
+TESTQ_NO_ASSERTION	internal/witness/proctree_realtree_test.go	TestHelperWitnessGrandchildBlocks	1
+TESTQ_SELF_COMPARISON	internal/flock/flock_test.go	TestErrLockBusySentinel	1
+TESTQ_SELF_COMPARISON	internal/model/kvbudget_perlayer_test.go	TestKVCacheShapeStaysComparable	1
+TESTQ_SELF_COMPARISON	internal/radixkv/regimefence_test.go	TestDecodeRegimeZeroFailsClosed	1
+TESTQ_UNCHECKED_ERR	cmd/fak/bail_test.go	TestRecoverExecutesOnceBound	2
+TESTQ_UNCHECKED_ERR	cmd/fak/bail_test.go	TestRecoverRefusesExecuteWithUnboundPlaceholder	2
+TESTQ_UNCHECKED_ERR	cmd/fak/dispatch_model_acceptance_test.go	TestApplyDispatchModelAcceptanceBlocksProviderSeam	2
+TESTQ_UNCHECKED_ERR	cmd/fak/dispatch_tick_lease_release_test.go	TestDispatchSpawnFailureReleasesLaneLease	1
+TESTQ_UNCHECKED_ERR	cmd/fak/dojo_provider_toolcall_test.go	TestRunDojoLiveFoldsProviderToolcallPerProvider	1
+TESTQ_UNCHECKED_ERR	cmd/fak/guard_pi_test.go	TestGuardPiExtensionSkipsOffAndNonPi	1
+TESTQ_UNCHECKED_ERR	cmd/fak/recover_test.go	TestRecoverMergeInProgressExecuteRestoresStaged	2
+TESTQ_UNCHECKED_ERR	cmd/fak/recover_test.go	TestRecoverOffTrunkExecuteRunsSafeSteps	2
+TESTQ_UNCHECKED_ERR	cmd/fak/sessions_codex_hook_test.go	TestCodexLoopHookBlocksActiveDirectContinuation	1
+TESTQ_UNCHECKED_ERR	cmd/fak/superloop_spinning_test.go	TestMemberProgressSpinningEndToEnd	3
+TESTQ_UNCHECKED_ERR	cmd/fak/toolproc_test.go	TestToolprocHookGrowthCompactsPastUnreadableTail	1
+TESTQ_UNCHECKED_ERR	internal/accounts/canary_test.go	TestCooldownExitGatedOnCanaryRoundTrip	1
+TESTQ_UNCHECKED_ERR	internal/accounts/canary_test.go	TestServeAtWalksPastProbationSeat	1
+TESTQ_UNCHECKED_ERR	internal/commitintent/commitintent_test.go	TestValidationMissingAndStaleFields	1
+TESTQ_UNCHECKED_ERR	internal/corelocks/leaseroot_test.go	TestNoCallerReliesOnThePositionalWalk	1
+TESTQ_UNCHECKED_ERR	internal/issuefanout/failure_paths_test.go	TestBuildRefusalNamesRecovery	1
+TESTQ_UNCHECKED_ERR	internal/issuefanout/product_error_ux_test.go	TestEveryRefusalLeadsWithAnAction	1
+TESTQ_UNCHECKED_ERR	internal/sessionctl/next_producer_inventory_test.go	TestModelFacingSyntheticProducersHaveNextWitnesses	1
+TESTQ_UNCHECKED_ERR	internal/sessionctl/next_test.go	TestNextDrainHasSingleProductionAuthority	1
+TESTQ_UNREAD_EXPECTATION	internal/sessionledger/rewind_test.go	TestRewindAxesIndependent	1
+TESTQ_UNREAD_EXPECTATION	internal/taskmgr/concept_test.go	TestNamedConceptHelpers	1
+
+## Precision spot-check at seed SHA 6ed7eb2467731dde576da2255731d21a33bd5cbc
+# Sample: the first 20 TESTQ_NO_ASSERTION findings in deterministic report order.
+# Reviewed 2026-08-09: 3 real defects, 17 deliberate helper/interface/probe tests.
+# Deliberate sample entries remain below as counted floor rows; reasons by family:
+# - *SSHHelperProcess / *Helper* / *Probe*: child-process fixtures whose observable assertion is in the parent test.
+# - *ResolverInterface / *Interfaces: compile-time interface conformance witnesses.
+# - TestLandlockApplyDoesNotPanicOnEmptySpec: panic absence is the asserted behavior.
+# Real-defect candidates are intentionally baselined too: this ratchet claims only "not growing";
+# remediation is separate work and regeneration will tighten the floor when they are fixed.
