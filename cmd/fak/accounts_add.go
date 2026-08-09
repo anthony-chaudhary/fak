@@ -37,6 +37,13 @@ type addParams struct {
 	suffix   string
 	noSync   bool
 
+	// baseURL and extraEnv enroll a seat that fronts a THIRD-PARTY Anthropic-compatible
+	// endpoint. baseURL is that endpoint; extraEnv is the raw repeatable --env KEY=VALUE list,
+	// parsed and validated (non-secret names only) by parseSeatExtraEnv before it reaches the
+	// registry. Both empty is an ordinary first-party seat, unchanged.
+	baseURL  string
+	extraEnv []string
+
 	// adopt enrolls by copying an EXISTING login bundle from `from` (default ~/.claude)
 	// instead of running interactive `claude setup-token`; force reconciles an existing
 	// target dir/registry row in place rather than refusing.
@@ -392,11 +399,21 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// Step 6: upsert the canonical registry record. A reconcile (--adopt --force) REPLACES an
 	// existing row for the name in place (refreshing its dir + identity + these flags) rather
 	// than appending a duplicate; a fresh add appends.
+	// A third-party-endpoint seat's overlay is validated BEFORE the registry is written, so a
+	// credential-shaped variable never reaches the plaintext file at all. (The launch path
+	// re-checks, since a registry can also be hand-edited.)
+	extraEnv, eerr := parseSeatExtraEnv(p.extraEnv)
+	if eerr != nil {
+		fmt.Fprintf(stderr, "fak accounts add: %v\n", eerr)
+		return 2
+	}
 	home := accounts.Home{
 		Name:          rosterName,
 		Dir:           dir,
 		Reserved:      p.reserved,
 		ChromeProfile: p.chrome,
+		BaseURL:       strings.TrimSpace(p.baseURL),
+		ExtraEnv:      extraEnv,
 		Identity:      accounts.DeriveIdentity(dir),
 	}
 	if apiKeyEnv != "" {
@@ -447,6 +464,19 @@ func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry,
 	fmt.Fprintf(stdout, "DRY RUN: no dir created, no credential copied, no probe, no registry write, no view sync\n")
 	fmt.Fprintf(stdout, "  target dir:    %s\n", dir)
 	fmt.Fprintf(stdout, "  roster name:   %s (reserved=%v)\n", rosterName, p.reserved)
+	// A third-party-endpoint seat: show the endpoint and the overlay's variable NAMES, and
+	// validate the overlay HERE too, so `--dry-run` catches a credential-shaped name before the
+	// operator re-runs for real. Names only, never values — a dry-run plan is meant to be
+	// pasteable, and ANTHROPIC_CUSTOM_HEADERS carries arbitrary header text.
+	if base := strings.TrimSpace(p.baseURL); base != "" {
+		fmt.Fprintf(stdout, "  endpoint:      %s (third-party Anthropic-compatible; launch requires --guard=false)\n", base)
+	}
+	if extra, err := parseSeatExtraEnv(p.extraEnv); err != nil {
+		fmt.Fprintf(stderr, "fak accounts add: %v\n", err)
+		return 2
+	} else if len(extra) > 0 {
+		fmt.Fprintf(stdout, "  seat env:      would set %s (values not shown)\n", strings.Join(sortedMapKeys(extra), ", "))
+	}
 	if env := strings.TrimSpace(p.apiKeyEnv); env != "" {
 		// API-key seat (#5331): the credential is the env-var REFERENCE; nothing is minted or copied.
 		fmt.Fprintf(stdout, "  credential:    would record the env-var REFERENCE $%s (kind=api_key; the key itself is never stored)\n", env)

@@ -90,7 +90,8 @@ type accountsCmd struct {
 	checkDiff                                        *bool
 
 	addName, addChrome, addToken, addSuffix, addFrom           *string
-	addAPIKeyEnv                                               *string
+	addAPIKeyEnv, addBaseURL                                   *string
+	addEnv                                                     *repeatedString
 	addReserved, addNoLogin, addNoSync, addAdopt               *bool
 	addForce, addProbeIdentity, addNoProbeIdentity, probeIdent *bool
 	addNoDivorce                                               *bool
@@ -138,6 +139,11 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	addName := fs.String("name", "", "(add) roster name for the new account")
 	addReserved := fs.Bool("reserved", false, "(add) hold the new account OUT of routine rotation (last-resort fallback)")
 	addChrome := fs.String("chrome-profile", "", "(add) Chrome profile provenance for the new account (informational)")
+	addBaseURL := fs.String("base-url", "", "(add) point the seat at a THIRD-PARTY Anthropic-compatible endpoint (a vendor gateway speaking the Messages API) instead of first-party api.anthropic.com. Such a seat must be launched with --guard=false, since guard fronts the child with its own base URL and credential")
+	var addEnv repeatedString
+	// NOT --env: that name is already the `resolve` verb's "print CLAUDE_CONFIG_DIR=<dir>" bool
+	// on this same flag set (flag.Var would panic on the redefinition).
+	fs.Var(&addEnv, "seat-env", "(add) extra KEY=VALUE environment for the agent this seat launches; repeatable. For the client bootstrap toggles a third-party endpoint needs (ANTHROPIC_MODEL, ANTHROPIC_CUSTOM_HEADERS, CLAUDE_CODE_USE_GATEWAY, …). NON-SECRET values only — the registry is plaintext and `accounts list --json` prints it, so a credential-shaped NAME is refused; pass the credential's env-var name to --api-key-env and export the value instead")
 	addNoLogin := fs.Bool("no-login", false, "(add) do NOT run `claude setup-token`; read the token from --token/stdin instead")
 	addToken := fs.String("token", "", "(add) the setup-token (sk-ant-oat…); '-' or empty with --no-login reads stdin")
 	addSuffix := fs.String("suffix", firstNonEmpty(os.Getenv("FAK_ACCOUNT_SUFFIX"), "-netra"), "(add) config-dir suffix: dir is ~/.claude-<name> when <name> already ends with it, else ~/.claude-<name><suffix>")
@@ -222,6 +228,8 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 		addSuffix:           addSuffix,
 		addFrom:             addFrom,
 		addAPIKeyEnv:        addAPIKeyEnv,
+		addBaseURL:          addBaseURL,
+		addEnv:              &addEnv,
 		addReserved:         addReserved,
 		addNoLogin:          addNoLogin,
 		addNoSync:           addNoSync,
@@ -280,7 +288,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	checkDiff := c.checkDiff
 	addName, addReserved, addChrome, addNoLogin, addToken := c.addName, c.addReserved, c.addChrome, c.addNoLogin, c.addToken
 	addSuffix, addNoSync, addAdopt, addFrom, addForce := c.addSuffix, c.addNoSync, c.addAdopt, c.addFrom, c.addForce
-	addAPIKeyEnv := c.addAPIKeyEnv
+	addAPIKeyEnv, addBaseURL, addEnv := c.addAPIKeyEnv, c.addBaseURL, c.addEnv
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
 	addNoDivorce, refreshTimeout, refreshAckLogout := c.addNoDivorce, c.refreshTimeout, c.refreshAckLogout
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
@@ -387,6 +395,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			name:            *addName,
 			reserved:        *addReserved,
 			chrome:          *addChrome,
+			baseURL:         *addBaseURL,
+			extraEnv:        *addEnv,
 			noLogin:         *addNoLogin,
 			token:           *addToken,
 			suffix:          *addSuffix,

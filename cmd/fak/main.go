@@ -1048,6 +1048,7 @@ func cmdAgent(argv []string) {
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	model := fs.String("model", "gemini-2.5-flash", "model id")
 	apiKeyEnv := fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
+	anthropicAuth := fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape - correct for api.anthropic.com), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key: auto would send x-api-key and the call would 401 even with a correct base URL, model, and body")
 	offline := fs.Bool("offline", false, "use the deterministic mock planner (no network)")
 	maxTurns := fs.Int("max-turns", 10, "max model turns per arm")
 	out := fs.String("out", "agent-report.json", "report output path")
@@ -1079,6 +1080,11 @@ func cmdAgent(argv []string) {
 		}
 		p, err := agent.NewProviderHTTPPlanner(*provider, *baseURL, *model, key)
 		must(err)
+		scheme, ok := agent.ParseAnthropicAuthScheme(*anthropicAuth)
+		if !ok {
+			must(fmt.Errorf("--anthropic-auth %q: want auto, bearer, or x-api-key", *anthropicAuth))
+		}
+		p.AnthropicAuthScheme = scheme
 		planner = p
 	}
 

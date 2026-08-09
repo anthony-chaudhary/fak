@@ -28,20 +28,21 @@ func cmdChat(argv []string) {
 	baseURL := fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
 	model := fs.String("model", "gemini-2.5-flash", "model id")
 	apiKeyEnv := fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
+	anthropicAuth := fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
 	offline := fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	maxTurns := fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
 
-	planner := chatPlanner(*offline, *baseURL, *provider, *model, *apiKeyEnv)
+	planner := chatPlanner(*offline, *baseURL, *provider, *model, *apiKeyEnv, *anthropicAuth)
 	runChat(os.Stdin, os.Stdout, planner, *maxTurns)
 }
 
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
 // unless a --base-url is given, mirroring `fak agent` exactly so `fak chat`
 // runs with zero network by default.
-func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv string) agent.Planner {
+func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string) agent.Planner {
 	if offline || baseURL == "" {
 		if !offline {
 			fmt.Fprintln(os.Stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
@@ -54,6 +55,11 @@ func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv string) agent
 	}
 	p, err := agent.NewProviderHTTPPlanner(provider, baseURL, model, key)
 	must(err)
+	scheme, ok := agent.ParseAnthropicAuthScheme(anthropicAuth)
+	if !ok {
+		must(fmt.Errorf("--anthropic-auth %q: want auto, bearer, or x-api-key", anthropicAuth))
+	}
+	p.AnthropicAuthScheme = scheme
 	return p
 }
 

@@ -389,6 +389,15 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", ucErr)
 		return 2
 	}
+	// A third-party seat's models live in the vendor's namespace, so the first-party default
+	// --model (and the fallback chain behind it) would name ids the endpoint does not serve.
+	// Defer to the seat's own $ANTHROPIC_MODEL unless the operator named a model explicitly.
+	// Resolved before buildLaunchArgv so the argv, the plan summary, and modelFallbackChain all
+	// read the same posture.
+	if resolved, why, changed := thirdPartySeatModel(home, p.model, p.modelExplicit); changed {
+		fmt.Fprintf(stderr, "fak accounts launch: %s\n", why)
+		p.model = resolved
+	}
 	guardCacheArgs := guardCachePostureArgs(mcMode, launchSeatAPIKeyEnv(home))
 	argv := buildLaunchArgv(fakBin, launchOpts{
 		command:         command,
@@ -399,8 +408,31 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		guardCacheArgs:  guardCacheArgs,
 		passthrough:     p.passthrough,
 	})
-	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
-	grant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), argv, envMap(env), home.Dir))
+	if why, conflict := thirdPartyGuardConflict(home, p.useGuard); conflict {
+		fmt.Fprintf(stderr, "fak accounts launch: %s\n", why)
+		return 2
+	}
+	// Validation is enforced HERE as well as at write time: a registry is a plaintext file an
+	// operator can hand-edit, so the launch is the last point that can refuse to hand a
+	// credential-shaped variable to a child process.
+	if err := accounts.ValidateExtraEnv(home.ExtraEnv); err != nil {
+		fmt.Fprintf(stderr, "fak accounts launch: seat %q: %v\n", home.Name, err)
+		return 2
+	}
+	env, scrubbed := launchSeatEnv(os.Environ(), home)
+	if len(scrubbed) > 0 {
+		// Say it out loud: an operator who exported a key expects it to be used, so silently
+		// dropping it would be its own surprise.
+		fmt.Fprintf(stderr, "fak accounts launch: seat %q has its own endpoint; dropped inherited credential(s) %s "+
+			"so the vendor gateway is not sent another account's token (the seat's $%s is kept)\n",
+			home.Name, strings.Join(scrubbed, ", "), home.APIKeyEnv)
+	}
+	// Declare the seat's own credential variable to the spawn broker's secret floor, so the
+	// variable the argv already references with --api-key-env actually reaches the child. See
+	// seatDeclaredCredentialEnv: without it a TOKEN-named credential is stripped, and the launch
+	// authenticates with nothing while looking correctly configured.
+	declaredCreds := seatDeclaredCredentialEnv(home)
+	grant := launchSpawnBroker(newLaunchBrokerAttemptDeclaring("accounts_launch", guardAgentBaseName(command), argv, envMap(env), home.Dir, declaredCreds))
 
 	printAccountsLaunchPlan(stderr, p, command, home, id, grant, mcMode, ultracodeOn)
 	printAccountFixSummary(stderr, fixes, "account fixes")
@@ -450,7 +482,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				guardCacheArgs:  guardCacheArgs,
 				passthrough:     p.passthrough,
 			})
-			fallbackGrant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), fallbackArgv, envMap(env), home.Dir))
+			fallbackGrant := launchSpawnBroker(newLaunchBrokerAttemptDeclaring("accounts_launch", guardAgentBaseName(command), fallbackArgv, envMap(env), home.Dir, declaredCreds))
 			fmt.Fprintf(stderr, "  fallback command  = %s\n", strings.Join(fallbackGrant.SanitizedArgv, " "))
 			fmt.Fprintf(stderr, "  fallback agent_run = %s policy_digest=%s broker=%s\n",
 				fallbackGrant.Metadata.AgentRunID, fallbackGrant.Metadata.PolicyDigest, fallbackGrant.Reason)
@@ -591,6 +623,16 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 		fmt.Fprintf(stderr, "  identity          = api-key seat ($%s — env-var reference, key never stored)\n", home.APIKeyEnv)
 	}
 	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
+	// A third-party seat's endpoint and overlay are the two things that make its launch differ
+	// from every other seat's, so name both. Keys only, never values: this plan is what an
+	// operator pastes into an issue, and an overlay value can be sensitive even when the
+	// variable name is not credential-shaped (ANTHROPIC_CUSTOM_HEADERS carries header text).
+	if home.ThirdParty() {
+		fmt.Fprintf(stderr, "  endpoint          = %s (third-party Anthropic-compatible; base_url)\n", home.BaseURL)
+	}
+	if keys := home.EnvOverlayKeys(); len(keys) > 0 {
+		fmt.Fprintf(stderr, "  seat env overlay  = %s (values not shown)\n", strings.Join(keys, ", "))
+	}
 	// Name the posture that produced the verdict, not just the verdict: under the default `auto`
 	// the operator should be able to see WHY ultracode is on or off for this launch (#5016).
 	posture := ultracodePostureWord(p.ultracodePosture)
