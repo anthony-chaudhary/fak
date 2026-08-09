@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,7 +16,7 @@ func TestHelpIdentifiesIndependentDevelopmentArtifact(t *testing.T) {
 	if code := run(&out, &errOut, []string{"help"}); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"fak-dev — repository-development tooling", "index ownership", "separately buildable 'fak' artifact"} {
+	for _, want := range []string{"fak-dev — repository-development tooling", "index ownership", "wiki <structure|verify|fresh|score>", "separately buildable 'fak' artifact"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("help missing %q:\n%s", want, out.String())
 		}
@@ -38,5 +40,51 @@ func TestOwnershipCommandUsesInventory(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("ownership inventory does not authorize index on fak-dev")
+	}
+}
+
+func TestWikiStructureExecutesThroughDevelopmentArtifact(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"dos.toml": `[lanes.trees]
+gateway = ["internal/gateway/**"]
+`,
+		"README.md":                   "# fixture\n",
+		"internal/gateway/gateway.go": "package gateway\n",
+	}
+	for rel, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run(&out, &errOut, []string{"wiki", "structure", "--root", root, "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var got struct {
+		Repo     string `json:"repo"`
+		Sections []any  `json:"sections"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got.Repo == "" || len(got.Sections) == 0 {
+		t.Fatalf("wiki structure did not execute: %+v", got)
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchWiki(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "wiki":`) || strings.Contains(string(body), "cmdWiki(") {
+		t.Fatal("runtime fak still dispatches the dev-only wiki command")
 	}
 }

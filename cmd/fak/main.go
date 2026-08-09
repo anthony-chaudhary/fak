@@ -205,6 +205,11 @@ func main() {
 		// Pin (or show, or revoke) this box's org trust anchor — the opt-in door to
 		// the org-policy plane, #5323. See cmd/fak/enroll.go.
 		cmdEnroll(os.Args[2:])
+	case "org":
+		// Read the org-policy plane: posture, staleness, and which channel owns each
+		// capability knob — the legibility half of centralized control, #5322. See
+		// cmd/fak/org.go.
+		cmdOrg(os.Args[2:])
 	case "egress":
 		cmdEgress(os.Args[2:])
 	case "eve":
@@ -250,8 +255,6 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "orient":
 		cmdOrient(os.Args[2:])
-	case "wiki":
-		cmdWiki(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":

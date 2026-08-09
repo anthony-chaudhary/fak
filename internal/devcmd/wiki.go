@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 // fak wiki — the fak-native, witness-verified repo wiki (epic #4277, mined from
 // deepwiki-open @ 16f35a0 — inspire, clean-room). Two deterministic subverbs, the
@@ -16,22 +16,24 @@ package main
 // network. `structure` seeds the tree from ground truth; `verify` witnesses cites.
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/internal/wiki"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-func cmdWiki(argv []string) { os.Exit(runWiki(os.Stdout, os.Stderr, argv)) }
-
-func runWiki(stdout, stderr io.Writer, argv []string) int {
+func RunWiki(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		writeWikiUsage(stderr)
 		return 2
@@ -377,4 +379,51 @@ func joinComma(xs []string) string {
 		out += x
 	}
 	return out
+}
+
+func verbFlagUsage(fs *flag.FlagSet, _ string) {
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage of %s:\n", fs.Name())
+		fs.PrintDefaults()
+	}
+}
+
+func encodeJSONOrFail(stdout, stderr io.Writer, v any, label string) int {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(stderr, "%s: encode json: %v\n", label, err)
+		return 1
+	}
+	return 0
+}
+
+func gitOut(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return out.String(), nil
+}
+
+func nonEmptyLines(s string) []string {
+	var rows []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) != "" {
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }

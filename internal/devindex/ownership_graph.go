@@ -25,6 +25,7 @@ var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "devindex", Owner: OwnerDev, Rationale: "indexes and audits the fak repository command surface"},
 	{Path: moduleInternalPrefix + "issuecontract", Owner: OwnerDev, Rationale: "validates GitHub project-work issue contracts"},
 	{Path: moduleInternalPrefix + "issuesync", Owner: OwnerDev, Rationale: "synchronizes fak repository GitHub issues"},
+	{Path: moduleInternalPrefix + "wiki", Owner: OwnerDev, Rationale: "audits repository documentation structure, citations, freshness, and coverage"},
 	{Path: moduleInternalPrefix + "sweep", Owner: OwnerDev, Rationale: "groups and commits shared-checkout development work"},
 	{Path: moduleInternalPrefix + "worktreeworker", Owner: OwnerDev, Rationale: "manages isolated repository worker worktrees"},
 }
