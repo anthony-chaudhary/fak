@@ -45,6 +45,20 @@ import (
 // SHAPE, never its name, and a verification failure exits non-zero with the closed
 // vocabulary refusal named on stderr  -  the envelope arm never fails open.
 func cmdPolicy(argv []string) {
+	if len(argv) > 0 && argv[0] == "land-rule" {
+		fs := flag.NewFlagSet("policy land-rule", flag.ExitOnError)
+		candidate := fs.String("candidate", "", "ArgRules-only candidate JSON")
+		policyPath := fs.String("policy", "", "policy manifest to merge")
+		reloadURL := fs.String("reload-url", "", "POST endpoint for the running gateway policy reload")
+		land := fs.Bool("land", false, "write the merged policy and reload (default is dry-run)")
+		rollback := fs.Bool("rollback", false, "restore the recorded preimage and reload")
+		_ = fs.Parse(argv[1:])
+		if err := runPolicyLandRule(*policyPath, *candidate, *reloadURL, *land, *rollback, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "fak policy land-rule:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	fs := flag.NewFlagSet("policy", flag.ExitOnError)
 	verbFlagUsage(fs, "policy")
 	dump := fs.Bool("dump", false, "write the built-in DefaultPolicy as a manifest to stdout")
