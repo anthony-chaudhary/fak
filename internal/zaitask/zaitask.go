@@ -84,10 +84,10 @@ type apiResponse struct {
 
 func (c Client) Run(ctx context.Context, prompt, model string, maxTokens int) (Result, error) {
 	if strings.TrimSpace(c.APIKey) == "" {
-		return Result{}, errors.New("ZAI API key is required")
+		return Result{}, errors.New("ZAI API key is required; recovery: set Client.APIKey from a ZAI credential")
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return Result{}, errors.New("prompt is required")
+		return Result{}, errors.New("prompt is required; recovery: provide a non-empty task prompt")
 	}
 	if model == "" {
 		model = DefaultModel
@@ -98,11 +98,11 @@ func (c Client) Run(ctx context.Context, prompt, model string, maxTokens int) (R
 	}
 	body, err := json.Marshal(apiRequest{Model: model, Messages: []message{{Role: "user", Content: prompt}}, MaxTokens: maxTokens, Stream: false, Thinking: &thinking{Type: "disabled"}})
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("encode zai request; recovery: report the request encoder defect: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("build zai request; recovery: set Client.BaseURL to a valid HTTP(S) URL: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -114,29 +114,29 @@ func (c Client) Run(ctx context.Context, prompt, model string, maxTokens int) (R
 	resp, err := hc.Do(req)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
-		return Result{}, fmt.Errorf("zai request: %w", err)
+		return Result{}, fmt.Errorf("zai request failed; recovery: check endpoint/network availability and retry: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
 	if err != nil {
-		return Result{}, fmt.Errorf("read zai response: %w", err)
+		return Result{}, fmt.Errorf("read zai response; recovery: retry the request or inspect the endpoint transport: %w", err)
 	}
 	if len(raw) > 8<<20 {
-		return Result{}, errors.New("zai response exceeds 8 MiB limit")
+		return Result{}, errors.New("zai response exceeds 8 MiB limit; recovery: request a smaller max_tokens value")
 	}
 	var decoded apiResponse
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return Result{}, fmt.Errorf("zai HTTP %d returned invalid JSON: %w", resp.StatusCode, err)
+		return Result{}, fmt.Errorf("zai HTTP %d returned invalid JSON; recovery: retry or inspect provider compatibility: %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := strings.TrimSpace(string(raw))
 		if decoded.Error != nil && decoded.Error.Message != "" {
 			msg = decoded.Error.Message
 		}
-		return Result{}, fmt.Errorf("zai HTTP %d: %s", resp.StatusCode, msg)
+		return Result{}, fmt.Errorf("zai HTTP %d: %s; recovery: inspect provider error, quota, and credentials before retrying", resp.StatusCode, msg)
 	}
 	if len(decoded.Choices) == 0 {
-		return Result{}, errors.New("zai response contained no choices")
+		return Result{}, errors.New("zai response contained no choices; recovery: retry or inspect provider response compatibility")
 	}
 	return Result{Content: decoded.Choices[0].Message.Content, Model: decoded.Model, RequestID: decoded.RequestID, Usage: decoded.Usage, LatencyMS: latency}, nil
 }
