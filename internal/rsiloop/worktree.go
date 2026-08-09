@@ -184,7 +184,7 @@ type wtPaths struct {
 
 // resolveRef returns the full SHA a ref points at.
 func resolveRef(repo, ref string) (string, error) {
-	cmd := exec.Command("git", "-C", repo, "rev-parse", ref)
+	cmd := windowgate.Command("git", "-C", repo, "rev-parse", ref)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -202,7 +202,7 @@ func shortSHA(sha string) string {
 
 // repoTopAndRel resolves the git repo root and the module's path relative to it.
 func repoTopAndRel(repoArg string) (top, moduleRel string, err error) {
-	cmd := exec.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel")
+	cmd := windowgate.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, rerr := cmd.Output()
 	if rerr != nil {
@@ -236,7 +236,7 @@ func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error 
 	}
 	defer os.RemoveAll(parent)
 	wt := filepath.Join(parent, "wt")
-	add := exec.Command("git", "-C", top, "worktree", "add", "--detach", wt, ref)
+	add := windowgate.Command("git", "-C", top, "worktree", "add", "--detach", wt, ref)
 	windowgate.ConfigureBackgroundCommand(add)
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("worktree add %s: %v: %s", ref, err, out)
@@ -251,7 +251,7 @@ func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error 
 
 // runProbe runs the KPI probe in the module dir and parses its `KPI=<float>` line.
 func runProbe(moduleDir, probePkg string) (float64, error) {
-	cmd := exec.Command("go", "run", probePkg)
+	cmd := windowgate.Command("go", "run", probePkg)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = moduleDir
 	out, err := cmd.CombinedOutput()
@@ -299,7 +299,7 @@ func runSuite(moduleDir string, cmds [][]string) (bool, string) {
 		if len(c) == 0 {
 			continue
 		}
-		cmd := exec.Command(c[0], c[1:]...)
+		cmd := windowgate.Command(c[0], c[1:]...)
 		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Dir = moduleDir
 		out, err := cmd.CombinedOutput()
@@ -333,7 +333,7 @@ func tail(s string, n int) string {
 // returns false — a candidate that changed nothing is not a real proposal. Build
 // artifacts or unexpected edits fail closed.
 func treeChangedOnly(wtRoot, only string) bool {
-	cmd := exec.Command("git", "-C", wtRoot, "status", "--porcelain")
+	cmd := windowgate.Command("git", "-C", wtRoot, "status", "--porcelain")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {

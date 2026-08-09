@@ -65,9 +65,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -787,7 +787,7 @@ func runKnownBadTestsWitness(root string, treeGlobs []string) knownBadWitnessRes
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	args := append([]string{"test"}, pkgs...)
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := windowgate.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	// `go test` forks the toolchain + the compiled test binary — a descendant tree.
@@ -812,7 +812,7 @@ func runKnownBadVerifyWitness(root string, treeGlobs []string, commit string) kn
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "dos", "verify", commit, "--workspace", root)
+	cmd := windowgate.CommandContext(ctx, "dos", "verify", commit, "--workspace", root)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()

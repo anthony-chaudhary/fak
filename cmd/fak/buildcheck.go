@@ -344,7 +344,7 @@ func loadBearingUntrackedFiles(root string, untracked []string) ([]string, error
 	if len(untrackedByDir) == 0 {
 		return nil, nil
 	}
-	cmd := exec.Command("git", "ls-files", "--", "*.go")
+	cmd := windowgate.Command("git", "ls-files", "--", "*.go")
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
@@ -495,7 +495,7 @@ func writeOverlayFile(path string, ov goOverlay) error {
 }
 
 func runGoBuildCheck(root string, args []string, stdout, stderr io.Writer) (int, error) {
-	cmd := exec.Command("go", args...)
+	cmd := windowgate.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	cmd.Stdout = stdout

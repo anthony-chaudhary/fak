@@ -294,7 +294,7 @@ func contains(xs []string, s string) bool {
 
 // RepoRoot returns the git top-level, falling back to the working directory.
 func RepoRoot() string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := windowgate.Command("git", "rev-parse", "--show-toplevel")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	if out, err := cmd.Output(); err == nil {
 		if s := strings.TrimSpace(string(out)); s != "" {
@@ -307,7 +307,7 @@ func RepoRoot() string {
 
 // HeadSHA returns the committed HEAD sha ("" if unavailable).
 func HeadSHA(root string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd := windowgate.Command("git", "rev-parse", "HEAD")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
@@ -322,7 +322,7 @@ func HeadSHA(root string) string {
 // untracked-but-not-ignored). Reads the working-tree bytes, where a forgotten
 // definition lives.
 func UncommittedFiles(root string) map[string]string {
-	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all", "-z")
+	cmd := windowgate.Command("git", "status", "--porcelain", "--untracked-files=all", "-z")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
@@ -361,7 +361,7 @@ func BuildCommittedHead(root string) (bool, string, error) {
 	}
 	defer os.RemoveAll(tmp)
 
-	archive := exec.Command("git", "archive", "--format=tar", "HEAD")
+	archive := windowgate.Command("git", "archive", "--format=tar", "HEAD")
 	windowgate.ConfigureBackgroundCommand(archive)
 	archive.Dir = root
 	var arBuf, arErr bytes.Buffer
@@ -374,7 +374,7 @@ func BuildCommittedHead(root string) (bool, string, error) {
 		return false, "", fmt.Errorf("extract: %v", err)
 	}
 
-	build := exec.Command(goBin, "build", "./...")
+	build := windowgate.Command(goBin, "build", "./...")
 	build.Dir = tmp
 	var so, se bytes.Buffer
 	build.Stdout = &so

@@ -3,6 +3,7 @@
 package windowgate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -147,6 +148,22 @@ func (j *JobObject) Close() error {
 // ConfigureBackgroundCommand marks cmd as a background/helper process. It must
 // not create a user-visible console window when the parent has no console of its
 // own, which is the common shape for scheduled fak maintenance tasks.
+// Command constructs a subprocess that inherits its standard handles while never
+// allocating a user-visible console window. Use it for short-lived helper tools
+// (including the Go toolchain) launched by fak control-plane code.
+func Command(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	ConfigureBackgroundCommand(cmd)
+	return cmd
+}
+
+// CommandContext is Command with cancellation.
+func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	ConfigureBackgroundCommand(cmd)
+	return cmd
+}
+
 func ConfigureBackgroundCommand(cmd *exec.Cmd) {
 	if cmd == nil {
 		return

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"text/tabwriter"
 
@@ -185,7 +184,7 @@ func benchmarksRun(stdout, stderr io.Writer, argv []string) int {
 	if b.Need != benchcatalog.NeedNone && len(extra) == 0 {
 		fmt.Fprintf(stdout, "note: %s needs %s  -  see `fak benchmarks describe %s` for the asset flags.\n", b.Name, b.Need, b.Name)
 	}
-	cmd := exec.Command("go", args...)
+	cmd := windowgate.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

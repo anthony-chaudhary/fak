@@ -1149,10 +1149,16 @@ var candidateConsoleTools = map[string]bool{
 // short dispatch probes may use configureDispatchHelperCommand; all other
 // background helpers use ConfigureBackgroundCommand.
 func GoExecViolations(rel, src string) []string {
-	if strings.HasSuffix(rel, "_test.go") || !hardGoBackgroundPath(rel) {
+	if strings.HasSuffix(rel, "_test.go") {
 		return nil
 	}
-	return goExecFindings(rel, src, true)
+	if hardGoBackgroundPath(rel) {
+		return goExecFindings(rel, src, true, false)
+	}
+	// Go commands are repository control-plane helpers wherever they live. The Go
+	// toolchain is a console executable on Windows, so an unconfigured invocation
+	// can allocate a transient black conhost window even outside dispatch code.
+	return goExecFindings(rel, src, false, true)
 }
 
 // GoExecCandidates returns advisory findings for literal console tools in Go
@@ -1162,19 +1168,19 @@ func GoExecCandidates(rel, src string) []string {
 	if strings.HasSuffix(rel, "_test.go") || hardGoBackgroundPath(rel) {
 		return nil
 	}
-	return goExecFindings(rel, src, false)
+	return goExecFindings(rel, src, false, false)
 }
 
 func hardGoBackgroundPath(rel string) bool {
 	return strings.HasPrefix(rel, "cmd/fak/dispatch") || hardGoBackgroundFiles[rel]
 }
 
-func goExecFindings(rel, src string, hard bool) []string {
+func goExecFindings(rel, src string, hard, onlyGo bool) []string {
 	lines := strings.Split(src, "\n")
 	var out []string
 	for i, line := range lines {
 		text := stripGoLineComment(line)
-		if literalConsoleTool(text) && reGoInlineTerm.MatchString(text) {
+		if literalConsoleTool(text) && (!onlyGo || literalGoTool(text)) && reGoInlineTerm.MatchString(text) {
 			out = append(out, fmt.Sprintf("%s:%d: inline exec.Command reaches %s without "+
 				"windowgate.ConfigureBackgroundCommand(cmd) — expand it to a command variable and configure the Windows no-window hook (%s)",
 				rel, i+1, strings.TrimSpace(text), ReasonGoUnsuppressedExec))
@@ -1184,7 +1190,10 @@ func goExecFindings(rel, src string, hard bool) []string {
 		if m == nil {
 			continue
 		}
-		if !hard && !literalConsoleTool(line) {
+		if onlyGo && !literalGoTool(line) {
+			continue
+		}
+		if !hard && !onlyGo && !literalConsoleTool(line) {
 			continue
 		}
 		name := m[1]
@@ -1213,6 +1222,19 @@ func goExecFindings(rel, src string, hard bool) []string {
 		}
 	}
 	return out
+}
+
+func literalGoTool(line string) bool {
+	m := reGoCommandLit.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	tool := m[1]
+	if tool == "" {
+		tool = m[2]
+	}
+	tool = strings.ToLower(filepath.Base(strings.ReplaceAll(tool, `\`, "/")))
+	return tool == "go" || tool == "go.exe"
 }
 
 func literalConsoleTool(line string) bool {

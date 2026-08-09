@@ -552,7 +552,7 @@ func prepushArchiveTip(r, sha string) (string, error) {
 // — by the deadline (the ctx.Err() branch) or by an untar error (the Process.Kill() branch) — so
 // extractArchive always returns bounded and the gate fails open, never wedging the push.
 var prepushArchiveCommand = func(ctx context.Context, r, sha string) *exec.Cmd {
-	return exec.CommandContext(ctx, "git", "-C", r, "archive", "--format=tar", sha)
+	return windowgate.CommandContext(ctx, "git", "-C", r, "archive", "--format=tar", sha)
 }
 
 func extractArchive(ctx context.Context, r, sha, dir string) error {
@@ -661,7 +661,7 @@ func safeArchiveJoin(root, name string) (string, error) {
 // failure detail is the trimmed compiler output so the exact `undefined: X` is visible without
 // re-running anything. The package-list generalization of ci_preflight's goBuildAll("./...").
 func goBuildPackages(dir string, pkgs []string) (string, bool) {
-	cmd := exec.Command("go", append([]string{"build"}, pkgs...)...)
+	cmd := windowgate.Command("go", append([]string{"build"}, pkgs...)...)
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()

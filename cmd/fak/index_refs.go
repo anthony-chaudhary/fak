@@ -8,7 +8,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -67,7 +66,7 @@ func indexRefs(stdout, stderr io.Writer, root string, args []string, asJSON bool
 }
 
 func indexRefsListPackages(root string) ([]goPkg, error) {
-	cmd := exec.Command("go", "list", "-e", "-json", "./...")
+	cmd := windowgate.Command("go", "list", "-e", "-json", "./...")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	var out bytes.Buffer

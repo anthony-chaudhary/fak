@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -328,7 +329,7 @@ func resolveFakBinary(buildDir string) (path, source string, err error) {
 		return "", "", fmt.Errorf("create isolated fak build directory: %w", err)
 	}
 	out := filepath.Join(buildDir, exeName)
-	build := exec.Command("go", "build", "-o", out, "./cmd/fak")
+	build := windowgate.Command("go", "build", "-o", out, "./cmd/fak")
 	build.Dir = root
 	if combined, buildErr := build.CombinedOutput(); buildErr != nil {
 		return "", "", fmt.Errorf("build ./cmd/fak: %w\n%s\n(set FAK_BIN=<path to a fak binary> to measure "+

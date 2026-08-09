@@ -348,7 +348,7 @@ type wtPaths struct {
 
 // resolveRef returns the full SHA a ref points at.
 func resolveRef(repo, ref string) (string, error) {
-	cmd := exec.Command("git", "-C", repo, "rev-parse", ref)
+	cmd := windowgate.Command("git", "-C", repo, "rev-parse", ref)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -366,7 +366,7 @@ func shortSHA(sha string) string {
 
 // repoTopAndRel resolves the git repo root and the module's path relative to it.
 func repoTopAndRel(repoArg string) (top, moduleRel string, err error) {
-	cmd := exec.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel")
+	cmd := windowgate.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, rerr := cmd.Output()
 	if rerr != nil {
@@ -400,7 +400,7 @@ func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error 
 	}
 	defer os.RemoveAll(parent)
 	wt := filepath.Join(parent, "wt")
-	add := exec.Command("git", "-C", top, "worktree", "add", "--detach", wt, ref)
+	add := windowgate.Command("git", "-C", top, "worktree", "add", "--detach", wt, ref)
 	windowgate.ConfigureBackgroundCommand(add)
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("worktree add %s: %v: %s", ref, err, out)
@@ -420,7 +420,7 @@ func runSuite(moduleDir string, cmds [][]string) (bool, string) {
 		if len(c) == 0 {
 			continue
 		}
-		cmd := exec.Command(c[0], c[1:]...)
+		cmd := windowgate.Command(c[0], c[1:]...)
 		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Dir = moduleDir
 		out, err := cmd.CombinedOutput()
@@ -459,7 +459,7 @@ func tail(s string, n int) string {
 // dojo run` legitimately drops untracked scratch alongside the one tracked
 // claim edit, and those must not mask a real extra edit nor fail the gate.
 func treeChangedOnlyTracked(wtRoot, only string) bool {
-	cmd := exec.Command("git", "-C", wtRoot, "status", "--porcelain")
+	cmd := windowgate.Command("git", "-C", wtRoot, "status", "--porcelain")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -517,7 +517,7 @@ func runDojo(cfg WorktreeConfig, moduleDir, corpusDir string) (dojo.Report, erro
 	}
 	args := []string{"run", "./cmd/fak", "dojo", "run", "--json", "--corpus", corpusDir}
 	args = append(args, cfg.DojoArgs...)
-	cmd := exec.Command("go", args...)
+	cmd := windowgate.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = moduleDir
 	// stdout/stderr are captured SEPARATELY (not CombinedOutput): `go run` writes

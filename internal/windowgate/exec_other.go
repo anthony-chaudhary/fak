@@ -9,6 +9,15 @@ import (
 
 // ConfigureBackgroundCommand is a no-op off Windows. POSIX helpers do not create
 // Windows console windows, and callers keep their ordinary process semantics.
+// Command constructs a short-lived helper subprocess. On Windows the matching
+// implementation also suppresses console-window allocation.
+func Command(name string, args ...string) *exec.Cmd { return exec.Command(name, args...) }
+
+// CommandContext is Command with cancellation.
+func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, name, args...)
+}
+
 func ConfigureBackgroundCommand(_ *exec.Cmd) {}
 
 // ConfigureDetachedCommand is a no-op off Windows. There is no console object to

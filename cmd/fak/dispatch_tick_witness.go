@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"io"
 	"os"
 	"os/exec"
@@ -376,7 +377,7 @@ func dispatchWitnessResolvingSHAGit(root string, issue int, baseSHA string) stri
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := windowgate.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
@@ -389,7 +390,7 @@ func dispatchWitnessResolvingSHAGit(root string, issue int, baseSHA string) stri
 func dispatchWitnessCommitPathsGit(root, sha string) ([]string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "show", "--pretty=format:", "--name-only", sha)
+	cmd := windowgate.CommandContext(ctx, "git", "show", "--pretty=format:", "--name-only", sha)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
@@ -419,7 +420,7 @@ func dispatchCountPathsOutsideTrees(changed, trees []string) int {
 func dispatchWitnessCommitAuditDos(root, sha string) (string, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "dos", "commit-audit", sha, "--workspace", root, "--json")
+	cmd := windowgate.CommandContext(ctx, "dos", "commit-audit", sha, "--workspace", root, "--json")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
@@ -472,7 +473,7 @@ func dispatchWitnessTestRunGo(root, sha string) (ran, passed bool) {
 	name, cmdArgs := affectedTestCommand(runtime.GOOS, append([]string{"test", "-count=1"}, pkgs...))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, name, cmdArgs...)
+	cmd := windowgate.CommandContext(ctx, name, cmdArgs...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	err := cmd.Run()
@@ -800,7 +801,7 @@ func dispatchWitnessSamePath(a, b string) bool {
 func dispatchWitnessGitOut(root string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := windowgate.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
@@ -829,7 +830,7 @@ func dispatchWitnessStrandedBuildFailsGo(root string, pkgs []string) (failed, ok
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	args := append([]string{"build", "-o", tmp + string(os.PathSeparator)}, pkgs...)
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := windowgate.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	err = cmd.Run()
@@ -873,7 +874,7 @@ func dispatchWitnessArchiveStranded(root, runsDir, stem string, files []dispatch
 func dispatchWitnessStashPathsGit(root string, paths []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"stash", "push", "--"}, paths...)...)
+	cmd := windowgate.CommandContext(ctx, "git", append([]string{"stash", "push", "--"}, paths...)...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	return cmd.Run()

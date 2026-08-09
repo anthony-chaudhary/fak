@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -274,7 +273,7 @@ func gofmtOwnedPaths(root string, paths []string) ([]string, error) {
 		return nil, nil
 	}
 	args := append([]string{"-l"}, goFiles...)
-	cmd := exec.Command("gofmt", args...)
+	cmd := windowgate.Command("gofmt", args...)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
@@ -334,7 +333,7 @@ func runValidateTests(dir string, args []string) (string, bool) {
 	// The archive checkout is isolated from peer WIP, so direct `go test` is the exact
 	// intended affected-package operation. The caller can invoke `fak validate` from WSL
 	// on hosts whose application policy blocks freshly-built native test binaries.
-	cmd := exec.Command("go", args...)
+	cmd := windowgate.Command("go", args...)
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
@@ -342,7 +341,7 @@ func runValidateTests(dir string, args []string) (string, bool) {
 }
 
 func runGoCheck(dir string, args ...string) (string, bool) {
-	cmd := exec.Command("go", args...)
+	cmd := windowgate.Command("go", args...)
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()

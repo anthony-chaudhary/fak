@@ -3,6 +3,7 @@
 package windowgate
 
 import (
+	"context"
 	"os/exec"
 	"testing"
 )
@@ -32,5 +33,14 @@ func TestRunInNewJobPreservesExitErrorOffWindows(t *testing.T) {
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok || exitErr.ExitCode() != 7 {
 		t.Fatalf("RunInNewJob error = %T %v, want *exec.ExitError code 7", err, err)
+	}
+}
+
+func TestCommandConstructorsPortable(t *testing.T) {
+	if got := Command("go", "version"); got.Path == "" {
+		t.Fatal("Command returned empty path")
+	}
+	if got := CommandContext(context.Background(), "go", "version"); got.Path == "" {
+		t.Fatal("CommandContext returned empty path")
 	}
 }

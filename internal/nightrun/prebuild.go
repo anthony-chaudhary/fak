@@ -3,7 +3,6 @@ package nightrun
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -196,7 +195,7 @@ func (c *goRunCache) binaryFor(ctx context.Context, root, pkg string) string {
 	// as a failure, so the loop falls back to the timeout-wrapped `go run` rather than stalling.
 	buildCtx, cancel := context.WithTimeout(ctx, buildPrebuildBudget)
 	defer cancel()
-	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", out, pkg)
+	cmd := windowgate.CommandContext(buildCtx, "go", "build", "-o", out, pkg)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	cmd.Env = c.buildEnv() // nil => inherit os.Environ(); set only when the preflight provisioned a default

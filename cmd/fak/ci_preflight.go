@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -121,7 +120,7 @@ func runCIPreflight(stdout, stderr io.Writer, argv []string) int {
 
 // gitRevParse resolves ref to a full sha in repo r.
 func gitRevParse(r, ref string) (string, error) {
-	cmd := exec.Command("git", "-C", r, "rev-parse", ref)
+	cmd := windowgate.Command("git", "-C", r, "rev-parse", ref)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -157,7 +156,7 @@ func extractCommittedTip(r, sha string) (string, error) {
 // gofmtList returns the unformatted .go files (relative to dir) that `gofmt -l .` reports, matching
 // the CI gofmt-check step exactly.
 func gofmtList(dir string) ([]string, error) {
-	cmd := exec.Command("gofmt", "-l", ".")
+	cmd := windowgate.Command("gofmt", "-l", ".")
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
@@ -178,7 +177,7 @@ func gofmtList(dir string) ([]string, error) {
 // goBuildAll runs `go build ./...` in dir. Returns (detail, ok); on failure detail is the trimmed
 // compiler output so an agent sees the exact `undefined: X` without re-running anything.
 func goBuildAll(dir string) (string, bool) {
-	cmd := exec.Command("go", "build", "./...")
+	cmd := windowgate.Command("go", "build", "./...")
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()

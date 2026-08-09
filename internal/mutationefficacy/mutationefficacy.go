@@ -32,7 +32,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -257,7 +256,7 @@ func GoTestRunner(timeout time.Duration) TestRunner {
 	return func(pkgDir string) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "go", "test", "-count=1", ".")
+		cmd := windowgate.CommandContext(ctx, "go", "test", "-count=1", ".")
 		cmd.Dir = pkgDir
 		windowgate.ConfigureBackgroundCommand(cmd)
 		return cmd.Run() == nil

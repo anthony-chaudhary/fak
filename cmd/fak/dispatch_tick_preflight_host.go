@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"io"
 	"os"
 	"os/exec"
@@ -221,7 +222,7 @@ func dispatchRunHostProbe(script string, timeout time.Duration, combineStderr bo
 func runDispatchHostProbeOneShot(script string, timeout time.Duration, combineStderr bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := windowgate.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	configureDispatchHelperCommand(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	if combineStderr {
@@ -244,7 +245,7 @@ type dispatchHostProbeShell struct {
 // spawnDispatchHostProbeShell cold-starts a warm probe shell. This is the ONLY
 // console creation the reuse spine performs, however many probes run on it.
 func spawnDispatchHostProbeShell(string) (dispatchtick.WarmShell, error) {
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", dispatchHostProbeBootstrap)
+	cmd := windowgate.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", dispatchHostProbeBootstrap)
 	configureDispatchHelperCommand(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	stdin, err := cmd.StdinPipe()
@@ -356,7 +357,7 @@ func (s *dispatchHostProbeShell) teardownLocked() {
 func dispatchRunExternalJSONImpl(root string, timeout time.Duration, name string, args ...string) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := windowgate.CommandContext(ctx, name, args...)
 	cmd.Dir = root
 	// Bound the post-deadline pipe wait: `dos` is a pip console-script shim
 	// whose real work runs in a python.exe GRANDCHILD holding the inherited
@@ -855,7 +856,7 @@ func dispatchScanWorkerProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
 func dispatchScanWorkerProcessRowsPOSIX() ([]dispatchCodexProcessRow, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-eo", "pid=,ppid=,comm=,args=")
+	cmd := windowgate.CommandContext(ctx, "ps", "-eo", "pid=,ppid=,comm=,args=")
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -900,7 +901,7 @@ func dispatchScanCodexProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
 func dispatchScanCodexProcessRowsPOSIX() ([]dispatchCodexProcessRow, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-eo", "pid=,ppid=,comm=,args=")
+	cmd := windowgate.CommandContext(ctx, "ps", "-eo", "pid=,ppid=,comm=,args=")
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -1057,7 +1058,7 @@ var dispatchTreeBuildCommand = func(root string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, goBin, "build", "-o", os.DevNull, "./cmd/fak")
+	cmd := windowgate.CommandContext(ctx, goBin, "build", "-o", os.DevNull, "./cmd/fak")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()

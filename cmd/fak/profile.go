@@ -159,7 +159,7 @@ On Windows, the benchmark run is routed to WSL via test.ps1 (native go test is O
 		return 0
 	}
 
-	cmd := exec.Command(p.Argv[0], p.Argv[1:]...)
+	cmd := windowgate.Command(p.Argv[0], p.Argv[1:]...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, os.Stdin
 	if err := cmd.Run(); err != nil {
@@ -174,7 +174,7 @@ On Windows, the benchmark run is routed to WSL via test.ps1 (native go test is O
 		// `go tool pprof` only reads the captured profile (no test binary is compiled),
 		// so it is not subject to the test-binary OS block and runs directly on any host.
 		fmt.Fprintf(stdout, "\n# go tool pprof -top %s\n", p.CPUProfile)
-		pp := exec.Command("go", "tool", "pprof", "-top", p.CPUProfile)
+		pp := windowgate.Command("go", "tool", "pprof", "-top", p.CPUProfile)
 		windowgate.ConfigureBackgroundCommand(pp)
 		pp.Stdout, pp.Stderr = stdout, stderr
 		if err := pp.Run(); err != nil {

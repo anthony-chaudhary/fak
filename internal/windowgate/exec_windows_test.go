@@ -4,6 +4,7 @@ package windowgate
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -427,5 +428,25 @@ func waitFor(cond func() bool, d time.Duration) bool {
 			return false
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestCommandSuppressesConsoleWindow(t *testing.T) {
+	cmd := Command("go", "version")
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
+		t.Fatal("Command did not set HideWindow")
+	}
+	if cmd.SysProcAttr.CreationFlags&CreateNoWindow == 0 {
+		t.Fatalf("Command CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
+	}
+}
+
+func TestCommandContextSuppressesConsoleWindow(t *testing.T) {
+	cmd := CommandContext(context.Background(), "go", "env", "GOMOD")
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
+		t.Fatal("CommandContext did not set HideWindow")
+	}
+	if cmd.SysProcAttr.CreationFlags&CreateNoWindow == 0 {
+		t.Fatalf("CommandContext CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
 	}
 }

@@ -542,7 +542,7 @@ func worktreeWorkerGoBuildVerify(wtPath string) (bool, string) {
 	if _, err := exec.LookPath("go"); err != nil {
 		return true, "go toolchain not found — skipping build verify (fail open)"
 	}
-	cmd := exec.Command("go", "build", "./...")
+	cmd := windowgate.Command("go", "build", "./...")
 	cmd.Dir = wtPath
 	windowgate.ConfigureBackgroundCommand(cmd)
 	env := workerworktree.WorktreeEnv(nil, wtPath)
