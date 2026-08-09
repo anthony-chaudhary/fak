@@ -178,6 +178,31 @@ func (s JudgeScorer) Score(obj Objective, win EvidenceWindow) []ScoreRow {
 	// broke the AND so the failure is attributable. Default (non-conjunctive)
 	// objectives keep the soft-progress fold untouched.
 	value := clamp01(verdict.Progress)
+	// A soft rubric verdict carries two representations of progress: the scalar
+	// and its per-criterion itemization. Never credit a scalar that is more
+	// optimistic than the arithmetic support in that same call. This is a
+	// consistency check, not an alternative scoring policy: conservative scalars
+	// remain valid, and bare-statement verdicts have no itemization to bind.
+	if obj.Rubric != nil && !obj.Rubric.Conjunctive && len(verdict.Criteria) > 0 {
+		// Fold only declared criterion IDs, once each. A missing finding supports
+		// zero, while an unknown or duplicate finding cannot inflate support.
+		byID := make(map[string]float64, len(verdict.Criteria))
+		for _, finding := range verdict.Criteria {
+			if _, seen := byID[finding.ID]; !seen {
+				byID[finding.ID] = clamp01(finding.Progress)
+			}
+		}
+		var supported float64
+		for _, criterion := range obj.Rubric.Criteria {
+			supported += byID[criterion.ID]
+		}
+		if len(obj.Rubric.Criteria) > 0 {
+			supported /= float64(len(obj.Rubric.Criteria))
+		}
+		if value > supported+1e-9 {
+			return nil
+		}
+	}
 	if obj.Rubric != nil && obj.Rubric.Conjunctive {
 		v, failed := conjunctiveValue(obj.Rubric, verdict.Criteria)
 		value = v
