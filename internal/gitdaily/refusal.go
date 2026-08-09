@@ -27,7 +27,7 @@ type Refusal struct {
 func (r Result) Refusal() *Refusal {
 	switch {
 	case r.ConfigErr != "":
-		return &Refusal{Code: RefusalInvalidOptions, Message: "git-daily is missing its repository identity; resolve the repository root and Git common directory before retrying"}
+		return &Refusal{Code: RefusalInvalidOptions, Message: configRecovery(r.ConfigErr)}
 	case r.TickLockErr != "":
 		return &Refusal{Code: RefusalTickLock, Message: "git-daily could not open its serializer; check permissions on the Git common directory, then retry", Retry: true}
 	case r.Skipped == SkipTickBusy:
@@ -37,7 +37,7 @@ func (r Result) Refusal() *Refusal {
 	case r.Maint.Incident:
 		return &Refusal{Code: RefusalMaintenance, Message: "git-daily stopped at a maintenance safety gate; inspect the maintenance refusal in fak git-daily --json before retrying"}
 	case r.LedgerErr != "":
-		return &Refusal{Code: RefusalLedgerWrite, Message: "git-daily finished maintenance but could not record its witness; repair the ledger path before the next tick"}
+		return &Refusal{Code: RefusalLedgerWrite, Message: "git-daily finished maintenance but could not record its witness; make the Git common directory writable, then rerun fak git-daily --force"}
 	default:
 		return nil
 	}
@@ -55,4 +55,17 @@ func (o Options) Validate() error {
 		return errors.New("gitdaily: missing " + strings.Join(missing, " and "))
 	}
 	return nil
+}
+
+func configRecovery(configErr string) string {
+	missingRoot := strings.Contains(configErr, "RepoRoot")
+	missingCommon := strings.Contains(configErr, "GitCommonDir")
+	switch {
+	case missingRoot && !missingCommon:
+		return "git-daily is missing RepoRoot; set it to the output of git rev-parse --show-toplevel, then retry"
+	case missingCommon && !missingRoot:
+		return "git-daily is missing GitCommonDir; set it to the output of git rev-parse --git-common-dir, then retry"
+	default:
+		return "git-daily is missing its repository identity; set RepoRoot from git rev-parse --show-toplevel and GitCommonDir from git rev-parse --git-common-dir, then retry"
+	}
 }
