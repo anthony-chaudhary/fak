@@ -375,6 +375,8 @@ func main() {
 	var qualitySamples int
 	var largeInputOutput, verifyLargeInputPath string
 	var largeInputSelfcheck bool
+	var selectorOutput, verifySelectorPath string
+	var selectorSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
@@ -422,6 +424,9 @@ func main() {
 	flag.BoolVar(&largeInputSelfcheck, "large-input-selfcheck", false, "run the fixture-backed 1,000-record large-input operator proof")
 	flag.StringVar(&largeInputOutput, "large-input-output", "", "write the large-input operator proof artifact")
 	flag.StringVar(&verifyLargeInputPath, "verify-large-input", "", "verify a captured large-input operator artifact")
+	flag.BoolVar(&selectorSelfcheck, "filter-selector-selfcheck", false, "run the adaptive filter-selector proof")
+	flag.StringVar(&selectorOutput, "filter-selector-output", "", "write the adaptive filter-selector proof artifact")
+	flag.StringVar(&verifySelectorPath, "verify-filter-selector", "", "verify a captured filter-selector artifact")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -449,6 +454,32 @@ func main() {
 	}
 	if gradeOutput != "" {
 		if err := writeHealthGrade(gradeInput, gradeOutput); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifySelectorPath != "" {
+		runVerify("verify-filter-selector", verifySelectorPath, verifySelectorArtifact)
+		return
+	}
+	if selectorSelfcheck || selectorOutput != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		r, err := buildSelectorReport(ctx, cfg.Workers)
+		r = compactSelectorReport(r)
+		b, merr := json.MarshalIndent(r, "", "  ")
+		if merr == nil && selectorOutput != "" {
+			merr = os.WriteFile(selectorOutput, append(b, '\n'), 0o644)
+		}
+		if merr != nil {
+			fmt.Fprintln(os.Stderr, merr)
+			os.Exit(1)
+		}
+		if selectorOutput == "" {
+			fmt.Println(string(b))
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

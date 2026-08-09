@@ -1783,6 +1783,46 @@
           "category": "incidental",
           "reason": "the process-global map holder for per-Server tables; the concept is proxyFillWitnessTable, already positioned",
           "token": "proxyFillWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "A plain English word inside a #1348 comment header in internal/gateway/gateway_admit.go describing the property the witness gate buys, not an identifier, constant, or refusal token.",
+          "token": "REVOCABLE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-file helper on gateway.Server: returns the (resource, witness) pair for one inbound proxy-fill result. Implementation detail of the FakWitnessArgKey concept, not a separate concept.",
+          "token": "proxyFillWitnessFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-file helper on gateway.Server recording a resource's live proxy-fill admission and retiring its prior witness. Implementation detail, not a separate concept.",
+          "token": "observeProxyFillWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constant namespacing the witness fak DERIVES (\"fakfill:\") so an operator can tell a derived token from a client-declared one. A label on the FakWitnessArgKey concept, not its own.",
+          "token": "proxyFillWitnessPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-file reader pulling the declared FakWitnessArgKey token off a result body or call args. Implementation detail of that concept.",
+          "token": "proxyFillDeclaredWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-Server resource->admission index backing the proxy-fill refutation. Internal data structure, not a concept a reader meets.",
+          "token": "proxyFillWitnessTable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-file helper minting H(resource, epoch, result bytes) when no client token was declared. Implementation detail of the FakWitnessArgKey concept.",
+          "token": "derivedProxyFillWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-file helper calling vdso.Revoke on the emitters the fill targets. Implementation detail of the already-positioned vDSO revocation concept.",
+          "token": "revokeProxyFillWitness"
         }
       ],
       "id": "witness-proof",
@@ -1797,6 +1837,7 @@
         "HonestyWrongWitness",
         "NewTreeWitness",
         "QualityWitness",
+        "REVOCABLE",
         "TurnOutcomesFromWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
@@ -1812,6 +1853,7 @@
         "compactionWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
+        "derivedProxyFillWitness",
         "dispatchWitnessArchiveStranded",
         "dispatchWitnessContestingLaneHolders",
         "dispatchWitnessDirtyFile",
@@ -1837,6 +1879,11 @@
         "named_witness",
         "newGuardCompactionWitness",
         "nwitness",
+        "observeProxyFillWitness",
+        "proxyFillDeclaredWitness",
+        "proxyFillWitnessFor",
+        "proxyFillWitnessPrefix",
+        "proxyFillWitnessTable",
         "proxyFillWitnesses",
         "readGuardCompactionWitnesses",
         "recordGuardCompactionWitness",
@@ -1846,6 +1893,7 @@
         "refutil",
         "renderCheckpointWitness",
         "revocations",
+        "revokeProxyFillWitness",
         "runSessionCheckpointWitness",
         "setup_not_witnessed",
         "tree_witness",
@@ -1899,6 +1947,11 @@
           "category": "incidental",
           "reason": "Private adapter that invokes the existing modelroute spawn placer and resolves its selected account; not a new gateway engine concept.",
           "token": "resolveSpawnEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private fixture selector runner; it is not a reusable gateway or engine concept.",
+          "token": "selectorGateway"
         }
       ],
       "id": "gateway-engine",
@@ -1916,7 +1969,8 @@
         "kernelwiki",
         "resolveCallEngine",
         "resolveSpawnEngine",
-        "shrinkWireInKernel"
+        "shrinkWireInKernel",
+        "selectorGateway"
       ],
       "min_files": 3,
       "name": "Gateway / engine family",
@@ -2039,6 +2093,11 @@
           "category": "incidental",
           "reason": "Agent-loop adapter over the already-positioned modelroute spawn-placement policy; not a new capability-policy primitive.",
           "token": "SpawnPlacementPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Human-readable rendering helper for an already-computed posture; not a capability-policy primitive.",
+          "token": "orgPostureGloss"
         }
       ],
       "exclude": [
@@ -2071,6 +2130,7 @@
         "guardWindowsArgvPreflight",
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
+        "orgPostureGloss",
         "policies",
         "policyErr",
         "policy_changed",
@@ -3301,6 +3361,11 @@
           "category": "incidental",
           "reason": "Pure checkpoint deletion policy fold, not a project planning abstraction",
           "token": "PlanRemoteDrain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture-only reason string for routing to the existing auth-relevance stage; not a planning abstraction.",
+          "token": "candidate_requires_auth_relevance"
         }
       ],
       "exclude": [
@@ -3363,7 +3428,8 @@
         "register_bench_plan_doc",
         "runAblatePlan",
         "wipLandOptions",
-        "wipLandWith"
+        "wipLandWith",
+        "candidate_requires_auth_relevance"
       ],
       "min_files": 2,
       "name": "Plan family",

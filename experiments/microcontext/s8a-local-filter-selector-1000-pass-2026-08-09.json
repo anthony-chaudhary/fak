@@ -1,0 +1,76 @@
+{
+  "schema": "fak-microcontext-filter-selector/1",
+  "verdict": "PASS",
+  "mode": "fixture-backed stage selector",
+  "records": 1000,
+  "physical_workers": 16,
+  "catalog_version": "issue-filter-catalog-v1",
+  "allowed_stages": [
+    "exclude",
+    "run(auth-relevance)",
+    "widen(issue-neighborhood)",
+    "escalate"
+  ],
+  "deterministic_only": {
+    "selector_calls": 0,
+    "semantic_calls": 900,
+    "selector_unit_cost": 0,
+    "semantic_unit_cost": 10,
+    "total_cost_units": 9000,
+    "false_negatives": 0,
+    "deterministic_stage_calls": 100
+  },
+  "always_run": {
+    "selector_calls": 0,
+    "semantic_calls": 1000,
+    "selector_unit_cost": 0,
+    "semantic_unit_cost": 10,
+    "total_cost_units": 10000,
+    "false_negatives": 0,
+    "deterministic_stage_calls": 0
+  },
+  "adaptive": {
+    "selector_calls": 900,
+    "semantic_calls": 26,
+    "selector_unit_cost": 1,
+    "semantic_unit_cost": 10,
+    "total_cost_units": 1160,
+    "false_negatives": 0,
+    "deterministic_stage_calls": 100
+  },
+  "replay": {
+    "selector_calls": 0,
+    "semantic_calls": 26,
+    "selector_unit_cost": 1,
+    "semantic_unit_cost": 10,
+    "total_cost_units": 0,
+    "false_negatives": 0,
+    "deterministic_stage_calls": 100
+  },
+  "confusion": {
+    "exclude_correct": 972,
+    "run_correct": 26,
+    "widen_correct": 1,
+    "escalate_correct": 1,
+    "wrong": 0
+  },
+  "stage_invocations": {
+    "escalate": 1,
+    "exclude": 972,
+    "run(auth-relevance)": 26,
+    "widen(issue-neighborhood)": 1
+  },
+  "granularity_counts": {
+    "field": 100,
+    "group": 1,
+    "record": 899
+  },
+  "peak_selector_in_flight": 16,
+  "cache_hits": 900,
+  "notes": [
+    "cost units are modeled fixture work: selector=1, semantic filter=10",
+    "timeout/error is never classified as a negative",
+    "selector authority is restricted to the versioned stage catalog",
+    "relationship-dependent input widens to a group rather than guessing from one record"
+  ]
+}

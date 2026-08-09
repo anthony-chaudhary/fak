@@ -79,6 +79,7 @@ Each rung must run end to end before the next is treated as real.
 | S6 | API-only adapter | provider-supported cache controls or measured natural prefix reuse; no kernel-only claims |
 | S7 | Multi-user/fairness mode | tenant isolation, weighted fairness, cancellation, spend and rate-limit envelopes |
 | S8 | **Observed fixture:** 1,000-record general large-input operator (#6029) | [partition/filter/map/cache/fold/oracle witness](micro-context-s8-large-input-operator.md) |
+| S8a | **Observed fixture:** adaptive filter-stage selector (#6030) | [confusion/cost/cache witness](micro-context-s8a-filter-selector.md) |
 
 Promotion requires a captured artifact at every rung. A synthetic rate is never promoted
 as inference throughput. An inference token rate is never promoted as useful agent work.
