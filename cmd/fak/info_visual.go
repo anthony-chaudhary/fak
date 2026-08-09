@@ -295,6 +295,9 @@ func guardInfoTurnsSaved(v guardInfoVars) uint64 {
 	if v.CacheAttribution != nil && v.CacheAttribution.FakVDSOAvoidedCalls > 0 {
 		return v.CacheAttribution.FakVDSOAvoidedCalls
 	}
+	if v.Adjudication == nil {
+		return 0
+	}
 	return v.Adjudication.Transformed
 }
 
