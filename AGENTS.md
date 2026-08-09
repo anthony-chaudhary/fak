@@ -394,6 +394,15 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
   reds the trunk on any `tools/*.py` outside the baseline, and porting a grandfathered script
   to Go shrinks that baseline - the ratchet only ever tightens. When you *touch* a `tools/*.py`
   for non-trivial work, default to porting it to Go in the same pass (`REASON_NEW_PYTHON_TOOL`).
+  **Dependency-heavy Go tools use a nested-module quarantine, not Python and not a root dependency.**
+  Put the public façade at `tools/<name>/` and keep it stdlib-only; put dependency-heavy
+  implementation code beneath it (for example `tools/<name>/terminal/go.mod`). The façade
+  preserves the root invocation (`go run ./tools/<name> ...`) while invoking the nested
+  module explicitly. Never add a root requirement to make a tool compile. The
+  `internal/dependencyquarantine` gate pins the reviewed root require/checksum sets, walks
+  the repository for nested `go.mod` files, rejects non-stdlib façade imports, and runs
+  every discovered nested module under CI. A dependency-budget change requires an explicit
+  allowlist update and review; a new nested module requires no central enumeration.
 - **GPU-server private control is private; public evidence is scrubbed.** Benchmark results and
   runbooks can live here once scrubbed to generic GPU-server language, but live private
   control code belongs in `fak-private`: private bridge/control packages, private cleanup
@@ -631,4 +640,3 @@ routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
 | A curated map of all the docs | [`llms.txt`](llms.txt) |
 
 License: [Apache-2.0](LICENSE).
-

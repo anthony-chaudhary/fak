@@ -184,6 +184,23 @@ Contributions are accepted **inbound = outbound**: your change is licensed to th
 under the same license that governs that part of the tree (today, Apache-2.0 for the
 kernel), in addition to the CLA grant to Netra.
 
+## Dependency-heavy Go tools
+
+New repository tooling is Go, not Python. If a useful tool needs dependencies outside the
+root module's reviewed budget, do not add them to the root and do not fall back to Python.
+Use a quarantined nested module:
+
+- keep a small, stdlib-only façade in `tools/<name>/` so callers retain
+  `go run ./tools/<name> ...`;
+- place the dependency-heavy implementation below it, conventionally
+  `tools/<name>/<dep-heavy>/go.mod`;
+- have the façade enter/invoke that module explicitly, hiding the module boundary;
+- run `go test ./internal/dependencyquarantine` before submitting.
+
+The gate pins the root `go.mod` require set and `go.sum`, walks for nested `go.mod` files
+rather than maintaining a list, checks every `tools/` façade for non-stdlib imports, and
+builds/tests every discovered nested module in CI. Any intentional root dependency-budget
+change must update the allowlist in the same reviewed change.
 ## Development workflow
 
 > **Mixed audience — check the marker on each bullet.** Four of the eight below are
