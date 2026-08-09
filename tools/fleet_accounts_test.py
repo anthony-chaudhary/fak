@@ -1119,9 +1119,12 @@ class WaveAllocationTest(unittest.TestCase):
         w = fleet_accounts.allocate_wave(
             9, task_class="t1", home=str(self.home),
             config_home=str(self.config_home), registry=reg)
-        self.assertEqual(w["granted"], 8, "the throttled pool is not offered")
-        self.assertNotIn("gem7", {lane["tag"] for lane in w["lanes"]})
-        self.assertTrue(any(b.get("tag") == "gem7" for b in w["blocked_target_accounts"]))
+        self.assertEqual(w["granted"], 9, "healthy pools still satisfy the requested wave")
+        lanes_by_tag = {lane["tag"] for lane in w["lanes"]}
+        self.assertNotIn("gem7", lanes_by_tag, "the throttled pool contributes zero slots")
+        blocked = [b for b in w["blocked_target_accounts"] if b.get("tag") == "gem7"]
+        self.assertEqual(len(blocked), 1)
+        self.assertTrue(blocked[0]["reason"].startswith("usage limit"))
 
     def test_wave_respects_product_filter(self) -> None:
         login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
