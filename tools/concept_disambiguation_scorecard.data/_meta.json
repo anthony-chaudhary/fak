@@ -357,12 +357,18 @@
           "category": "incidental",
           "reason": "the Go constant holding the org last-good path environment variable's name; a policy-plane config identifier, matched here only by the word cache",
           "token": "OrgPolicyCachePathEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #2830's local descriptor interface, not a new cache architecture concept",
+          "token": "CacheLever"
         }
       ],
       "id": "cache",
       "ignore": [
         "CacheCreationTokensHeadOnly",
         "CacheCreationTokensMessagePrefix",
+        "CacheLever",
         "CacheStateAllowlist",
         "CacheValueBaseline",
         "CacheValueFacts",
@@ -1005,6 +1011,11 @@
           "category": "incidental",
           "reason": "Plain accessor on StagedDiff listing which gates recorded a denominator this run. It names no new idea: the concept is the CANDIDATE DENOMINATOR ledger (#5602) it reads, and this is one of three method names on it.",
           "token": "ReportedGates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method name required by issue #2830's local CacheLever interface, not a new guard gate",
+          "token": "CorrectnessGate"
         }
       ],
       "exclude": [
@@ -1022,6 +1033,7 @@
       "ignore": [
         "AggregateHBMBytes",
         "CacheValueGateDebtKey",
+        "CorrectnessGate",
         "DELEGATE",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
@@ -2652,6 +2664,11 @@
           "category": "incidental",
           "reason": "Issue #4400 result record within ctxplan reconciliation",
           "token": "PlanStepDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue-local result value grouping retry action and observability reason; not a reusable decision-system concept.",
+          "token": "partialretrydecision"
         }
       ],
       "id": "decision",
@@ -2661,7 +2678,8 @@
         "appendsteerdecisions",
         "decisionStderr",
         "gooddecisionratio",
-        "kinddecisionsabout"
+        "kinddecisionsabout",
+        "partialretrydecision"
       ],
       "min_files": 3,
       "name": "Decision family",
