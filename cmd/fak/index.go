@@ -39,7 +39,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/anthony-chaudhary/fak/internal/devcmd"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
@@ -131,12 +130,7 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexExecAudit(stdout, stderr, rootDir, *asJSON, *limit)
 	case "agents", "agentsmd", "agent":
 		return indexAgents(stdout, stderr, rootDir, args, *asJSON, *agentsSection, *agentsFull, *agentsWriteResident)
-	case "ownership", "split":
-		if len(args) != 0 {
-			fmt.Fprintln(stderr, "usage: fak index ownership [--json] [--root PATH]")
-			return 2
-		}
-		return indexOwnership(stdout, stderr, rootDir, *asJSON)
+
 	case "graph":
 		if len(args) != 0 {
 			fmt.Fprintln(stderr, "usage: fak index graph [--json]")
@@ -374,7 +368,6 @@ func writeIndexUsage(w io.Writer) {
   fak index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
   fak index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
   fak index graph             HEAD-only Markdown reachability census under named resolver rules
-  fak index ownership         runtime/dev command inventory + runtime dependency leak paths
   flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
 `)
 }
@@ -449,8 +442,4 @@ func flushTab(tw *tabwriter.Writer, stderr io.Writer, label string) int {
 		return 1
 	}
 	return 0
-}
-
-func indexOwnership(stdout, stderr io.Writer, root string, asJSON bool) int {
-	return devcmd.RunOwnership(stdout, stderr, root, asJSON)
 }
