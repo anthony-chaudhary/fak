@@ -613,6 +613,8 @@ func main() {
 		cmdReadmeVisualAudit(os.Args[2:])
 	case "codex-memory":
 		cmdCodexMemory(os.Args[2:])
+	case "dormancy":
+		cmdDormancy(os.Args[2:])
 	case "version", "-v", "--version":
 		cmdVersion(os.Stdout)
 	case "-h", "--help", "help":
