@@ -223,6 +223,7 @@ var tier = map[string]int{
 	"tokenizer":        1,
 	"answershape":      1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
 	"codelint":         1,
+	"codexmcpdiag":     1, // pure Codex MCP startup evidence classifier (#5980); stdlib-only, off the hot path.
 	"codexlifecycle":   1, // pure exactly-once Codex task-lifecycle fold keyed by exact turn_id (#4785): events in, typed terminal (complete/aborted/superseded/process_death/live) + provenance out; stdlib-only, imports nothing internal, off the hot path.
 	"polymodel":        1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
 	"reachdelta":       3, // typed policy reach-expansion referee (#4220): composes adjudicator policy sets with knownbad accepted-risk records; off the hot path.
