@@ -512,12 +512,21 @@ func formatTurnsTimeSaved(kc kernel.Counters, sum gateway.AdjudicationSummary) s
 	var b strings.Builder
 	b.WriteString(guardSection("turns / time saved"))
 	b.WriteString(guardRow("round-trips spared", fmt.Sprintf("~%.0f naive round-trip(s) spared", turns)))
-	if mean := sum.MeanTurnLatencySeconds(); mean > 0 {
-		b.WriteString(guardRow("wall-clock", fmt.Sprintf("≈ ~%.1fs of wall-clock", turns*mean)))
+	if seconds, timed := timeSavedSeconds(turns, sum); timed {
+		mean := sum.MeanTurnLatencySeconds()
+		b.WriteString(guardRow("wall-clock", fmt.Sprintf("≈ ~%.1fs of wall-clock", seconds)))
 		b.WriteString(guardNote(fmt.Sprintf("this session's observed ~%.1fs/turn over %d timed turn(s)", mean, sum.E2ELatencyCount)))
 	} else {
 		b.WriteString(guardRow("wall-clock", "wall-clock omitted — no turn latency observed this session"))
 	}
 	b.WriteString(guardRow("basis", fmt.Sprintf("WITNESSED: %s; time is observed, not modeled", basis)))
 	return b.String()
+}
+
+func timeSavedSeconds(turns float64, sum gateway.AdjudicationSummary) (float64, bool) {
+	mean := sum.MeanTurnLatencySeconds()
+	if turns < 0.5 || mean <= 0 {
+		return 0, false
+	}
+	return turns * mean, true
 }

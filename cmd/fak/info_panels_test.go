@@ -249,6 +249,18 @@ func TestGuardInfoTrendsSavedCalls(t *testing.T) {
 		t.Errorf("silent trends panel must keep its three rows, got %d", len(bare))
 	}
 
+	proxy := bareCtx
+	proxy.v.Adjudication = gateway.AdjudicationSummary{Transformed: 3, E2ELatencySumSeconds: 12, E2ELatencyCount: 3}
+	proxyRows := strings.Join(guardInfoTrendsPanelRows(proxy, guardPanelFull), "\n")
+	if !strings.Contains(proxyRows, "3 calls avoided") || !strings.Contains(proxyRows, "faster ≈ ~12s") {
+		t.Fatalf("proxy trends missing reconciled observed time saving: %q", proxyRows)
+	}
+	proxy.v.Adjudication.E2ELatencySumSeconds = 0
+	proxy.v.Adjudication.E2ELatencyCount = 0
+	if rows := strings.Join(guardInfoTrendsPanelRows(proxy, guardPanelFull), "\n"); strings.Contains(rows, "faster ≈") {
+		t.Fatalf("untimed trends fabricated wall-clock saving: %q", rows)
+	}
+
 	// Mini stays the single save row whether or not calls were avoided.
 	mini := guardInfoTrendsPanelRows(ctx, guardPanelMini)
 	if len(mini) != 1 || strings.Contains(mini[0], "calls avoided") {

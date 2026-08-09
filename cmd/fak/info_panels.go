@@ -203,6 +203,9 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 		rows = append(rows, fmt.Sprintf(" saved %s  %s calls avoided",
 			sparklineTUI(ctx.tr.savedCalls, ctx.sparkW), guardInfoShortCount(int(saved))))
 	}
+	if seconds, ok := timeSavedSeconds(float64(guardInfoTurnsSaved(v)), *v.Adjudication); ok {
+		rows = append(rows, fmt.Sprintf(" faster ≈ ~%.0fs (observed)", seconds))
+	}
 	return rows
 }
 
