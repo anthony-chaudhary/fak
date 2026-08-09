@@ -731,7 +731,10 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 // Anthropic Claude Messages API.
 // ---------------------------------------------------------------------------
 
-type anthropicAdapter struct{}
+// anthropicAdapter speaks the Claude Messages API wire. Its one field declares HOW a
+// credential is presented; the zero value keeps the historical shape-sniffing, so
+// `anthropicAdapter{}` is byte-for-byte the pre-field adapter.
+type anthropicAdapter struct{ auth AnthropicAuthScheme }
 
 // Provider reports ProviderAnthropic (the Claude Messages API wire).
 func (anthropicAdapter) Provider() Provider { return ProviderAnthropic }
@@ -758,27 +761,97 @@ func IsAnthropicOAuthToken(tok string) bool {
 	return strings.HasPrefix(tok, "sk-ant-oat")
 }
 
-// Headers sets Content-Type and anthropic-version, then picks the auth scheme by
-// credential shape: an OAuth (sk-ant-oat) subscription token rides as a Bearer with
-// the oauth beta flag, a plain API key as x-api-key, and an empty key sends neither.
-func (anthropicAdapter) Headers(apiKey string) map[string]string {
+// AnthropicAuthScheme declares HOW an Anthropic-wire credential is presented upstream.
+//
+// WHY IT EXISTS. The credential's SHAPE is a reliable discriminator only for
+// FIRST-PARTY Anthropic: api.anthropic.com wants a plain key as x-api-key and a
+// subscription token (sk-ant-oat…) as a Bearer, and IsAnthropicOAuthToken tells them
+// apart with no configuration. A THIRD-PARTY Anthropic-COMPATIBLE endpoint — a cloud
+// vendor's serving endpoint, a corporate proxy, an aggregating gateway — authenticates
+// its OWN tenant credential, whose prefix fak cannot know and must not guess. Those
+// endpoints generally accept the token ONLY as `Authorization: Bearer`, so sniffing the
+// prefix sends x-api-key and the call 401s ("credential ... of an unsupported type")
+// even though the base URL, model, and body were all correct. That failure is
+// indistinguishable from a bad token, which is what made it worth making declarable.
+//
+// The zero value keeps the sniff, so every existing caller is unchanged.
+type AnthropicAuthScheme string
+
+const (
+	// AnthropicAuthAuto sniffs the credential shape — sk-ant-oat => Bearer + the oauth
+	// beta, anything else => x-api-key. The default, and the right answer for
+	// first-party Anthropic.
+	AnthropicAuthAuto AnthropicAuthScheme = ""
+	// AnthropicAuthAPIKey always presents the credential as x-api-key.
+	AnthropicAuthAPIKey AnthropicAuthScheme = "x-api-key"
+	// AnthropicAuthBearer always presents it as `Authorization: Bearer` and NEVER as
+	// x-api-key: a third-party gateway's tenant token must not also be copied into a
+	// header that endpoint does not expect and may log. The oauth beta still rides
+	// along for a genuine sk-ant-oat token, since that flag is a property of the
+	// SUBSCRIPTION credential rather than of the scheme.
+	AnthropicAuthBearer AnthropicAuthScheme = "bearer"
+)
+
+// ParseAnthropicAuthScheme maps an operator-supplied string to a scheme. It accepts
+// "auto"/"" for the sniff and tolerates the common spellings of the two explicit
+// schemes ("bearer"/"authorization", "x-api-key"/"apikey"/"api-key"), so a config
+// value does not fail on a hyphen. An unrecognized value is a MISS, never a silent
+// fallback to the sniff — a typo'd scheme must fail loud at its call site rather than
+// re-introduce the 401 it was set to avoid.
+func ParseAnthropicAuthScheme(s string) (AnthropicAuthScheme, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "auto":
+		return AnthropicAuthAuto, true
+	case "bearer", "authorization":
+		return AnthropicAuthBearer, true
+	case "x-api-key", "xapikey", "apikey", "api-key":
+		return AnthropicAuthAPIKey, true
+	default:
+		return "", false
+	}
+}
+
+// NewAnthropicTranscriptAdapter returns the Claude Messages API adapter with an
+// explicit auth scheme. NewTranscriptAdapter(ProviderAnthropic) is the AnthropicAuthAuto
+// case of this constructor; callers reaching a third-party Anthropic-compatible endpoint
+// pass AnthropicAuthBearer.
+func NewAnthropicTranscriptAdapter(scheme AnthropicAuthScheme) TranscriptAdapter {
+	return anthropicAdapter{auth: scheme}
+}
+
+// Headers sets Content-Type and anthropic-version, then presents the credential under
+// the adapter's declared AnthropicAuthScheme. Under the default (auto) it picks by
+// credential shape: an OAuth (sk-ant-oat) subscription token rides as a Bearer with the
+// oauth beta flag, a plain API key as x-api-key, and an empty key sends neither.
+func (a anthropicAdapter) Headers(apiKey string) map[string]string {
 	h := map[string]string{
 		"Content-Type":      "application/json",
 		"anthropic-version": "2023-06-01",
 	}
-	switch {
-	case apiKey == "":
+	if apiKey == "" {
 		// No credential (loopback dogfood / mock) — send neither auth scheme.
-	case IsAnthropicOAuthToken(apiKey):
-		// A subscription OAuth token: Anthropic accepts it ONLY as a bearer token
-		// with the oauth beta flag set — sending it as x-api-key 401s with
-		// "invalid x-api-key". This is exactly what the official Claude Code client
-		// sends, and it is what makes a Claude Pro/Max subscription usable through
-		// the gateway.
-		h["Authorization"] = "Bearer " + apiKey
+		return h
+	}
+	// The oauth beta is a property of the SUBSCRIPTION credential, not of the scheme,
+	// so it rides with an sk-ant-oat token however that token was asked to present.
+	if IsAnthropicOAuthToken(apiKey) {
 		h["anthropic-beta"] = AnthropicOAuthBeta
-	default:
+	}
+	switch a.auth {
+	case AnthropicAuthBearer:
+		h["Authorization"] = "Bearer " + apiKey
+	case AnthropicAuthAPIKey:
 		h["x-api-key"] = apiKey
+	default:
+		// AnthropicAuthAuto: sniff the shape. Anthropic rejects a subscription token as
+		// an x-api-key ("invalid x-api-key") and accepts it ONLY as a bearer — which is
+		// exactly what the official Claude Code client sends, and what makes a Claude
+		// Pro/Max subscription usable through the gateway.
+		if IsAnthropicOAuthToken(apiKey) {
+			h["Authorization"] = "Bearer " + apiKey
+		} else {
+			h["x-api-key"] = apiKey
+		}
 	}
 	return h
 }

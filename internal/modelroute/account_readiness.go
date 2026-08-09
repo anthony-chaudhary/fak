@@ -46,6 +46,11 @@ type AccountReadinessObservation struct {
 	BoundModels []string               `json:"bound_models,omitempty"`
 	Reason      string                 `json:"reason,omitempty"`
 	NextAction  string                 `json:"next_action,omitempty"`
+	// ManualOnly mirrors the account's reservation. It is reported because a READY
+	// account that never gets picked otherwise looks like a routing bug: the operator
+	// asking "why is nothing landing on this account" needs to see that the answer is a
+	// declared reservation, not a broken binding.
+	ManualOnly bool `json:"manual_only,omitempty"`
 }
 
 // AccountReadinessSummary is the rollup over a provider account roster.
@@ -106,6 +111,9 @@ func accountReadinessObservation(a Account, isDefault bool, bound []string, look
 	cred := credentialState(a, lookup)
 	status := AccountReady
 	reason, action := "account is configured", ""
+	if a.ManualOnly {
+		reason = "account is configured; reserved for explicit requests (manual_only)"
+	}
 	if cred == CredentialMissing {
 		status = AccountNeedsCredential
 		reason = "remote account credential env var is unset or empty"
@@ -127,6 +135,7 @@ func accountReadinessObservation(a Account, isDefault bool, bound []string, look
 		BoundModels: append([]string(nil), bound...),
 		Reason:      reason,
 		NextAction:  action,
+		ManualOnly:  a.ManualOnly,
 	}
 }
 
