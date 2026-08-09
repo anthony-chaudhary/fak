@@ -17,12 +17,12 @@ func TestFoldCoversLifecycle(t *testing.T) {
 	}{
 		{"editing", Facts{DirtyPaths: []string{"a.go"}}, Editing, "", nil, true},
 		{"commit ready", Facts{DirtyPaths: []string{"a.go"}, CommitArgs: []string{"--path", "a.go", "-m", "fix(x): y (#1) (fak x)"}}, CommitReady, "fak", []string{"commit", "--path", "a.go", "-m", "fix(x): y (#1) (fak x)"}, false},
-		{"committed", Facts{LocalCommit: "abc"}, CommittedUnpushed, "git", []string{"push"}, false},
+		{"committed", Facts{LocalCommit: "abc"}, CommittedUnpushed, "fak", []string{"sync", "push"}, false},
 		{"parked", Facts{Checkpoint: "session-1", CheckpointLive: true}, Parked, "", nil, true},
 		{"reclaim", Facts{Checkpoint: "session-1"}, Reclaim, "fak", []string{"wip", "reconcile", "--reclaim"}, false},
 		{"checkpoint land", Facts{Checkpoint: "session-1", CheckpointApply: true}, LandReady, "fak", []string{"wip", "land", "session-1", "--apply"}, false},
 		{"worker land", Facts{WorkerPath: `C:\\worker`, WorkerLandReady: true}, LandReady, "fak", []string{"worktree", "worker", "land", "--path", `C:\\worker`}, false},
-		{"landed", Facts{LandedCommit: "def"}, LandedUnpushed, "git", []string{"push"}, false},
+		{"landed", Facts{LandedCommit: "def"}, LandedUnpushed, "fak", []string{"sync", "push"}, false},
 		{"local shipped", Facts{LocalCommit: "abc", LocalOnRemote: true}, Shipped, "", nil, false},
 		{"landed shipped", Facts{LandedCommit: "def", LandedOnRemote: true}, Shipped, "", nil, false},
 	}
@@ -78,10 +78,10 @@ func TestActionsUseOnlySafeExistingEntrypoints(t *testing.T) {
 			}
 		}
 		if a.Tool == "fak" {
-			if len(a.Args) == 0 || (a.Args[0] != "commit" && a.Args[0] != "wip" && a.Args[0] != "worktree") {
+			if len(a.Args) == 0 || (a.Args[0] != "commit" && a.Args[0] != "wip" && a.Args[0] != "worktree" && a.Args[0] != "sync") {
 				t.Fatalf("non-allowlisted fak action: %q", joined)
 			}
-		} else if a.Tool != "git" || !reflect.DeepEqual(a.Args, []string{"push"}) {
+		} else {
 			t.Fatalf("non-allowlisted action: %q", joined)
 		}
 	}

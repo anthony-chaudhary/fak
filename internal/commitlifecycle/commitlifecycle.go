@@ -60,7 +60,7 @@ func Fold(f Facts) Row {
 		return Row{State: Shipped}
 	}
 	if f.LandedCommit != "" {
-		return Row{State: LandedUnpushed, Action: Action{Tool: "git", Args: []string{"push"}}}
+		return Row{State: LandedUnpushed, Action: Action{Tool: "fak", Args: []string{"sync", "push"}}}
 	}
 	if f.WorkerLandReady {
 		return Row{State: LandReady, Action: Action{Tool: "fak", Args: []string{"worktree", "worker", "land", "--path", f.WorkerPath}}}
@@ -75,7 +75,7 @@ func Fold(f Facts) Row {
 		return Row{State: Reclaim, Action: Action{Tool: "fak", Args: []string{"wip", "reconcile", "--reclaim"}}}
 	}
 	if f.LocalCommit != "" {
-		return Row{State: CommittedUnpushed, Action: Action{Tool: "git", Args: []string{"push"}}}
+		return Row{State: CommittedUnpushed, Action: Action{Tool: "fak", Args: []string{"sync", "push"}}}
 	}
 	if len(f.DirtyPaths) > 0 {
 		if len(f.CommitArgs) == 0 {
