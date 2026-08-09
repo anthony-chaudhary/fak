@@ -79,6 +79,8 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 
 For an unlisted task, start at [`INDEX.md`](INDEX.md) and select the current audience route.
 
+- docs/generated/verb-surface.md — generated source-derived fak verb tree, REFUSES column, and unverified coverage count
+
 ---
 
 # `AGENTS.md`
@@ -481,6 +483,15 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
   reds the trunk on any `tools/*.py` outside the baseline, and porting a grandfathered script
   to Go shrinks that baseline - the ratchet only ever tightens. When you *touch* a `tools/*.py`
   for non-trivial work, default to porting it to Go in the same pass (`REASON_NEW_PYTHON_TOOL`).
+  **Dependency-heavy Go tools use a nested-module quarantine, not Python and not a root dependency.**
+  Put the public façade at `tools/<name>/` and keep it stdlib-only; put dependency-heavy
+  implementation code beneath it (for example `tools/<name>/terminal/go.mod`). The façade
+  preserves the root invocation (`go run ./tools/<name> ...`) while invoking the nested
+  module explicitly. Never add a root requirement to make a tool compile. The
+  `internal/dependencyquarantine` gate pins the reviewed root require/checksum sets, walks
+  the repository for nested `go.mod` files, rejects non-stdlib façade imports, and runs
+  every discovered nested module under CI. A dependency-budget change requires an explicit
+  allowlist update and review; a new nested module requires no central enumeration.
 - **GPU-server private control is private; public evidence is scrubbed.** Benchmark results and
   runbooks can live here once scrubbed to generic GPU-server language, but live private
   control code belongs in `fak-private`: private bridge/control packages, private cleanup
@@ -1708,6 +1719,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 ## The product
 
 - [SHIPPED] **Daily lock-aware Git hygiene** — `fak git daily --selfcheck` performs a deterministic, non-destructive maintenance pass that reports stale Git lock files without deleting them, and the registered daily cron path runs the same command; witnessed by `cmd/fak/git_daily_test.go` and `internal/gitdaily/gitdaily_test.go`.
+- [SHIPPED] **Spine-first issue fan-out planner** — `fak issue fanout` expands one witnessed working spine into a bounded set of full-contract QA, dogfood, product, observability, integration, documentation, and release candidates; it refuses a missing spine witness and emits stable marker keys for downstream deduplication. Witness: `go test ./internal/issuefanout`; `fak issue fanout --title probe --leaf issuefanout --spine 5b8f0bd1 --max 3 --json`; live-repository dogfood commit `2a7e67c90d` (#2514); durable invocation-ledger commit `3d58f944eb` (#2515).
 - [SHIPPED] fak provides a bounded micro-context fabric with one immutable agent base: the synthetic floor schedules 10,000 logical contexts, controlled-kernel witnesses complete 100 and 1,000 real-model contexts, and the cache-observable S2b fixture reconciles 4,859 reused prompt tokens with endpoint-native counters. The 10,000 real-model soak remains tracked separately; logical contexts are not physical model slots. ([research contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-fabrics.md), [S2b witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-s2b-kernel-cache-ab.md))
 
 - [SHIPPED] The gateway samples model-output prose into a bounded, non-blocking shadow queue and counts shared `internal/negframe.Classify` findings as `fak_negframe_output_negatives_total{surface="model_output"}` without rewriting or delaying response bytes; queue saturation drops telemetry and increments a labeled drop counter. Witness: `go test ./internal/gateway -run TestOutputNegation -count=1` (`TestOutputNegationCounter`, `TestOutputNegationAuditReturnsBeforeClassification`).
@@ -2006,7 +2018,7 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 title: "Micro-context fabrics for 100–10,000 parallel agents"
 description: "Dedicated research focus for splitting one cached agent base into many bounded logical contexts, with controlled-kernel and API-only paths."
 status: active
-last_reviewed: 2026-08-06
+last_reviewed: 2026-08-09
 ---
 
 # Micro-context fabrics: one cached base, 10,000 useful agent contexts
@@ -2051,6 +2063,18 @@ base_id + task_delta + capability_set + budget + continuation + output_contract
 The kernel owns admission, scheduling, shared-prefix identity, tool policy, journaling,
 and result folding. Model serving owns prefill/decode capacity. A full agent harness is
 optional and should be paid for only when a task needs its UI/session semantics.
+
+### General large-input operator
+
+The same substrate can be more than a high-agent-count runtime. The proposed
+[large-input operator contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-large-input-operators.md) partitions a large
+artifact into stable records, runs deterministic filters before semantic work, uses bounded
+micro-contexts to select or execute filters and tool calls, emits typed cacheable facts, and
+folds them hierarchically with provenance and safe cancellation. That is the general-purpose
+claim to test: not "parallelize every prompt," but make micro-context execution one selectable
+backend for decomposable large-input work alongside SQL/search, retrieval, compression, coarse
+chunks, and tuned long context. The operator contract and this execution fabric are separate
+layers; neither is sufficient alone.
 
 ## Minimal-spine ladder
 
@@ -2163,6 +2187,7 @@ Epic: [#5785](https://github.com/anthony-chaudhary/fak/issues/5785) (P0, G0).
 - [#5820](https://github.com/anthony-chaudhary/fak/issues/5820) — S5a 1,000 real-model-turn contexts on one controlled node.
 - [#5821](https://github.com/anthony-chaudhary/fak/issues/5821) — cache-value Track-1 fold of witnessed shared-base reuse.
 - [#5830](https://github.com/anthony-chaudhary/fak/issues/5830)–[#5844](https://github.com/anthony-chaudhary/fak/issues/5844) — hardening fan-out off spine `28846558d0` (qa, dogfood, product, observability, integration, docs, release).
+- [#6029](https://github.com/anthony-chaudhary/fak/issues/6029)–[#6034](https://github.com/anthony-chaudhary/fak/issues/6034) — large-input operator cohort: runnable 1,000-issue spine, adaptive filter selection, read-only tool enrichment, provenance-preserving fold, tuned-baseline falsification, then effectful tools; see [the operator note](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-large-input-operators.md).
 
 2026-08-06: #5792–#5795 repaired to dispatch-ready contract bodies (research completion
 standard, routed); the `research` label was removed from the open leaves so the
@@ -2203,6 +2228,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 ## Active focus
 
 - [Micro-context fabrics for 100–10,000 parallel agents](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-fabrics.md) — split one cached agent base into many bounded logical contexts; includes the runnable 10k synthetic spine and controlled-kernel/API-only research ladder.
+- [Micro-context operators for general large-input LLM work](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-large-input-operators.md) — partition record/field/group inputs, adaptively select filters or tools, emit typed facts, fold with provenance, and stop only under an answer-safe contract.
 - [Micro-context S1 real-endpoint witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-s1-real-endpoint.md) — 100/100 contexts through four bounded workers, with TTFT/usage telemetry and a retained 16-worker overload finding.
 - [Micro-context S2 shared-prefix A/B](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-s2-prefix-ab.md) — no cache benefit observed on the first real endpoint; scoped concurrency improved aggregate work while worsening TTFT.
 ## Read research by maturity
@@ -2270,63 +2296,102 @@ The repository's studies and dated investigations currently live under [`docs/no
 
 # fak — the Fused Agent Kernel
 
-**fak turns a tool-using agent into a managed agent.**
+**A management layer for the AI agent you already use.**
 
-The agent keeps its interface and model. A fak *kernel* — a management plane for one model session, not an OS kernel and not a GPU compute kernel — owns four things from outside it: model traffic and cache reuse, context lifetime, capabilities, and recovery. That pairing is what this page means by a *managed agent*.
+Run Claude Code, Codex, OpenCode, or your own client through one binary to reuse stable model work, compact long sessions, enforce tool policy, recover interrupted runs, and see what the agent actually did.
 
-> **TL;DR:** install one binary and run `fak agent --offline`. The managed agent still finishes its task while the kernel blocks a poisoned tool result and a destructive operation. No API key, model download, or GPU needed.
+The agent still owns the task and user interface. Your provider or local server still generates the tokens. fak sits between them as the management plane for the session, where it can manage model traffic, context, tools, and recovery without asking you to adopt a new agent framework.
+
+> **TL;DR:** install fak, then run `fak guard -- claude`. You keep the same agent, interface, and login; fak reduces repeated model work, keeps long sessions within a context budget, and can stop out-of-policy tools before they run.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-*This page is the front door, and the only one aimed at a reader who has not decided yet. Every other root page is narrower: [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) installs it and owns the verbatim proof output, [`START-HERE.md`](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) routes a job you already have, [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) is the by-name map, [`LEARNING-PATH.md`](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) teaches the concepts in order, and [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) is for automated contributors, not humans.*
+*This page is the front door, and the only one aimed at a reader who has not decided yet. Every other root page is narrower: [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) owns the complete first-run sequence, [`START-HERE.md`](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md) routes a job you already have, [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) is the by-name map, [`LEARNING-PATH.md`](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) teaches the concepts in order, and [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) is for automated contributors, not humans.*
 
-<!-- readme-verified: 2026-08-03 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-09 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
-## Try the kernel without a key, model, or GPU
+<a id="install"></a>
+## Install, then run the agent you already use
 
-For the shortest public proof, install the one binary and run one deterministic end-to-end check:
+Install the prebuilt binary on macOS or Linux; the installer verifies its SHA-256 against the release manifest:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-fak agent --offline
-# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
+fak version
 ```
 
-Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
+Then put fak around a normal agent session:
 
-(Go 1.26+ users can substitute `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`. Run it from any directory — no clone needed.) The run leaves one file behind: it writes `agent-report.json` into the directory you start it from and prints that full path when it finishes. Pass `--out PATH` to put it somewhere else.
+```bash
+fak guard -- claude                                  # -> Claude opens normally, now managed by fak
+fak guard --provider openai -- codex                 # provider is normally auto-detected
+fak guard --policy examples/dev-agent-policy.json -- opencode
+```
 
-That report counts four kernel events beneath those rows: malformed tool calls the kernel repaired in place instead of spending a retry turn (*in-syscall repairs*), repeated calls answered from the kernel's own cache with no engine round-trip (*vDSO dedup hits*), calls the policy refused before they ran (*adjudicator denies*), and tool results held out of the model's context (*MMU quarantines*). The [glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/glossary.md) defines these and the rest of the project's vocabulary.
+There is no new chat UI, and no API key is required. `guard` starts a private kernel gateway, points the child process at it, and passes the model wire and existing credentials through unchanged. The agent behaves normally; on exit, fak summarizes reuse, context, and policy decisions. API billing is opt-in with `--api-key-env`; local models are available with `--local` or `--gguf`.
 
-The verbatim expected output is printed once among the root pages — in [Getting started § Tier 0](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) — and the unabridged capture is in the [tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md). If the command did not do what you expected, start at [first-run troubleshooting](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/troubleshooting-first-run.md).
+If you already have Go 1.26+, or you are on Windows without a POSIX shell, install with:
 
-Next: for the expanded policy, routing, and benchmark sequence, use the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md). To stand up a running, server-side governed agent in under 10 minutes — offline, with a default-deny floor, an audit journal, and a visible DENY — follow the [governed-agent quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/governed-agent-quickstart.md).
+```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+```
 
-## One managed agent, two ways to run the kernel
+Manual downloads, containers, source builds, and release verification are in [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md). If the first command refuses to start, use [first-run troubleshooting](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/troubleshooting-first-run.md).
 
-A managed agent pairs fak with Claude Code, Codex, opencode, or your own client and its chosen model. fak owns the operational boundary around that session: what context is retained, what work is reused, which tools may run, what results may return, and how the session recovers. The roles stay separate — the agent or client owns the task loop and user experience, the fak kernel is the management plane, the model provider or server generates tokens. Change any one without replacing the others.
+## What you get
 
-| Where the kernel runs | Start here | Use it when… |
-|---|---|---|
-| Beside one agent | [`fak guard`](#manage-one-local-agent-fak-guard) | You want a local launcher and supervisor for an existing agent. `guard` starts a private kernel gateway, points the child agent at it, and manages that session. |
-| As an endpoint | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | One or many OpenAI, Anthropic, or MCP clients need a durable kernel service. It can front an existing model server or load GGUF itself. |
-| Entirely offline | [the one-minute proof](#try-the-kernel-without-a-key-model-or-gpu) | You want to evaluate the managed-agent path without an API key, model download, or GPU. |
+| Value | What fak does at the boundary |
+|---|---|
+| **Less repeated model work** | Keeps shared prompt prefixes stable for provider caches, drops stale history before it is sent again, deduplicates repeated tool calls, and directly reuses the model's running scratchpad (the KV cache) when fak owns inference. |
+| **Longer, recoverable sessions** | Compacts aged middle turns to a resident-context budget, checkpoints kernel state, and resumes interrupted work instead of making every run disposable. |
+| **Tool control that prompts cannot override** | Gives every proposed tool call an `ALLOW`, `DENY`, `TRANSFORM`, or `REQUIRE_WITNESS` verdict from a reviewable capability policy before it executes. Untrusted tool results can be quarantined before they return to the model. |
+| **One observable boundary** | Records model traffic, cache hits, compaction, tool decisions, and recovery in one journal instead of scattering them across an agent, provider, and tool stack. |
+| **A choice of model backends** | Preserves cloud providers, fronts OpenAI-compatible local servers, or loads GGUF weights itself while exposing OpenAI, Anthropic, and MCP interfaces. |
 
-Both commands run the same kernel, and the model stays a replaceable backend — cloud API, local model server, or in-kernel GGUF. Default to `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint. For architecture, current evidence, and development workflow, start at [START-HERE.md](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md).
-
-## What the managed agent gains
-
-- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system. It keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses the running scratchpad of work-so-far (the *KV cache*) directly when it owns inference. That is ~4.1× less work than a tuned warm-cache stack — compute time against a baseline that already keeps per-agent KV warm, not against a re-send-everything loop. In the measured run (Apple M3 Pro), a 50-turn × 5-agent Qwen2.5-1.5B Q8 session finishes in ~19 minutes where the tuned baseline needs ~78. It is on by default and does not change the model's output.
-- **Long runs keep moving.** Sessions compact their own history — up to ~107K tokens of aged middle-turn context dropped per compaction fire, measured on a real `fak guard -- claude` session held to a 48K resident-context budget — and can resume after a crash instead of dying at the context limit.
-- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM (run it, but rewritten into a safe form), or REQUIRE_WITNESS (hold it until an outside check confirms what it claims to do — and deny if nothing does) against a reviewable *capability floor*: the policy file listing which tools the session may use at all, so anything absent from it is denied before it runs. That verdict is an in-process function call — 362 ns per decision (measured on an M3 Pro; 560–605 ns once argument predicates run), with no policy model and no network hop. Tool results carry provenance too — where the bytes came from, and whether that source is trusted — so poisoned content read from an untrusted source is stopped at *result admission*, before the model acts on it.
-- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. Mixture-of-experts models use only a few of the model's expert blocks per token; for those, the kernel pages just the needed expert weights in from SSD, so the whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output — the decoder is held to your schema, so a reply cannot come back as malformed JSON — are built in.
-
-Evidence: [tuned benchmark baselines](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) · [tagged claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). Every number above names its workload, hardware, and baseline in those two documents. Unfamiliar word: [glossary](https://github.com/anthony-chaudhary/fak/blob/main/docs/glossary.md).
+These are implemented features, not just an architecture pitch. In the current measured workload, fak performs about **4.1× less compute work** than a tuned baseline that already keeps each agent's KV cache warm: a 50-turn × 5-agent Qwen2.5-1.5B Q8 run on an Apple M3 Pro took about 19 minutes versus 78. In a real `fak guard -- claude` session, compaction removed up to about 107K aged tokens per fire while holding resident context to 48K. Policy verdicts are local in-process calls, measured at 362 ns without argument predicates and 560–605 ns with them. Workload, hardware, units, and tuned baselines: [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) and [tagged claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 <p align="center">
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token-economics summary for real fak guard sessions, separating provider prompt-cache rebates from fak-authored compaction savings and comparing fak with a tuned warm-cache baseline." width="900">
 </p>
 
+## Choose the shape that fits
+
+The same kernel can manage one interactive agent or become shared infrastructure:
+
+| Goal | Start with | What it gives you |
+|---|---|---|
+| Improve one agent you already run | [`fak guard -- claude`](#manage-one-local-agent-fak-guard) | A private per-session gateway, lifecycle supervision, reporting, and optional policy without replacing the agent UI or login. |
+| Give several clients one managed endpoint | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | OpenAI, Anthropic, and MCP interfaces in front of an existing model server or in-kernel GGUF. |
+| Evaluate behavior before connecting a model | [`fak agent --offline`](#try-the-behavior-offline) | A deterministic demonstration of repair, reuse, policy denial, and result quarantine. |
+
+A concrete local-stack example is Claude Code using a model on your own Mac through `fak serve` and `fak mac`. A concrete policy example is starting OpenCode with `examples/dev-agent-policy.json`, where tools outside the declared capability floor are denied before execution. The sections below show both operating modes; the [tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) walks through their reports.
+
+## How it works
+
+```text
+Claude Code / Codex / OpenCode / your client
+                    │
+                    ▼
+        fak: cache · context · policy · journal · recovery
+                    │
+                    ▼
+       Anthropic / OpenAI / local server / GGUF
+```
+
+fak is effective at this position because every model request and proposed tool call crosses the same checkpoint. Stable work can be reused before another inference request, old context can be shed before it consumes the next window, and a capability decision can be enforced before a tool runs. The kernel does not need to be the agent or the model to manage either boundary.
+
+## Try the behavior offline
+
+If you want to inspect fak before trusting it with an agent login or downloading a model, run the deterministic demo:
+
+```bash
+fak agent --offline
+# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
+```
+
+This is a functional check, not the main product experience or a model-quality benchmark. A mock planner drives the real managed-agent path so you can see a malformed call repaired, a repeat served locally, a destructive operation denied, and an untrusted result kept out of context. The run writes `agent-report.json` in the current directory (or `--out PATH`) with the underlying kernel events.
+
+The verbatim output and explanation are in [Getting started § Tier 0](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min). For a server-side default-deny example with an audit journal and visible denial, use the [governed-agent quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/governed-agent-quickstart.md). For the full policy, routing, and benchmark sequence, use the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
 ## What fak is not
 
 fak is a management plane. It is not a model, not a faster model server, and not a prompt-injection detector. The boundaries, so you can rule it out quickly:
@@ -2386,24 +2451,9 @@ fak mac                                              # long form: fak claude-mac
 
 `fak mac` targets a gateway over the network, so it works whether you are on the Mac or driving it from another machine. Honest expectations: the first full local turn is slow (10–15 min prefill on an M3 Pro) and single-stream. The wow is that it works end to end and stays observable the whole time via the preflight panel. The [operator walkthrough](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/mac-agent-ui.md) covers the launcher's flags, the preflight panel, and the live overlay.
 
-## Install
+## Make fak the default launcher
 
-No Go toolchain needed — the installer downloads a prebuilt binary and verifies its SHA-256 against the release's `SHA256SUMS`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-```
-
-If you already have Go 1.26+, or you are on Windows without a POSIX shell:
-
-```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-```
-
-Either way, `fak version` confirms it. Manual archive downloads, containers, build-from-source, and release-provenance verification: [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md).
-
-Want the kernel with no new command to remember? `fak launch install --provider all --default claude` installs reversible `claude`/`codex` shims and makes bare `fak` launch your chosen provider. The original provider binaries are not overwritten; use `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable` to bypass interception. Run `fak launch doctor` for a redacted readiness report. [Zero-adoption launch guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/zero-adoption-launch.md).
-
+After trying `fak guard`, you can remove even that extra command: `fak launch install --provider all --default claude` installs reversible `claude`/`codex` shims and makes bare `fak` launch your chosen provider. The original provider binaries are not overwritten; use `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable` to bypass interception. Run `fak launch doctor` for a redacted readiness report. [Zero-adoption launch guide](https://github.com/anthony-chaudhary/fak/blob/main/docs/zero-adoption-launch.md).
 ## Going deeper
 
 - Use it: [tutorial](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/tutorial.md) · [integration guides](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations) · [examples](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md) · [first command didn't work?](https://github.com/anthony-chaudhary/fak/blob/main/docs/adoption/troubleshooting-first-run.md)
@@ -2558,7 +2608,9 @@ New dated notes go under [`docs/notes/`](https://github.com/anthony-chaudhary/fa
 - [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — select a scoped result, compare its tuned baseline, and follow the committed artifact and reproduce route.
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](https://github.com/anthony-chaudhary/fak/blob/main/docs/index.md) — choose a current public, builder, operator, contributor, or research route.
+- [In-one-breath contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/ONE-BREATH-CONTRACT.md) — the named, bounded explainer summary a budget-aware loader can serve first; `fak breath` checks only its countable shape and ratchets pre-existing doc debt.
 - [Innovations index](https://github.com/anthony-chaudhary/fak/blob/main/docs/INNOVATIONS-INDEX.md) — the durable catalog of fak's innovations, concepts, and learnings: what each is, the general primitive it embodies, where it lives, whether it's shipped, and whether it's been generalized for reuse. The innovations counterpart to this repo map and the [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) doc map.
+- [Generated verb/refusal surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/generated/verb-surface.md) — source-derived command tree, preconditions, refusal codes, and visible gap count.
 - [Work map](https://github.com/anthony-chaudhary/fak/blob/main/docs/WORK-MAP.md) — where each *kind* of work lives, kept separate: **optimizations** (the `EXTENDING.md` three-gate lane), **ongoing work** (the in-flight trackers, epics, and dispatch loop), and **dev** (the build/test/partition/ship workflow). Names the overlaps and the known drift between the status surfaces. Read this when you're not sure which front door a task belongs to.
 - [Generation contract](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation.md) — the canonical now/next/second-next/future taxonomy for generation-aware development: stream labels, generation milestones, promotion/demotion evidence, shared-trunk rules, runtime feature-gate separation, intake rules, issue views, and anti-patterns. The front door for epic #1625.
 - [Localized entry points (i18n)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/README.md) — in-language front doors that carry the pitch, the 60-second proof, and the market-specific value props, then hand off to the English docs. Ships **17 languages** — [हिन्दी (Hindi)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/hi/README.md), [தமிழ் (Tamil)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ta/README.md), [తెలుగు (Telugu)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/te/README.md), [বাংলা (Bengali)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/bn/README.md), [मराठी (Marathi)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/mr/README.md), [Deutsch (German)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/de/README.md), [Français (French)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/fr/README.md), [Español (Spanish)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/es/README.md), [日本語 (Japanese)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ja/README.md), [简体中文 (Simplified Chinese)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/zh/README.md), [한국어 (Korean)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ko/README.md), [Português (Portuguese)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/pt/README.md), [Русский (Russian)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ru/README.md), [العربية (Arabic)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/ar/README.md), [Bahasa Indonesia (Indonesian)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/id/README.md), [Tiếng Việt (Vietnamese)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/vi/README.md), and [Türkçe (Turkish)](https://github.com/anthony-chaudhary/fak/blob/main/docs/i18n/tr/README.md) — each folder also carrying a quickstart, an install guide, and an FAQ; rationale in the [emerging-market adoption note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md); where to share them in the [distribution-channels note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/INDIA-I18N-DISTRIBUTION-CHANNELS-2026-07-01.md).
@@ -2678,6 +2730,8 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 ## Operating the agent fleet
 
+- **[Daily lock-aware Git hygiene](https://github.com/anthony-chaudhary/fak/blob/main/docs/releases/issue-5592-daily-lock-aware-git-hygiene-2026-08-08.md)** — fetch, lock, commit, push, and reconcile safely on shared trunk.
+
 - [Deploy fak on a rented GPU cloud](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/neo-cloud-deploy.md) — the operator quickstart for **standing the gateway up on a GPU box you rent** (CoreWeave, Lambda, RunPod, Crusoe, Vast.ai, Nebius): the two host primitives every provider is a storefront over (raw GPU VM → `docker run --gpus all` / `install.sh`+systemd; GPU k8s pool → `kubectl apply -k deploy/k8s/overlays/gpu`), and the two shapes — **in-kernel** on the card from a mounted `.gguf` (needs a `Dockerfile.cuda` build — with `CUDA_ARCH` unset the default build covers *every* arch in `internal/compute/cuda_arch.txt` plus a `compute_120` PTX floor, so it is the one to ship when you do not know which card you will be handed; `--build-arg CUDA_ARCH=sm_90` only *narrows* it. The versioned `-cuda` tag is not yet published) or **proxy** in front of a co-located vLLM/SGLang (the lean static image is enough). Every per-provider row is marked `not yet` end-to-end witnessed — a dogfood path, not a verified claim. Disambiguates the three pages that all say "cloud": this one deploys the **gateway**, [clouds.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/supported/clouds.md) fronts a hosted **API**, and the [neo-cloud reference architecture](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-cloud-reference-architecture.md) is the **backend binding layer**. `gen/next` under epic #1678.
 - [The scope of a GitHub ticket](https://github.com/anthony-chaudhary/fak/blob/main/docs/ticket-scope.md) — the front door for the ticket-scope toolkit: what the scope of one issue *is* — the six axes that decide whether a ticket is a single dispatchable unit of agent work (structure / size on the S0–S4 ladder / atomicity / write-scope / cohort placement / work-class), each mapped to the `fak` verb that measures it (`fak issue contract`, `fak dispatch issue-smallness-lint`, `fak issue cohort`), the closed reason it fails with, and the fix. The executable pass over it is the [`/ticket-scope`](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/ticket-scope/SKILL.md) skill.
 - [Spine-first + fan-out defaults](https://github.com/anthony-chaudhary/fak/blob/main/docs/spine-first-defaults.md) — the two defaults that fire for every new unit of work unless waived: ship the minimal working end-to-end **spine** first (or file the spine as its own issue), then **fan out** the follow-on QA / dogfood / productization backlog at creation time with `fak issue fanout` (**3 is the floor**, not the target — `issuefanout.MinFanout`; the full taxonomy runs to ~15 candidates), wave-planned via `fak issue cohort --from-plan`. The doctrine behind epic #2510; the planner spine is [`internal/issuefanout`](https://github.com/anthony-chaudhary/fak/blob/main/internal/issuefanout/issuefanout.go) (`fak issue fanout`, shipped `5b8f0bd1`).
@@ -2756,6 +2810,14 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 **Quality, provenance & supply chain** — [claim-proof evaluator route](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/claim-proof-proximity-audit.md) · [output-quality regression runbook](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/output-quality-regression-runbook.md) · [durable-artifacts inventory](https://github.com/anthony-chaudhary/fak/blob/main/docs/observability/durable-artifacts.md) · [supply-chain reproducibility](https://github.com/anthony-chaudhary/fak/blob/main/docs/supply-chain-reproducibility.md) · [checkpoint Go-port decision](https://github.com/anthony-chaudhary/fak/blob/main/docs/checkpoint-go-port-decision.md) · [CI/CD reporting Slack sink](https://github.com/anthony-chaudhary/fak/blob/main/docs/decisions/cicd-reporting-slack-sink.md) · [release branch-regime status](https://github.com/anthony-chaudhary/fak/blob/main/docs/release-branch-regime-status.md) · [front-door clarity scorecard](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/frontdoor-clarity-scorecard.md) · [front-door link witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/frontdoor-link-witness.md) · [generation-drift check](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/generation-drift-check.md) · [public-negation audit](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/public-negation-audit.md) · [public terminology audit](https://github.com/anthony-chaudhary/fak/blob/main/docs/quality/public-terminology-audit.md).
 
+**Operator & user routes** — [troubleshooting route](https://github.com/anthony-chaudhary/fak/blob/main/docs/troubleshooting.md) (start from the user-visible symptom) · [upgrade route](https://github.com/anthony-chaudhary/fak/blob/main/docs/upgrade.md) (choose a release, migrate configuration, preserve rollback) · [operator route](https://github.com/anthony-chaudhary/fak/blob/main/docs/operator/README.md) (deploy, observe, recover, upgrade; routes on to [policy authoring](https://github.com/anthony-chaudhary/fak/blob/main/docs/policy.md)) · [observability route](https://github.com/anthony-chaudhary/fak/blob/main/docs/observability/README.md) (choose the production signal) · [config bails](https://github.com/anthony-chaudhary/fak/blob/main/docs/config-bails.md) (every configuration refusal's reason token, the check, and the `fak recover` fix).
+
+**Area indexes** — [implementation docs by generation](https://github.com/anthony-chaudhary/fak/blob/main/docs/generation/README.md) · [milestone tracking ledger](https://github.com/anthony-chaudhary/fak/blob/main/docs/milestones/README.md) · [#grafana link registry](https://github.com/anthony-chaudhary/fak/blob/main/docs/grafana/README.md) · [Confluence publishing](https://github.com/anthony-chaudhary/fak/blob/main/docs/confluence/README.md) · [Kimi K3 route page](https://github.com/anthony-chaudhary/fak/blob/main/docs/kimi-k3/README.md).
+
+**Scorecards (cont.)** — [intent-literal / metric-honesty](https://github.com/anthony-chaudhary/fak/blob/main/docs/intent-literal-scorecard/README.md) · [persona-fit](https://github.com/anthony-chaudhary/fak/blob/main/docs/persona-fit-scorecard/README.md) · [fak-native TOON](https://github.com/anthony-chaudhary/fak/blob/main/docs/toon-scorecard/README.md).
+
+**Caching & serving concepts** — [Awesome Caching](https://github.com/anthony-chaudhary/fak/blob/main/docs/awesome-caching/README.md) (every caching concept fak knows, each in its own words) · [disaggregable compute-claim ladder](https://github.com/anthony-chaudhary/fak/blob/main/docs/serving/COMPUTE-CLAIM-TAXONOMY.md) · [Mobile FFI](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/mobile.md) (gating on-device tool calls through fak).
+
 **Slack channels** — [#blockers](https://github.com/anthony-chaudhary/fak/blob/main/docs/blockers-channel.md) · [#releases](https://github.com/anthony-chaudhary/fak/blob/main/docs/releases-channel.md).
 
 **Dated baselines & drills** — [systems baseline (2026-06-26)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SYSTEMS-BASELINE-2026-06-26.md) · [anchor-strategy net-dollar verdict (2026-07-11)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/ANCHOR-STRATEGY-NET-DOLLAR-VERDICT-2026-07-11.md) · [cache-value score regression (2026-07-04)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CACHE-VALUE-SCORE-REGRESSION-2026-07-04.md) · [logvault restore drill (2026-07-09)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/logvault-restore-drill-2026-07-09.md) · [archived pre-fresh-start README (2026-06-25)](https://github.com/anthony-chaudhary/fak/blob/main/docs/archive/README-2026-06-25-before-fresh-start.md) · [DeepSeek-V4 pure-fak native-GPU witness status (2026-07-16)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-PURE-FAK-NATIVE-GPU-WITNESS-STATUS-2026-07-16.md).
@@ -2766,8 +2828,11 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Per-claim benchmark witness granularity — decision for #3431](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/PER-CLAIM-BENCHMARK-WITNESS-GRANULARITY-2026-08-09.md) -- auto-indexed dated note.
+- [Micro-context dogfood readout — 2026-08-08](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/MICRO-CONTEXT-DOGFOOD-2026-08-08.md) -- auto-indexed dated note.
+- [Worker-land crash recovery — 2026-08-08](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/WORKER-LAND-CRASH-RECOVERY-2026-08-08.md) -- auto-indexed dated note.
 - [Study: professorpalmer/Puppetmaster @5de5cd58 — second pass over the v1.18.0→v1.21.13 delta; the honest-instrument thesis (a freshness verdict for a check that could not run, a savings ledger that debits itself, mechanical citation verification), passive quota harvest, a relay-borrowed 401, and a lease write boundary (epic #5961, #5962-#5981)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-PUPPETMASTER-2026-08-08.md) -- auto-indexed dated note.
-- [Study: thu-nics/C2C @113c3a9b — Cache-to-Cache KV fusion; DRAFT (no issues filed): positional cross-tokenizer alignment and per-layer KV precision are PARTIAL, the neural fuser is a fak-stated DIVERGENT; substituted for an unresolvable arXiv citation](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-C2C-2026-08-08.md) -- auto-indexed dated note.
+- [Study: thu-nics/C2C @113c3a9b — Cache-to-Cache KV fusion; DRAFT (no issues filed): positional cross-tokenizer alignment and per-layer KV precision are PARTIAL, the neural fuser is a fak-stated DIVERGENT; substituted for an unresolvable arXiv citation](docs/notes/CONCEPT-STUDY-C2C-2026-08-08.md) -- auto-indexed dated note.
 - [Study: can1357/oh-my-pi @896bf5f3 — CoW worker isolation, mid-stream tool-argument interception reframed affordance-first, compaction arithmetic, reversible secret placeholders, replay-safety and quota preflight (epic #5917, #5918-#5927)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-OH-MY-PI-2026-08-08.md) -- auto-indexed dated note.
 - [Study: youneslaaroussi/Marionette @1f058aa2 — live tool-call loop steering, playbook-derived tool faulting, sequenced scripted-model E2E, ingest-time source denial (#5904-#5910)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-MARIONETTE-2026-08-08.md) -- auto-indexed dated note.
 - [Study: agnt-gg/agnt @66208c56 — cache-prefix, gate-predicate and estimator borrows; source-available so INSPIRE-only (#5896-#5903)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONCEPT-STUDY-AGNT-2026-08-08.md) -- auto-indexed dated note.
@@ -3500,6 +3565,23 @@ Contributions are accepted **inbound = outbound**: your change is licensed to th
 under the same license that governs that part of the tree (today, Apache-2.0 for the
 kernel), in addition to the CLA grant to Netra.
 
+## Dependency-heavy Go tools
+
+New repository tooling is Go, not Python. If a useful tool needs dependencies outside the
+root module's reviewed budget, do not add them to the root and do not fall back to Python.
+Use a quarantined nested module:
+
+- keep a small, stdlib-only façade in `tools/<name>/` so callers retain
+  `go run ./tools/<name> ...`;
+- place the dependency-heavy implementation below it, conventionally
+  `tools/<name>/<dep-heavy>/go.mod`;
+- have the façade enter/invoke that module explicitly, hiding the module boundary;
+- run `go test ./internal/dependencyquarantine` before submitting.
+
+The gate pins the root `go.mod` require set and `go.sum`, walks for nested `go.mod` files
+rather than maintaining a list, checks every `tools/` façade for non-stdlib imports, and
+builds/tests every discovered nested module in CI. Any intentional root dependency-budget
+change must update the allowlist in the same reviewed change.
 ## Development workflow
 
 > **Mixed audience — check the marker on each bullet.** Four of the eight below are
@@ -7232,12 +7314,8 @@ the default image as the `-cuda` tag:
 # Pull (a tagged release publishes both):
 docker pull ghcr.io/anthony-chaudhary/fak:0.41.0-cuda
 
-# Or build locally. With no --build-arg it compiles every arch in
-# internal/compute/cuda_arch.txt (sm_80 A100, sm_89 Ada/L4 + RTX 40xx, sm_90 H100/H200,
-# sm_100 B100/B200, sm_120 RTX 50xx) plus a compute_120 PTX floor:
-docker build -f Dockerfile.cuda -t fak:cuda .
-
-# Or narrow to a single arch when you know the card (validated against cuda_arch.txt):
+# Or build locally, picking the arch that matches the rented card
+# (sm_80 A100, sm_89 Ada/L4 default, sm_90 H100/H200, sm_100 B200/GB200):
 docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_90 -t fak:cuda .
 
 # Run with the NVIDIA Container Toolkit (--gpus requires it on the host):
@@ -7248,9 +7326,9 @@ docker run --rm --gpus all -p 8080:8080 \
   --engine inkernel --backend cuda
 ```
 
-The supported arch set is exactly `internal/compute/cuda_arch.txt` — `sm_80`, `sm_89`,
-`sm_90`, `sm_100`, and `sm_120` (RTX 50-series / consumer Blackwell, added by #4181) —
-and the build rejects any `CUDA_ARCH` outside that file. Model coverage in-kernel is exactly what
+This image does **not** support sm_120 (RTX 50-series / consumer Blackwell) —
+`internal/compute` has no sm_120 kernel variant yet, so rent a datacenter card
+(A100/L4/H100/H200/B200/GB200). Model coverage in-kernel is exactly what
 [`internal/compute`](https://github.com/anthony-chaudhary/fak/tree/main/internal/compute)
 already proves — this image ships the runtime, not new kernel coverage.
 

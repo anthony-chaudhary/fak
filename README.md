@@ -4,63 +4,102 @@
 
 # fak — the Fused Agent Kernel
 
-**fak turns a tool-using agent into a managed agent.**
+**A management layer for the AI agent you already use.**
 
-The agent keeps its interface and model. A fak *kernel* — a management plane for one model session, not an OS kernel and not a GPU compute kernel — owns four things from outside it: model traffic and cache reuse, context lifetime, capabilities, and recovery. That pairing is what this page means by a *managed agent*.
+Run Claude Code, Codex, OpenCode, or your own client through one binary to reuse stable model work, compact long sessions, enforce tool policy, recover interrupted runs, and see what the agent actually did.
 
-> **TL;DR:** install one binary and run `fak agent --offline`. The managed agent still finishes its task while the kernel blocks a poisoned tool result and a destructive operation. No API key, model download, or GPU needed.
+The agent still owns the task and user interface. Your provider or local server still generates the tokens. fak sits between them as the management plane for the session, where it can manage model traffic, context, tools, and recovery without asking you to adopt a new agent framework.
+
+> **TL;DR:** install fak, then run `fak guard -- claude`. You keep the same agent, interface, and login; fak reduces repeated model work, keeps long sessions within a context budget, and can stop out-of-policy tools before they run.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-*This page is the front door, and the only one aimed at a reader who has not decided yet. Every other root page is narrower: [`GETTING-STARTED.md`](GETTING-STARTED.md) installs it and owns the verbatim proof output, [`START-HERE.md`](START-HERE.md) routes a job you already have, [`INDEX.md`](INDEX.md) is the by-name map, [`LEARNING-PATH.md`](LEARNING-PATH.md) teaches the concepts in order, and [`AGENTS.md`](AGENTS.md) is for automated contributors, not humans.*
+*This page is the front door, and the only one aimed at a reader who has not decided yet. Every other root page is narrower: [`GETTING-STARTED.md`](GETTING-STARTED.md) owns the complete first-run sequence, [`START-HERE.md`](START-HERE.md) routes a job you already have, [`INDEX.md`](INDEX.md) is the by-name map, [`LEARNING-PATH.md`](LEARNING-PATH.md) teaches the concepts in order, and [`AGENTS.md`](AGENTS.md) is for automated contributors, not humans.*
 
-<!-- readme-verified: 2026-08-03 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-09 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
-## Try the kernel without a key, model, or GPU
+<a id="install"></a>
+## Install, then run the agent you already use
 
-For the shortest public proof, install the one binary and run one deterministic end-to-end check:
+Install the prebuilt binary on macOS or Linux; the installer verifies its SHA-256 against the release manifest:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-fak agent --offline
-# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
+fak version
 ```
 
-Those three verdict rows are the proof: the managed agent still finishes its task while a poisoned tool result and a destructive operation are both stopped at the kernel boundary. Offline mode uses a deterministic mock planner, so it verifies the managed-agent path and the policy boundary without claiming live-model quality or latency.
+Then put fak around a normal agent session:
 
-(Go 1.26+ users can substitute `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`. Run it from any directory — no clone needed.) The run leaves one file behind: it writes `agent-report.json` into the directory you start it from and prints that full path when it finishes. Pass `--out PATH` to put it somewhere else.
+```bash
+fak guard -- claude                                  # -> Claude opens normally, now managed by fak
+fak guard --provider openai -- codex                 # provider is normally auto-detected
+fak guard --policy examples/dev-agent-policy.json -- opencode
+```
 
-That report counts four kernel events beneath those rows: malformed tool calls the kernel repaired in place instead of spending a retry turn (*in-syscall repairs*), repeated calls answered from the kernel's own cache with no engine round-trip (*vDSO dedup hits*), calls the policy refused before they ran (*adjudicator denies*), and tool results held out of the model's context (*MMU quarantines*). The [glossary](docs/glossary.md) defines these and the rest of the project's vocabulary.
+There is no new chat UI, and no API key is required. `guard` starts a private kernel gateway, points the child process at it, and passes the model wire and existing credentials through unchanged. The agent behaves normally; on exit, fak summarizes reuse, context, and policy decisions. API billing is opt-in with `--api-key-env`; local models are available with `--local` or `--gguf`.
 
-The verbatim expected output is printed once among the root pages — in [Getting started § Tier 0](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) — and the unabridged capture is in the [tutorial](docs/fak/tutorial.md). If the command did not do what you expected, start at [first-run troubleshooting](docs/adoption/troubleshooting-first-run.md).
+If you already have Go 1.26+, or you are on Windows without a POSIX shell, install with:
 
-Next: for the expanded policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md). To stand up a running, server-side governed agent in under 10 minutes — offline, with a default-deny floor, an audit journal, and a visible DENY — follow the [governed-agent quickstart](docs/fak/governed-agent-quickstart.md).
+```bash
+go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+```
 
-## One managed agent, two ways to run the kernel
+Manual downloads, containers, source builds, and release verification are in [INSTALL.md](INSTALL.md). If the first command refuses to start, use [first-run troubleshooting](docs/adoption/troubleshooting-first-run.md).
 
-A managed agent pairs fak with Claude Code, Codex, opencode, or your own client and its chosen model. fak owns the operational boundary around that session: what context is retained, what work is reused, which tools may run, what results may return, and how the session recovers. The roles stay separate — the agent or client owns the task loop and user experience, the fak kernel is the management plane, the model provider or server generates tokens. Change any one without replacing the others.
+## What you get
 
-| Where the kernel runs | Start here | Use it when… |
-|---|---|---|
-| Beside one agent | [`fak guard`](#manage-one-local-agent-fak-guard) | You want a local launcher and supervisor for an existing agent. `guard` starts a private kernel gateway, points the child agent at it, and manages that session. |
-| As an endpoint | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | One or many OpenAI, Anthropic, or MCP clients need a durable kernel service. It can front an existing model server or load GGUF itself. |
-| Entirely offline | [the one-minute proof](#try-the-kernel-without-a-key-model-or-gpu) | You want to evaluate the managed-agent path without an API key, model download, or GPU. |
+| Value | What fak does at the boundary |
+|---|---|
+| **Less repeated model work** | Keeps shared prompt prefixes stable for provider caches, drops stale history before it is sent again, deduplicates repeated tool calls, and directly reuses the model's running scratchpad (the KV cache) when fak owns inference. |
+| **Longer, recoverable sessions** | Compacts aged middle turns to a resident-context budget, checkpoints kernel state, and resumes interrupted work instead of making every run disposable. |
+| **Tool control that prompts cannot override** | Gives every proposed tool call an `ALLOW`, `DENY`, `TRANSFORM`, or `REQUIRE_WITNESS` verdict from a reviewable capability policy before it executes. Untrusted tool results can be quarantined before they return to the model. |
+| **One observable boundary** | Records model traffic, cache hits, compaction, tool decisions, and recovery in one journal instead of scattering them across an agent, provider, and tool stack. |
+| **A choice of model backends** | Preserves cloud providers, fronts OpenAI-compatible local servers, or loads GGUF weights itself while exposing OpenAI, Anthropic, and MCP interfaces. |
 
-Both commands run the same kernel, and the model stays a replaceable backend — cloud API, local model server, or in-kernel GGUF. Default to `fak guard` for one existing agent; choose `fak serve` when the kernel must be a shared or durable endpoint. For architecture, current evidence, and development workflow, start at [START-HERE.md](START-HERE.md).
-
-## What the managed agent gains
-
-- **Less repeated work, safely.** fak's core job is to coordinate several caching layers that would otherwise fight each other into one system. It keeps shared prompt prefixes byte-stable so the provider's cache never busts, sheds stale history before it is sent again, and reuses the running scratchpad of work-so-far (the *KV cache*) directly when it owns inference. That is ~4.1× less work than a tuned warm-cache stack — compute time against a baseline that already keeps per-agent KV warm, not against a re-send-everything loop. In the measured run (Apple M3 Pro), a 50-turn × 5-agent Qwen2.5-1.5B Q8 session finishes in ~19 minutes where the tuned baseline needs ~78. It is on by default and does not change the model's output.
-- **Long runs keep moving.** Sessions compact their own history — up to ~107K tokens of aged middle-turn context dropped per compaction fire, measured on a real `fak guard -- claude` session held to a 48K resident-context budget — and can resume after a crash instead of dying at the context limit.
-- **Policy is on the execution path.** Every proposed tool call receives ALLOW, DENY, TRANSFORM (run it, but rewritten into a safe form), or REQUIRE_WITNESS (hold it until an outside check confirms what it claims to do — and deny if nothing does) against a reviewable *capability floor*: the policy file listing which tools the session may use at all, so anything absent from it is denied before it runs. That verdict is an in-process function call — 362 ns per decision (measured on an M3 Pro; 560–605 ns once argument predicates run), with no policy model and no network hop. Tool results carry provenance too — where the bytes came from, and whether that source is trusted — so poisoned content read from an untrusted source is stopped at *result admission*, before the model acts on it.
-- **Big local models are first-class.** The kernel loads GGUF weights itself and serves OpenAI, Anthropic, and MCP clients directly. Mixture-of-experts models use only a few of the model's expert blocks per token; for those, the kernel pages just the needed expert weights in from SSD, so the whole model does not have to sit in RAM. Quantized (e.g. Q4) inference and grammar-constrained structured output — the decoder is held to your schema, so a reply cannot come back as malformed JSON — are built in.
-
-Evidence: [tuned benchmark baselines](BENCHMARK-AUTHORITY.md) · [tagged claims ledger](CLAIMS.md). Every number above names its workload, hardware, and baseline in those two documents. Unfamiliar word: [glossary](docs/glossary.md).
+These are implemented features, not just an architecture pitch. In the current measured workload, fak performs about **4.1× less compute work** than a tuned baseline that already keeps each agent's KV cache warm: a 50-turn × 5-agent Qwen2.5-1.5B Q8 run on an Apple M3 Pro took about 19 minutes versus 78. In a real `fak guard -- claude` session, compaction removed up to about 107K aged tokens per fire while holding resident context to 48K. Policy verdicts are local in-process calls, measured at 362 ns without argument predicates and 560–605 ns with them. Workload, hardware, units, and tuned baselines: [benchmark authority](BENCHMARK-AUTHORITY.md) and [tagged claims ledger](CLAIMS.md).
 
 <p align="center">
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token-economics summary for real fak guard sessions, separating provider prompt-cache rebates from fak-authored compaction savings and comparing fak with a tuned warm-cache baseline." width="900">
 </p>
 
+## Choose the shape that fits
+
+The same kernel can manage one interactive agent or become shared infrastructure:
+
+| Goal | Start with | What it gives you |
+|---|---|---|
+| Improve one agent you already run | [`fak guard -- claude`](#manage-one-local-agent-fak-guard) | A private per-session gateway, lifecycle supervision, reporting, and optional policy without replacing the agent UI or login. |
+| Give several clients one managed endpoint | [`fak serve`](#run-the-managed-agent-endpoint-fak-serve) | OpenAI, Anthropic, and MCP interfaces in front of an existing model server or in-kernel GGUF. |
+| Evaluate behavior before connecting a model | [`fak agent --offline`](#try-the-behavior-offline) | A deterministic demonstration of repair, reuse, policy denial, and result quarantine. |
+
+A concrete local-stack example is Claude Code using a model on your own Mac through `fak serve` and `fak mac`. A concrete policy example is starting OpenCode with `examples/dev-agent-policy.json`, where tools outside the declared capability floor are denied before execution. The sections below show both operating modes; the [tutorial](docs/fak/tutorial.md) walks through their reports.
+
+## How it works
+
+```text
+Claude Code / Codex / OpenCode / your client
+                    │
+                    ▼
+        fak: cache · context · policy · journal · recovery
+                    │
+                    ▼
+       Anthropic / OpenAI / local server / GGUF
+```
+
+fak is effective at this position because every model request and proposed tool call crosses the same checkpoint. Stable work can be reused before another inference request, old context can be shed before it consumes the next window, and a capability decision can be enforced before a tool runs. The kernel does not need to be the agent or the model to manage either boundary.
+
+## Try the behavior offline
+
+If you want to inspect fak before trusting it with an agent login or downloading a model, run the deterministic demo:
+
+```bash
+fak agent --offline
+# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
+```
+
+This is a functional check, not the main product experience or a model-quality benchmark. A mock planner drives the real managed-agent path so you can see a malformed call repaired, a repeat served locally, a destructive operation denied, and an untrusted result kept out of context. The run writes `agent-report.json` in the current directory (or `--out PATH`) with the underlying kernel events.
+
+The verbatim output and explanation are in [Getting started § Tier 0](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min). For a server-side default-deny example with an audit journal and visible denial, use the [governed-agent quickstart](docs/fak/governed-agent-quickstart.md). For the full policy, routing, and benchmark sequence, use the [reproduction packet](docs/repro-packet.md).
 ## What fak is not
 
 fak is a management plane. It is not a model, not a faster model server, and not a prompt-injection detector. The boundaries, so you can rule it out quickly:
@@ -120,24 +159,9 @@ fak mac                                              # long form: fak claude-mac
 
 `fak mac` targets a gateway over the network, so it works whether you are on the Mac or driving it from another machine. Honest expectations: the first full local turn is slow (10–15 min prefill on an M3 Pro) and single-stream. The wow is that it works end to end and stays observable the whole time via the preflight panel. The [operator walkthrough](docs/fak/mac-agent-ui.md) covers the launcher's flags, the preflight panel, and the live overlay.
 
-## Install
+## Make fak the default launcher
 
-No Go toolchain needed — the installer downloads a prebuilt binary and verifies its SHA-256 against the release's `SHA256SUMS`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-```
-
-If you already have Go 1.26+, or you are on Windows without a POSIX shell:
-
-```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-```
-
-Either way, `fak version` confirms it. Manual archive downloads, containers, build-from-source, and release-provenance verification: [INSTALL.md](INSTALL.md).
-
-Want the kernel with no new command to remember? `fak launch install --provider all --default claude` installs reversible `claude`/`codex` shims and makes bare `fak` launch your chosen provider. The original provider binaries are not overwritten; use `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable` to bypass interception. Run `fak launch doctor` for a redacted readiness report. [Zero-adoption launch guide](docs/zero-adoption-launch.md).
-
+After trying `fak guard`, you can remove even that extra command: `fak launch install --provider all --default claude` installs reversible `claude`/`codex` shims and makes bare `fak` launch your chosen provider. The original provider binaries are not overwritten; use `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable` to bypass interception. Run `fak launch doctor` for a redacted readiness report. [Zero-adoption launch guide](docs/zero-adoption-launch.md).
 ## Going deeper
 
 - Use it: [tutorial](docs/fak/tutorial.md) · [integration guides](docs/integrations/) · [examples](examples/README.md) · [first command didn't work?](docs/adoption/troubleshooting-first-run.md)
