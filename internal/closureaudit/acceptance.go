@@ -49,10 +49,14 @@ package closureaudit
 //     like Decide cannot match some other package's).
 //  5. A region with zero surviving needles => UNKNOWN(NO_NAMED_SYMBOL).
 //
-// The verdict fold adds two more UNKNOWN paths: a needle with no presence fact
-// (PROBE_MISSING) and a probe that errored (PROBE_FAILED). A verdict is only ever
-// SHIPPED when every needle was probed cleanly, every needle is present, and no
-// present internal/ symbol is caller-less.
+// The verdict fold adds three more UNKNOWN paths: a needle with no presence fact
+// (PROBE_MISSING), a probe that errored (PROBE_FAILED), and evidence that is only
+// generic (GENERIC_PRESENCE_ONLY — every present needle is a bare identifier
+// spread module-wide, #6002). A verdict is only ever SHIPPED when every needle was
+// probed cleanly, every needle is present, no present internal/ symbol is
+// caller-less, and at least one present needle is specific enough to bind the
+// evidence to this issue: a path, a token, a package-qualified symbol, or a
+// narrowly-spread bare symbol.
 
 import (
 	"fmt"
@@ -84,6 +88,13 @@ const (
 	// unprobed, not absent. Reporting only the issues that fit under the cap is the
 	// same class of error this whole verb exists to remove.
 	ReasonNotResolved = "NOT_RESOLVED"
+	// ReasonGenericPresenceOnly marks a resolution whose every present needle is a
+	// bare identifier spread module-wide (#6002): the behaviour-shaped clauses all
+	// declined at extraction, so the only surviving evidence is vocabulary
+	// presence, which cannot witness any particular landing. The verdict abstains
+	// (UNKNOWN), never SHIPPED — the #5822 false positive resolved SHIPPED off the
+	// generic `Affected` alone while every real done condition had declined.
+	ReasonGenericPresenceOnly = "GENERIC_PRESENCE_ONLY"
 
 	DeclineNotIdentifier  = "NOT_AN_IDENTIFIER"
 	DeclineTooShort       = "TOO_SHORT"
@@ -105,6 +116,16 @@ const DefaultSeam = "cmd/fak"
 // architestDir is the layering-pin package. It imports the whole module by design,
 // so a referent there proves nothing about production wiring.
 const architestDir = "internal/architest"
+
+// maxBareSymbolSpread is the widest trunk presence a BARE, unqualified symbol
+// needle may have and still corroborate a SHIPPED verdict on its own (#6002). A
+// symbol one leaf landed is present in its declaration file plus a handful of
+// referents; an identifier present across dozens of files is module vocabulary
+// that predates the issue (`Affected`, the #5822 false positive, sits in 34
+// tracked Go files on the trunk), so its presence witnesses nothing about any
+// particular landing. Paths, refusal tokens, and package-qualified symbols are
+// exempt: each is already pinned to a specific site.
+const maxBareSymbolSpread = 8
 
 // NeedleKind is what a surviving backticked span was classified as.
 type NeedleKind string
@@ -414,8 +435,10 @@ func nameSeam(acc Acceptance, defPackage string) (string, bool) {
 // verdict. It is total and pure: same inputs, same verdict, no I/O.
 //
 // SHIPPED requires ALL of: an acceptance region with at least one needle, a clean
-// probe for every needle, every needle present on ref, and no present internal/
-// symbol that reaches zero production callers. Anything less is PARTIAL, OPEN, or —
+// probe for every needle, every needle present on ref, no present internal/
+// symbol that reaches zero production callers, and at least one present needle
+// that corroborates — binds the evidence to a specific site — rather than merely
+// matching module vocabulary (#6002). Anything less is PARTIAL, OPEN, or —
 // whenever the evidence itself is missing rather than negative — UNKNOWN.
 func Resolve(ref string, acc Acceptance, presence []Presence) Resolution {
 	if ref == "" {
@@ -503,6 +526,13 @@ func Resolve(ref string, acc Acceptance, presence []Presence) Resolution {
 			seam, strings.Join(unwired, ", "), ref))
 	}
 	if len(clauses) == 0 {
+		if generic := genericOnly(present, byNeedle); len(generic) > 0 {
+			res.Verdict = AcceptanceUnknown
+			res.Reason = fmt.Sprintf("%s: every present needle (%s) is a bare identifier found in more than %d file(s) on %s — module vocabulary, not a witness for this issue's landing — NOT evidence that it shipped",
+				unknownSentence(ReasonGenericPresenceOnly), strings.Join(generic, ", "), maxBareSymbolSpread, ref)
+			res.Remaining = "corroborate the acceptance with a seam-specific witness — a package-qualified `pkg.Symbol`, a source path, or a refusal token from the landing — then re-resolve"
+			return res
+		}
 		res.Verdict = AcceptanceShipped
 		res.Reason = fmt.Sprintf("all %d acceptance symbol(s) are present on %s and every internal/ symbol among them reaches a production caller", len(acc.Needles), ref)
 		return res
@@ -511,6 +541,31 @@ func Resolve(ref string, acc Acceptance, presence []Presence) Resolution {
 	res.Reason = fmt.Sprintf("%d of %d acceptance symbol(s) present on %s; %d unwired", len(present), len(acc.Needles), ref, len(unwired))
 	res.Remaining = strings.Join(clauses, "; ")
 	return res
+}
+
+// genericOnly reports whether the present evidence is ONLY generic — no needle
+// specific enough to bind the trunk facts to this issue's landing (#6002). A path
+// names a site, a refusal token is a declared greppable commitment, and a
+// package-qualified symbol is pinned to its declaring package; each corroborates
+// on its own. A BARE symbol corroborates only when its presence is narrow (at
+// most maxBareSymbolSpread files): an identifier spread wider is module
+// vocabulary that predates the issue, and its presence witnesses nothing.
+// Returns the generic needle texts when nothing corroborates, nil when at least
+// one needle does.
+func genericOnly(present []Needle, byNeedle map[string]Presence) []string {
+	var generic []string
+	for _, n := range present {
+		switch {
+		case n.Kind == NeedlePath || n.Kind == NeedleToken:
+			return nil
+		case n.Pkg != "":
+			return nil
+		case len(byNeedle[n.Grep].Files) <= maxBareSymbolSpread:
+			return nil
+		}
+		generic = append(generic, n.Text)
+	}
+	return generic
 }
 
 // qualifierMatches enforces a pkg.Sym qualifier against the declaration site, so a
