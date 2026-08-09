@@ -48,6 +48,8 @@ func runHeadroom(stdout, stderr io.Writer, argv []string) int {
 		return runHeadroomCompress(stdout, stderr, argv[1:])
 	case "bench":
 		return runHeadroomBench(stdout, stderr, argv[1:])
+	case "compare":
+		return runHeadroomCompare(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		headroomUsage(stdout)
 		return 0
@@ -64,6 +66,7 @@ func headroomUsage(w io.Writer) {
   fak headroom status [--json]               selected plugin, proxy reachability, plugin health, KPI
   fak headroom compress [flags] [FILE|-]     compress a blob and print the savings (proof)
   fak headroom bench [flags] [FILE...]       measure savings on a corpus (built-in, or REAL files via --dir/FILE)
+  fak headroom compare [--via LIST] [--json] compare compressors on one frozen corpus
 
 bench flags:
   --via NAME    compressor plugin to bench (default: native)
@@ -296,4 +299,49 @@ func readBlob(args []string) ([]byte, error) {
 		return os.ReadFile(args[0])
 	}
 	return io.ReadAll(os.Stdin)
+}
+
+func runHeadroomCompare(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("headroom compare", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	via := fs.String("via", "none,native,lingua", "comma-separated compressor arms")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "headroom compare: no positional arguments")
+		return 2
+	}
+	var names []string
+	for _, name := range strings.Split(*via, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		fmt.Fprintln(stderr, "headroom compare: --via requires at least one arm")
+		return 2
+	}
+	report := headroom.CompareBench(names, headroom.BenchCorpus())
+	if *jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "%s: %d arms over %d frozen inputs\n", report.Schema, len(report.Arms), report.Corpus)
+		for _, arm := range report.Arms {
+			fmt.Fprintf(stdout, "  %-12s saved=%6.2f%% local=%d ns/input status=%s\n", arm.Name, 100*arm.Report.Saved, arm.NSPerInput, arm.Report.Status)
+		}
+		for _, missing := range report.Missing {
+			fmt.Fprintf(stdout, "  MISSING %s\n", missing)
+		}
+	}
+	if !report.Complete {
+		return 3
+	}
+	return 0
 }
