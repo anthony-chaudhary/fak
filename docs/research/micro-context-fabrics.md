@@ -2,7 +2,7 @@
 title: "Micro-context fabrics for 100–10,000 parallel agents"
 description: "Dedicated research focus for splitting one cached agent base into many bounded logical contexts, with controlled-kernel and API-only paths."
 status: active
-last_reviewed: 2026-08-06
+last_reviewed: 2026-08-09
 ---
 
 # Micro-context fabrics: one cached base, 10,000 useful agent contexts
@@ -47,6 +47,18 @@ base_id + task_delta + capability_set + budget + continuation + output_contract
 The kernel owns admission, scheduling, shared-prefix identity, tool policy, journaling,
 and result folding. Model serving owns prefill/decode capacity. A full agent harness is
 optional and should be paid for only when a task needs its UI/session semantics.
+
+### General large-input operator
+
+The same substrate can be more than a high-agent-count runtime. The proposed
+[large-input operator contract](micro-context-large-input-operators.md) partitions a large
+artifact into stable records, runs deterministic filters before semantic work, uses bounded
+micro-contexts to select or execute filters and tool calls, emits typed cacheable facts, and
+folds them hierarchically with provenance and safe cancellation. That is the general-purpose
+claim to test: not "parallelize every prompt," but make micro-context execution one selectable
+backend for decomposable large-input work alongside SQL/search, retrieval, compression, coarse
+chunks, and tuned long context. The operator contract and this execution fabric are separate
+layers; neither is sufficient alone.
 
 ## Minimal-spine ladder
 
@@ -159,6 +171,7 @@ Epic: [#5785](https://github.com/anthony-chaudhary/fak/issues/5785) (P0, G0).
 - [#5820](https://github.com/anthony-chaudhary/fak/issues/5820) — S5a 1,000 real-model-turn contexts on one controlled node.
 - [#5821](https://github.com/anthony-chaudhary/fak/issues/5821) — cache-value Track-1 fold of witnessed shared-base reuse.
 - [#5830](https://github.com/anthony-chaudhary/fak/issues/5830)–[#5844](https://github.com/anthony-chaudhary/fak/issues/5844) — hardening fan-out off spine `28846558d0` (qa, dogfood, product, observability, integration, docs, release).
+- [#6029](https://github.com/anthony-chaudhary/fak/issues/6029)–[#6034](https://github.com/anthony-chaudhary/fak/issues/6034) — large-input operator cohort: runnable 1,000-issue spine, adaptive filter selection, read-only tool enrichment, provenance-preserving fold, tuned-baseline falsification, then effectful tools; see [the operator note](micro-context-large-input-operators.md).
 
 2026-08-06: #5792–#5795 repaired to dispatch-ready contract bodies (research completion
 standard, routed); the `research` label was removed from the open leaves so the
