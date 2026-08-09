@@ -244,3 +244,32 @@ func TestSessionCompactAuditBadSince(t *testing.T) {
 		t.Errorf("rc = %d, want 2 for a malformed --since", rc)
 	}
 }
+
+func TestSessionCompactAuditTopByPeakResident(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runSession(&out, &errb, []string{"compact-audit", "--root", fixtureCorpusRoot(), "--top", "2", "--top-by", "peak-resident"})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "top 2 sessions by peak-resident tokens") {
+		t.Fatalf("missing token trajectory ranking:\n%s", got)
+	}
+	if strings.Contains(got, "sessions by fires") {
+		t.Fatalf("fire ranking leaked into token trajectory view:\n%s", got)
+	}
+	if !strings.Contains(got, "final RESIDENT") || !strings.Contains(got, "cumulative input") {
+		t.Fatalf("token dimensions missing:\n%s", got)
+	}
+}
+
+func TestSessionCompactAuditRejectsUnknownTopBy(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runSession(&out, &errb, []string{"compact-audit", "--root", fixtureCorpusRoot(), "--top-by", "bytes"})
+	if rc != 2 {
+		t.Fatalf("rc=%d want 2; stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(errb.String(), "want fires, peak-resident, or cumulative-input") {
+		t.Fatalf("stderr=%s", errb.String())
+	}
+}

@@ -903,7 +903,7 @@ func sessionUsage(w io.Writer) {
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
   fak session audit [summary|actions|discover|audit|deep] [--days N] [--json] [--fail-on high]
                                                offline recent transcript audit; defaults to summary --here
-  fak session compact-audit [--root DIR] [--since D] [--cwd S] [--json] [--scrub] [--top N]
+  fak session compact-audit [--root DIR] [--since D] [--cwd S] [--json] [--scrub] [--top N] [--top-by fires|peak-resident|cumulative-input]
                                                offline compaction health from native Codex rollouts:
                                                did compaction fire, hold, and cut resident context?
                                                (append-only bytes / cumulative tokens are NOT the signal)
