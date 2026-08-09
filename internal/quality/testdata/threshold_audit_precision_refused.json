@@ -1,0 +1,21 @@
+{
+  "request": {
+    "threshold": 0.5,
+    "comparison": "at_least",
+    "observations": [0.4996, 0.8],
+    "boundary_width": 0.001,
+    "round_trip_decimal_places": 3,
+    "perturbation": 0.001
+  },
+  "receipt": {
+    "schema": "fak-quality-threshold-audit/1",
+    "verdict": "refused",
+    "refusal_code": "precision_dependent",
+    "reason": "threshold membership changes under a supported round-trip or plausible perturbation",
+    "observation_count": 2,
+    "boundary_count": 1,
+    "boundary_mass": 0.5,
+    "round_trip_flip_count": 1,
+    "perturbation_flip_count": 1
+  }
+}
