@@ -98,8 +98,18 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 	}
 
 	// Preserve the original for retrieval (reversible CCR), then rewrite the
-	// payload to the compressed, model-readable rendering.
+	// payload to the compressed, model-readable rendering. Tool-aware distillers
+	// carry the exact model-callable restore handle inline; the generic metadata
+	// remains authoritative for every compressor.
 	origin := preserveOriginal(ctx, body)
+	if origin != "" && out.Codec == "go-test-distill" {
+		out.Bytes = appendRestoreHint(out.Bytes, origin)
+		out.NewLen = len(out.Bytes)
+		if len(out.Bytes) >= len(body) {
+			atomic.AddInt64(&g.skippedNoSaving, 1)
+			return admitAsIs()
+		}
+	}
 	atomic.AddInt64(&g.compressed, 1)
 	atomic.AddInt64(&g.bytesIn, int64(len(body)))
 	atomic.AddInt64(&g.bytesOut, int64(len(out.Bytes)))

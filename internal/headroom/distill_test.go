@@ -32,7 +32,7 @@ func TestDistillGoTestKeepsFailuresAndDropsRoutinePasses(t *testing.T) {
 		t.Fatalf("output = %#v", out)
 	}
 	got := string(out.Bytes)
-	for _, required := range []string{"--- FAIL: TestAlpha", "alpha_test.go:17", "--- FAIL: TestBeta", "panic: sentinel failure", "\nFAIL\n", "FAIL\texample.invalid/pkg", "ok  \texample.invalid/other", "402 routine go test line(s) dropped", "result meta origin"} {
+	for _, required := range []string{"--- FAIL: TestAlpha", "alpha_test.go:17", "--- FAIL: TestBeta", "panic: sentinel failure", "\nFAIL\n", "FAIL\texample.invalid/pkg", "ok  \texample.invalid/other", "402 routine go test line(s) dropped"} {
 		if !strings.Contains(got, required) {
 			t.Errorf("missing %q in:\n%s", required, got)
 		}
@@ -104,6 +104,9 @@ func TestDistillAdmissionPreservesOriginalInCAS(t *testing.T) {
 	payload, ok := verdict.Payload.(abi.TransformPayload)
 	if !ok {
 		t.Fatalf("payload = %#v", verdict.Payload)
+	}
+	if !bytes.Contains(payload.NewArgs.Inline, []byte(`fak_context_restore {"origin":"`+origin+`"}`)) {
+		t.Fatalf("inline hint omitted exact restore handle %q: %s", origin, payload.NewArgs.Inline)
 	}
 	if bytes.Contains(payload.NewArgs.Inline, []byte("--- PASS:")) || !bytes.Contains(payload.NewArgs.Inline, []byte("--- FAIL:")) {
 		t.Fatalf("admitted rendering did not filter passes and preserve failures: %s", payload.NewArgs.Inline)

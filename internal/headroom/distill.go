@@ -20,7 +20,7 @@ func (distillCompressor) Name() string { return DistillName }
 
 func (c distillCompressor) Compress(ctx context.Context, in Input) (Output, error) {
 	if body, dropped, ok := applyGoTestFilter(in.Tool, in.Bytes); ok {
-		hint := fmt.Sprintf("[fak distill: %d routine go test line(s) dropped; original recoverable via result meta origin]", dropped)
+		hint := fmt.Sprintf("[fak distill: %d routine go test line(s) dropped]", dropped)
 		body = append(body, '\n')
 		body = append(body, hint...)
 		if len(body) < len(in.Bytes) { // never-worse invariant
@@ -79,3 +79,13 @@ func isGoTestTool(tool string, raw []byte) bool {
 }
 
 func init() { Register(distillCompressor{}) }
+
+func appendRestoreHint(body []byte, origin string) []byte {
+	hint := "[restore original: fak_context_restore {\"origin\":\"" + origin + "\"}]"
+	out := make([]byte, 0, len(body)+1+len(hint))
+	out = append(out, body...)
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	return append(out, hint...)
+}
