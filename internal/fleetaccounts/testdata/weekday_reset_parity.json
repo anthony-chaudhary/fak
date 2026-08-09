@@ -1,0 +1,8 @@
+[
+  {"reset":"Monday at 9am (America/Los_Angeles)","now_utc":"2026-06-04T19:00:00Z","want_utc":"2026-06-08T16:00:00Z"},
+  {"reset":"mon 9am (America/Los_Angeles)","now_utc":"2026-06-04T19:00:00Z","want_utc":"2026-06-08T16:00:00Z"},
+  {"reset":"Tuesday at 1:30pm (America/Los_Angeles)","now_utc":"2026-06-04T19:00:00Z","want_utc":"2026-06-09T20:30:00Z"},
+  {"reset":"wed 11pm (America/Los_Angeles)","now_utc":"2026-06-04T19:00:00Z","want_utc":"2026-06-11T06:00:00Z"},
+  {"reset":"Thursday at 9am (America/Los_Angeles)","now_utc":"2026-06-04T19:00:00Z","want_utc":"2026-06-11T16:00:00Z"},
+  {"reset":"Sunday at 12pm (America/Los_Angeles)","now_utc":"2026-06-04T19:00:00Z","want_utc":"2026-06-07T19:00:00Z"}
+]
