@@ -1929,6 +1929,11 @@
           "category": "incidental",
           "reason": "the Go constant holding the org last-good path environment variable's name; a config identifier, not a policy concept",
           "token": "OrgPolicyCachePathEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local corpus adapter that selects the already-declared reference arm; it introduces no policy capability.",
+          "token": "referencePolicyForCorpusCell"
         }
       ],
       "exclude": [
@@ -1942,6 +1947,7 @@
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
+        "PolicyRevision",
         "ProgressCallAdjudicated",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
@@ -1960,10 +1966,12 @@
         "numareplicapolicyunsupported",
         "policies",
         "policyErr",
+        "policy_changed",
         "policyblocks",
         "policylabel",
         "postures",
-        "printGuardLaunchPostures"
+        "printGuardLaunchPostures",
+        "referencePolicyForCorpusCell"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
@@ -2451,6 +2459,11 @@
           "category": "incidental",
           "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
           "token": "DefaultSetupParityReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "local boolean accumulator, not a project support-maturity concept",
+          "token": "seenSupport"
         }
       ],
       "id": "support-maturity",
@@ -2494,6 +2507,7 @@
         "parseCoverageLine",
         "recurrentevictunsupportederror",
         "scoreparity",
+        "seenSupport",
         "setup_parity_clean",
         "setup_parity_flagged",
         "setup_parity_ok",
@@ -2719,6 +2733,11 @@
           "category": "incidental",
           "reason": "An unexported string-formatting helper local to set_comparability.go that renders an already-computed value-to-arms grouping into one finding's detail line. It carries no domain meaning of its own and is not part of any public shape.",
           "token": "renderAxisPartition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Format-only helper for the existing compact-audit report; it adds a ranking presentation but does not materialize a distinct domain artifact or lifecycle.",
+          "token": "RenderCompactTrajectoryRanking"
         }
       ],
       "id": "render-materialize",
@@ -2726,6 +2745,7 @@
         "AllowsRender",
         "DefaultRender",
         "RenderAuditClusterReport",
+        "RenderCompactTrajectoryRanking",
         "RenderFidelity",
         "RenderKind",
         "RenderReopen",
@@ -2890,6 +2910,16 @@
           "category": "incidental",
           "reason": "operator readout renderer for FilingPlan (mirrors ExplainPlan/ExplainMatrix/ExplainBisect in the same package); a rendering function, not a governed concept",
           "token": "ExplainFilingPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Record kind constant, not a planning concept.",
+          "token": "KindCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local trace root identifier, not a planning concept.",
+          "token": "candidateID"
         }
       ],
       "exclude": [
@@ -2906,6 +2936,7 @@
         "DecodeInterleavePlan",
         "ExplainFilingPlan",
         "FleetBenchPlanDoc",
+        "KindCandidate",
         "NoteCandidates",
         "PlanDecodeInterleave",
         "PlanEviction",
@@ -2914,6 +2945,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "buildMainPlan",
+        "candidateID",
         "candidateNote",
         "candidatePaths",
         "candidatemean",
@@ -3225,6 +3257,16 @@
           "category": "incidental",
           "reason": "A wire error code returned when a mid-flight verb names a trace with no owned run to reach; a refusal label, not a loop concept.",
           "token": "midflight_no_owned_loop"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON report field naming, not a loop lifecycle concept",
+          "token": "OldestLoopID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only projection type, not a loop lifecycle concept",
+          "token": "LoopView"
         }
       ],
       "id": "loop",
@@ -3234,6 +3276,8 @@
         "ClassPollingLoop",
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
+        "LoopView",
+        "OldestLoopID",
         "POLLING_LOOP",
         "appendlooprunevent",
         "buildtuiloopreport",
