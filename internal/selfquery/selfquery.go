@@ -61,6 +61,7 @@ type FeatureCard struct {
 	// Cards() leaves it empty so SummaryDigest stays stable.
 	Freshness string       `json:"freshness,omitempty"`
 	Request   RequestShape `json:"request"`
+	Related   []Edge       `json:"related,omitempty"`
 }
 
 type RequestShape struct {
