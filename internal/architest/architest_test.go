@@ -143,6 +143,7 @@ var tier = map[string]int{
 	"toolcoverage":         1,                // read-only tools/*.py sibling-test coverage audit over skills/CI references; stdlib-only, off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
+	"modelsrc":             2,                // model-source URL registry; transports stay behind ReaderAt openers.
 	"skillenv":             4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
 	"guardroute":           4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"guardcomplaint":       4,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
