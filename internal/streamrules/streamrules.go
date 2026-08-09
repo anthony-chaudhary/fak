@@ -44,11 +44,13 @@ func ParseScope(spec string) (Scope, string, error) {
 // ScopeNamedTool. PathGlob optionally narrows a tool rule using path.Match
 // syntax against StreamKey.Path.
 type Rule struct {
-	Name     string
-	Pattern  string
-	Scope    Scope
-	Tool     string
-	PathGlob string
+	Name             string
+	Pattern          string
+	Scope            Scope
+	Tool             string
+	PathGlob         string
+	Interrupt        bool
+	SubstituteAction string
 }
 
 // Diagnostic reports a rule dropped during compilation.
@@ -68,9 +70,11 @@ type StreamKey struct {
 
 // Match records the complete buffer at the first point a rule matched it.
 type Match struct {
-	Rule     string
-	Key      StreamKey
-	Snapshot string
+	Rule             string
+	Key              StreamKey
+	Snapshot         string
+	Interrupt        bool
+	SubstituteAction string
 }
 
 type compiledRule struct {
@@ -114,6 +118,9 @@ func Compile(rules []Rule) (*Matcher, []Diagnostic) {
 				diagnostics = append(diagnostics, Diagnostic{Rule: rule.Name, Error: fmt.Sprintf("compile path glob: %v", err)})
 				continue
 			}
+		}
+		if rule.Interrupt && strings.TrimSpace(rule.SubstituteAction) == "" {
+			rule.Interrupt = false
 		}
 		m.rules = append(m.rules, compiledRule{rule: rule, re: re})
 	}
@@ -180,7 +187,7 @@ func (m *Matcher) check(key StreamKey, state *streamState) []Match {
 			continue
 		}
 		state.matched[i] = true
-		matches = append(matches, Match{Rule: rule.rule.Name, Key: key, Snapshot: state.value})
+		matches = append(matches, Match{Rule: rule.rule.Name, Key: key, Snapshot: state.value, Interrupt: rule.rule.Interrupt, SubstituteAction: rule.rule.SubstituteAction})
 	}
 	return matches
 }
