@@ -1,4 +1,4 @@
-package cudaacceptance_test
+package compute_test
 
 import (
 	"os"
