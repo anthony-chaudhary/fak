@@ -146,11 +146,26 @@ func raceSoftSignals(covPkgs []string, racedPkgs map[string]bool) []string {
 	}
 	var soft []string
 	for _, p := range covPkgs {
-		if !racedPkgs[p] {
+		if !racePackageMeasured(p, racedPkgs) {
 			soft = append(soft, fmt.Sprintf("%s %s: not exercised under -race", raceUncheckedClass, p))
 		}
 	}
 	return soft
+}
+
+// racePackageMeasured accepts both full import paths from coverprofiles and the
+// repo-relative package names operators naturally pass to --raced.
+func racePackageMeasured(profilePkg string, racedPkgs map[string]bool) bool {
+	if racedPkgs[profilePkg] {
+		return true
+	}
+	for raced := range racedPkgs {
+		raced = strings.TrimPrefix(strings.TrimSpace(raced), "./")
+		if raced != "" && (profilePkg == raced || strings.HasSuffix(profilePkg, "/"+raced)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseCoverProfile parses a Go -coverprofile (mode: set/count/atomic) into per-package
