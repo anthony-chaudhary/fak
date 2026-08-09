@@ -375,3 +375,35 @@ func TestGitDailyScoreOnAnEmptyLedgerIsNotHealthy(t *testing.T) {
 		t.Errorf("no defect names the ledger %q it was scored from: %+v", path, payload.KPIs)
 	}
 }
+
+func TestGitDailyStatusSurfacesWeeklyAdoptionFold(t *testing.T) {
+	rows := []gitdaily.Row{
+		{At: "2026-08-03T12:00:00Z"},
+		{At: "2026-08-04T12:00:00Z", GraceRefused: "LOCKED"},
+		{At: "2026-08-10T12:00:00Z", Incident: true},
+	}
+	var out bytes.Buffer
+	writeGitDailyStatus(&out, "/tmp/gitdaily.jsonl", rows)
+	for _, want := range []string{
+		"week 2026-08-03: 2 recorded runs, 1 ok, 1 refused, 0 error",
+		"week 2026-08-10: 1 recorded runs, 0 ok, 0 refused, 1 error",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status missing %q\n---\n%s", want, out.String())
+		}
+	}
+
+	report := gitDailyStatusReport{
+		Schema:   "fak-git-daily-status/1",
+		Rows:     rows,
+		Outcomes: gitdaily.FoldOutcomes(rows),
+		Weekly:   gitdaily.FoldOutcomesByWeek(rows),
+	}
+	b, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"weekly":[{"week":"2026-08-03","total":2,"ok":1,"refused":1,"errors":0}`) {
+		t.Fatalf("JSON weekly fold missing: %s", b)
+	}
+}

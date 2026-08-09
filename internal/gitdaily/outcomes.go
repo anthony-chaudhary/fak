@@ -26,6 +26,7 @@ package gitdaily
 
 import (
 	"sort"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 )
@@ -121,6 +122,57 @@ func FoldOutcomes(rows []Row) Outcomes {
 		default:
 			out.OK++
 		}
+	}
+	return out
+}
+
+// WeekOutcome is the per-ISO-week invocation/outcome fold used by the adoption
+// readback. Week is the Monday that begins the UTC week (YYYY-MM-DD), making the
+// bucket stable across locale settings and year boundaries.
+type WeekOutcome struct {
+	Week    string `json:"week"`
+	Total   int    `json:"total"`
+	OK      int    `json:"ok"`
+	Refused int    `json:"refused"`
+	Errors  int    `json:"errors"`
+}
+
+// FoldOutcomesByWeek groups recorded invocations by their RFC3339 timestamp. Legacy
+// rows without a parseable At value are intentionally omitted: assigning them to the
+// current week would fabricate adoption. Results are chronological and deterministic.
+func FoldOutcomesByWeek(rows []Row) []WeekOutcome {
+	byWeek := make(map[string]*WeekOutcome)
+	for _, r := range rows {
+		at, err := time.Parse(time.RFC3339, r.At)
+		if err != nil {
+			continue
+		}
+		at = at.UTC()
+		weekday := (int(at.Weekday()) + 6) % 7 // Monday = 0.
+		monday := at.AddDate(0, 0, -weekday).Format("2006-01-02")
+		w := byWeek[monday]
+		if w == nil {
+			w = &WeekOutcome{Week: monday}
+			byWeek[monday] = w
+		}
+		w.Total++
+		switch r.Outcome() {
+		case OutcomeError:
+			w.Errors++
+		case OutcomeRefused:
+			w.Refused++
+		default:
+			w.OK++
+		}
+	}
+	weeks := make([]string, 0, len(byWeek))
+	for week := range byWeek {
+		weeks = append(weeks, week)
+	}
+	sort.Strings(weeks)
+	out := make([]WeekOutcome, 0, len(weeks))
+	for _, week := range weeks {
+		out = append(out, *byWeek[week])
 	}
 	return out
 }

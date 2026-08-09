@@ -154,3 +154,28 @@ func TestFoldOutcomesReadsTheRealLedgerFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestFoldOutcomesByWeekCountsRecordedInvocations(t *testing.T) {
+	rows := []Row{
+		{At: "2026-08-02T20:00:00Z"}, // Sunday of the 2026-07-27 UTC week.
+		{At: "2026-08-03T12:00:00Z", GraceRefused: "LOCKED"},
+		{At: "2026-08-09T23:59:59Z", Incident: true},
+		{At: "2026-08-10T00:00:00Z"},
+		{At: "not-a-timestamp"}, // Never fabricate a week for legacy/bad rows.
+	}
+	got := FoldOutcomesByWeek(rows)
+	want := []WeekOutcome{
+		{Week: "2026-07-27", Total: 1, OK: 1},
+		{Week: "2026-08-03", Total: 2, Refused: 1, Errors: 1},
+		{Week: "2026-08-10", Total: 1, OK: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("weekly outcomes = %#v, want %#v", got, want)
+	}
+}
+
+func TestFoldOutcomesByWeekEmptyIsStable(t *testing.T) {
+	if got := FoldOutcomesByWeek(nil); len(got) != 0 {
+		t.Fatalf("weekly outcomes = %#v, want empty", got)
+	}
+}

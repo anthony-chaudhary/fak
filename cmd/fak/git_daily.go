@@ -105,6 +105,7 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 				Schema:   "fak-git-daily-status/1",
 				Ledger:   path,
 				Outcomes: gitdaily.FoldOutcomes(rows),
+				Weekly:   gitdaily.FoldOutcomesByWeek(rows),
 				Rows:     rows,
 			}, "fak git-daily")
 		}
@@ -204,10 +205,11 @@ func emitGitDailyUnit(stdout, stderr io.Writer, target, label, fakBin, repoRoot 
 // the rows underneath — and because the summary is a fold of exactly the rows in this
 // envelope, the two can never disagree the way a separately-kept counter would.
 type gitDailyStatusReport struct {
-	Schema   string            `json:"schema"`
-	Ledger   string            `json:"ledger"`
-	Outcomes gitdaily.Outcomes `json:"outcomes"`
-	Rows     []gitdaily.Row    `json:"rows"`
+	Schema   string                 `json:"schema"`
+	Ledger   string                 `json:"ledger"`
+	Outcomes gitdaily.Outcomes      `json:"outcomes"`
+	Weekly   []gitdaily.WeekOutcome `json:"weekly"`
+	Rows     []gitdaily.Row         `json:"rows"`
 }
 
 // writeGitDailyText prints the operator report: the skip decision if any, then the lock
@@ -328,6 +330,7 @@ func writeGitDailyStatus(w io.Writer, path string, rows []gitdaily.Row) {
 		return
 	}
 	writeGitDailyOutcomes(w, gitdaily.FoldOutcomes(rows))
+	writeGitDailyWeekly(w, gitdaily.FoldOutcomesByWeek(rows))
 	for _, r := range rows {
 		note := fmt.Sprintf("folded %d loose (%d -> %d), packs %d -> %d, locks cleared %d",
 			r.LooseFolded(), r.LooseBefore, r.LooseAfter, r.PacksBefore, r.PacksAfter,
@@ -342,6 +345,14 @@ func writeGitDailyStatus(w io.Writer, path string, rows []gitdaily.Row) {
 	}
 	if n, reason := gitdaily.DeferredStreak(rows); n > 1 {
 		fmt.Fprintf(w, "\nfold tier has been held back %s for %d consecutive runs — the backlog is growing.\n", reason, n)
+	}
+}
+
+// writeGitDailyWeekly prints the adoption fold: one deterministic line per UTC week.
+func writeGitDailyWeekly(w io.Writer, weeks []gitdaily.WeekOutcome) {
+	for _, week := range weeks {
+		fmt.Fprintf(w, "week %s: %d recorded runs, %d ok, %d refused, %d error\n",
+			week.Week, week.Total, week.OK, week.Refused, week.Errors)
 	}
 }
 
