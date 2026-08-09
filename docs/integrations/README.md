@@ -87,8 +87,9 @@ defining their own. Support has exactly three values:
   in-process and injects the base URL into the child only. Every `fak guard` tool also
   has a guide, so the tables write it **`fak guard` + guide**.
 - **guide** — a dedicated walkthrough you wire by base URL or MCP. (The
-  [agent-harnesses page](../supported/agent-harnesses.md) calls its top rows
-  "first-class guides" — that is this **guide** label, not a fourth value.)
+  [agent-harnesses page](../supported/agent-harnesses.md) groups these under "harnesses
+  with a dedicated guide" and carries the labels below in a *support* column — a heading,
+  not a fourth value.)
 - **universal recipe** — a tool not listed in the table below uses the
   [universal recipe](#dont-see-your-framework-the-universal-recipe) and is graded,
   sourced, in the [compatibility matrix](compatibility-matrix.md).

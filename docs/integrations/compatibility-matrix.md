@@ -24,6 +24,12 @@ var, constructor arg, or config field. A **Partial** or **No** means the repoint
 templated, indirect, or undocumented — the [caveats](#caveats-worth-knowing) below say
 exactly how.
 
+*Custom base URL* is a **wire fact**, not a support status. Support status has one canonical
+vocabulary — **`fak guard` + guide**, **guide**, **universal recipe** — defined once in the
+[integration index](README.md#support-status-the-canonical-vocabulary), which is
+authoritative. A tool listed here with no dedicated guide is **universal recipe** support:
+it repoints by the key in its row and is graded, sourced, in this table.
+
 > Surveyed 2026-06-30 across 47 targets (12 harnesses, 14 frameworks, 14 backends, 7
 > protocols). Each row carries a source link; 40 of 47 are high-confidence, the rest
 > flagged in the caveats. Wires and config keys drift — when a row looks stale, the source
