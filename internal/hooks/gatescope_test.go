@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestgateScopeRowTableCoversEveryGateFile(t *testing.T) {
+func TestGateScopeRowTableCoversEveryGateFile(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)

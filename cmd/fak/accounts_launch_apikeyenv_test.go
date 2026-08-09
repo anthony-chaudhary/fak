@@ -79,10 +79,10 @@ func TestLaunchAPIKeyEnvFloorContradictionPremise(t *testing.T) {
 				t.Fatalf("guardCachePostureArgs dropped the reference: %q", args)
 			}
 			// ...but the launcher's own env sanitizer removes it from the child's environment.
-			sanitized, stripped := sanitizeLaunchEnv(map[string]string{
+			sanitized, stripped := sanitizeLaunchEnvExcept(map[string]string{
 				"PATH":     "/usr/bin",
 				tc.envName: tc.value,
-			})
+			}, nil)
 			if _, ok := sanitized[tc.envName]; ok {
 				t.Fatalf("premise refuted: %s survived the #2358 floor (%s)", tc.envName, tc.why)
 			}
