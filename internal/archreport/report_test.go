@@ -229,6 +229,62 @@ func TestAnalyzeAdversarialInputs(t *testing.T) {
 	}
 }
 
+func TestAnalyzeErrorsNameRecovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		contract string
+		leaf     string
+		files    map[string]string
+		want     []string
+	}{
+		{
+			name:     "contract syntax",
+			contract: "package architest\nvar tier = map[string]int{",
+			want:     []string{"parse architecture contract", "repair the Go syntax before reporting"},
+		},
+		{
+			name:     "contract declaration",
+			contract: "package architest\nvar tierName=[]string{\"root\"}\n",
+			want:     []string{"missing tier or tierName", "restore both declarations"},
+		},
+		{
+			name:     "unknown leaf",
+			contract: "package architest\nvar tier=map[string]int{\"known\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
+			leaf:     "unknown",
+			want:     []string{"has no tier declaration", "choose a declared leaf", "or add its tier there"},
+		},
+		{
+			name:     "stale declaration",
+			contract: "package architest\nvar tier=map[string]int{\"missing\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
+			want:     []string{"declared package directory", "does not exist", "create the package or remove its stale tier declaration"},
+		},
+		{
+			name:     "leaf syntax",
+			contract: "package architest\nvar tier=map[string]int{\"broken\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
+			files:    map[string]string{"internal/broken/broken.go": "package broken\nimport ("},
+			want:     []string{"parse imports", "broken.go", "repair the Go syntax before reporting"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeArchitectureFixture(t, root, "internal/architest/architest_test.go", tt.contract)
+			for path, body := range tt.files {
+				writeArchitectureFixture(t, root, path, body)
+			}
+			_, err := Analyze(root, tt.leaf)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q does not name recovery %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func writeArchitectureFixture(t *testing.T, root, path, body string) {
 	t.Helper()
 	p := filepath.Join(root, filepath.FromSlash(path))

@@ -51,7 +51,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	}
 	if onlyLeaf != "" {
 		if _, ok := tiers[onlyLeaf]; !ok {
-			return Report{}, fmt.Errorf("leaf %q has no tier declaration", onlyLeaf)
+			return Report{}, fmt.Errorf("leaf %q has no tier declaration; choose a declared leaf from internal/architest/architest_test.go or add its tier there", onlyLeaf)
 		}
 	}
 	counts := map[int]int{}
@@ -77,7 +77,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	for _, name := range leaves {
 		deps, err := internalImports(filepath.Join(root, "internal", name))
 		if err != nil {
-			return Report{}, err
+			return Report{}, fmt.Errorf("inspect declared leaf %q: %w", name, err)
 		}
 		declared, floor := tiers[name], 1
 		if name == "abi" {
@@ -135,7 +135,7 @@ func parseContract(path string) (map[string]int, []string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse architecture contract %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse architecture contract %s: %w; repair the Go syntax before reporting", path, err)
 	}
 	tiers := map[string]int{}
 	var names []string
@@ -179,14 +179,17 @@ func parseContract(path string) (map[string]int, []string, error) {
 		return true
 	})
 	if len(tiers) == 0 || len(names) == 0 {
-		return nil, nil, fmt.Errorf("architecture contract missing tier or tierName in %s", path)
+		return nil, nil, fmt.Errorf("architecture contract missing tier or tierName in %s; restore both declarations", path)
 	}
 	return tiers, names, nil
 }
 func internalImports(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("declared package directory %s does not exist; create the package or remove its stale tier declaration", dir)
+		}
+		return nil, fmt.Errorf("read declared package directory %s: %w; restore read access and retry", dir, err)
 	}
 	set := map[string]bool{}
 	fset := token.NewFileSet()
@@ -196,7 +199,7 @@ func internalImports(dir string) ([]string, error) {
 		}
 		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, parser.ImportsOnly)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse imports in %s: %w; repair the Go syntax before reporting", filepath.Join(dir, e.Name()), err)
 		}
 		for _, imp := range f.Imports {
 			p, err := strconv.Unquote(imp.Path.Value)
