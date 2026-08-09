@@ -94,6 +94,7 @@ var verbManifest = []Verb{
 	{Name: "blast", Synopsis: "estimate the dependency blast radius of a broken package against live leases and queued issues", Lane: "cmd"},
 	{Name: "blockers", Synopsis: "the blockers report/Slack surface: what is gating the fleet right now", Lane: "cmd"},
 	{Name: "boundary", Synopsis: "boundary-tell linter: unexpanded paths, hardcoded URLs, no-timeout HTTP, change-detector tests", Lane: "cmd"},
+	{Name: "breath", Synopsis: "advisory counted-ratchet gate for the measurable half of the In-one-breath documentation contract", Lane: "cmd", Doc: "docs/ONE-BREATH-CONTRACT.md"},
 	{Name: "budget", Synopsis: "per-task budget readout: tokens/turns spent vs a soft target with a per-category breakdown", Lane: "cmd"},
 	{Name: "buildcheck", Synopsis: "collision-free compile check: discard output (never in-tree), -overlay-masking untracked sibling .go files", Lane: "cmd"},
 	{Name: "c", Synopsis: "shorthand for 'fak console agent': launch a fak-guard-wrapped interactive Claude Code session", Lane: "cmd"},

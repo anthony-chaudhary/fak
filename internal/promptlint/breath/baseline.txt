@@ -1,0 +1,65 @@
+# fak breath ratchet baseline — KIND<TAB>path<TAB>count.
+# Regenerate with: fak breath --emit-baseline > internal/promptlint/breath/baseline.txt
+# This is a FLOOR, not an allowlist: a key may shrink freely, and any count ABOVE
+# its floor is a NEW finding. A green ratchet claims only that this class is not
+# growing — never that the corpus is clean.
+# breath judges the COUNTABLE half of the contract only: presence, position, sentence count, sentence length, banned punctuation, unexpanded acronyms. It does NOT judge accuracy, completeness, or faithfulness to the page body, and must not be extended to: good plain-language writing ADDS content absent from the source (the elaborative explanation phenomenon, PlainQAFact arXiv 2503.08890), so an entailment check scores the BEST-written blocks as the LEAST faithful. Whether the block is TRUE is review's job. See docs/ONE-BREATH-CONTRACT.md.
+BREATH_MISSING	docs/explainers/addressable-kv-cache-in-5-min.md	1
+BREATH_MISSING	docs/explainers/addressable-kv-cache.md	1
+BREATH_MISSING	docs/explainers/agent-runtime.md	1
+BREATH_MISSING	docs/explainers/agent-virtual-filesystem.md	1
+BREATH_MISSING	docs/explainers/awq-quantization.md	1
+BREATH_MISSING	docs/explainers/cache.md	1
+BREATH_MISSING	docs/explainers/caching/README.md	1
+BREATH_MISSING	docs/explainers/caching/level-1-what-is-caching.md	1
+BREATH_MISSING	docs/explainers/caching/level-2-managed-cache-in-practice.md	1
+BREATH_MISSING	docs/explainers/caching/level-3-cache-economics-and-the-wire.md	1
+BREATH_MISSING	docs/explainers/caching/level-4-kernel-kv-cache.md	1
+BREATH_MISSING	docs/explainers/caching/level-5-the-caching-frontier.md	1
+BREATH_MISSING	docs/explainers/change-data-capture-for-agents.md	1
+BREATH_MISSING	docs/explainers/code-linting-at-the-kernel.md	1
+BREATH_MISSING	docs/explainers/compounding-benefits-of-a-saved-call.md	1
+BREATH_MISSING	docs/explainers/context-control-surfaces-and-the-pin-audit-gap.md	1
+BREATH_MISSING	docs/explainers/context-shedding.md	1
+BREATH_MISSING	docs/explainers/context-signal-to-noise.md	1
+BREATH_MISSING	docs/explainers/context-tape-visuals.md	1
+BREATH_MISSING	docs/explainers/context.md	1
+BREATH_MISSING	docs/explainers/cross-platform-spine.md	1
+BREATH_MISSING	docs/explainers/data-residency-and-compliance.md	1
+BREATH_MISSING	docs/explainers/default-deny-vs-classifier.md	1
+BREATH_MISSING	docs/explainers/engineering-is-building-loops.md	1
+BREATH_MISSING	docs/explainers/fleet-benchmarks.md	1
+BREATH_MISSING	docs/explainers/frozen-trajectory-cache-cliff.md	1
+BREATH_MISSING	docs/explainers/gateway.md	1
+BREATH_MISSING	docs/explainers/glossary.md	1
+BREATH_MISSING	docs/explainers/god-file-growth-gate.md	1
+BREATH_MISSING	docs/explainers/hardware-limits-and-capacity.md	1
+BREATH_MISSING	docs/explainers/hardware-portability.md	1
+BREATH_MISSING	docs/explainers/kv-cache-agentic-context.md	1
+BREATH_MISSING	docs/explainers/loader-semantic-transform-contracts.md	1
+BREATH_MISSING	docs/explainers/local-vs-frontier-parity.md	1
+BREATH_MISSING	docs/explainers/long-session-economics.md	1
+BREATH_MISSING	docs/explainers/long-sessions-keep-the-cache-hit.md	1
+BREATH_MISSING	docs/explainers/memory-engineering.md	1
+BREATH_MISSING	docs/explainers/multi-gpu-tensor-parallelism.md	1
+BREATH_MISSING	docs/explainers/o1-context-window-economics.md	1
+BREATH_MISSING	docs/explainers/one-binary-one-surface.md	1
+BREATH_MISSING	docs/explainers/policy-in-the-kernel.md	1
+BREATH_MISSING	docs/explainers/routing.md	1
+BREATH_MISSING	docs/explainers/runtime-vs-client.md	1
+BREATH_MISSING	docs/explainers/shared-workspace-and-the-negation-operator.md	1
+BREATH_MISSING	docs/explainers/sota-optimizations.md	1
+BREATH_MISSING	docs/explainers/status-a-peer-can-trust.md	1
+BREATH_MISSING	docs/explainers/structured-generation-became-infrastructure.md	1
+BREATH_MISSING	docs/explainers/the-abstraction-map.md	1
+BREATH_MISSING	docs/explainers/tool-call-is-a-syscall.md	1
+BREATH_MISSING	docs/explainers/ultracode-multi-agent-dogfood.md	1
+BREATH_MISSING	docs/explainers/vdso-revoke-as-comm-revoke.md	1
+BREATH_MISSING	docs/explainers/verify-dont-trust.md	1
+BREATH_MISSING	docs/explainers/video-content-plan.md	1
+BREATH_MISSING	docs/explainers/vllm-lifecycle-cache-loss-bridge.md	1
+BREATH_MISSING	docs/explainers/what-a-saved-token-is-worth.md	1
+BREATH_MISSING	docs/explainers/what-fak-is-not.md	1
+BREATH_MISSING	docs/explainers/what-is-a-cuda-kernel.md	1
+BREATH_MISSING	docs/explainers/what-is-managed-cache.md	1
+BREATH_MISSING	docs/explainers/you-never-manage-the-context-window.md	1
