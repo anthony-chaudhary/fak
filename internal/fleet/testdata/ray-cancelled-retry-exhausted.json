@@ -1,0 +1,9 @@
+{
+  "schema": "fak-ray-recovery-probe/1",
+  "case": "cancelled-retry-exhausted",
+  "upstream": "ray-project/ray@ray-2.56.1+g936f0d7d49d9",
+  "fak_state": "FAILED",
+  "recoverable": false,
+  "action": "ESCALATE",
+  "evidence": "worker exited and retry budget is exhausted"
+}
