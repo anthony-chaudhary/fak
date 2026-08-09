@@ -1,0 +1,32 @@
+{
+  "engine": "SGLang OpenAI-compatible",
+  "host": "sanctioned-lab-gpu-node",
+  "scalar_total_baseline": {
+    "held_metrics": {
+      "p95_ape": 4.832763148225986,
+      "mape": 1.7194230311386762
+    },
+    "seconds_per_total_token": 5.917142888396524E-05
+  },
+  "schema": "fak-scheduler-calibration/1",
+  "held_metrics": {
+    "p95_ape": 0.36702298613794654,
+    "mape": 0.11044017936358493
+  },
+  "timestamp_utc": "2026-08-09T00:00:00Z",
+  "provenance": {
+    "raw_shape_count": 27,
+    "cache_inference": "usage.prompt_tokens_details.cached_tokens when present, otherwise exact-repeat proxy",
+    "claim_status": "observed calibration; no net-true gain claimed",
+    "method": "wall-clock OpenAI-compatible requests; deterministic prompts; repeated exact prefixes",
+    "held_out_shape_count": 6,
+    "remote_artifact": "/tmp/fakgpu/scheduler-calibration.json"
+  },
+  "gpu": "NVIDIA A100-class accelerator",
+  "model": "qwen2.5-72b-instruct",
+  "fit": {
+    "seconds_per_cached_input_token": 4.78825802052107E-06,
+    "seconds_per_output_token": 0.01992837778167551,
+    "seconds_per_uncached_input_token": 0.00014059235809224313
+  }
+}
