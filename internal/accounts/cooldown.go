@@ -500,7 +500,7 @@ func (s *CooldownStore) Active(now time.Time) []CooldownEntry {
 func activeCooldownSignals(e CooldownEntry, now time.Time) (map[string]time.Time, time.Time) {
 	active := map[string]time.Time{}
 	if len(e.Signals) == 0 {
-		if e.Active(now) {
+		if e.Active(now) || e.Kind == CooldownOrgAuthWall {
 			name := strings.TrimSpace(string(e.Kind))
 			if name == "" {
 				name = "legacy"
@@ -510,7 +510,17 @@ func activeCooldownSignals(e CooldownEntry, now time.Time) (map[string]time.Time
 		return active, latestSignalReset(active)
 	}
 	for signal, resetAt := range e.Signals {
-		if strings.TrimSpace(signal) != "" && now.Before(resetAt) {
+		if strings.TrimSpace(signal) == "" {
+			continue
+		}
+		// An upstream ORG AUTH WALL never lapses on its own timer (#4998). A usage cap
+		// self-recovers, so the window elapsing IS the recovery; an organization with
+		// OAuth/subscription access disabled does not repair itself, and re-admitting it
+		// because a clock ran out re-dispatches into the same terminal 403. Its deadline
+		// means "a reprobe is due" (CooldownEntry.ReprobeDue), not "re-admit" — only a
+		// witnessed healthy round-trip clears it (ObserveSeatHealth/ClearOrgAuthWall).
+		// Sibling usage/rate signals on the same account keep expiring normally.
+		if signal == string(CooldownOrgAuthWall) || now.Before(resetAt) {
 			active[signal] = resetAt.UTC()
 		}
 	}

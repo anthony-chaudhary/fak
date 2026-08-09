@@ -198,6 +198,21 @@ func (r Registry) loginObservation(h Home, si SeatIdentity, cd *CooldownStore, n
 			reason, action = cooldownReasonAction(e)
 		}
 	}
+	// Org-auth-wall overlay (#4998): a witnessed upstream organization wall outranks
+	// both the generic cooldown rendering and a later needs_login degradation — once
+	// Claude blanks the unusable tokens, `/login` is exactly the repair the original
+	// terminal 403 already proved futile, so the weaker cause must not displace the
+	// stronger witnessed one. Only the ready/needs_login pair (plus the cooldown
+	// rendering derived from ready) may be overridden: tombstoned, disabled, and
+	// missing-dir are deliberate operator states whose repair is more actionable
+	// than the wall's.
+	if cd != nil && !now.IsZero() &&
+		(status == LoginReady || status == LoginNeedsLogin || status == LoginCooledDown) {
+		if e, ok := cd.OrgAuthWall(h.Identity.AccountKey(), now); ok {
+			status = LoginOrgAuthWall
+			reason, action = orgAuthWallReasonAction(e, now)
+		}
+	}
 	obs := LoginObservation{
 		Name:         h.Name,
 		Dir:          h.Dir,
