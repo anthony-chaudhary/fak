@@ -79,9 +79,15 @@ client that reads either one connects.
 
 ## What "connects" honestly means
 
-The [compatibility matrix](compatibility-matrix.md) answers a narrow question for 45
+The [compatibility matrix](compatibility-matrix.md) answers a narrow question for 47
 surveyed tools: does it let you set a base URL? This page adds the sharper one. Can fak
-actually adjudicate that wire, and how cleanly? The grades:
+actually adjudicate that wire, and how cleanly? The grades below are a **connect grade** — a
+wire fact about how cleanly fak adjudicates that wire. They are **not** support status: that
+has one canonical vocabulary (**`fak guard` + guide** / **guide** / **universal recipe**),
+defined once in the
+[integration index](README.md#support-status-the-canonical-vocabulary), which is
+authoritative. A tool carries one support label from there *and* one connect grade from
+here; the two axes answer different questions and neither renames the other. The grades:
 
 - Drop-in: one documented base-URL setting points it at a wire fak exposes.
 - Per-wire: it connects on its OpenAI-compatible wire. Route its other wire (often a
