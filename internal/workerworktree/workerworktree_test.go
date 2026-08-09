@@ -89,6 +89,11 @@ func (f *fakeGit) runEnv(root string, env map[string]string, args []string) (int
 	if len(args) > 0 {
 		verb = args[0]
 	}
+	// Recovery anchors are an added side effect of isolated landing. Keep legacy
+	// CAS response queues scoped to trunk update-ref calls.
+	if len(args) > 1 && verb == "update-ref" && args[1] == "--create-reflog" {
+		return 0, ""
+	}
 	if queue := f.replies[verb]; len(queue) > 0 {
 		r := queue[0]
 		f.replies[verb] = queue[1:]
@@ -696,7 +701,7 @@ func TestLandIsolatedRetryReapplyConflictFallsBack(t *testing.T) {
 	if handled {
 		t.Fatalf("a conflicting re-apply must fall back to the baseline, got %+v", res)
 	}
-	if len(g.envCallsWithPrefix("commit-tree")) != 1 || len(g.callsWithPrefix("update-ref")) != 1 {
+	if len(g.envCallsWithPrefix("commit-tree")) != 1 || len(g.callsWithPrefix("update-ref", "refs/heads/main")) != 1 {
 		t.Fatalf("the conflicted retry must not build/CAS a second commit: env=%v calls=%v", g.envCalls, g.calls)
 	}
 	if len(g.callsWithPrefix("checkout")) != 0 {

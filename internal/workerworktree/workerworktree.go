@@ -802,6 +802,12 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		if rc != 0 || newCommit == "" {
 			return Result{}, false
 		}
+		// Name the off-branch commit before trunk CAS. A process crash from here on
+		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
+		recoveryRef, anchorErr := AnchorRecoveryEntry(root, wtPath, newCommit, func(r string, a []string) (int, string) { return runEnv(genv, r, env, a) })
+		if anchorErr != nil {
+			return Result{OK: false, Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error()}, true
+		}
 		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
 		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
 		// commit built on the stale base is simply abandoned, unreferenced.
@@ -811,7 +817,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		// The ref moved but the shared working tree still holds OLD content for `paths`
 		// (we never touched it). Sync just those paths so trunk builders see the landed
 		// change, matching the baseline post-state. A sync failure does NOT unland.
-		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts)
+		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts) + "; recovery-ref=" + recoveryRef
 		coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
 		if rc, out := run(git, root, coArgs); rc != 0 {
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)

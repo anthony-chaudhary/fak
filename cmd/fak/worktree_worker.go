@@ -68,6 +68,9 @@ fak worktree <subcommand>
                    pass --apply (or FAK_WORKTREE_COLD_COLLECT=apply) to actually collect.
                    --even-if-unlanded also collects the held ones, DESTROYING that work.
       list         List the live per-worker worktrees. Prints {count, paths}.
+      recover [--cleanup REF] [--force]
+                   List durable off-branch land candidates and their LANDED or
+                   RECOVERABLE state. Cleanup refuses unlanded refs unless forced.
 `))
 }
 
@@ -90,6 +93,8 @@ func cmdWorktreeWorker(argv []string) {
 		worktreeWorkerReap(argv[1:])
 	case "list":
 		worktreeWorkerList(argv[1:])
+	case "recover":
+		worktreeWorkerRecover(argv[1:])
 	case "-h", "--help", "help":
 		worktreeWorkerUsage()
 	default:
@@ -417,6 +422,46 @@ func worktreeDirBytes(dir string) int64 {
 type worktreeWorkerListOut struct {
 	Count int      `json:"count"`
 	Paths []string `json:"paths"`
+}
+
+type worktreeWorkerRecoverOut struct {
+	OK         bool                           `json:"ok"`
+	Count      int                            `json:"count"`
+	Candidates []workerworktree.RecoveryEntry `json:"candidates"`
+	Cleaned    string                         `json:"cleaned,omitempty"`
+	Reason     string                         `json:"reason,omitempty"`
+}
+
+// worktreeWorkerRecover is the crash-resume inventory for isolated lands. With
+// no mutation flags it is read-only. Cleanup is guarded by HEAD reachability;
+// --force is deliberately required to discard an unlanded candidate.
+func worktreeWorkerRecover(argv []string) {
+	fs := flag.NewFlagSet("worktree worker recover", flag.ExitOnError)
+	root := fs.String("root", "", "repo root (default: discover from cwd)")
+	cleanup := fs.String("cleanup", "", "delete one landed recovery ref")
+	force := fs.Bool("force", false, "allow cleanup of an unlanded recovery ref")
+	fs.Parse(argv)
+
+	repoRoot := worktreeWorkerRoot(*root)
+	out := worktreeWorkerRecoverOut{Candidates: []workerworktree.RecoveryEntry{}}
+	if *cleanup != "" {
+		if err := workerworktree.DeleteRecoveryRef(repoRoot, *cleanup, *force, nil); err != nil {
+			out.Reason = err.Error()
+			worktreeWorkerEmit(out)
+			os.Exit(1)
+		}
+		out.Cleaned = *cleanup
+	}
+	items, err := workerworktree.RecoveryEntries(repoRoot, nil)
+	if err != nil {
+		out.Reason = err.Error()
+		worktreeWorkerEmit(out)
+		os.Exit(1)
+	}
+	out.OK = true
+	out.Count = len(items)
+	out.Candidates = items
+	worktreeWorkerEmit(out)
 }
 
 func worktreeWorkerList(argv []string) {
