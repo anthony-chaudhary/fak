@@ -47,6 +47,7 @@ $paths = @(
  '\Memory\Page Faults/sec','\Memory\Page Reads/sec',
  '\Memory\Demand Zero Faults/sec','\Memory\Transition Faults/sec',
  '\System\Context Switches/sec','\System\System Calls/sec',
+ '\Processor(_Total)\% Processor Time','\System\Processor Queue Length',
  '\System\Processes','\System\Threads',
  '\Memory\Available MBytes','\PhysicalDisk(_Total)\Current Disk Queue Length'
 )
@@ -58,6 +59,7 @@ foreach ($s in $c.CounterSamples) { $h[$s.Path.Split([char]92)[-1]] = [math]::Ro
 # from the SAME enumeration — no extra Get-Process/Get-CimInstance walk.
 $snap = { Get-CimInstance Win32_Process | ForEach-Object {
   [pscustomobject]@{ pid=$_.ProcessId; name=$_.Name; handles=[int]$_.HandleCount; threads=[int]$_.ThreadCount;
+    cpu=[int64]$_.('Kernel'+'Mode'+'Time') + [int64]$_.('User'+'Mode'+'Time');
     ops=[int64]$_.ReadOperationCount + [int64]$_.WriteOperationCount + [int64]$_.OtherOperationCount } } }
 # Under the very churn stall this tool diagnoses, Get-CimInstance Win32_Process
 # intermittently returns an empty/degraded set — which would blank the handle,
@@ -82,7 +84,8 @@ Start-Sleep -Seconds 1
 $second=@(); foreach($try in 1..4){ $second=Get-Snap; if($second.Count -gt 50){break}; Start-Sleep -Milliseconds 250 }
 $sw.Stop()
 $spawnWindow = [math]::Round($sw.Elapsed.TotalSeconds, 3)
-$top=@(); $hlist=@(); $handleTotal=0; $spawned=0
+$top=@(); $topCPU=@(); $hlist=@(); $handleTotal=0; $spawned=0
+$logicalCPU=[Environment]::ProcessorCount
 foreach($p in $second){
   $handleTotal += $p.handles
   $hlist += [pscustomobject]@{ pid=$p.pid; name=$p.name; handles=$p.handles; threads=$p.threads }
@@ -91,9 +94,17 @@ foreach($p in $second){
   # This is the gross birth count the spawn axis needs; the net process delta
   # cancels it away (a burst of short-lived spawns is born AND reaped between
   # samples). Free here: both enumerations already exist for the I/O delta.
-  if ($prev) { $d = $p.ops - $prev.ops; if ($d -gt 0) { $top += [pscustomobject]@{ pid=$p.pid; name=$p.name; ops=$d } } }
+  if ($prev) {
+    $d = $p.ops - $prev.ops; if ($d -gt 0) { $top += [pscustomobject]@{ pid=$p.pid; name=$p.name; ops=$d } }
+    $dcpu = $p.cpu - $prev.cpu
+    if ($p.pid -ne 0 -and $dcpu -gt 0 -and $spawnWindow -gt 0 -and $logicalCPU -gt 0) {
+      $cpuPct = 100 * $dcpu / ($spawnWindow * 10000000 * $logicalCPU)
+      $topCPU += [pscustomobject]@{ pid=$p.pid; name=$p.name; percent=[math]::Round($cpuPct,2) }
+    }
+  }
   else { $spawned++ }
 }
+$topCPU = $topCPU | Sort-Object percent -Descending | Select-Object -First 12
 $top   = $top   | Sort-Object ops     -Descending | Select-Object -First 12
 $topH  = $hlist | Sort-Object handles -Descending | Select-Object -First 12
 $topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
@@ -104,6 +115,9 @@ $topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
   transition  = $h['Transition Faults/sec']
   ctxsw       = $h['Context Switches/sec']
   syscalls    = $h['System Calls/sec']
+  cpuPct      = $h['% Processor Time']
+  cpuQueue    = $h['Processor Queue Length']
+  logicalCPU  = [int]$logicalCPU
   procs       = [int]$h['Processes']
   threads     = [int]$h['Threads']
   availMB     = [int]$h['Available MBytes']
@@ -112,11 +126,18 @@ $topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
   spawned     = [int]$spawned
   spawnKnown  = [bool]$spawnKnown
   spawnWindow = [double]$spawnWindow
+  topCPU      = $topCPU
   top         = $top
   topHandles  = $topH
   topThreads  = $topT
 } | ConvertTo-Json -Compress -Depth 4
 `
+
+type stallTopCPU struct {
+	PID     int     `json:"pid"`
+	Name    string  `json:"name"`
+	Percent float64 `json:"percent"`
+}
 
 type stallTopIO struct {
 	PID  int     `json:"pid"`
@@ -143,6 +164,9 @@ type stallRaw struct {
 	Transition  float64 `json:"transition"`
 	Ctxsw       float64 `json:"ctxsw"`
 	Syscalls    float64 `json:"syscalls"`
+	CPUPct      float64 `json:"cpuPct"`
+	CPUQueue    float64 `json:"cpuQueue"`
+	LogicalCPU  int     `json:"logicalCPU"`
 	Procs       int     `json:"procs"`
 	Threads     int     `json:"threads"`
 	AvailMB     int     `json:"availMB"`
@@ -158,10 +182,11 @@ type stallRaw struct {
 	Spawned     int     `json:"spawned"`
 	SpawnKnown  bool    `json:"spawnKnown"`
 	SpawnWindow float64 `json:"spawnWindow"`
-	// Top and TopHandles are json.RawMessage because PowerShell's ConvertTo-Json
+	// TopCPU, Top, TopHandles, and TopThreads are json.RawMessage because PowerShell's ConvertTo-Json
 	// unwraps a SINGLE-element array into a bare object — so on a quiet box (only
 	// one process with a positive IO delta) these arrive as `{...}`, not `[...]`.
 	// psList decodes either shape, so the monitor never crashes when the box calms.
+	TopCPU     json.RawMessage `json:"topCPU"`
 	Top        json.RawMessage `json:"top"`
 	TopHandles json.RawMessage `json:"topHandles"`
 	TopThreads json.RawMessage `json:"topThreads"`
@@ -207,6 +232,9 @@ func gatherStallSample(topN int) (stallscan.Sample, string) {
 		TransitionFaultsPerSec: raw.Transition,
 		ContextSwitchesPerSec:  raw.Ctxsw,
 		SystemCallsPerSec:      raw.Syscalls,
+		CPUPercent:             raw.CPUPct,
+		ProcessorQueueLength:   raw.CPUQueue,
+		ProcessorCount:         raw.LogicalCPU,
 		ProcessCount:           raw.Procs,
 		ThreadCount:            raw.Threads,
 		AvailableMB:            raw.AvailMB,
@@ -236,6 +264,12 @@ func gatherStallSample(topN int) (stallscan.Sample, string) {
 	if raw.SpawnKnown && raw.Spawned > 0 && raw.SpawnWindow > 0 {
 		s.SpawnBurst = raw.Spawned
 		s.SpawnWindowSeconds = raw.SpawnWindow
+	}
+	var topCPU []stallTopCPU
+	if err := psList(raw.TopCPU, &topCPU); err == nil {
+		for _, p := range topCPU {
+			s.TopCPU = append(s.TopCPU, stallscan.ProcCPU{PID: p.PID, Name: p.Name, Percent: p.Percent})
+		}
 	}
 	var topIO []stallTopIO
 	if err := psList(raw.Top, &topIO); err == nil {

@@ -39,9 +39,17 @@ type Sample struct {
 	DemandZeroFaultsPerSec float64 `json:"demand_zero_faults_per_sec"`
 	TransitionFaultsPerSec float64 `json:"transition_faults_per_sec"`
 
-	// Scheduler / syscall pressure.
-	ContextSwitchesPerSec float64 `json:"context_switches_per_sec"`
-	SystemCallsPerSec     float64 `json:"system_calls_per_sec"`
+	// Scheduler / syscall pressure. CPUPercent is aggregate host utilization on
+	// a 0..100 scale; ProcessorQueueLength is runnable work waiting for a CPU;
+	// ProcessorCount makes that queue comparable across differently-sized hosts.
+	// TopCPU attributes processes that consumed cores during the same measured
+	// interval. Zero means unobserved and does not trip the saturation rule.
+	CPUPercent            float64   `json:"cpu_percent,omitempty"`
+	ProcessorQueueLength  float64   `json:"processor_queue_length,omitempty"`
+	ProcessorCount        int       `json:"processor_count,omitempty"`
+	ContextSwitchesPerSec float64   `json:"context_switches_per_sec"`
+	SystemCallsPerSec     float64   `json:"system_calls_per_sec"`
+	TopCPU                []ProcCPU `json:"top_cpu,omitempty"`
 
 	// Process/thread census + churn since the previous sample.
 	ProcessCount int     `json:"process_count"`
@@ -89,6 +97,14 @@ type Sample struct {
 	TopIO []ProcIO `json:"top_io,omitempty"`
 }
 
+// ProcCPU is one process's average CPU use during the sample window. Percent is
+// expressed as percent of total host capacity, so 100 means the whole machine.
+type ProcCPU struct {
+	PID     int     `json:"pid"`
+	Name    string  `json:"name"`
+	Percent float64 `json:"percent"`
+}
+
 // ProcIO is one process's I/O-operation rate at sample time.
 type ProcIO struct {
 	PID  int     `json:"pid"`
@@ -123,14 +139,15 @@ const (
 type Cause string
 
 const (
-	CauseNone        Cause = "none"
-	CauseSoftFault   Cause = "soft_fault_churn" // demand-zero/transition storm at low hard-fault, RAM free
-	CauseSpawnStorm  Cause = "spawn_storm"      // process-creation burst driving ctx-switch/syscall spike
-	CauseSchedThrash Cause = "scheduler_thrash" // context-switch/syscall storm without a clear spawn burst
-	CauseDiskIO      Cause = "disk_io"          // genuine disk-backed pressure (hard faults / disk queue)
-	CauseMemPressure Cause = "memory_pressure"  // low available RAM (the classic case, here to distinguish it)
-	CauseHandleLeak  Cause = "handle_leak"      // a process's open-handle count climbing unbounded (slow-burn)
-	CauseThreadLeak  Cause = "thread_leak"      // a process's thread count climbing into the hundreds/thousands (terminal thread lag)
+	CauseNone          Cause = "none"
+	CauseSoftFault     Cause = "soft_fault_churn" // demand-zero/transition storm at low hard-fault, RAM free
+	CauseSpawnStorm    Cause = "spawn_storm"      // process-creation burst driving ctx-switch/syscall spike
+	CauseSchedThrash   Cause = "scheduler_thrash" // context-switch/syscall storm without a clear spawn burst
+	CauseDiskIO        Cause = "disk_io"
+	CauseCPUSaturation Cause = "cpu_saturation"  // cores full with runnable work queued behind them
+	CauseMemPressure   Cause = "memory_pressure" // low available RAM (the classic case, here to distinguish it)
+	CauseHandleLeak    Cause = "handle_leak"     // a process's open-handle count climbing unbounded (slow-burn)
+	CauseThreadLeak    Cause = "thread_leak"     // a process's thread count climbing into the hundreds/thousands (terminal thread lag)
 )
 
 // Deliberately NOT an axis: desktop-heap free%. Issue #3403 scoped two new axes —
@@ -213,6 +230,14 @@ type Thresholds struct {
 	MemLowMB      int     // available RAM below this = memory pressure (default 2048)
 	DiskQueueBusy float64 // disk queue at/above this = real disk pressure (default 4)
 
+	// Direct busy-box detection. CPU alone is not enough-a parallel build can
+	// productively use every core. A stall requires near-full aggregate CPU AND
+	// runnable work queued behind the logical CPUs. Queue is normalized per core
+	// so the same threshold works on laptops and large fleet nodes.
+	CPUStallPercent    float64 // aggregate host CPU needed for a stall (default 90)
+	CPUQueuePerCore    float64 // runnable queue/logical CPU needed for a stall (default 0.5)
+	CPUElevatedPercent float64 // aggregate host CPU that raises calm to elevated (default 80)
+
 	// Handle-leak detection. A single process at/above HandleLeakProc handles is
 	// a leak suspect (default 10000, Russinovich's line). This is a WARNING axis,
 	// not a freeze axis: a leak suspect raises a calm box to *elevated* and names
@@ -259,6 +284,9 @@ func DefaultThresholds() Thresholds {
 		SpawnBurstRateStall: 150,
 		MemLowMB:            2048,
 		DiskQueueBusy:       4,
+		CPUStallPercent:     90,
+		CPUQueuePerCore:     0.5,
+		CPUElevatedPercent:  80,
 		HandleLeakProc:      10000,
 		SystemHandleHigh:    1000000,
 		ThreadLeakProc:      500,
@@ -278,6 +306,12 @@ type Verdict struct {
 	TopProcess string  `json:"top_process,omitempty"`
 	TopPID     int     `json:"top_pid,omitempty"`
 	TopOps     float64 `json:"top_ops_per_sec,omitempty"`
+
+	// CPU attribution: the process consuming the largest share of total host
+	// capacity over the measured interval, even when no saturation threshold trips.
+	TopCPUProcess string  `json:"top_cpu_process,omitempty"`
+	TopCPUPID     int     `json:"top_cpu_pid,omitempty"`
+	TopCPUPercent float64 `json:"top_cpu_percent,omitempty"`
 
 	// Handle-leak attribution: the worst per-process handle hog, if any crossed
 	// HandleLeakProc. Populated regardless of Level (so an operator sees the
@@ -338,6 +372,13 @@ func (s Sample) hardFraction() float64 {
 func Classify(s Sample, t Thresholds) Verdict {
 	v := Verdict{Level: LevelCalm, Cause: CauseNone}
 
+	// Attribute the top CPU process regardless of level. A host-wide "busy"
+	// verdict without naming the spinner doing the work is not actionable.
+	if len(s.TopCPU) > 0 {
+		top := topByCPU(s.TopCPU)
+		v.TopCPUProcess, v.TopCPUPID, v.TopCPUPercent = top.Name, top.PID, top.Percent
+	}
+
 	// Attribute the top I/O process regardless of level — useful even when calm.
 	if len(s.TopIO) > 0 {
 		top := topByOps(s.TopIO)
@@ -379,6 +420,26 @@ func Classify(s Sample, t Thresholds) Verdict {
 		v.Level = LevelStall
 		v.Cause = CauseDiskIO
 		v.Reasons = append(v.Reasons, fmt.Sprintf("hard-fault fraction %.2f at %0.f total faults/sec", s.hardFraction(), s.TotalFaultsPerSec))
+		return v
+	}
+
+	// CPU saturation is distinct from scheduler churn: it catches the direct
+	// "too many runnable things / spinners consumed every core" busy-box shape.
+	// Require both near-full CPU and a normalized run queue, so a useful parallel
+	// compile that happens to fill the cores is not mislabeled as grinding down.
+	queuePerCore := 0.0
+	if s.ProcessorCount > 0 {
+		queuePerCore = s.ProcessorQueueLength / float64(s.ProcessorCount)
+	}
+	if t.CPUStallPercent > 0 && t.CPUQueuePerCore > 0 &&
+		s.CPUPercent >= t.CPUStallPercent && s.ProcessorCount > 0 && queuePerCore >= t.CPUQueuePerCore {
+		v.Level = LevelStall
+		v.Cause = CauseCPUSaturation
+		v.Reasons = append(v.Reasons, fmt.Sprintf("CPU %.1f%% with %.2f runnable waiters/core (queue %.1f across %d CPUs)",
+			s.CPUPercent, queuePerCore, s.ProcessorQueueLength, s.ProcessorCount))
+		if v.TopCPUProcess != "" {
+			v.Reasons = append(v.Reasons, fmt.Sprintf("top CPU consumer %s (pid %d) at %.1f%% of host capacity", v.TopCPUProcess, v.TopCPUPID, v.TopCPUPercent))
+		}
 		return v
 	}
 
@@ -456,6 +517,11 @@ func Classify(s Sample, t Thresholds) Verdict {
 	}
 
 	// --- Elevated (not yet a stall, but worth logging) ---
+	if t.CPUElevatedPercent > 0 && s.CPUPercent >= t.CPUElevatedPercent {
+		v.Level = LevelElevated
+		v.Cause = CauseCPUSaturation
+		v.Reasons = append(v.Reasons, fmt.Sprintf("CPU %.1f%% elevated (>= %.1f%%); runnable queue %.2f/core", s.CPUPercent, t.CPUElevatedPercent, queuePerCore))
+	}
 	if s.TotalFaultsPerSec >= t.SoftFaultElevated {
 		v.Level = LevelElevated
 		if v.Cause == CauseNone {
@@ -530,6 +596,17 @@ func worstThreadHog(in []ProcThreads, threshold int) (ProcThreads, bool) {
 		}
 	}
 	return worst, found
+}
+
+// topByCPU returns the largest total-host CPU consumer without mutating input.
+func topByCPU(in []ProcCPU) ProcCPU {
+	top := ProcCPU{}
+	for _, p := range in {
+		if p.Percent > top.Percent {
+			top = p
+		}
+	}
+	return top
 }
 
 // topByOps returns the highest-ops entry (stable on ties by PID for determinism).
