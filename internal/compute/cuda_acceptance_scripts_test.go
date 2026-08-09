@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestGPUAcceptanceScriptsDoNotRequireHOME(t *testing.T) {
+func TestGPUAcceptanceScriptsResolveCleanEnvironmentToolkit(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join("..", "..", "tools", "run_*_acceptance_on_gpu.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -20,8 +20,12 @@ func TestGPUAcceptanceScriptsDoNotRequireHOME(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(data), "${CUDA_HOME:-$HOME/") {
-			t.Errorf("%s expands unset HOME under `set -u`; use ${HOME:-fallback} or a system-toolkit fallback", filepath.Base(path))
+		script := string(data)
+		if strings.Contains(script, "${CUDA_HOME:-$HOME/") {
+			t.Errorf("%s expands unset HOME under `set -u`", filepath.Base(path))
+		}
+		if !strings.Contains(script, "[ -x /usr/local/cuda/bin/nvcc ]") {
+			t.Errorf("%s does not probe the standard CUDA toolkit outside PATH", filepath.Base(path))
 		}
 	}
 }

@@ -71,13 +71,15 @@ NVCC="$CUDA_HOME/bin/nvcc"
 if [ ! -x "$NVCC" ]; then
   if command -v nvcc >/dev/null 2>&1; then
     NVCC="$(command -v nvcc)"
-    CUDA_HOME="$(dirname "$(dirname "$NVCC")")"
-    echo "[926] using system nvcc at $NVCC (CUDA_HOME=$CUDA_HOME)"
+  elif [ -x /usr/local/cuda/bin/nvcc ]; then
+    NVCC=/usr/local/cuda/bin/nvcc
   else
-    echo "[926] FAIL: no nvcc at $NVCC and none on PATH — this is not a CUDA node." >&2
+    echo "[926] FAIL: no CUDA toolkit at $CUDA_HOME, /usr/local/cuda, or on PATH." >&2
     echo "[926] Run the CUDA-toolchain setup first (see internal/compute/setup_cuda_wsl.sh)." >&2
     exit 3
   fi
+  CUDA_HOME="$(dirname "$(dirname "$NVCC")")"
+  echo "[926] using system nvcc at $NVCC (CUDA_HOME=$CUDA_HOME)"
 fi
 
 # include / lib / rpath from whichever CUDA dirs actually exist (micromamba vs DLVM/DGX).
