@@ -500,6 +500,14 @@ def classify_opencode_probe(result: dict[str, Any], *, base_url: str = "",
                 "block_reason": (f"provider quota exhausted; resets {reset}" if reset
                                  else "provider quota exhausted"),
                 "reset": reset, "weekly": (windows or {}).get("weekly")}
+    # A relay can pass through an upstream vendor's 401. Fence that borrowed status
+    # before the durable auth arm so a still-valid seat remains retryable.
+    lowered_body = (body or "").lower()
+    if status == 401 and any(pattern in lowered_body for pattern in (
+            "blocked by upstream provider", "request blocked by upstream")):
+        return {"status": "APIERR", "block_kind": "apierr",
+                "block_reason": "relay request blocked by upstream provider",
+                "reset": None, "weekly": None}
     if status in (401, 403) or (body and fleet_session_signals.is_auth_error(body)):
         kind = fleet_session_signals.auth_block_kind(body) if body else "auth"
         st = {"access": "ACCESS", "credit": "CREDIT"}.get(kind, "AUTH")
