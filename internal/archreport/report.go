@@ -135,7 +135,7 @@ func parseContract(path string) (map[string]int, []string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("parse architecture contract %s: %w", path, err)
 	}
 	tiers := map[string]int{}
 	var names []string

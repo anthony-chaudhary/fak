@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/archreport"
@@ -42,7 +43,7 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 
 func TestRunArchitectureTextNamesDependents(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := runArchitecture([]string{"--leaf", "archreport"}, &out, &errOut)
+	code := runArchitecture(&out, &errOut, []string{"--leaf", "archreport"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}

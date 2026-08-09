@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +143,99 @@ import _ "github.com/anthony-chaudhary/fak/internal/beta"
 	}
 	if scoped.Violations != 0 {
 		t.Fatalf("scoped violations=%d", scoped.Violations)
+	}
+}
+
+func TestAnalyzeAdversarialInputs(t *testing.T) {
+	tests := []struct {
+		name       string
+		contract   string
+		leaf       string
+		files      map[string]string
+		wantErr    string
+		wantDeps   []string
+		wantFloor  int
+		violations int
+	}{
+		{
+			name:     "malformed contract",
+			contract: "package architest\nvar tier = map[string]int{",
+			wantErr:  "parse architecture contract",
+		},
+		{
+			name:     "missing tier table",
+			contract: "package architest\nvar tierName=[]string{\"root\"}\n",
+			wantErr:  "missing tier or tierName",
+		},
+		{
+			name:     "unknown scoped leaf",
+			contract: "package architest\nvar tier=map[string]int{\"known\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
+			leaf:     "hostile-not-declared",
+			wantErr:  `leaf "hostile-not-declared" has no tier declaration`,
+		},
+		{
+			name:     "declared directory missing",
+			contract: "package architest\nvar tier=map[string]int{\"missing\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
+			wantErr:  "internal/missing",
+		},
+		{
+			name:     "malformed leaf source",
+			contract: "package architest\nvar tier=map[string]int{\"broken\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
+			files:    map[string]string{"internal/broken/broken.go": "package broken\nimport ("},
+			wantErr:  "broken.go",
+		},
+		{
+			name:     "deduplicates and collapses nested imports",
+			contract: "package architest\nvar tier=map[string]int{\"source\":1,\"target\":2}\nvar tierName=[]string{\"root\",\"primitive\",\"foundation-composite\"}\n",
+			leaf:     "source",
+			files: map[string]string{
+				"internal/source/a.go":      "package source\nimport _ \"github.com/anthony-chaudhary/fak/internal/target/subpackage\"\n",
+				"internal/source/b.go":      "package source\nimport _ \"github.com/anthony-chaudhary/fak/internal/target\"\n",
+				"internal/source/a_test.go": "package source\nimport _ \"github.com/anthony-chaudhary/fak/internal/ignored\"\n",
+				"internal/target/target.go": "package target\n",
+			},
+			wantDeps:   []string{"target"},
+			wantFloor:  2,
+			violations: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeArchitectureFixture(t, root, "internal/architest/architest_test.go", tt.contract)
+			for path, body := range tt.files {
+				writeArchitectureFixture(t, root, path, body)
+			}
+			r, err := Analyze(root, tt.leaf)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(filepath.ToSlash(err.Error()), tt.wantErr) {
+					t.Fatalf("err=%v want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(r.Leaves) != 1 {
+				t.Fatalf("leaves=%d report=%+v", len(r.Leaves), r)
+			}
+			if !reflect.DeepEqual(r.Leaves[0].Dependencies, tt.wantDeps) {
+				t.Fatalf("dependencies=%v want=%v", r.Leaves[0].Dependencies, tt.wantDeps)
+			}
+			if r.Leaves[0].ImportFloor != tt.wantFloor || r.Violations != tt.violations {
+				t.Fatalf("floor=%d violations=%d", r.Leaves[0].ImportFloor, r.Violations)
+			}
+		})
+	}
+}
+
+func writeArchitectureFixture(t *testing.T, root, path, body string) {
+	t.Helper()
+	p := filepath.Join(root, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+		t.Fatal(err)
 	}
 }
