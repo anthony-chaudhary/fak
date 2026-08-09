@@ -1,0 +1,148 @@
+// Package usagepreflight decides whether an outbound provider request may spend
+// the selected seat's quota. It is deliberately provider-neutral: providers
+// that expose usage implement Reader without coupling admission to 429 parsing.
+package usagepreflight
+
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
+// Policy controls behavior when known remaining quota is at or below Reserve.
+type Policy string
+
+const (
+	PolicyConfirm    Policy = "confirm"
+	PolicyAuto       Policy = "auto"
+	PolicyFailClosed Policy = "fail-closed"
+)
+
+// Action is the structured outcome emitted for every enabled preflight.
+type Action string
+
+const (
+	ActionProceed Action = "proceed"
+	ActionSwitch  Action = "switch-seat"
+	ActionRefuse  Action = "refuse"
+)
+
+var (
+	ErrConfirmationRequired = errors.New("usage preflight requires confirmation")
+	ErrReserveReached       = errors.New("usage preflight reserve reached")
+	ErrNoAlternateSeat      = errors.New("usage preflight found no alternate seat")
+)
+
+// Reading is a provider's latest usage observation. Remaining and Limit use the
+// same provider-defined unit. Known=false means unavailable or unreadable and
+// must fail open.
+type Reading struct {
+	Remaining int64
+	Limit     int64
+	Known     bool
+}
+
+// Reader obtains a remaining-quota reading. Implementations may use an existing
+// response cache or a provider usage endpoint. Reader errors fail open.
+type Reader interface {
+	Remaining(context.Context, string) (Reading, error)
+}
+
+// Selector chooses an eligible seat other than current. It must not mutate
+// reactive cooldown or seatpark backoff state.
+type Selector interface {
+	Alternate(context.Context, string) (string, bool)
+}
+
+// Record makes preflight saves and refusals measurable.
+type Record struct {
+	Seat           string `json:"seat"`
+	SelectedSeat   string `json:"selected_seat"`
+	Action         Action `json:"action"`
+	Policy         Policy `json:"policy"`
+	Remaining      int64  `json:"remaining,omitempty"`
+	Limit          int64  `json:"limit,omitempty"`
+	ReservePercent int    `json:"reserve_percent"`
+	UsageKnown     bool   `json:"usage_known"`
+	UsageReadError bool   `json:"usage_read_error,omitempty"`
+}
+
+type Recorder interface{ RecordUsagePreflight(context.Context, Record) }
+
+// Config is default-off. ReservePercent is inclusive: exactly the reserve
+// boundary is treated as reserve reached.
+type Config struct {
+	Enabled        bool
+	ReservePercent int
+	Policy         Policy
+}
+
+// Hook is the outbound admission seam. Call invokes send exactly once for the
+// admitted seat and never invokes it for a refused or replaced original seat.
+type Hook struct {
+	Config   Config
+	Reader   Reader
+	Selector Selector
+	Recorder Recorder
+}
+
+func (h Hook) Call(ctx context.Context, seat string, send func(context.Context, string) error) error {
+	selected, rec, err := h.Decide(ctx, seat)
+	if h.Config.Enabled && h.Recorder != nil {
+		h.Recorder.RecordUsagePreflight(ctx, rec)
+	}
+	if err != nil {
+		return err
+	}
+	return send(ctx, selected)
+}
+
+// Decide returns the seat to use and a structured decision.
+func (h Hook) Decide(ctx context.Context, seat string) (string, Record, error) {
+	rec := Record{Seat: seat, SelectedSeat: seat, Action: ActionProceed, Policy: h.Config.Policy, ReservePercent: h.Config.ReservePercent}
+	if !h.Config.Enabled {
+		return seat, rec, nil
+	}
+	if h.Reader == nil {
+		return seat, rec, nil
+	}
+
+	reading, err := h.Reader.Remaining(ctx, seat)
+	if err != nil || !reading.Known || reading.Limit <= 0 {
+		rec.UsageReadError = err != nil
+		return seat, rec, nil
+	}
+	rec.UsageKnown, rec.Remaining, rec.Limit = true, reading.Remaining, reading.Limit
+	reserve := h.Config.ReservePercent
+	if reserve < 0 {
+		reserve = 0
+	}
+	if reserve > 100 {
+		reserve = 100
+	}
+	// Multiplication avoids rounding ambiguity at the inclusive boundary.
+	if reading.Remaining*100 > reading.Limit*int64(reserve) {
+		return seat, rec, nil
+	}
+
+	switch h.Config.Policy {
+	case PolicyAuto:
+		if h.Selector != nil {
+			if alternate, ok := h.Selector.Alternate(ctx, seat); ok && alternate != "" && alternate != seat {
+				rec.Action, rec.SelectedSeat = ActionSwitch, alternate
+				return alternate, rec, nil
+			}
+		}
+		rec.Action = ActionRefuse
+		return seat, rec, ErrNoAlternateSeat
+	case PolicyConfirm:
+		rec.Action = ActionRefuse
+		return seat, rec, ErrConfirmationRequired
+	case PolicyFailClosed:
+		rec.Action = ActionRefuse
+		return seat, rec, ErrReserveReached
+	default:
+		rec.Action = ActionRefuse
+		return seat, rec, fmt.Errorf("unknown usage preflight policy %q", h.Config.Policy)
+	}
+}
