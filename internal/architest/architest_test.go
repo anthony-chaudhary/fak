@@ -43,6 +43,10 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
+	"citeverify":     2, // mechanical source-line claim verification; stdlib-only, off the hot path.
+	"genlock":        2, // generated-output input lock verification; stdlib-only, off the hot path.
+	"usagepreflight": 2, // remaining-quota admission calculation; stdlib-only, off the hot path.
+
 	"envconfiglint":        2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
 	"flowcredit":           2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
 	"stallpage":            2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
