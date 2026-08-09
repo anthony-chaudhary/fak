@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -95,6 +96,11 @@ func Shared(b []byte) abi.Ref { return Inline(b, abi.ScopeFleet, abi.TaintTainte
 // mailbox to a fixed, small footprint.
 const DefaultQueueCap = 1024
 
+const (
+	DefaultRateBurst  = 4096
+	DefaultRateWindow = time.Second
+)
+
 // Bus is a process-global, mutex+condvar mailbox: one ordered queue per
 // ChannelKey. Each queue is length-bounded (DefaultQueueCap by default; tune with
 // SetQueueCap) so an undrained mailbox cannot grow without bound. Construct with
@@ -105,6 +111,11 @@ type Bus struct {
 	cond   *sync.Cond
 	queues map[ChannelKey][]Message
 	seq    uint64
+
+	rateBurst  int
+	rateWindow time.Duration
+	now        func() time.Time
+	buckets    map[pairKey]tokenBucket
 
 	// queueCap is the per-channel length bound. A Send/Publish that would push a
 	// queue past it is refused (deny-as-value, ReasonRateLimited) rather than
@@ -126,9 +137,9 @@ type Bus struct {
 // NewBus builds an empty mailbox bus with the DefaultQueueCap per-channel bound.
 func NewBus() *Bus {
 	b := &Bus{
-		queues:   map[ChannelKey][]Message{},
-		subs:     map[ChannelKey]map[uint64]ChannelKey{},
-		queueCap: DefaultQueueCap,
+		queues: map[ChannelKey][]Message{}, subs: map[ChannelKey]map[uint64]ChannelKey{},
+		queueCap: DefaultQueueCap, rateBurst: DefaultRateBurst, rateWindow: DefaultRateWindow,
+		now: time.Now, buckets: make(map[pairKey]tokenBucket),
 	}
 	b.cond = sync.NewCond(&b.mu)
 	return b
@@ -145,6 +156,18 @@ func (b *Bus) SetQueueCap(n int) {
 	b.mu.Unlock()
 }
 
+// SetRateLimit tunes the per-sender-target token bucket. burst < 0 disables it.
+// Existing buckets are cleared so the new contract takes effect atomically.
+func (b *Bus) SetRateLimit(burst int, window time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rateBurst = burst
+	if window > 0 {
+		b.rateWindow = window
+	}
+	b.buckets = make(map[pairKey]tokenBucket)
+}
+
 // queueFullLocked reports whether the queue for `to` is at/over the length bound
 // and a further enqueue must be refused. The caller must hold b.mu.
 func (b *Bus) queueFullLocked(to ChannelKey) bool {
@@ -158,6 +181,58 @@ func (b *Bus) queueFullLocked(to ChannelKey) bool {
 // package reuses the closed reason set, never widening it).
 func queueFullVerdict() abi.Verdict {
 	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited, By: "a2achan/cap"}
+}
+
+type pairKey struct {
+	from string
+	to   ChannelKey
+}
+type tokenBucket struct {
+	tokens  float64
+	updated time.Time
+}
+
+func rateLimitedVerdict() abi.Verdict {
+	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited, By: "a2achan/rate"}
+}
+
+func (b *Bus) takeRateToken(from string, to ChannelKey) bool {
+	if b.rateBurst < 0 {
+		return true
+	}
+	now := b.now()
+	key := pairKey{from, to}
+	bucket, ok := b.buckets[key]
+	if !ok {
+		bucket = tokenBucket{tokens: float64(b.rateBurst), updated: now}
+	}
+	if elapsed := now.Sub(bucket.updated); elapsed > 0 {
+		bucket.tokens += elapsed.Seconds() / b.rateWindow.Seconds() * float64(b.rateBurst)
+		if bucket.tokens > float64(b.rateBurst) {
+			bucket.tokens = float64(b.rateBurst)
+		}
+		bucket.updated = now
+	}
+	if bucket.tokens < 1 {
+		b.buckets[key] = bucket
+		return false
+	}
+	bucket.tokens--
+	b.buckets[key] = bucket
+	return true
+}
+
+func (b *Bus) refundRateToken(from string, to ChannelKey) {
+	if b.rateBurst < 0 {
+		return
+	}
+	key := pairKey{from, to}
+	bucket := b.buckets[key]
+	bucket.tokens++
+	if bucket.tokens > float64(b.rateBurst) {
+		bucket.tokens = float64(b.rateBurst)
+	}
+	b.buckets[key] = bucket
 }
 
 // Default is the process-global bus shared by every in-kernel agent in one
@@ -179,7 +254,13 @@ func (b *Bus) Send(ctx context.Context, from string, to ChannelKey, body abi.Ref
 		return v
 	}
 	b.mu.Lock()
+	if !b.takeRateToken(from, to) {
+		b.mu.Unlock()
+		atomic.AddInt64(&b.denied, 1)
+		return rateLimitedVerdict()
+	}
 	if b.queueFullLocked(to) {
+		b.refundRateToken(from, to)
 		b.mu.Unlock()
 		atomic.AddInt64(&b.denied, 1)
 		return queueFullVerdict()

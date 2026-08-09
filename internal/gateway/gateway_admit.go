@@ -272,6 +272,18 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 					s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
 				}
 			}
+			// Deposit the SAME admitted result into the toolproc reuse cache (#5119),
+			// the other half of the loop whose serve side sits in
+			// adjudicateProposedServed. Same ALLOW-only gate as the vDSO fill above —
+			// a quarantined or transformed result never becomes servable bytes — but
+			// carried on its own opt-in (SetToolprocReuse), because the two probes key
+			// on different things: the vDSO on the tool NAME, this on the command
+			// CONTENT. Unarmed, this is one lock-free map probe.
+			if wv.Kind == "ALLOW" {
+				if orig, ok := callByID[messages[i].ToolCallID]; ok {
+					s.reuseOffer(orig.Function.Name, orig.Function.Arguments, messages[i].Content)
+				}
+			}
 			return wv, content, rewrote
 		})
 		wv := rec.verdict

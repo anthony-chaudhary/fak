@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "guardcompactionwitness-3152",
+      "canonical": "guardCompactionWitness (durable per-session compaction-health row)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it.",
+      "distinction": "The post-hoc WITNESS OF RECORD: keyed by session id and readable with no live gateway anywhere. NOT the LIVE in-session verdict (#3099 / observeCompaction, the in-process metrics recorder that dies with the process) and NOT the honest shed ACCOUNTING (#3095 / warmWitness, which prices shed tokens against observed cache_read). Also not CompactSessionReport, which reconstructs compaction health by parsing a rollout transcript file -- this row is folded from the gateway's own counters at exit and changes nothing about how they are measured.",
+      "distinct_from": [
+        "cov5303-compact-session-report",
+        "cov5307-observe-compaction",
+        "witness-proof-warmwitness"
+      ],
+      "aliases": [],
+      "grounding": "guardCompactionWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -185,14 +185,12 @@ func runIdempotencySelfcheck(stdout, stderr io.Writer, argv []string) int {
 	// Attempt 1 lands and records; then its signal is "lost" (the hang).
 	store, err := idempotency.Open(ledger, idempotency.DefaultWindow)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak idempotency selfcheck: %v\n", err)
-		return 1
+		return idempotencySelfcheckFail(stderr, "", err)
 	}
 	key := idempotency.Key("issue-create", "epic-2093-file-child")
 	res1, replayed1, err := store.Do(key, "issue-create", fileIssue("idempotency keys"))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak idempotency selfcheck: attempt 1: %v\n", err)
-		return 1
+		return idempotencySelfcheckFail(stderr, "attempt 1: ", err)
 	}
 	fmt.Fprintf(stderr, "  attempt 1: applied=%v result=%q\n", !replayed1, res1)
 	if replayed1 {
@@ -202,13 +200,11 @@ func runIdempotencySelfcheck(stdout, stderr io.Writer, argv []string) int {
 	// The post-hang retry arrives in a fresh process → reopen the ledger.
 	store2, err := idempotency.Open(ledger, idempotency.DefaultWindow)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak idempotency selfcheck: %v\n", err)
-		return 1
+		return idempotencySelfcheckFail(stderr, "", err)
 	}
 	res2, replayed2, err := store2.Do(key, "issue-create", fileIssue("idempotency keys"))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak idempotency selfcheck: retry: %v\n", err)
-		return 1
+		return idempotencySelfcheckFail(stderr, "retry: ", err)
 	}
 	fmt.Fprintf(stderr, "  retry after hang: replayed=%v result=%q\n", replayed2, res2)
 	if !replayed2 {
@@ -225,8 +221,7 @@ func runIdempotencySelfcheck(stdout, stderr io.Writer, argv []string) int {
 	fresh := idempotency.Key("issue-create", "epic-2093-file-sibling")
 	res3, replayed3, err := store2.Do(fresh, "issue-create", fileIssue("timeout partial-state child"))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak idempotency selfcheck: fresh op: %v\n", err)
-		return 1
+		return idempotencySelfcheckFail(stderr, "fresh op: ", err)
 	}
 	fmt.Fprintf(stderr, "  fresh key: applied=%v result=%q\n", !replayed3, res3)
 	if replayed3 {
@@ -238,6 +233,15 @@ func runIdempotencySelfcheck(stdout, stderr io.Writer, argv []string) int {
 
 	return idempotencyVerdict(stdout, stderr, *asJSON, true,
 		"retry after hang replayed without double-filing; fresh key proceeded", filed)
+}
+
+// idempotencySelfcheckFail reports a selfcheck stage that could not RUN -- a ledger that
+// would not open, a store call that errored -- which is a different thing from a stage that
+// ran and gave the wrong answer (idempotencyVerdict records those). stage is the
+// "attempt 1: "-style prefix naming which step died, empty for the ledger opens.
+func idempotencySelfcheckFail(stderr io.Writer, stage string, err error) int {
+	fmt.Fprintf(stderr, "fak idempotency selfcheck: %s%v\n", stage, err)
+	return 1
 }
 
 func idempotencyVerdict(stdout, stderr io.Writer, asJSON, pass bool, detail string, filed []string) int {

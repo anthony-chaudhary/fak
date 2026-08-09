@@ -33,6 +33,17 @@ func gateDocPlacement(d *StagedDiff) ([]Finding, error) {
 	// Rule 1: root *.md not in the allowlist (over the touched ACMR set). Shared with the tree twin.
 	findings := rootMDPlacementFindings(d.StagedPaths)
 
+	// This gate judges MARKDOWN, not the whole staged set: root-level .md under rule 1 plus
+	// newly-added docs/notes/ notes under rule 2. Counting that union is what distinguishes a
+	// commit of forty docs from a commit of forty .go files, which today report identically (#5602).
+	judged := 0
+	for _, p := range d.StagedPaths {
+		norm := strings.ReplaceAll(p, "\\", "/")
+		if strings.HasSuffix(norm, ".md") && !strings.Contains(norm, "/") {
+			judged++
+		}
+	}
+
 	// Rule 2: a newly-added dated docs/notes/ note must be listed in INDEX.md.
 	index, _ := d.IndexMD() // missing INDEX.md => "" => everything reads as unlisted, matching the Python ([] on OSError) only when index exists
 	if index != "" {
@@ -44,6 +55,7 @@ func gateDocPlacement(d *StagedDiff) ([]Finding, error) {
 			if base == "README.md" {
 				continue
 			}
+			judged++
 			isDated := datedRE.MatchString(base) || strings.HasPrefix(base, "PLAN-")
 			if isDated && !strings.Contains(index, base) {
 				findings = append(findings, Finding{
@@ -53,6 +65,7 @@ func gateDocPlacement(d *StagedDiff) ([]Finding, error) {
 			}
 		}
 	}
+	d.NoteCandidates("DOC_PLACEMENT", judged, "staged markdown doc(s)")
 	return findings, nil
 }
 

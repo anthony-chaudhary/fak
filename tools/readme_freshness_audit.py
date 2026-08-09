@@ -29,6 +29,10 @@ The checks split into two tiers.
   headline_authority each bolded headline number is an authority row   WARN if not mirrored
   freshness_stamp    the <!-- readme-verified: DATE … --> marker is     WARN if absent/older
                        present and not older than --max-age-days (14)        than the window
+  showcase_sync      the OTHER front door (docs/showcase.html, the repo's  FAIL on any
+                       configured homepage) is linked from the README and       shortfall
+                       still agrees with it on installer, first run, the
+                       benchmark authority, and every version it quotes
   jargon_density     count first-screen expert terms with no plain gloss ADVISORY count only
 
 **Substance** — does the page *do its job* for the whole audience? Each is a set
@@ -84,6 +88,8 @@ the reader's first paste would have died on ``unknown verb``. When
 ``cmd/fak/main.go`` is unreadable (the tool run outside the repo) the check abstains
 to presence-only — a missing source of truth is not a README defect. The remaining
 affordances stay text-only by design; this is the beachhead, not the whole wall.
+``showcase_sync`` reuses that same dispatch set for the same reason: two front doors
+agreeing on a command only counts when the command is one the binary really has.
 
 The three operator front-page laws this enforces:
   1. SOTA-vs-us, never naive   -> naive_baseline FAIL
@@ -116,6 +122,15 @@ AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 # commands actually exist. Parsed live (never a hand-list) so the lcd_onramp
 # anti-gaming cross-check stays correct as verbs are added/renamed.
 MAIN_GO_REL = "cmd/fak/main.go"
+# The repository's OTHER front door. GitHub's repo-level homepage setting points at
+# the Pages copy of this file, so for a share of visitors it — not README.md — is the
+# first fak page they see, yet it is authored by hand and no check read it. See
+# check_showcase_sync.
+SHOWCASE_REL = "docs/showcase.html"
+# Benchmark datasets that stamp the fak version their numbers were measured at. The
+# showcase quotes one of those as-of versions in a chart caption; that is legitimate
+# and must NOT be mistaken for a stale product pin (see check_showcase_sync).
+BENCH_DATA_GLOB = "tools/*.data.json"
 
 # How long a freshness stamp stays "fresh" before we WARN.
 DEFAULT_MAX_AGE_DAYS = 14
@@ -167,6 +182,7 @@ WEIGHTS: dict[str, float] = {
     "naive_baseline": 1.0,
     "headline_authority": 0.75,
     "freshness_stamp": 0.75,
+    "showcase_sync": 1.0,
     "jargon_density": 0.5,
     # substance
     "guard_prominence": 1.5,
@@ -294,6 +310,44 @@ _LEAD_SIGNATURE_RE = re.compile(
     r"|drop-?in",
     re.IGNORECASE,
 )
+
+# --- the second front door (docs/showcase.html) ----------------------------
+# Raw-HTML reduction, in the ONE order that is correct (see html_text).
+_HTML_COMMENT_RE = re.compile(r"(?s)<!--.*?-->")
+_HTML_RAWTEXT_RE = re.compile(r"(?is)<(script|style)\b.*?</\1\s*>")
+_HTML_TAG_RE = re.compile(r"(?s)<[^>]+>")
+
+# The published one-line installer. Both front doors hand the reader this exact
+# command, so a drift here sends a homepage visitor at a different script than the
+# one the README stands behind.
+_INSTALL_CMD_RE = re.compile(r"curl\s+-fsSL\s+(\S+?)\s*\|\s*sh")
+
+# A `fak vX.Y.Z` version the showcase prints next to a number.
+_FAK_VERSION_RE = re.compile(r"\bfak\s+v(\d+\.\d+\.\d+)\b", re.IGNORECASE)
+
+# The as-of version a benchmark dataset stamps on its own numbers.
+_DATA_FAK_VERSION_RE = re.compile(r'"fak_version"\s*:\s*"v?(\d+\.\d+\.\d+)"')
+
+# The showcase must name the same single source of truth the README's headline
+# numbers are traced against, so both front doors answer to one authority doc.
+_AUTHORITY_LINK_RE = re.compile(re.escape(AUTHORITY_REL), re.IGNORECASE)
+
+
+def html_text(html: str) -> str:
+    """Reader-visible text of a raw HTML page (comments, script, style, tags out).
+
+    THE ORDER IS LOAD-BEARING. Comments are stripped FIRST because
+    ``docs/showcase.html``'s own header comment contains the literal string
+    ``<script>`` (it tells a maintainer which block to re-sync when the benchmark
+    data changes). Reducing script/style first therefore matches from *inside that
+    comment* all the way to the page's real ``</script>`` and swallows the entire
+    page — 42 KB in, 1 KB out. That failure is silent and it is the dangerous kind:
+    an empty extraction makes every cross-check below vacuously true, so the gate
+    would report a clean sync for a page it never actually read.
+    """
+    text = _HTML_COMMENT_RE.sub(" ", html)
+    text = _HTML_RAWTEXT_RE.sub(" ", text)
+    return _HTML_TAG_RE.sub(" ", text)
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +481,107 @@ def check_freshness_stamp(readme: str, *, today: _dt.date,
         }
     return {"check": "freshness_stamp", "status": "OK",
             "detail": f"verified {age}d ago (<= {max_age_days}d window)"}
+
+
+def check_showcase_sync(readme: str, showcase: str | None, *,
+                        version: str = "",
+                        dataset_versions: set[str] | None = None,
+                        dispatch: set[str] | None = None) -> dict[str, Any]:
+    """The OTHER front door cannot drift away from this one, or go unlinked.
+
+    GitHub's repo-level homepage setting points at the Pages copy of
+    ``docs/showcase.html``, so a meaningful share of visitors meet *that* page
+    first. It is hand-authored, it is not Markdown, and until this check existed
+    nothing read it: ``readme_freshness_audit`` audited only ``README.md``, and
+    ``internal/seoaeoscore`` opens the file solely to harvest its JSON-LD blocks
+    (its page scorer is ``.md``-only *by assertion* — see
+    ``seoaeoscore_test.go``'s ``published(root, "docs/showcase.html")`` case). Two
+    front doors, one of them invisible to the people tending the other.
+
+    This is the missing seam. Every affordance below is MECHANICAL — no judgment,
+    no prose grading — and each names a way the two doors could tell a visitor
+    different things:
+
+      linked_from_readme  the README names the showcase, so a maintainer editing
+                            the front page can see the other front door exists
+      install_matches     every ``curl … | sh`` installer the showcase publishes is
+                            one the README publishes too (rename install.sh and the
+                            homepage would keep pointing at the old script)
+      first_run_matches   a line-leading ``fak <verb>`` on the showcase is BOTH a
+                            verb the binary really dispatches AND one the README
+                            teaches — the same anti-gaming cross-check ``lcd_onramp``
+                            applies to the README, now applied to the homepage
+      authority_linked    the showcase names ``BENCHMARK-AUTHORITY.md``, so both
+                            doors answer to the one source ``headline_authority``
+                            already traces the README's numbers against
+      version_traced      every ``fak vX.Y.Z`` the showcase prints is either the
+                            current ``VERSION`` or the as-of version some in-repo
+                            benchmark dataset stamps on its own numbers. This is the
+                            subtle one: the chart caption's ``fak v0.30.0`` is NOT a
+                            stale pin — ``tools/hero_benchmark.data.json`` says the
+                            run was measured at 0.30.0, and quoting the measurement's
+                            version is correct. What is *not* correct is a version no
+                            dataset and no VERSION file stands behind, which is
+                            exactly what regenerating the dataset without re-syncing
+                            the page would produce.
+
+    Hygiene tier: ANY missing affordance is a FAIL, because each one is a concrete
+    thing the homepage would be saying that the repository does not back. When the
+    page cannot be read at all (``showcase is None`` — the tool run outside the
+    repo) the check ABSTAINS to WARN, the same posture ``lcd_onramp`` takes when
+    ``cmd/fak/main.go`` is unreadable: a missing source of truth is not a defect.
+    """
+    if showcase is None:
+        return {
+            "check": "showcase_sync", "status": "WARN",
+            "detail": (f"no {SHOWCASE_REL} to cross-check (run from the repo ROOT to "
+                       "audit the published homepage against this page)"),
+        }
+    text = html_text(showcase)
+    cur = _parse_version(version)
+
+    readme_installs = set(_INSTALL_CMD_RE.findall(readme))
+    page_installs = set(_INSTALL_CMD_RE.findall(text))
+
+    readme_verbs = set(_BARE_FAK_CMD_RE.findall(readme))
+    page_verbs = set(_BARE_FAK_CMD_RE.findall(text))
+    shared_verbs = page_verbs & readme_verbs
+    # With a known dispatch set a shared verb must also be REAL; without one (the
+    # source unreadable) abstain to "the two pages agree on some command".
+    real_shared = (shared_verbs & dispatch) if dispatch else shared_verbs
+
+    known_versions = set(dataset_versions or ())
+    if cur is not None:
+        known_versions.add("%d.%d.%d" % cur)
+    page_versions = set(_FAK_VERSION_RE.findall(text))
+    untraced_versions = sorted(page_versions - known_versions)
+
+    subs = {
+        "linked_from_readme": (SHOWCASE_REL in readme)
+        or (Path(SHOWCASE_REL).name in readme),
+        "install_matches": bool(page_installs) and page_installs <= readme_installs,
+        "first_run_matches": bool(real_shared),
+        "authority_linked": bool(_AUTHORITY_LINK_RE.search(showcase)),
+        "version_traced": not untraced_versions,
+    }
+    out = _grade_subs(
+        "showcase_sync", subs, fail_if_zero=True, warn_below=1.0,
+        label=(f"the configured homepage ({SHOWCASE_REL}) is linked from the README "
+               "and agrees with it"))
+    if out["items"]:
+        # Hygiene tier: a partially-synced front door is a required edit, not a
+        # judgment call, so any shortfall is a FAIL (not the _grade_subs WARN).
+        out["status"] = "FAIL"
+        bits = []
+        if untraced_versions:
+            bits.append("version(s) no dataset or VERSION backs: "
+                        + ", ".join(untraced_versions))
+        if page_installs - readme_installs:
+            bits.append("installer(s) the README does not publish: "
+                        + ", ".join(sorted(page_installs - readme_installs)))
+        if bits:
+            out["detail"] += " — " + "; ".join(bits)
+    return out
 
 
 def check_jargon_density(readme: str, *, first_screen_lines: int) -> dict[str, Any]:
@@ -1167,7 +1322,9 @@ def fak_dispatch_verbs(root: Path) -> set[str] | None:
 
 def run_checks(readme: str, version: str, authority: str, root: Path, *,
                today: _dt.date, max_age_days: int,
-               dispatch: set[str] | None = None) -> list[dict[str, Any]]:
+               dispatch: set[str] | None = None,
+               showcase: str | None = None,
+               dataset_versions: set[str] | None = None) -> list[dict[str, Any]]:
     """All checks over already-read text. The pure core; tests call this."""
     return [
         # hygiene — is the page correct?
@@ -1176,6 +1333,8 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_naive_baseline(readme),
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
+        check_showcase_sync(readme, showcase, version=version,
+                            dataset_versions=dataset_versions, dispatch=dispatch),
         check_jargon_density(readme, first_screen_lines=FIRST_SCREEN_LINES),
         # substance — does the page do its job for the whole audience?
         check_guard_prominence(readme, first_screen_lines=FIRST_SCREEN_LINES),
@@ -1204,9 +1363,33 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     version = _safe_read(root / VERSION_REL)
     authority = _safe_read(root / AUTHORITY_REL)
     dispatch = fak_dispatch_verbs(root)
+    # None (not "") when the second front door is absent, so check_showcase_sync can
+    # tell "no page to read" (abstain) apart from "an empty page" (a real defect).
+    showcase = _safe_read(root / SHOWCASE_REL) or None
     checks = run_checks(readme, version, authority, root,
-                        today=today, max_age_days=max_age_days, dispatch=dispatch)
+                        today=today, max_age_days=max_age_days, dispatch=dispatch,
+                        showcase=showcase,
+                        dataset_versions=bench_dataset_versions(root))
     return build_payload(workspace=str(root), checks=checks)
+
+
+def bench_dataset_versions(root: Path) -> set[str]:
+    """Every fak version an in-repo benchmark dataset stamps as its own as-of.
+
+    The showcase's chart caption prints ``fak v0.30.0`` beside the hero numbers.
+    That is not a stale product pin: ``tools/hero_benchmark.data.json`` declares
+    ``"fak_version": "0.30.0"`` as the version the run was measured at, and citing
+    the measurement's version is the honest thing to do. So ``version_traced``
+    accepts any version a dataset stands behind — and only those, plus the current
+    ``VERSION``. Regenerate the dataset at a new version without re-syncing the
+    page and the quoted version stops being backed by anything, which is precisely
+    the drift the check exists to catch.
+    """
+    out: set[str] = set()
+    for p in sorted(root.glob(BENCH_DATA_GLOB)):
+        for m in _DATA_FAK_VERSION_RE.finditer(_safe_read(p)):
+            out.add(m.group(1))
+    return out
 
 
 def _safe_read(path: Path) -> str:

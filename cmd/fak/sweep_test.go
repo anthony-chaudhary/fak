@@ -793,8 +793,8 @@ func TestRunSweepApplyRefusesOffLaneStamp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// Subject already carries a (fak gateway) stamp on a docs path -> mismatch -> refuse.
 	code := runSweepApply(&stdout, &stderr, root, plan, "docs", "docs: update x (fak gateway)", nil, 0, false)
-	if code != 3 {
-		t.Fatalf("exit = %d, want 3 (pre-commit refusal)", code)
+	if code != safecommit.ExitRefused {
+		t.Fatalf("exit = %d, want %d (a refusal on the merits, not retryable contention)", code, safecommit.ExitRefused)
 	}
 	if called {
 		t.Fatal("commitFn must NOT be called when the pre-lint refuses")
@@ -809,9 +809,9 @@ func TestRunSweepApplyValidation(t *testing.T) {
 	if code := runSweepApply(&out, &errb, t.TempDir(), plan, "docs", "", nil, 0, false); code != 2 {
 		t.Fatalf("missing -m: exit = %d, want 2", code)
 	}
-	// Unknown lane -> pre-commit refusal (3).
-	if code := runSweepApply(&out, &errb, t.TempDir(), plan, "gateway", "feat: x", nil, 0, false); code != 3 {
-		t.Fatalf("unknown lane: exit = %d, want 3", code)
+	// Unknown lane -> a refusal on the merits (4); retrying never invents the lane.
+	if code := runSweepApply(&out, &errb, t.TempDir(), plan, "gateway", "feat: x", nil, 0, false); code != safecommit.ExitRefused {
+		t.Fatalf("unknown lane: exit = %d, want %d", code, safecommit.ExitRefused)
 	}
 }
 

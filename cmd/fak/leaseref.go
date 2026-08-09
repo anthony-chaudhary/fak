@@ -114,15 +114,37 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       the source that makes a peer's lease (fetched into the local ref store)
       visible at admission. Pipe it: dos arbitrate ... --leases "$(fak leaseref live)".
 
-  fak leaseref liveness [--session ME] [--dir DIR]
+  fak leaseref liveness [--session ME] [--summary] [--dir DIR]
       Classify each LIVE lease by its OWNING SESSION's liveness (#2164):
       self | peer-live | peer-dead | peer-unknown, keyed on the session descriptor
       heartbeat at refs/fak/locks/session-<id> — never the ephemeral acquiring pid.
-      Emits [{...record, liveness, reclaimable, evidence}, ...]. FAIL-CLOSED:
+      Emits the JSON ARRAY [{...record, node, liveness, reclaimable, evidence,
+      evidence_kind}, ...]. evidence_kind is the machine-routable companion to the
+      evidence sentence — no-session-binding | self-session | no-descriptor |
+      terminal-stopped | heartbeat-lapsed | heartbeating — so a loop that wants to
+      REPAIR picks a remedy without pattern-matching prose. FAIL-CLOSED:
       only a POSITIVELY dead session (lapsed heartbeat or terminal STOPPED) is
       reclaimable; a heartbeating peer's lane is never stolen, and a lease with no
       session binding (or no descriptor) is peer-unknown, not reclaimable.
       --session ME tags your own leases self.
+      THE ARRAY IS THE DEFAULT and its rows keep their old keys, because the array
+      is a live contract (tools/issue_dispatch.py's cross-machine lane gate iterates
+      it and fails OPEN on any other top-level shape). The AGGREGATE (#5485) rides
+      two compatible channels instead: a one-line liveness_coverage banner on
+      STDERR on every default run, and --summary, which emits
+      {schema, summary, leases} on stdout — summary = {total, by_class,
+      by_evidence_kind, positive_evidence, liveness_coverage}, both histograms
+      zero-filled over their closed vocabularies.
+      HOW TO READ liveness_coverage: it is the fraction of live leases whose class
+      rests on an OBSERVED input rather than on an absence. 0.0 with total > 0 is
+      the case the field exists for — every row is an absence of evidence, which is
+      far more often a WIRING DEFECT IN THIS OBSERVER (nothing on the write path
+      publishes what the classification consumes, so every downstream verdict is
+      uninformative) than a fleet that genuinely went unclassifiable at once.
+      by_evidence_kind then names the remedy: all no-session-binding means acquirers
+      are not passing --session, all no-descriptor means 'fak leaseref
+      session-publish' is down. An EMPTY live set also reports 0.0 and is NOT that
+      signal — read total first.
 
   fak leaseref session-publish --session S [--host H] [--state RUNNING] [--ttl SEC] [--dir DIR]
       Publish/refresh a lightweight session descriptor at refs/fak/locks/session-S
@@ -145,9 +167,14 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       READ-ONLY staleness report over refs/fak/locks/*: list every lease, classify
       live-vs-expired against now, and emit the garden control-pane envelope
       (ok/verdict/reason) plus would_reap[] dry-run evidence: owner, lane, tree,
-      age, TTL threshold, and the exact expiry comparison that selected the stale
-      lease. Reaps NOTHING — verdict ACTION when an expired lease lingers is the
-      signal to run 'fak leaseref reap'. This is the member 'fak garden' folds.
+      age, the threshold that age was judged against, and the exact comparison
+      that selected the stale lease. A lease carrying NO TTL (--ttl 0, the
+      acquire default) cannot expire and so can never be reaped; those are
+      judged by AGE instead — never by the holder's pid, which names a
+      per-invocation CLI child and is dead even for a healthy lease — and
+      reported under age_stale[] / age_stale_ids, whose remedy is
+      'fak leaseref release ID', not the reaper. Reaps NOTHING — verdict ACTION
+      is the signal to act. This is the member 'fak garden' folds.
 
   fak leaseref acquire --id ID --holder H [--session S] [--tree GLOB ...] [--ttl SEC] [--dir DIR]
       FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
@@ -245,15 +272,48 @@ func runLeaserefLive(stdout, stderr io.Writer, argv []string) int {
 	return emitLeaserefJSON(stdout, stderr, leases, "live")
 }
 
+// leaserefLivenessSchema names the --summary envelope, in the same
+// fak.<verb>.<vN> shape as the audit verb's control-pane schema.
+const leaserefLivenessSchema = "fak.leaseref-liveness.v1"
+
+// leaserefLivenessReport is the OPT-IN (--summary) shape: the aggregate beside the very
+// rows it was folded from, so a reader never has to run the verb twice or trust that two
+// invocations saw the same ref namespace.
+type leaserefLivenessReport struct {
+	Schema  string                     `json:"schema"`
+	Summary leaseref.LivenessSummary   `json:"summary"`
+	Leases  []leaseref.ClassifiedLease `json:"leases"`
+}
+
 // runLeaserefLiveness is the #2164 witness: each LIVE lease tagged by its owning
 // session's liveness (self | peer-live | peer-dead | peer-unknown), keyed on the session
 // descriptor heartbeat — never the ephemeral acquiring pid. reclaimable is true ONLY on
 // peer-dead (a positively-dead session); everything else fails closed.
+//
+// #5485 wires the AGGREGATE (leaseref.SummarizeLiveness) onto this verb, and the shape
+// choice is load-bearing. The per-row array has a blind spot the rows themselves cannot
+// close: when nothing on the write path publishes the input this classification consumes,
+// every row comes back peer-unknown and the output is a complete, well-formed,
+// correctly-computed array in which every row is an ABSENCE of evidence — indistinguishable
+// from a healthy read, though one is a fleet state and the other is a wiring defect in THIS
+// observer that silently invalidates every verdict downstream. liveness_coverage is the
+// field that tells them apart.
+//
+// It is NOT promoted to a top-level object by default, because the array is a live
+// contract: tools/issue_dispatch.py's lease_ref_busy_lanes runs exactly this verb,
+// json.loads its stdout and rejects any non-list with "unexpected leaseref liveness shape"
+// — returning an EMPTY busy-lane set. That failure is silent and fails OPEN: the wave
+// planner would stop seeing cross-machine leases and schedule onto lanes a live peer holds.
+// A diagnostic must never be able to cause a lane collision, so the aggregate takes two
+// channels that cannot: --summary (opt-in, stdout, the full envelope) and, on the default
+// path where stdout is spoken for, a one-line banner on STDERR — which callers capture
+// separately and, in issue_dispatch.py's case, read only on a non-zero exit.
 func runLeaserefLiveness(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref liveness", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	session := fs.String("session", "", "this agent's own session id (its leases classify 'self')")
+	summary := fs.Bool("summary", false, "emit {schema, summary, leases} instead of the bare row array")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -264,7 +324,53 @@ func runLeaserefLiveness(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref liveness: %v\n", err)
 		return 1
 	}
-	return emitLeaserefJSON(stdout, stderr, rows, "liveness")
+	// One fold over the rows just classified — never a second read of the ref namespace,
+	// so the aggregate can never disagree with the rows printed beside it.
+	sum := leaseref.SummarizeLiveness(rows)
+	if *summary {
+		return emitLeaserefJSON(stdout, stderr, leaserefLivenessReport{
+			Schema:  leaserefLivenessSchema,
+			Summary: sum,
+			Leases:  rows,
+		}, "liveness")
+	}
+	code := emitLeaserefJSON(stdout, stderr, rows, "liveness")
+	fmt.Fprintln(stderr, leaserefCoverageBanner(sum))
+	return code
+}
+
+// leaserefCoverageBanner renders the one-line stderr companion to the default array: the
+// coverage number, and — in the one case that matters — what it means and who fixes it.
+//
+// It is a pure function of the summary so a test can assert the sentence without a repo,
+// and it says the remedy rather than only the ratio because the two absence kinds route to
+// DIFFERENT owners: no-session-binding is the acquirer (waiting never helps), no-descriptor
+// is the publisher. An empty live set is called out explicitly, since its 0.0 is an
+// undefined ratio reported as the zero value and NOT the wiring signal.
+func leaserefCoverageBanner(s leaseref.LivenessSummary) string {
+	const prefix = "fak leaseref liveness: "
+	if s.Total == 0 {
+		return prefix + "0 live lease(s); liveness_coverage is undefined for an empty live set (reported 0.0) and is NOT the wiring signal. --summary emits the aggregate as JSON."
+	}
+	head := fmt.Sprintf("%sliveness_coverage=%.2f (%d/%d live lease(s) classified on OBSERVED evidence); --summary emits the aggregate as JSON",
+		prefix, s.Coverage, s.PositiveEvidence, s.Total)
+	if s.PositiveEvidence > 0 {
+		return head + "."
+	}
+	var remedies []string
+	if n := s.ByEvidenceKind[leaseref.EvidenceNoBinding]; n > 0 {
+		remedies = append(remedies, fmt.Sprintf("%d %s (the ACQUIRER never bound a session — pass --session at acquire; waiting never helps)",
+			n, leaseref.EvidenceNoBinding))
+	}
+	if n := s.ByEvidenceKind[leaseref.EvidenceNoDescriptor]; n > 0 {
+		remedies = append(remedies, fmt.Sprintf("%d %s (the PUBLISHER is absent or died — start/repair `fak leaseref session-publish`)",
+			n, leaseref.EvidenceNoDescriptor))
+	}
+	warn := head + ". WARNING: every live lease rests on an ABSENCE of evidence — far more often a WIRING DEFECT IN THIS OBSERVER, which leaves every verdict above uninformative, than a fleet that genuinely went unclassifiable at once"
+	if len(remedies) > 0 {
+		warn += "; by_evidence_kind: " + strings.Join(remedies, ", ")
+	}
+	return warn + "."
 }
 
 func runLeaserefSessionPublish(stdout, stderr io.Writer, argv []string) int {
@@ -405,7 +511,23 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 // (ok/verdict/reason) so the `fak garden` bundle can fold it. It REAPS NOTHING — deleting an
 // expired lease stays the explicit `fak leaseref reap` verb, kept separate from this audit so a
 // read-only garden tick never mutates the cross-machine lock state. ok is always true (reporting
-// is the pass working); verdict is ACTION only when an expired lease lingers, the signal to reap.
+// is the pass working); verdict is ACTION when there is something to act on.
+//
+// THREE CONDITIONS TRIP ACTION, and they do not share a remedy. A TTL-expired lease and an
+// expired session descriptor are both collected by `fak leaseref reap`. The third —
+// a TTL-LESS lease past the age floor (leaserefNoTTLStaleAgeS) — is not: Record.Expired
+// short-circuits false at ttl<=0, so it never enters Live's expired partition and Reap can
+// never delete it. Before this rung such a lease was reported `stale=false, TTL_LIVE` forever
+// while the lane it names stayed permanently refused, which is why the fleet accumulated
+// 18 wedged lanes with nothing anywhere reporting them. It is now counted and named on its
+// own keys (age_stale_count / age_stale_ids / age_stale) with the remedy that works,
+// `fak leaseref release <id>`, spelled out in the reason.
+//
+// THE RESIDUAL, stated rather than hidden: internal/gardenbundle maps this member to ActReap,
+// so an ACTION driven only by age-stale ghosts still makes the garden tick run the reaper,
+// which will collect none of them and report reaping 0. The reason string says so in words.
+// Making them collectable is a lease-DELETING change to the reaper and is deliberately not
+// bundled with a read-only detector.
 func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak leaseref audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -437,20 +559,32 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref audit: %v\n", serr)
 		return 1
 	}
-	var liveIDs, expiredIDs []string
-	var liveRows, expiredRows []map[string]any
+	var liveIDs, expiredIDs, ageStaleIDs []string
+	var liveRows, expiredRows, ageStaleRows []map[string]any
 	for _, r := range recs {
 		if r.Expired(now) {
 			expiredIDs = append(expiredIDs, r.ID)
 			expiredRows = append(expiredRows, leaserefAuditLeaseRow(r, now, true))
-		} else {
-			liveIDs = append(liveIDs, r.ID)
-			liveRows = append(liveRows, leaserefAuditLeaseRow(r, now, false))
+			continue
+		}
+		row := leaserefAuditLeaseRow(r, now, false)
+		liveIDs = append(liveIDs, r.ID)
+		liveRows = append(liveRows, row)
+		// A TTL-less lease past the age floor is un-expired by the TTL rule and therefore
+		// still counted live — the live/expired partition keeps meaning exactly what it
+		// always meant — but it is now ALSO reported as stale by age. It is deliberately
+		// kept OUT of would_reap: `fak leaseref reap` provably cannot collect it (Reap
+		// deletes only Live's expired partition, which a ttl<=0 record can never enter),
+		// and a dry-run that promised a deletion the reaper will not perform would be a
+		// worse lie than the silence this rung replaces.
+		if s, _ := row["stale"].(bool); s {
+			ageStaleIDs = append(ageStaleIDs, r.ID)
+			ageStaleRows = append(ageStaleRows, row)
 		}
 	}
 	verdict := "OK"
 	reason := fmt.Sprintf("%d live lease(s), 0 expired under refs/fak/locks/*", len(liveIDs))
-	if len(expiredIDs) > 0 || len(expiredDescriptorIDs) > 0 {
+	if len(expiredIDs) > 0 || len(expiredDescriptorIDs) > 0 || len(ageStaleIDs) > 0 {
 		verdict = "ACTION"
 		parts := []string{fmt.Sprintf("%d live, %d EXPIRED lease(s)", len(liveIDs), len(expiredIDs))}
 		if len(expiredIDs) > 0 {
@@ -460,6 +594,12 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 			parts = append(parts, fmt.Sprintf("%d EXPIRED session descriptor(s)", len(expiredDescriptorIDs)))
 		}
 		reason = strings.Join(parts, ", ") + " under refs/fak/locks/* — run `fak leaseref reap`"
+		if len(ageStaleIDs) > 0 {
+			// Named separately from the reapable set, with the remedy that actually works.
+			// The reaper is not it, and saying so here is the whole point of the rung.
+			reason += fmt.Sprintf("; %d TTL-less lease(s) stale by age >= %ds (%s) — `reap` cannot collect these, release each with `fak leaseref release <id>`",
+				len(ageStaleIDs), leaserefNoTTLStaleAgeS, strings.Join(ageStaleIDs, ", "))
+		}
 	}
 	env := map[string]any{
 		"schema":                   "fak.leaseref-audit-control-pane.v1",
@@ -474,10 +614,71 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 		"live_descriptor_count":    len(liveDescriptors),
 		"expired_descriptor_count": len(expiredDescriptorIDs),
 		"expired_descriptor_ids":   expiredDescriptorIDs,
+		// The age rung's own readout, strictly additive: every key above keeps its
+		// pre-existing meaning and value.
+		"age_stale_count":          len(ageStaleIDs),
+		"age_stale_ids":            ageStaleIDs,
+		"age_stale":                ageStaleRows,
+		"no_ttl_stale_age_seconds": leaserefNoTTLStaleAgeS,
 	}
 	return emitLeaserefJSON(stdout, stderr, env, "audit")
 }
 
+// leaserefNoTTLStaleAgeS is the AGE bound the audit judges a TTL-LESS lease by, in
+// seconds. It is the second half of a promise this row already made and did not keep:
+// the row has always emitted an `age_seconds` and an `age_threshold_seconds`, but the
+// threshold was just an echo of Record.TTLSeconds — which is 0 on every lease taken
+// through `fak leaseref acquire` (its --ttl default is "0 = no expiry"). So the one
+// comparison the field names could never fire, and a TTL-less lease reported
+// `stale=false, reason=TTL_LIVE` no matter how old it was. That is not a cosmetic gap:
+// Record.Expired short-circuits false at ttl<=0, Live therefore never puts such a record
+// in its expired partition, and Reap — which deletes only what Live called expired —
+// can never collect it, so the lane it names is refused for the life of the repository
+// with nothing anywhere reporting it. Measured on this workspace's own lane journal:
+// ttl null on 60 of 60 acquires, 60 ACQUIRE against 42 RELEASE, so 18 lanes wedged, the
+// newest of them over a week old (docs/notes/DOWNSTREAM-REVIEW-VERIFIED-2026-08-05.md §4).
+//
+// WHY AGE, AND EXPLICITLY NOT PID. A lease record carries no pid at all, and that is
+// deliberate: the acquiring process is a per-invocation CLI child that dies almost
+// immediately, so "its pid is dead" is true of a perfectly healthy lease and a pid probe
+// would report every live lane in the fleet as abandoned (internal/leaseref/liveness.go
+// states the same rule for the session classifier). Age against a floor is the
+// conservative proxy that has no such failure mode — the identical argument
+// internal/leaseref/lockfile.go already makes for orphaned .lock FILES, applied here to
+// the lease RECORD it never covered.
+//
+// WHY 24 HOURS. It must sit far above every legitimate un-renewed hold. The longest one
+// in the tree is a dispatch worker's lane lease at WorkerTimeoutS + LeaseTTLMarginS
+// (~40 min), and anything with a real TTL is judged by that TTL and never reaches this
+// rung at all. A day is ~36x the longest legitimate hold, well under the observed
+// week-plus wedge, and a holder still working after a day without a single renew has
+// nothing left that can distinguish it from a ghost.
+const leaserefNoTTLStaleAgeS = int64(24 * 60 * 60)
+
+// The closed reason vocabulary of an audit row — the `--json` contract a control pane
+// routes on, in the same shape as leaseref's Reason*/Liveness* families. TTL_* are the
+// pre-existing pair (unchanged, byte for byte, for any lease carrying a TTL); NO_TTL_*
+// are the age rung, reached only when ttl_seconds <= 0.
+const (
+	leaserefReasonTTLLive    = "TTL_LIVE"            // has a TTL, not yet lapsed
+	leaserefReasonTTLExpired = "TTL_EXPIRED"         // has a TTL and it lapsed: reapable
+	leaserefReasonNoTTLYoung = "NO_TTL_YOUNG"        // no TTL, but too young (or undatable) to call abandoned
+	leaserefReasonNoTTLStale = "NO_TTL_AGE_EXCEEDED" // no TTL and older than the age floor: abandoned
+)
+
+// leaserefAuditLeaseRow renders one lease as an audit row: who holds it, how much age it
+// has accumulated, the threshold that age was judged against, and the closed
+// reason/evidence pair naming exactly which comparison decided.
+//
+// TWO RULES, because a lease need not carry a TTL. `expired` is the caller's TTL verdict
+// (leaseref.Record.Expired) and owns every lease with ttl_seconds > 0 — those rows are
+// unchanged. A lease with ttl_seconds <= 0 has no expiry at all, so it falls to the age
+// rung: stale once its age reaches leaserefNoTTLStaleAgeS, and NEVER on the pid or the
+// holder string (see that const for why a pid probe is the wrong test).
+//
+// FAILS CLOSED on unknown age: a record with no acquired/renewed stamp at all has no age
+// to compare, so it stays not-stale rather than being called abandoned on absent evidence
+// — the same posture ClassifyLiveness takes toward a missing session descriptor.
 func leaserefAuditLeaseRow(r leaseref.Record, now time.Time, expired bool) map[string]any {
 	active := r.AcquiredAt
 	if r.RenewedAt > active {
@@ -494,18 +695,35 @@ func leaserefAuditLeaseRow(r leaseref.Record, now time.Time, expired bool) map[s
 	if r.TTLSeconds > 0 && active > 0 {
 		expiresAt = active + r.TTLSeconds
 	}
-	reason := "TTL_LIVE"
-	evidence := "ttl_seconds<=0 so the lease has no expiry threshold"
-	if r.TTLSeconds > 0 {
-		evidence = fmt.Sprintf("now_unix=%d >= active_unix=%d + ttl_seconds=%d (expires_at_unix=%d)",
+	stale := expired
+	threshold := r.TTLSeconds
+	reason := leaserefReasonTTLLive
+	evidence := ""
+	switch {
+	case r.TTLSeconds > 0:
+		evidence = fmt.Sprintf("now_unix=%d < active_unix=%d + ttl_seconds=%d (expires_at_unix=%d)",
 			now.Unix(), active, r.TTLSeconds, expiresAt)
-		if !expired {
-			evidence = fmt.Sprintf("now_unix=%d < active_unix=%d + ttl_seconds=%d (expires_at_unix=%d)",
+		if expired {
+			reason = leaserefReasonTTLExpired
+			evidence = fmt.Sprintf("now_unix=%d >= active_unix=%d + ttl_seconds=%d (expires_at_unix=%d)",
 				now.Unix(), active, r.TTLSeconds, expiresAt)
 		}
-	}
-	if expired {
-		reason = "TTL_EXPIRED"
+	case active <= 0:
+		threshold = leaserefNoTTLStaleAgeS
+		reason = leaserefReasonNoTTLYoung
+		evidence = "ttl_seconds<=0 (no expiry) and the record carries no acquired/renewed stamp, so its age is unknown — fails closed to not stale"
+	default:
+		threshold = leaserefNoTTLStaleAgeS
+		if age >= threshold {
+			stale = true
+			reason = leaserefReasonNoTTLStale
+			evidence = fmt.Sprintf("ttl_seconds<=0 (no expiry) and age_seconds=%d >= age_threshold_seconds=%d (now_unix=%d, active_unix=%d) — judged by age, never by the holder's pid",
+				age, threshold, now.Unix(), active)
+			break
+		}
+		reason = leaserefReasonNoTTLYoung
+		evidence = fmt.Sprintf("ttl_seconds<=0 (no expiry) and age_seconds=%d < age_threshold_seconds=%d (now_unix=%d, active_unix=%d) — too young to call abandoned",
+			age, threshold, now.Unix(), active)
 	}
 	return map[string]any{
 		"id":                    r.ID,
@@ -515,13 +733,13 @@ func leaserefAuditLeaseRow(r leaseref.Record, now time.Time, expired bool) map[s
 		"node":                  r.HolderNode(),
 		"tree":                  append([]string(nil), r.TreeGlobs...),
 		"age_seconds":           age,
-		"age_threshold_seconds": r.TTLSeconds,
+		"age_threshold_seconds": threshold,
 		"ttl_seconds":           r.TTLSeconds,
 		"active_unix":           active,
 		"acquired_unix":         r.AcquiredAt,
 		"renewed_unix":          r.RenewedAt,
 		"expires_at_unix":       expiresAt,
-		"stale":                 expired,
+		"stale":                 stale,
 		"reason":                reason,
 		"evidence":              evidence,
 	}

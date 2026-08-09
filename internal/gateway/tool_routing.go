@@ -756,3 +756,33 @@ func (s *Server) TransientWireErrorSnapshot() uint64 {
 	defer s.metrics.upstreamErrMu.Unlock()
 	return s.metrics.upstreamErrors["transport"]
 }
+
+// UpstreamErrorKindsSnapshot returns a copy of the FULL cumulative upstream-error tally by
+// kind — every label upstreamErrorKind mints ("stalled", "oom", "unreachable",
+// "rate_limited", "auth", "forbidden", "overloaded", "status_4xx", "status_5xx",
+// "transport", "other"), not the two-kind rotation subset (RotationEvidenceSnapshot) or the
+// single transport scalar (TransientWireErrorSnapshot). It is the accessor the durable
+// gateway-usage ledger reads at session teardown (#5487): the kind the classifier already
+// computes was process-local — an in-memory /metrics counter plus a stderr FAILED line —
+// so under `fak guard`, where the gateway is a per-invocation process, a stall left no
+// trace once the wrapped command exited.
+//
+// Returns nil (not an empty map) when nothing failed, so the caller's omitempty ledger
+// field stays ABSENT rather than writing an empty object: absent reads NOT INSTRUMENTED,
+// and a pre-field row must stay byte-identical. A nil server or metrics likewise returns
+// nil, so a caller may snapshot unconditionally.
+func (s *Server) UpstreamErrorKindsSnapshot() map[string]uint64 {
+	if s == nil || s.metrics == nil {
+		return nil
+	}
+	s.metrics.upstreamErrMu.Lock()
+	defer s.metrics.upstreamErrMu.Unlock()
+	if len(s.metrics.upstreamErrors) == 0 {
+		return nil
+	}
+	out := make(map[string]uint64, len(s.metrics.upstreamErrors))
+	for k, v := range s.metrics.upstreamErrors {
+		out[k] = v
+	}
+	return out
+}

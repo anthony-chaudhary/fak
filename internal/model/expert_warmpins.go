@@ -398,7 +398,10 @@ func (p *ExpertPinSet) unpinnedByHeatDesc() []expertUsageKey {
 // WarmStartPins gives the ring an online-learning pin-set warm-started from the summed histogram: the
 // top-budget experts of the workload prior start pinned. It is the ring-side entry to the axis #4358
 // targets — the ring's `pinned` boolean was static per call; now a durable, workload-personalized set
-// backs it. Off the live serve path (matMulStaged does not yet consult the set — the #2726 follow-on).
+// backs it. ON the live serve path as of #5613: weightHALStagedBounded (expert_ring_hal.go:113)
+// computes matMulStaged's `pinned` from this set per routed expert, so the pool's
+// pinned-never-evicted invariant protects the warm hot-set. See paging_ring.go's `pins` field doc,
+// which has carried the corrected wiring status since #5613 while this line still denied it.
 func (r *pagedRing) WarmStartPins(hist *ExpertUsageHistogram, budget int) {
 	r.pins = WarmStartExpertPins(hist, budget)
 }

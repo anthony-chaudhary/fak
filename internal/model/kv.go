@@ -11,7 +11,19 @@ import (
 // prefix, so only the suffix needs prefilling (real prefix reuse). For
 // GLM-MoE-DSA the clone carries the DSA attention/index cache instead of the dense
 // GQA K/V rows.
+//
+// It refuses, by name, an architecture whose session state is NOT the KVCache (#5548). A
+// recompute session carries its prefix as a token history and leaves the cache empty, so
+// this clone would hand back a session that has ingested nothing while its caller believes
+// it holds the prefix — and then prefills only the suffix. Nothing downstream can catch
+// that: an empty cache is a well-formed zero-length prefix at every consumer. The refusal
+// is loud for the same reason requireGemma4Session's is: a wrong answer with no error is
+// the failure this whole family of guards exists to prevent.
 func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
+	if !m.Cfg.KVPrefixReuseSupported() {
+		panic("model: SessionFromPrefix is not available for architecture " + m.Cfg.archFamilyKey() +
+			": its session state is the token history, not the KV cache, so a cache clone carries no prefix")
+	}
 	return &Session{M: m, Cache: prefix.Clone()}
 }
 
@@ -132,6 +144,62 @@ type Session struct {
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
 	halW map[string]compute.Tensor
+	// ExpertRingBytes bounds the DEVICE residency of ROUTED expert weights (`.mlp.experts.N.*`) at
+	// this many bytes, staging them through a pagedRing (expert_ring_hal.go, #5611) instead of the
+	// never-evicting halW memoizer above. It is what makes the ACTIVATED expert set a bounded object:
+	// a MoE checkpoint activates ~3% of its experts per token, so a budget far below the expert bulk
+	// still serves the working set, and the coldest expert is evicted rather than accumulated. Dense,
+	// attention, router, lm_head and SHARED-expert weights are unaffected — they are activated every
+	// token and keep permanent residency. 0 (the default) disables the ring entirely and leaves every
+	// path byte-for-byte unchanged.
+	ExpertRingBytes int64
+	// ExpertPinBudget is how many routed experts the ring may hold PINNED — exempt from LRU eviction
+	// — chosen as the hottest of the persisted cross-session usage prior and drifted between turns by
+	// ExpertRingEndTurn (expert_ring_pins.go, #5613). It buys back the cold page-in a hot expert
+	// otherwise pays after every eviction and every restart. It must stay well under the ring's own
+	// capacity in experts: a pin-set as large as the ring leaves no victims and the ring degrades to
+	// a memoizer that refuses new work. 0 (the default) is plain LRU.
+	ExpertPinBudget int
+	// ExpertUsagePath is where this session dumps its routed-expert usage histogram at each turn
+	// boundary and warm-starts its pin-set from at the first staging. A missing file is the cold
+	// first run, not an error — the run BUILDS the prior a later one starts from, which is why a
+	// path alone (with no pin budget) is still useful. "" disables persistence entirely; a caller
+	// folding several sessions' dumps sums them with SumExpertUsageHistograms and points here at the
+	// result.
+	ExpertUsagePath string
+	// ExpertRingEvict selects how the ring ranks eviction victims among its UNPINNED residents
+	// (expert_ring_policy.go, #5615). The zero value is LRU — polymodel's own choice, which the ring
+	// has always inherited and which is a default rather than a finding. Promote the value-aware
+	// candidate only from a measured verdict on this workload's own trace
+	// (SelectExpertRingEvictPolicy); it is fixed for the ring's life, because switching mid-flight
+	// would score one window under two policies.
+	ExpertRingEvict ExpertRingEvictPolicy
+	// ExpertPrefetch selects whether each MoE layer's activated set is staged into the ring up front
+	// (the default, expert_ring_prefetch.go, #5614) or discovered one expert at a time as the GEMMs
+	// reach for it. Inert without a ring, like every knob above it.
+	ExpertPrefetch ExpertPrefetchMode
+	// expertRing is the bounded routed-expert ring, built lazily on the first routed-expert staging
+	// when ExpertRingBytes > 0 and freed by Close. nil on every session that never declared a budget.
+	// When sharedRing is set it points at THAT ring instead, so every routed-expert path — demand,
+	// prefetch, telemetry — reads a shared ring by exactly the rule it read a private one by.
+	expertRing *pagedRing
+	// sharedRing is the cross-agent routed-expert residency this session attached to (R7/#5618,
+	// expert_ring_shared.go), nil for the per-conversation default. It is what makes Close DETACH
+	// rather than free: the bytes belong to the (model, device) pair, not to this conversation.
+	//
+	// Only routed-expert WEIGHT residency is shared. KV cache, conversation state and halW stay
+	// per-session — the safety property SharedExpertRing.Attach enforces by refusing a session over a
+	// different *Model or Backend.
+	sharedRing *SharedExpertRing
+	// ringAgent is this session's identity in the shared ring's coalescing ledger; empty when private.
+	ringAgent string
+	// ringDepth is the reentrancy depth of the shared-ring lock span this session currently holds (see
+	// Session.ringEnter). It needs no synchronization of its own: a Session is single-goroutine, so
+	// only the goroutine running its forward can ever touch it.
+	ringDepth int
+	// expertPinErr retains a warm-start load failure until the next turn boundary reports it: a
+	// corrupt usage dump must degrade the session to a cold start, not fail it, but must not vanish.
+	expertPinErr error
 	// halStep counts tokens run through the HAL (diagnostic / legacy warm-up counter).
 	halStep int
 	// halLogitsWarm gates CUDA-graph capture: it flips true only after one FULL
@@ -204,6 +272,23 @@ type Session struct {
 	// host) and the forward stays byte-for-byte the resident path. See splitKernel.
 	CPUOffloadExperts bool
 
+	// ExpertSpillLayers GRADES CPUOffloadExperts (#5612): with the split on, spill only the FIRST N
+	// MoE layers' expert GEMMs to host RAM and keep the rest device-resident — llama.cpp's
+	// `--n-cpu-moe N`, over the model's real MoE layer ordinals (MoEExpertLayers). It is the dial
+	// between the two endpoints the split kernel could express before: all experts host, or none.
+	//
+	// 0 (the default) or a value at/above the MoE layer count means UNGRADED — every expert weight
+	// spills, byte-for-byte the pre-#5612 predicate — so the field is inert unless a plan sets it,
+	// and CPUOffloadExperts alone still means what it always meant. Nothing spills when
+	// CPUOffloadExperts is false, whatever this holds. Size it with Model.ResolveExpertSpillPlacement and install
+	// it with Session.ApplyExpertSpillPlacement, which keeps it in agreement with ExpertRingBytes.
+	ExpertSpillLayers int
+
+	// spillOnHost memoizes the graded placement predicate (expertSpillOnHost). It is consulted per
+	// GEMM and its construction walks every resident tensor name, so it is built once per session;
+	// ApplyExpertSpillPlacement clears it so a re-planned session cannot keep running the old grade.
+	spillOnHost func(string) bool
+
 	// PrecisionPolicy enables dynamic whole-token precision. When set, Prefill/Step
 	// speculatively run the Q8_0 path, inspect the returned distribution, and may roll the
 	// KV cache back to recompute the same token/span in f32. It is additive: nil preserves
@@ -255,6 +340,13 @@ type Session struct {
 	// glmDsaSharedTopK carries the current token's most recent full-indexer
 	// decision across IndexShare layers while tokenHiddenGLMDsa walks the block stack.
 	glmDsaSharedTopK []int
+
+	// gemma4Hist is the token history of a gemma4 Session (gemma4_session.go, #5495). The
+	// dedicated gemma4 forward is cacheless, so this slice IS the session state: each
+	// Prefill/Step appends to it and re-runs the forward over the whole prefix. It is empty
+	// on every other architecture, and a gemma4 session leaves Cache untouched — the cached
+	// per-layer-window KV path is #5496.
+	gemma4Hist []int
 
 	// decodeScores reuses one attention-score buffer across heads AND decode steps. A
 	// single Session decodes serially and the per-step head loop is serial, so one buffer
@@ -632,6 +724,13 @@ func (s *Session) Prefill(ids []int) []float32 {
 		s.requireMiniMaxSession()
 		return s.head(s.tokenLoopHidden(s.tokenHiddenMiniMax, ids))
 	}
+	if s.M.Cfg.isGemma4() {
+		// #5495: the DEDICATED gemma4 forward, on whatever resident store the model loaded as
+		// (residentMatRows dispatches f32/Q8_0/Q4_K/int4/k-quant/GPTQ by name). It must precede
+		// every generic lane below — each of them assumes the scalar cfg.HeadDim, which is the
+		// wrong shape on this arch's local layers.
+		return s.prefillGemma4(ids)
+	}
 	if s.Q4 {
 		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
 		// the shared per-token blockStep with the int4 kernel. Slower than batched but uses
@@ -728,6 +827,13 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		for _, id := range ids {
 			s.tokenHiddenMiniMax(id, s.Cache.Len())
 		}
+		return
+	}
+	if s.M.Cfg.isGemma4() {
+		// #5495. The dedicated gemma4 forward is cacheless, so advancing state IS appending to
+		// the history — there is no K/V to fill and nothing to discard. A later Prefill/Step
+		// recomputes over the full prefix, so this is exactly PrefillNoLogits's contract.
+		s.gemma4Ingest(ids)
 		return
 	}
 	if s.Q4 {
@@ -837,6 +943,9 @@ func (s *Session) Step(id int) []float32 {
 	if s.M.Cfg.isMiniMaxSparseAttn() {
 		s.requireMiniMaxSession()
 		return s.head(s.tokenHiddenMiniMax(id, s.Cache.Len()))
+	}
+	if s.M.Cfg.isGemma4() {
+		return s.stepGemma4(id) // #5495 — see Prefill
 	}
 	if s.Backend != nil {
 		s.ensureOpenBackendSession()

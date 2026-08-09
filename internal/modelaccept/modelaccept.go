@@ -2,6 +2,7 @@ package modelaccept
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,15 @@ type Task struct {
 	ExpectedRefusal  string `json:"expected_refusal,omitempty"`
 	RetryRequired    bool   `json:"retry_required,omitempty"`
 	RecoveryRequired bool   `json:"recovery_required,omitempty"`
+	MeasureToolWidth bool   `json:"measure_tool_width,omitempty"`
+	// MinParallelToolCalls is the tool-call WIDTH the task requires: how many
+	// calls must arrive in ONE assistant turn. It is deliberately separate from
+	// MinToolCalls, which is VOLUME over the whole task and is confounded with
+	// retries — a retry/recovery task reaches min_tool_calls: 2 by failing once,
+	// which is the opposite signal from batching two independent calls at once.
+	// Graded from the run's proven width (see ToolCallWidth), so a run that does
+	// not report tool_turns can never satisfy a width requirement.
+	MinParallelToolCalls int `json:"min_parallel_tool_calls,omitempty"`
 }
 
 type Thresholds struct {
@@ -50,17 +60,23 @@ type Corpus struct {
 }
 
 type Run struct {
-	Model         string  `json:"model"`
-	ActualModel   string  `json:"actual_model"`
-	Task          string  `json:"task"`
-	Repetition    int     `json:"repetition"`
-	Result        string  `json:"result"`
-	ProviderError bool    `json:"provider_error"`
-	ToolValid     bool    `json:"tool_valid"`
-	ToolCalls     int     `json:"tool_calls,omitempty"`
+	Model         string `json:"model"`
+	ActualModel   string `json:"actual_model"`
+	Task          string `json:"task"`
+	Repetition    int    `json:"repetition"`
+	Result        string `json:"result"`
+	ProviderError bool   `json:"provider_error"`
+	ToolValid     bool   `json:"tool_valid"`
+	ToolCalls     int    `json:"tool_calls,omitempty"`
+	// ToolTurns is the number of ASSISTANT TURNS that issued at least one tool
+	// call — the same denominator internal/agent/turnbatch.go folds as ToolTurns
+	// (a text-only turn is excluded: it had nothing to batch). Zero means the
+	// harness did not report it, not "no turns"; width then stays unproven.
+	ToolTurns     int     `json:"tool_turns,omitempty"`
 	Refusal       string  `json:"refusal,omitempty"`
 	RetryCount    int     `json:"retry_count,omitempty"`
 	Recovered     bool    `json:"recovered,omitempty"`
+	Decision      string  `json:"decision,omitempty"`
 	LatencyMS     int64   `json:"latency_ms"`
 	InputTokens   int64   `json:"input_tokens"`
 	CostUSD       float64 `json:"cost_usd"`
@@ -82,23 +98,30 @@ type Input struct {
 }
 
 type ModelDecision struct {
-	Model              string   `json:"model"`
-	RequestedTier      int      `json:"requested_tier"`
-	Verdict            Verdict  `json:"verdict"`
-	Samples            int      `json:"samples"`
-	SuccessRate        float64  `json:"success_rate"`
-	ProviderErrorRate  float64  `json:"provider_error_rate"`
-	InvalidToolRate    float64  `json:"invalid_tool_rate"`
-	P50LatencyMS       int64    `json:"p50_latency_ms"`
-	P95LatencyMS       int64    `json:"p95_latency_ms"`
-	P95InputTokens     int64    `json:"p95_input_tokens"`
-	P95CostUSD         float64  `json:"p95_cost_usd"`
-	RefusalRate        float64  `json:"refusal_rate"`
-	RetryRate          float64  `json:"retry_rate"`
-	RecoveryRate       float64  `json:"recovery_rate"`
-	AverageInputTokens float64  `json:"average_input_tokens"`
-	AverageCostUSD     float64  `json:"average_cost_usd"`
-	Reasons            []string `json:"reasons"`
+	Model             string  `json:"model"`
+	RequestedTier     int     `json:"requested_tier"`
+	Verdict           Verdict `json:"verdict"`
+	Samples           int     `json:"samples"`
+	SuccessRate       float64 `json:"success_rate"`
+	ProviderErrorRate float64 `json:"provider_error_rate"`
+	InvalidToolRate   float64 `json:"invalid_tool_rate"`
+	P50LatencyMS      int64   `json:"p50_latency_ms"`
+	P95LatencyMS      int64   `json:"p95_latency_ms"`
+	P95InputTokens    int64   `json:"p95_input_tokens"`
+	P95CostUSD        float64 `json:"p95_cost_usd"`
+	RefusalRate       float64 `json:"refusal_rate"`
+	RetryRate         float64 `json:"retry_rate"`
+	RecoveryRate      float64 `json:"recovery_rate"`
+	ToolCalls         int     `json:"tool_calls"`
+	ToolTurns         int     `json:"tool_turns"`
+	// ToolCallsPerToolTurn is the model's tool-call WIDTH on this corpus: calls
+	// per tool-CALLING turn, the denominator internal/agent/turnbatch.go uses for
+	// its batched-turn rate. The raw sums above are retained so a consumer can
+	// recompute over a different denominator, matching that fold's contract.
+	ToolCallsPerToolTurn float64  `json:"tool_calls_per_tool_turn"`
+	AverageInputTokens   float64  `json:"average_input_tokens"`
+	AverageCostUSD       float64  `json:"average_cost_usd"`
+	Reasons              []string `json:"reasons"`
 }
 
 type Decision struct {
@@ -142,6 +165,7 @@ func Evaluate(in Input) Decision {
 		var tokens int64
 		var cost float64
 		refusals, retries, recoveries := 0, 0, 0
+		toolCalls, toolTurns := 0, 0
 		for _, r := range rr {
 			key := fmt.Sprintf("%s/%d", r.Task, r.Repetition)
 			if seen[key] {
@@ -164,6 +188,12 @@ func Evaluate(in Input) Decision {
 				invalidTools++
 				d.Reasons = append(d.Reasons, "tool behavior mismatch: "+key)
 			}
+			// Width is graded apart from volume and does NOT feed invalid_tool_rate:
+			// a serialized run issued valid tool calls, it just never batched them.
+			widthOK := t.MinParallelToolCalls == 0 || ToolCallWidth(r) >= t.MinParallelToolCalls
+			if !widthOK {
+				d.Reasons = append(d.Reasons, "tool width mismatch: "+key)
+			}
 			refusalOK := r.Refusal == t.ExpectedRefusal
 			if !refusalOK {
 				d.Reasons = append(d.Reasons, "refusal mismatch: "+key)
@@ -185,9 +215,11 @@ func Evaluate(in Input) Decision {
 			if r.Recovered {
 				recoveries++
 			}
-			if !r.ProviderError && r.ActualModel == req.Model && ResultMatches(t, r.Result) && toolOK && refusalOK && retryOK && recoveryOK {
+			if !r.ProviderError && r.ActualModel == req.Model && ResultMatches(t, r.Result) && toolOK && widthOK && refusalOK && retryOK && recoveryOK {
 				successes++
 			}
+			toolCalls += r.ToolCalls
+			toolTurns += r.ToolTurns
 			lat = append(lat, r.LatencyMS)
 			tokenSamples = append(tokenSamples, r.InputTokens)
 			costSamples = append(costSamples, r.CostUSD)
@@ -203,6 +235,12 @@ func Evaluate(in Input) Decision {
 					}
 				}
 			}
+		}
+		d.ToolCalls, d.ToolTurns = toolCalls, toolTurns
+		if toolTurns > 0 {
+			// Same guard and one-decimal rounding as turnbatch's per-turn mean, so
+			// the acceptance grade and the fleet meter report the same number.
+			d.ToolCallsPerToolTurn = math.Round(float64(toolCalls)/float64(toolTurns)*10) / 10
 		}
 		if len(rr) > 0 {
 			n := float64(len(rr))
@@ -308,11 +346,17 @@ func validate(in Input) []string {
 		if t.MinToolCalls < 0 || (t.MinToolCalls > 0 && !t.ToolRequired) {
 			r = append(r, "task "+t.ID+" has invalid minimum tool calls")
 		}
+		if t.MinParallelToolCalls < 0 || (t.MinParallelToolCalls > 0 && !t.ToolRequired) {
+			r = append(r, "task "+t.ID+" has invalid minimum parallel tool calls")
+		}
 		if t.ExpectedRefusal != "" && t.ExpectedRefusal != "policy" && t.ExpectedRefusal != "safety" {
 			r = append(r, "task "+t.ID+" has invalid expected refusal")
 		}
 		if t.RecoveryRequired && !t.RetryRequired {
 			r = append(r, "task "+t.ID+" requires recovery without retry")
+		}
+		if t.MeasureToolWidth && (!t.ToolRequired || t.MinToolCalls < 2) {
+			r = append(r, "task "+t.ID+" measure_tool_width needs at least two required tool calls")
 		}
 		if seen[t.ID] {
 			r = append(r, "duplicate task: "+t.ID)
@@ -335,8 +379,12 @@ func validate(in Input) []string {
 		if run.FailureClass != "" && run.FailureClass != "capability" && run.FailureClass != "policy_refusal" && run.FailureClass != "provider_infrastructure" && run.FailureClass != "harness" {
 			r = append(r, fmt.Sprintf("run %s/%s/%d has invalid failure class", run.Model, run.Task, run.Repetition))
 		}
-		if run.ToolCalls < 0 || run.RetryCount < 0 {
+		if run.ToolCalls < 0 || run.ToolTurns < 0 || run.RetryCount < 0 {
 			r = append(r, fmt.Sprintf("run %s/%s/%d has negative behavior count", run.Model, run.Task, run.Repetition))
+		}
+		// A tool turn issued at least one call, so turns can never outnumber calls.
+		if run.ToolTurns > run.ToolCalls {
+			r = append(r, fmt.Sprintf("run %s/%s/%d reports more tool turns than tool calls", run.Model, run.Task, run.Repetition))
 		}
 		if run.Refusal != "" && run.Refusal != "policy" && run.Refusal != "safety" {
 			r = append(r, fmt.Sprintf("run %s/%s/%d has invalid refusal class", run.Model, run.Task, run.Repetition))
@@ -370,6 +418,21 @@ func validate(in Input) []string {
 	}
 	sort.Strings(r)
 	return r
+}
+
+// ToolCallWidth is the tool-call width a run PROVES from its two structural
+// counts. Spreading ToolCalls calls over ToolTurns tool-calling turns forces
+// some turn to carry at least ceil(ToolCalls/ToolTurns) of them, so that floor
+// is witnessed, never inferred: 2 calls in 1 turn proves width 2, while the same
+// 2 calls in 2 turns proves only width 1. It is a lower bound — a [3,1] run
+// proves 2, not 3 — which keeps a width grade fail-closed rather than generous.
+// A run that reports no tool turns proves width 0, so an unreported harness can
+// never satisfy a width requirement by omission.
+func ToolCallWidth(r Run) int {
+	if r.ToolTurns <= 0 || r.ToolCalls <= 0 {
+		return 0
+	}
+	return (r.ToolCalls + r.ToolTurns - 1) / r.ToolTurns
 }
 
 // ResultMatches applies the task's predeclared output contract. sentinel_line

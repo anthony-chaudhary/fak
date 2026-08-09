@@ -434,5 +434,155 @@ class MainCliTest(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class TaskNameGuardTest(unittest.TestCase):
+    """#5572 — the task name is READ from these scripts and published as ground truth, so
+    it must be a static literal read from the real param/assignment site.
+
+    Every fixture below is text handed straight to the pure parser (or written into a temp
+    tree for the CLI witness). No registrar is executed and no scheduled task is touched —
+    reading a registrar as text is the only thing this tool ever does to one.
+    """
+
+    # An interpolated default: PowerShell expands this at run time, so the literal body
+    # "Fleet$($Suffix)Doctor" names nothing on the host.
+    INTERPOLATED = (
+        "<#\nregister_flaky.ps1 -- install the task.\n#>\n"
+        "param(\n"
+        "  [string]$Suffix = 'Doctor',\n"
+        "  [string]$TaskName = \"Fleet$($Suffix)Doctor\",\n"
+        "  [int]$EveryMinutes = 30\n"
+        ")\n")
+
+    # A backtick-escaped default is equally unreadable statically.
+    BACKTICKED = "param([string]$TaskName = \"Fleet`tDoctor\", [int]$EveryMinutes = 30)\n"
+
+    # The usage header documents an override BEFORE the param block declares the default —
+    # the exact first-match race the unanchored search lost.
+    HEADER_DECOY = (
+        "<#\nregister_decoy.ps1 -- install the task. Override the name with\n"
+        "  .\\register_decoy.ps1 -TaskName 'NotTheRealOne'\n"
+        "which sets $TaskName = 'NotTheRealOne' for that run only.\n#>\n"
+        "param(\n"
+        "  [string]$TaskName = 'FleetRealName',\n"
+        "  [int]$EveryMinutes = 15\n"
+        ")\n")
+
+    # Same race via a plain line comment recording a rename.
+    LINE_COMMENT_DECOY = (
+        "param(\n"
+        "  # legacy, removed 2026-01: $TaskName = 'OldName'\n"
+        "  [string]$TaskName = 'FleetRealName',\n"
+        "  [int]$EveryMinutes = 15\n"
+        ")\n")
+
+    def test_interpolated_name_is_refused_not_emitted(self):
+        rec = li.parse_register_ps1(self.INTERPOLATED, "register_flaky.ps1")
+        assert rec is not None
+        # The raw body must never reach the doc — that is the whole defect.
+        self.assertNotIn("$", rec["name"])
+        self.assertNotIn("Suffix", rec["name"])
+        self.assertEqual(rec["name"], li.NAME_UNRESOLVED)
+        self.assertTrue(rec["name_unresolved"])
+        # Still inventoried: the loop exists, only its name is unknowable.
+        self.assertEqual(rec["source"], "tools/register_flaky.ps1")
+        self.assertEqual(rec["cadence_minutes"], 30)
+
+    def test_backticked_name_is_refused(self):
+        rec = li.parse_register_ps1(self.BACKTICKED, "register_bt.ps1")
+        assert rec is not None
+        self.assertNotIn("`", rec["name"])
+        self.assertEqual(rec["name"], li.NAME_UNRESOLVED)
+
+    def test_header_block_decoy_does_not_shadow_param_default(self):
+        rec = li.parse_register_ps1(self.HEADER_DECOY, "register_decoy.ps1")
+        assert rec is not None
+        self.assertEqual(rec["name"], "FleetRealName")
+        self.assertFalse(rec["name_unresolved"])
+
+    def test_line_comment_decoy_does_not_shadow_param_default(self):
+        rec = li.parse_register_ps1(self.LINE_COMMENT_DECOY, "register_legacy.ps1")
+        assert rec is not None
+        self.assertEqual(rec["name"], "FleetRealName")
+
+    def test_literal_registrar_parses_unchanged(self):
+        # CONTROL: the ordinary shape every register_*.ps1 uses today is untouched.
+        rec = li.parse_register_ps1(SAMPLE_REGISTER, "register_fleet_slack_status.ps1")
+        assert rec is not None
+        self.assertEqual(rec["name"], "FleetSlackStatus")
+        self.assertFalse(rec["name_unresolved"])
+        self.assertEqual(rec["sink"], li.SINK_SLACK)
+        self.assertEqual(rec["cadence"], "every 30 min")
+
+    def test_hash_inside_a_string_is_not_a_comment(self):
+        # Comment stripping must not truncate a line at a '#' that lives inside a string.
+        text = ("$Doc = 'docs\\a#b.md'\n"
+                "param([string]$TaskName = 'FleetHashSafe', [int]$EveryMinutes = 15)\n")
+        rec = li.parse_register_ps1(text, "register_hash.ps1")
+        assert rec is not None
+        self.assertEqual(rec["name"], "FleetHashSafe")
+
+    def test_summary_counts_the_refusal(self):
+        loops = [li.parse_register_ps1(self.INTERPOLATED, "register_flaky.ps1"),
+                 li.parse_register_ps1(SAMPLE_REGISTER, "register_fleet_slack_status.ps1")]
+        self.assertEqual(li.summarize(loops)["unresolved"], 1)
+        self.assertEqual(li.summarize([loops[1]])["unresolved"], 0)
+
+    def test_md_and_slack_show_the_refusal(self):
+        loops = [li.parse_register_ps1(self.INTERPOLATED, "register_flaky.ps1")]
+        inv = {"schema": li.SCHEMA, "loops": loops, "summary": li.summarize(loops)}
+        md = li.render_md(inv, "2026-08-02T00:00:00Z")
+        self.assertIn("Refused 1 task name(s)", md)
+        self.assertIn(li.NAME_UNRESOLVED, md)
+        self.assertIn("`tools/register_flaky.ps1`", md)  # names WHICH script drifted
+        self.assertIn("refused 1 task name(s)", li.render_slack(inv))
+
+    def test_clean_tree_carries_no_refusal_text(self):
+        # CONTROL: nothing about the refusal leaks into the doc when every name is literal.
+        loops = [li.parse_register_ps1(SAMPLE_REGISTER, "register_fleet_slack_status.ps1")]
+        inv = {"schema": li.SCHEMA, "loops": loops, "summary": li.summarize(loops)}
+        md = li.render_md(inv, "2026-08-02T00:00:00Z")
+        self.assertNotIn("Refused", md)
+        self.assertNotIn("unresolved", md)
+        self.assertNotIn("refused", li.render_slack(inv))
+
+
+class TaskNameGuardCliTest(unittest.TestCase):
+    """The refusal has to reach a sink an operator actually watches: the rendered doc and
+    the exit code (which the scheduled task stores as LastTaskResult)."""
+
+    def _tree(self, register_text: str) -> Path:
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        root = Path(d.name)
+        (root / "tools").mkdir()
+        (root / "tools" / "register_flaky.ps1").write_text(register_text, encoding="utf-8")
+        return root
+
+    def _run(self, argv):
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            return li.main(argv), buf.getvalue()
+
+    def test_interpolated_name_exits_nonzero_and_still_renders_the_doc(self):
+        root = self._tree(TaskNameGuardTest.INTERPOLATED)
+        doc = root / "docs" / "loops.md"
+        rc, out = self._run(["--workspace", str(root), "--md", str(doc),
+                             "--now", "2026-08-02T00:00:00Z"])
+        self.assertEqual(rc, 1)
+        self.assertIn("refused 1 task name(s)", out)
+        text = doc.read_text(encoding="utf-8")
+        self.assertIn(li.NAME_UNRESOLVED, text)
+        self.assertNotIn("Fleet$", text)
+
+    def test_all_literal_names_exit_zero(self):
+        # CONTROL: today's tree shape stays rc 0 — the guard adds no new failure.
+        root = self._tree(SAMPLE_REGISTER)
+        doc = root / "docs" / "loops.md"
+        rc, out = self._run(["--workspace", str(root), "--md", str(doc),
+                             "--now", "2026-08-02T00:00:00Z"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("refused", out)
+        self.assertIn("FleetSlackStatus", doc.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

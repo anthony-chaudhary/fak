@@ -364,13 +364,8 @@ func clusterSelftest(maxSize, n int) error {
 		gotReduce, errs := runLoopbackGroup(size, func(g *model.DistComm) ([]float32, error) {
 			return g.AllReduceSum(parts[g.Rank()])
 		})
-		for r := 0; r < size; r++ {
-			if errs[r] != nil {
-				return fmt.Errorf("size=%d rank %d allreduce: %w", size, r, errs[r])
-			}
-			if err := assertBitExact(gotReduce[r], wantReduce); err != nil {
-				return fmt.Errorf("size=%d rank %d allreduce: %w", size, r, err)
-			}
+		if err := assertRanksBitExact(size, "allreduce", gotReduce, errs, wantReduce); err != nil {
+			return err
 		}
 
 		// AllGather (near-even tiling of size*n into `size` shards).
@@ -392,13 +387,24 @@ func clusterSelftest(maxSize, n int) error {
 		gotGather, errs := runLoopbackGroup(size, func(g *model.DistComm) ([]float32, error) {
 			return g.AllGather(gParts[g.Rank()], plan)
 		})
-		for r := 0; r < size; r++ {
-			if errs[r] != nil {
-				return fmt.Errorf("size=%d rank %d allgather: %w", size, r, errs[r])
-			}
-			if err := assertBitExact(gotGather[r], wantGather); err != nil {
-				return fmt.Errorf("size=%d rank %d allgather: %w", size, r, err)
-			}
+		if err := assertRanksBitExact(size, "allgather", gotGather, errs, wantGather); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// assertRanksBitExact checks every rank of one loopback collective: the rank's own transport
+// error first, then bit-exactness against the LocalCollective reference. op names the
+// collective in the failure prose, which is the only thing that differs between the
+// allreduce and allgather checks the loopback exercise runs.
+func assertRanksBitExact(size int, op string, got [][]float32, errs []error, want []float32) error {
+	for r := 0; r < size; r++ {
+		if errs[r] != nil {
+			return fmt.Errorf("size=%d rank %d %s: %w", size, r, op, errs[r])
+		}
+		if err := assertBitExact(got[r], want); err != nil {
+			return fmt.Errorf("size=%d rank %d %s: %w", size, r, op, err)
 		}
 	}
 	return nil

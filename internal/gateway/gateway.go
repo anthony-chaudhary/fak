@@ -330,6 +330,21 @@ type Config struct {
 	// gateway's buffered/adjudicated client response. Used for Codex ChatGPT subscription
 	// upstreams, which reject non-streaming Responses requests.
 	ForceResponsesStream bool
+	// StreamProgressTimeout is the streaming CONTENT-progress deadline (#5486): how long a
+	// proxied stream may stay WARM — keepalives arriving, so the inter-byte deadline never
+	// fires — without one frame that advances the turn. It is carried verbatim onto every
+	// proxy planner (newConfiguredHTTPPlanner) and resolved there by
+	// agent.(*HTTPPlanner).streamProgressWindow, so this field uses that resolver's encoding
+	// exactly: ZERO (the unconfigured default every caller who never sets it gets) means
+	// agent.DefaultStreamProgressTimeout, a NEGATIVE value DISABLES the deadline — the escape
+	// hatch for a provider whose prefill legitimately outlasts the window — and a positive
+	// value outside [5s, 600s] falls back to the default rather than being clamped, so a
+	// typo'd window never silently becomes a different real deadline.
+	//
+	// `fak serve` feeds this from --stream-progress-timeout, which spells the off switch the
+	// way every other serve knob does (0), and translates that 0 into the negative encoding
+	// above; see cmd/fak/serve.go:serveStreamProgressTimeout.
+	StreamProgressTimeout time.Duration
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a
@@ -467,6 +482,12 @@ type Config struct {
 	// ReloadPolicy reloads the process policy floor in-place. Nil disables the
 	// /v1/fak/policy/reload route.
 	ReloadPolicy PolicyReloadFunc
+	// ObservePolicy reports which capability floor governs this process RIGHT NOW —
+	// source + effective (post-overlay) digest — WITHOUT reloading anything (#3960).
+	// It is the read-only complement of ReloadPolicy, mirroring ObserveTrace/ResetTrace:
+	// before it, an operator had to POST a reload (re-reading the file, possibly CHANGING
+	// the floor) merely to look. Nil disables the GET /v1/fak/policy route.
+	ObservePolicy PolicyObserveFunc
 	// ReloadRoute is the model-routing manifest hot-reload watcher (#4003) — the
 	// route-plane twin of ReloadPolicy. When non-nil it seeds the atomic seam that
 	// backs POST /v1/fak/route/reload, a manual SIGHUP-style forced reload of the
@@ -832,6 +853,31 @@ type PolicyReloadResponse struct {
 	EffectiveDigest string `json:"effective_digest,omitempty"`
 }
 
+// PolicyObserveFunc is injected by the host CLI so the gateway can ATTEST the
+// installed capability floor without importing policy/adjudicator internals — the
+// read-only complement of PolicyReloadFunc (#3960), mirroring TraceObserveFunc.
+type PolicyObserveFunc func(context.Context) (PolicyObservation, error)
+
+// PolicyObservation is the wire result of GET /v1/fak/policy: which capability floor
+// governs this process right now, attested by digest, with NO reload side effect.
+//
+// EffectiveDigest is deliberately the same field (and the same host-side computation)
+// as PolicyReloadResponse.EffectiveDigest, so a GET answer and a POST-reload answer are
+// directly comparable — that equality is what lets an operator prove a reload was a
+// no-op. It covers the EFFECTIVE floor (base manifest folded with the operator
+// allow/deny overlays), not the file bytes, because the overlay is re-applied on every
+// reload and so the enforced floor differs from what is on disk.
+type PolicyObservation struct {
+	Source          string `json:"source,omitempty"`
+	EffectiveDigest string `json:"effective_digest,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	// ReloadCount is the number of successful POST /v1/fak/policy/reload swaps this
+	// process has served. The gateway owns this counter (the host func never sets it),
+	// so an operator can tell a floor that has been hot-swapped under it from one that
+	// has stood since launch. Always emitted, including the 0 of a never-reloaded floor.
+	ReloadCount int64 `json:"reload_count"`
+}
+
 // RouteReloadResponse is the wire result of POST /v1/fak/route/reload — the outcome
 // of a forced model-routing manifest reload (the route-plane twin of
 // PolicyReloadResponse). Reloaded is false with no error when the on-disk manifest
@@ -1052,7 +1098,8 @@ type SessionThroughput struct {
 type SessionControlRequest struct {
 	Run        string             `json:"run,omitempty"`        // verb "run": target run-state token
 	Reason     string             `json:"reason,omitempty"`     // verb "run": reason token (closed vocabulary)
-	Budget     *SessionBudget     `json:"budget,omitempty"`     // verb "budget"
+	Budget     *SessionBudget     `json:"budget,omitempty"`     // verb "budget", and the mid-flight "set-budget" (#2403)
+	CallID     string             `json:"call_id,omitempty"`    // verb "drop-pending-call" (#2403): the one queued call to skip
 	Pace       *SessionPace       `json:"pace,omitempty"`       // verb "pace"
 	Priority   *int               `json:"priority,omitempty"`   // verb "priority"
 	Wall       *SessionWall       `json:"wall,omitempty"`       // verb "wall" (#2762): wall-clock limit
@@ -1216,6 +1263,7 @@ type Server struct {
 	servedFailure  servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
 	traceSeq       uint64        // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy   PolicyReloadFunc
+	observePolicy  PolicyObserveFunc
 	resetTrace     TraceResetFunc
 	observeTrace   TraceObserveFunc
 	observeSession SessionObserveFunc
@@ -1253,6 +1301,24 @@ type Server struct {
 	// route concurrently; a nil load means routing hot-reload is not configured and
 	// the route answers 404, mirroring a nil reloadPolicy. Set via SetRouteWatcher.
 	routeWatcher atomic.Pointer[modelroute.Watcher]
+
+	// policyReloads counts the SUCCESSFUL POST /v1/fak/policy/reload swaps this
+	// process has served; it backs PolicyObservation.ReloadCount so a GET
+	// /v1/fak/policy answer distinguishes a floor that has been hot-swapped under the
+	// operator from one that has stood since launch (#3960). Gateway-owned on
+	// purpose: the injected host func never sets it, so the count cannot be spoofed
+	// by the policy loader. Atomic because a reload POST and an observe GET race.
+	policyReloads atomic.Int64
+
+	// boundAddr is the address this process is actually listening on, recorded by
+	// Serve once the listener exists (#5642). Before it, nothing in the Server knew
+	// its own dialable address, so the A2A agent card advertised a literal
+	// `fleet.example.com` — a served descriptor pointing at a host that is not fak.
+	// It is an atomic pointer because Serve writes it while a handler may read it
+	// concurrently; a nil load means "not serving on a listener we own" (a bare
+	// Handler under httptest), in which case the request's own Host is the only
+	// answer. See a2aSelfBaseURL.
+	boundAddr atomic.Pointer[string]
 
 	// loops is the in-kernel background-loop supervisor (internal/bgloop): the
 	// runtime that keeps registered recurring loops progressing while the gateway is
@@ -1416,6 +1482,16 @@ type Server struct {
 	ctxExpenseNotedMu sync.Mutex
 	ctxExpenseNoted   map[string]struct{}
 
+	// compactionContract holds, per session trace, the continuation contract the LAST
+	// compaction boundary emitted (#2422, compaction_contract.go), pending the next completed
+	// turn that reports it. Unlike ctxExpenseNoted this is a TAKE-ONCE latch rather than a
+	// once-per-session seen-set: every boundary is a distinct loss the model has to be told
+	// about, so the reporting turn consumes the record instead of suppressing later ones.
+	// Minted lazily by noteCompactionContract, drained by takeCompactionContract, and bounded
+	// by the same maxResetHealthSessions reaper. Report-only: nothing here mutates the body.
+	compactionContractMu sync.Mutex
+	compactionContract   map[string]*CompactionContract
+
 	// ctxRestore holds, per session trace, the content-addressed stash of ORIGINATING tasks the
 	// Anthropic-passthrough compaction dropped (ctxrestore.go). A fired tombstone hands the gateway
 	// the dropped turn's bytes + its sha256-hex handle (agent.CompactOutcome.RestoreID/RestoreBytes),
@@ -1449,6 +1525,20 @@ type Server struct {
 	// generational reset as traceOwner so it cannot grow unbounded.
 	tracePrincipalMu sync.RWMutex
 	tracePrincipal   map[string]Principal
+
+	// sessionLeases holds the kernel-MINTED lease identities cross-agent sends address
+	// (#2439): id -> (name, expiry). Addressing a lease id rather than a name is what
+	// makes a send to a dead session refuse instead of misrouting to whoever holds that
+	// name now. Guarded by leaseMu; bounded by the same generational reset as traceOwner.
+	leaseMu       sync.RWMutex
+	sessionLeases map[string]sessionLease
+
+	// controlPlaneLog is the control-plane principal journal (#2439): one row per
+	// /v1/fak/session/{id}/{verb} event with the principal the KERNEL assigned it, refused
+	// or not, so a relayed authority attempt leaves a countable witness. Guarded by
+	// controlPlaneMu; bounded to maxControlPlaneEvents, oldest dropped first.
+	controlPlaneMu  sync.Mutex
+	controlPlaneLog []ControlPlaneEvent
 
 	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
 	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
@@ -1720,6 +1810,10 @@ type Server struct {
 	// loop's model round-trips per request. See Config.Native / native_serve.go.
 	native         bool
 	nativeMaxTurns int
+	// midflight is the live per-trace mid-flight verb mailbox registry (#2403): the
+	// lookup POST /v1/fak/session/{trace}/{interrupt|drop-pending-call|set-budget}
+	// crosses to reach the owned run it names. See native_midflight.go.
+	midflight midflightRuns
 	// vdsoProxyFill opts the proxy path into warming the vDSO from admitted inbound
 	// tool_result blocks (Config.VDSOProxyFill). Default false. See admitInboundResults.
 	vdsoProxyFill bool
@@ -1933,6 +2027,7 @@ func New(cfg Config) (*Server, error) {
 		logf:                         logf,
 		debugStatsf:                  cfg.DebugStatsf,
 		reloadPolicy:                 cfg.ReloadPolicy,
+		observePolicy:                cfg.ObservePolicy,
 		resetTrace:                   cfg.ResetTrace,
 		observeTrace:                 cfg.ObserveTrace,
 		observeSession:               cfg.ObserveSession,
@@ -2376,6 +2471,10 @@ func newConfiguredHTTPPlanner(cfg Config, model, dialURL string) (*agent.HTTPPla
 	p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
 	p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 	p.ForceResponsesStream = cfg.ForceResponsesStream
+	// Passed through verbatim: Config.StreamProgressTimeout carries the planner field's own
+	// encoding (0 = the agent default, negative = disabled, out-of-band = the default), so a
+	// Config nobody configures leaves the planner at the 300s default byte-for-byte.
+	p.StreamProgressTimeout = cfg.StreamProgressTimeout
 	wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver, cfg.UpstreamTransportErrorObserver)
 	return p, nil
 }

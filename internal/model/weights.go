@@ -208,6 +208,13 @@ type Model struct {
 	// experts. nil unless such experts loaded; the f32/Q8/Q4_K paths never read it.
 	kqw map[string]*kQuantTensor
 
+	// expertCheckpoint is the R5/#5616 tier BELOW the bounded device ring: the per-expert range
+	// reader that serves a routed-expert weight ABSENT from q4kw/kqw by faulting exactly that
+	// expert's stride out of the fused checkpoint slab. nil unless a loader attached one
+	// (SetExpertCheckpoint), and then every routed expert resolves from the resident stores exactly
+	// as before — this is an added tier, not a replacement.
+	expertCheckpoint *ExpertCheckpointTier
+
 	// q2w holds the optional resident ternary Q2_0 copy of matmul weights, fed the raw
 	// GGUF group-128 blocks straight from the loader and consumed by q2MatRows.
 	q2w map[string]*q2Tensor

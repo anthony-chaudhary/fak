@@ -203,6 +203,10 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 //     the next turn of THIS loop (the consumer half that had no live caller).
 //   - WithRouteManifest: the live, hot-reloadable routing policy (s.route), so a per-call
 //     model route is bound before each in-loop k.Syscall, exactly as the proxy path does.
+//   - WithRouteAccounts + WithRoutePrincipal: the model-ACCOUNT roster (s.roster) and the
+//     request's isolation principal, so the routed id the manifest PICKs is resolved to
+//     the account-bound Target.EngineRoute() and gated on the caller's tenancy — the same
+//     resolveRoute the proxy path runs, rather than a manifest-only route (#5644).
 //
 // The loop is seeded with the request's last user message; the kernel-owned tool catalog
 // is the sole tool path. It returns the per-turn ArmMetrics — the witness that the loop,
@@ -210,7 +214,9 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
 	task := lastUserText(req.Messages)
-	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
+	opts, release := s.nativeRunOptions(ctx, reqTrace)
+	defer release()
+	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, opts...)
 }
 
 // runNativeArmStream drives the owned loop for one STREAMED request. onProgress (may be
@@ -220,7 +226,8 @@ func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesR
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
 	task := lastUserText(req.Messages)
-	opts := s.nativeRunOptions(ctx, reqTrace)
+	opts, release := s.nativeRunOptions(ctx, reqTrace)
+	defer release()
 	if onProgress != nil {
 		opts = append(opts, agent.WithProgressObserver(onProgress))
 	}
@@ -286,8 +293,20 @@ func ensureGrammarRung() {
 	abi.RegisterAdjudicator(5, grammar.Default)
 }
 
-func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.RunOption {
-	opts := make([]agent.RunOption, 0, 2)
+// The returned release closes this run's mid-flight mailbox and MUST be deferred by the
+// caller: the registry entry is what a control-plane verb looks the live run up by, so
+// leaving it behind would let a later verb address a finished run.
+func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent.RunOption, func()) {
+	opts := make([]agent.RunOption, 0, 4)
+	// #2403 write half: open this run's mid-flight mailbox under the request trace — the
+	// same id the typed progress events carry — so POST /v1/fak/session/{trace}/{interrupt|
+	// drop-pending-call|set-budget} reaches THIS live run and lands at its next clean turn
+	// boundary. Wired here rather than per-entrypoint so the buffered and streamed native
+	// /v1/messages turns and the agent-sessions run are all addressable by the same verbs.
+	// An empty trace registers nothing and yields a nil mailbox, which WithMidflightVerbs
+	// accepts as the historical (mailbox-free) loop.
+	mfOpt, release := s.midflightRunOption(reqTrace)
+	opts = append(opts, mfOpt)
 	if s.decideSession != nil {
 		opts = append(opts, agent.WithSessionGate(agent.SessionGate{
 			Decide: func(trace string) (int, bool, int, string) {
@@ -316,7 +335,27 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.
 			opts = append(opts, agent.WithRouteManifest(mfst))
 		}
 	}
-	return opts
+	// #5644: hang the roster mirror the manifest option only half-wired. Until now the
+	// owned loop resolved a tool call's engine through the MANIFEST alone while the
+	// proxying path resolved the same call through the manifest AND the account roster
+	// (buildCall -> routeEngine -> resolveRoute -> Target.EngineRoute()), so two serving
+	// modes of one binary bound two different routes for the same call and the residency
+	// PDP adjudicating a native turn saw a manifest route where the proxy path would have
+	// shown it an account-resolved one. Passed unconditionally: a nil roster leaves the
+	// abstract routed id verbatim, which is byte-for-byte the pre-#5644 native loop, so a
+	// gateway with no --route-accounts is unchanged.
+	//
+	// The principal rides along because the roster's residency arm needs BOTH halves
+	// (#5332): resolveRoute refuses an account whose principals allowlist does not name
+	// this caller, so wiring the roster without the principal would make the native path
+	// resolve a route the proxy path REFUSES — trading one divergence for a worse one.
+	// withAuth already stamped the request principal onto ctx, and an unattributed caller
+	// yields "", which Target.Admits fails closed against a restricted account.
+	opts = append(opts,
+		agent.WithRouteAccounts(s.roster),
+		agent.WithRoutePrincipal(principalFromContext(ctx)),
+	)
+	return opts, release
 }
 
 func sendAnthropicTerminalWithNativeArm(send func(string, any), stop string, usage anthropicUsage, arm *agent.ArmMetrics) {

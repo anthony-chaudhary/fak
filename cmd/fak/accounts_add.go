@@ -72,6 +72,21 @@ type addParams struct {
 	// It exists as a test/advanced seam, sourced from $FAK_OAUTH_PROFILE_URL at the CLI layer.
 	probeURL string
 
+	// noDivorce (adopt only) opts OUT of the default post-copy token-family divorce. An adopt
+	// COPIES the source's .credentials.json, so both dirs end up holding ONE OAuth refresh token —
+	// and the first side to refresh rotates the family and silently 401s the other (witnessed
+	// 2026-08-06: an enrolled seat's refresh logged the operator's own interactive session out,
+	// its access token still hours from expiry). By default the enroll therefore refreshes the new
+	// seat immediately, so the seat provably owns its own family and the source's now-dead
+	// credential is reported at enroll time instead of detonating later. Pass this to keep the
+	// copy byte-identical and control the timing yourself — the hazard then stays armed, which is
+	// the whole reason it is opt-out rather than opt-in.
+	noDivorce bool
+
+	// divorceSpawn overrides the refresh spawn used by the family divorce (nil = the real
+	// `claude -p`). Test seam only, mirroring accounts.RefreshSpawn.
+	divorceSpawn accounts.RefreshSpawn
+
 	// dryRun prints the enrollment plan and returns without any mutation — no dir created, no
 	// credential copied, no OAuth probe, no registry write, no view sync (#3954). It short-circuits
 	// after the read-only refusals (bad target, existing dir, duplicate name, missing source) so a
@@ -214,9 +229,8 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		// instead of minting a fresh setup-token. The source is already an enrolled, twin-clean
 		// login, so the credential is proven by being live; we still twin-check a copied
 		// .oauth-token, since that is the exact surface GateTokenWrite guards.
-		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		src, srcOK := resolveAdoptSource(stderr, p, reg)
+		if !srcOK {
 			return 1
 		}
 		if sameDir(src, dir) {
@@ -272,6 +286,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		} else {
 			fmt.Fprintln(stderr, "fak accounts: warning: adopted a credential but could not derive identity; run `fak accounts discover --write` after first login")
 		}
+		// Step 3b: DIVORCE the copied credential's OAuth token family. The copy above left this
+		// seat and `src` holding one refresh token; the first of them to refresh rotates the family
+		// and the other is instantly dead (see internal/accounts/credfamily.go for the witness).
+		// Resolving it here — while the operator is watching the enroll — is the only way the cost
+		// lands at a chosen moment instead of mid-task hours later. It doubles as the seat's
+		// refresh-capability proof: a seat that cannot rotate its own token is a seat that will
+		// demand a human /login, and we would rather learn that now than at dispatch.
+		divorceAdoptedFamily(stdout, stderr, src, dir, p)
 	} else {
 		// SETUP-TOKEN: mint (or read) a brand-new setup-token, twin-check, write, then probe.
 		token, err := obtainToken(stdout, stderr, dir, p)
@@ -326,7 +348,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 					_ = os.RemoveAll(dir)
 				}
 				fmt.Fprintf(stderr, "fak accounts: REFUSED (identity-hijack): %s\n", col.Detail)
-				fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket; pass --force to override, or remove seat %q first\n", rosterName, col.ConflictSeat)
+				fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket. Pick a remedy:\n", rosterName)
+				fmt.Fprintf(stderr, "    fresh dir     — meant to add a DIFFERENT account? log in again under a FRESH config dir\n")
+				fmt.Fprintf(stderr, "                    (CLAUDE_CONFIG_DIR=<new dir> claude /login), then re-run. Never log into another seat's dir.\n")
+				fmt.Fprintf(stderr, "    canonicalize  — this login should BE seat %q? rebind that seat onto it in place:\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "                    fak accounts enroll-current --name %s --force\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "    tombstone     — retiring seat %q instead? tombstone it with fall-forward, then re-run:\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "                    fak accounts remove --name %s --rehome-to <seat>\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "  (--force enrolls the duplicate anyway: two seats on one bucket, one of which the rotation drops)\n")
 				return 1
 			}
 			fmt.Fprintf(stderr, "fak accounts: warning: --force enrolling a duplicate of seat %q (%s)\n", col.ConflictSeat, col.Account)
@@ -423,10 +452,9 @@ func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry,
 		fmt.Fprintf(stdout, "  credential:    would record the env-var REFERENCE $%s (kind=api_key; the key itself is never stored)\n", env)
 		fmt.Fprintf(stdout, "  identity:      would derive from the key reference (offline; no OAuth profile probe)\n")
 	} else if p.adopt {
-		src, err := resolveSourceSeat(p.homeDir, p.from, reg)
-		if err != nil {
-			// A missing/invalid source is a read-only refusal that must fire under --dry-run too.
-			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		// A missing/invalid source is a read-only refusal that must fire under --dry-run too.
+		src, srcOK := resolveAdoptSource(stderr, p, reg)
+		if !srcOK {
 			return 1
 		}
 		fmt.Fprintf(stdout, "  credential:    would ADOPT the login bundle from %s\n", src)
@@ -742,6 +770,52 @@ func loadRegistryOrErr(stderr io.Writer, registryPath string) (accounts.Registry
 	return reg, true
 }
 
+// resolveAdoptSource resolves the seat an `--adopt` enroll copies its login bundle FROM, and
+// refuses a missing or invalid source. The dry run and the real run have to agree about what
+// "the source" is and refuse the same source for the same reason — a --dry-run that happily
+// resolved a source the real run then rejected would print a plan nobody can execute — so both
+// ask here. ok=false means the refusal has already been printed and the caller must exit 1.
+func resolveAdoptSource(stderr io.Writer, p addParams, reg accounts.Registry) (string, bool) {
+	src, err := resolveSourceSeat(p.homeDir, p.from, reg)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return "", false
+	}
+	return src, true
+}
+
+// resolveRehomeTarget picks the seat a removal falls FORWARD to and resolves it. Both removal
+// forms choose it the same way — the explicit --rehome-to, else the registry's anchor seat —
+// and refuse the same two ways: no target at all, and a target the registry cannot resolve.
+// Sharing that is what stops one form from tombstoning against a rehome the other form would
+// have rejected. self names the seat being retired when the caller has exactly one (the
+// --name form), which is excluded from the anchor fallback and refused as an explicit target;
+// the account form passes "" because it retires a whole bucket and catches rehome-into-retired
+// by identity, which no name comparison could see. ok=false means the refusal has already been
+// printed and the caller must exit 1.
+func resolveRehomeTarget(stderr io.Writer, reg accounts.Registry, rehomeTo, self string) (string, accounts.Home, bool) {
+	rehome := rehomeTo
+	if rehome == "" {
+		if def, ok := reg.Default(); ok && (self == "" || def.Name != self) {
+			rehome = def.Name
+		}
+	}
+	if rehome == "" {
+		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
+		return "", accounts.Home{}, false
+	}
+	if self != "" && rehome == self {
+		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q to itself\n", self)
+		return "", accounts.Home{}, false
+	}
+	live, _, err := reg.Resolve(rehome)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+		return "", accounts.Home{}, false
+	}
+	return rehome, live, true
+}
+
 // syncViewsUnlessNoSync re-syncs the dos/job views unless noSync is set, returning the
 // nonzero exit code to propagate on a sync failure (0 otherwise). It folds the
 // `if !noSync { syncViews … }` tail the registry-mutating subcommands share.
@@ -791,23 +865,8 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		return 1
 	}
 	// Resolve the rehome target: the flag, else the registry's default seat.
-	rehome := p.rehomeTo
-	if rehome == "" {
-		if def, ok := reg.Default(); ok && def.Name != p.name {
-			rehome = def.Name
-		}
-	}
-	if rehome == "" {
-		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
-		return 1
-	}
-	if rehome == p.name {
-		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q to itself\n", p.name)
-		return 1
-	}
-	liveRehome, _, err := reg.Resolve(rehome)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+	rehome, liveRehome, ok := resolveRehomeTarget(stderr, reg, p.rehomeTo, p.name)
+	if !ok {
 		return 1
 	}
 	if liveRehome.Name == p.name {
@@ -854,11 +913,15 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 
 // applyTombstone performs the registry-side retirement of the ACTIVE seat at reg.Homes[idx]:
 // it sets status=tombstoned + rehome + audit fields, disables the seat, and moves any roles it
-// held onto liveRehomeName (which the caller has already resolved to an active seat). With
-// archive it ALSO renames the seat's config dir to <dir>.DELETED-<date> and repoints the
-// registry handle (name + dir) plus any rehome ref that named the old handle — the manual
-// dir-rename + hand-edit-registry dance, done for you. It refuses the live CLAUDE_CONFIG_DIR,
-// since you cannot move the dir the current session runs from.
+// held onto liveRehomeName (which the caller has already resolved to an active seat). WITHOUT
+// archive the seat is tombstoned in place under its own name, so it FLATTENS the pool: every OTHER
+// seat whose rehome edge named it is repointed forward to liveRehomeName, compressing `C -> S -> L`
+// to `C -> L` instead of letting the registry accrete `tombstoned -> … -> live` chains as
+// intermediate hops retire (#4672). With archive it instead renames the seat's config dir to
+// <dir>.DELETED-<date> and repoints the registry handle (name + dir) plus any inbound rehome edge
+// that named the old handle onto the renamed one — a repoint `restore` reverses — the manual
+// dir-rename + hand-edit-registry dance, done for you. It refuses the live CLAUDE_CONFIG_DIR, since
+// you cannot move the dir the current session runs from.
 //
 // It mutates reg only; the caller saves + syncs + prints the summary. It returns the roles it
 // moved (for the summary) and a nonzero code (with a printed error) on an archive filesystem
@@ -903,6 +966,21 @@ func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, r
 		for i := range reg.Homes {
 			if reg.Homes[i].RehomeTo == oldName {
 				reg.Homes[i].RehomeTo = newName
+			}
+		}
+	} else {
+		// Flatten inbound rehome edges past a seat tombstoned IN PLACE (#4672). The seat keeps its
+		// name here (no --archive rename), so every OTHER seat that rehomed to it would keep naming
+		// a now-dead seat — and as intermediate hops retire the pool accretes tombstoned->…->live
+		// chains that `list --all` renders as rehomes pointing at dead seats. Repoint each such edge
+		// forward to the live seat this removal falls to. (The archive branch above already repoints
+		// inbound edges onto the renamed handle, which `restore` reverses; a plain tombstone has no
+		// rename and nothing to reverse, so flattening forward is the correct hygiene.) idx is
+		// skipped naturally — its own RehomeTo is the rehome handle, never fromName (a self-rehome is
+		// refused upstream) — and fromName != liveRehomeName for the same reason, so no self-loop.
+		for i := range reg.Homes {
+			if i != idx && reg.Homes[i].RehomeTo == fromName {
+				reg.Homes[i].RehomeTo = liveRehomeName
 			}
 		}
 	}
@@ -983,20 +1061,11 @@ func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 		return 1
 	}
 
-	// Resolve the rehome target: the flag, else the registry's anchor seat.
-	rehome := p.rehomeTo
-	if rehome == "" {
-		if def, ok := reg.Default(); ok {
-			rehome = def.Name
-		}
-	}
-	if rehome == "" {
-		fmt.Fprintln(stderr, "fak accounts: no --rehome-to and no default seat to fall forward to; pass --rehome-to <seat>")
-		return 1
-	}
-	liveRehome, _, err := reg.Resolve(rehome)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+	// Resolve the rehome target: the flag, else the registry's anchor seat. No seat to exclude
+	// here — the account form retires a whole bucket, and rehoming INTO that bucket is caught
+	// by the identity check below, which a name comparison could not see anyway.
+	rehome, liveRehome, ok := resolveRehomeTarget(stderr, reg, p.rehomeTo, "")
+	if !ok {
 		return 1
 	}
 	// Refuse rehoming INTO the account being retired: the live target must not itself resolve to

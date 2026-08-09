@@ -37,9 +37,13 @@ func runWipCensus(ctx context.Context, stdout, stderr io.Writer, repo string, as
 	fmt.Fprintf(stdout, "wip checkpoint census over %d ref(s) (read-only — nothing deleted):\n", c.Total)
 	fmt.Fprintf(stdout, "  LANDED                    %6d  delta already in HEAD (today's reap collects these)\n", c.Landed)
 	fmt.Fprintf(stdout, "  LIVE                      %6d  owning session still live (kept)\n", c.Live)
-	fmt.Fprintf(stdout, "  CLOSED_CLEAN_ESTIMATE    %6d  dead session, delta empty or subsumed by HEAD (safe to collect)\n", c.ClosedCleanEstimate)
-	fmt.Fprintf(stdout, "  CLOSED_DIRTY_RECOVERABLE  %6d  dead session, unlanded delta (MUST be kept)\n", c.ClosedDirtyRecoverable)
+	fmt.Fprintf(stdout, "  CLOSED_CLEAN_ESTIMATE    %6d  dead session, every payload file byte-identical to HEAD\n", c.ClosedCleanEstimate)
+	fmt.Fprintf(stdout, "  CLOSED_DIRTY_RECOVERABLE  %6d  recoverable unlanded deliverable (ACTION REQUIRED; kept)\n", c.ClosedDirtyRecoverable)
 	fmt.Fprintf(stdout, "  UNKNOWN                   %6d  unresolved (kept, fail-safe)\n", c.Unknown)
+	fmt.Fprintf(stdout, "  safely reapable (LANDED only): %d\n", c.Landed)
+	if c.ClosedDirtyRecoverable > 0 {
+		fmt.Fprintf(stdout, "  recovery backlog (not reapable): %d unlanded deliverable(s) require reconcile --reclaim\n", c.ClosedDirtyRecoverable)
+	}
 	return 0
 }
 
@@ -84,6 +88,12 @@ func wipCensus(ctx context.Context, repo string) (wipref.CensusReport, error) {
 					errMu.Unlock()
 					continue
 				}
+				payload := wipref.PayloadCensus{}
+				if !facts.Landed && !facts.Live {
+					payload = wipref.BuildPayloadCensus(wipPayloadReading(ctx, repo, recs[i]))
+					read, files, absent, diverged := payload.Facts()
+					facts.PayloadRead, facts.PayloadFiles, facts.PayloadAbsent, facts.PayloadDiverged = read, files, absent, diverged
+				}
 				class := wipref.Classify(facts)
 				verdicts[i] = wipref.CensusVerdict{
 					Session: wipSessionOf(recs[i]),
@@ -91,7 +101,7 @@ func wipCensus(ctx context.Context, repo string) (wipref.CensusReport, error) {
 					Object:  recs[i].Object,
 					Class:   class,
 					Reason:  wipref.CensusReason(class),
-				}
+				}.WithPayload(payload)
 			}
 		}()
 	}
@@ -104,6 +114,42 @@ func wipCensus(ctx context.Context, repo string) (wipref.CensusReport, error) {
 		return wipref.CensusReport{}, firstErr
 	}
 	return wipref.BuildCensus(verdicts), nil
+}
+
+// wipPayloadReading measures every payload file with checked Git plumbing. The
+// path list comes from the checkpoint metadata, never from obj^, so parentless refs are
+// measured rather than mistaken for empty. The two-dot tree diff works for both
+// parentless and descendant checkpoints.
+func wipPayloadReading(ctx context.Context, repo string, rec wipref.RefRecord) wipref.PayloadReading {
+	if len(rec.Stamp.Scope) == 0 {
+		return wipref.PayloadReading{Read: true}
+	}
+	base := "HEAD"
+	if _, _, code, err := gitWip(ctx, repo, nil, "rev-parse", "--verify", "HEAD^{tree}"); err != nil {
+		return wipref.Unread("resolve HEAD tree: %v", err)
+	} else if code != 0 {
+		// An unborn repository has no HEAD commit, but a parentless checkpoint still
+		// has a real tree. Compare it with Git's own empty-tree object rather than
+		// treating the missing branch name as an empty payload.
+		empty, errStr, emptyCode, emptyErr := gitWipStdin(ctx, repo, "", "mktree")
+		if emptyErr != nil {
+			return wipref.Unread("create empty tree: %v", emptyErr)
+		}
+		if emptyCode != 0 {
+			return wipref.Unread("create empty tree exited %d: %s", emptyCode, strings.TrimSpace(errStr))
+		}
+		base = strings.TrimSpace(empty)
+	}
+	args := []string{"diff", "--name-status", "--no-renames", "-z", base, rec.Object, "--"}
+	args = append(args, rec.Stamp.Scope...)
+	out, errStr, code, err := gitWip(ctx, repo, nil, args...)
+	if err != nil {
+		return wipref.Unread("git diff --name-status: %v", err)
+	}
+	if code != 0 {
+		return wipref.Unread("git diff --name-status exited %d: %s", code, strings.TrimSpace(errStr))
+	}
+	return wipref.PayloadReading{Read: true, Paths: rec.Stamp.Scope, NameStatus: out}
 }
 
 // wipCensusWorkers sizes the census worker pool. The work is git-subprocess-bound, not

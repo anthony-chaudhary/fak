@@ -118,6 +118,53 @@ class ClassifyScoreTest(unittest.TestCase):
         self.assertNotIn("stale", g["tags"])
 
 
+class DependencyTaxonomyTest(unittest.TestCase):
+    """The directional blocker pair (#3563): `blocked-by` / `blocks`. The names are
+    lowercase-kebab like the rest of the fleet taxonomy, and each is a label FAMILY
+    whose scoped `:#N` / `/N` value names the counterpart issue. These tests cover the
+    DECLARATION and recognition only: no reader consumes the edges yet, so there is no
+    end-to-end graph witness to assert against."""
+
+    def test_pair_is_declared_lowercase_kebab(self):
+        self.assertEqual(m.DEPENDENCY, {"blocked-by", "blocks"})
+        for name in m.DEPENDENCY:
+            self.assertEqual(name, name.lower())
+            self.assertRegex(name, r"^[a-z]+(?:-[a-z]+)*$")
+        # No bare `blocked` state label — direction is the whole point.
+        self.assertNotIn("blocked", m.DEPENDENCY)
+
+    def test_scoped_and_bare_family_labels_are_recognised(self):
+        got = m.dependency_labels({"blocked-by:#3224", "blocks/3600", "blocked-by",
+                                   "priority/P2", "bug"})
+        self.assertEqual(got, ["blocked-by", "blocked-by:#3224", "blocks/3600"])
+
+    def test_blocked_by_human_is_a_different_label(self):
+        # The existing dispatch human-block hold must not be read as a graph edge.
+        self.assertEqual(m.dependency_labels({"blocked-by-human"}), [])
+
+    def test_classify_surfaces_dependency_without_reweighting(self):
+        plain = m.classify(_issue(40, labels=["priority/P2"], idle_days_ago=0), NOW)
+        dep = m.classify(_issue(41, labels=["priority/P2", "blocked-by:#3224"],
+                                idle_days_ago=0), NOW)
+        self.assertEqual(plain["dependency"], [])
+        self.assertEqual(dep["dependency"], ["blocked-by:#3224"])
+        self.assertEqual(dep["score"], plain["score"])   # surfacing, not ranking
+        self.assertEqual(dep["tags"], plain["tags"])     # and not a triage gap
+
+    def test_config_can_override_the_pair(self):
+        import json
+        import tempfile
+        orig = m.DEPENDENCY
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "cfg.json"
+                p.write_text(json.dumps({"dependency": ["needs"]}), encoding="utf-8")
+                m._load_config(str(p))
+                self.assertEqual(m.DEPENDENCY, {"needs"})
+        finally:
+            m.DEPENDENCY = orig
+
+
 class ActionsTest(unittest.TestCase):
     def test_dormant_question_yields_close_cmd(self):
         rows = [m.classify(_issue(3, labels=["question"], idle_days_ago=40), NOW)]

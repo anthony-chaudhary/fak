@@ -114,6 +114,150 @@ def test_jargon_glossed_term_not_flagged() -> None:
     assert "KV cache" not in c["items"], c
 
 
+# --- showcase_sync: the OTHER front door (docs/showcase.html) --------------
+#
+# The fixtures below are a MINIMAL two-front-door pair: a homepage that hands the
+# reader an installer, a first command, an authority link and a dataset-stamped
+# version, and a README that publishes the same installer + command and names the
+# page. Each failing test mutates exactly ONE of those, so a green run means the
+# check discriminates that specific drift and not merely "the strings differ".
+
+_SHOWCASE_OK = """<!doctype html>
+<!--
+  Hand-authored homepage. Re-sync the <script> block below when the benchmark
+  data changes.  (This mention of a script tag INSIDE a comment is the ordering
+  trap html_text exists to survive - see the regression test at the bottom.)
+-->
+<html><head><style>body { color: #000 }</style></head><body>
+<h1>fak</h1>
+<pre><code>curl -fsSL https://example.invalid/install.sh | sh
+fak agent --offline</code></pre>
+<p>Every number traces to <a href="BENCHMARK-AUTHORITY.md">the benchmark
+authority</a>; the hero run was measured at fak v0.30.0.</p>
+<script>renderChart({series: [1, 2, 3]});</script>
+</body></html>
+"""
+
+_README_OK = """# fak
+
+Install the one binary and run one deterministic check:
+
+    curl -fsSL https://example.invalid/install.sh | sh
+    fak agent --offline
+
+Show it off: [the published showcase](docs/showcase.html) is the configured
+homepage. Numbers live in BENCHMARK-AUTHORITY.md.
+"""
+
+_SHOWCASE_KW = dict(version="0.43.0", dataset_versions={"0.30.0"},
+                    dispatch={"agent", "guard", "serve"})
+
+
+def test_showcase_sync_ok_when_front_doors_agree() -> None:
+    c = rfa.check_showcase_sync(_README_OK, _SHOWCASE_OK, **_SHOWCASE_KW)
+    assert c["status"] == "OK" and c["score"] == 1.0, c
+    assert not c["items"], c
+
+
+def test_showcase_sync_fails_when_readme_does_not_link_it() -> None:
+    # The #5476 defect shape: the page is fine, nothing points at it.
+    readme = _README_OK.replace("[the published showcase](docs/showcase.html)",
+                                "the demos")
+    c = rfa.check_showcase_sync(readme, _SHOWCASE_OK, **_SHOWCASE_KW)
+    assert c["status"] == "FAIL" and "linked_from_readme" in c["items"], c
+
+
+def test_showcase_sync_fails_when_install_command_drifts() -> None:
+    # Rename the installer on one door only: the homepage now sends a visitor at
+    # a script the README does not stand behind.
+    showcase = _SHOWCASE_OK.replace("install.sh", "get-fak-v2.sh")
+    c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
+    assert c["status"] == "FAIL" and "install_matches" in c["items"], c
+    assert "get-fak-v2.sh" in c["detail"], c
+
+
+def test_showcase_sync_fails_when_first_run_verb_is_fabricated() -> None:
+    # Anti-gaming, applied to the homepage: a first command the binary does not
+    # dispatch earns nothing, exactly as in lcd_onramp.
+    showcase = _SHOWCASE_OK.replace("fak agent --offline", "fak totally-made-up")
+    c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
+    assert c["status"] == "FAIL" and "first_run_matches" in c["items"], c
+
+
+def test_showcase_sync_fails_when_a_real_verb_is_not_taught_by_the_readme() -> None:
+    # A real verb that only ONE door teaches is still a divergence.
+    showcase = _SHOWCASE_OK.replace("fak agent --offline", "fak serve --addr :8080")
+    c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
+    assert c["status"] == "FAIL" and "first_run_matches" in c["items"], c
+
+
+def test_showcase_sync_first_run_abstains_without_a_dispatch_set() -> None:
+    # No cmd/fak/main.go to parse (run outside the repo): fall back to "both
+    # doors name the same command" rather than inventing a defect.
+    c = rfa.check_showcase_sync(_README_OK, _SHOWCASE_OK,
+                                version="0.43.0", dataset_versions={"0.30.0"})
+    assert "first_run_matches" not in c["items"], c
+
+
+def test_showcase_sync_fails_when_authority_link_is_dropped() -> None:
+    showcase = _SHOWCASE_OK.replace("BENCHMARK-AUTHORITY.md", "our internal notes")
+    c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
+    assert c["status"] == "FAIL" and "authority_linked" in c["items"], c
+
+
+def test_showcase_sync_fails_on_a_version_nothing_backs() -> None:
+    # The drift the check is really for: the dataset gets regenerated (or the
+    # caption hand-edited) and the homepage quotes a version no artifact stamps.
+    showcase = _SHOWCASE_OK.replace("fak v0.30.0", "fak v0.9.9")
+    c = rfa.check_showcase_sync(_README_OK, showcase, **_SHOWCASE_KW)
+    assert c["status"] == "FAIL" and "version_traced" in c["items"], c
+    assert "0.9.9" in c["detail"], c
+
+
+def test_showcase_sync_accepts_a_dataset_stamped_as_of_version() -> None:
+    # The mirror image: v0.30.0 != VERSION 0.43.0, but a dataset stands behind it
+    # as the version the run was MEASURED at, so quoting it is honest.
+    c = rfa.check_showcase_sync(_README_OK, _SHOWCASE_OK, **_SHOWCASE_KW)
+    assert "version_traced" not in c["items"], c
+    bare = rfa.check_showcase_sync(_README_OK, _SHOWCASE_OK, version="0.43.0",
+                                   dispatch={"agent"})
+    assert "version_traced" in bare["items"], bare
+
+
+def test_showcase_sync_abstains_when_there_is_no_page() -> None:
+    c = rfa.check_showcase_sync(_README_OK, None, **_SHOWCASE_KW)
+    assert c["status"] == "WARN" and "showcase" in c["detail"], c
+
+
+def test_showcase_sync_fails_on_an_empty_page() -> None:
+    # An empty page is a real defect, NOT the same as "no page to read".
+    c = rfa.check_showcase_sync(_README_OK, "", **_SHOWCASE_KW)
+    assert c["status"] == "FAIL", c
+
+
+def test_html_text_survives_a_script_mention_inside_a_comment() -> None:
+    # REGRESSION GUARD, and the reason html_text strips comments first: the real
+    # docs/showcase.html header comment contains the literal string "<script>",
+    # so reducing script/style FIRST matches from inside that comment to the
+    # page's real </script> and swallows the whole page. An empty extraction
+    # makes every cross-check above vacuously true - a silent false GREEN.
+    text = rfa.html_text(_SHOWCASE_OK)
+    assert "fak agent --offline" in text, text[:200]
+    assert "benchmark" in text, "reader-visible prose after the comment was lost"
+    assert "Hand-authored homepage" not in text, "comment text leaked into reader text"
+    assert "renderChart" not in text, "script body leaked into reader text"
+    assert "color: #000" not in text, "style body leaked into reader text"
+
+
+def test_bench_dataset_versions_reads_the_stamped_as_of(tmp_path: Path) -> None:
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "hero_benchmark.data.json").write_text(
+        '{"meta": {"fak_version": "0.30.0"}}', encoding="utf-8")
+    (tmp_path / "tools" / "other.data.json").write_text(
+        '{"meta": {"fak_version": "v0.31.2"}}', encoding="utf-8")
+    assert rfa.bench_dataset_versions(tmp_path) == {"0.30.0", "0.31.2"}
+
+
 # --- substance checks (graded affordances → 0..1 score) --------------------
 
 def test_guard_prominence_high_when_leads() -> None:
@@ -627,6 +771,25 @@ def test_live_collect_real_readme() -> None:
     assert p["schema"] == rfa.SCHEMA
     assert "ok" in p and isinstance(p["checks"], list) and p["checks"]
     assert p["corpus"]["readme_debt"] == 0, p["corpus"]
+
+
+def test_live_showcase_sync_reads_the_real_homepage() -> None:
+    # The committed pair must actually satisfy the check - and the extraction
+    # must not be vacuous: a 40 KB page reduced to nothing would pass every
+    # cross-check for the wrong reason, so assert the reader text is substantial.
+    root = rfa.repo_root()
+    page = root / rfa.SHOWCASE_REL
+    if not page.exists() or not (root / rfa.README_REL).exists():
+        return  # tolerant: not in the repo tree
+    text = rfa.html_text(page.read_text(encoding="utf-8"))
+    assert len(text) > 5000, f"showcase reduced to {len(text)} chars - extraction broke"
+    c = rfa.check_showcase_sync(
+        (root / rfa.README_REL).read_text(encoding="utf-8"),
+        page.read_text(encoding="utf-8"),
+        version=rfa._safe_read(root / rfa.VERSION_REL),
+        dataset_versions=rfa.bench_dataset_versions(root),
+        dispatch=rfa.fak_dispatch_verbs(root))
+    assert c["status"] == "OK", c
 
 
 # --- self-contained runner (mirrors memory_recall_audit_test.py) -----------

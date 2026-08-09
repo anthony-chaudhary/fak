@@ -104,3 +104,87 @@ Restoring that wiring means editing the file the loop is writing. This note surf
 finding with exact locations so the owning loop (or a human) can restore it without a
 collision. The reusable structure (`internal/orphanscan`) is what ships from this
 session; it will catch the next dropped wiring automatically.
+
+---
+
+## Follow-up (2026-08-06): the scan became a gate (#3167)
+
+The note above ships a scanner whose only caller was a `t.Logf`-only test — it found
+orphans and then ignored them, which is a report, not a gate. [#3167] closes that: the
+dogfood test now **asserts**, so a newly orphaned func reds the tree.
+
+### Ratchet, not cliff
+
+A scan over a real repo reports standing debt as well as fresh mistakes, so asserting
+on a raw finding count either reds the trunk on day one or gets tuned down to a number
+nobody can defend. The gate instead diffs against a checked-in baseline. Two
+suppression tiers, in the order you should reach for them:
+
+1. **`//orphanscan:keep <reason>`** on the func's doc comment — local, greppable,
+   travels with the code, visible to whoever reads the definition. Honored inside
+   `ScanDir`, so a kept func never even reaches the gate. Prefer this.
+2. **`internal/orphanscan/keep_allowlist.txt`** — for what tier 1 cannot express: a
+   func whose package is held by another loop's lane lease (so the source cannot be
+   edited at all right now), plus the standing baseline that makes the ratchet possible.
+   Format is `<package-dir> <func-name> # <reason>`; the **reason is required** and a
+   missing one is a parse error, because an unexplained suppression is how a ratchet
+   quietly becomes a rubber stamp.
+
+Exemptions key on **package + func name, never file:line** — a func that moves between
+files in its package, or just drifts down its file as neighbours grow, is the same
+exemption and must not silently lapse.
+
+### Running it
+
+The gate is the named test, the same opt-in shape as `internal/windowgate` — a command
+a human or a CI job invokes deliberately, not a new default-on `make ci` rung:
+
+```
+go test ./internal/orphanscan -run TestDogfoodRealRepo -v
+```
+
+It judges the packages in `dogfoodPkgs` (`cmd/fak`, `internal/gateway`) — deliberately a
+short named list, not the whole tree, since widening to packages nobody has baselined
+would red the trunk with pre-existing debt. On a finding it prints the `ORPHAN_FUNC`
+line **and** the exact remedy, including the allowlist line to paste.
+
+### Two degradations that keep it from crying wolf
+
+Both matter because this is a shared tree with in-flight siblings:
+
+- **A package with an unparseable file is not judged.** References are counted per file,
+  so a file that will not parse contributes none — and if it held a func's only call
+  site, that func looks orphaned when it is not. `ScanDirReport` reports `Unparsed` so
+  the gate can see the input was incomplete and decline rather than fail on a mid-save
+  neighbour. (`ScanDir` keeps its original signature for report-only callers such as
+  `internal/antipattern`.)
+- **A stale allowlist entry logs, never fails.** That case fires when someone *fixed* an
+  orphan; pruning the line is the fix landing, and a peer should not red the tree for
+  improving it. Staleness is judged only for packages the run actually scanned, so a
+  partial scan never claims the rest of the file is dead.
+
+### Baseline at landing: 4
+
+`cmdGitSpawnBench` and `dispatchPreflightChurn` (redundant wrappers whose live callers
+use the `run*` / `...State` form), `isMidflightVerb` (classifier never consulted by the
+route it was written for), and `cmdRunaway` — the interesting one: `cmd/fak/main.go` has
+no `case "runaway":`, yet `cmd/fak/runaway.go` re-execs `<self> runaway --json`, so that
+self-call cannot resolve. Each is a live finding for its owning lane, recorded with that
+reasoning in the allowlist.
+
+Every §A/§B/§C finding from the original run above is **gone** from the current scan —
+wired or deleted in the intervening month, including `cmdBenchIngest`, which #3167 named
+as the exemplar allowlist case. It is deliberately *not* listed: `main.go` now dispatches
+`case "bench-ingest"`, so allowlisting it would create a stale entry on day one.
+
+### Not landed here
+
+The `fak orphanscan` CLI verb #3167 also asks for. It needs `cmd/fak/orphanscan.go` plus
+a `main.go` dispatch case, and `cmd/**` was held exclusive by another loop's lease
+(`claude-5031`) — the same collision the section above hit a month earlier, so treat it
+as the standing condition for this lane rather than bad luck. The `Gate` /
+`SuppressionHint` / `ScanDirReport` seams are shaped for it: the verb is a thin
+`os.Exit(runOrphanscan(...))` shell in the `cmd/fak/stallscan.go` mould over exactly
+those three calls, with no further work in this package.
+
+[#3167]: https://github.com/anthony-chaudhary/fak/issues/3167

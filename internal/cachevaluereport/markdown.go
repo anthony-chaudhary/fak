@@ -147,7 +147,11 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "| cumulative net | dollar-blind | OBSERVED tokens, no configured price |\n")
 	} else {
 		fmt.Fprintf(&sb, "| latest net | $%.4f | OBSERVED ($ projection) |\n", r.LatestNetUSD)
-		fmt.Fprintf(&sb, "| cumulative net | $%.4f (%s) | OBSERVED ($ projection) |\n", r.CumulativeNetUSD, breakEvenLabel(r.BrokeEven))
+		if d := r.RecallInjectionDebit; d.Injections > 0 {
+			fmt.Fprintf(&sb, "| recall injection debit | -$%.4f (%d injection(s), %d record(s), %d estimated prompt token(s)) | MEASURED feature spend |\n", d.EstimatedUSD, d.Injections, d.Records, d.EstimatedTokens)
+		}
+		netAfterRecall := r.CumulativeNetUSD - r.RecallInjectionDebit.EstimatedUSD
+		fmt.Fprintf(&sb, "| cumulative net | $%.4f (%s) | OBSERVED ($ projection), after recall debit |\n", netAfterRecall, breakEvenLabel(netAfterRecall >= 0))
 	}
 	if len(r.OwnerAttribution) > 0 {
 		last := r.OwnerAttribution[len(r.OwnerAttribution)-1]

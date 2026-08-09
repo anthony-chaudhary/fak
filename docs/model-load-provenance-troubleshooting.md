@@ -196,11 +196,24 @@ Stated plainly so nobody reads a capability into this guide that is not there:
   a header. Emitting `DomainCheck{Rejected: 0}` there would assert a validation
   that never ran — the exact species of unwitnessed claim this artifact exists to
   kill. They stay empty until a weight-touching pass appends them.
-- **Not wired yet.** No command renders the artifact (`fak info` has no
-  provenance mode), and `internal/provenance.RunManifest` does not yet carry the
-  digest, so a run's recorded evidence is not automatically bound to its loader
-  semantics. Until that lands, the digest has to be recorded by whoever performs
-  the load.
+- **Live in the run-evidence schema.** `internal/provenance.RunManifest` *does*
+  carry the digest: field `load_provenance`, refused by `Validate` unless it is a
+  `sha256:<64 lowercase hex>` content address, and ordered in the fingerprint
+  directly after `model` and ahead of every downstream fact. So two runs that
+  agree on model, tokenizer, backend, hardware, seed, and decode params but were
+  built under different loader semantics are **not** `Equivalent`, and `Compare`
+  localizes the divergence to `load_provenance` rather than passing them as the
+  same run. That seam is witnessed end to end (see the last two rows below),
+  which matters because neither side can check the other: `provenance` is
+  stdlib-only and never imports the loader, and `model` cannot see the evidence
+  schema at all.
+- **Not wired yet.** Two things genuinely remain. (1) **No command renders or
+  diffs the artifact** — `fak info` has no provenance mode, so Steps 1 and 2
+  above are a Go API, not a CLI an operator can run against two run directories.
+  (2) **Nothing in production constructs a `RunManifest`**, so the
+  `load_provenance` field is *enforced but unpopulated*: the schema will refuse a
+  malformed digest, but it cannot supply a missing one. Until a producer lands,
+  the digest has to be recorded by whoever performs the load.
 
 ## Witnesses
 
@@ -214,7 +227,32 @@ Stated plainly so nobody reads a capability into this guide that is not there:
 | Every delta routes to its own investigation area | `TestDiffLoadProvenanceRoutesEachDeltaToItsInvestigation` | `model` |
 | The artifact leaks no weights or paths | `TestProvenanceArtifactLeaksNoWeightsOrPaths` | `model` |
 | An incomplete artifact is refused rather than published | `TestLoadProvenanceRefusesIncompleteScope` | `ggufload` |
+| A real header parse's digest is accepted by the run-evidence content-address check | `TestLoadProvenanceDigestIsAcceptedByRunEvidence` | `ggufload` |
+| Run evidence diverges on loader semantics alone, localized to `load_provenance` | `TestRunEvidenceDivergesOnRealLoaderSemantics` | `ggufload` |
 
 ```
 go test ./internal/model ./internal/ggufload -count=1
 ```
+
+### What the Qwen3.6 witness does and does not prove
+
+`TestLoadProvenanceReportsQwen36SSMADecayInversion` parses a **synthetic,
+header-only GGUF fixture** built in-test (`writeLoadProvenanceGGUF`) whose
+`general.architecture` is the vendor spelling `qwen3.6` — not a real Qwen3.6
+checkpoint. It is not a mock: the artifact is produced by the shipping
+`(*ggufload.File).LoadProvenance` from a genuinely parsed header, and the test
+asserts the fixture is payload-free (`TensorDataOffset` ≥ file size) so every
+recorded fact is *proven* to come from the header alone.
+
+What it therefore does prove: the producer names the `ssm_a` decay inversion,
+canonicalizes `qwen3.6` onto the `qwen35` family, counts distinct tensors and
+distinct layers, gives a model-global transformed tensor a layer count of 0,
+and omits identity mappings. Because the producer is header-only **by
+construction**, none of that needs weights — a real checkpoint would exercise
+the identical code path with a larger tensor directory.
+
+What it does not prove: the tensor/layer counts of any *shipped* Qwen3.6
+release (the fixture's layer count is chosen by the test), and nothing about
+`domain_checks` or `tensor_summaries`, which are value evidence a header-only
+producer deliberately leaves empty. Confirming the first against a real
+checkpoint needs only that checkpoint's **header**, not its weights.

@@ -31,15 +31,30 @@ const (
 	kindIQ3XXS
 	kindIQ4XS
 	kindQ8_0
+	kindQ4_0
 )
 
-// Resident k-quant super-block byte sizes per 256 weights (== ggufload.blockQ{5,6}KBytes):
+// Resident k-quant super-block byte sizes per 256 weights (== ggufload.blockQ{5,6}KBytes),
+// plus the two LEGACY 32-weight ggml block formats this store also carries:
 //
 //	Q5_K     = d(f16,2) + min(f16,2) + scales(12) + qh(32) + ql(128) = 176
 //	Q6_K     = ql(128) + qh(64) + scales(16) + d(f16,2)             = 210
 //	IQ3_XXS  = d(f16,2) + qs(64) + scales/signs(32)                 = 98
 //	IQ4_XS   = d(f16,2) + scales_h(2) + scales_l(4) + qs(128)       = 136
-//	Q8_0     = d(f16,2) + qs(32)                                    = 34
+//	Q8_0     = d(f16,2) + qs(32)                                    = 34  (per 32 weights)
+//	Q4_0     = d(f16,2) + qs(16 nibble bytes)                       = 18  (per 32 weights)
+//
+// Per RESIDENT weight that is Q8_0 34/32 = 1.0625 B and Q4_0 18/32 = 0.5625 B. The Q4_0
+// figure is the point of the direct-resident native-q4_0 load (#5497): a checkpoint
+// distributed as native q4_0 is chosen BECAUSE it is small, and the default
+// Q4->f32->Q8 load round-trip lands it at the re-quantized Q8_0 density instead —
+// roughly double its own on-disk size, with both copies live at the round-trip's peak.
+// Held raw here the resident bytes ARE the file's bytes, so residency tracks the artifact.
+//
+// NOTE the two distinct Q4_0 densities in this tree: the figure above is the GGUF-NATIVE
+// block (f16 scale). The separate re-quantized int4 store (q4Tensor) uses an f32 scale and
+// a different nibble order, so it costs (4+16)/32 = 0.625 B/weight and can NOT hold file
+// bytes verbatim. That store is untouched by this path.
 const (
 	q5kBlockBytes    = 2 + 2 + 12 + qkK/8 + qkK/2
 	q6kBlockBytes    = qkK/2 + qkK/4 + qkK/16 + 2
@@ -47,6 +62,8 @@ const (
 	iq4xsBlockBytes  = 2 + 2 + qkK/64 + qkK/2
 	q8_0BlockWeights = 32
 	q8_0BlockBytes   = 2 + q8_0BlockWeights
+	q4_0BlockWeights = 32
+	q4_0BlockBytes   = 2 + q4_0BlockWeights/2
 )
 
 func (k kQuantKind) blockBytes() int {
@@ -59,14 +76,19 @@ func (k kQuantKind) blockBytes() int {
 		return iq4xsBlockBytes
 	case kindQ8_0:
 		return q8_0BlockBytes
+	case kindQ4_0:
+		return q4_0BlockBytes
 	default:
 		return q5kBlockBytes
 	}
 }
 
 func (k kQuantKind) blockWeights() int {
-	if k == kindQ8_0 {
+	switch k {
+	case kindQ8_0:
 		return q8_0BlockWeights
+	case kindQ4_0:
+		return q4_0BlockWeights
 	}
 	return qkK
 }
@@ -81,6 +103,8 @@ func (k kQuantKind) String() string {
 		return "IQ4_XS"
 	case kindQ8_0:
 		return "Q8_0"
+	case kindQ4_0:
+		return "Q4_0"
 	default:
 		return "Q5_K"
 	}
@@ -174,6 +198,8 @@ func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 		iq4xsDequantSuperBlock(dst, blk)
 	case kindQ8_0:
 		q8_0DequantBlock(dst, blk)
+	case kindQ4_0:
+		q4_0DequantBlock(dst, blk)
 	default:
 		q5kDequantSuperBlock(dst, blk)
 	}
@@ -401,6 +427,16 @@ func (b *QuantBuilder) AddResidentIQ4XS(canon string, shape []int, raw []byte) e
 
 func (b *QuantBuilder) AddResidentQ8_0(canon string, shape []int, raw []byte) error {
 	return b.addResidentKQuant(canon, shape, raw, kindQ8_0)
+}
+
+// AddResidentQ4_0 stores a raw legacy-ggml Q4_0 payload verbatim (#5497), so a checkpoint
+// distributed as native q4_0 stays at its own on-disk density instead of being re-quantized
+// up to Q8_0 by the default load round-trip. shape is the model [out, in] convention with in
+// a multiple of 32. Same eligibility contract as its siblings: idempotent (stores nothing and
+// returns nil) for a name the identity-normalization gate refuses, so the loader may call it
+// unconditionally on a Q4_0 tensor.
+func (b *QuantBuilder) AddResidentQ4_0(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindQ4_0)
 }
 
 func (b *QuantBuilder) addResidentKQuant(canon string, shape []int, raw []byte, kind kQuantKind) error {

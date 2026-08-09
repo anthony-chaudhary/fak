@@ -53,20 +53,37 @@ type RungVerdict struct {
 // returned, which won, the bounded-disclosure witness, the loopback
 // disposition, and a one-line human explanation. Built only off the hot path.
 type Decision struct {
-	Tool        string        `json:"tool"`
-	ArgsDigest  string        `json:"args_digest,omitempty"` // sha256[:12] of the args bytes — never the raw args
-	ArgsBytes   int           `json:"args_bytes"`            // size of the args payload
-	Consistency string        `json:"consistency"`           // the call's declared consistency level (#1317): STRICT (the default) / BOUNDED_STALE / BEST_EFFORT / SPECULATIVE — recorded verbatim so the relaxation contract is an audit field, not a hidden mode
-	Verdict     string        `json:"verdict"`               // final verdict kind name
-	Reason      string        `json:"reason,omitempty"`      // final reason name (omitted when NONE)
-	By          string        `json:"by,omitempty"`          // winning rung's By (or synthesized: empty-policy/all-defer)
-	Claim       string        `json:"claim,omitempty"`       // final bounded-disclosure witness
-	Disposition string        `json:"disposition,omitempty"` // deny loopback: RETRYABLE/WAIT/ESCALATE/TERMINAL
-	Posture     string        `json:"posture,omitempty"`     // verdict Meta: e.g. admit_and_log
-	WouldDeny   string        `json:"would_deny,omitempty"`  // verdict Meta: the reason a posture downgrade suppressed
-	Redacted    []string      `json:"redacted,omitempty"`    // TRANSFORM: arg keys whose value the rung rewrote
-	Rungs       []RungVerdict `json:"rungs"`                 // every rung consulted, in fold order
-	Explanation string        `json:"explanation"`           // one-line human summary
+	Tool        string `json:"tool"`
+	ArgsDigest  string `json:"args_digest,omitempty"` // sha256[:12] of the args bytes — never the raw args
+	ArgsBytes   int    `json:"args_bytes"`            // size of the args payload
+	Consistency string `json:"consistency"`           // the call's declared consistency level (#1317): STRICT (the default) / BOUNDED_STALE / BEST_EFFORT / SPECULATIVE — recorded verbatim so the relaxation contract is an audit field, not a hidden mode
+	Verdict     string `json:"verdict"`               // final verdict kind name
+	Reason      string `json:"reason,omitempty"`      // final reason name (omitted when NONE)
+	By          string `json:"by,omitempty"`          // winning rung's By (or synthesized: empty-policy/all-defer)
+	Claim       string `json:"claim,omitempty"`       // final bounded-disclosure witness
+	Disposition string `json:"disposition,omitempty"` // deny loopback: RETRYABLE/WAIT/ESCALATE/TERMINAL
+	// DenyRule is the CLOSED-vocabulary id of the policy RUNG that refused
+	// (abi.DenyRuleID). Reason names the refusal's CLASS — POLICY_BLOCK covers the
+	// recursive-delete rung, the out-of-tree-write rung and seven gitgate laws at
+	// once — so a reader given only the class cannot tell WHICH rule matched, and
+	// an operator auditing a denial cannot check whether the advice they were given
+	// is even about the same rule (#5213). Re-validated through abi.DenyRuleID, so
+	// a non-member value is dropped WHOLE and no input byte can appear here.
+	DenyRule string `json:"deny_rule,omitempty"`
+	// Remedy is the sanctioned alternative declared BY THE REFUSING RUNG ITSELF
+	// (verdict Meta "fix" / "dry_run_hint" — the same one seam the wire renders).
+	// It is empty when the matched rule declares none, and an empty Remedy MUST be
+	// reported as "no sanctioned alternative is known" rather than back-filled from
+	// the reason CLASS: a class-keyed lookup is what advised a Slack send and a
+	// core-lock maintenance witness for an ordinary refused file edit (#5213).
+	// Same disclosure budget as Claim — static operator-authored text, never an arg
+	// value — so it stays safe to log.
+	Remedy      string        `json:"remedy,omitempty"`
+	Posture     string        `json:"posture,omitempty"`    // verdict Meta: e.g. admit_and_log
+	WouldDeny   string        `json:"would_deny,omitempty"` // verdict Meta: the reason a posture downgrade suppressed
+	Redacted    []string      `json:"redacted,omitempty"`   // TRANSFORM: arg keys whose value the rung rewrote
+	Rungs       []RungVerdict `json:"rungs"`                // every rung consulted, in fold order
+	Explanation string        `json:"explanation"`          // one-line human summary
 }
 
 // FoldExplain folds an Adjudicator chain EXACTLY as Fold does (same winning
@@ -170,6 +187,16 @@ func (d *Decision) populate(ctx context.Context, c *abi.ToolCall, v abi.Verdict)
 	if v.Kind == abi.VerdictDeny {
 		d.Disposition = Disposition(v.Reason)
 	}
+	// Bind the refusal to the rule that actually matched, and to that rule's OWN
+	// declared alternative. Both are read off the winning verdict only — never
+	// synthesized from the reason class — so a consumer can always tell "this
+	// remedy came from the rung that refused" from "this rung offered none".
+	if isRefusal(v.Kind) {
+		if id, ok := abi.DenyRuleID(v.Meta[abi.MetaDenyRule]); ok {
+			d.DenyRule = id
+		}
+		d.Remedy = remedyOf(v)
+	}
 	d.Posture = v.Meta["posture"]
 	d.WouldDeny = v.Meta["would_deny"]
 	if v.Kind == abi.VerdictTransform {
@@ -200,20 +227,23 @@ func (d *Decision) explain() string {
 			b += " (" + d.Disposition + ")"
 		}
 		b += "."
+		if d.DenyRule != "" {
+			b += " matched rule: " + d.DenyRule + "."
+		}
 		if d.Claim != "" {
 			b += " offending set: " + d.Claim + "."
 		}
 		if d.By == "empty-policy" || d.By == "all-defer" {
 			b += " No rung affirmatively allowed it — fail-closed default deny."
 		}
-		return b
+		return b + remedySentence(d.Remedy)
 	case "TRANSFORM":
 		if len(d.Redacted) > 0 {
 			return d.Tool + " transformed by " + or(d.By, "a rung") + ": rewrote " + strings.Join(d.Redacted, ", ") + " before dispatch (e.g. secret redaction)."
 		}
 		return d.Tool + " transformed by " + or(d.By, "a rung") + " before dispatch."
 	case "WITNESS":
-		return d.Tool + " held pending an independent witness read-back" + claimSuffix(d.Claim) + "."
+		return d.Tool + " held pending an independent witness read-back" + claimSuffix(d.Claim) + "." + remedySentence(d.Remedy)
 	case "QUARANTINE":
 		return d.Tool + " result quarantined: held out of the model's context window."
 	default:
@@ -249,8 +279,17 @@ func (d Decision) Text() string {
 		}
 		b.WriteByte('\n')
 	}
+	if d.DenyRule != "" {
+		fmt.Fprintf(&b, "rule: %s\n", d.DenyRule)
+	}
 	if d.Claim != "" {
 		fmt.Fprintf(&b, "witness: %s\n", d.Claim)
+	}
+	// Print the remedy line for every refusal, including the empty case: an
+	// operator reading a denial trace must be able to tell "this rule offers no
+	// alternative" from "the trace forgot to print one".
+	if isRefusalName(d.Verdict) {
+		fmt.Fprintf(&b, "remedy: %s\n", or(d.Remedy, "(none — no sanctioned alternative is known for this call)"))
 	}
 	if len(d.Redacted) > 0 {
 		fmt.Fprintf(&b, "redacted: %s\n", strings.Join(d.Redacted, ", "))
@@ -340,6 +379,52 @@ func claimOf(v abi.Verdict) string {
 		return v.Meta["claim"]
 	}
 	return ""
+}
+
+// isRefusal reports whether a verdict kind withheld the call. Allow / Transform /
+// Defer proceed (a Transform proceeds with rewritten args); Quarantine acts on the
+// RESULT, not the call, so it is not a refused attempt either. Everything else —
+// Deny, RequireWitness, and any registered restrictive kind the fold held — is a
+// refusal whose matched rule and alternative the caller is owed.
+func isRefusal(k abi.VerdictKind) bool {
+	switch k {
+	case abi.VerdictAllow, abi.VerdictTransform, abi.VerdictDefer, abi.VerdictQuarantine:
+		return false
+	}
+	return true
+}
+
+// isRefusalName is isRefusal over a rendered verdict NAME, for the Decision's own
+// already-stringified Verdict field. Kept in lockstep with isRefusal above.
+func isRefusalName(name string) bool {
+	switch name {
+	case "ALLOW", "TRANSFORM", "DEFER", "QUARANTINE":
+		return false
+	}
+	return true
+}
+
+// remedyOf returns the sanctioned alternative the REFUSING RUNG declared, through
+// the same one seam the wire renders: the arg-predicate rung stamps Meta["fix"]
+// (its manifest arg_rules[].fix), the reversibility rung stamps
+// Meta["dry_run_hint"] (its preview affordance). Empty means the matched rule
+// declared no alternative — reported as such, never back-filled from the class.
+func remedyOf(v abi.Verdict) string {
+	if fix := v.Meta["fix"]; fix != "" {
+		return fix
+	}
+	return v.Meta["dry_run_hint"]
+}
+
+// remedySentence renders the actionable half of a refusal. An absent remedy is
+// stated OUT LOUD — a refusal that silently omits the alternative reads as "there
+// must be one, go find it", which is how a governed agent talks itself onto a more
+// privileged path than the one it was refused (#5213).
+func remedySentence(remedy string) string {
+	if remedy == "" {
+		return " No sanctioned alternative is known for this call."
+	}
+	return " Sanctioned alternative: " + remedy + "."
 }
 
 func claimSuffix(claim string) string {

@@ -1,0 +1,20 @@
+{
+  "request": {
+    "threshold": 0.5,
+    "comparison": "at_least",
+    "observations": [0.2, 0.48, 0.52, 0.9],
+    "boundary_width": 0.03,
+    "round_trip_decimal_places": 2,
+    "perturbation": 0.01
+  },
+  "receipt": {
+    "schema": "fak-quality-threshold-audit/1",
+    "verdict": "accepted",
+    "reason": "threshold membership is stable under the declared precision and perturbation checks",
+    "observation_count": 4,
+    "boundary_count": 2,
+    "boundary_mass": 0.5,
+    "round_trip_flip_count": 0,
+    "perturbation_flip_count": 0
+  }
+}

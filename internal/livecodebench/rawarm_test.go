@@ -133,3 +133,34 @@ func TestRunRawArmRejectsBadConfig(t *testing.T) {
 		t.Fatalf("want error for nil sampler")
 	}
 }
+
+func TestRunRawArmCountsTruncatedAndReasoningOnly(t *testing.T) {
+	report, err := RunRawArm(context.Background(), RawArmConfig{Model: "m", Endpoint: "e", N: 1}, []Problem{{QuestionID: "q", Prompt: "p"}}, func(context.Context, Problem, int) (string, RawSampleUsage, error) {
+		return "reasoning", RawSampleUsage{FinishReason: "length", ReasoningOnly: true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Usage.Truncated != 1 || report.Usage.ReasoningOnly != 1 {
+		t.Fatalf("usage=%+v", report.Usage)
+	}
+	if report.ResultClaimAllowed {
+		t.Fatal("truncated report must not allow a result claim")
+	}
+	problem := report.Problems[0]
+	if len(problem.FinishReasons) != 1 || problem.FinishReasons[0] != "length" || len(problem.ReasoningOnly) != 1 || !problem.ReasoningOnly[0] {
+		t.Fatalf("per-sample termination metadata=%+v", problem)
+	}
+}
+
+func TestRunRawArmAllowsCompleteResultClaim(t *testing.T) {
+	report, err := RunRawArm(context.Background(), RawArmConfig{Model: "m", Endpoint: "e", N: 1}, []Problem{{QuestionID: "q", Prompt: "p"}}, func(context.Context, Problem, int) (string, RawSampleUsage, error) {
+		return "answer", RawSampleUsage{FinishReason: "stop"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.ResultClaimAllowed {
+		t.Fatal("complete report should allow a result claim")
+	}
+}

@@ -129,10 +129,27 @@ func isMonitorTool(tool string) bool {
 	return tool == "Monitor" || tool == "Monitor[bg]"
 }
 
+// monitorTaskIDForCall recovers the harness task id from a tool-process journal
+// call id, so it can be matched against a tasks/<id>.output path.
+//
+// The bg bridge writes a brokered background job as "bg:<session>:<id>" —
+// session-qualified since #5880, because the harness's background id is
+// per-session while the journal is workspace-shared, so the bare id collided
+// between sessions. Rows written before that carry the unqualified "bg:<id>";
+// both shapes resolve to the same <id>, so a Monitor armed by an older binary
+// stays recognised. A call id with no "bg:" prefix (a plain PreToolUse spawn of
+// tool "Monitor") is returned as-is, as before.
 func monitorTaskIDForCall(callID string) string {
-	id := strings.TrimSpace(callID)
-	id = strings.TrimPrefix(id, "bg:")
-	return id
+	rest, ok := strings.CutPrefix(strings.TrimSpace(callID), "bg:")
+	if !ok {
+		return strings.TrimSpace(callID)
+	}
+	// Cut at the FIRST colon: the session id is the qualifier, and cutting at the
+	// last one would truncate a task id that itself contains a colon.
+	if _, id, qualified := strings.Cut(rest, ":"); qualified {
+		return id
+	}
+	return rest
 }
 
 func renderLiveMonitorOutputReason(violations []Violation) string {

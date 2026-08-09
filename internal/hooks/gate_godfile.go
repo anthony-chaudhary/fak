@@ -140,7 +140,7 @@ func godfileScanTree(t *TrackedTree) []godScan {
 			continue
 		}
 		lines := countLines(body)
-		if lines <= godFuncMaxLines {
+		if lines <= godFuncMaxLines && lines <= godFileMaxLines {
 			continue
 		}
 		scans = append(scans, godScan{path: p, lines: lines, funcs: longFuncs(p, body)})

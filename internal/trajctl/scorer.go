@@ -66,6 +66,16 @@ type Scorer interface {
 // seam. Scorers are keyed by Method; a second scorer claiming a live method is a
 // registration error, not a silent overwrite, so a method always resolves to one
 // known implementation.
+//
+// THE QUALIFICATION GATE (#2573): a scorer ships with its backtest. Registering a
+// method here is what lets it steer live sessions, so a NEW method — or a new
+// Version of an existing one — earns that place by first passing
+// `fak trajctl backtest --scorer X --corpus Y` on a recorded corpus: its readings
+// must track the witnessed W3 outcome at the well-calibrated bar and must not
+// materially regress the incumbent it replaces (backtest.go). The gate is offline,
+// costs no model call, and is deliberately cheap enough that there is no excuse for
+// skipping it — a method that has never read recorded history has no evidence it
+// reads live history any better.
 type Registry struct {
 	byMethod map[string]Scorer
 }

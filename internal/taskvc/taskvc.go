@@ -24,11 +24,15 @@
 // rename an installer's -TaskName default and the trunk guard reds.
 //
 // The parse is deliberately LITERAL-ONLY. A PowerShell single-quoted default
-// ($TaskName = 'FleetScoutLoop') is a static, bindable fact; an interpolated one
-// ($TaskName = "FleetWorktreeDoctor-$repoSlug") is not knowable without running
-// the script, so it is never treated as covering a task. That is a feature: a
-// templated installer genuinely CANNOT be proven to update a bare live task in
-// place, and the inventory records it as drift rather than pretending coverage.
+// ($TaskName = 'FleetScoutLoop') is a static, bindable fact; a name interpolated
+// at runtime ($TaskName = "FleetSomething-$repoSlug") is not knowable without
+// executing the script, so it is never treated as covering a task. That is a
+// feature, not a parser gap: a templated installer genuinely CANNOT be proven to
+// update a bare live task in place, so the inventory records the gap (StatusDrift)
+// instead of pretending coverage. The cure is to give the installer a literal
+// default — register_worktree_doctor.ps1 carried exactly that interpolated shape
+// until #5409 pinned it to 'FleetWorktreeDoctor', which promoted its inventory row
+// to StatusInstaller without this parse changing at all.
 //
 // Everything here is pure and cross-platform except ScanTree's `git ls-files`
 // call; the classifier core is unit-tested on synthetic inputs, so the trunk
@@ -83,7 +87,10 @@ const (
 	// why Reason is still required — see Coverage.Reason.
 	StatusXML Status = "xml"
 	// StatusDrift: an installer for this loop exists but registers a DIFFERENT
-	// (or interpolated, hence unbindable) name, so a reinstall duplicates it.
+	// (or interpolated, hence unbindable) name, so a reinstall duplicates it. The
+	// inventory currently holds none — #5409 reconciled the last one — but the
+	// status stays: the class recurs every time an installer's -TaskName default is
+	// edited without its row.
 	StatusDrift Status = "drift"
 	// StatusOrphan: no installer AND no exported XML — the loop is simply lost on
 	// a reimage. The inventory currently holds none; the gate exists to keep it
@@ -125,10 +132,13 @@ var taskNameDecl = regexp.MustCompile(`\$[A-Za-z0-9_]*TaskName\s*=\s*(?:'([^']*)
 // DeclaredTaskNames returns the task names a fleet installer script statically
 // registers, sorted and deduped.
 //
-// Only literal names count. An empty-string default and an interpolated
-// one ($TaskName = "FleetWorktreeDoctor-$repoSlug") are both skipped: neither is
+// Only literal names count. An empty-string default and one interpolated at
+// runtime ($TaskName = "FleetSomething-$repoSlug") are both skipped: neither is
 // knowable without executing the script, so neither can be evidence that
-// re-running the installer would update a given live task in place.
+// re-running the installer would update a given live task in place. The skip is
+// keyed on the SHAPE of the value — an unresolved "$" — and never on a particular
+// task, so an installer that trades its template for a literal binds immediately,
+// with no change here.
 func DeclaredTaskNames(src string) []string {
 	seen := map[string]bool{}
 	for _, m := range taskNameDecl.FindAllStringSubmatch(src, -1) {

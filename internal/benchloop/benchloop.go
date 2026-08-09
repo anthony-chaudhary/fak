@@ -212,8 +212,10 @@ func StatusFromParts(p Parts) Report {
 // touched no bench code/harness/model/config (benchcli.DetectInvalidation). It is a no-op
 // (no reuse) unless there is a concrete next auto-runnable local datum to skip, a
 // current commit lineage, and a known machine — and it honors the NoReuseEnv
-// force-rerun escape hatch. Machine/model/precision beyond (commit × box) are left as
-// wildcards here: per-task config narrowing is a follow-up (see reuse.go).
+// force-rerun escape hatch. The lineage it keys on is (commit × box × the SELECTED
+// task's model/precision), resolved from that task's Run command by taskConfig, so a
+// prior run of a DIFFERENT config at this commit on this box no longer suppresses it
+// (#5087). An axis the selected task does not name stays a wildcard.
 func evalReuse(p Parts, r Report) ReuseVerdict {
 	if r.Catalog.Error != "" || r.Local.Error != "" {
 		return ReuseVerdict{}
@@ -230,7 +232,9 @@ func evalReuse(p Parts, r Report) ReuseVerdict {
 	if strings.TrimSpace(p.Caps.Box) == "" {
 		return ReuseVerdict{Reason: "unknown machine; cannot confirm lineage reuse"}
 	}
-	return LineageReuseAcross(p.Catalog.Runs, LineageKey{Commit: p.Commit, Machine: p.Caps.Box}, p.Cross)
+	model, precision := taskConfig(r.Local.Next.Run)
+	key := LineageKey{Commit: p.Commit, Machine: p.Caps.Box, Model: model, Precision: precision}
+	return LineageReuseAcross(p.Catalog.Runs, key, p.Cross)
 }
 
 func Walk() []Surface {

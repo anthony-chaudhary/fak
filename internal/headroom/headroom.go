@@ -38,10 +38,11 @@ type Compressor interface {
 
 // Input is one tool result presented to a Compressor.
 type Input struct {
-	Tool  string      // the producing tool (a router hint; may be "")
-	Kind  ContentKind // detected content class (router hint; KindUnknown = sniff it)
-	Model string      // target model id, for token-accounting plugins (may be "")
-	Bytes []byte      // the model-bound result bytes
+	Tool             string      // the producing tool (a router hint; may be "")
+	Kind             ContentKind // detected content class (router hint; KindUnknown = sniff it)
+	Model            string      // target model id, for token-accounting plugins (may be "")
+	Bytes            []byte      // the model-bound result bytes
+	UpstreamHeadroom *Presence   // detected upstream Headroom; native stays inert to avoid double-compression
 }
 
 // Output is a Compressor's verdict on one input.

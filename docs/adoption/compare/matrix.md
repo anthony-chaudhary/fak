@@ -145,5 +145,5 @@ performance figures live in the deeper docs and are witnessed numbers there (the
 
 ```
 test -f docs/adoption/compare/matrix.md              # this artifact exists
-python tools/seo_aeo_scorecard.py                    # new doc does not red the SEO scorecard
+fak score seo                                        # new doc does not red the SEO scorecard
 ```

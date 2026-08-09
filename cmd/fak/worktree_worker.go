@@ -50,8 +50,14 @@ fak worktree <subcommand>
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
                    (or --base-sha). Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
+           [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
+           [--require-remote-recovery]
                    Apply the worktree's diff-since-base onto the trunk as one
                    signed-off commit. Prints {ok, applied, committed, ...}.
+                   A diff touching a hard-self core-locked path is REFUSED with
+                   CORE_SELF_MODIFY unless the witness claim (flag, or a
+                   Core-lock-maintenance-witness: trailer in the commit message)
+                   resolves CONFIRMED — the same lock fak commit enforces.
       reap --worktree D
                    Force-remove ONE finished worker worktree. Prints {ok, removed, ...}.
       reap --all-cold [--apply] [--age-floor-min N] [--even-if-unlanded]
@@ -63,6 +69,10 @@ fak worktree <subcommand>
                    pass --apply (or FAK_WORKTREE_COLD_COLLECT=apply) to actually collect.
                    --even-if-unlanded also collects the held ones, DESTROYING that work.
       list         List the live per-worker worktrees. Prints {count, paths}.
+      recover [--remote R] [--fetch] [--cleanup REF] [--force]
+              [--cleanup-remote REF] [--apply] [--allow-peer] [--worktree-name NAME]
+                   List durable off-branch land candidates and their LANDED or
+                   RECOVERABLE state. Cleanup refuses unlanded refs unless forced.
 `))
 }
 
@@ -85,6 +95,8 @@ func cmdWorktreeWorker(argv []string) {
 		worktreeWorkerReap(argv[1:])
 	case "list":
 		worktreeWorkerList(argv[1:])
+	case "recover":
+		worktreeWorkerRecover(argv[1:])
 	case "-h", "--help", "help":
 		worktreeWorkerUsage()
 	default:
@@ -132,6 +144,9 @@ func worktreeWorkerPrepare(argv []string) {
 	lane := fs.String("lane", "", "worker's lane (e.g. cmd, gateway) — a segment of the worktree dir name")
 	key := fs.String("key", "", "worker's unique key (issue number, wave id, pid) — hashed into the dir name")
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
+	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
+	var paths repeatedString
+	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
 	wtRoot := fs.String("wt-root", "", "parent dir for the worktree (default: FLEET_WORKER_WORKTREE_ROOT or per-OS scratch)")
 	root := fs.String("root", "", "repo root (default: discover from cwd)")
 	fs.Parse(argv)
@@ -141,6 +156,15 @@ func worktreeWorkerPrepare(argv []string) {
 	out := worktreePrepareOut{Result: res}
 	if res.OK && res.Path != "" {
 		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
+		if strings.TrimSpace(*message) != "" || len(paths) > 0 {
+			if strings.TrimSpace(*message) == "" || len(paths) == 0 {
+				res.OK, res.Reason = false, "--message and at least one --path must be supplied together"
+				out.Result = res
+			} else if err := workerworktree.SaveIntent(res.Path, res.BaseSHA, *message, paths); err != nil {
+				res.OK, res.Reason = false, "save worker land intent: "+err.Error()
+				out.Result = res
+			}
+		}
 	}
 	worktreeWorkerEmit(out)
 	if !res.OK {
@@ -155,6 +179,15 @@ func worktreeWorkerLand(argv []string) {
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
 	verify := fs.String("verify", "off", "pre-land witness run IN the worktree: off | go-build")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")
+	// Same flag name and same semantics as `fak commit --core-lock-maintenance-witness`
+	// (#5392): the claim is RESOLVED against independent evidence, and only a CONFIRMED
+	// resolution clears a hard-self core-lock pathset. Without it the land is refused
+	// with CORE_SELF_MODIFY. A worker that has no CLI to pass a flag through carries the
+	// same claim as a workerworktree.CoreLockWitnessTrailer line in its commit message.
+	coreLockWitness := fs.String("core-lock-maintenance-witness", "",
+		"independent witness claim that clears a hard-self core-lock land (same claim vocabulary as fak commit)")
+	recoveryRemote := fs.String("recovery-remote", "", "publish/read-back candidate on this git remote before trunk CAS")
+	requireRemote := fs.Bool("require-remote-recovery", false, "refuse trunk CAS unless remote recovery read-back succeeds")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
 	fs.Parse(argv)
@@ -176,7 +209,15 @@ func worktreeWorkerLand(argv []string) {
 		os.Exit(2)
 	}
 
-	res := workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil)
+	opts := []workerworktree.LandOption{workerworktree.WithCoreLockWitness(*coreLockWitness)}
+	if strings.TrimSpace(*recoveryRemote) != "" || *requireRemote {
+		remote := strings.TrimSpace(*recoveryRemote)
+		if remote == "" {
+			remote = "origin"
+		}
+		opts = append(opts, workerworktree.WithRecoveryRemote(remote, *requireRemote))
+	}
+	res := workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil, opts...)
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)
@@ -402,8 +443,72 @@ func worktreeDirBytes(dir string) int64 {
 // worktreeWorkerListOut is the list JSON: a count and the sorted live-worktree
 // paths (never null — an empty slice renders `[]`), mirroring the Python CLI.
 type worktreeWorkerListOut struct {
-	Count int      `json:"count"`
-	Paths []string `json:"paths"`
+	Count     int                           `json:"count"`
+	Paths     []string                      `json:"paths"`
+	Inventory []workerworktree.InventoryRow `json:"inventory"`
+}
+
+type worktreeWorkerRecoverOut struct {
+	OK            bool                                `json:"ok"`
+	Count         int                                 `json:"count"`
+	Candidates    []workerworktree.RecoveryEntry      `json:"candidates"`
+	Cleaned       string                              `json:"cleaned,omitempty"`
+	Reason        string                              `json:"reason,omitempty"`
+	RemoteCleanup *workerworktree.RemoteCleanupReport `json:"remote_cleanup,omitempty"`
+}
+
+// worktreeWorkerRecover is the crash-resume inventory for isolated lands. With
+// no mutation flags it is read-only. Cleanup is guarded by HEAD reachability;
+// --force is deliberately required to discard an unlanded candidate.
+func worktreeWorkerRecover(argv []string) {
+	fs := flag.NewFlagSet("worktree worker recover", flag.ExitOnError)
+	root := fs.String("root", "", "repo root (default: discover from cwd)")
+	cleanup := fs.String("cleanup", "", "delete one landed recovery ref")
+	force := fs.Bool("force", false, "allow cleanup of an unlanded recovery ref")
+	remote := fs.String("remote", "origin", "remote whose worker-land mirror is inspected")
+	fetch := fs.Bool("fetch", false, "refresh the read-only remote mirror before listing")
+	cleanupRemote := fs.String("cleanup-remote", "", "report/delete one remote recovery ref after default-branch ancestry proof")
+	apply := fs.Bool("apply", false, "apply remote cleanup; otherwise report-only")
+	allowPeer := fs.Bool("allow-peer", false, "permit cleanup of a peer-named recovery ref")
+	worktreeName := fs.String("worktree-name", "", "local worktree identity used for remote cleanup ownership guard")
+	fs.Parse(argv)
+
+	repoRoot := worktreeWorkerRoot(*root)
+	out := worktreeWorkerRecoverOut{Candidates: []workerworktree.RecoveryEntry{}}
+	if *fetch {
+		if err := workerworktree.FetchRecoveryMirror(repoRoot, *remote, nil); err != nil {
+			out.Reason = err.Error()
+			worktreeWorkerEmit(out)
+			os.Exit(1)
+		}
+	}
+	if *cleanupRemote != "" {
+		plan := workerworktree.CleanupRemoteRecoveryRef(repoRoot, *remote, *cleanupRemote, *worktreeName, *allowPeer, *apply, nil)
+		out.RemoteCleanup = &plan
+		if *apply && !plan.Applied {
+			out.Reason = plan.Reason
+			worktreeWorkerEmit(out)
+			os.Exit(1)
+		}
+	}
+	if *cleanup != "" {
+		if err := workerworktree.DeleteRecoveryRef(repoRoot, *cleanup, *force, nil); err != nil {
+			out.Reason = err.Error()
+			worktreeWorkerEmit(out)
+			os.Exit(1)
+		}
+		out.Cleaned = *cleanup
+	}
+	items, err := workerworktree.RecoveryEntries(repoRoot, nil)
+	if err != nil {
+		out.Reason = err.Error()
+		worktreeWorkerEmit(out)
+		os.Exit(1)
+	}
+	out.OK = true
+	out.Count = len(items)
+	out.Candidates = items
+	worktreeWorkerEmit(out)
 }
 
 func worktreeWorkerList(argv []string) {
@@ -416,7 +521,15 @@ func worktreeWorkerList(argv []string) {
 	if paths == nil {
 		paths = []string{}
 	}
-	worktreeWorkerEmit(worktreeWorkerListOut{Count: n, Paths: paths})
+	rows, err := workerworktree.Inventory(repoRoot, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak worktree worker list: %v\n", err)
+		os.Exit(1)
+	}
+	if rows == nil {
+		rows = []workerworktree.InventoryRow{}
+	}
+	worktreeWorkerEmit(worktreeWorkerListOut{Count: n, Paths: paths, Inventory: rows})
 }
 
 // worktreeWorkerGoBuildVerify is the `--verify go-build` witness: run `go build

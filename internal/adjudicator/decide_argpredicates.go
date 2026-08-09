@@ -320,6 +320,17 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 // argDeny builds the bounded-disclosure Deny for a violated arg predicate. The
 // witness Claim names the offending tool.arg and the bound it broke — never the
 // arg value (which may be sensitive) nor the rest of the policy.
+//
+// Every caller passes a detail whose LEADING atom is a source literal naming the
+// structural rule that fired ("rm_rf recursive/forced delete", "allow_glob "+glob,
+// "deny_regex /"+re+"/"). That atom is the rung's identity, and until #5863 it
+// reached the journal only as a substring of the free-text Claim — so a consumer
+// had to prose-parse to tell the recursive-delete rung from the out-of-tree-write
+// rung, both of which land on ("monitor", "POLICY_BLOCK"). abi.DenyRuleID
+// promotes it onto Meta as a closed-vocabulary id. It discloses nothing new: the
+// atom is already in the Claim, and abi.DenyRuleID admits only the literals the
+// floor itself declares, so the trailing detail (which may name a policy glob or
+// regex) can never ride along.
 func argDeny(pr *ArgPredicate, detail string) abi.Verdict {
 	reason := pr.Reason
 	if reason == abi.ReasonNone {
@@ -337,7 +348,33 @@ func argDeny(pr *ArgPredicate, detail string) abi.Verdict {
 	if pr.Fix != "" {
 		v.Meta = map[string]string{"fix": pr.Fix}
 	}
+	if rule, ok := abi.DenyRuleID(detail); ok {
+		v.Meta = withDenyRule(v.Meta, rule)
+	}
 	return v
+}
+
+// withDenyRule stamps a validated rule id onto a verdict's Meta, allocating the
+// map only when the verdict carried none. Callers pass ONLY an id abi.DenyRuleID
+// has already admitted.
+func withDenyRule(meta map[string]string, rule string) map[string]string {
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	meta[abi.MetaDenyRule] = rule
+	return meta
+}
+
+// denyRule returns a Meta map carrying just the rung's rule id, for a deny site
+// that has no other bounded context to attach. An unregistered id yields nil, so
+// a rung that forgets to declare its vocabulary entry emits nothing rather than
+// free text.
+func denyRule(rule string) map[string]string {
+	id, ok := abi.DenyRuleID(rule)
+	if !ok {
+		return nil
+	}
+	return map[string]string{abi.MetaDenyRule: id}
 }
 
 // argMalformed builds the fail-closed Deny for an arg value the canonicalizer
@@ -359,7 +396,9 @@ func argMalformed(pr *ArgPredicate) abi.Verdict {
 		Reason:  abi.ReasonMalformed,
 		By:      "monitor",
 		Payload: abi.WitnessPayload{Claim: pr.Tool + "." + pr.Arg + " has an unterminated quote (a value that opens ' or \" must close it)"},
-		Meta:    map[string]string{"fix": "close the quote in " + pr.Arg + ", or drop the leading quote if the value is not meant to be quote-wrapped, then retry"},
+		Meta: withDenyRule(map[string]string{
+			"fix": "close the quote in " + pr.Arg + ", or drop the leading quote if the value is not meant to be quote-wrapped, then retry",
+		}, abi.DenyRuleArgMalformed),
 	}
 }
 

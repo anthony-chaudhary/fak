@@ -99,7 +99,7 @@ func TestGemma4GGUFConfigDerivesHeterogeneousGeometryAndRunsForward(t *testing.T
 		t.Fatalf("LoadModel: %v", err)
 	}
 	act := m.Forward([]int{0, 1, 2})
-	if act.Seq != 3 || len(act.Logits) != 3 || len(act.Logits[2]) != 5 {
+	if act.Seq != 3 || len(act.Logits) != 3 || len(act.Logits[2]) != tinyGemma4Vocab {
 		t.Fatalf("bad forward shape: seq=%d logits=%dx?", act.Seq, len(act.Logits))
 	}
 	suppressed := map[int]bool{3: true, 4: true}
@@ -126,7 +126,7 @@ func TestGemma4GGUFConfigDerivesHeterogeneousGeometryAndRunsForward(t *testing.T
 		t.Fatalf("LoadModelQuant: %v", err)
 	}
 	qact := qm.Forward([]int{0, 1, 2})
-	if len(qact.Logits) != 3 || len(qact.Logits[2]) != 5 {
+	if len(qact.Logits) != 3 || len(qact.Logits[2]) != tinyGemma4Vocab {
 		t.Fatalf("bad quant forward shape")
 	}
 	for i, v := range qact.Logits[2] {
@@ -154,6 +154,27 @@ func TestGemma3PostFFWNormCanonicalMapping(t *testing.T) {
 
 var _ = model.SandwichNorm // model is used via f.Config() return type assertions above
 
+// tinyGemma4Vocab is the fixture's vocabulary size, and it is deliberately wider than the
+// geometry needs: it is the DENOMINATOR of the resident-quant correctness witness
+// (TestGemma4ResidentQuantSessionPrefillsOnDedicatedForward, #5495). That test's claim is a
+// logit cosine against the f32 reference, and a cosine over a handful of values is nearly
+// uninformative — two short vectors of similarly-scaled numbers correlate above 0.999 whether
+// or not the forward is right. Two ids are suppressed to -inf by the fixture's
+// tokenizer.ggml.suppress_tokens, so the witness scores over tinyGemma4Vocab-2 finite logits.
+// Only the embedding/LM-head width and the token list scale with it, so widening is cheap.
+const tinyGemma4Vocab = 64
+
+// tinyGemma4Tokens is the fixture's token list. Its LENGTH is what the loader reads as
+// VocabSize, so it has to track tinyGemma4Vocab — an embedding matrix wider than this list
+// would leave the LM head at the list's width and silently keep the witness narrow.
+func tinyGemma4Tokens() []string {
+	ts := make([]string, tinyGemma4Vocab)
+	for i := range ts {
+		ts[i] = "t" + strconv.Itoa(i)
+	}
+	return ts
+}
+
 // tinyGemma4GGUF builds a minimal but architecturally faithful gemma4 GGUF: 4 layers
 // (3 sliding + 1 global), heterogeneous per-layer head_dim/kv-heads, q/k norms, a global
 // layer with NO v_proj (V = K), per-layer output-scale tensors, sandwich-norm tensors,
@@ -166,7 +187,7 @@ func tinyGemma4GGUF(t *testing.T) []byte {
 	const (
 		H       = 32 // n_embd
 		I       = 32
-		V       = 5
+		V       = tinyGemma4Vocab
 		heads   = 2
 		hdSWA   = 16 // local head_dim
 		hdFull  = 32 // global head_dim
@@ -244,7 +265,7 @@ func tinyGemma4GGUF(t *testing.T) []byte {
 	writeKVIntArrayForTest(&b, "gemma4.attention.head_count_kv", []int32{kvSWA, kvSWA, kvSWA, kvFull})
 	writeKVBoolArrayForTest(&b, "gemma4.attention.sliding_window_pattern", []bool{true, true, true, false})
 	writeKVIntArrayForTest(&b, "tokenizer.ggml.suppress_tokens", []int32{3, 4})
-	writeKVStringArray(&b, "tokenizer.ggml.tokens", []string{"a", "b", "c", "d", "e"})
+	writeKVStringArray(&b, "tokenizer.ggml.tokens", tinyGemma4Tokens())
 
 	for i, tt := range tensors {
 		writeTensorInfoForTest(&b, tt.name, tt.dims, TensorF32, offsets[i])

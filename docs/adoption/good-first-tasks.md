@@ -69,18 +69,23 @@ applied to your own PR.
 
 ## Want a tracked ticket instead?
 
-The tasks above are always-available edits. If you would rather claim a numbered issue
-that no one else is on, the popularization backlog has larger self-contained units,
-each still ownable end to end by one person:
+The tasks above are always-available edits — they never run out, because each one adds a
+row or a paragraph to a file that is never finished. If you would rather claim a numbered
+issue that nobody else is on, check the newcomer label:
 
 ```
-gh issue list --label popularization --state open
+gh issue list --repo anthony-chaudhary/fak --label "good first issue" --state open
 ```
 
-Three that are doc-shaped and open at the time of writing: an asciinema-style recorded
-terminal cast of the 60-second proof (#2296), a "who is this for" persona gallery
-(#2309), and a reader-facing public roadmap page (#2311). Check the issue is still open
-before you start.
+That is the maintained newcomer queue and the one to check first.
+
+This page used to send you to `--label popularization` instead. Do not start there: every
+one of that label's 55 issues is now closed, so the command returns an empty list. The
+label is kept only as a record of the finished batch.
+
+If the `good first issue` list is empty on the day you look, that is a restocking lapse on
+our side, not a shortage of work — take any row from the table above instead. Those need no
+ticket and no assignment: edit the file and open the pull request.
 
 ## Related
 

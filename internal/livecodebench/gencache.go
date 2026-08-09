@@ -156,7 +156,7 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		maxRetries = 0
 	}
 	var genUsage RawArmUsage
-	genByID := make(map[string][]string)
+	genByID := make(map[string]RawArmProblem)
 	if len(toGen) > 0 {
 		genReport, err := RunRawArm(ctx, cfg, toGen, sample)
 		if err != nil {
@@ -164,7 +164,7 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		}
 		genUsage = genReport.Usage
 		for i, pp := range genReport.Problems {
-			genByID[pp.QuestionID] = pp.Completions
+			genByID[pp.QuestionID] = pp
 			if cache != nil {
 				cache.Put(cacheKeyFor(cfg, release, toGen[i]), pp.Completions)
 			}
@@ -179,6 +179,8 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		}
 		seen[id] = true
 		var comps []string
+		var finishReasons []string
+		var reasoningOnly []bool
 		switch {
 		case done[id] != nil:
 			comps = done[id]
@@ -186,28 +188,34 @@ func RunRawArmCached(ctx context.Context, cfg RawArmConfig, release string, prob
 		case cached[id] != nil:
 			comps = cached[id]
 		default:
-			comps = genByID[id]
+			generated := genByID[id]
+			comps = generated.Completions
+			finishReasons = generated.FinishReasons
+			reasoningOnly = generated.ReasoningOnly
 		}
-		merged = append(merged, RawArmProblem{QuestionID: id, PromptSHA256: promptSHA256(byID[id].Prompt), Completions: comps})
+		merged = append(merged, RawArmProblem{QuestionID: id, PromptSHA256: promptSHA256(byID[id].Prompt), Completions: comps, FinishReasons: finishReasons, ReasoningOnly: reasoningOnly})
 	}
 
 	res.Report = RawArmReport{
-		Arm:         "raw",
-		Model:       cfg.Model,
-		Endpoint:    cfg.Endpoint,
-		N:           cfg.N,
-		Temperature: cfg.Temperature,
-		Seed:        cfg.Seed,
-		Concurrency: conc,
-		MaxRetries:  maxRetries,
-		Release:     release,
-		Problems:    merged,
+		Arm:                "raw",
+		Model:              cfg.Model,
+		Endpoint:           cfg.Endpoint,
+		N:                  cfg.N,
+		Temperature:        cfg.Temperature,
+		Seed:               cfg.Seed,
+		Concurrency:        conc,
+		MaxRetries:         maxRetries,
+		Release:            release,
+		Problems:           merged,
+		ResultClaimAllowed: priorUsage.Truncated+genUsage.Truncated == 0,
 		Usage: RawArmUsage{
 			Samples:            priorUsage.Samples + genUsage.Samples,
 			PromptTokens:       priorUsage.PromptTokens + genUsage.PromptTokens,
 			CompletionTokens:   priorUsage.CompletionTokens + genUsage.CompletionTokens,
 			CachedPromptTokens: priorUsage.CachedPromptTokens + genUsage.CachedPromptTokens,
 			Retries:            priorUsage.Retries + genUsage.Retries,
+			Truncated:          priorUsage.Truncated + genUsage.Truncated,
+			ReasoningOnly:      priorUsage.ReasoningOnly + genUsage.ReasoningOnly,
 		},
 	}
 	return res, nil

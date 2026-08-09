@@ -38,6 +38,8 @@ func cmdMemory(args []string) {
 		cmdMemoryRun(args[1:])
 	case "recall":
 		os.Exit(runMemoryRecall(os.Stdout, os.Stderr, args[1:]))
+	case "index":
+		os.Exit(runMemoryIndex(os.Stdout, os.Stderr, args[1:]))
 	case "curate":
 		os.Exit(runMemoryCurate(os.Stdout, os.Stderr, args[1:]))
 	case "-h", "--help", "help":

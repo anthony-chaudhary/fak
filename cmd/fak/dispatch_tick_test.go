@@ -163,7 +163,7 @@ func TestDispatchPromptCarriesDevelopmentBranchRole(t *testing.T) {
 		t.Fatalf("branch role fields = %#v", got)
 	}
 	prompt := dispatchMapString(got, "prompt")
-	for _, want := range []string{"configured development branch `dev`", "Just commit on `dev`."} {
+	for _, want := range []string{"configured development branch `dev`", "just commit on `dev`"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}

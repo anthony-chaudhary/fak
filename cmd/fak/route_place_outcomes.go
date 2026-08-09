@@ -32,6 +32,11 @@ type journalSummary struct {
 	Journal modelroute.JournalStats `json:"journal"`
 	Fold    modelroute.FoldStats    `json:"fold"`
 	Models  int                     `json:"models_with_evidence"`
+	// Trails is the audit path from each evidence row back to the turns that produced it.
+	// It rides the JSON in full — deliberately, however long it gets — because this is the
+	// only form of the record that can be diffed, archived, or handed to someone who was
+	// not at the terminal. The human rendering below is the one that abbreviates.
+	Trails []modelroute.EvidenceTrail `json:"trails,omitempty"`
 }
 
 // placementGradeInputs resolves the two mutually exclusive ways of supplying evidence into
@@ -86,10 +91,10 @@ func placementGradeInputs(opts placeOptions) (map[string][]modelroute.ClassEvide
 	if jstats.Lines == 0 {
 		return nil, floor, nil, fmt.Errorf("--outcomes %s: the journal is empty; grading nothing is a typo, not a policy", opts.OutcomesPath)
 	}
-	evidence, fold := modelroute.FoldTurnOutcomes(outcomes, modelroute.FoldOptions{Since: since})
+	evidence, fold, trails := modelroute.FoldTurnOutcomesTrail(outcomes, modelroute.FoldOptions{Since: since})
 	return evidence, floor, &journalSummary{
 		Path: opts.OutcomesPath, Since: opts.Since, Floor: floor,
-		Journal: jstats, Fold: fold, Models: len(evidence),
+		Journal: jstats, Fold: fold, Models: len(evidence), Trails: trails,
 	}, nil
 }
 
@@ -182,5 +187,57 @@ func printJournalSummary(w io.Writer, s journalSummary) {
 	if s.Fold.Undeduplicable > 0 {
 		fmt.Fprintf(w, "  caution      %d counted turn(s) carry no id, so this corpus cannot be checked for replay\n",
 			s.Fold.Undeduplicable)
+	}
+}
+
+// citationSample bounds how many turn ids one grade prints. A grade can rest on hundreds
+// of turns and an operator reading a placement is not reading all of them here — the full
+// list is in the --json trails, which is the form an audit actually uses.
+const citationSample = 4
+
+// printGradeCitations renders the audit path from each MEASURED grade back to the turns
+// that earned it.
+//
+// This is the half of "grade from a durable record" that makes the record worth keeping.
+// A grade printed alone is a number an operator has to take on trust from the same
+// pipeline that produced it; a grade printed with the turns behind it can be re-walked
+// against the journal, and a producer that double-counted, mis-attributed, or graded a
+// model on another model's slots stops being invisible.
+//
+// Only measured grades are cited, because an unmeasured one names no class and therefore
+// has no set of turns that earned it — printing its turns anyway would read as evidence
+// for a capability that was explicitly declined. The per-model refusal reason printed by
+// printGrades is the answer to that question, and it is already there.
+//
+// Nothing is silently dropped: an abbreviated list says how many it left out, and turns
+// that were counted while carrying no id are reported as unnameable rather than omitted.
+func printGradeCitations(w io.Writer, grades []modelroute.Grade, trails []modelroute.EvidenceTrail, floor modelroute.GradeFloor) {
+	if len(trails) == 0 {
+		return
+	}
+	header := false
+	for _, g := range grades {
+		turns, anonymous := modelroute.TurnsBehind(g, trails, floor)
+		if len(turns) == 0 && anonymous == 0 {
+			continue
+		}
+		if !header {
+			fmt.Fprintf(w, "  audit        which turns earned each measured grade (full list in --json trails)\n")
+			header = true
+		}
+		shown := turns
+		elided := 0
+		if len(shown) > citationSample {
+			shown, elided = shown[:citationSample], len(turns)-citationSample
+		}
+		line := strings.Join(shown, " ")
+		if elided > 0 {
+			line = fmt.Sprintf("%s (+%d more)", line, elided)
+		}
+		if anonymous > 0 {
+			line = fmt.Sprintf("%s [%d counted turn(s) carry no id and cannot be named]", line, anonymous)
+		}
+		fmt.Fprintf(w, "    %s %s %d/%d from %d turn(s): %s\n",
+			g.Model, g.Class, g.Successes, g.Attempts, len(turns)+anonymous, line)
 	}
 }

@@ -1,0 +1,9 @@
+{
+  "schema": "fak-ray-recovery-probe/1",
+  "case": "known-positive",
+  "upstream": "ray-project/ray@ray-2.56.1+g936f0d7d49d9",
+  "fak_state": "RUNNING",
+  "recoverable": true,
+  "action": "NONE",
+  "evidence": "worker heartbeat is current"
+}

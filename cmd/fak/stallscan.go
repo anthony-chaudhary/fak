@@ -138,7 +138,14 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		// A leak past the reboot high-water is the page the loop exists to catch:
 		// prompt a reboot BEFORE the freeze, not after (issue #3668).
 		if adv := stallscan.AdviseReboot(sample, stallscan.DefaultRebootThresholds()); adv.Advised {
-			fmt.Fprintf(stdout, "%s  REBOOT   %s\n", time.Now().UTC().Format("15:04:05"), adv.Reason)
+			at := time.Now().UTC().Format("15:04:05")
+			fmt.Fprintf(stdout, "%s  REBOOT   %s\n", at, adv.Reason)
+			// A second process over the same line is its own driver of the reboot,
+			// not a detail of the first — print every crosser the headline used to
+			// mask, so the operator weighs all of them (issue #4614).
+			for _, also := range adv.SecondaryCrossers() {
+				fmt.Fprintf(stdout, "%s  REBOOT   also: %s\n", at, also.Reason)
+			}
 		}
 		return -1 // continue
 	}
@@ -270,6 +277,9 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 	}
 	if adv.Advised {
 		fmt.Fprintf(w, "reboot      : ADVISED (%s axis): %s pid %d at %d (>= %d high-water)\n", adv.Axis, adv.Process, adv.PID, adv.Count, adv.Threshold)
+		for _, also := range adv.SecondaryCrossers() {
+			fmt.Fprintf(w, "              ALSO (%s axis): %s pid %d at %d (>= %d high-water)\n", also.Axis, also.Process, also.PID, also.Count, also.Threshold)
+		}
 	}
 	fmt.Fprintf(w, "not-the-cause: %d MB RAM free, disk queue %.1f\n", s.AvailableMB, s.DiskQueueLen)
 	if len(v.Reasons) > 0 {

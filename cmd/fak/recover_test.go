@@ -107,6 +107,60 @@ func TestRecoverStaleUntrackedIsNotAutoExecutable(t *testing.T) {
 	}
 }
 
+// TestRecoverCollisionRiskOffersARouteThatPreservesFinishedWork binds the COLLISION_RISK
+// playbook (#5481) to the case its original two routes both dropped. "wait for the live lease"
+// and "choose a disjoint lane/region" each assume the change is not written yet; when it is
+// already written, built and green, waiting leaves it dirty in a shared checkout (exactly the
+// hazard `fak wip sweep-guard` exists to warn about) and it cannot be re-aimed at another lane.
+// The plan must therefore name a route that PRESERVES the finished delta — the checkpoint verb —
+// and it must be offered first, because it is the only one of the three that is safe to do
+// immediately and loses nothing if the operator then also waits or repartitions.
+func TestRecoverCollisionRiskOffersARouteThatPreservesFinishedWork(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"COLLISION_RISK", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"recover COLLISION_RISK",
+		"fak wip checkpoint",
+		"dos top",
+		"dos arbitrate",
+		"fak wip sweep-guard",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, got)
+		}
+	}
+	if i, j := strings.Index(got, "fak wip checkpoint"), strings.Index(got, "dos top"); i > j {
+		t.Fatalf("checkpoint route must be offered before the wait route (%d > %d):\n%s", i, j, got)
+	}
+
+	plan, ok := recoveryPlans("main")["COLLISION_RISK"]
+	if !ok {
+		t.Fatal("COLLISION_RISK plan missing")
+	}
+	if len(plan.Steps) == 0 || !reflect.DeepEqual(plan.Steps[0].Argv, []string{"fak", "wip", "checkpoint"}) {
+		t.Fatalf("first step = %+v, want the preserve-the-work checkpoint route", plan.Steps)
+	}
+	if plan.Steps[0].Safe {
+		t.Fatal("the checkpoint step must not be marked Safe: --execute would then run it on every collision, which is a behaviour change, not a routing fix")
+	}
+}
+
+// TestRecoverCollisionRiskStaysManual: adding a concrete command to the plan must not silently
+// turn it into an auto-run playbook — a recovery that checkpoints on every collision is a
+// behaviour change. --execute still refuses and points at the dry-run notes.
+func TestRecoverCollisionRiskStaysManual(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"COLLISION_RISK", "--execute"}); rc != 3 {
+		t.Fatalf("rc = %d, want 3; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "no safe executable recovery") {
+		t.Fatalf("stderr missing refusal: %s", errb.String())
+	}
+}
+
 func TestRecoverUnknownFailsClosed(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runRecover(&out, &errb, []string{"NOT_A_REASON"}); rc != 2 {

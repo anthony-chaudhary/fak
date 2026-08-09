@@ -82,6 +82,7 @@ var defaultSeverity = map[string]Severity{
 	ReasonWorkspacePathUnmapped:         SeverityWarn,   // the correct-path hint avoids a wasted turn
 	ReasonForegroundNetworkLoop:         SeverityWarn,   // the batch/background hint avoids a killed-mid-loop turn
 	ReasonForegroundPowerShellInventory: SeverityWarn,   // bounded host inventory avoids the two-minute foreground kill
+	ReasonUndeclaredLeaf:                SeverityWarn,   // #2082: the declare-it-now hint at edit time beats a refused commit many turns later
 }
 
 // DefaultSeverity returns the default severity for a reason. An UNKNOWN reason

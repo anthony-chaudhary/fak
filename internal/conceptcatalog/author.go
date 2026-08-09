@@ -334,6 +334,13 @@ func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
 		}
 	}
 	if err = json.Unmarshal(b, &snap); err != nil {
+		// An exit-1 with EMPTY stdout is a generator crash, not an ACTION snapshot. The
+		// branch above deliberately admits exit 1 as valid content, so a Python traceback
+		// — which also exits 1 — arrives here as a bare "unexpected end of JSON input"
+		// with the only diagnosis, stderr, already discarded. Name the real failure.
+		if len(bytes.TrimSpace(b)) == 0 {
+			return Plan{}, snap, fmt.Errorf("canonical generator wrote no snapshot (exit ok, empty stdout): %s", strings.TrimSpace(stderr.String()))
+		}
 		return Plan{}, snap, fmt.Errorf("decode planned snapshot: %w", err)
 	}
 	// Every generated artifact ages with the catalog: a fresh scorecard beside a
@@ -360,8 +367,16 @@ func PlanClassify(c Catalog, req ClassifyRequest) (Plan, error) {
 	if !categories[req.Category] {
 		return Plan{}, fmt.Errorf("category must be incidental, false-positive, test-only, or build-tag-only")
 	}
+	// Every top-level key of _meta.json must be declared here. This struct is not a
+	// projection for reading — the file is DECODED into it and RE-ENCODED from it, so a
+	// key that is absent from the struct is silently deleted from the file a classify
+	// writes. "meta" carries {as_of, fak_version}, the dating block the canonical
+	// generator REFUSES to render a scorecard without, so dropping it turned every
+	// `fak concept classify` into a generator crash. Held verbatim as RawMessage rather
+	// than a typed struct: this code has no business reshaping a block it only carries.
 	var meta struct {
 		Schema   string           `json:"schema"`
+		Meta     json.RawMessage  `json:"meta,omitempty"`
 		Glossary string           `json:"glossary"`
 		Families []map[string]any `json:"families"`
 	}
@@ -408,11 +423,19 @@ func PlanClassify(c Catalog, req ClassifyRequest) (Plan, error) {
 	if !found {
 		return Plan{}, fmt.Errorf("unknown family %q", req.Family)
 	}
-	out, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
+	// Encode rather than MarshalIndent: Marshal escapes <, > and & into <-style
+	// sequences, and this file is full of prose reasons that legitimately contain them
+	// ("path helper naming <git-common-dir>/fak/token-cache"). Escaping is valid JSON but
+	// it rewrites human-authored text into an unreadable form on every classify, so a
+	// two-token edit would arrive as a corpus-wide diff nobody can review.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err = enc.Encode(meta); err != nil {
 		return Plan{}, err
 	}
-	out = append(out, '\n')
+	out := buf.Bytes() // Encode already terminates with a newline.
 	plan := Plan{Mode: "classify", Family: req.Family, BeforeFamilyCount: before, AfterFamilyCount: before, Files: []string{filepath.ToSlash(p)}, Changes: []Change{{Path: p, BeforeCount: before, AfterCount: before, Content: out}}}
 	return AddGeneratedArtifacts(c, plan)
 }

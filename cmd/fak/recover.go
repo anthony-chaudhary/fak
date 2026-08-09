@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -63,6 +64,8 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 	dryRun := fs.Bool("dry-run", false, "print the recovery commands without running them (default)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	list := fs.Bool("list", false, "list known recovery reasons")
+	var set repeatedStringFlag
+	fs.Var(&set, "set", "bind a catalog placeholder: NAME=VALUE substitutes <NAME> in the plan's commands and notes (repeatable). Config-class bails print the recovery pre-bound.")
 	dir := fs.String("dir", ".", "repo directory")
 	trunk := fs.String("trunk", "", "configured trunk/development branch override")
 	if !parseFlags(fs, argv) {
@@ -103,6 +106,12 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak recover: unknown recovery reason %q (run `fak recover --list`)\n", reasonArg)
 		return 2
 	}
+	bindings, err := parseRecoveryBindings(set.Values())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak recover: %v\n", err)
+		return 2
+	}
+	plan = bindRecoveryPlan(plan, bindings)
 	mode := "dry-run"
 	if *execute {
 		mode = "execute"
@@ -121,6 +130,16 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintf(stderr, "fak recover: %s has no safe executable recovery; use the dry-run notes\n", token)
 		return 3
+	}
+	// A placeholder is legible in a dry run and unrunnable in an execute: shelling
+	// out a literal <path> passes an argument the operator never chose. Refuse and
+	// name what to bind, which is the next step rather than a dead end.
+	if missing := unboundRecoveryPlaceholders(plan); len(missing) > 0 {
+		fmt.Fprintf(stderr, "fak recover: %s needs %s bound before --execute can run its commands\n", token, strings.Join(missing, ", "))
+		for _, name := range missing {
+			fmt.Fprintf(stderr, "  next: fak recover %s --execute --set %s=<value>\n", token, name)
+		}
+		return 2
 	}
 	for _, step := range plan.Steps {
 		if !step.Safe {
@@ -145,7 +164,22 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// recoveryPlans is the whole closed recovery vocabulary: the TREE class below
+// (guard/DOS refusals over a working tree) merged with the CONFIG class from
+// recover_config.go (the bails whose cause is a flag, an env var, or a file).
+// The two are kept in separate files because they read differently — a tree
+// recovery runs complete commands, a config recovery carries placeholders the
+// bail site binds — but they share one namespace so `fak recover <TOKEN>`
+// resolves any reason fak emits, whichever half produced it.
 func recoveryPlans(trunk string) map[string]recoveryPlan {
+	plans := treeRecoveryPlans(trunk)
+	for token, plan := range configRecoveryPlans() {
+		plans[token] = plan
+	}
+	return plans
+}
+
+func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 	originTrunk := "origin/" + trunk
 	return map[string]recoveryPlan{
 		"OFF_TRUNK": {
@@ -223,13 +257,18 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 		},
 		"COLLISION_RISK": {
 			Reason:     "COLLISION_RISK",
-			Summary:    "wait for the live lease or choose a disjoint lane/region",
+			Summary:    "checkpoint finished work, or wait for the live lease, or choose a disjoint lane/region",
 			Executable: false,
 			Steps: []recoveryStep{
+				{Argv: []string{"fak", "wip", "checkpoint"}, Summary: "park an already-finished delta durably so the lane can be released"},
 				{Argv: []string{"dos", "top"}, Summary: "inspect live leases and workers"},
 				{Argv: []string{"dos", "arbitrate"}, Summary: "retry arbitration with a disjoint region"},
 			},
-			Notes: []string{"do not bypass the lease; repartition or wait"},
+			Notes: []string{
+				"do not bypass the lease; repartition, park, or wait",
+				"the other two routes assume the work is not written yet: waiting leaves a finished delta dirty in a shared checkout where a peer's broad `git add` sweeps it (see `fak wip sweep-guard`), and an already-written change cannot be re-aimed at a disjoint lane",
+				"if the change is already written and green, checkpoint it first, then land it with `fak wip land` once the lane frees",
+			},
 		},
 		"OUT_OF_TREE_WRITE": {
 			Reason:     "OUT_OF_TREE_WRITE",
@@ -277,13 +316,23 @@ func renderRecoverList(w io.Writer, plans map[string]recoveryPlan, asJSON bool) 
 		}
 		return 0
 	}
+	// Width the reason column to the widest token actually present rather than a
+	// fixed 24: the config class added UNAUTHENTICATED_OFF_HOST_BIND at 29, whose
+	// overflow shunted that row's mode and summary out of alignment with every
+	// other row — in the one listing an operator reads to find their token.
+	width := 0
+	for _, k := range keys {
+		if n := len(plans[k].Reason); n > width {
+			width = n
+		}
+	}
 	for _, k := range keys {
 		p := plans[k]
 		exec := "manual"
 		if p.Executable {
 			exec = "executable"
 		}
-		fmt.Fprintf(w, "%-24s %-10s %s\n", p.Reason, exec, p.Summary)
+		fmt.Fprintf(w, "%-*s %-10s %s\n", width, p.Reason, exec, p.Summary)
 	}
 	return 0
 }
@@ -313,7 +362,7 @@ func runRecoverStep(dir string, argv []string, stdout, stderr io.Writer) int {
 	if len(argv) == 0 {
 		return 0
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.Command(recoveryArgv0(argv[0]), argv[1:]...)
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -321,10 +370,41 @@ func runRecoverStep(dir string, argv []string, stdout, stderr io.Writer) int {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()
 		}
+		if errors.Is(err, exec.ErrNotFound) {
+			// A recovery that cannot find its own tool is the dead end this whole
+			// path exists to remove, so it gets the same treatment as any other
+			// config bail rather than a bare exec error.
+			writeConfigBail(stderr, configBail{
+				Verb:    "fak recover",
+				Summary: fmt.Sprintf("the recovery step %q is not on PATH, so it could not be run", argv[0]),
+				Knobs:   []bailKnob{bailEnv("PATH", "does not contain "+argv[0]).want("a directory holding " + argv[0])},
+				Check:   "re-run this recovery with --dry-run to print the commands and run them yourself",
+			})
+			return 1
+		}
 		fmt.Fprintf(stderr, "fak recover: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// recoveryArgv0 resolves a step's command. A plan that says `fak` means THIS
+// fak: the operator is already running it, so making the recovery depend on a
+// second copy being installed on PATH is a failure mode invented by the
+// recovery itself. Every other command (git, and anything a future plan names)
+// resolves through PATH as written.
+//
+// os.Executable can fail on an exotic platform; the bare name is then still
+// correct, just PATH-dependent again.
+func recoveryArgv0(name string) string {
+	if name != "fak" {
+		return name
+	}
+	self, err := os.Executable()
+	if err != nil || strings.TrimSpace(self) == "" {
+		return name
+	}
+	return self
 }
 
 func shellJoin(argv []string) string {

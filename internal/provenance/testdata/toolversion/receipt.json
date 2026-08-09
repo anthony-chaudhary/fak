@@ -1,0 +1,26 @@
+{
+  "accepted": {
+    "tool": "git",
+    "pin": "2.43.0",
+    "pin_kind": "exact",
+    "state": "match",
+    "satisfied": true,
+    "live": "2.43.0",
+    "live_token": "2.43.0",
+    "reason": "live version 2.43.0 matches pin 2.43.0",
+    "raw": "git version 2.43.0\n",
+    "path": "/usr/bin/git"
+  },
+  "refused": {
+    "tool": "mytool",
+    "pin": "1.2.3",
+    "pin_kind": "exact",
+    "state": "mismatch",
+    "satisfied": false,
+    "live": "2.0.0",
+    "live_token": "2.0.0",
+    "reason": "live version 2.0.0 does not match pin 1.2.3",
+    "raw": "/opt/toolchain-1.2.3/bin/mytool version 2.0.0\n",
+    "path": "/opt/toolchain-1.2.3/bin/mytool"
+  }
+}

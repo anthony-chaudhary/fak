@@ -100,7 +100,9 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 		if !be.Caps().UploadDtype {
 			warnings = append(warnings, fmt.Sprintf("--cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); a live serve refuses this combination", be.Name()))
 		}
-		demands, err = serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, serveDeviceFitBudget(be))
+		// The sizing dry-run inspects a single unsharded process, so it plans the whole
+		// routed-expert set (ranks=1) — the same demands a non-EP serve boot would build.
+		demands, err = serveGGUFCPUOffloadMemoryPlan(ws, 1, contextBudgetTokens, serveDeviceFitBudget(be))
 	case be != nil:
 		demands, err = serveGGUFMemoryPlan(ws, !be.Caps().UploadDtype, contextBudgetTokens, serveDeviceFitBudget(be))
 	default:
@@ -198,12 +200,21 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 // artifact, print it, and return without loading a tensor byte or binding a listener.
 func runServeSizingJSON(sf *serveFlags) {
 	if *sf.ggufPath == "" {
-		fmt.Fprintln(os.Stderr, "fak serve: --plan-json requires --gguf WEIGHTS (the artifact is header-derived)")
+		writeConfigBail(os.Stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailWeightsRequired,
+			Summary: "--plan-json requires --gguf WEIGHTS (the artifact is header-derived)",
+			Knobs: []bailKnob{
+				bailFlag("plan-json", "true"),
+				bailFlag("gguf", "").want("a GGUF path, an hf:// URI, or a registry alias"),
+			},
+			Check: "fak ls   # the locally cached models --gguf can name",
+		})
 		os.Exit(2)
 	}
 	be, err := resolveServeChatBackend(*sf.backendName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		writeBackendUnavailableBail(os.Stderr, "fak serve", *sf.backendName)
 		os.Exit(2)
 	}
 	ws, err := ggufload.OpenWeights(*sf.ggufPath)

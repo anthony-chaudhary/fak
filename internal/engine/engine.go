@@ -264,6 +264,16 @@ func (residencyGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdic
 	if c == nil || c.Engine == "" || !sensitiveRoute(c) || !remoteRoute(c.Engine) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-residency"}
 	}
+	// The ONE operator-declared widening (#5421): an org-operated fleet host the
+	// operator declared INSIDE the org trust boundary over authenticated transport
+	// (fleet_trust.go). It admits the payload because the operator vouched for the
+	// DESTINATION — the route is still remote and still off-box, so remoteRoute,
+	// PlacementZone.OnBox, and the tier-1 mirror modelroute.IsRemoteRoute are all
+	// unmoved. An empty boundary (the default) makes this branch dead, so every
+	// route denied before this existed is still denied.
+	if insideFleetTrustBoundary(c.Engine) {
+		return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-residency"}
+	}
 	return abi.Verdict{
 		Kind:   abi.VerdictDeny,
 		Reason: abi.ReasonTrustViolation,
@@ -372,7 +382,10 @@ func remoteRoute(route string) bool {
 // so a family added here and forgotten there is a test failure, not a fail-OPEN.
 // NOTE the "fleet" family (an ORG-OPERATED server, modelroute.ZoneFleet) is
 // deliberately ABSENT from this list: org-owned hardware is self-hosted but still
-// off-box, so it stays remote to this floor.
+// off-box, so it stays remote to this floor. It stays absent even after #5421: an
+// operator-declared fleet host is admitted by the residency GATE (fleet_trust.go),
+// never reclassified as on-box, so this list and its tier-1 mirror never learn a
+// policy they would have to keep in sync.
 func localRoute(route string) bool {
 	for _, local := range []string{"inkernel", "mock", "cassette", "local", "on-device", "ondevice", "kernel"} {
 		if route == local ||

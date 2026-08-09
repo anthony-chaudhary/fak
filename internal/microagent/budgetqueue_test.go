@@ -380,3 +380,198 @@ func TestBudgetQueueDrainsInOrderWithoutQueueJump(t *testing.T) {
 	close(relW2)
 	waitForSlot(t, func() bool { return q.Waiting() == 0 && q.Used() == 0 }, 2*time.Second, "queue settled empty")
 }
+
+// TestBudgetQueueShedsWithBackpressureWhenParkQueueFull witnesses the BOUND on
+// the park queue (#2021 scope 1) and the backpressure signal it raises (scope
+// 2): once the budget is spent AND MaxQueue admits are parked, the next Admit
+// is SHED immediately with ErrBackpressure — it does not park (which would let
+// the queue grow without limit), does not spin, and reserves nothing.
+func TestBudgetQueueShedsWithBackpressureWhenParkQueueFull(t *testing.T) {
+	t.Parallel()
+	const (
+		budget   = 10
+		maxQueue = 2
+	)
+	q := microagent.NewBudgetQueueDepth(budget, maxQueue)
+
+	holder, err := q.Admit(context.Background(), budget, 0) // spend the whole budget.
+	if err != nil {
+		t.Fatalf("holder Admit: %v", err)
+	}
+
+	var wg sync.WaitGroup // joined before the test returns, so no late t.Errorf.
+	wg.Add(maxQueue)
+	for i := 0; i < maxQueue; i++ {
+		go func() {
+			defer wg.Done()
+			release, err := q.Admit(context.Background(), budget, 0)
+			if err != nil {
+				t.Errorf("parked Admit: %v", err)
+				return
+			}
+			release()
+		}()
+	}
+	waitForSlot(t, func() bool { return q.Waiting() == maxQueue }, 2*time.Second, "park queue at its bound")
+
+	// The bound binds: this admit is refused, not queued.
+	start := time.Now()
+	if _, err := q.Admit(context.Background(), budget, 0); !errors.Is(err, microagent.ErrBackpressure) {
+		t.Fatalf("Admit past the park bound: err=%v, want ErrBackpressure", err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("shed blocked for %s — it parked instead of refusing", el)
+	}
+	if w := q.Waiting(); w != maxQueue {
+		t.Fatalf("Waiting()=%d after a shed, want %d (a shed admit must not park)", w, maxQueue)
+	}
+	if u := q.Used(); u != budget {
+		t.Fatalf("Used()=%d after a shed, want %d (a shed admit must reserve nothing)", u, budget)
+	}
+
+	holder() // capacity returns: the parked admits still drain normally.
+	wg.Wait()
+	waitForSlot(t, func() bool { return q.Waiting() == 0 && q.Used() == 0 }, 2*time.Second, "queue settled empty")
+}
+
+// TestBudgetQueuePressureReadoutTracksShedState witnesses the poll-before-enqueue
+// half of the backpressure signal: Pressure reports one consistent snapshot, and
+// its Shed flag goes false -> true -> false as the park queue fills and drains,
+// so an enrolling caller can stop enqueuing without first earning a refusal. It
+// also pins the default bound applied when no depth is configured.
+func TestBudgetQueuePressureReadoutTracksShedState(t *testing.T) {
+	t.Parallel()
+	if got := microagent.NewBudgetQueue(0).MaxQueue(); got != microagent.DefaultMaxParkedAdmits {
+		t.Fatalf("NewBudgetQueue MaxQueue()=%d, want DefaultMaxParkedAdmits=%d", got, microagent.DefaultMaxParkedAdmits)
+	}
+	if got := microagent.NewBudgetQueueDepth(10, -1).MaxQueue(); got != microagent.DefaultMaxParkedAdmits {
+		t.Fatalf("non-positive depth MaxQueue()=%d, want DefaultMaxParkedAdmits=%d", got, microagent.DefaultMaxParkedAdmits)
+	}
+
+	const (
+		budget   = 10
+		maxQueue = 2
+	)
+	q := microagent.NewBudgetQueueDepth(budget, maxQueue)
+
+	want := microagent.BudgetPressure{Budget: budget, MaxQueue: maxQueue}
+	if got := q.Pressure(); got != want {
+		t.Fatalf("idle Pressure()=%+v, want %+v", got, want)
+	}
+
+	holder, err := q.Admit(context.Background(), budget, 0)
+	if err != nil {
+		t.Fatalf("holder Admit: %v", err)
+	}
+	// Budget spent but the queue has room: NOT shed — upstream may still enqueue.
+	want = microagent.BudgetPressure{Budget: budget, Used: budget, MaxQueue: maxQueue}
+	if got := q.Pressure(); got != want {
+		t.Fatalf("saturated-budget Pressure()=%+v, want %+v (room to park is not backpressure)", got, want)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(maxQueue)
+	for i := 0; i < maxQueue; i++ {
+		go func() {
+			defer wg.Done()
+			release, err := q.Admit(context.Background(), budget, 0)
+			if err != nil {
+				t.Errorf("parked Admit: %v", err)
+				return
+			}
+			release()
+		}()
+	}
+	waitForSlot(t, func() bool { return q.Pressure().Shed }, 2*time.Second, "pressure reports shed")
+
+	want = microagent.BudgetPressure{Budget: budget, Used: budget, Waiting: maxQueue, MaxQueue: maxQueue, Shed: true}
+	if got := q.Pressure(); got != want {
+		t.Fatalf("full-queue Pressure()=%+v, want %+v", got, want)
+	}
+
+	holder()
+	wg.Wait()
+	waitForSlot(t, func() bool { return !q.Pressure().Shed }, 2*time.Second, "pressure clears after drain")
+	want = microagent.BudgetPressure{Budget: budget, MaxQueue: maxQueue}
+	if got := q.Pressure(); got != want {
+		t.Fatalf("drained Pressure()=%+v, want %+v", got, want)
+	}
+}
+
+// TestBudgetQueueSustainedOversubscriptionShedsThenDrains is the #2021 acceptance
+// witness under the BOUNDED regime: with 50 admits contending for a budget that
+// fits exactly one, no request is ever reserved above budget, the park queue
+// never grows past MaxQueue (the surplus is shed as typed ErrBackpressure, not
+// queued and not spun on), and every parked admit still drains when capacity
+// returns. The settle is deterministic — the whole budget is held while the
+// burst arrives, so exactly MaxQueue park and the rest are shed.
+func TestBudgetQueueSustainedOversubscriptionShedsThenDrains(t *testing.T) {
+	t.Parallel()
+	const (
+		budget   = 10
+		maxQueue = 3
+		n        = 50 // sustained over-subscription.
+	)
+	q := microagent.NewBudgetQueueDepth(budget, maxQueue)
+
+	holder, err := q.Admit(context.Background(), budget, 0) // budget spent up front.
+	if err != nil {
+		t.Fatalf("holder Admit: %v", err)
+	}
+
+	var admitted, shed atomic.Int64
+	var peak atomic.Int64 // high-water Σ reserved, sampled from inside the gate.
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			release, err := q.Admit(context.Background(), budget, 0)
+			if err != nil {
+				if !errors.Is(err, microagent.ErrBackpressure) {
+					t.Errorf("Admit: err=%v, want nil or ErrBackpressure", err)
+				}
+				shed.Add(1)
+				return
+			}
+			defer release()
+			cur := q.Used()
+			for {
+				old := peak.Load()
+				if cur <= old || peak.CompareAndSwap(old, cur) {
+					break
+				}
+			}
+			admitted.Add(1)
+		}()
+	}
+	waitForSlot(t, func() bool { return shed.Load() == n-maxQueue && q.Waiting() == maxQueue },
+		10*time.Second, "surplus shed and park queue at its bound")
+
+	// Over-subscription is bounded, not absorbed: budget held flat, queue capped.
+	if u := q.Used(); u != budget {
+		t.Fatalf("Used()=%d under sustained over-subscription, want %d (nothing reserved above budget)", u, budget)
+	}
+	if a := admitted.Load(); a != 0 {
+		t.Fatalf("%d admits granted while the whole budget was held", a)
+	}
+	if p := q.Pressure(); !p.Shed || p.Waiting != maxQueue {
+		t.Fatalf("Pressure()=%+v, want Shed=true Waiting=%d", p, maxQueue)
+	}
+
+	holder() // capacity returns: the parked admits drain, none is dropped.
+	wg.Wait()
+
+	if got := peak.Load(); got > budget {
+		t.Fatalf("reserved-token peak %d exceeded budget=%d", got, budget)
+	}
+	if a := admitted.Load(); a != maxQueue {
+		t.Fatalf("%d parked admits drained, want %d (a parked admit must never be dropped)", a, maxQueue)
+	}
+	if s := shed.Load(); s != n-maxQueue {
+		t.Fatalf("%d admits shed, want %d", s, n-maxQueue)
+	}
+	if u, w := q.Used(), q.Waiting(); u != 0 || w != 0 {
+		t.Fatalf("queue did not settle empty: Used()=%d Waiting()=%d", u, w)
+	}
+}

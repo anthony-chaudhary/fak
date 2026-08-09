@@ -337,11 +337,19 @@ func appendGoalScratchLog(goalPath, line string, rotateBytes int64) {
 	_, _ = f.WriteString(time.Now().UTC().Format(goalScratchLogStampLayout) + " " + strings.TrimSpace(line) + "\n")
 }
 
-// rotateGoalScratchLog seals the active sidecar into the next free "<path>.NNN" segment once
-// it reaches rotateBytes, so appends continue into a fresh file. Nothing is dropped or
-// rewritten — sealed segments stay on disk and the concatenation of "<path>.001".."<path>",
-// in index order, is the whole history. This is append-only-UNTIL-ROTATED, which is what the
-// growthgate ClassLog remedy ("rotate by size") asks of a plaintext grower.
+// rotateGoalScratchLog seals the active sidecar into the next free "<stem>.NNN.log" segment
+// once it reaches rotateBytes, so appends continue into a fresh file. Nothing is dropped or
+// rewritten — sealed segments stay on disk and the concatenation of "<stem>.001.log"..
+// "<stem>.log", in index order, is the whole history. This is append-only-UNTIL-ROTATED,
+// which is what the growthgate ClassLog remedy ("rotate by size") asks of a plaintext grower.
+//
+// The index is infixed BEFORE the extension rather than appended after it so a sealed segment
+// still ends in ".log". That is load-bearing, not cosmetic: growthgate's walk pre-filter
+// (isGrowthCandidate) admits a file only by its ".jsonl"/".log"/".err" suffix, so the natural
+// "<path>.NNN" naming would drop every sealed segment out of the census entirely — and the
+// sealed segments are precisely where the unbounded history accumulates. Keeping the suffix
+// keeps them both visible to the census and classified ClassLog (reapable when COLD), which is
+// what holds the retention promise of #3826 inside the leak budget epics #3287 / #3455 track.
 //
 // A non-positive rotateBytes disables rotation (used by callers that bound the file some
 // other way). Stat/rename failures leave the active file in place: appending to an oversized
@@ -354,10 +362,12 @@ func rotateGoalScratchLog(path string, rotateBytes int64) {
 	if err != nil || fi.Size() < rotateBytes {
 		return
 	}
+	ext := filepath.Ext(path)
+	stem := strings.TrimSuffix(path, ext)
 	// Segment indices are parsed numerically by readers, so the zero-pad width is cosmetic
 	// and the scan simply takes the first free slot.
 	for i := 1; i < 1000; i++ {
-		seg := fmt.Sprintf("%s.%03d", path, i)
+		seg := fmt.Sprintf("%s.%03d%s", stem, i, ext)
 		if _, statErr := os.Stat(seg); os.IsNotExist(statErr) {
 			_ = os.Rename(path, seg)
 			return

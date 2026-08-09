@@ -112,5 +112,5 @@ verdict=ALLOW reason=NONE by=monitor
 ```
 test -f docs/adoption/casts/install-to-first-verdict.cast   # the cast file exists
 test -f docs/adoption/casts/README.md                       # this annotated page exists
-python tools/seo_aeo_scorecard.py                           # new doc does not red the SEO scorecard
+fak score seo                                               # new doc does not red the SEO scorecard
 ```

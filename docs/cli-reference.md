@@ -19,6 +19,24 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `microcontextdemo`: bounded logical-context fabric
+
+`microcontextdemo` is the research/demo CLI for one immutable agent base serving bounded physical model slots across 100, 1,000, and 10,000 logical contexts. It is a separate demo binary, so invoke it with `go run ./cmd/microcontextdemo` rather than as a `fak` subcommand.
+
+```bash
+# Offline LCD floor: deterministic scheduler/shared-base semantics, not model tokens/s.
+go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64
+
+# Verify captured controlled witnesses.
+go run ./cmd/microcontextdemo -verify-kernel-prefix-ab experiments/microcontext/s2b-gcp-inkernel-prefix-ab-pass-2026-08-07.json
+go run ./cmd/microcontextdemo -verify-quality experiments/microcontext/s5-gcp-1000-cuda-outcomes-2026-08-07.json
+go run ./cmd/microcontextdemo -verify-health-scorecard experiments/microcontext/s5-gcp-1000-cuda-health-scorecard-2026-08-07.json
+```
+
+Core live flags match `microcontextdemo -h`: `-endpoint`, `-model`, `-provider`, and `-hardware` declare endpoint provenance; `-contexts` and `-workers` separate logical orchestration from bounded physical execution; `-request-timeout` and `-run-timeout` bound calls and runs. The API-only admission envelope uses `-api-concurrency`, `-api-rpm`, `-api-tpm`, and `-api-spend-micros`. Real in-kernel compatibility batches use `-gguf`, `-compat-batch-hardware`, `-compat-batch-size`, and `-compat-batch-execution`.
+
+All artifact modes have explicit `-verify-*` counterparts in `-h`. The research contract and claim boundaries are in [`docs/research/micro-context-fabrics.md`](research/micro-context-fabrics.md); captured artifacts are indexed in [`docs/research/README.md`](research/README.md).
+
 ## Use fak with your coding agent (Claude Code, Cursor, …)
 
 If you drive a coding agent, fak fits in two ways:
@@ -146,6 +164,12 @@ else — repo-workflow verbs, scorecards, benches, dispatch/loop plumbing — is
 lists every verb with its tier. The bare dev spellings below still work today
 (the `fak dev` namespace is compatibility-first); `fak dev` is the canonical form.
 
+The `session`, `signal`, and `ps` verbs are the front door to out-of-band control
+of a session that is **already running** — steer, redirect, pause, resume, cancel,
+terminate, throttle, budget, priority. That closed vocabulary, what each op may
+touch, the witness that proves it applied, and the closed refusal tokens are
+specified in [`docs/operator-control-plane.md`](operator-control-plane.md).
+
 ```
 fak dev       [<verb> ...]                             # list the dev tier, or run a dev verb (canonical spelling)
 fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
@@ -157,6 +181,11 @@ fak turntax   --suite turntax-airline                  # price the extra error-c
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
 fak guard     [--session-pressure-gate high,report=pressure.json] -- <agent command>  # wrap a real agent through the kernel; optional recent-session gate refuses high Opus/long-context pressure and can write its JSON action ledger before launch
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
+fak ps        [--json] [--watch] [--interval D] [--frames N] [--addr URL] [--key K]   # the read-only process table: one aligned row per live served session (`fak top` is `--watch`)
+fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."   # job control for a running session over the control plane: the OS process-model names, one running session at a time
+fak info      [--gateway-url URL] [--interval DUR] [--once] [--json]   # the live fak-info overlay: poll a gateway's /debug/vars and print one plain-words line per tick
+fak resume    plan [--resident-tokens N] [--idle-seconds S] [--ttl 5m|1h] [--horizon N] [--shed-budget N] [--seed-tokens N] [--image DIR] [--json]   # the deterministic resume-cache decision: project the cache POSTURE (cold past the TTL, warm inside it), price RESUME_FULL / CUT / RESET, recommend a cut-by-default re-entry
+fak recover   <REASON> [--dry-run|--execute] [--json]   # closed-vocabulary refusal recovery: map a guard/DOS reason token to the concrete commands that clear it
 fak relay     resume (--baton FILE|- | FILE) [--json]   # inspect a fak.relay.baton.v1 leg handoff OFFLINE: exactly what a successor leg would receive (pointer-only, no reload re-verification); --json emits the canonical byte-stable wire form
 fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA
 fak task      handoff --file HANDOFF.json [--json] [--live] [--repo owner/repo]  # verified completion handoff: require StateDone + VerifiedDone + current state, then plan/sync 1-2 follow-up issues
@@ -169,7 +198,7 @@ fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-
 fak codex     [--dry-run] [--split off] [--managed-cache on] -- exec --json "task"  # launch OpenAI Codex through fak guard; guard injects Codex -c model_provider=fak / wire_api=responses overrides; --managed-cache posture (default $FAK_MANAGED_CACHE) forwarded to guard
 fak c <target>|--target NAME|--auto|--list-targets      # pick a named compute backend (mac/gcp/local/anthropic + ~/.fak/targets.json); --auto ranks by health then cheapest/most-local (cost local<mac<gcp<anthropic), fails over past a DOWN target. quota is a [stub] (not a live fak accounts read) and never excludes
 fak snapshot  kinds | demo | info | dump-fleet | restore-fleet   # dump/restore any primitive (turn|tool|session|fleet|RSI loop) to a portable sha256-integrity bundle
-fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP + MCP gateway (any-language agents)
+fak serve     --addr :8080 [--require-key-env VAR] [--fleet-bus [--fleet-bus-dir DIR]] [--session-registry PATH|off]   # OpenAI-compatible HTTP + MCP gateway (any-language agents). `--session-registry` scopes WHICH SESSIONS this serve can see and write (#5825): unset keeps today's shared per-user default (`FAK_SESSION_REGISTRY`, else `<UserConfigDir>/fak/session-registry.json` — the single file EVERY serve on the box shares), which is the right reach for a real fleet but means a serve started only to drive its own sessions still adopts every live session on the host, so a fanned `fak fleet control send --op pause --all` writes to peers' work. `--fleet-bus-dir` does NOT narrow this: it scopes the BUS (announcements, directives, claims, acks) and nothing about which sessions get written, so a private bus over the shared registry reads like a sandbox and is not one. Pass a path to hydrate from and mirror to that file alone, or `off` for a pure in-memory table that adopts nothing and persists nothing. An armed `--fleet-bus` serve prints its own reach — session count and registry — before it drains a single directive
 fak recall    --dir DIR                                # persist/inspect a finished session as a durable core image
 fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass over a sleeping core image
 fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff   # attach to a session core image; demand-page its working set
@@ -192,6 +221,7 @@ fak operator  brief [--cadence FILE] [--program FILE] [--milestone FILE] [--heav
 fak operator  heaviness [--json] [--markdown] [--compare FILE]   # operator-surface pressure scorecard: verb surface, guard flag burden, refusal vocabulary, doc-map discoverability, appeal channel, heaviness_debt, and heaviness_pressure
 fak score     <name> [--json] [--markdown] [--compare FILE]   # parent verb (#1505) grouping the meta-scorecards / RSI loops so the top-level surface stays operator daily-drivers. `fak score list` names them: conflation, dogfood, dojo-rsi, guard-rsi, guard-verdict-rsi, product, skill-effectiveness, support-maturity, token-defaults, ui-quality. Each forwards to the same handler its legacy top-level verb ran (behavior-preserving; the legacy verbs remain as thin aliases)
 fak maturity  [next] [--json|--markdown] [--compare base.json]   # feature-maturity lifecycle scorecard: places every declared capability on a closed ladder and emits `fak maturity next`, the ranked backlog. `fak maturity route [--limit N] [--fetch-existing|--live]` turns the top public-routeable backlog rows into stable, deduped GitHub issue plans so the issue-dispatch loop can work them.
+fak idea-scout [--json] [--max-issues N] [--min-score N] [--config FILE] [--candidates FILE --issues FILE --scout-issues FILE] [--live]   # research-to-issue feeder (docs/idea-scout.md): score arXiv/GitHub/Hacker News/Reddit hits for relatedness, dedupe four ways (seen-cache, the label-targeted filed-stamp index, existing issue bodies, near-duplicate titles) and plan triage-ready issues. DRY-RUN BY DEFAULT — it mutates nothing. `--live` is the blast radius: it runs `gh issue create` against the current repo's REAL tracker, up to `--max-issues` public issues, and records each filed source id in `.idea-scout/seen.json`. The `--candidates`/`--issues`/`--scout-issues` fixtures replay a run offline with no network and no `gh`. Exit 2 when the filed-stamp index cannot be built completely — it REFUSES rather than risk re-filing.
 fak scoreboard post [--from card.json --debt-key K | --kpi NAME --value V --grade A --verdict OK --detail ...] [--dry-run]   # post a scorecard result/score to the Slack scoreboard channel (its own FAK_SCOREBOARD_* workspace, separate from the lab bridge); CI + local agents publish a number the moment it changes
 fak scorecard control-pane [--json|--check|--pin] [--post]   # LOCAL producer for the same #scoreboard feed (#998, local side of 52ed934b): --post (or FAK_SCOREBOARD_AUTOPOST=1) auto-posts the freshly-regenerated portfolio number tagged --source <hostname> the moment the scorecard is folded — off by default, reuses internal/scoreboard (no second manual `scoreboard post`), deduped via .fak/scoreboard-autopost-state.json so an unchanged rerun is silent
 fak bench-loop status|next|walk|run [--json]   # benchmark super-loop manager: folds registry, recorded runs, nightrun ledger, local next selection, and authority gap; run delegates to fak nightrun run
@@ -201,8 +231,12 @@ fak blockers post [--severity status|operator|clear] --title ... [--detail ... -
 fak blockers feed --issues FILE [--label blocked --repo-url URL] [--dry-run]   # CI roll-up: fold a `gh issue list --json number,title,url,assignees,labels` payload into one card — clear when empty, operator (paged) when a blocker is UNOWNED, background status when all are assigned
 fak chatrelay --endpoint URL --channel C0X [--model M --mention <@U> --system S --prime=false --once --interval 3s --dry-run]   # bridge ONE Slack channel to a `fak serve` /v1/chat/completions endpoint: poll history, forward each human message, post the reply in-thread. Generic chatbot front end — no shell, no command router; channel text is chatbot input, never a command. FAK_CHATRELAY_* (token falls back to the scoreboard token; channel has NO fallback). See docs/fak/slack-sessions.md
 fak chatops   --channel C0X --admins U07A,U07B [--bot-user <@U07BOT> --audit FILE --prime=false --once --interval 3s --dry-run]   # inbound read-only control door: poll ONE control channel, parse each admin mention as ONE verb from a closed grammar (help/ping/status/fleet answer; dispatch/resume/halt are declined until the guarded act path lands). Fail-closed admin allowlist on the immutable user id; refuses to start with no admins; every decision journaled to --audit. FAK_CHATOPS_* (token falls back to the scoreboard token; channel/admins have NO fallback). See docs/fak/slack-sessions.md
+fak fleet control send --op OP [--payload|--text TEXT] (--all | --instance I,I | --machine M | --role R) [--lane L --wave W --label X] [--ttl 5m] [--wait 10s] [--reason R] [--bus DIR] [--json] | status --directive ID | instances [--ttl D]   # the centralized control point (#5600): fan ONE op to every announced fleet instance over a shared bus directory (`fak serve --fleet-bus` arms an instance), then fold the ACKS back — `send` exits 0 only when every addressed instance witnessed the apply, 1 when it published but nobody has answered (including `--wait 0`), and 2 when the selector addresses nobody (`FLEETBUS_NO_TARGET`) rather than accepting a directive that can never apply. Instance axes (`--all`/`--instance`/`--machine`/`--role`) pick WHICH processes; session axes (`--lane`/`--wave`/`--label`) narrow WITHIN each one. An instance that matched nothing acks REFUSED, never a hollow "applied". The selectors pick which INSTANCES and which sessions within them, but the set an instance can write at all is its own `fak serve --session-registry` scope — neither `--bus` here nor `--fleet-bus-dir` there narrows it (#5825), so `--all` against the default shared per-user registry reaches every session on each addressed host, including peers'
 fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | session-publish --session S [--ttl SEC] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR] | sync [--remote R] [--push-only|--fetch-only] [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's heartbeat (#2164); `session-publish` refreshes that heartbeat as a side ref; `audit` is the read-only staleness report; `sync` converges the namespace with a remote (push-then-fetch, side refs only)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
+fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak guard decision journal's hash chain, or export it
+fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
+fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
@@ -800,3 +834,17 @@ The following work was completed as the initial wave-0 build:
 See [PARTITION.md](https://github.com/anthony-chaudhary/fak/blob/main/PARTITION.md) for the current partition manifest and wave plan.
 
 License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
+
+## `fak launch`
+
+`fak launch doctor [--json] [--repair]` diagnoses shim/provider posture; `--repair` refreshes the managed upgrade-stable fak target and owned shims.
+
+`fak launch install [--provider claude|codex|all] [--default NAME] [--no-path]`
+installs managed shims and, unless `--no-path` is set, an idempotent fak-owned PATH block
+for supported PowerShell/POSIX startup files. Uninstall removes only that block.
+
+`fak launch add NAME --command PATH [--arg ARG ...] [--default] [--shim]` persists a
+custom provider as an argv template. `fak launch remove NAME` removes the binding and
+owned shim; `fak launch list [--json]` lists bindings without exposing local command paths
+or argument values. Names are lowercase command aliases, cannot be path-like, and cannot
+shadow reserved fak verbs. See [Zero-adoption provider launch](zero-adoption-launch.md).

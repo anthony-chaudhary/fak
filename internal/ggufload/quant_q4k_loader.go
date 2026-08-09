@@ -56,6 +56,8 @@ type q4kLoadOptions struct {
 	expertShardSet      bool
 	expertShard         ExpertShard
 	residentDenseKQuant bool
+	streamedExperts     bool
+	streamedExpertBytes int64
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -77,11 +79,53 @@ func WithExpertShard(lo, hi int) Q4KLoadOption {
 	}
 }
 
+// WithStreamedExperts leaves the batched routed-expert slabs ON DISK and attaches an R5 checkpoint
+// tier (#5616) over them instead of materializing E per-expert copies at load: a routed expert is
+// then read, one stride at a time, when a router actually picks it. hostBytes is the tier's host
+// retention budget; 0 — the value to pass unless you have measured a reason not to — is
+// stream-through, where an expert is read, handed to the bounded device ring and dropped, so host
+// residency for the expert bulk stays at zero and a checkpoint bigger than host RAM is servable.
+//
+// This option needs a checkpoint that stays OPEN for the life of the model (the tier reads through
+// the WeightSource's own shard readers), so it is available only on the WeightSource-form entry
+// points; LoadModelQ4KProfileOptions refuses it rather than returning a model whose experts became
+// unreadable when it closed the source.
+func WithStreamedExperts(hostBytes int64) Q4KLoadOption {
+	return func(o *q4kLoadOptions) {
+		o.streamedExperts = true
+		o.streamedExpertBytes = hostBytes
+	}
+}
+
+// probeQ4KLoadOptions applies opts to the zero value without the config-dependent validation, for
+// callers that must inspect a request BEFORE they have a parsed checkpoint to validate it against.
+func probeQ4KLoadOptions(opts []Q4KLoadOption) q4kLoadOptions {
+	var out q4kLoadOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&out)
+		}
+	}
+	return out
+}
+
 func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptions, error) {
 	out := q4kLoadOptions{residentDenseKQuant: true}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&out)
+		}
+	}
+	if out.streamedExperts {
+		if out.streamedExpertBytes < 0 {
+			return out, fmt.Errorf("gguf: streamed-expert host budget %d is negative", out.streamedExpertBytes)
+		}
+		// A streamed tier serves EVERY expert the checkpoint carries; an expert-parallel band says
+		// this rank must never touch the others. Honouring both would mean silently serving a rank
+		// experts it was sharded out of, so refuse instead of picking one.
+		if out.expertShardSet {
+			return out, fmt.Errorf("gguf: streamed routed experts and an expert-parallel shard [%d,%d) cannot both be requested",
+				out.expertShard.Lo, out.expertShard.Hi)
 		}
 	}
 	if !out.expertShardSet {
@@ -128,7 +172,18 @@ func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
 }
 
 // LoadModelQ4KProfileOptions is LoadModelQ4KProfile with explicit load options.
+//
+// It refuses WithStreamedExperts: this entry point closes the checkpoint before it returns
+// (loadVia), and an R5 checkpoint tier reads through those very readers, so the model it handed
+// back would fail on the first routed expert a router picked — a checkpoint whose expert bulk is
+// resident nowhere else has no fallback to degrade to. Open the checkpoint yourself and keep it
+// open for the model's life instead.
 func LoadModelQ4KProfileOptions(path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	if probeQ4KLoadOptions(opts).streamedExperts {
+		return nil, fmt.Errorf("gguf: WithStreamedExperts needs a checkpoint that outlives the model; " +
+			"LoadModelQ4KProfileOptions closes it on return — use OpenWeights + (*WeightSource).QuantModelQ4KProfileOptions " +
+			"and close the source only after the model is done")
+	}
 	return loadVia(path, func(ws *WeightSource) (*model.Model, error) {
 		return ws.QuantModelQ4KProfileOptions(p, opts...)
 	})
@@ -187,6 +242,33 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	if err != nil {
 		return nil, err
 	}
+	// R5/#5616: under WithStreamedExperts the fused routed-expert slabs are described from the
+	// tensor directory (no payload IO) and left on disk; `streamed` is the read-only set of GGUF
+	// tensor names the tier took ownership of, which the per-tensor workers consult to skip
+	// materializing them. Built BEFORE the load so a checkpoint the tier cannot serve is refused
+	// up front rather than after paying for the whole load.
+	var expertTier *model.ExpertCheckpointTier
+	var streamed map[string]bool
+	if loadOpts.streamedExperts {
+		shards, err := s.FusedExpertTensors()
+		if err != nil {
+			return nil, err
+		}
+		expertTier, err = buildExpertCheckpointTier(shards, loadOpts.streamedExpertBytes)
+		if err != nil {
+			return nil, err
+		}
+		if expertTier == nil {
+			return nil, fmt.Errorf("gguf: streamed routed experts requested, but this %s checkpoint carries no fused expert slab the tier can serve", cfg.ModelType)
+		}
+		streamed = make(map[string]bool)
+		for _, sh := range shards {
+			for _, f := range sh.Fused {
+				streamed[f.Name] = true
+			}
+		}
+	}
+
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	p.SetTotal(len(s.File.Tensors))
@@ -230,6 +312,15 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			// and unsloth UD quants can use IQ3_XXS/IQ4_XS/Q8_0 in addition to the K-quants.
 			// Any other type falls to the f32 dequant-split.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+				// R5/#5616: the tier owns this slab. Return before shapeAndBytes — reading the
+				// payload here is exactly the cost the rung removes, and on a GLM-5.2-shaped
+				// checkpoint it is the whole expert bulk. Nothing is tallied on the load-path
+				// breakdown (acctType stays ""), because these bytes were neither held resident nor
+				// round-tripped through f32: they were not loaded at all, and the tier's own Stats
+				// is where their reads show up.
+				if streamed[info.Name] {
+					return tw
+				}
 				shape, raw, okShape := s.shapeAndBytesOrFail(info, &tw)
 				if !okShape {
 					return tw
@@ -325,6 +416,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// path (it refuses the normalize-sensitive q/k/qkv/linear_attn projections), so skipping
 		// normalizeCanonicalTensorData here is safe for exactly the identity weights (ffn_down,
 		// o_proj, lm_head) it admits. The expert k-quants take the batched resident path above.
+		// This is also the arm a NATIVE Q4_0 checkpoint takes (#5497), since the type test is the
+		// shared geometry table: such a checkpoint is published BECAUSE it is the small artifact,
+		// and the dequant→Q8 route left it resident at Q8_0 density — larger than the file it came
+		// from — having held the f32 expansion and the Q8 result live at once, so the load PEAK,
+		// not merely the steady state, is what broke the fit. Routing it here rather than through
+		// its own branch is deliberate: Q4_0 then inherits the same two safety gates as its
+		// siblings, so a backend that disables dense raw residency, or the GLM device layout
+		// below, still sends it down the proven path instead of leaving it unreachable at decode.
 		// EXCEPTION — glm_moe_dsa: its device serve (glmDsaWeightHAL) uploads every DENSE weight
 		// from the f32/q8/q4kw stores and has no kqw kernels, so a dense weight held here panics
 		// the first request ("got resident raw expert-quant weight ... on the device path" — the
@@ -372,6 +471,14 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 	m, err := builder.Build()
 	if err != nil {
 		return nil, err
+	}
+	if expertTier != nil {
+		m.SetExpertCheckpoint(expertTier)
+		if p != nil && p.Progress != nil {
+			st := expertTier.Stats()
+			fmt.Fprintf(p.Progress, "experts: %d routed projections streamed from the checkpoint (host budget %d B)\n",
+				st.Tensors, st.BudgetBytes)
+		}
 	}
 	// #4974: reproduce the witnessed `numactl --interleave=all` weight placement in-process so the
 	// CPU Q4_K decode path gets the multi-node bandwidth regime out of the box (no external wrapper).
@@ -441,6 +548,15 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 				}
 			case TensorQ2_0:
 				if err := builder.AddResidentQ2(pt.name, pt.shape, pt.raw); err != nil {
+					return err
+				}
+			case TensorQ4_0:
+				// Must be an explicit arm: the default below is the Q4_K super-block wrapper, and
+				// a 32-weight/18-byte Q4_0 payload handed to it fails the 256-weight/144-byte
+				// geometry check. This switch is the single funnel every resident route lands in,
+				// so naming Q4_0 here is what keeps the dense arm and the batched-expert arm from
+				// half-applying the format.
+				if err := builder.AddResidentQ4_0(pt.name, pt.shape, pt.raw); err != nil {
 					return err
 				}
 			default: // TensorQ4_K

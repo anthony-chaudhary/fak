@@ -72,8 +72,10 @@ func ClassifyReversibility(tool string, args map[string]any) ReversibilityEnvelo
 	// Populate the safe-subset sidestep target. Only a bare `git push` /
 	// `git push <remote>` with no branch and no dangerous flag carries a rewrite; a
 	// force/delete/tags/all/mirror/refspec/-u/named-branch/sibling push does not, so a
-	// future `env.RewriteCommand != ""` gate can never see a dangerous push.
-	if cmd := commandText(args); cmd != "" && safeBareGitPush(cmd) {
+	// future `env.RewriteCommand != ""` gate can never see a dangerous push. Reads
+	// the same sink-scoped view the classifier does (#5898): a declared tool's
+	// payload prose can no more offer a sidestep than it can classify.
+	if cmd := actionCommandText(tool, args); cmd != "" && safeBareGitPush(cmd) {
 		env.RewriteCommand = gitPushSidestepCommand
 		env.RewriteTool = tool
 	}
@@ -169,7 +171,11 @@ func ReversibilityConfirmToken(class ReversibilityClass, tool string, args map[s
 }
 
 func classifyReversibility(tool string, args map[string]any) (ReversibilityClass, string) {
-	cmd := commandText(args)
+	// Action rules read the sink-scoped argument view (#5898): a tool that
+	// declares which argument keys reach an execution sink exposes only those
+	// to the family matchers, so payload prose (a commit message, an issue
+	// body) cannot classify. An undeclared tool keeps the full scan.
+	cmd := actionCommandText(tool, args)
 	// The dry-run scan reads the quote-stripped payload view, not the raw
 	// command: a QUOTED "--dry-run" is a mention, and must not launder a
 	// destructive command past the preview gate (#2752).

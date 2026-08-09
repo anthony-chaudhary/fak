@@ -1,8 +1,14 @@
 package ideascout
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +69,8 @@ func TestDedupeRungsAndSeenCacheRoundTrip(t *testing.T) {
 		want string
 	}{
 		{"seen-cache", Candidate{SourceID: "arxiv:old", URL: "https://example.test/old", Title: "Novel thing"}, "seen-cache"},
-		{"stamp", Candidate{SourceID: "github:owner/repo", URL: "https://github.com/Owner/Repo", Title: "Other"}, "issue-body"},
+		{"stamp", Candidate{SourceID: "github:owner/repo", URL: "https://github.com/Owner/Repo", Title: "Other"}, "filed-stamp"},
+		{"stamp-case-folded", Candidate{SourceID: "github:Owner/Repo", URL: "https://example.test/nope", Title: "Other"}, "filed-stamp"},
 		{"url", Candidate{SourceID: "arxiv:url", URL: "https://example.test/already", Title: "Other"}, "issue-body"},
 		{"title", Candidate{SourceID: "arxiv:title", URL: "https://example.test/new", Title: "Capability policy for tool calls"}, "title-near"},
 		{"fresh", Candidate{SourceID: "arxiv:new", URL: "https://example.test/new", Title: "Different research"}, ""},
@@ -110,7 +117,7 @@ func TestRenderIssueAndPlanRanking(t *testing.T) {
 		},
 	}
 
-	plans, stats := PlanIssues(candidates, map[string]Topic{topic.Key: topic}, nil, nil, nil, "", Config{RecentDays: 180, MinScore: 1, MaxIssues: 2, DupJaccard: 0.55}, "2026-06-30", now)
+	plans, stats, _ := PlanIssues(candidates, map[string]Topic{topic.Key: topic}, nil, nil, nil, "", Config{RecentDays: 180, MinScore: 1, MaxIssues: 2, DupJaccard: 0.55}, "2026-06-30", now)
 	if stats["within-run-dup"] != 1 {
 		t.Fatalf("within-run-dup = %d, want 1", stats["within-run-dup"])
 	}
@@ -233,6 +240,52 @@ func TestScoreCandidateHackerNewsPoints(t *testing.T) {
 	}
 }
 
+// withDefaultRepoSize keeps legacy gather fixtures focused on the behaviour
+// they predate. Tests of the size floor always set an explicit non-zero size.
+func withDefaultRepoSize(repos []GitHubRepo) []GitHubRepo {
+	out := append([]GitHubRepo(nil), repos...)
+	for i := range out {
+		if out[i].Size == 0 {
+			out[i].Size = 7455
+		}
+	}
+	return out
+}
+
+func TestLiveFetcherRequestsRepoSizeOnBothGitHubLanes(t *testing.T) {
+	var calls [][]string
+	orig := ghJSONFn
+	t.Cleanup(func() { ghJSONFn = orig })
+	ghJSONFn = func(args []string, _ time.Duration, _ any) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}
+
+	fetcher := LiveFetcher{}
+	if _, err := fetcher.FetchGitHub("agent", 2); err != nil {
+		t.Fatalf("FetchGitHub: %v", err)
+	}
+	if _, err := fetcher.FetchGitHubFresh("agent", 2); err != nil {
+		t.Fatalf("FetchGitHubFresh: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("GitHub fetch calls = %d, want 2", len(calls))
+	}
+	for _, argv := range calls {
+		fieldList, ok := argAfter(argv, "--json")
+		if !ok {
+			t.Fatalf("GitHub fetch missing --json: %v", argv)
+		}
+		fields := strings.Split(fieldList, ",")
+		if !slices.Contains(fields, "size") {
+			t.Fatalf("GitHub fetch fields %v missing size", fields)
+		}
+		if slices.Contains(fields, "diskUsage") {
+			t.Fatalf("GitHub search does not support diskUsage: %v", fields)
+		}
+	}
+}
+
 type stubFetcher struct {
 	github      []GitHubRepo
 	githubFresh []GitHubRepo
@@ -240,15 +293,20 @@ type stubFetcher struct {
 	redditJSON  string
 }
 
-func (s stubFetcher) FetchArxiv(string, int) (string, error)             { return "", nil }
-func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error)      { return s.github, nil }
-func (s stubFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return s.githubFresh, nil }
-func (s stubFetcher) FetchHackerNews(string, int) (string, error)        { return s.hnJSON, nil }
-func (s stubFetcher) FetchReddit(string, int) (string, error)            { return s.redditJSON, nil }
-func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error)   { return nil, nil }
-func (s stubFetcher) EnsureLabels() error                                { return nil }
-func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)      { return "", nil }
-func (s stubFetcher) AddToProject(string, string, string) error          { return nil }
+func (s stubFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (s stubFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(s.github), nil
+}
+func (s stubFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(s.githubFresh), nil
+}
+func (s stubFetcher) FetchHackerNews(string, int) (string, error)      { return s.hnJSON, nil }
+func (s stubFetcher) FetchReddit(string, int) (string, error)          { return s.redditJSON, nil }
+func (s stubFetcher) FetchExistingIssues(int) ([]ExistingIssue, error) { return nil, nil }
+func (s stubFetcher) FetchScoutIssues(int) ([]ExistingIssue, error)    { return nil, nil }
+func (s stubFetcher) EnsureLabels() error                              { return nil }
+func (s stubFetcher) CreateIssue(IssuePlan, string) (string, error)    { return "", nil }
+func (s stubFetcher) AddToProject(string, string, string) error        { return nil }
 
 func TestGatherCandidatesHackerNewsFiltersByPoints(t *testing.T) {
 	hn := `{"hits":[
@@ -346,6 +404,49 @@ func TestGatherCandidatesFreshLaneAdmitsYoungRepo(t *testing.T) {
 	}
 }
 
+func TestGatherCandidatesRepoSizeFloorAppliesToBothGitHubLanes(t *testing.T) {
+	tiny := GitHubRepo{FullName: "x/scaffold", URL: "https://github.com/x/scaffold", Description: "thin scaffold", StargazersCount: 9000, UpdatedAt: "2026-07-09T00:00:00Z", Size: 135}
+	real := tiny
+	real.FullName, real.URL, real.Size = "x/real", "https://github.com/x/real", 7455
+	cfg := DefaultConfig()
+	topic := Topic{Key: "agents", GitHub: "agents", Terms: []string{"agents"}}
+	var errs []string
+	cands := GatherCandidates(stubFetcher{github: []GitHubRepo{tiny, real}, githubFresh: []GitHubRepo{tiny, real}}, []Topic{topic}, cfg, &errs)
+	var realCandidates []Candidate
+	for _, cand := range cands {
+		if cand.URL == tiny.URL {
+			t.Fatalf("tiny scaffold admitted: %#v", cands)
+		}
+		if cand.URL == real.URL {
+			realCandidates = append(realCandidates, cand)
+		}
+	}
+	if len(realCandidates) != 2 {
+		t.Fatalf("real repository admitted %d times, want stars + fresh lanes: %#v", len(realCandidates), cands)
+	}
+	lanes := map[string]bool{}
+	for _, cand := range realCandidates {
+		lanes[stringFromExtra(cand.Extra, "lane")] = true
+	}
+	if !lanes[""] || !lanes["fresh"] {
+		t.Fatalf("real repository lane provenance = %v, want stars + fresh", lanes)
+	}
+
+	withoutSize := realCandidates[0]
+	withoutSize.Extra = map[string]any{}
+	for key, value := range realCandidates[0].Extra {
+		if key != "size" {
+			withoutSize.Extra[key] = value
+		}
+	}
+	now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	gotScore, gotReasons := ScoreCandidate(realCandidates[0], topic, cfg, now)
+	wantScore, wantReasons := ScoreCandidate(withoutSize, topic, cfg, now)
+	if gotScore != wantScore || !reflect.DeepEqual(gotReasons, wantReasons) {
+		t.Fatalf("repo size perturbed score: with size=(%d, %v), without=(%d, %v)", gotScore, gotReasons, wantScore, wantReasons)
+	}
+}
+
 func TestGatherCandidatesFreshLaneRespectsFreshMinStars(t *testing.T) {
 	toy := GitHubRepo{
 		FullName:        "toy/repo",
@@ -396,6 +497,999 @@ func TestApplyThresholdsFreshKnobs(t *testing.T) {
 	}
 }
 
+// windowedFetcher models GitHub the way the two dedup corpora actually see it:
+// `all` is the tracker newest-first, so FetchExistingIssues truncates it to the
+// caller's limit — a RECENCY WINDOW — while FetchScoutIssues answers a query
+// TARGETED at the idea-scout label and so returns the scout's whole filing
+// history however old, exactly as `gh issue list --label idea-scout` does.
+type windowedFetcher struct {
+	repos     []GitHubRepo
+	all       []ExistingIssue // newest first
+	labeled   []ExistingIssue // carries the idea-scout label + stamp
+	scoutErr  error
+	windowErr error
+}
+
+func (f windowedFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (f windowedFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(f.repos), nil
+}
+func (f windowedFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
+func (f windowedFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
+func (f windowedFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
+func (f windowedFetcher) EnsureLabels() error                                { return nil }
+func (f windowedFetcher) CreateIssue(IssuePlan, string) (string, error)      { return "", nil }
+func (f windowedFetcher) AddToProject(string, string, string) error          { return nil }
+
+func (f windowedFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
+	if f.windowErr != nil {
+		return nil, f.windowErr
+	}
+	if limit >= 0 && len(f.all) > limit {
+		return f.all[:limit], nil // the tracker's tail falls off the window
+	}
+	return f.all, nil
+}
+
+func (f windowedFetcher) FetchScoutIssues(limit int) ([]ExistingIssue, error) {
+	if f.scoutErr != nil {
+		return nil, f.scoutErr
+	}
+	if limit >= 0 && len(f.labeled) > limit {
+		return f.labeled[:limit], nil // saturated: gh cannot say whether it truncated
+	}
+	return f.labeled, nil
+}
+
+// agedFiling is the case the 800-issue window lost: an idea-scout issue filed long
+// ago (and possibly closed since) that has since fallen out of any recency window.
+var agedFiling = ExistingIssue{
+	Number: 528,
+	Title:  "idea-scout: o/aged",
+	Body:   "> Auto-filed by the daily idea-scout.\n\n**Source:** https://github.com/o/aged\n<!-- idea-scout-source: github:o/aged -->",
+}
+
+func agedCandidateRepo() GitHubRepo {
+	return GitHubRepo{
+		FullName:        "o/aged",
+		URL:             "https://github.com/o/aged",
+		Description:     "an agent tool sandbox",
+		StargazersCount: 500,
+		PushedAt:        "2026-07-30T00:00:00Z",
+		CreatedAt:       "2026-07-01T00:00:00Z",
+	}
+}
+
+func unrelatedRecentIssues() []ExistingIssue {
+	return []ExistingIssue{
+		{Number: 5540, Title: "flake in the gateway suite", Body: "unrelated"},
+		{Number: 5539, Title: "release ship pins a stale base", Body: "unrelated"},
+		{Number: 5538, Title: "docs freshness stamp drifted", Body: "unrelated"},
+		{Number: 5537, Title: "lease reaper leaves orphans", Body: "unrelated"},
+		{Number: 5536, Title: "push gate rejects a tiered leaf", Body: "unrelated"},
+	}
+}
+
+func writeScoutConfig(t *testing.T, dir, thresholds string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.json")
+	body := `{
+		"topics": [{"key":"t","github":"agent tool","terms":["agent","tool"],"area":"trust-floor"}],
+		"thresholds": {` + thresholds + `}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// TestFiledStampCatchesASourceFiledBelowTheScanWindow is the regression pin for
+// #5544. The defect is SELF-MASKING at today's tip: the duplicates the 800-issue
+// window already produced (#5298/#5308/#5309) still sit INSIDE that window and are
+// matched, so a green run at the tip proves nothing. The window is shrunk instead
+// — issue_scan_limit=2 over a six-issue tracker — so the aged filing is below it,
+// which is exactly the state #528 was in when it came back as #5298.
+func TestFiledStampCatchesASourceFiledBelowTheScanWindow(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeScoutConfig(t, dir, `"min_score": 1, "max_issues": 3, "issue_scan_limit": 2, "scout_scan_limit": 50`)
+	fetcher := windowedFetcher{
+		repos:   []GitHubRepo{agedCandidateRepo()},
+		all:     append(unrelatedRecentIssues(), agedFiling), // newest first: the filing is 6th of 6
+		labeled: []ExistingIssue{agedFiling},
+	}
+
+	// The counterfactual first: through the WINDOW alone the aged filing is
+	// invisible, so the pre-fix rungs would have called this source new and filed
+	// it a second time. If this ever stops holding, the test below is vacuous.
+	window, err := fetcher.FetchExistingIssues(2)
+	if err != nil {
+		t.Fatalf("window fetch: %v", err)
+	}
+	winStamped, winTitles, winBodies := ExistingIssueIndex(window)
+	aged := Candidate{SourceID: "github:o/aged", URL: "https://github.com/o/aged", Title: "o/aged"}
+	if rung := IsDuplicate(aged, nil, winStamped, winTitles, winBodies, 0.55); rung != "" {
+		t.Fatalf("fixture does not exercise the defect: the 2-issue window already catches the aged filing via %q", rung)
+	}
+
+	// No seen-cache exists in dir: the git-ignored fast path is gone, which is the
+	// other half of the failure (#5543). The guarantee has to hold without it.
+	result, err := Run(RunOptions{
+		Workspace:  dir,
+		ConfigPath: cfgPath,
+		Fetcher:    fetcher,
+		Today:      "2026-08-02",
+		Now:        time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Planned) != 0 {
+		t.Fatalf("re-filed a source whose issue is below the scan window: %#v", result.Planned)
+	}
+	if result.Skipped["filed-stamp"] != 1 {
+		t.Fatalf("filed-stamp rung did not fire: skipped=%#v", result.Skipped)
+	}
+	if result.Skipped["issue-body"] != 0 || result.Skipped["title-near"] != 0 {
+		t.Fatalf("the windowed rungs must not be what caught it: skipped=%#v", result.Skipped)
+	}
+	var attributed bool
+	for _, d := range result.Dropped {
+		if d.SourceID == "github:o/aged" && d.Rung == "filed-stamp" {
+			attributed = true
+		}
+	}
+	if !attributed {
+		t.Fatalf("dropped attribution missing github:o/aged on filed-stamp: %#v", result.Dropped)
+	}
+	if idx := result.DedupIndex; idx.FiledIssuesScanned != 1 || idx.FiledStamps != 1 || !idx.ScoutIndexComplete || idx.WindowIssuesScanned != 2 {
+		t.Fatalf("dedup index does not report a complete label-targeted scan alongside the 2-issue window: %#v", idx)
+	}
+}
+
+// A saturated label scan is ambiguous between complete and truncated, and a
+// truncated index is indistinguishable from "this source is new". Growth has to
+// surface as a loud stop, not a quiet re-file.
+func TestSaturatedScoutIndexRefuses(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeScoutConfig(t, dir, `"min_score": 1, "scout_scan_limit": 2`)
+	fetcher := windowedFetcher{
+		repos:   []GitHubRepo{agedCandidateRepo()},
+		all:     unrelatedRecentIssues(),
+		labeled: []ExistingIssue{agedFiling, {Number: 529, Title: "idea-scout: o/two", Body: "<!-- idea-scout-source: github:o/two -->"}},
+	}
+	_, err := Run(RunOptions{Workspace: dir, ConfigPath: cfgPath, Fetcher: fetcher, Today: "2026-08-02"})
+	if err == nil {
+		t.Fatal("a saturated filed-issue index must refuse, not proceed on a possibly-truncated scan")
+	}
+	if !strings.Contains(err.Error(), "saturated") || !strings.Contains(err.Error(), "scout_scan_limit=2") {
+		t.Fatalf("refusal does not name the saturation tripwire: %v", err)
+	}
+}
+
+// The durable rung is MANDATORY: a populated seen-cache is a node-local fast path
+// and cannot stand in for it, because the cache is exactly what was lost in #5543.
+func TestScoutIndexFetchFailureRefusesDespiteSeenCache(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveSeen(dir, map[string]SeenRecord{"github:o/aged": {FiledAt: "2025-01-01"}}); err != nil {
+		t.Fatalf("SaveSeen: %v", err)
+	}
+	cfgPath := writeScoutConfig(t, dir, `"min_score": 1`)
+	fetcher := windowedFetcher{repos: []GitHubRepo{agedCandidateRepo()}, all: unrelatedRecentIssues(), scoutErr: errors.New("gh: not authenticated")}
+	_, err := Run(RunOptions{Workspace: dir, ConfigPath: cfgPath, Fetcher: fetcher, Today: "2026-08-02"})
+	if err == nil {
+		t.Fatal("a failed filed-issue index must refuse even when a seen-cache exists")
+	}
+	if !strings.Contains(err.Error(), "cannot build the filed-issue index") {
+		t.Fatalf("refusal does not name the durable rung: %v", err)
+	}
+}
+
+// The pre-existing refusal on a failed window scan is not relaxed on the back of
+// the new rung: degrading the soft rungs onto a bare local cache is still a worse
+// run than no run.
+func TestWindowFetchRefusalIsUnchanged(t *testing.T) {
+	fetcher := windowedFetcher{repos: []GitHubRepo{agedCandidateRepo()}, labeled: []ExistingIssue{agedFiling}, windowErr: errors.New("gh: rate limited")}
+
+	bare := t.TempDir()
+	cfgPath := writeScoutConfig(t, bare, `"min_score": 1`)
+	if _, err := Run(RunOptions{Workspace: bare, ConfigPath: cfgPath, Fetcher: fetcher, Today: "2026-08-02"}); err == nil {
+		t.Fatal("a failed window scan with no seen-cache must still refuse")
+	} else if !strings.Contains(err.Error(), "cannot fetch existing issues and no seen-cache") {
+		t.Fatalf("window refusal changed shape: %v", err)
+	}
+
+	cached := t.TempDir()
+	if err := SaveSeen(cached, map[string]SeenRecord{"github:o/other": {FiledAt: "2025-01-01"}}); err != nil {
+		t.Fatalf("SaveSeen: %v", err)
+	}
+	cachedCfg := writeScoutConfig(t, cached, `"min_score": 1`)
+	result, err := Run(RunOptions{Workspace: cached, ConfigPath: cachedCfg, Fetcher: fetcher, Today: "2026-08-02", Now: time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatalf("a failed window scan with a seen-cache should degrade, not refuse: %v", err)
+	}
+	if result.Skipped["filed-stamp"] != 1 {
+		t.Fatalf("the durable rung must still gate when the window is gone: skipped=%#v", result.Skipped)
+	}
+}
+
+// ============================================================================
+// The SHARED corpus (#5547).
+//
+// testdata/dedup_corpus.json is read by BOTH scouts: these tests and
+// tools/idea_scout_test.py. It is the mechanical replacement for the prose
+// "Two implementations, one contract" table in docs/idea-scout.md — the tie
+// that let the SAME dedup defect be fixed twice, once per implementation
+// (cfe66c656 Python/#5543, then 00f270957d2a Go/#5544). A rung that changes
+// here and not in tools/idea_scout.py (or the other way round) now reds a test
+// instead of aging into a re-filed issue.
+// ============================================================================
+
+const corpusPath = "testdata/dedup_corpus.json"
+
+type corpusIssue struct {
+	Number int    `json:"number"`
+	State  string `json:"state"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+}
+
+type corpusCandidate struct {
+	SourceID string `json:"source_id"`
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+}
+
+type corpusCase struct {
+	Name      string          `json:"name"`
+	Candidate corpusCandidate `json:"candidate"`
+	Want      string          `json:"want"`
+	Why       string          `json:"why"`
+}
+
+type corpusDedupIndex struct {
+	FiledIssuesScanned  int  `json:"filed_issues_scanned"`
+	FiledStamps         int  `json:"filed_stamps"`
+	ScoutIndexComplete  bool `json:"scout_index_complete"`
+	WindowIssuesScanned int  `json:"window_issues_scanned"`
+}
+
+type corpusExpect struct {
+	Refuse         bool             `json:"refuse"`
+	RefuseContains []string         `json:"refuse_contains"`
+	Planned        []string         `json:"planned"`
+	Skipped        map[string]int   `json:"skipped"`
+	Dropped        []DroppedSource  `json:"dropped"`
+	DedupIndex     corpusDedupIndex `json:"dedup_index"`
+}
+
+type corpusRun struct {
+	Name         string                `json:"name"`
+	Config       json.RawMessage       `json:"config"`
+	Repos        []GitHubRepo          `json:"repos"`
+	WindowIssues []corpusIssue         `json:"window_issues"`
+	ScoutIssues  []corpusIssue         `json:"scout_issues"`
+	WindowError  string                `json:"window_error"`
+	ScoutError   string                `json:"scout_error"`
+	Seen         map[string]SeenRecord `json:"seen"`
+	Expect       corpusExpect          `json:"expect"`
+	Why          string                `json:"why"`
+}
+
+type dedupCorpus struct {
+	Schema          string                `json:"schema"`
+	Rungs           []string              `json:"rungs"`
+	SkipStatKeys    []string              `json:"skip_stat_keys"`
+	DupJaccard      float64               `json:"dup_jaccard"`
+	Seen            map[string]SeenRecord `json:"seen"`
+	WindowIssues    []corpusIssue         `json:"window_issues"`
+	ScoutIssues     []corpusIssue         `json:"scout_issues"`
+	DedupCases      []corpusCase          `json:"dedup_cases"`
+	WindowOnlyCases []corpusCase          `json:"window_only_cases"`
+	Runs            []corpusRun           `json:"runs"`
+}
+
+func loadCorpus(t *testing.T) dedupCorpus {
+	t.Helper()
+	raw, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("read shared corpus %s (tools/idea_scout_test.py reads the same file): %v", corpusPath, err)
+	}
+	var c dedupCorpus
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("parse shared corpus: %v", err)
+	}
+	if c.Schema != "fak/idea-scout-dedup-corpus@1" {
+		t.Fatalf("corpus schema = %q, want fak/idea-scout-dedup-corpus@1", c.Schema)
+	}
+	if len(c.DedupCases) == 0 || len(c.WindowOnlyCases) == 0 || len(c.Runs) == 0 {
+		t.Fatalf("corpus is empty in at least one section: %d dedup, %d window-only, %d runs",
+			len(c.DedupCases), len(c.WindowOnlyCases), len(c.Runs))
+	}
+	return c
+}
+
+func existingIssues(in []corpusIssue) []ExistingIssue {
+	out := make([]ExistingIssue, 0, len(in))
+	for _, iss := range in {
+		out = append(out, ExistingIssue{Number: iss.Number, Title: iss.Title, Body: iss.Body})
+	}
+	return out
+}
+
+func corpusCand(c corpusCandidate) Candidate {
+	return Candidate{SourceID: c.SourceID, URL: c.URL, Title: c.Title}
+}
+
+// index applies the corpus's index_build_rule: the durable stamps come from the
+// label-targeted filing history, unioned with any stamp still visible in the
+// recency window; the soft rungs see the window and nothing else.
+func (c dedupCorpus) index() (map[string]struct{}, []map[string]struct{}, string) {
+	stamped := StampIndex(existingIssues(c.ScoutIssues))
+	winStamped, titleSets, bodies := ExistingIssueIndex(existingIssues(c.WindowIssues))
+	for sid := range winStamped {
+		stamped[sid] = struct{}{}
+	}
+	return stamped, titleSets, bodies
+}
+
+func TestSharedCorpusDedupRungs(t *testing.T) {
+	c := loadCorpus(t)
+	stamped, titleSets, bodies := c.index()
+	for _, tc := range c.DedupCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := IsDuplicate(corpusCand(tc.Candidate), c.Seen, stamped, titleSets, bodies, c.DupJaccard)
+			if got != tc.Want {
+				t.Fatalf("shared corpus %q: rung = %q, want %q\n  candidate: %+v\n  why: %s\n  (tools/idea_scout_test.py asserts the SAME verdict from the SAME file — a rung that moves in only one implementation must red here)",
+					tc.Name, got, tc.Want, tc.Candidate, tc.Why)
+			}
+		})
+	}
+}
+
+// The counterfactual half of the corpus: with the durable rung removed (no scout
+// index) and the seen-cache gone, every case must come back NEW. That is the
+// exact state #5543 was found in, and it is what keeps the filed-stamp cases
+// above from passing for some unrelated reason.
+func TestSharedCorpusWindowOnlyCounterfactual(t *testing.T) {
+	c := loadCorpus(t)
+	winStamped, titleSets, bodies := ExistingIssueIndex(existingIssues(c.WindowIssues))
+	for _, tc := range c.WindowOnlyCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := IsDuplicate(corpusCand(tc.Candidate), nil, winStamped, titleSets, bodies, c.DupJaccard)
+			if got != tc.Want {
+				t.Fatalf("shared corpus window-only %q: rung = %q, want %q — the corpus no longer exercises the defect\n  why: %s", tc.Name, got, tc.Want, tc.Why)
+			}
+		})
+	}
+}
+
+// The rung VOCABULARY is part of the contract too: renaming, adding or dropping a
+// rung on one side only is exactly the drift this corpus exists to catch, and a
+// per-case verdict check alone would not see it.
+func TestSharedCorpusRungVocabulary(t *testing.T) {
+	c := loadCorpus(t)
+
+	_, stats, _ := PlanIssues(nil, nil, nil, nil, nil, "", DefaultConfig(), "2026-08-02", time.Time{})
+	var gotKeys []string
+	for k := range stats {
+		gotKeys = append(gotKeys, k)
+	}
+	wantKeys := append([]string(nil), c.SkipStatKeys...)
+	sort.Strings(gotKeys)
+	sort.Strings(wantKeys)
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("planner skip-stat keys = %v, corpus skip_stat_keys = %v", gotKeys, wantKeys)
+	}
+
+	declared := map[string]bool{}
+	for _, r := range c.Rungs {
+		declared[r] = true
+	}
+	exercised := map[string]bool{}
+	for _, tc := range c.DedupCases {
+		if tc.Want == "" {
+			continue
+		}
+		if !declared[tc.Want] {
+			t.Fatalf("case %q expects rung %q, which the corpus does not declare in `rungs`", tc.Name, tc.Want)
+		}
+		exercised[tc.Want] = true
+	}
+	for _, r := range c.Rungs {
+		if !exercised[r] {
+			t.Fatalf("declared rung %q has no case in the shared corpus", r)
+		}
+		if _, ok := stats[r]; !ok {
+			t.Fatalf("declared rung %q is not a planner skip-stat key: %v", r, stats)
+		}
+	}
+}
+
+// corpusFetcher replays one run case. It models GitHub the way the two dedup
+// corpora actually see it: FetchExistingIssues TRUNCATES the newest-first tracker
+// to the caller's limit (a recency window), while FetchScoutIssues answers a query
+// targeted at the idea-scout label and so returns the scout's whole filing history
+// however old. tools/idea_scout_test.py stubs the Python fetchers identically.
+type corpusFetcher struct {
+	repos     []GitHubRepo
+	window    []ExistingIssue
+	scout     []ExistingIssue
+	windowErr error
+	scoutErr  error
+}
+
+func (f corpusFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (f corpusFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(f.repos), nil
+}
+func (f corpusFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
+func (f corpusFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
+func (f corpusFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
+func (f corpusFetcher) EnsureLabels() error                                { return nil }
+func (f corpusFetcher) AddToProject(string, string, string) error          { return nil }
+
+func (f corpusFetcher) CreateIssue(IssuePlan, string) (string, error) {
+	return "", errors.New("corpus replay is dry-run: nothing may ever be filed")
+}
+
+func (f corpusFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
+	if f.windowErr != nil {
+		return nil, f.windowErr
+	}
+	if limit >= 0 && len(f.window) > limit {
+		return f.window[:limit], nil
+	}
+	return f.window, nil
+}
+
+func (f corpusFetcher) FetchScoutIssues(limit int) ([]ExistingIssue, error) {
+	if f.scoutErr != nil {
+		return nil, f.scoutErr
+	}
+	if limit >= 0 && len(f.scout) > limit {
+		return f.scout[:limit], nil
+	}
+	return f.scout, nil
+}
+
+func TestSharedCorpusRuns(t *testing.T) {
+	c := loadCorpus(t)
+	for _, rc := range c.Runs {
+		t.Run(rc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.json")
+			if err := os.WriteFile(cfgPath, rc.Config, 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			if len(rc.Seen) > 0 {
+				if err := SaveSeen(dir, rc.Seen); err != nil {
+					t.Fatalf("SaveSeen: %v", err)
+				}
+			}
+			fetcher := corpusFetcher{
+				repos:  rc.Repos,
+				window: existingIssues(rc.WindowIssues),
+				scout:  existingIssues(rc.ScoutIssues),
+			}
+			if rc.WindowError != "" {
+				fetcher.windowErr = errors.New(rc.WindowError)
+			}
+			if rc.ScoutError != "" {
+				fetcher.scoutErr = errors.New(rc.ScoutError)
+			}
+
+			result, err := Run(RunOptions{
+				Workspace:  dir,
+				ConfigPath: cfgPath,
+				Fetcher:    fetcher,
+				Today:      "2026-08-02",
+				Now:        time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+			})
+
+			if rc.Expect.Refuse {
+				if err == nil {
+					t.Fatalf("shared corpus run %q must REFUSE, got result %#v\n  why: %s", rc.Name, result, rc.Why)
+				}
+				for _, want := range rc.Expect.RefuseContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("shared corpus run %q refusal %q missing %q", rc.Name, err.Error(), want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("shared corpus run %q: %v\n  why: %s", rc.Name, err, rc.Why)
+			}
+
+			var planned []string
+			for _, p := range result.Planned {
+				planned = append(planned, p.SourceID)
+			}
+			want := rc.Expect.Planned
+			if len(planned) == 0 && len(want) == 0 {
+				planned, want = nil, nil
+			}
+			if !reflect.DeepEqual(planned, want) {
+				t.Fatalf("shared corpus run %q: planned = %v, want %v\n  why: %s", rc.Name, planned, rc.Expect.Planned, rc.Why)
+			}
+			for rung, n := range rc.Expect.Skipped {
+				if result.Skipped[rung] != n {
+					t.Fatalf("shared corpus run %q: skipped[%q] = %d, want %d (all: %#v)", rc.Name, rung, result.Skipped[rung], n, result.Skipped)
+				}
+			}
+			gotDropped := result.Dropped
+			if len(gotDropped) == 0 {
+				gotDropped = nil
+			}
+			wantDropped := rc.Expect.Dropped
+			if len(wantDropped) == 0 {
+				wantDropped = nil
+			}
+			if !reflect.DeepEqual(gotDropped, wantDropped) {
+				t.Fatalf("shared corpus run %q: dropped attribution = %#v, want %#v", rc.Name, gotDropped, wantDropped)
+			}
+			got := corpusDedupIndex{
+				FiledIssuesScanned:  result.DedupIndex.FiledIssuesScanned,
+				FiledStamps:         result.DedupIndex.FiledStamps,
+				ScoutIndexComplete:  result.DedupIndex.ScoutIndexComplete,
+				WindowIssuesScanned: result.DedupIndex.WindowIssuesScanned,
+			}
+			if got != rc.Expect.DedupIndex {
+				t.Fatalf("shared corpus run %q: dedup_index = %+v, want %+v", rc.Name, got, rc.Expect.DedupIndex)
+			}
+			if _, err := os.Stat(CachePath(dir)); len(rc.Seen) == 0 && !os.IsNotExist(err) {
+				t.Fatalf("shared corpus run %q is dry-run and must not write the seen cache (stat err=%v)", rc.Name, err)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// The SHARED SOURCE corpus (#5549).
+//
+// testdata/source_corpus.json is read by BOTH scouts: the tests below and
+// tools/idea_scout_test.py's SharedSourceCorpusTest. It is the gather-stage
+// sibling of dedup_corpus.json — #5547 made the DEDUP contract mechanical after
+// the same defect had to be fixed twice; this makes the GATHER contract
+// mechanical after `hn` and `reddit` turned out to exist only in Go, so a topic
+// naming them on the scheduled Python path gathered nothing and reported success.
+// ============================================================================
+
+const sourceCorpusPath = "testdata/source_corpus.json"
+
+type sourceParseCase struct {
+	Name    string           `json:"name"`
+	Lane    string           `json:"lane"`
+	Topic   string           `json:"topic"`
+	Payload string           `json:"payload"`
+	Want    []map[string]any `json:"want"`
+	Why     string           `json:"why"`
+}
+
+type sourceConfigCase struct {
+	Name           string          `json:"name"`
+	Topic          json.RawMessage `json:"topic"`
+	Refuse         bool            `json:"refuse"`
+	RefuseContains []string        `json:"refuse_contains"`
+	Why            string          `json:"why"`
+}
+
+type sourceScoreCase struct {
+	Name               string    `json:"name"`
+	Candidate          Candidate `json:"candidate"`
+	Terms              []string  `json:"terms"`
+	WantScore          int       `json:"want_score"`
+	WantReasonContains string    `json:"want_reason_contains"`
+	Why                string    `json:"why"`
+}
+
+type sourceGatherCase struct {
+	Name                   string          `json:"name"`
+	Topic                  Topic           `json:"topic"`
+	MinPoints              int             `json:"min_points"`
+	MinRepoSizeKB          int             `json:"min_repo_size_kb"`
+	GitHubRepos            []GitHubRepo    `json:"github_repos"`
+	GitHubFreshRepos       []GitHubRepo    `json:"github_fresh_repos"`
+	HNPayload              string          `json:"hn_payload"`
+	RedditPayload          string          `json:"reddit_payload"`
+	HNError                string          `json:"hn_error"`
+	RedditError            string          `json:"reddit_error"`
+	WantSourceIDs          []string        `json:"want_source_ids"`
+	WantErrorsContain      []string        `json:"want_errors_contain"`
+	AssertSizeScoreNeutral bool            `json:"assert_size_score_neutral"`
+	Why                    string          `json:"why"`
+	TopicRaw               json.RawMessage `json:"-"`
+}
+
+type sourceCorpus struct {
+	Schema        string             `json:"schema"`
+	TopicKeys     []string           `json:"topic_keys"`
+	MetaKeys      []string           `json:"meta_keys"`
+	Lanes         []string           `json:"lanes"`
+	DisplayList   string             `json:"display_list"`
+	ThresholdKeys []string           `json:"threshold_keys"`
+	ConfigCases   []sourceConfigCase `json:"config_cases"`
+	ParseCases    []sourceParseCase  `json:"parse_cases"`
+	ScoreCases    []sourceScoreCase  `json:"score_cases"`
+	GatherCases   []sourceGatherCase `json:"gather_cases"`
+}
+
+func loadSourceCorpus(t *testing.T) sourceCorpus {
+	t.Helper()
+	raw, err := os.ReadFile(sourceCorpusPath)
+	if err != nil {
+		t.Fatalf("read shared source corpus %s (tools/idea_scout_test.py reads the same file): %v", sourceCorpusPath, err)
+	}
+	var c sourceCorpus
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("parse shared source corpus: %v", err)
+	}
+	if c.Schema != "fak/idea-scout-source-corpus@1" {
+		t.Fatalf("corpus schema = %q, want fak/idea-scout-source-corpus@1", c.Schema)
+	}
+	if len(c.ConfigCases) == 0 || len(c.ParseCases) == 0 || len(c.GatherCases) == 0 || len(c.ScoreCases) == 0 {
+		t.Fatalf("source corpus is empty in at least one section: %d config, %d parse, %d score, %d gather",
+			len(c.ConfigCases), len(c.ParseCases), len(c.ScoreCases), len(c.GatherCases))
+	}
+	return c
+}
+
+// TestSharedSourceCorpusVocabulary pins the SOURCE VOCABULARY itself: the lanes
+// that exist, the topic keys that arm them, and the thresholds a config may set.
+// tools/idea_scout_test.py asserts the same three lists against its own
+// SOURCE_LANES / TOPIC_META_KEYS / DEFAULTS, so a lane or knob that grows on one
+// implementation and not the other reds here instead of silently gathering
+// nothing on the path that runs.
+func TestSharedSourceCorpusVocabulary(t *testing.T) {
+	c := loadSourceCorpus(t)
+
+	var laneLabels []string
+	for _, lane := range sourceLanes {
+		laneLabels = append(laneLabels, lane.label)
+	}
+	if !reflect.DeepEqual(laneLabels, c.Lanes) {
+		t.Fatalf("gather lane labels = %v, corpus lanes = %v\n  (tools/idea_scout.py's SOURCE_LANES must carry the identical list)", laneLabels, c.Lanes)
+	}
+	if got := sourceTopicKeys(); !reflect.DeepEqual(got, c.TopicKeys) {
+		t.Fatalf("source topic keys = %v, corpus topic_keys = %v", got, c.TopicKeys)
+	}
+	if !reflect.DeepEqual(topicMetaKeys, c.MetaKeys) {
+		t.Fatalf("topic meta keys = %v, corpus meta_keys = %v", topicMetaKeys, c.MetaKeys)
+	}
+	if got := sourceDisplayList(); got != c.DisplayList {
+		t.Fatalf("source display list = %q, corpus display_list = %q", got, c.DisplayList)
+	}
+
+	gotThresholds := append([]string(nil), thresholdKeys()...)
+	wantThresholds := append([]string(nil), c.ThresholdKeys...)
+	sort.Strings(gotThresholds)
+	sort.Strings(wantThresholds)
+	if !reflect.DeepEqual(gotThresholds, wantThresholds) {
+		t.Fatalf("Config threshold keys = %v, corpus threshold_keys = %v\n  (this list caught hn_per_topic/reddit_per_topic/min_points being Go-only knobs)", gotThresholds, wantThresholds)
+	}
+
+	// Every declared lane must name a topic key that is itself declared, so the
+	// two vocabularies cannot drift from each other inside one implementation.
+	declaredKeys := map[string]bool{}
+	for _, k := range c.TopicKeys {
+		declaredKeys[k] = true
+	}
+	for _, lane := range sourceLanes {
+		if !declaredKeys[lane.topicKey] {
+			t.Fatalf("lane %q is armed by topic key %q, which the corpus does not declare", lane.label, lane.topicKey)
+		}
+	}
+}
+
+// TestSharedSourceCorpusConfigCases is the loud-refusal half of #5549: a config
+// naming a lane the running implementation cannot serve must FAIL rather than
+// gather zero and report success.
+func TestSharedSourceCorpusConfigCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	for _, tc := range c.ConfigCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.json")
+			doc := "{\"topics\":[" + string(tc.Topic) + "]}"
+			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, _, err := LoadConfig(path)
+			if tc.Refuse {
+				if err == nil {
+					t.Fatalf("config case %q must REFUSE and did not\n  why: %s", tc.Name, tc.Why)
+				}
+				for _, want := range tc.RefuseContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("config case %q refusal %q missing %q", tc.Name, err.Error(), want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("config case %q must be ACCEPTED: %v\n  why: %s", tc.Name, err, tc.Why)
+			}
+		})
+	}
+}
+
+// TestSharedSourceCorpusParseCases folds the SAME wire bytes tools/idea_scout.py
+// folds and asserts the SAME candidates come out, field by field.
+func TestSharedSourceCorpusParseCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	for _, tc := range c.ParseCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			var got []Candidate
+			switch tc.Lane {
+			case "hn":
+				got = ParseHackerNewsJSON(tc.Payload, tc.Topic)
+			case "reddit":
+				got = ParseRedditJSON(tc.Payload, tc.Topic)
+			default:
+				t.Fatalf("parse case %q names lane %q, which has no parser here", tc.Name, tc.Lane)
+			}
+			if len(got) != len(tc.Want) {
+				t.Fatalf("parse case %q: got %d candidates, want %d\n  got: %+v\n  why: %s", tc.Name, len(got), len(tc.Want), got, tc.Why)
+			}
+			for i, want := range tc.Want {
+				assertCandidateFields(t, tc.Name, i, got[i], want, tc.Why)
+			}
+		})
+	}
+}
+
+// assertCandidateFields compares a parsed candidate against the corpus's expected
+// object one field at a time. `extra` is compared as a whole map (through a JSON
+// round-trip so both sides are float64-normalised), so an extra key present on
+// one implementation only is caught rather than ignored.
+func assertCandidateFields(t *testing.T, caseName string, i int, got Candidate, want map[string]any, why string) {
+	t.Helper()
+	gotFields := map[string]any{
+		"source":    got.Source,
+		"source_id": got.SourceID,
+		"url":       got.URL,
+		"title":     got.Title,
+		"summary":   got.Summary,
+		"published": got.Published,
+		"topic":     got.Topic,
+	}
+	for key, wantVal := range want {
+		if key == "extra" {
+			continue
+		}
+		gotVal, ok := gotFields[key]
+		if !ok {
+			t.Fatalf("parse case %q candidate %d: corpus names field %q, which the Go candidate has no counterpart for", caseName, i, key)
+		}
+		if gotVal != wantVal {
+			t.Fatalf("parse case %q candidate %d: %s = %#v, want %#v\n  why: %s\n  (tools/idea_scout_test.py folds the same bytes and asserts the same value)", caseName, i, key, gotVal, wantVal, why)
+		}
+	}
+	wantExtra, ok := want["extra"]
+	if !ok {
+		return
+	}
+	gotExtra := normaliseJSON(t, got.Extra)
+	if !reflect.DeepEqual(gotExtra, normaliseJSON(t, wantExtra)) {
+		t.Fatalf("parse case %q candidate %d: extra = %#v, want %#v\n  why: %s", caseName, i, gotExtra, normaliseJSON(t, wantExtra), why)
+	}
+}
+
+// normaliseJSON round-trips a value through JSON so numbers on both sides land as
+// float64 and the comparison is about content, not Go's int/float distinction.
+func normaliseJSON(t *testing.T, v any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal for comparison: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal for comparison: %v", err)
+	}
+	return out
+}
+
+// TestSharedSourceCorpusScoreCases pins the `points` bonus. It was a Go-only
+// branch: the same HN story scored 30 here and 10 in Python, so a story that
+// cleared min_score on one path could never clear it on the other.
+func TestSharedSourceCorpusScoreCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	for _, tc := range c.ScoreCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			score, reasons := ScoreCandidate(tc.Candidate, Topic{Key: "probe", Terms: tc.Terms}, DefaultConfig(), now)
+			if score != tc.WantScore {
+				t.Fatalf("score case %q: score = %d, want %d (reasons=%v)\n  why: %s", tc.Name, score, tc.WantScore, reasons, tc.Why)
+			}
+			joined := strings.Join(reasons, "; ")
+			if tc.WantReasonContains == "" {
+				if strings.Contains(joined, "points") {
+					t.Fatalf("score case %q: reasons %q claim a points bonus that was not earned", tc.Name, joined)
+				}
+				return
+			}
+			if !strings.Contains(joined, tc.WantReasonContains) {
+				t.Fatalf("score case %q: reasons %q missing %q", tc.Name, joined, tc.WantReasonContains)
+			}
+		})
+	}
+}
+
+// sourceProbeFetcher serves one gather case: the two points lanes from fixture
+// bytes, every other lane empty. tools/idea_scout_test.py stubs the Python
+// fetchers identically.
+type sourceProbeFetcher struct {
+	github      []GitHubRepo
+	githubFresh []GitHubRepo
+	hn          string
+	reddit      string
+	hnErr       error
+	redditErr   error
+	corpusFetcher
+}
+
+func (f sourceProbeFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return append([]GitHubRepo(nil), f.github...), nil
+}
+
+func (f sourceProbeFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) {
+	return append([]GitHubRepo(nil), f.githubFresh...), nil
+}
+
+func (f sourceProbeFetcher) FetchHackerNews(string, int) (string, error) {
+	return f.hn, f.hnErr
+}
+
+func (f sourceProbeFetcher) FetchReddit(string, int) (string, error) {
+	return f.reddit, f.redditErr
+}
+
+// TestSharedSourceCorpusGatherCases is the BEHAVIOURAL half of the vocabulary
+// claim: for each declared topic key, a topic naming only that key must actually
+// gather its lane. A key that is admissible at config load and unread at gather
+// time is exactly the #5549 defect, and a vocabulary list alone would not see it.
+func TestSharedSourceCorpusGatherCases(t *testing.T) {
+	c := loadSourceCorpus(t)
+	for _, tc := range c.GatherCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			fetcher := sourceProbeFetcher{
+				github: tc.GitHubRepos, githubFresh: tc.GitHubFreshRepos,
+				hn: tc.HNPayload, reddit: tc.RedditPayload,
+			}
+			if tc.HNError != "" {
+				fetcher.hnErr = errors.New(tc.HNError)
+			}
+			if tc.RedditError != "" {
+				fetcher.redditErr = errors.New(tc.RedditError)
+			}
+			cfg := DefaultConfig()
+			cfg.MinPoints = tc.MinPoints
+			if tc.MinRepoSizeKB != 0 {
+				cfg.MinRepoSizeKB = tc.MinRepoSizeKB
+			}
+			var errorsOut []string
+			cands := GatherCandidates(fetcher, []Topic{tc.Topic}, cfg, &errorsOut)
+
+			var gotIDs []string
+			for _, cand := range cands {
+				gotIDs = append(gotIDs, cand.SourceID)
+			}
+			want := tc.WantSourceIDs
+			if len(gotIDs) == 0 && len(want) == 0 {
+				gotIDs, want = nil, nil
+			}
+			if !reflect.DeepEqual(gotIDs, want) {
+				t.Fatalf("gather case %q: source_ids = %v, want %v\n  why: %s\n  (tools/idea_scout_test.py runs the same case through gather_candidates)", tc.Name, gotIDs, tc.WantSourceIDs, tc.Why)
+			}
+			if tc.AssertSizeScoreNeutral {
+				now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+				for _, cand := range cands {
+					withoutSize := cand
+					withoutSize.Extra = map[string]any{}
+					for key, value := range cand.Extra {
+						if key != "size" {
+							withoutSize.Extra[key] = value
+						}
+					}
+					gotScore, gotReasons := ScoreCandidate(cand, tc.Topic, cfg, now)
+					wantScore, wantReasons := ScoreCandidate(withoutSize, tc.Topic, cfg, now)
+					if gotScore != wantScore || !reflect.DeepEqual(gotReasons, wantReasons) {
+						t.Fatalf("gather case %q: repo size perturbed score: with=(%d, %v), without=(%d, %v)", tc.Name, gotScore, gotReasons, wantScore, wantReasons)
+					}
+				}
+			}
+			for _, wantErr := range tc.WantErrorsContain {
+				if !strings.Contains(strings.Join(errorsOut, "; "), wantErr) {
+					t.Fatalf("gather case %q: errors %v missing %q", tc.Name, errorsOut, wantErr)
+				}
+			}
+			if len(tc.WantErrorsContain) == 0 && len(errorsOut) > 0 {
+				t.Fatalf("gather case %q recorded unexpected errors: %v", tc.Name, errorsOut)
+			}
+		})
+	}
+}
+
+// TestSourceCorpusCoversEveryDeclaredTopicKey keeps the gather cases honest: a
+// lane added to the vocabulary with no case proving it actually gathers would let
+// the #5549 defect back in under a green suite.
+func TestSourceCorpusCoversEveryDeclaredTopicKey(t *testing.T) {
+	c := loadSourceCorpus(t)
+	covered := map[string]bool{}
+	for _, tc := range c.GatherCases {
+		for _, key := range sourceTopicKeys() {
+			if topicNamesKey(tc.Topic, key) && len(tc.WantSourceIDs) > 0 {
+				covered[key] = true
+			}
+		}
+	}
+	// arxiv and github are covered by the run corpus and the fresh-lane tests;
+	// the points lanes are the ones this corpus exists for.
+	for _, key := range []string{"hn", "reddit"} {
+		if !covered[key] {
+			t.Fatalf("declared topic key %q has no gather case that admits a candidate — the corpus would not notice the lane going missing", key)
+		}
+	}
+}
+
+// TestEveryDeclaredThresholdIsActuallyRead welds the threshold vocabulary to the
+// code that CONSUMES it, which is the same weld the gather cases make for source
+// lanes. thresholdKeys() is reflected off Config's JSON tags, so a knob becomes
+// admissible the moment the field exists — but applyThresholds reads a hand-written
+// switch, and a key that is admissible at load and unread at apply is exactly the
+// #5549 defect on the threshold half: the setting appears to take and does not.
+// Without this, adding a Config field and updating the corpus list is enough to
+// ship a silently-ignored knob.
+func TestEveryDeclaredThresholdIsActuallyRead(t *testing.T) {
+	rt := reflect.TypeOf(Config{})
+	for _, key := range thresholdKeys() {
+		t.Run(key, func(t *testing.T) {
+			idx := -1
+			for i := 0; i < rt.NumField(); i++ {
+				if name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ","); name == key {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				t.Fatalf("threshold %q is declared but has no Config field", key)
+			}
+			cfg := DefaultConfig()
+			var probe any
+			switch cur := reflect.ValueOf(cfg).Field(idx); cur.Kind() {
+			case reflect.Int:
+				probe = int(cur.Int()) + 7
+			case reflect.Float64:
+				probe = cur.Float() + 0.125
+			case reflect.String:
+				probe = "probe-" + key
+			default:
+				t.Fatalf("threshold %q has unhandled kind %s — teach this test before adding it", key, cur.Kind())
+			}
+			applyThresholds(&cfg, map[string]any{key: probe})
+			if got := reflect.ValueOf(cfg).Field(idx).Interface(); got != probe {
+				t.Fatalf("applyThresholds ignored declared threshold %q: Config.%s = %v, want %v — the key is admissible at load and unread at apply, which is the silent no-op this corpus exists to refuse",
+					key, rt.Field(idx).Name, got, probe)
+			}
+		})
+	}
+}
+
+func topicNamesKey(t Topic, key string) bool {
+	switch key {
+	case "arxiv":
+		return t.Arxiv != ""
+	case "github":
+		return t.GitHub != ""
+	case "hn":
+		return t.HN != ""
+	case "reddit":
+		return t.Reddit != ""
+	}
+	return false
+}
+
 func hasLabel(labels []string, want string) bool {
 	for _, got := range labels {
 		if got == want {
@@ -403,4 +1497,217 @@ func hasLabel(labels []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// ============================================================================
+// The durable rung's two ENDPOINTS.
+//
+// #5544 routed the never-file-twice guarantee onto `gh issue list --label
+// idea-scout`. That query is a COMPLETE COVER for the deduped population only if
+// both ends of the loop hold:
+//
+//	WRITE end — every issue the scout files carries ScoutLabel and the
+//	            `<!-- idea-scout-source: … -->` stamp, else the index cannot see it.
+//	READ  end — the query really is label-targeted over --state all, else it is a
+//	            recency window again under a new name.
+//
+// tools/idea_scout.py welds both on the Python side (test_render_stamps_source_and_labels
+// pins the label list render_issue emits; test_scout_index_query_is_label_targeted_not_windowed
+// pins the argv). Neither was welded here, so the Go port — the path
+// .claude/skills/question-loop/SKILL.md points agents at — could lose either end
+// under a fully green suite. The failure would be SELF-MASKING in exactly the way
+// #5544 describes: the recency window keeps catching recent filings, so nothing
+// reds until they age out and get re-filed.
+//
+// The dedup corpus cannot cover this. It hand-writes issue bodies on the read side,
+// so it pins StampIndex against a fixture rather than against what RenderIssue
+// actually produces, and it never exercises the label filter at all.
+// ============================================================================
+
+// argAfter returns the value following `flag` in a gh argv.
+func argAfter(argv []string, flag string) (string, bool) {
+	for i, a := range argv {
+		if a == flag && i+1 < len(argv) {
+			return argv[i+1], true
+		}
+	}
+	return "", false
+}
+
+// TestScoutIndexQueryIsLabelTargeted is the READ end. It patches the shell-out seam
+// and reads back the argv LiveFetcher.FetchScoutIssues would actually send, so the
+// property under test is the wiring rather than a helper's contract in isolation.
+func TestScoutIndexQueryIsLabelTargeted(t *testing.T) {
+	var sent [][]string
+	orig := ghJSONFn
+	t.Cleanup(func() { ghJSONFn = orig })
+	ghJSONFn = func(args []string, _ time.Duration, _ any) error {
+		sent = append(sent, args)
+		return nil
+	}
+
+	if _, err := (LiveFetcher{}).FetchScoutIssues(5000); err != nil {
+		t.Fatalf("FetchScoutIssues: %v", err)
+	}
+	if _, err := (LiveFetcher{}).FetchExistingIssues(800); err != nil {
+		t.Fatalf("FetchExistingIssues: %v", err)
+	}
+	if len(sent) != 2 {
+		t.Fatalf("expected one argv per fetch, got %d: %v", len(sent), sent)
+	}
+	scout, window := sent[0], sent[1]
+
+	label, ok := argAfter(scout, "--label")
+	if !ok || label != ScoutLabel {
+		t.Fatalf("the filed-issue index query is not label-targeted: %v\n  without `--label %s` it is a bare recency listing, so the durable rung's coverage tracks the tracker's growth again and an aged-out filing gets re-filed (#5544)", scout, ScoutLabel)
+	}
+	if state, ok := argAfter(scout, "--state"); !ok || state != "all" {
+		t.Fatalf("the filed-issue index query does not cover closed issues: %v\n  a triaged-and-CLOSED filing is exactly the one that comes back as a duplicate", scout)
+	}
+	if limit, ok := argAfter(scout, "--limit"); !ok || limit != "5000" {
+		t.Fatalf("the filed-issue index query did not carry the caller's scout_scan_limit: %v", scout)
+	}
+
+	// The contrast is the point: the soft window must stay UNfiltered. Narrowing it
+	// to the scout's own label would quietly delete the "did a human already write
+	// this up lately" rung while every count still looked plausible.
+	if _, ok := argAfter(window, "--label"); ok {
+		t.Fatalf("the rung 3/4 window query grew a label filter: %v\n  it is meant to be the broad listing over everyone's issues", window)
+	}
+	if limit, ok := argAfter(window, "--limit"); !ok || limit != "800" {
+		t.Fatalf("the window query did not carry the caller's issue_scan_limit: %v", window)
+	}
+}
+
+// recordedIssue is what CreateIssue was actually asked to file. The LABELS decide
+// whether the label-targeted index will ever see the issue again; the BODY carries
+// the stamp that index is built from.
+type recordedIssue struct {
+	title  string
+	body   string
+	labels []string
+}
+
+// recordingFetcher closes the loop the durable rung depends on: run 1 files through
+// CreateIssue, run 2 reads the SAME issues back through FetchScoutIssues — which
+// applies the label filter server-side the way GitHub does, so an issue the scout
+// filed WITHOUT ScoutLabel is invisible to the index no matter what its body says.
+type recordingFetcher struct {
+	repos  []GitHubRepo
+	window []ExistingIssue
+	filed  []recordedIssue
+}
+
+func (f *recordingFetcher) FetchArxiv(string, int) (string, error) { return "", nil }
+func (f *recordingFetcher) FetchGitHub(string, int) ([]GitHubRepo, error) {
+	return withDefaultRepoSize(f.repos), nil
+}
+func (f *recordingFetcher) FetchGitHubFresh(string, int) ([]GitHubRepo, error) { return nil, nil }
+func (f *recordingFetcher) FetchHackerNews(string, int) (string, error)        { return "", nil }
+func (f *recordingFetcher) FetchReddit(string, int) (string, error)            { return "", nil }
+func (f *recordingFetcher) EnsureLabels() error                                { return nil }
+func (f *recordingFetcher) AddToProject(string, string, string) error          { return nil }
+
+func (f *recordingFetcher) FetchExistingIssues(limit int) ([]ExistingIssue, error) {
+	if limit >= 0 && len(f.window) > limit {
+		return f.window[:limit], nil
+	}
+	return f.window, nil
+}
+
+func (f *recordingFetcher) FetchScoutIssues(limit int) ([]ExistingIssue, error) {
+	var out []ExistingIssue
+	for i, iss := range f.filed {
+		if !hasLabel(iss.labels, ScoutLabel) {
+			continue // `--label idea-scout` is a SERVER-side filter: gh never sends it
+		}
+		out = append(out, ExistingIssue{Number: 900 + i, Title: iss.title, Body: iss.body})
+	}
+	if limit >= 0 && len(out) > limit {
+		return out[:limit], nil
+	}
+	return out, nil
+}
+
+func (f *recordingFetcher) CreateIssue(issue IssuePlan, _ string) (string, error) {
+	f.filed = append(f.filed, recordedIssue{
+		title:  issue.Title,
+		body:   issue.Body,
+		labels: append([]string(nil), issue.Labels...),
+	})
+	return fmt.Sprintf("https://github.com/o/r/issues/%d", 900+len(f.filed)), nil
+}
+
+// TestFiledIssueRoundTripsBackIntoTheDurableRung is the WRITE end, proven end to
+// end: file a source, then scout the same source again from a workspace with NO
+// seen-cache and a window that does not contain the filing. Only the durable rung
+// can catch the second run, and it must — that is the whole never-file-twice claim,
+// exercised through what RenderIssue really emits rather than a hand-written fixture.
+func TestFiledIssueRoundTripsBackIntoTheDurableRung(t *testing.T) {
+	fetcher := &recordingFetcher{repos: []GitHubRepo{agedCandidateRepo()}, window: unrelatedRecentIssues()}
+	now := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	const thresholds = `"min_score": 1, "max_issues": 3, "scout_scan_limit": 50`
+
+	// ---- Run 1: file it for real, against the recorder. ----------------------
+	first := t.TempDir()
+	r1, err := Run(RunOptions{
+		Workspace:  first,
+		ConfigPath: writeScoutConfig(t, first, thresholds),
+		Fetcher:    fetcher,
+		Live:       true,
+		Today:      "2026-08-02",
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if len(r1.Filed) != 1 || len(fetcher.filed) != 1 {
+		t.Fatalf("first run should file exactly the one candidate: filed=%#v recorded=%d", r1.Filed, len(fetcher.filed))
+	}
+
+	// The label the index query filters on must be ON the issue the scout files.
+	// Drop it and `gh issue list --label idea-scout` stops returning new filings
+	// while the recency window masks the loss until they age out.
+	if got := fetcher.filed[0].labels; !hasLabel(got, ScoutLabel) {
+		t.Fatalf("the filed issue does not carry %q, so the label-targeted filing index can never see it and the never-file-twice guarantee is void: labels=%v", ScoutLabel, got)
+	}
+	// The stamp must survive its own reader: RenderIssue writes the marker and
+	// StampIndex parses it back. A corpus that hand-writes both ends cannot see the
+	// two drift apart.
+	stampedBack := StampIndex([]ExistingIssue{{Title: fetcher.filed[0].title, Body: fetcher.filed[0].body}})
+	if _, ok := stampedBack["github:o/aged"]; !ok {
+		t.Fatalf("the stamp RenderIssue wrote is not the stamp StampIndex reads back: index=%v\n  body:\n%s", stampedBack, fetcher.filed[0].body)
+	}
+
+	// ---- Run 2: fresh workspace (no seen.json), same source, window unchanged.
+	// The filing is NOT in the window, so nothing but the durable rung can catch it.
+	second := t.TempDir()
+	if _, err := os.Stat(CachePath(second)); !os.IsNotExist(err) {
+		t.Fatalf("the second workspace must start with no seen-cache, stat err=%v", err)
+	}
+	r2, err := Run(RunOptions{
+		Workspace:  second,
+		ConfigPath: writeScoutConfig(t, second, thresholds),
+		Fetcher:    fetcher,
+		Today:      "2026-08-03",
+		Now:        now.AddDate(0, 0, 1),
+	})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(r2.Planned) != 0 {
+		t.Fatalf("re-filed a source this same scout already filed: %#v", r2.Planned)
+	}
+	if r2.Skipped["filed-stamp"] != 1 {
+		t.Fatalf("the durable rung did not catch the scout's own filing: skipped=%#v", r2.Skipped)
+	}
+	if r2.Skipped["seen-cache"] != 0 || r2.Skipped["issue-body"] != 0 || r2.Skipped["title-near"] != 0 {
+		t.Fatalf("a rung other than filed-stamp caught it, so this proves nothing about the label-targeted index: skipped=%#v", r2.Skipped)
+	}
+	if idx := r2.DedupIndex; idx.FiledIssuesScanned != 1 || idx.FiledStamps != 1 || !idx.ScoutIndexComplete {
+		t.Fatalf("the dedup index did not read back the one filing: %#v", idx)
+	}
+	if len(fetcher.filed) != 1 {
+		t.Fatalf("the dry-run second pass filed something: %#v", fetcher.filed)
+	}
 }

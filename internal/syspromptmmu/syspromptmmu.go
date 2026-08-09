@@ -64,24 +64,23 @@ type Segment struct {
 	cachemeta.PromptSegment
 }
 
-// authored is one base-context block as written here: the canonical fak text plus its
-// tier. The witness and token estimate are derived deterministically from the content.
-type authored struct {
-	tier    Tier
-	content string
-}
-
-// baseContext is the ordered, authored base context: fak's spine then the policy
-// floor. This is the one genuinely new authorship surface — fak's own system prompt.
-// The order is load-bearing (head→tail) and the contents are fixed literals, so the
-// emitted plan is byte-identical every call (invariant 1).
-var baseContext = []authored{
-	{TierSpine, spineIdentity},
-	{TierSpine, spineGate},
-	{TierSpine, spineJournal},
-	{TierSpine, spineCapability},
-	{TierPolicy, policyDenyFloor},
-	{TierPolicy, policySafetyResident},
+// baseContext is the one registry of fak-authored RESIDENT prompt blocks: fak's
+// spine followed by the policy floor. Every block declares a typed gate whose only
+// operand is StableBlockInputs; that type deliberately has no current message,
+// request, clock, nonce, or other per-turn input. ResidentBlocks additionally
+// latches every admitted id, so a future conditional block may appear once but can
+// never disappear on a later turn (#5897).
+//
+// The order is load-bearing (head→tail). All current gates are alwaysResident, so
+// BaseContext's bytes, witnesses, and PlanDigest remain byte-identical to the
+// pre-#5897 fixed-literal plan.
+var baseContext = []residentBlockSpec{
+	{id: "spine.identity", tier: TierSpine, content: spineIdentity, gate: alwaysResident},
+	{id: "spine.gate", tier: TierSpine, content: spineGate, gate: alwaysResident},
+	{id: "spine.journal", tier: TierSpine, content: spineJournal, gate: alwaysResident},
+	{id: "spine.capability", tier: TierSpine, content: spineCapability, gate: alwaysResident},
+	{id: "policy.deny-floor", tier: TierPolicy, content: policyDenyFloor, gate: alwaysResident},
+	{id: "policy.safety-resident", tier: TierPolicy, content: policySafetyResident, gate: alwaysResident},
 }
 
 // The spine: fak's irreducible concepts (the gate, the journal, what a capability is),
@@ -148,23 +147,14 @@ func NonEvictable(t Tier) bool {
 // BaseContext returns the ordered, tier-classified base-context plan: fak's SegStable
 // spine (TierSpine) followed by the versioned policy floor (TierPolicy). The overlay
 // tier is not emitted here — it is the queried harness layer Rung 3 (#1261) appends
-// after the Rung-2 cache breakpoint. Deterministic: same inputs → byte-identical
-// segment contents (invariant 1).
+// after the Rung-2 cache breakpoint.
+//
+// The canonical plan has no conditional blocks today, so a fresh conversation builder
+// admits the whole registry on its first snapshot and preserves the historical bytes.
+// Future conditional resident blocks must go through ResidentBlocks instead of
+// evaluating a per-turn predicate directly.
 func BaseContext() []Segment {
-	out := make([]Segment, len(baseContext))
-	for i, a := range baseContext {
-		content := []byte(a.content)
-		out[i] = Segment{
-			Tier: a.tier,
-			PromptSegment: cachemeta.PromptSegment{
-				Kind:    cachemeta.SegStable,
-				Tokens:  estTokens(content),
-				Content: content,
-				Witness: WitnessFor(content),
-			},
-		}
-	}
-	return out
+	return NewResidentBlocks().Next(StableBlockInputs{})
 }
 
 // BaseContextPlan returns the base-context plan as the flat, wire-neutral

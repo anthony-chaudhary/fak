@@ -72,6 +72,12 @@ var compactBailReasonPreEligible = map[string]bool{
 	CompactReasonRedecodeFail:      false,
 	CompactReasonPrefixMismatch:    false,
 	CompactReasonMalformedBody:     false,
+	// The survival-class refusal (#2421) sits on the eligible side for the same reason the late
+	// structural aborts do: a real compactible candidate existed and was DECLINED. It is in fact
+	// the most alertable member of that half — a sustained nonzero rate means the configured
+	// budget no longer clears the session's pinned floor, so the lever is refusing every turn
+	// while the resident window keeps growing.
+	CompactReasonPinEvictRefused: false,
 }
 
 // CompactBailReasons returns every REGISTERED CompactReason* bail token, sorted, so a

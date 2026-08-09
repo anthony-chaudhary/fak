@@ -104,6 +104,9 @@ func gateFileAdmission(d *StagedDiff) ([]Finding, error) {
 			findings = append(findings, Finding{Gate: "FILE_ADMISSION", File: p, Detail: why})
 		}
 	}
+	// The denominator is the DEDUPED added/renamed set — the paths this gate actually
+	// classified, not the raw list it was handed (#5602).
+	d.NoteCandidates("FILE_ADMISSION", len(seen), "added/renamed path(s) classified")
 	return findings, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
@@ -53,7 +54,7 @@ func cacheAblationMechs(ca *guardInfoCacheAttribution) []cacheAblationMech {
 	}
 	return []cacheAblationMech{
 		{label: "provider prompt-cache", tokEq: ca.ProviderTokenEquiv, detail: providerAblationDetail(ca)},
-		{label: "fak compaction shed", tokEq: shedTokEq, detail: shedAblationDetail(ca, shedTokEq)},
+		{label: compactionShedMechLabel, tokEq: shedTokEq, detail: shedAblationDetail(ca, shedTokEq)},
 		{label: "fak KV-prefix reuse", tokEq: float64(ca.FakKVPrefixReusedTokens)},
 	}
 }
@@ -92,6 +93,15 @@ func renderInfoCacheAblationRows(ctx guardInfoPanelCtx) []string {
 	// cold/passthrough session" — the pane calling a session cold while holding the witness that
 	// fak had deferred N tools on it. That is precisely the defer-on session #3647 asks to surface.
 	if maxEq <= 0 && ca.FakVDSOAvoidedCalls == 0 && !hasColdToolDeferShed(ca) {
+		// A zero shed has TWO readings the bars cannot tell apart (#5430): a genuinely cold session
+		// that had nothing to shed, and a session where the compaction lever ran EVERY turn and
+		// bailed — a silent, stable misconfiguration an operator can sit on for hours while this
+		// pane shows a calm zero. When the gateway witnessed compaction attempts, the session was
+		// not cold, so say what the gate actually did instead of calling it a passthrough.
+		if gate := compactionGateRows(ctx.v.Adjudication); len(gate) > 0 {
+			return append(append(rows,
+				" ablation  no cache savings witnessed yet — compaction ran and shed nothing; its gate says why:"), gate...)
+		}
 		return append(rows, " ablation  no cache savings witnessed yet — nothing to ablate on a cold/passthrough session")
 	}
 	rows = append(rows, " ablation  turn a mechanism off → tokens you'd lose (click a row for how it's priced):")
@@ -115,12 +125,205 @@ func renderInfoCacheAblationRows(ctx guardInfoPanelCtx) []string {
 		if ctx.cacheMech == i+1 { // expanded: spell out where this mechanism's token-equiv came from
 			rows = append(rows, cacheMechDetailLines(i, ca, m.tokEq)...)
 		}
+		// The shed bar prices WHAT was shed; the gate row below it says whether the lever engaged at
+		// all and, if not, why (#5430). It rides directly under the mechanism it explains so the two
+		// read as one story instead of a number and an unrelated diagnostic. Bound by LABEL, not by
+		// slot: see compactionShedMechLabel.
+		if m.label == compactionShedMechLabel {
+			rows = append(rows, compactionGateRows(ctx.v.Adjudication)...)
+		}
 	}
 	if ca.FakVDSOAvoidedCalls > 0 {
 		rows = append(rows, fmt.Sprintf("   %s ·  %s engine calls avoided (not tokens)",
 			padRightTUI("fak vDSO memo", 22), guardInfoShortCount(int(ca.FakVDSOAvoidedCalls))))
 	}
 	return append(rows, deferColdAblationRows(ca)...)
+}
+
+// compactionShedMechLabel is the cacheAblationMechs LABEL of the "fak compaction shed" bar — the
+// mechanism the compaction gate row explains. The gate row is placed by matching this label, the
+// same identity applyInfoCacheMechClick hit-tests a clicked row with, rather than by a slot number:
+// an index would have moved the gate row silently under a different mechanism the first time the
+// cacheAblationMechs order changed, and no compiler or test can check a bare integer. The label
+// match makes that drift impossible by construction.
+//
+// cacheMechDetailLines still expands the shed provenance under `case 1`, which is a slot number; it
+// is a switch on the CALLER's mechIdx and cannot key off a label, so
+// TestCompactionGateRowBindsToTheShedBarByLabel pins slot 1 to this label to keep that binding
+// honest too.
+const compactionShedMechLabel = "fak compaction shed"
+
+// compactionGateLabel labels the live compaction-gate posture row. Like deferColdMechLabel it is
+// deliberately NOT a substring of any cacheAblationMechs label ("fak compaction shed"), so
+// applyInfoCacheMechClick's Contains hit-test can never mistake this diagnostic for a priced bar
+// and expand a mechanism nobody clicked.
+const compactionGateLabel = "fak compaction gate"
+
+// compactionGateRows says WHY the compaction shed bar reads what it does: the budget the gate is
+// ACTUALLY running at and the dominant bail reason. Both already ride /debug/vars under
+// `adjudication.compaction_*` (gateway.AdjudicationSummary) and are already decoded by this pane —
+// they were simply never rendered in the plain-words view. Issue #5430: a permanently disengaged
+// lever draws a ZERO shed bar indistinguishable from a session that had nothing to shed, so the
+// failure is silent AND stable. The guard EXIT summary has printed this since #1407/#1408
+// (guard_format.go's "compaction" section); this reads the same counters in the LIVE view, where
+// someone would notice in time to fix it. Not byte-for-byte the same rendering, and deliberately
+// not the same reason SET: the exit summary lists every bail reason it saw, this row ranks ONE
+// dominant reason over compaction CANDIDATES only (agent.CompactBailPreEligible), and its
+// malformed_body gloss is its own (guard_format's fault note covers only the three cache-burst
+// reasons). Where the two do overlap the wording is kept identical on purpose.
+//
+// Showing the EFFECTIVE budget is half the point: a `fak guard` launch that did not pass
+// --compact-history-budget does not run at the flag's printed default — resolveGuardCompactBudget
+// substitutes gateway.HeadlessCompactHistoryBudget — so the number here, read off the running
+// gateway, is the only one an operator can trust.
+//
+// Nil when the gateway attempted no compaction at all (an older gateway, a non-Anthropic route, or
+// a session that never reached the transform), so a pane with no compaction witness stays
+// byte-identical rather than fabricating a posture.
+func compactionGateRows(adj *gateway.AdjudicationSummary) []string {
+	if adj == nil || adj.CompactionFired+adj.CompactionBailed+adj.CompactionOff == 0 {
+		return nil
+	}
+	state := fmt.Sprintf("budget %s tok · %d fired / %d bailed",
+		guardInfoShortCount(adj.CompactionBudget), adj.CompactionFired, adj.CompactionBailed)
+	if adj.CompactionBudget <= 0 {
+		state = "OFF — budget 0, body forwarded byte-for-byte"
+	}
+	rows := []string{fmt.Sprintf("   %s ·  %s", padRightTUI(compactionGateLabel, 22), state)}
+	reason, n := dominantCompactionBail(adj.CompactionBailReasons)
+	// The pre-eligible lump is held OUT of the ranking, so the fired/bailed count on the posture row
+	// above and the "x%d" here are counted over different populations. Disclosing the held-out total
+	// is what keeps that from reading as an arithmetic error ("190 bailed … dominant x3").
+	held := preEligibleBailTotal(adj.CompactionBailReasons)
+	// Indented past the 22-cell label column and its " · " gutter so the reason hangs under the
+	// posture and the pair reads as one block — the same shape deferColdAblationRows uses.
+	if reason == "" {
+		if held == 0 { // nothing bailed at all: no reason line rather than an invented one
+			return rows
+		}
+		// Every bail was decided BEFORE a compactible span existed, so there is no compaction-health
+		// answer to give. Saying that is the honest degrade; falling silent here would have left the
+		// operator staring at "N bailed" with no line at all, and naming the biggest pre-eligible
+		// reason would have pointed them at the one bucket with nothing to do.
+		return append(rows, fmt.Sprintf("   %s    no candidate bails: all %d were pre-eligible (decided before any compactible span existed) — says nothing about compaction health",
+			padRightTUI("", 22), held))
+	}
+	line := fmt.Sprintf("   %s    dominant bail: %s x%d", padRightTUI("", 22), reason, n)
+	if held > 0 {
+		line += fmt.Sprintf(" (of %d candidate bails; %d pre-eligible held out)", candidateBailTotal(adj.CompactionBailReasons), held)
+	}
+	if gloss := compactionBailGloss(reason, adj); gloss != "" {
+		line += " — " + gloss
+	}
+	return append(rows, line)
+}
+
+// preEligibleBailTotal and candidateBailTotal split the bail lump the way
+// agent.CompactBailPreEligible does: requests the compactor declined BEFORE any compactible span
+// existed (non_json, no_messages_key, decode_failed, too_few_msgs) versus real candidates it
+// declined or aborted afterwards. The split exists so the gate row can SHOW its own denominator —
+// it ranks over candidates, while the posture row's "N bailed" is the raw gateway counter.
+func preEligibleBailTotal(reasons map[string]uint64) uint64 {
+	total := uint64(0)
+	for r, n := range reasons {
+		if agent.CompactBailPreEligible(r) {
+			total += n
+		}
+	}
+	return total
+}
+
+func candidateBailTotal(reasons map[string]uint64) uint64 {
+	total := uint64(0)
+	for r, n := range reasons {
+		if !agent.CompactBailPreEligible(r) {
+			total += n
+		}
+	}
+	return total
+}
+
+// dominantCompactionBail picks the reason that explains most of the bailed lump — the one field
+// #5430 asks for, since "51 bailed" alone is uninterpretable. Ties break on the reason NAME
+// (sortedMapKeys) so the row is stable turn-over-turn instead of flickering between two
+// equally-common reasons as Go's map iteration reshuffles.
+//
+// It ranks over compaction CANDIDATES only: agent.CompactBailPreEligible names the identity-returns
+// the compactor decided before any compactible span existed (non_json, no_messages_key,
+// decode_failed, too_few_msgs), and those are both benign and by far the highest-volume — the
+// compactor is attempted on every Anthropic passthrough, so a session's auxiliary pings pile into
+// too_few_msgs. Ranking the raw map hands the row to that bucket on ordinary mixed traffic and
+// points the operator at the one group with nothing to do, while the actionable under_budget /
+// burst_unprofitable bail that IS the #5430 failure hides underneath it. HEAD already restricts its
+// offline twin the same way (gatewayusageledger's TopBailReason is computed over candBailReasons),
+// and internal/gatewayusageledger/compaction_noncandidate_test.go pins the scenario: too_few_msgs
+// x190 must not beat under_budget x3.
+//
+// An UNREGISTERED reason ranks as a candidate (CompactBailPreEligible reports false), so a future
+// CompactReason* can never be silently dropped from the row — the same conservative direction the
+// vocabulary owner chose.
+//
+// Empty name when nothing bailed AND when every bail was pre-eligible; the caller distinguishes the
+// two with preEligibleBailTotal and says so, rather than printing a false "none".
+func dominantCompactionBail(reasons map[string]uint64) (string, uint64) {
+	best, bestN := "", uint64(0)
+	for _, r := range sortedMapKeys(reasons) {
+		if agent.CompactBailPreEligible(r) {
+			continue
+		}
+		if reasons[r] > bestN {
+			best, bestN = r, reasons[r]
+		}
+	}
+	return best, bestN
+}
+
+// compactionBailGloss turns a closed agent.CompactReason* string into the clause that tells an
+// operator what to DO about it. The count alone cannot: "under_budget x51" reads as a benign short
+// session, yet on a long one it is exactly the #5430 failure. The budget is applied to the
+// messages[] array ALONE — CompactAnthropicHistoryWithOptions sums estimateElementTokens over
+// message elements and never counts the system+tools block — so an operator sizing it from "my
+// context is N tokens" sets it too HIGH in the safe-looking direction and the cut never engages.
+// Naming that unit right on the bail row is the cheapest place to stop the misreading.
+//
+// An unrecognised reason returns no clause rather than a guess, so a future CompactReason* prints
+// its raw name and count instead of an invented explanation.
+func compactionBailGloss(reason string, adj *gateway.AdjudicationSummary) string {
+	switch reason {
+	case "under_budget":
+		// ANCHOR-STARVED is a SUBSET of under_budget and operationally its opposite: the protected
+		// prefix already exceeds the budget, so no budget value can make the cut fire (#1407). When
+		// it is present the plain "lower the budget" advice would send the operator the wrong way.
+		if adj.CompactionAnchorStarved > 0 {
+			return fmt.Sprintf("ANCHOR-STARVED x%d — the protected prefix already exceeds the budget, so NO budget value makes it fire; needs a re-anchor (#1407)", adj.CompactionAnchorStarved)
+		}
+		return "the messages[] suffix never exceeded the budget (the system+tools block is NOT counted) — a LOWER --compact-history-budget is what engages the cut"
+	case "burst_unprofitable":
+		return "shed-able middle, but no repaying turn horizon — needs a bounded turn/context budget, an idle gap, or --compact-solvency-floor; never a tighter budget"
+	case "no_breakpoint":
+		return "no cache_control anchor to protect a prefix behind — the cut cannot fire on this traffic"
+	case "too_few_msgs":
+		// Pre-eligible: dominantCompactionBail no longer ranks it, so this clause is unreachable from
+		// the gate row today. Kept because the gloss is a reason→clause map for any caller, and a
+		// half-populated one would read as "fak has no explanation for this reason".
+		return "too few messages to drop one safely (benign)"
+	case "window_no_drop":
+		return "the kept window swallowed the whole suffix — nothing left to drop"
+	case "cached_span":
+		return "the candidate drop would have deleted cache_control-marked history"
+	case "prefix_mismatch", "splice_failed", "redecode_failed":
+		// Verbatim the guard exit summary's note for the same three reasons (guard_format.go), so the
+		// live row and the exit banner cannot tell an operator two different stories about a fault.
+		return "⚠ fak-fault: a fired rewrite would have burst the cache — must stay 0"
+	case "malformed_body":
+		// NOT a cache burst, and folding it into the sentence above said it was. This abort fires when
+		// the splice re-decodes for fak but leaves an Anthropic-invalid message (empty text/content),
+		// which the API answers with a 400 (internal/agent/anthropic_compact.go's
+		// CompactReasonMalformedBody) — the protected prefix is intact, so the cache was never at
+		// risk. Same severity, different failure: still fak's own bug, still must stay 0.
+		return "⚠ fak-fault: the spliced body was Anthropic-invalid (empty text/content) and would have 400'd — the cache was not at risk, but it must stay 0"
+	}
+	return ""
 }
 
 // deferColdMechLabel labels the cold-tool-defer block's count row. It is deliberately NOT a

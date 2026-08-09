@@ -2,8 +2,8 @@ package gateway
 
 // http_epfanout.go — the expert-parallel (EP) request-fanout bridge (#2955), split
 // out of http.go along its concern seam (#2999). Everything here serves one job:
-// mirror an inbound non-streaming chat request from the EP front rank to its
-// follower ranks so every process of a sharded serve reaches the collectives.
+// mirror an inbound served request from the EP front rank to its follower ranks so
+// every process of a sharded serve reaches the collectives.
 
 import (
 	"bytes"
@@ -17,6 +17,17 @@ import (
 
 const epFollowerHeader = "X-Fak-EP-Follower"
 
+// The served routes this bridge mirrors. A follower has to be asked for the SAME
+// route the front rank is serving: /v1/completions and /v1/chat/completions take
+// different request schemas, so a legacy request mirrored onto the chat route is not
+// the same forward pass — it is a 400 on the follower and a front rank still alone in
+// the collective (#5523). Each call site passes the constant route it serves rather
+// than r.URL.Path, so no part of an outbound follower URL is client-steerable.
+const (
+	epRouteChatCompletions = "/v1/chat/completions"
+	epRouteCompletions     = "/v1/completions"
+)
+
 // epFanoutClient carries loopback follower requests. It deliberately has no
 // independent wall-clock timeout: the follower forward must live exactly as long as
 // the front-rank request, including slow cold GLM/MoE turns. NewRequestWithContext
@@ -24,20 +35,28 @@ const epFollowerHeader = "X-Fak-EP-Follower"
 // still releases every follower without a shorter transport timer splitting ranks.
 var epFanoutClient = &http.Client{}
 
-// startEPFanoutFollowers mirrors an inbound non-streaming chat request from the EP
-// front rank to its follower rank endpoints before the front rank enters the local
-// in-kernel decode. Rank-local expert parallelism reduces the routed-expert delta
-// through a process-group AllReduce; that collective makes progress only if every
-// rank runs the same forward pass. FAK_EP_FANOUT_ADDRS is therefore the temporary
-// single-endpoint bridge for the sharded serve: the front rank receives the client
-// request, followers receive the identical loopback request with X-Fak-EP-Follower
-// set, and every process reaches the collectives concurrently. The follower header
-// prevents recursive fanout if an operator points the bridge at another front rank.
-func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request) (func(), bool) {
+// startEPFanoutFollowers mirrors an inbound served request from the EP front rank to
+// its follower rank endpoints before the front rank enters the local in-kernel decode.
+// Rank-local expert parallelism reduces the routed-expert delta through a
+// process-group AllReduce; that collective makes progress only if every rank runs the
+// same forward pass. FAK_EP_FANOUT_ADDRS is therefore the temporary single-endpoint
+// bridge for the sharded serve: the front rank receives the client request, followers
+// receive the identical loopback request with X-Fak-EP-Follower set, and every process
+// reaches the collectives concurrently. The follower header prevents recursive fanout
+// if an operator points the bridge at another front rank — it is checked HERE, on
+// entry, before any route-specific work, so every wire that calls this is guarded the
+// same way.
+//
+// route is the served route to mirror onto, and is the caller's own constant (see
+// epRouteChatCompletions / epRouteCompletions) rather than r.URL.Path. It used to be
+// hardcoded to the chat wire, which is half of why the legacy text-completion wire
+// entered a multi-rank decode no follower was released into (#5523); the other half
+// was that handleCompletions never called this at all.
+func (s *Server) startEPFanoutFollowers(w http.ResponseWriter, r *http.Request, route string) (func(), bool) {
 	if r.Header.Get(epFollowerHeader) != "" {
 		return func() {}, true
 	}
-	urls := epFanoutURLsFromEnv()
+	urls := epFanoutURLsFromEnv(route)
 	if len(urls) == 0 {
 		return func() {}, true
 	}
@@ -142,7 +161,12 @@ func (s *Server) logEPFanout(format string, args ...any) {
 	}
 }
 
-func epFanoutURLsFromEnv() []string {
+// epFanoutURLsFromEnv expands FAK_EP_FANOUT_ADDRS — a delimiter-separated list of
+// follower rank addresses — into one absolute follower URL per rank on the given
+// served route. An address may omit the scheme (http:// is assumed) and may carry a
+// trailing slash. An unset or empty variable yields no URLs, which is what makes the
+// bridge inert on a single-rank serve.
+func epFanoutURLsFromEnv(route string) []string {
 	raw := os.Getenv("FAK_EP_FANOUT_ADDRS")
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -159,7 +183,7 @@ func epFanoutURLsFromEnv() []string {
 		if !strings.HasPrefix(part, "http://") && !strings.HasPrefix(part, "https://") {
 			part = "http://" + part
 		}
-		urls = append(urls, strings.TrimRight(part, "/")+"/v1/chat/completions")
+		urls = append(urls, strings.TrimRight(part, "/")+route)
 	}
 	return urls
 }

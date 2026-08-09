@@ -1,0 +1,40 @@
+{
+  "name": "third-arm-breaks-hold",
+  "note": "The adversarial fixture (#5660). A three-arm campaign whose CHOSEN PAIR is spotless: control 'baseline-greedy' and treatment 'candidate-topp' agree on all four held axes, so the delta an operator actually reads looks perfectly controlled and any favored-pair check certifies it. The third selected arm 'candidate-minp' ran under a different tokenizer, so the campaign never held the axis it declared it held — and that arm is still in the set, still ranked, still folded into whatever the campaign concludes. Nothing here is malformed and every arm witnesses every axis, so the gate cannot refuse its way out on evidence grounds; it has to evaluate the axis over the WHOLE set and return not_comparable naming tokenizer and the exact partition. This is what proves the gate is set-wide rather than pairwise.",
+  "campaign": {
+    "id": "sampler-sweep-2026w32",
+    "held_axes": ["model", "tokenizer", "engine", "dataset"]
+  },
+  "arms": [
+    {
+      "id": "baseline-greedy",
+      "role": "control",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    },
+    {
+      "id": "candidate-topp",
+      "role": "treatment",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    },
+    {
+      "id": "candidate-minp",
+      "role": "treatment",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v2",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    }
+  ]
+}

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -164,6 +165,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		dispatchtick.ClaimNoCommit:    {},
 	}
 	var records []dispatchtick.WitnessRecord
+	// #5864 beat-while-working: the mirror of the #4324 release below. This sweep
+	// is the one place in the Go dispatch stack that re-observes a worker, so it
+	// is also the only place a lane-lease heartbeat can be driven BY the work
+	// still being in progress rather than by a timer that outlives it. Built once
+	// per sweep; it reads the live-lease set lazily, so a sweep with nothing
+	// running spawns no `dos` child.
+	beater := newDispatchLaneBeater(root)
 	for _, log := range resolveLogs(runsDir) {
 		issue, ok := issueFromResolveLog(filepath.Base(log))
 		if !ok {
@@ -178,7 +186,17 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			continue // no pid -> cannot prove the worker finished -> not yet auditable
 		}
 		if dispatchPIDAlive(pid) {
-			continue // still running -> it may not have committed yet
+			// Still running -> it may not have committed yet, AND its lane lease is
+			// being worked right now. #5864: refresh the lease HERE, off the same
+			// process-table read that just proved the worker is alive, so the beat
+			// can never outlive the holder — the next sweep that finds this pid dead
+			// takes the release branch below instead. Live sweeps only: a dry-run
+			// audit must never write to the shared WAL. Fail-open — every refusal and
+			// fault is counted on the payload and nothing is propagated.
+			if live {
+				beater.beatLiveWorker(log, stem, pid, time.Now())
+			}
+			continue
 		}
 		base := ""
 		if b, err := os.ReadFile(stem + dispatchtick.BaseSHASidecarSuffix); err == nil {
@@ -278,6 +296,22 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			// runs-dir archive copy.
 			row["reverted"] = reverted
 		}
+		// #4324 release-on-exit: this worker is provably finished and the sweep has
+		// stopped writing under its lease (the land+reap and the stranded-revert rung
+		// both ran above), so a NORMAL exit hands the lane back NOW through the fenced
+		// CAS delete instead of stranding it for the ~40-min TTL and refusing peers
+		// against a holder that no longer exists. Live sweeps only — a dry-run never
+		// mutates a ref. An abnormal exit (an unclassifiable crash, or stranded edits)
+		// deliberately keeps its lease: TTL expiry plus the dead-holder reclaim is the
+		// correct path when a lane may be mid-write. Fail-open: the outcome is recorded
+		// on the graded row and never propagated.
+		if live && dispatchWorkerExitReleasesLease(rec, len(reverted)) {
+			if id, outcome := dispatchLeaseReleaser(root, stem); id != "" {
+				row["lease_released"] = id
+			} else {
+				row["lease_release_refused"] = outcome
+			}
+		}
 		audited = append(audited, row)
 		buckets[rec.Claim] = append(buckets[rec.Claim], row)
 		if live {
@@ -292,6 +326,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		"witnessed":   buckets[dispatchtick.ClaimWitnessed],
 		"unwitnessed": buckets[dispatchtick.ClaimUnwitnessed],
 		"no_commit":   buckets[dispatchtick.ClaimNoCommit],
+	}
+	// #5864: the beat outcomes, by closed-vocabulary reason, so "which lanes were
+	// attested and why were the rest not" is countable straight off the tick
+	// payload rather than inferred from the WAL's silence. Absent when the sweep
+	// found no live worker to attest.
+	if beat := beater.summary(); beat != nil {
+		payload["lane_beat"] = beat
 	}
 	return payload, records
 }
@@ -522,7 +563,12 @@ const witnessStrandedArchiveSuffix = ".stranded"
 //  4. at least one matching dirty file is a .go file (a docs-only strand cannot
 //     be "the non-compiling file"), and at least one matching file is TRACKED
 //     (else there is nothing the sanctioned stash primitive can revert);
-//  5. a SCOPED `go build` of exactly the package dirs containing the matching
+//  5. NO live lane lease contests any of the matching files (#5570) — see
+//     dispatchWitnessContestingLaneHolders. The globs in 3 prove only that a file
+//     sits inside the DEAD worker's declared lane, never that the dead worker
+//     wrote it, and a re-acquired lane puts a LIVE peer's mid-edit files under
+//     exactly those globs;
+//  6. a SCOPED `go build` of exactly the package dirs containing the matching
 //     dirty .go files FAILS — the strand is provably what reds the build.
 //
 // Then: archive every matching dirty file under the runs dir, and revert the
@@ -564,6 +610,28 @@ func dispatchWitnessRevertStranded(root, runsDir, stem string, tree []string) []
 	if len(stash) == 0 || len(goDirs) == 0 {
 		return nil // nothing both provably-poisonous AND revertible by the sanctioned primitive
 	}
+	// #5570 authorship gate, deliberately BEFORE the scoped build: the build verdict is
+	// the rung's strongest guard and also the one a live worker mid-edit trips routinely,
+	// so asking it about a lane somebody else now holds would answer the wrong question
+	// (and pay for a compile to do it). Attribution first, evidence-of-poison second.
+	holders, ok := dispatchWitnessContestingLaneHolders(root, stem)
+	if !ok {
+		return nil // the lease store is unreadable -> authorship unprovable -> touch nothing
+	}
+	for _, f := range mine {
+		for _, h := range holders {
+			if !dispatchPathInLeaseTree(f.Path, h.Tree) {
+				continue
+			}
+			// Stand down WHOLE, not per file: the build verdict below is scoped to the
+			// union of these files' packages, so one contested file makes the poison
+			// unattributable for every one of them.
+			fmt.Fprintf(os.Stderr,
+				"fak dispatch: stranded-revert stood down for %s — lane lease %s (%s) covers %s (#5570)\n",
+				filepath.Base(stem), h.ID, h.Liveness, f.Path)
+			return nil
+		}
+	}
 	pkgs := make([]string, 0, len(goDirs))
 	for d := range goDirs {
 		pkgs = append(pkgs, d)
@@ -580,6 +648,77 @@ func dispatchWitnessRevertStranded(root, runsDir, stem string, tree []string) []
 		return nil
 	}
 	return stash
+}
+
+// dispatchWitnessLaneHolder is ONE live lane lease that contests a stranded-revert
+// attribution. Tree is the lease's own globs — the authorship evidence the rung matches
+// its candidate paths against — and Liveness is the leaseref class that decided, kept so
+// the stand-down can name WHICH holder it yielded to instead of refusing anonymously.
+type dispatchWitnessLaneHolder struct {
+	ID       string
+	Tree     []string
+	Liveness string
+}
+
+// dispatchWitnessContestingLaneHolders reads refs/fak/locks and returns every live lane
+// lease with a better claim to a dirty file than this dead worker has (#5570). ok is
+// false when the store could not be read at all, which the caller must treat as "cannot
+// attribute" and never as "nobody holds it".
+//
+// WHY THE RUNG NEEDS THIS. Its only attribution input was the DEAD worker's own declared
+// .tree sidecar, so "inside the dead worker's lane globs" and "the dead worker's file"
+// were the same test — and they are not the same thing. A lane that has since been handed
+// back and re-acquired puts a LIVE worker's mid-edit files under exactly those globs,
+// where the rung's strongest guard (a scoped `go build` that FAILS) is precisely what a
+// worker at a non-compiling intermediate state trips routinely. Bytes were archived and
+// stashed rather than destroyed, but a worker whose files revert underneath it reports
+// nonsense. The lease record is the authorship evidence that was missing.
+//
+// THREE EXCLUSIONS, in order:
+//
+//   - the swept worker's OWN lease. The sweep reverts BEFORE it hands the lease back
+//     (dispatchLeaseReleaser runs at the end of the same per-slot body), so the dead
+//     worker's own lane is normally still live right here; counting it would make the
+//     rung refuse itself on every tick and silently delete the whole #3515 behaviour.
+//     Ownership is proven with the #4324 fencing token — id AND holder AND generation —
+//     because the lease id is derived from the LANE, so the next worker's re-acquire
+//     reuses the id and only the bumped generation tells the two records apart.
+//   - a lease whose owning session is POSITIVELY dead (leaseref.LivenessPeerDead): there
+//     is no live writer to protect, so a dead peer must not disable the rung. This class
+//     is reachable at all only because acquireDispatchLaneLease now stamps
+//     Record.SessionID; before that binding every dispatch lease landed in
+//     ClassifyLiveness's SessionID == "" branch and could only ever be peer-unknown.
+//   - a lease whose globs do not cover the path in question — applied by the caller, per
+//     file, through the rung's own dispatchPathInLeaseTree so "in a lane" means exactly
+//     one thing in this file.
+//
+// Everything else contests: peer-live is the hazard by name, and peer-unknown fails
+// CLOSED on purpose. This rung archives-then-stashes another agent's work, so an
+// unclassifiable holder is a reason to touch nothing — the same posture as the absent
+// .tree sidecar the function already stands down on.
+//
+// The reader is deliberately ANONYMOUS (empty selfSession). Every dispatch lease taken on
+// one box carries the same tick session id, so classifying self here would say "self"
+// about a PEER's lane as readily as about the dead worker's; own-ness is decided by the
+// fencing token above and by nothing else.
+func dispatchWitnessContestingLaneHolders(root, stem string) ([]dispatchWitnessLaneHolder, bool) {
+	rows, err := leaseref.NewInDir(root).ClassifyLive(context.Background(), "", time.Now())
+	if err != nil {
+		return nil, false
+	}
+	ownID := readResolveLeaseID(stem, "")
+	ownFence, ownProvable := readDispatchLeaseFence(stem)
+	var out []dispatchWitnessLaneHolder
+	for _, row := range rows {
+		if ownProvable && row.ID == ownID && row.Holder == ownFence.Holder && row.Generation == ownFence.Generation {
+			continue // provably the swept worker's own lane, not yet handed back
+		}
+		if row.Liveness == leaseref.LivenessPeerDead {
+			continue // the holder is positively gone; no live writer to protect
+		}
+		out = append(out, dispatchWitnessLaneHolder{ID: row.ID, Tree: row.TreeGlobs, Liveness: row.Liveness})
+	}
+	return out, true
 }
 
 // dispatchPathInLeaseTree reports whether a repo-relative path falls under one of

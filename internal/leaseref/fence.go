@@ -137,6 +137,27 @@ func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (Fen
 	return v, nil
 }
 
+// PublishFenced verifies presented at the externally-visible write boundary and invokes
+// publish only while the caller still owns the live generation. A missing, expired, or
+// superseded lease returns the typed FenceVerdict from Fence and suppresses publish.
+//
+// Callers must put no externally-visible result write before this method. Heartbeat
+// cancellation is deliberately not consulted: the authoritative generation is read here,
+// immediately before the sink is invoked.
+func (s *Store) PublishFenced(ctx context.Context, presented Record, now time.Time, publish func() error) (FenceVerdict, error) {
+	if publish == nil {
+		return FenceVerdict{}, fmt.Errorf("leaseref: nil fenced publisher")
+	}
+	verdict, err := s.Fence(ctx, presented, now)
+	if err != nil || !verdict.OK {
+		return verdict, err
+	}
+	if err := publish(); err != nil {
+		return verdict, err
+	}
+	return verdict, nil
+}
+
 // AcquireFenced is the generation-aware, compare-and-swap WRITE side of the fencing token.
 // Unlike Acquire — a blind update-ref that overwrites whatever is there, kept for the
 // best-effort cross-machine PUBLISH path — AcquireFenced reads the current lease, decides

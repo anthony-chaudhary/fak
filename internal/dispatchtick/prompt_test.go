@@ -213,7 +213,10 @@ func TestIssuePromptOriginChecksVaryByLaneAndDogfood(t *testing.T) {
 		wantGate  string
 		wantRefus string
 	}{
-		{"tools", "command `python tools/<touched>_test.py`", "`REASON_NEW_PYTHON_TOOL`"},
+		// NEW_PYTHON_TOOL, not REASON_NEW_PYTHON_TOOL: the latter is the Go CONSTANT
+		// name (internal/pythongate.ReasonNewPythonTool), which no reason registry
+		// declares. #3220's witness gate is what surfaced the stale citation.
+		{"tools", "command `python tools/<touched>_test.py`", "`NEW_PYTHON_TOOL`"},
 		{"docs", "command `make claims-lint`", "[SHIPPED]/[SIMULATED]/[STUB]"},
 		{"abi", "command `go test ./internal/abi -count=1`", "`CORE_SELF_MODIFY`"},
 		{"cmd", "command `go test ./cmd/fak -count=1`", "`ARCH_LAYER_VIOLATION`"},
@@ -331,15 +334,18 @@ func TestIssuePromptStatesGitLawsAndHonestBlock(t *testing.T) {
 	}
 }
 
+// #3220 restructured the free-prose "Proof by default checklist:" paragraph into the
+// `proof-by-default` rule of the structured set, so the assertion now binds the rule's
+// id and its witness alongside the four proof shapes the checklist always named.
 func TestIssuePromptIncludesProofByDefaultChecklist(t *testing.T) {
 	p := RenderIssuePrompt(sampleIssuePrompt())
 	for _, want := range []string{
-		"Proof by default checklist:",
+		"- proof-by-default: Match the proof to the defect:",
 		"visual/TUI bugs need a captured render or screenshot witness",
 		"logic/behavior bugs need a failing-before and passing-after repro test",
 		"docs/operator changes need a lint, render, or exact-output fixture",
 		"shipped/done claims need a witnessed commit tied to `#465` and `(fak docs)`",
-		"Do not stop on narrative alone.",
+		"Do not stop on narrative alone - witness `LOOP_DONE_UNWITNESSED`",
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prompt missing proof checklist item %q:\n%s", want, p)
@@ -394,10 +400,12 @@ func TestIssuePromptRedactsPrivateControlDetails(t *testing.T) {
 
 func TestIssuePromptLocksTrunkOnlyAndForbidsBranchEscape(t *testing.T) {
 	p := RenderIssuePrompt(sampleIssuePrompt())
+	// Post-#3220 these are the `main-only` and `no-history-rewrite` rules of the
+	// structured git-law set, each stated with the witness that enforces it.
 	for _, want := range []string{
-		"Work on the configured development branch `main` ONLY.",
-		"Never branch / new-worktree (the OFF_TRUNK guard refuses it).",
-		"No push / tag / force-push / history-rewrite / reset / clean / checkout-of-tracked-files.",
+		"- main-only: Work on the configured development branch `main` ONLY - never branch, never a new worktree - witness `OFF_TRUNK`",
+		"No push / tag / force-push / history-rewrite / reset / clean / checkout-of-tracked-files",
+		"witness `NEVER_AMEND_SHARED`",
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prompt missing trunk-only guard %q:\n%s", want, p)
@@ -428,7 +436,7 @@ func TestIssuePromptUsesConfiguredDevelopmentBranch(t *testing.T) {
 	p := RenderIssuePrompt(in)
 	for _, want := range []string{
 		"configured development branch `dev`",
-		"Just commit on `dev`.",
+		"just commit on `dev` - witness `NEVER_AMEND_SHARED`",
 		"a committed change on the configured development branch `dev`",
 	} {
 		if !strings.Contains(p, want) {

@@ -30,17 +30,29 @@ But two honest constraints shape what to serve:
   floor shipped in #934. The default is `unsloth/Qwen3.6-27B-GGUF` /
   `Qwen3.6-27B-Q4_K_M.gguf`, with exact size and SHA-256 checked before build or serve; a legacy
   Qwen2.5 override cannot emit the Qwen3.6 ready marker.
-- **CUDA GDN/SSM execution is still `not yet`.** #934 did not prove backend parity, and fresh DG2
-  validation found no GPU-resident Qwen3.6-27B turn. #4714 owns that fail-closed CUDA seam. Until
-  it lands and a capacity window produces the hardware artifact, the launcher contract is model
+- **CUDA GDN/SSM execution: the seam landed, parity is still `not yet`.** #934 did not prove
+  backend parity. The fail-closed seam #4714 owned, and the whole-operation GDN decode kernel
+  #4725 owned, have both since closed, so this page must no longer be read as "blocked on
+  #4714" — a device run now reaches the backend forward instead of refusing at it. What is
+  still unproven is *numeric* parity: `cmd/qwen35check`'s acceptance mode is the gate that
+  would prove it, and it is pinned to a different checkpoint than the launcher serves (see
+  below), so it has never actually graded this artifact. Until that pin is reconciled and a
+  capacity window produces an independently read-back artifact, the launcher contract is model
   identity evidence—not #4379 throughput/correctness evidence.
 - **Keep `--cuda-graph` OFF** (the default). At 14B/datacenter GPU it was witnessed to *crash* the serve
   (lazy KV `cudaMalloc` during graph capture, **#932**), not speed it up — until KV is
   pre-allocated before capture.
 
 `scripts/gcp-qwen-serve.sh` and `tools/qwen36_a100_fak_serve.sh` therefore default to the pinned
-Qwen3.6-27B artifact and fail closed on a different repository/file. Live readiness remains
-blocked on #4714 plus an independently read-back A100 run.
+Qwen3.6-27B artifact and fail closed on a different repository/file. Live readiness now rests on
+an independently read-back datacenter-GPU run, not on #4714.
+
+- **The acceptance gate is pinned to the wrong bytes.** `cmd/qwen35check`'s acceptance mode is
+  what would prove GDN/SSM numeric parity (per-step full-logit cosine plus argmax equality against
+  a CPU reference), but its `acceptanceCheckpointBytes` / `acceptanceCheckpointSHA` name a
+  *different* build of the checkpoint than the two launchers pin. A parity run therefore refuses
+  on identity before it compares a single logit, which is why "parity unproven" has persisted
+  even though the kernel work landed. Reconcile the two pins before reading any parity result.
 
 ## Why a single datacenter GPU is enough
 
@@ -120,9 +132,17 @@ lever (#483) + fused kernels (#279) + continuous batching (#401).
 
 ## Honest scope
 
-- **The literal Qwen3.6-27B does not run on fak's forward yet** — it's a GDN/SSM hybrid; fak
-  panics on the first decode (#934). See the Status section at the top. The runbook serves a
-  **supported** standard-arch coder (Qwen2.5-Coder-14B) meanwhile.
+- **The literal Qwen3.6-27B now runs on fak's own forward** — superseding this page's earlier
+  "panics on the first decode (#934)" scope note, which a datacenter-GPU run has since
+  falsified. A `--backend cuda` serve of the pinned `Qwen3.6-27B-Q4_K_M.gguf` answers
+  `/v1/chat/completions` with real code, logging its own path per turn as
+  `inkernel_chat backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true` — fak's
+  whole-operation GDN/SSM decode kernel (#4725), no external engine in the path. Falling back
+  to a standard-arch coder is no longer required to serve this model.
+  What that does **not** establish is *numeric* parity: reaching the kernel and being
+  bit-defensibly right are different claims, and the acceptance gate that would settle it is
+  still mispinned (see above). Read this as "the forward executes", not "the forward is proven
+  correct".
 - **Proven end-to-end on a live datacenter GPU (2026-06-27)**: provision → `-tags cuda` build (sm_80) →
   GGUF load → gateway (`/healthz`, `/v1/models`) → **a real coding turn from the laptop through
   an SSH-forward tunnel** (`is_prime`, a reverse-string lambda — correct code from fak's own

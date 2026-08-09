@@ -44,6 +44,32 @@ pilot_development_branch = "dev"
 # worker at once). The trees are prefix-based and pairwise disjoint by construction.
 # `internal/abi` is the frozen, human-owned spine (PARTITION.md "wave-0, unleasable")
 # -> EXCLUSIVE: an ABI change is the serial gate that every leaf imports.
+#
+# SUB-LANES (internal/laneadmit/lanetree.go). Every name below is a lane ROOT, not the
+# whole vocabulary. A lane name is path-shaped, so `gateway/server` and
+# `gateway/server.go` are addressable WITHOUT a row here: they derive their tree from
+# the nearest declared ancestor (`gateway` -> `internal/gateway/**`, hence
+# `internal/gateway/server/**` and `internal/gateway/server.go`). That is what takes the
+# addressable space from the 543 names in this file to 13,678 over the tracked tree --
+# measured, not projected, by TestRepoLaneSpaceMultiplier in internal/laneadmit. Keep
+# declaring roots here; do NOT enumerate what is below them.
+#
+# Defaults, all chosen so nothing below this comment changes meaning:
+#   * DEFAULT GRANULARITY IS THE LEAF. A surface that names `gateway` gets
+#     `internal/gateway/**` exactly as before and serializes with every other `gateway`
+#     holder. Narrowing is opt-in: a caller must name the sub-lane to get it.
+#   * A SUB-LANE IS NEVER MORE PERMISSIVE THAN ITS ROOT. A parent's holder blocks every
+#     descendant and vice versa (conflict kind `lane_ancestry`), `exclusive` below
+#     INHERITS downward (no `abi/...` escapes the serial ABI gate), and a tail that
+#     cannot be derived falls back to the ancestor's coarse tree.
+#   * DIRECTORY granularity is the safe cut for CODE roots: siblings are separate Go
+#     packages, so neither worker's half-finished edit can red the other's build. FILE
+#     granularity is honest only where files do not co-compile (docs, visuals, examples,
+#     testdata). Callers pick; the taxonomy does not force one.
+#   * A lease id keeps ONE ref segment: `gateway/server` travels as
+#     `<surface>-lane-docs_notes` because internal/leaseref's validID rejects `/`
+#     (and git could not hold both refs/fak/locks/x and .../x/y). The encoding is
+#     reversible for any real path -- see escapeLaneSegment.
 [lanes]
 concurrent = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
@@ -105,11 +131,18 @@ concurrent = [
   "modelaccept",
   "executionroute",
   "market",
+  "tokenprofile",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  # #5619: internal/gitbroker, the resident git query broker. Declared BEFORE the package
+  # exists so the rungs (#5620-#5624) can ship a `(fak gitbroker)` stamp without tripping
+  # TIER_DECLARED on their first push. Sibling of gitgate and deliberately disjoint from it:
+  # gitgate REFUSES git commands, gitbroker ANSWERS git questions, so the two lanes never
+  # collide even though both are named for git.
+  "gitbroker",
   # reconciled 2026-06-27 (#1029): internal/modelreg is a real committed leaf (the
   # friendly-name -> model-ref registry behind `fak run ornith:9b` / `fak serve --gguf`)
   # that had NO declared lane -> a `(fak modelreg)` ship-stamp bound but the arbiter could
@@ -266,11 +299,13 @@ concurrent = [
   "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "deadlineadmit",
   "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
   "deploymanifest", "dispatchaging", "dispatchaudit", "dispatchcache", "dispatchconservation",
+  "dispatchdoa",
   "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
   "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy", "dormancysim", "dsparity",
   "edittx", "egressfloor", "envconfiglint", "epicprogress", "epochbridge", "escalation",
   "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
-  "fleetbottleneck", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory", "fleetmetrics",
+  "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
+  "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
   "flock", "flowcredit", "focusscore", "frontierswe", "fusedturn", "gardenbundle",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
@@ -310,6 +345,14 @@ concurrent = [
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
   "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
   "worktreewitness", "xenginekv", "xprobe",
+  "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
+  "corelockgate", # #5392: internal/corelockgate leaf -- see [lanes].concurrent note.
+  "skilleffectiveness", # #5444: internal/skilleffectiveness leaf -- see [lanes].concurrent note.
+  "skillfootprint", # #5444: internal/skillfootprint leaf -- see [lanes].concurrent note.
+  "taskvc", # #3323: internal/taskvc leaf -- see [lanes].concurrent note.
+  "gitdaily", # #5577: unattended daily git-hygiene tick; see [lanes.trees].
+  "docrender",
+  "streamrules", # #5920: pure streaming rule detection primitive; see [lanes.trees].
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -337,6 +380,7 @@ autopick = [
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  "gitbroker", # #5619: internal/gitbroker leaf (the resident git query broker), see [lanes].concurrent note
   "modelreg", # #1029: internal/modelreg leaf (the run-by-name model registry), see [lanes].concurrent note
   "renameconcept", # internal/renameconcept leaf (the concept-rename planner/applier), see [lanes].concurrent note
   "sessionimage",
@@ -433,6 +477,10 @@ autopick = [
   "clonescan", # #5059: internal/clonescan leaf -- see [lanes].concurrent note.
   "egresslist", # #5130: internal/egresslist leaf -- see [lanes].concurrent note.
   "egressrefresh", # #5130: internal/egressrefresh leaf -- see [lanes].concurrent note.
+  "leasequeue", # #5505: internal/leasequeue leaf -- see [lanes].concurrent note.
+  "tokenprofile",
+  "docrender",
+  "streamrules",
   # new-leaf:lane
 ]
 
@@ -538,6 +586,9 @@ blobhttp = ["internal/blobhttp/**"]
 ctxplan = ["internal/ctxplan/**"]
 dgxbridge = ["internal/dgxbridge/**"]
 gitgate = ["internal/gitgate/**"]
+# #5619: the git query broker. Disjoint from gitgate by construction -- gitgate decides
+# whether a git command may run, gitbroker answers git questions without spawning one.
+gitbroker = ["internal/gitbroker/**"]
 hfhub = ["internal/hfhub/**"]
 memq = ["internal/memq/**"]
 polymodel = ["internal/polymodel/**"]
@@ -621,6 +672,7 @@ issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (th
 chatopsdetach = ["internal/chatopsdetach/**"]
 godfileceiling = ["internal/godfileceiling/**"]
 microagent = ["internal/microagent/**"]
+microcontextdemo = ["cmd/microcontextdemo/**"]
 l3kv = ["internal/l3kv/**"]
 doomloop = ["internal/doomloop/**"]
 cvregress = ["internal/cvregress/**"]
@@ -729,6 +781,7 @@ dispatchaging = ["internal/dispatchaging/**"]
 dispatchaudit = ["internal/dispatchaudit/**"]
 dispatchcache = ["internal/dispatchcache/**"]
 dispatchconservation = ["internal/dispatchconservation/**"]
+dispatchdoa = ["internal/dispatchdoa/**"]
 dispatchpost = ["internal/dispatchpost/**"]
 dispatchsweep = ["internal/dispatchsweep/**"]
 dispatchtick = ["internal/dispatchtick/**"]
@@ -754,6 +807,7 @@ findingsink = ["internal/findingsink/**"]
 fleet = ["internal/fleet/**"]
 fleetaccounts = ["internal/fleetaccounts/**"]
 fleetbottleneck = ["internal/fleetbottleneck/**"]
+fleetbus = ["internal/fleetbus/**"]
 fleetcap = ["internal/fleetcap/**"]
 fleetcompare = ["internal/fleetcompare/**"]
 fleetfreeze = ["internal/fleetfreeze/**"]
@@ -991,6 +1045,15 @@ worklog = ["internal/worklog/**"]
 worktreewitness = ["internal/worktreewitness/**"]
 xenginekv = ["internal/xenginekv/**"]
 xprobe = ["internal/xprobe/**"]
+leasequeue = ["internal/leasequeue/**"]
+corelockgate = ["internal/corelockgate/**"]
+skilleffectiveness = ["internal/skilleffectiveness/**"]
+skillfootprint = ["internal/skillfootprint/**"]
+taskvc = ["internal/taskvc/**"]
+gitdaily = ["internal/gitdaily/**"]
+tokenprofile = ["internal/tokenprofile/**"]
+docrender = ["internal/docrender/**"]
+streamrules = ["internal/streamrules/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1315,6 +1378,13 @@ summary  = "`dos status` returned a run digest containing a `claimed` field, vio
 fix      = "Fix the status producer so the digest contains only liveness, ledger-verified progress, lease region, and resume evidence; do not consume claimed status."
 see_also = ["dos status", "tools/dispatch_status.py"]
 
+[reasons.PIN_EVICT_REFUSED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a compaction plan would have evicted a PINNED context page -- a system invariant, the active steer, or the continuation seed -- so the gateway forwarded the body UNCHANGED instead of compacting lossily. The survival class is assigned deterministically from the page's kind (ctxplan.ClassOf), never from model output, so no prose a model emits can pin itself into the protected set or talk a page out of it."
+fix      = "raise --compact-history-budget above the pinned floor, or shed load elsewhere (fewer resident tools, a smaller steer). A refusal means the budget cannot hold the state the session needs to stay correct -- do NOT work around it by dropping the pin, which is the silent context loss the class exists to prevent. Floor: go test ./internal/gateway -run 'TestPinEvictRefused|TestPinnedPageSurvivesCompaction'"
+see_also = ["internal/ctxplan/survival.go", "internal/gateway/pinsurvival.go", "internal/gateway/messages.go"]
+
 [reasons.ARCH_LAYER_VIOLATION]
 category = "OPERATOR_GATE"
 refusal  = true
@@ -1390,7 +1460,7 @@ category = "OPERATOR_GATE"
 refusal  = true
 summary  = "a pathspec commit touches hard-self core-lock machinery -- a surface that can weaken the admission, witness, or ship-grade machinery that would catch its own bad edit"
 fix      = "Use an operator/release maintenance path, or rerun `fak commit` with `--core-lock-maintenance-witness <claim>` only after an independent witness resolver confirms the maintenance claim -- do not clear this by self-report. The accepted commit records the confirmed witness on refs/notes/fak/decisions."
-see_also = ["internal/corelocks", "internal/corelockaudit", "internal/safecommit/corelock.go", "dos commit-audit"]
+see_also = ["internal/corelocks", "internal/corelockaudit", "internal/corelockgate", "internal/safecommit/corelock.go", "dos commit-audit"]
 
 # FrontierSWE score-parity gate (#1717): the typed refusal emitted when a fak
 # FrontierSWE arm tries to claim a time-to-solution win while its score
@@ -1653,6 +1723,13 @@ summary  = "the all-in-one deployment is at its configured concurrent-governed-s
 fix      = "let an in-flight session finish (headroom frees the next scrape) and retry the new session, or scale the deployment out / raise FAK_MAX_SESSIONS if the host genuinely has capacity. Size the ceiling from the sizing model in docs/fak/deployment-guide.md and watch the fak_gateway_session_saturation gauge to scale BEFORE saturation. A zero/unset ceiling never fires this. Floor: go test ./internal/gateway -run TestSessionCeiling."
 see_also = ["internal/gateway/session_ceiling.go", "internal/gateway/session_admit.go", "docs/fak/deployment-guide.md", "RATE_LIMIT_BACKOFF", "GATE_PRESSURE"]
 
+[reasons.COMPACTION_THRASH]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "the served session's context window refilled to the compaction limit on 3 consecutive turns (#2424): history compaction FIRED every one of those turns and bought no lasting headroom, so the session is spending a compaction per reply and making no progress against its window. Detection and the /metrics count are always on; the session STOP that carries this reason at the served boundary is armed only by FAK_COMPACTION_THRASH_STOP."
+fix      = "restart the work in a FRESH window seeded from durable state (commit, plan, ledger) rather than letting the same transcript re-fill — tightening --compact-history-budget only compacts more often and changes nothing, because the binding constraint is the traffic, not the budget. Shrink the per-turn floor instead: window large reads, summarize bulky tool results, and drop tools the run does not use. Watch fak_gateway_compaction_thrash_sessions_total before arming the stop. Floor: go test ./internal/gateway -run TestCompactionThrashVerdict."
+see_also = ["internal/gateway/ctxadvice.go", "internal/gateway/ctxvalue.go", "internal/gateway/session_admit.go", "SESSION_CEILING_SATURATED", "BUDGET_CONTEXT_EXHAUSTED"]
+
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
 # (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT
@@ -1754,6 +1831,51 @@ refusal  = true
 summary  = "A fleet/lane-scoped broadcast (issue #2764) had no applicable shape -- an empty selector (an unstated set never means 'every session'), a nil session table, an op outside the closed control vocabulary, or a non-lifecycle op (steer/redirect/budget/priority) that cannot be fanned without a payload -- and was refused whole at the edge, before any session was touched."
 fix      = "State at least one selector axis (--lane / --wave / --label) and fan only a lifecycle op (pause|resume|cancel|terminate|throttle); per-session refusals inside an accepted broadcast surface the drive table's own CONTROL_* tokens. Floor: internal/sessionctl Broadcast edge validation."
 see_also = ["internal/sessionctl/broadcast.go", "internal/sessionctl/broadcast_test.go"]
+
+# #5600 (child of the centralized-fleet-control epic #5599): the closed refusal
+# vocabulary of the CROSS-PROCESS fleet control bus (internal/fleetbus) -- the layer
+# above BROADCAST_MALFORMED, which fans one op inside ONE gateway's session table.
+# The bus carries a directive to every announced INSTANCE and folds an ack back, so a
+# control point can say "4 of 4 applied" and have that be falsifiable. The bus itself
+# declares no ops (it is tier 1 and cannot see sessionctl); op MEANING lives in the
+# serve-side applier, which is why UNKNOWN_OP and APPLY_REFUSED are separate tokens:
+# one is "the bus carried a word this instance does not speak", the other is "this
+# instance spoke it and said no". Producers of record: internal/fleetbus/fleetbus.go
+# (Reasons) and cmd/fak/serve_fleetbus.go (the applier's outcomes).
+[reasons.FLEETBUS_MALFORMED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A fleet-bus envelope could not be trusted as WRITTEN -- a missing or wrong schema tag, an id outside the [A-Za-z0-9._-] token grammar (ids are path segments, so '.' / '..' / a separator would escape the bus directory), an empty selector (an unstated set never means 'every instance'), a selector that states both --all and a filter, or an ack claiming a non-applied status with no reason token."
+fix      = "Fix the envelope at its producer, not at the reader: state at least one selector axis or an explicit --all (never both), keep every id a bare token, and give every non-applied ack a closed reason. Floor: go test ./internal/fleetbus -run 'Validate|Selector'."
+see_also = ["internal/fleetbus/fleetbus.go", "internal/fleetbus/fleetbus_test.go"]
+
+[reasons.FLEETBUS_EXPIRED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A directive reached an instance after its TTL had run out, so the instance ACKED it expired instead of applying it. A control directive is a statement about NOW ('restart, the account was just added'); replaying an hour-old one against an instance that was down for that hour is a fresh action wearing a stale intent."
+fix      = "Re-issue the directive if it is still what you want (`fak fleet control send` re-publishes with a new id), or raise --ttl for an op whose intent genuinely outlives the window. --ttl 0 means never expires -- state it deliberately. Floor: go test ./internal/fleetbus -run Expire."
+see_also = ["internal/fleetbus/drain.go", "internal/fleetbus/fleetbus.go"]
+
+[reasons.FLEETBUS_NO_TARGET]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A send resolved to ZERO instances -- the roster held no fresh instance the selector addressed -- so it was refused at the edge rather than published. Publishing to nobody would return a report that is trivially 'complete' (0 of 0 applied) and read as success; the denominator is the whole point of the roster."
+fix      = "Run `fak fleet control instances` to see who is actually announced and fresh, widen or correct the selector, or arm the instances first (`fak serve --fleet-bus`). An instance silent for longer than the TTL is stale and is not a target. Floor: go test ./cmd/fak -run FleetControl."
+see_also = ["cmd/fak/fleet_control.go", "internal/fleetbus/fold.go"]
+
+[reasons.FLEETBUS_UNKNOWN_OP]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An instance received a directive whose op is outside ITS control vocabulary and acked it refused. The bus is deliberately op-agnostic (it carries an opaque token), so a mixed-version fleet is a real state: the token names the instance that cannot speak the word, rather than dropping the directive and leaving it forever OUTSTANDING."
+fix      = "Send an op the instance advertises (`fak fleet control instances` prints each instance's ops), or upgrade the instances that refused. A refused ack is a completed round trip -- the directive is accounted for, not lost. Floor: go test ./cmd/fak -run FleetBusApplier."
+see_also = ["cmd/fak/serve_fleetbus.go", "internal/fleetbus/drain.go"]
+
+[reasons.FLEETBUS_APPLY_REFUSED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "An instance KNEW the op and refused to apply it -- no live session matched, none were tagged into the stated lane/wave/label, the op needs a per-session payload a bare fan cannot name (redirect/budget/priority), or the local route refused it outright (a steer at a serve that owns no session loop carries STEER_NO_OWNED_LOOP through in the detail). An instance that matched nothing refuses rather than acking a hollow 'applied', because a fleet-wide 'everybody applied, 0 affected' is the accepted-but-never-applied phantom wearing a success token."
+fix      = "Read the ack's detail -- it names WHICH nothing this was and each is a different fix: start the serve with --native for steer, drop the session selector if the sessions are untagged, or use the single-session verb for a payload-carrying op. Floor: go test ./cmd/fak -run FleetBusApplier."
+see_also = ["cmd/fak/serve_fleetbus.go", "internal/fleetbus/drain.go", "internal/gateway/http.go"]
 
 # #3066 (child [GATE] of the TOON epic #3064): the closed skip-reason vocabulary
 # the pure `toon.Decide(...)` governor returns instead of `Encode:true`. Each token
@@ -1965,8 +2087,80 @@ summary  = "The resident .claude/skills description floor fell materially below 
 fix      = "Re-pin skillfootprint.SkillDescriptionBudgetBytes DOWN to the newly measured floor and update docs/context-budget/skill-description-floor.md in the same commit, so the ratchet tightens. If instead the floor priced as zero or near-zero, the probe is broken, not the catalog: check that `.claude/skills` is present and readable from the working directory. Measure with `fak skill footprint --json`. Floor: `go test ./internal/skillfootprint`."
 see_also = ["internal/skillfootprint/descbudget.go", "docs/context-budget/skill-description-floor.md", "fak skill footprint", "SKILL_DESC_BUDGET_EXCEEDED"]
 
+# The bind-safety startup refusal (#5373, a child of #3279). `fak serve` refuses to bind a
+# listener that is reachable from OFF THIS HOST while no inbound token door is configured --
+# the shape the January 2026 internet-wide scan #3279 cites found 175,108 local-model servers
+# in. The gate has shipped with its three-case test matrix since cmd/fak/serve_bind_safety.go
+# landed, but the token it emits was never declared here, so `dos_check_reason
+# UNAUTHENTICATED_OFF_HOST_BIND` classified fak's own structured refusal as UNCLASSIFIED prose
+# drift -- exactly the failure the closed vocabulary exists to kill, on a security refusal.
+# Declaring it completes that half of #5373's witness. Loopback binds and off-host binds that
+# DO name a token door are never refused; the escape is deliberately verbose.
+[reasons.UNAUTHENTICATED_OFF_HOST_BIND]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "`fak serve` was asked to bind an address reachable from off this host (0.0.0.0, ::, a bare :port, or a routable IP) while neither --require-key-env nor --key-principal configures an inbound token door, so every request the listener would serve is unauthenticated. Refused at startup rather than started silently. Loopback binds (the 127.0.0.1:8080 default, localhost, ::1), --stdio, and any off-host bind that DOES name a token door are unaffected."
+fix      = "Arm a token door: `--require-key-env FAK_API_KEY` (single-tenant bearer) or `--key-principal <tenant>=<ENV_VAR>` (per-tenant keyset), with the named env var set. Or keep the listener local with `--addr 127.0.0.1:8080`. For the deliberate isolated-segment case where a host firewall does the work, pass --unsafe-allow-unauthenticated-bind, which binds anyway and prints a loud warning every boot."
+see_also = ["cmd/fak/serve_bind_safety.go", "cmd/fak/serve_bind_safety_test.go", "docs/air-gapped-deployment-kit.md", "fak serve"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).
+# Daily Git hygiene refusal vocabulary (#5589). These tokens are emitted by
+# internal/gitdaily.Refusal when a scheduled tick cannot establish its serializer, safely
+# clean proven-orphan locks, complete guarded maintenance, or persist its witness. TICK_BUSY
+# is advisory because another live tick already owns the mutator; the remaining outcomes
+# require operator recovery before the scheduler retries.
+[reasons.INVALID_OPTIONS]
+category = "MISROUTE"
+refusal  = true
+summary  = "fak git-daily was invoked without a complete repository identity, so the unattended tick cannot safely choose its Git common directory or ledger."
+fix      = "Run fak git-daily from the target clone, or set RepoRoot from `git rev-parse --show-toplevel` and GitCommonDir from `git rev-parse --git-common-dir`, then retry."
+see_also = ["fak git-daily --help", "internal/gitdaily/refusal.go"]
+
+[reasons.TICK_BUSY]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "A live fak git-daily tick already owns this clone's serializer, so the overlapping scheduler fire was skipped without mutation."
+fix      = "Wait for the active tick to finish, then read `fak git-daily status`; retry only if no fresh ledger row appears."
+see_also = ["fak git-daily status", "internal/gitdaily/refusal.go"]
+
+[reasons.TICK_LOCK_ERROR]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "fak git-daily could not open or inspect its per-clone serializer in the Git common directory."
+fix      = "Check permissions and filesystem health for the Git common directory, confirm no unsupported lock object replaced the serializer path, then retry."
+see_also = ["fak git-daily --json", "internal/gitdaily/refusal.go"]
+
+[reasons.LOCK_CLEANUP_FAILED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The daily tick found a lock that its evidence-gated cleanup could not safely reclaim, so maintenance did not proceed as if the clone were clean."
+fix      = "Inspect the lock sweep in `fak git-daily --json`; resolve the named live, ambiguous, or failed lock condition, then rerun the tick."
+see_also = ["fak git-daily --json", "internal/gitdaily", "docs/cli-reference.md"]
+
+[reasons.MAINTENANCE_INCIDENT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Daily object maintenance reached a guarded safety gate or failed command and recorded an incident instead of continuing unattended."
+fix      = "Inspect the maintenance refusal in `fak git-daily --json`, correct the reported repository condition, and rerun only after the safety gate is satisfied."
+see_also = ["fak git-daily --json", "internal/gitdaily", "fak buildcheck"]
+
+[reasons.LEDGER_WRITE_FAILED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Daily cleanup and maintenance completed, but fak could not append the bounded JSONL witness in the Git common directory."
+fix      = "Make the Git common directory and ledger writable, then rerun `fak git-daily --force` so completion is independently recorded."
+see_also = ["fak git-daily --force --json", "internal/gitdaily/refusal.go"]
+
+[reasons.MICROCONTEXT_LEDGER_REFUSED]
+category = "MISROUTE"
+refusal  = true
+summary  = "A micro-context witness, quality ledger, cache A/B, or health scorecard failed schema or accounting reconciliation, so fak refused to grade or publish it."
+fix      = "Run the matching `microcontextdemo -verify-* <artifact>` command printed by the producing stage; regenerate the artifact from the source run rather than editing totals by hand."
+see_also = ["cmd/microcontextdemo", "docs/research/README.md", "go run ./cmd/microcontextdemo -h"]
 [retention]
 audits_keep_last = 30
+
+
+

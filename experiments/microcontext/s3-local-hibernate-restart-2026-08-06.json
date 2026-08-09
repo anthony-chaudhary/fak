@@ -1,0 +1,48 @@
+{
+  "schema": "fak-microcontext-hibernation/1",
+  "verdict": "PASS",
+  "observed_at": "2026-08-06T19:13:28Z",
+  "provenance": "observed local controlled-kernel scheduler; synthetic no-model agent steps",
+  "logical_contexts": 1000,
+  "worker_slots": 16,
+  "resident_limit": 16,
+  "turns_per_context": 2,
+  "forced_runtime_restarts": 1,
+  "completed": 1000,
+  "unique_retirements": 1000,
+  "duplicate_effects": 0,
+  "peak_resident": 16,
+  "peak_warm": 4,
+  "at_restart": {
+    "warm": 0,
+    "parked": 1000,
+    "hibernated": 1000,
+    "resident": 0
+  },
+  "final": {
+    "warm": 0,
+    "parked": 0,
+    "hibernated": 0,
+    "resident": 0
+  },
+  "restore_latency_p50_us": 1581,
+  "restore_latency_p95_us": 8045,
+  "queue_age_p50_us": 516,
+  "queue_age_p95_us": 1006,
+  "queue_age_max_us": 2055,
+  "frozen_bytes_at_restart": 54000,
+  "restored_turns": 1000,
+  "replay_turns_avoided": 1000,
+  "peak_alloc_delta_bytes": 1597912,
+  "memory_envelope_bytes": 67108864,
+  "wall_ms": 2358,
+  "claims": [
+    "1,000 logical contexts resumed from durable snapshots after scheduler reconstruction",
+    "resident contexts remained bounded by the declared physical-slot cap",
+    "one exclusive durable retirement effect exists per context"
+  ],
+  "non_claims": [
+    "synthetic steps are not model tokens/sec, TTFT, KV-cache, or prefix-cache evidence",
+    "forced runtime reconstruction is not an operating-system crash or power-loss witness"
+  ]
+}

@@ -12,6 +12,22 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
+func TestFeatureQueryTextPrintsFreshnessRungs(t *testing.T) {
+	cards := []selfquery.FeatureCard{
+		{Name: "old-card", Kind: "dev-doc", Effect: selfquery.EffectRead, Source: "devindex", Summary: "older guidance", Freshness: "SUPERSEDED_BY:new-card"},
+		{Name: "stale-card", Kind: "tool", Effect: selfquery.EffectRead, Source: "registry", Summary: "needs review", Freshness: "STALE"},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := writeFeatureRows(&stdout, &stderr, cards); code != 0 {
+		t.Fatalf("writeFeatureRows code=%d stderr=%q", code, stderr.String())
+	}
+	want := "old-card    dev-doc  read  devindex  older guidance  SUPERSEDED_BY:new-card\n" +
+		"stale-card  tool     read  registry  needs review    STALE\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("text render:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestFeatureQueryMemoryJSON(t *testing.T) {
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer

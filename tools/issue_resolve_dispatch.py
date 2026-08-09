@@ -129,6 +129,9 @@ _ANY_WORKER_LOG_RE = re.compile(r"(?:resolve|repair)-(\d+)-")
 # The `lane=<L>` field of the `# fak-spawn` header `spawn_issue_worker` flushes as
 # the first line of every worker log (used by the pre-spawn lane-lease gate, #1310).
 _SPAWN_LANE_RE = re.compile(r"\blane=(\S+)")
+# ``resolve-<issue>-<YYYYMMDD>-<HHMMSS>.witness`` -> (issue, date, time). Anchored so a
+# stray sidecar name can never yield a bogus launch order (#5869).
+_WITNESS_STAMP_RE = re.compile(r"^resolve-(\d+)-(\d{8})-(\d{6})\.witness$")
 _RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 DEFAULT_SPAWN_PROBE_S = 5.0
@@ -220,6 +223,66 @@ _MULTI_LANE_HOLD_LEDGER = "multi-lane-holds.jsonl"
 # contract/multi-lane TTL<=0 short-circuit).
 DEFAULT_COLLISION_HOLD_TTL_H = 3
 _COLLISION_HOLD_LEDGER = "collision-holds.jsonl"
+# Consecutive-identical re-block hold (#5869). #1396 recorded WHY a finished worker
+# landed no commit and held a re-blockable terminal (self_modify / policy_block) --
+# but only for the tick that WITNESSED the exit (:func:`held_no_commit_issues` reads
+# the in-memory sweep result), so the very next tick re-picked the same issue with no
+# memory of the refusal. Measured over the clean current-fleet window (2026-08-04 ..
+# 08-07, 286 finished-worker .witness records / 94.0h over 117 issues): 24 issues hit
+# a re-blockable terminal and drew 54 further worker-units costing 16.6h (17.8% of the
+# window). BUT the docstring premise "re-dispatching it re-blocks identically" is only
+# ~30% true -- 16/54 re-blocked, while 8/54 (15%) went on to land a WITNESSED commit.
+# So the reason CLASS is the wrong key: a blanket hold on the first re-blockable
+# terminal (N=1) suppresses 2-8 real commits at every TTL in the window. What IS
+# predictive is REPETITION -- the last N attempts hit the SAME terminal with nothing
+# changed between them. Replaying the window: N=2 suppresses 6 runs / 1.5h and loses
+# ZERO witnessed commits at every TTL below 7.0h.
+#
+# The TTL was re-derived at 0.1h resolution over the WHOLE retained corpus (2396
+# .witness records / 313 issues; every armed 2-streak in it falls in the 08-04+
+# current-fleet window, so the window IS the signal and the pre-outage and outage
+# slices arm no streak at all). Three things that derivation corrects, because the
+# first cut of this constant shipped on a mis-read of them:
+#
+#   * The boundary is 7.0h EXACTLY, so a 6h default carried 1.0h of margin, not the
+#     0.4h the second reading reported. #4568's f34f02f84 -- the commit that reading
+#     blamed -- launched 2.69h and landed 2.85h after that issue's last block, not
+#     6.4h.
+#   * The boundary is NOT set by a late lander. It is a SUPPRESSION CASCADE: at
+#     TTL>=7.0h the hold eats #4568's untyped `unknown` run at 08-07 00:30 (6.97h
+#     after the policy_block at 08-06 17:32), and deleting that run from the trace
+#     re-forms a [policy_block, policy_block] tail that never existed in reality --
+#     which then eats the 06:52 win. The number that sets the band is a block-to-
+#     UNRELATED-run gap, so reading the block-to-win distribution alone (a clean void
+#     between 2.69h and 9.33h) does NOT find it. This is also why raising N does not
+#     buy safety: N=3 loses that same win from TTL=4h.
+#   * Loss is NON-MONOTONE in the TTL -- N=2 is lossless again across [12.3h, 13.3h]
+#     -- because suppression rewrites the streak structure downstream of itself. A
+#     "zero-loss band [a,b]" is therefore the wrong shape to quote; the only
+#     defensible statistic is the largest TTL below which nothing is lost anywhere.
+#
+# 5h is that value minus a deliberate 2.0h margin, and on this corpus it is FREE: the
+# suppression yield is flat at 6 runs / 1.5h across the whole plateau [4.4h, 6.2h], so
+# 6h -> 5h suppresses exactly as much while doubling the distance to the first loss.
+# The forward cost is the tail it gives up: of the 32 re-dispatches that FOLLOW a
+# re-blockable block, 28 arrive inside 4h (median 3.28h, p90 4.55h) and just 1 (3.1%)
+# lands in the (5h, 6h] band a 6h TTL would still have caught.
+#
+# The TTL is also what makes the hold self-clearing: it does not decide the issue is
+# dead, it admits ONE probe per window and lets that PROBE'S OUTCOME clear or re-arm
+# the hold -- 5h still clears a full window ahead of the 3.28h median re-dispatch
+# cadence, so the probe stays reachable. Yield is deliberately modest
+# because consecutive-identical streaks are rare while the `unknown` bucket stays
+# untyped (149/232 no-commit runs, 49.7h -- #5867): `policy_block -> unknown` (13)
+# outnumbers `policy_block -> policy_block` (8). Typing that bucket raises this same
+# rule's yield to 24 runs / 7.3h with no change here. Set either to 0 to disable.
+DEFAULT_REBLOCK_STREAK_HOLD_N = 2
+DEFAULT_REBLOCK_STREAK_HOLD_TTL_H = 5
+# The measured TTL at which the replay first destroys a witnessed commit (see above).
+# Kept as a named constant so the margin between it and the shipped default is a
+# testable invariant rather than a claim in a comment that drifts off the data.
+REBLOCK_STREAK_FIRST_LOSS_TTL_H = 7.0
+REBLOCK_STREAK_MIN_TTL_MARGIN_H = 1.5
 # Low-yield lane soft-exclude (#2062): a lane whose recent resolve sessions burned
 # turns yet closed nothing is a poison-pill sink (e.g. a GPU-less host re-grabbing a
 # P1 GPU epic it structurally cannot run). The shared lane_yield fold flags it; the
@@ -256,6 +319,18 @@ DEFAULT_REPAIR_BATCH = 5
 # (anti-churn for un-repairables). A SUCCESSFUL repair needs no cooldown escape:
 # its edit bumps the issue's updatedAt, which re-admits it past the hold ledger.
 DEFAULT_REPAIR_COOLDOWN_MIN = 360
+# The DURABLE record of what each repair worker attempted. The cooldown above used
+# to be read off the `repair-<N>-*.log` mtime plus its `.issues` batch sidecar --
+# and `prune_dead_sidecars` DELETES both the moment the groomer exits (repair logs
+# are deliberately disposable). So the cooldown evidence died with the worker: the
+# window only ever covered a groomer that was still ALIVE, which is precisely the
+# case the live-repair scan already refuses. Measured on this host: 62 of 186
+# grooming events (33%) re-groomed an issue inside the 360-min window, median gap
+# 43 min -- four consecutive workers re-grooming #3238/#5255 in 108 minutes, each
+# burning a seat on the same un-repairable heads. The ledger is written at spawn
+# and outlives the sweep, exactly like contract-holds.jsonl; the reader still folds
+# any surviving logs so a live/unpruned groomer is counted the same as before.
+_REPAIR_ATTEMPT_LEDGER = "repair-attempts.jsonl"
 # Same-issue WIP hold (#2975): a finished resolver can leave useful local
 # working-tree changes without a commit. If the same issue is immediately picked
 # again, the second worker stacks onto uncommitted WIP that no live lease owns.
@@ -294,6 +369,19 @@ def is_orientation_doc(path: str) -> bool:
 # resolve log names a guard-audit journal and that journal proves a repeated
 # quarantined result.
 ACTIVE_GUARD_LIVELOCK_MIN_COUNT = 10
+# How many journal rows the worker may append WITHOUT reproducing a quarantine
+# before that quarantine is treated as escaped. Guard journals are append-only,
+# so a plain lifetime tally never decreases: once a worker crossed
+# :data:`ACTIVE_GUARD_LIVELOCK_MIN_COUNT` the hold LATCHED for the rest of the
+# journal's life, even after the worker broke out and shipped hundreds of clean
+# decisions (#5861). A livelocked worker reproduces the IDENTICAL quarantine
+# within a handful of rows -- dispatch_status's status-card fold, which this
+# scan's docstring calls itself the result-side analogue of, treats 3 consecutive
+# repeats as the tight signal. 50 intervening rows with no recurrence is more
+# than an order of magnitude past that, so it is positive proof the worker moved
+# on, the same role the compaction shed plays for the compact-runaway hold. The
+# hold must describe a livelock happening NOW, not one that happened once.
+ACTIVE_GUARD_LIVELOCK_ESCAPE_ROWS = 50
 _AUDIT_LOG_RE = re.compile(r"audit log\s*:\s*(.+?\.jsonl)")
 # Active compact-runaway spawn hold: a worker that is already far past the
 # compact threshold while still taking tool turns is not healthy headroom. This
@@ -301,6 +389,16 @@ _AUDIT_LOG_RE = re.compile(r"audit log\s*:\s*(.+?\.jsonl)")
 # context burn.
 ACTIVE_COMPACT_RUNAWAY_MIN_COUNT = 3
 ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K = 20.0
+# A turn whose context sits this many thousand tokens BELOW the previous turn's
+# is a compaction shed: positive proof compact control just did its job. Context
+# only grows within a compaction cycle, so a drop this large has no other cause.
+# Hits recorded before the most recent shed describe an overshoot the harness has
+# ALREADY recovered from, so they are forgotten (#5858). Without this the scan
+# counts all-time hits and the hold LATCHES for the rest of a recovered worker's
+# life -- the same "hold outlives the condition that caused it" shape as a lane
+# goal-park that outlived its 429. The hold must describe compact control failing
+# NOW, not once.
+ACTIVE_COMPACT_RUNAWAY_SHED_K = 5.0
 _CTX_BUDGET_RE = re.compile(r"\bctx:(\d+(?:\.\d+)?)k/(\d+(?:\.\d+)?)k")
 _DIST_PAST_COMPACT_RE = re.compile(r"\bdist:(\d+(?:\.\d+)?)k-past-compact")
 _COMPACT_FIELD_RE = re.compile(r"\bcompact=(\S+)")
@@ -451,15 +549,32 @@ def _audit_path_from_log(log: Path, root: Path) -> Path | None:
     return found
 
 
-def _guard_result_livelock(journal: Path, *,
-                           min_count: int = ACTIVE_GUARD_LIVELOCK_MIN_COUNT) -> dict[str, Any]:
+def _guard_result_livelock(
+    journal: Path,
+    *,
+    min_count: int = ACTIVE_GUARD_LIVELOCK_MIN_COUNT,
+    escape_rows: int = ACTIVE_GUARD_LIVELOCK_ESCAPE_ROWS,
+) -> dict[str, Any]:
     """Return positive evidence for repeated quarantined tool_result rows.
 
     This is the result-side analogue of the status-card livelock fold, scoped to
     active worker journals. The key includes reason + digest so unrelated
     quarantines do not trip the fuse.
+
+    "Livelock" is load-bearing and is enforced against the CURRENT burst only
+    (:data:`ACTIVE_GUARD_LIVELOCK_ESCAPE_ROWS`, #5861): every parsed journal row
+    advances a clock, and a key the worker has not reproduced for that many rows
+    is forgotten because the worker demonstrably moved past it. Without that,
+    the count is an append-only LIFETIME tally -- it can never fall back under
+    ``min_count``, so the hold latches for the life of the journal, and ten
+    quarantines scattered singly across thousands of productive rows (never two
+    adjacent, a livelock by no reading) trip the fuse just as hard as ten in a
+    row.
     """
     counts: dict[tuple[str, str, str], int] = {}
+    last_row: dict[tuple[str, str, str], int] = {}
+    escapes = 0
+    row_idx = 0
     try:
         lines = journal.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -471,6 +586,9 @@ def _guard_result_livelock(journal: Path, *,
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # Every well-formed kernel decision is a tick of progress, whatever it
+        # decided -- that is what pushes an old quarantine out of the window.
+        row_idx += 1
         verdict = str(row.get("verdict") or "").upper()
         tool = str(row.get("tool") or row.get("name") or "")
         if verdict != "QUARANTINE" or tool != "tool_result":
@@ -480,12 +598,29 @@ def _guard_result_livelock(journal: Path, *,
         if not digest:
             continue
         key = (tool, reason, digest)
+        prev = last_row.get(key)
+        if prev is not None and row_idx - prev > escape_rows:
+            # The worker went a full escape window without reproducing this
+            # quarantine and then hit it again: the earlier burst is one it
+            # already escaped, so this is a NEW burst that must reach min_count
+            # on its own merits.
+            counts[key] = 0
+            escapes += 1
         counts[key] = counts.get(key, 0) + 1
+        last_row[key] = row_idx
+    # Tail escape: a burst whose last repeat is already an escape window behind
+    # the journal head describes a worker that has since recovered. Forget it,
+    # so the hold CLEARS on recovery instead of latching.
+    for key, idx in last_row.items():
+        if row_idx - idx > escape_rows:
+            counts[key] = 0
+            escapes += 1
     if not counts:
-        return {"livelock": False, "path": str(journal)}
+        return {"livelock": False, "path": str(journal), "rows": row_idx}
     (tool, reason, digest), count = max(counts.items(), key=lambda item: item[1])
     if count < min_count:
-        return {"livelock": False, "path": str(journal), "count": count}
+        return {"livelock": False, "path": str(journal), "count": count,
+                "rows": row_idx, "escapes": escapes}
     return {
         "livelock": True,
         "path": str(journal),
@@ -493,6 +628,9 @@ def _guard_result_livelock(journal: Path, *,
         "reason": reason,
         "digest": digest,
         "count": count,
+        "rows": row_idx,
+        "escapes": escapes,
+        "rows_since": row_idx - last_row[(tool, reason, digest)],
     }
 
 
@@ -519,18 +657,28 @@ def active_guard_livelock_hold(root: Path, runs_dir: Path, *,
                 issue = int(m.group(1))
             except ValueError:
                 issue = None
-        hit.update({"log": str(log), "issue": issue})
+        # Which lane the livelock actually burns (#5861, mirroring #5858's
+        # compact-runaway fix). A guard result livelock is a property of ONE
+        # worker's own tool loop, not of the fleet: stamp the lane -- readable
+        # from the very log this scan already opened -- so the caller can scope
+        # the hold to the colliding lane instead of idling every disjoint lane.
+        # `None` when the spawn header is unreadable; the caller fails CLOSED.
+        hit.update({"log": str(log), "issue": issue,
+                    "lane": _spawn_header_lane(log)})
         candidates.append(hit)
     if not candidates:
         return {"active": False}
     candidates.sort(key=lambda h: int(h.get("count") or 0), reverse=True)
     top = candidates[0]
+    lane_bit = f" on lane '{top.get('lane')}'" if top.get("lane") else ""
     return {
         "active": True,
         "candidates": candidates[:5],
+        "lanes": sorted({str(c.get("lane")) for c in candidates if c.get("lane")}),
+        "lane_unknown": any(not c.get("lane") for c in candidates),
         "reason": (
-            f"live worker #{top.get('issue') or '?'} is already in a guard "
-            f"result livelock: {top.get('tool')} {top.get('reason')} "
+            f"live worker #{top.get('issue') or '?'}{lane_bit} is already in a "
+            f"guard result livelock: {top.get('tool')} {top.get('reason')} "
             f"digest={str(top.get('digest') or '')[:12]} count={top.get('count')}"
         ),
     }
@@ -541,6 +689,7 @@ def _compact_runaway_from_log(
     *,
     min_count: int = ACTIVE_COMPACT_RUNAWAY_MIN_COUNT,
     min_past_k: float = ACTIVE_COMPACT_RUNAWAY_MIN_PAST_K,
+    shed_k: float = ACTIVE_COMPACT_RUNAWAY_SHED_K,
 ) -> dict[str, Any]:
     """Return positive evidence that one live worker is past compact and looping.
 
@@ -548,12 +697,19 @@ def _compact_runaway_from_log(
     consecutive tool turns are tens of thousands of tokens past the compact
     threshold, another resolver spawn is more likely to multiply the failure
     mode than add useful throughput.
+
+    "Consecutive" is load-bearing and is enforced against the CURRENT compaction
+    cycle only: a compaction shed (:data:`ACTIVE_COMPACT_RUNAWAY_SHED_K`) clears
+    the accumulated hits, because a worker the harness already pulled back under
+    budget is not a runaway no matter how far it once overshot.
     """
     try:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return {"runaway": False, "unavailable": True, "log": str(log)}
     hits: list[dict[str, Any]] = []
+    prev_ctx_k: float | None = None
+    sheds = 0
     for line in lines:
         if "fak-turn" not in line or "finish=tool_use" not in line:
             continue
@@ -565,6 +721,12 @@ def _compact_runaway_from_log(
             limit_k = float(ctx_m.group(2))
         except ValueError:
             continue
+        # Compact control demonstrably fired: forget the overshoot it just cured,
+        # so the hold clears on recovery instead of latching forever.
+        if prev_ctx_k is not None and ctx_k <= prev_ctx_k - shed_k:
+            hits.clear()
+            sheds += 1
+        prev_ctx_k = ctx_k
         past_k = max(0.0, ctx_k - limit_k)
         dist_m = _DIST_PAST_COMPACT_RE.search(line)
         if dist_m:
@@ -587,6 +749,7 @@ def _compact_runaway_from_log(
             "runaway": False,
             "log": str(log),
             "count": len(hits),
+            "sheds": sheds,
             "max_past_k": round(max((h["past_k"] for h in hits), default=0.0), 1),
         }
     last = hits[-1]
@@ -594,6 +757,7 @@ def _compact_runaway_from_log(
         "runaway": True,
         "log": str(log),
         "count": len(hits),
+        "sheds": sheds,
         "max_past_k": round(max(h["past_k"] for h in hits), 1),
         "ctx_k": last["ctx_k"],
         "limit_k": last["limit_k"],
@@ -634,6 +798,12 @@ def active_compact_runaway_hold(
             except ValueError:
                 issue = None
         hit["issue"] = issue
+        # Which lane the runaway actually burns (#5858). A compact runaway is a
+        # property of ONE worker's context, not of the fleet: stamp the lane so
+        # the caller can scope the hold to the colliding lane instead of idling
+        # every disjoint lane behind one worker's local condition. `None` when
+        # the spawn header is unreadable -- the caller fails CLOSED on unknown.
+        hit["lane"] = _spawn_header_lane(log)
         candidates.append(hit)
     if not candidates:
         return {"active": False}
@@ -642,13 +812,16 @@ def active_compact_runaway_hold(
         reverse=True,
     )
     top = candidates[0]
+    lane_bit = f" on lane '{top.get('lane')}'" if top.get("lane") else ""
     return {
         "active": True,
         "candidates": candidates[:5],
+        "lanes": sorted({str(c.get("lane")) for c in candidates if c.get("lane")}),
+        "lane_unknown": any(not c.get("lane") for c in candidates),
         "reason": (
-            f"live worker #{top.get('issue') or '?'} is already past compact "
-            f"by {top.get('max_past_k')}k tokens across {top.get('count')} "
-            "tool-use turns"
+            f"live worker #{top.get('issue') or '?'}{lane_bit} is already past "
+            f"compact by {top.get('max_past_k')}k tokens across "
+            f"{top.get('count')} tool-use turns"
         ),
     }
 
@@ -662,14 +835,34 @@ def _py() -> str:
 
 
 def _fak_command_prefix(root: Path) -> list[str]:
+    """Argv prefix for invoking ``fak``, freshest candidate first (#5856).
+
+    ``$FAK_BIN`` stays the absolute override. Otherwise rank the repo-root artifact and
+    the PATH binary by build time and take the newest, falling back to ``go run`` when
+    neither exists. The old order took ``<root>/fak.exe`` unconditionally and never
+    consulted PATH at all — while ``_fak_bin()`` in this same module resolves through
+    PATH — so a single dispatcher tick ran two different fak builds, and the repo-root
+    copy is the one nothing ever refreshes.
+
+    PATH is read through ``dispatch_worker._which_on_exact_path`` rather than
+    ``shutil.which``: on Windows the latter also applies current-directory search, which
+    would resolve right back to the repo-root artifact this function is trying to rank.
+    """
     explicit = os.environ.get("FAK_BIN")
     if explicit:
         return [explicit]
+    candidates: list[str] = []
+    onpath = dispatch_worker._which_on_exact_path("fak", os.environ.get("PATH"))
+    if onpath:
+        candidates.append(onpath)
     for name in ("fak.exe", "fak"):
         cand = root / name
         if cand.is_file():
-            return [str(cand)]
-    return ["go", "run", "./cmd/fak"]
+            candidates.append(str(cand))
+            break
+    if not candidates:
+        return ["go", "run", "./cmd/fak"]
+    return [max(candidates, key=dispatch_worker.fak_binary_build_time)]
 
 
 def contract_overlay_path(runs_dir: Path, number: int) -> Path:
@@ -1283,14 +1476,49 @@ def live_repair_workers(
     return out
 
 
+def record_repair_attempt(runs_dir: Path, issues: list[int] | set[int], *,
+                          live: bool, now_ts: float | None = None) -> None:
+    """Append one repair worker's whole batch to the durable attempt ledger.
+
+    The cooldown's evidence must OUTLIVE the worker that produced it. Its old
+    carrier -- the ``repair-<N>-*.log`` and its ``.issues`` sidecar -- is swept by
+    :func:`prune_dead_sidecars` as soon as the groomer dies, so the window
+    collapsed to the groomer's own lifetime and the same un-repairable heads were
+    re-groomed every ~40 minutes. Live ticks only: a dry run must stay
+    side-effect-free. Fail-open -- a missed row re-grooms sooner, never blocks."""
+    nums = sorted({int(n) for n in issues if int(n or 0) > 0})
+    if not live or not nums:
+        return
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with (runs_dir / _REPAIR_ATTEMPT_LEDGER).open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"utc": iso, "ts": now, "issues": nums}) + "\n")
+    except OSError:
+        pass
+
+
 def recently_repaired_issues(runs_dir: Path, *, cooldown_min: int,
                              now_ts: float | None = None) -> set[int]:
-    """Issues a contract-repair worker ATTEMPTED within the window -- the mtime of
-    each ``repair-<N>-*.log`` plus every issue in its ``.issues`` batch sidecar.
+    """Issues a contract-repair worker ATTEMPTED within the window -- read from the
+    durable ``repair-attempts.jsonl`` ledger, UNION any still-present
+    ``repair-<N>-*.log`` mtime plus its ``.issues`` batch sidecar.
     Anti-churn for un-repairables: an issue a worker could not honestly bring to
     contract must not be re-groomed every tick. A SUCCESSFUL repair needs no
     escape hatch here -- its edit bumps updatedAt, which re-admits the issue past
     the hold ledger, and a passing review never reaches the repair path again.
+
+    The ledger is the load-bearing half: repair logs are deliberately disposable
+    and :func:`prune_dead_sidecars` unlinks them (with the ``.issues`` sidecar) the
+    moment the groomer exits, so a log-only reader can never see past the CURRENT
+    worker. The surviving-log scan is kept so a live or not-yet-swept groomer still
+    counts, and so a runs dir written before the ledger existed still cools.
+
+    The window is a pure age comparison against ``cooldown_min``: once a row falls
+    past the horizon the issue is admitted again with no reset verb, so an issue
+    that later becomes repairable is never pinned out permanently.
     0 disables the gate."""
     if cooldown_min <= 0 or not runs_dir.is_dir():
         return set()
@@ -1298,6 +1526,21 @@ def recently_repaired_issues(runs_dir: Path, *, cooldown_min: int,
     now = now_ts if now_ts is not None else time.time()
     horizon = now - cooldown_min * 60
     recent: set[int] = set()
+    ledger = runs_dir / _REPAIR_ATTEMPT_LEDGER
+    if ledger.is_file():
+        try:
+            lines = ledger.read_text(encoding="utf-8",
+                                     errors="replace").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+                if float(row.get("ts") or 0) < horizon:
+                    continue
+                recent.update(int(n) for n in (row.get("issues") or []))
+            except (TypeError, ValueError):
+                continue
     for log in runs_dir.glob("repair-*.log"):
         m = _REPAIR_LOG_RE.search(log.name)
         if not m:
@@ -1429,7 +1672,10 @@ def prune_dead_sidecars(
     are removed with the ``.pid`` so a half-pruned run never confuses the wave
     auditor; resolve ``.log`` files and ``.witness`` records are retained as the
     durable transcript/cooldown evidence. Repair logs remain disposable and are
-    swept with their repair-only sidecars.
+    swept with their repair-only sidecars -- the repair cooldown does NOT depend on
+    them surviving, because :func:`record_repair_attempt` writes the batch to
+    ``repair-attempts.jsonl`` at spawn. It used to depend on exactly these files,
+    and the 360-min window silently collapsed to the groomer's own lifetime.
     """
     import time
     now = now_ts if now_ts is not None else time.time()
@@ -2204,33 +2450,20 @@ def codex_worker_env(account_dir: str | None, lane: str, workspace: Path) -> dic
     return env
 
 
-# Windows process-creation flags for a detached worker.
-#   DETACHED_PROCESS  — the child gets NO console at all.
-#   CREATE_NO_WINDOW  — the child gets a console, but it is HIDDEN (no window).
-# Every detached worker — batch shim OR native exe — gets CREATE_NO_WINDOW, never
-# DETACHED_PROCESS, for TWO reasons:
-#   1. A .cmd/.bat launcher (opencode.CMD, the npm shim) is run BY cmd.exe, which
-#      REQUIRES a console: under DETACHED_PROCESS the batch wrapper dies at the
-#      "Terminate batch job (Y/N)?" prompt producing ZERO output — every dispatched
-#      glm/opencode worker was DOA (0-byte log) until it got a (hidden) console.
-#   2. A native worker (claude.exe) given DETACHED_PROCESS has no console, so every
-#      console tool it spawns — git, gh, fak, the shell — pops its OWN visible
-#      window: the "random popup windows" seen during a dispatched run. CREATE_NO_WINDOW
-#      gives the worker one HIDDEN console the whole tool subtree inherits, so it
-#      still outlives this dispatcher but never flashes a window. (Same conclusion as
-#      claude_agent_chat.detached_creationflags.)
-_DETACHED_PROCESS = 0x00000008  # retained to document the rejected alternative
-_CREATE_NO_WINDOW = 0x08000000
+# Unattended workers bind stdout/stderr to their transcript and never read a console.
+# DETACHED_PROCESS is the only honest mode: CREATE_NO_WINDOW merely hides a newly
+# allocated console and still pays for conhost/OpenConsole. Batch shims run through
+# cmd.exe with redirected standard handles and need no console either.
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NO_WINDOW = 0x08000000  # retained to distinguish the rejected hidden-console mode
 
 
 def win_creationflags(exe: str) -> int:
-    """The Windows creationflags for spawning ``exe`` detached: ALWAYS a HIDDEN
-    console (CREATE_NO_WINDOW). A .cmd/.bat shim needs a console to live; a native
-    exe needs one so its console grandchildren don't each pop a visible window.
-    ``exe`` is accepted for call-site stability but no longer branches the result."""
-    del exe  # both batch shims and native exes take the hidden-console path
-    return _CREATE_NO_WINDOW
-
+    """Return the no-console flag for one unattended Windows worker."""
+    del exe
+    if os.name != "nt":
+        return 0
+    return _DETACHED_PROCESS
 
 def wave_membership_env(rank: int, wave_id: str, size: int,
                         shortfall: int) -> dict[str, str]:
@@ -2277,6 +2510,58 @@ def write_account_sidecar(out_log: Path, account: dict[str, Any] | None) -> dict
         out_log.with_suffix(ACCOUNT_SIDECAR_SUFFIX).write_text(
             json.dumps(rec, sort_keys=True), encoding="utf-8")
     return rec
+
+
+def dispatch_account_id(account: dict[str, Any] | None) -> str:
+    """The stable, human-legible identity of the seat a worker is dispatched onto.
+
+    Byte-for-byte the Python mirror of the Go spine's ``dispatchAccountID``
+    (cmd/fak/dispatch_tick_worker.go): the switcher's ``tag`` is the identity of
+    record (it is what the ``.account.json`` sidecar and ``fak dispatch tick``
+    render, and it is the same string ``fak guard``'s rotation note names), and
+    the config dir's BASE NAME is the fallback for a seat carrying no tag. ""
+    only for a genuinely anonymous seat.
+
+    The two implementations must agree exactly, including the imperfect basename
+    fallback: ``goalpark.SameAccount`` is a plain string compare, so a Go-spawned
+    and a Python-spawned worker on the SAME seat that disagreed by one character
+    would each be walled by their own parks and blind to the other's — a silent
+    miss, never an error.
+    """
+    src = account or {}
+    tag = str(src.get("tag") or "").strip()
+    if tag:
+        return tag
+    acct_dir = str(src.get("dir") or "").strip()
+    if acct_dir:
+        return os.path.basename(os.path.normpath(acct_dir))
+    return ""
+
+
+def stamp_dispatch_account(env: dict[str, str],
+                           account: dict[str, Any] | None) -> dict[str, str]:
+    """Return ``env`` with ``DISPATCH_ACCOUNT`` naming the seat this worker serves on.
+
+    ``fak guard`` writes the #4805 long-``Retry-After`` goal park from this very
+    variable (cmd/fak/guard.go's park template) and reads it back through
+    ``goalpark.Record.Blocks``, whose contract is that a record which cannot name
+    whose wall it is blocks NOBODY. Nothing under ``tools/`` ever set it, so every
+    park this Python dispatcher's workers wrote carried ``account=""`` (27 of 27
+    on-disk records at the time of this change) and the account-scoped park landed
+    in #5870 INERT: present in the binary, blocking no one.
+
+    Deleted rather than left blank for an anonymous seat, mirroring the Go spine:
+    an unattributable spawn must not inherit THIS dispatcher's stale identity and
+    mislabel someone else's wall as its own. Returns a NEW dict — the caller's env
+    is never mutated.
+    """
+    out = dict(env)
+    ident = dispatch_account_id(account)
+    if ident:
+        out["DISPATCH_ACCOUNT"] = ident
+    else:
+        out.pop("DISPATCH_ACCOUNT", None)
+    return out
 
 
 def write_lease_sidecar(out_log: Path, lease: dict[str, Any] | None) -> dict[str, Any]:
@@ -2407,6 +2692,13 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     # off is byte-identical to today.
     spawn_cwd, env, wt_info = worker_worktree.isolate_spawn(
         Path(cwd), lane, str(issue), cwd, env, base_sha=base_sha, git=worktree_git)
+    # Name the seat this worker actually serves on, in the SAME variable and the
+    # SAME format the Go spine stamps. This is the ONE choke point every spawn on
+    # this dispatcher passes through (the resolve tick, the contract-repair tick,
+    # dispatch_account_topup, dispatch_glm_docs), so no producer can drift back to
+    # an unattributed park. See stamp_dispatch_account for why a blank one made the
+    # whole account-scoped park inert.
+    env = stamp_dispatch_account(env, account)
     prompt_file: Path | None = None
     prompt_stdin = None
     if backend == "opencode":
@@ -2514,8 +2806,21 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
 # an honest WEEKLY_CAPPED hold. Everything here is FAIL-OPEN: any error resolves to
 # "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
 
+# The `-` in the class is load-bearing: Claude names its rolling cap "hit your 5-HOUR
+# limit", and a `[\w\s]`-only class stops dead at the hyphen — so the ONE banner that
+# names the 5-hour window explicitly was the one banner this gate could not see, while
+# "hit your weekly limit" (all word chars) matched. That asymmetry is what made the
+# fleet detect weekly caps and miss 5-hour caps entirely (#5890).
+# The `reached` alternatives cover Claude's other live phrasings — "Claude usage limit
+# reached." and "You've reached your weekly limit" — which carry none of "hit your",
+# "exhausted", "rate limited", or "429", so no hold was written for them at all and the
+# dispatcher kept spawning workers into the wall for the whole window. Both stay
+# PHRASE-anchored (a bare "limit reached" is not enough) so mid-run agent prose in a
+# productive log still cannot false-match.
 _CAP_BANNER_RE = re.compile(
-    r"hit your[\w\s]*limit|limit\s+exhausted|rate[_ -]limited|HTTP\s+429",
+    r"hit your[\w\s-]*limit|reached your[\w\s-]*limit"
+    r"|usage limit reached|(?:weekly|session|\d+[\s-]?hour)\s+limit\s+reached"
+    r"|limit\s+exhausted|rate[_ -]limited|HTTP\s+429",
     re.IGNORECASE)
 # The codex (OpenAI/ChatGPT) backend hits its own quota wall with a different banner
 # than Claude's: "You've hit your usage limit. Visit https://chatgpt.com/codex/...
@@ -2537,9 +2842,30 @@ _RESET_AT_RE = re.compile(
 # bare time-of-day reset that already passed a full day forward — falsely walls an
 # account that actually has room (the gem8 false-cap). Classify the banner so a
 # session limit gets a short cooldown bounded to its real reset.
-_CAP_WEEKLY_RE = re.compile(r"weekly[\w/\s]*limit", re.IGNORECASE)
+_CAP_WEEKLY_RE = re.compile(
+    r"weekly[\w/\s]*limit|limit[\w\s]*for the week|7[\s-]?day\s+limit", re.IGNORECASE)
 _CAP_SESSION_RE = re.compile(r"session\s+limit", re.IGNORECASE)
+# The 5-hour ROLLING cap is its own window — neither a multi-day weekly wall nor the short
+# session limit whose 90-minute clamp used to swallow it (see _ROLLING_HOLD_MAX_MIN).
+_CAP_FIVE_HOUR_RE = re.compile(r"\b5[\s-]?hour(?:ly)?\s+limit\b", re.IGNORECASE)
+# Does the banner name a SUBSCRIPTION cap at all? _CAP_BANNER_RE deliberately also fires on
+# a bare provider throttle (`reason=rate_limited`, `HTTP 429`), which is a minutes-long
+# transient, not a quota wall. Since the unqualified Claude usage banner now defaults to the
+# rolling 5-hour cap, the two must be told apart or every guard 429 would idle a healthy seat
+# for hours. A hit here means "a real usage cap"; a miss means "just a throttle".
+_CAP_USAGE_RE = re.compile(
+    r"hit your[\w\s-]*limit|reached your[\w\s-]*limit|usage limit"
+    r"|limit\s+reached|limit\s+exhausted|quota", re.IGNORECASE)
 _CAP_RESET_RE = re.compile(r"resets\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
+# Claude's modern phrasing is "your limit will RESET AT/ON <when>", not "resets <when>":
+# _CAP_RESET_RE and _CAP_RESET_FALLBACK_RE both require the literal "resets" and
+# _RESET_AT_RE accepts "reset at" only before an ISO date, so a wall-clock ("3pm") or
+# dated ("Nov 3 at 9am") reset was dropped and the hold fell back to a blind fallback_min
+# cooldown (#5890). The LA-suffixed form is tried first for the same reason _CAP_RESET_RE
+# precedes its fallback: the tz suffix bounds the capture instead of running to EOL.
+_WILL_RESET_LA_RE = re.compile(
+    r"resets?\s+(?:at|on)\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
+_WILL_RESET_RE = re.compile(r"resets?\s+(?:at|on)\s+([^\r\n.;]+)", re.IGNORECASE)
 _CAP_RESET_FALLBACK_RE = re.compile(r"resets\s+([^\r\n]+)", re.IGNORECASE)
 # The guard/gateway names a cap wall as a RELATIVE Go-duration wait, not an absolute
 # "resets <when>" clause — e.g.
@@ -2560,9 +2886,26 @@ _ANNOUNCED_WAIT_DUR_RE = re.compile(
 # future moment (a stale, already-passed bare time-of-day must not become a ~24h
 # wall). Weekly limits keep the full parsed reset.
 _SESSION_HOLD_MAX_MIN = 90
+# The rolling-5h cap gets its OWN ceiling. It shares the session bucket's motive — a stale
+# bare time-of-day must not become a ~24h wall — but not its number: a 5-hour window's real
+# reset is up to 5h out, so the 90-minute clamp re-offered a still-capped seat as much as
+# 3.5h early and respawned it straight into the same wall (#5890). 5h + 15m of clock/DST
+# slack keeps the ceiling honest without over-holding.
+_ROLLING_HOLD_MAX_MIN = 5 * 60 + 15
+# A WEEKLY cap whose banner names no parseable reset must not fall back to the same short
+# cooldown a rolling cap gets: the real window is days, so a fallback_min hold re-admits the
+# seat ~168 times before it can possibly serve. Hold longer, then re-probe — still bounded,
+# because an over-hold costs idle seat time while an under-hold costs a doomed spawn.
+_WEEKLY_FALLBACK_MIN = 6 * 60
 _MONTHS = {m: i for i, m in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
     start=1)}
+# A weekly cap names its reset by WEEKDAY far more often than by date ("your limit will reset
+# on Monday at 9am"). Without this map the weekday word is ignored and the bare time-of-day
+# branch resolves it to TODAY-or-TOMORROW — a Wednesday reset seen on a Thursday reads as
+# ~1.5h out instead of ~6 days, which is the under-hold that respawns a walled seat all week.
+_WEEKDAYS = {d: i for i, d in enumerate(
+    ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))}
 # America/Los_Angeles is PDT (UTC-7) over the summer reset windows this gate sees;
 # a PT wall-clock time + this offset == UTC. (A ±1h DST error only nudges the hold
 # edge and self-corrects on the next probe — fine for a throttle.)
@@ -2673,14 +3016,27 @@ def _cap_hit_from_text(text: str, *, evidence_log: str = "") -> dict[str, Any] |
     if not _CAP_BANNER_RE.search(text or ""):
         return None
     m = (_CODEX_RESET_RE.search(text) or _RESET_AT_RE.search(text) or _CAP_RESET_RE.search(text)
-         or _ANNOUNCED_WAIT_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text))
+         or _WILL_RESET_LA_RE.search(text) or _ANNOUNCED_WAIT_RE.search(text)
+         or _WILL_RESET_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text))
     reset_text = m.group(1).strip() if m else ""
+    # An explicit 5-hour banner outranks an incidental "session limit" mention, and the
+    # UNQUALIFIED Claude usage-limit banner ("Claude usage limit reached.") is the rolling
+    # 5-hour cap — not a session limit. Defaulting it to "session" is what filed the 5-hour
+    # window under a 90-minute ceiling it does not fit (#5890).
     if _CAP_WEEKLY_RE.search(text):
         kind = "weekly"
+    elif _CAP_FIVE_HOUR_RE.search(text):
+        kind = "rolling_5h"
     elif _CAP_SESSION_RE.search(text):
         kind = "session"
-    else:
+    elif not _CAP_USAGE_RE.search(text):
+        # No subscription-cap phrasing at all — this is a bare provider throttle (a guard
+        # `reason=rate_limited` / HTTP 429). It self-clears in minutes, so it keeps the SHORT
+        # `session` bucket and its 90-minute ceiling. Promoting it to the rolling-cap ceiling
+        # would idle a healthy seat for hours over a transient 429.
         kind = "session"
+    else:
+        kind = "rolling_5h"
     return {"reset_text": reset_text, "evidence_log": evidence_log, "kind": kind}
 
 
@@ -2688,13 +3044,21 @@ def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
                     hit: dict[str, Any], now_ts: float, fallback_min: int,
                     source: str) -> dict[str, Any]:
     now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
-    kind = hit.get("kind") or "session"
+    kind = hit.get("kind") or "rolling_5h"
+    # A weekly cap with no parseable reset falls back LONGER than a rolling one: its real
+    # window is days, so the short fallback re-admitted the seat over and over (#5890).
+    if kind == "weekly":
+        fallback_min = max(fallback_min, _WEEKLY_FALLBACK_MIN)
     until = (_parse_relative_wait(str(hit.get("reset_text") or ""), now_utc)
              or _parse_reset_to_utc(str(hit.get("reset_text") or ""), now_utc)
              or now_utc + dt.timedelta(minutes=fallback_min))
-    if kind == "session":
-        session_cap = now_utc + dt.timedelta(minutes=_SESSION_HOLD_MAX_MIN)
-        until = min(until, session_cap)
+    # Per-kind ceiling: each cap kind is clamped to ITS OWN real window, so a stale
+    # already-passed time-of-day can never become a ~24h wall and a genuine 5-hour reset
+    # is never truncated to the session limit's 90 minutes. Weekly keeps the full reset.
+    hold_max_min = {"session": _SESSION_HOLD_MAX_MIN,
+                    "rolling_5h": _ROLLING_HOLD_MAX_MIN}.get(kind)
+    if hold_max_min is not None:
+        until = min(until, now_utc + dt.timedelta(minutes=hold_max_min))
     state = {"product": product, "account": account_tag, "kind": kind,
              "reset_text": hit.get("reset_text") or "",
              "evidence_log": hit.get("evidence_log") or "",
@@ -2811,12 +3175,32 @@ def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | 
                 cand = dt.datetime(now_utc.year + 1, month, day, hour, minute) + _PT_TO_UTC
             except ValueError:
                 return None
-    else:
+        return _clamp_reset(cand, now_utc)
+    # A weekday name ("Monday at 9am") resolves to the NEXT such weekday, which for a weekly
+    # cap is up to 7 days out. Checked after the month branch so an explicit date always wins,
+    # and only when a time-of-day was found, so a stray day word in a long tail cannot
+    # manufacture a reset on its own.
+    wd = re.search(r"\b(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?"
+                   r"|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b", t)
+    if wd:
         now_pt = now_utc - _PT_TO_UTC
-        cand_pt = now_pt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        ahead = (_WEEKDAYS[wd.group(1)[:3]] - now_pt.weekday()) % 7
+        cand_pt = (now_pt + dt.timedelta(days=ahead)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0)
         if cand_pt <= now_pt:
-            cand_pt += dt.timedelta(days=1)
-        cand = cand_pt + _PT_TO_UTC
+            cand_pt += dt.timedelta(days=7)
+        return _clamp_reset(cand_pt + _PT_TO_UTC, now_utc)
+    now_pt = now_utc - _PT_TO_UTC
+    cand_pt = now_pt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if cand_pt <= now_pt:
+        cand_pt += dt.timedelta(days=1)
+    return _clamp_reset(cand_pt + _PT_TO_UTC, now_utc)
+
+
+def _clamp_reset(cand: dt.datetime, now_utc: dt.datetime) -> dt.datetime | None:
+    """The shared tail of every :func:`_parse_reset_to_utc` branch: a reset must be in the
+    FUTURE (a past instant is a misparse, not a zero-length hold) and is capped at 8 days so
+    a garbled clause can never wall a seat indefinitely."""
     if cand <= now_utc:
         return None
     return min(cand, now_utc + dt.timedelta(days=8))
@@ -3165,6 +3549,59 @@ def split_command_env(value: str) -> list[str]:
 # CLOSED) only on 3, and fail OPEN on everything else.
 LEASE_REFUSED_RC = 3
 
+# `fak leaseref <sub>` shells git, and git can stall for minutes on this shared
+# peer-dirty Windows trunk. `subprocess.run(..., capture_output=True, timeout=N)`
+# LOOKS like it bounds that, but on Windows it does not (#4368): CPython's
+# TimeoutExpired path calls Popen.kill() — TerminateProcess against the DIRECT child
+# only — and then re-enters communicate() with NO timeout to drain the pipe reader
+# threads. A descendant git.exe holds an INHERITED duplicate of the stdout/stderr pipe
+# write handle, so killing fak.exe alone never closes the pipe and that second
+# communicate() blocks FOREVER. That is the witnessed pre-spawn hang: the ancestry
+# `issue_resolve_dispatch.py -> fak.exe leaseref live -> git.exe -> git.exe` with the
+# dispatcher alive, no stdout/stderr, and no worker ever spawned — a tick that looks
+# live while doing no work and reaches neither WOULD_SPAWN/SPAWNED nor a refusal.
+#
+# So the timeout path reaps the whole process TREE first (`taskkill /F /T`, the same
+# honest reaper terminate_issue_worker_tree uses; a POSIX probe is spawned into its own
+# session so one killpg covers the descendants), which CLOSES those inherited handles,
+# and only then drains with a SECOND bounded join — abandoning the daemon reader threads
+# rather than waiting if even that lapses. Every path returns a typed verdict, so the
+# caller fails open and the tick still reaches a spawn decision.
+LEASE_TIMEOUT_RC = 124  # timeout(1)'s conventional code; distinct from 127 (exec failure)
+LEASE_DRAIN_TIMEOUT_S = 5
+
+
+def _terminate_lease_probe(proc: Any) -> dict[str, Any]:
+    """Reap a timed-out `fak leaseref` probe AND its git descendants.
+
+    ``Popen.kill()`` is not enough: on Windows it is a TerminateProcess against the
+    direct child, which leaves the grandchild git.exe alive holding the inherited pipe
+    write handle — the #4368 deadlock. ``taskkill /T`` walks the pid tree; the POSIX
+    branch signals the probe's OWN process group (the pid, never ``getpgid``, so a probe
+    that somehow is not a group leader can never route SIGKILL at the dispatcher).
+    """
+    pid = getattr(proc, "pid", None)
+    try:
+        if os.name == "nt":
+            killed = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                                    capture_output=True, text=True,
+                                    timeout=LEASE_DRAIN_TIMEOUT_S,
+                                    creationflags=no_window_creationflags())
+            out: dict[str, Any] = {"ok": killed.returncode == 0,
+                                   "returncode": killed.returncode,
+                                   "stderr": (killed.stderr or "").strip()[-300:]}
+        else:
+            os.killpg(pid, signal.SIGKILL)
+            out = {"ok": True, "returncode": 0}
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        out = {"ok": False, "returncode": None, "error": str(exc)}
+    try:
+        proc.kill()  # belt and braces: the direct child, whatever the tree reap did
+    except (OSError, ValueError):
+        pass
+    out["pid"] = pid
+    return out
+
 
 def _fak_bin(root: Path) -> list[str] | None:
     """The on-disk `fak` argv for a lease subprocess, or None when only the
@@ -3240,22 +3677,54 @@ def lease_id_for_lane(lane: str) -> str:
 
 def _run_lease(root: Path, args: list[str], *, timeout: int = 30) -> dict[str, Any]:
     """Run one `fak leaseref` subcommand, returning {rc, stdout, verdict}. Never
-    raises: an exec failure is reported as rc 127 so the caller fails open."""
+    raises: an exec failure is reported as rc 127 so the caller fails open, and a probe
+    that outlives `timeout` is reported as rc LEASE_TIMEOUT_RC.
+
+    This deliberately does NOT use `subprocess.run(timeout=...)`: see the
+    LEASE_TIMEOUT_RC note above — on Windows that timeout is unbounded whenever a
+    descendant git holds the inherited pipe, which is exactly this call site's #4368
+    pre-spawn hang. Popen + a tree reap + a bounded second drain is what actually
+    terminates."""
     bin_argv = _fak_bin(root)
     if not bin_argv:
         return {"rc": 127, "stdout": "", "verdict": None, "skipped": "no fak binary"}
     cmd = [*bin_argv, "leaseref", *args]
     kwargs: dict[str, Any] = {
-        "cwd": str(root), "capture_output": True, "text": True,
-        "encoding": "utf-8", "errors": "replace", "timeout": timeout,
+        "cwd": str(root), "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True,
+        "encoding": "utf-8", "errors": "replace",
     }
     if os.name == "nt":
         kwargs["creationflags"] = no_window_creationflags()
+    else:
+        # The probe owns its process group, so the timeout reap can signal the whole
+        # tree (a stalled git descendant included) without ever touching this process.
+        kwargs["start_new_session"] = True
     try:
-        proc = subprocess.run(cmd, **kwargs)
+        proc = subprocess.Popen(cmd, **kwargs)
     except (OSError, subprocess.SubprocessError) as exc:
         return {"rc": 127, "stdout": "", "verdict": None, "error": str(exc)}
-    out = (proc.stdout or "").strip()
+    try:
+        stdout, _stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        killed = _terminate_lease_probe(proc)
+        drained = True
+        try:
+            stdout, _stderr = proc.communicate(timeout=LEASE_DRAIN_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError):
+            # Even the post-reap drain lapsed: leave the daemon reader threads to the
+            # interpreter rather than joining them forever, and report it.
+            stdout, drained = "", False
+        return {"rc": LEASE_TIMEOUT_RC, "stdout": (stdout or "").strip(),
+                "verdict": None, "timeout": True, "timeout_s": timeout,
+                "killed": killed, "drained": drained,
+                "error": (f"LEASE_PROBE_TIMEOUT: `fak leaseref {' '.join(args)}` "
+                          f"exceeded {timeout}s; reaped pid {killed.get('pid')} tree "
+                          f"(ok={killed.get('ok')}, drained={drained})")}
+    except (OSError, subprocess.SubprocessError) as exc:
+        _terminate_lease_probe(proc)
+        return {"rc": 127, "stdout": "", "verdict": None, "error": str(exc)}
+    out = (stdout or "").strip()
     doc: Any = None
     try:
         doc = json.loads(out) if out else None
@@ -3411,8 +3880,15 @@ def live_lane_lease_lanes(root: Path, *, runner: Any | None = None) -> dict[str,
     run = runner or _run_lease
     res = run(root, ["live"])
     if res.get("rc") != 0:
-        return {"lanes": [], "fail_open": True, "rc": res.get("rc"),
-                "detail": res.get("error") or res.get("skipped")}
+        # A LEASE_PROBE_TIMEOUT surfaces as a TYPED row (timeout + the reap witness) so
+        # the tick's payload says the probe was bounded and reaped, not merely "rc != 0"
+        # — the #4368 difference between a fail-open read and a dispatcher that hung.
+        out = {"lanes": [], "fail_open": True, "rc": res.get("rc"),
+               "detail": res.get("error") or res.get("skipped")}
+        if res.get("timeout"):
+            out.update({"timeout": True, "timeout_s": res.get("timeout_s"),
+                        "killed": res.get("killed"), "drained": res.get("drained")})
+        return out
     doc = res.get("verdict")
     if not isinstance(doc, list):
         return {"lanes": [], "fail_open": True, "rc": res.get("rc"),
@@ -3783,6 +4259,41 @@ NO_COMMIT_MISSING_LOG = "missing_log_artifact"
 NO_COMMIT_RESTART_EXHAUSTED = "restart_exhausted"
 NO_COMMIT_UNKNOWN = "unknown"
 
+# --- residual-bucket split (#5870, closing the #5867/#5869 seam) ------------
+# The three classes below replace the bare ``unknown`` fall-through. They are NOT new
+# analysis: internal/dispatchconservation already DERIVES exactly these at READ time
+# (refineUnknownNoCommit, #5867) by re-reading the same 4 KiB log tail this function
+# already holds -- but only for the reader's own report. Everything that routes off the
+# SIDECAR (`reblock_streak_held_records`, `held_no_commit_issues`, dispatch_status)
+# still saw an untyped blob, because the WRITER stamped ``unknown``. Over the retained
+# corpus that blob was 1278 of 2391 .witness records. Typing at write time makes the
+# sidecar self-describing, so the reader's refinement becomes a fallback for HISTORY
+# rather than the only place the type exists.
+#
+# Vocabulary safety (the #5866 trap): these three strings are ALREADY in the Go
+# reader's ``noCommitReasons`` set -- fbdf1e9d87 added them there. So emitting them
+# here CANNOT re-create #5866, where a Python-only class fell through
+# ``if !noCommitReasons[reason] { reason = "unknown" }``. That is checked by a pin on
+# the Go side (producer_vocab_test.go) which reads THESE constants' values, so the two
+# halves cannot drift apart silently. Any FOURTH class added here needs its Go row in
+# the same commit.
+NO_COMMIT_CLEAN_EXIT = "clean_exit_no_commit"
+NO_COMMIT_DIED_BEFORE_EPILOGUE = "died_before_epilogue"
+NO_COMMIT_GUARD_SPAWN_FAILED = "guard_child_spawn_failed"
+
+# The guard exit summary's SECTION RULE -- ``guardSection`` in
+# cmd/fak/guard_format_layout.go renders ``── guard · <name> ──…`` once per section, so
+# its presence in the tail proves the guard reached its epilogue and the session ended
+# NORMALLY. Deliberately the section rule and not the ``guard · cache window`` section:
+# that one is emitted only when the session recorded cache turns
+# (``if turns <= 0`` in cmd/fak/guard_child_supervision.go), and #5867 measured it
+# finding 0 of 69 auth_wall runs whose epilogue the section rule finds 69/69.
+_GUARD_EPILOGUE_MARKER = "── guard · "
+# ``fak guard: could not run %q: %v`` (cmd/fak/guard_child_supervision.go) -- the guard
+# never exec'd the agent at all. Checked FIRST because such a run ALSO prints a partial
+# epilogue, and "the child never started" is the more specific, more fixable statement.
+_GUARD_CHILD_SPAWN_FAILED_MARKER = "fak guard: could not run"
+
 # An opencode/glm worker that prints only its startup banner ("> build · glm-…") and
 # exits — the documented banner-only no-op (#1275).
 _NOOP_BANNER_RE = re.compile(r">\s*build\s*[·:]", re.IGNORECASE)
@@ -3819,14 +4330,49 @@ def classify_restart_exhaustion(log: Path) -> dict | None:
             "dominant_cause": match.group("cause")}
 
 
+def refine_unknown_no_commit(tail: str) -> str:
+    """Name the residual no-commit -- the runs that match no failure SIGNATURE -- from
+    what the guard epilogue in ``tail`` shows about HOW the session ended (#5870).
+
+    This is the write-time twin of ``refineUnknownNoCommit`` in
+    internal/dispatchconservation (#5867); both read the same 4 KiB tail and apply the
+    same two markers in the same order, so a sidecar stamped here and a sidecar refined
+    there name the same run identically. Three outcomes, and they are genuinely
+    different work items:
+
+    * ``guard_child_spawn_failed`` -- the guard could not exec the agent. A mechanical
+      host/config fault, not an agent outcome, and not a verdict on the issue.
+    * ``clean_exit_no_commit`` -- the guard wrote its epilogue, so the session ENDED
+      NORMALLY and simply landed nothing. This is the one that is a verdict on the
+      attempt: same wall-clock as a winning run, nothing to show. Repeats of it are
+      what the #5869 re-block streak hold exists to stop paying for.
+    * ``died_before_epilogue`` -- no epilogue at all; the worker was killed mid-turn.
+      Actionable as supervision/retention only. Never a statement about the issue, so
+      a repeat of it must NOT be read as "this issue re-blocks identically".
+
+    Total on the residual: every no-commit now carries a type. FAIL-OPEN by
+    construction -- an empty tail (unreadable log) yields ``died_before_epilogue``,
+    which is the honest reading of "no exit evidence was ever written"."""
+    if _GUARD_CHILD_SPAWN_FAILED_MARKER in tail:
+        return NO_COMMIT_GUARD_SPAWN_FAILED
+    if _GUARD_EPILOGUE_MARKER in tail:
+        return NO_COMMIT_CLEAN_EXIT
+    return NO_COMMIT_DIED_BEFORE_EPILOGUE
+
+
 def classify_no_commit_reason(log: Path) -> str:
     """Why did a finished worker land no resolving commit? Classify from the log TAIL
     (the guard summary + final turn live at the end) so the witness records a
     STRUCTURED reason rather than an opaque CLAIM_NO_COMMIT. Lets an anti-churn picker
     tell a re-blockable guard refusal (self_modify / policy_block) from a transient
     wall (auth_wall) or a DOA backend (banner_noop). Pure + FAIL-OPEN: a missing log
-    artifact gets a typed missing_log_artifact reason; no recognized signature stays
-    UNKNOWN (never a false positive)."""
+    artifact gets a typed missing_log_artifact reason.
+
+    The residual -- a run matching no failure signature -- is no longer stamped a bare
+    ``unknown``: :func:`refine_unknown_no_commit` splits it by the guard epilogue the
+    same tail already carries (#5870). ``unknown`` therefore survives only in HISTORIC
+    sidecars, which keeps it meaningful: a fresh ``unknown`` reaching a reader now means
+    a writer this vocabulary has never heard of, not "we did not look"."""
     try:
         if not log.exists():
             return NO_COMMIT_MISSING_LOG
@@ -3853,7 +4399,7 @@ def classify_no_commit_reason(log: Path) -> str:
         small = False
     if small and _NOOP_BANNER_RE.search(tail):
         return NO_COMMIT_BANNER_NOOP
-    return NO_COMMIT_UNKNOWN
+    return refine_unknown_no_commit(tail)
 
 
 # --- SPAWN_FAILED cause attribution (#2635) --------------------------------
@@ -3974,6 +4520,155 @@ def held_no_commit_issues(witnessed: dict[str, Any] | None) -> set[int]:
             except (KeyError, TypeError, ValueError):
                 continue
     return held
+
+
+def issue_witness_history(runs_dir: Path) -> dict[int, list[dict[str, Any]]]:
+    """``{issue: [record, ...]}`` in LAUNCH order, read from the durable
+    ``resolve-<issue>-<UTC>.witness`` sidecars. Each record carries ``ts`` (the UTC
+    launch stamp parsed from the FILENAME), ``claim`` and ``reason``.
+
+    The filename stamp -- not the mtime -- is the ordering key: it is the worker's
+    launch instant, so it is monotone per issue, whereas the witness sweep rewrites
+    mtimes at an arbitrary later tick and would scramble the sequence. A run's whole
+    lifetime is well under an hour (p95 31 min over the window), so using the launch
+    stamp as the recency key too costs far less than the hold TTL it is compared
+    against, and it keeps this a pure function of names + contents.
+
+    These sidecars are the DURABLE carrier: :func:`prune_dead_sidecars` unlinks a
+    dead worker's ``.pid`` and process-metadata siblings but explicitly RETAINS the
+    ``.log`` and ``.witness`` "as the durable transcript/cooldown evidence", so this
+    history outlives every worker AND every dispatcher process. That is why #5869
+    needs no new ledger: unlike the repair cooldown -- whose carrier WAS swept, which
+    is why :func:`record_repair_attempt` had to start writing ``repair-attempts
+    .jsonl`` -- the evidence this hold keys on is already written and already kept.
+    FAIL-OPEN: an unreadable or unparseable sidecar is skipped, never raised."""
+    hist: dict[int, list[dict[str, Any]]] = {}
+    if not runs_dir.is_dir():
+        return hist
+    for w in runs_dir.glob(f"resolve-*{WITNESS_SIDECAR_SUFFIX}"):
+        m = _WITNESS_STAMP_RE.match(w.name)
+        if not m:
+            continue
+        try:
+            ts = dt.datetime.strptime(
+                m.group(2) + m.group(3), "%Y%m%d%H%M%S").replace(
+                    tzinfo=dt.timezone.utc).timestamp()
+        except ValueError:
+            continue
+        try:
+            row = json.loads(w.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(row, dict):
+            continue
+        hist.setdefault(int(m.group(1)), []).append({
+            "ts": ts,
+            "claim": str(row.get("claim") or ""),
+            "reason": str(row.get("reason") or ""),
+        })
+    for runs in hist.values():
+        runs.sort(key=lambda r: r["ts"])
+    return hist
+
+
+def reblock_streak_held_records(
+    runs_dir: Path,
+    *,
+    streak_n: int = DEFAULT_REBLOCK_STREAK_HOLD_N,
+    ttl_h: int = DEFAULT_REBLOCK_STREAK_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+) -> list[dict[str, Any]]:
+    """Issues whose last ``streak_n`` finished workers ALL hit the SAME re-blockable
+    terminal -- the durable, cross-process half of the #1396 pick-held-invariant that
+    :func:`held_no_commit_issues` only ever provided for the witnessing tick.
+
+    The key is REPETITION, not the reason CLASS. Holding on the class alone (N=1) is
+    what the measurement in #5869 refutes: 15% of the re-dispatches that follow a
+    re-blockable terminal land a witnessed commit, so a first retry after a
+    ``policy_block`` must stay ADMITTED. Only once the SAME terminal recurs with
+    nothing changed between the attempts is the retry provably futile. Streak identity
+    is deliberately strict -- the tail must be ``streak_n`` CONSECUTIVE
+    ``CLAIM_NO_COMMIT`` records carrying ONE reason drawn from
+    ``_HOLD_NO_COMMIT_REASONS``. Anything else in that tail (a landed commit, an
+    ``auth_wall``, a ``restart_exhausted``, an untyped ``unknown``, or the OTHER
+    re-blockable reason) means the attempts were not identical, and the issue stays
+    free to retry.
+
+    THREE things clear the hold, so it can never outlive the condition it describes:
+
+    * **A changed outcome** -- the structural clear. Any admitted run that is not the
+      same re-blockable terminal breaks the tail and the hold evaporates with no reset
+      verb. This is the clear that matters, and the TTL exists to keep it REACHABLE.
+    * **The TTL** -- measured from the newest run in the streak. Elapsed time alone
+      does not declare the issue retryable; it admits exactly ONE probe per window and
+      lets that probe's OUTCOME decide. A probe that re-blocks identically re-arms the
+      hold for another window; a probe that lands anything else clears it for good.
+      Without this a held issue could never produce the record that frees it (the
+      streak cannot break if no run is ever admitted) -- the self-sealing hold.
+    * **A fresh gh ``updatedAt``** -- newer than the newest run in the streak. A guard
+      refusal is a verdict on what the ISSUE ASKED FOR, so a re-scope genuinely
+      changes it. This is the same content-keyed re-admission the contract and
+      multi-lane ledgers take, and it is why this hold does NOT take the local-tree
+      opt-out ``collision_held_records`` needs.
+
+    ``streak_n <= 0`` or ``ttl_h <= 0`` disables the gate (readers return empty),
+    matching the other holds' kill switch. Pure + FAIL-OPEN throughout."""
+    if streak_n <= 0 or ttl_h <= 0:
+        return []
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - ttl_h * 3600
+    out: list[dict[str, Any]] = []
+    for issue, all_runs in sorted(issue_witness_history(runs_dir).items()):
+        # Only runs that have already LAUNCHED count. Live this is a no-op (nothing is
+        # stamped in the future), but it keeps the hold a pure function of ``now_ts``
+        # so a test — or a replay over the retained corpus — can evaluate it at any
+        # instant and see exactly what the picker would have seen at that tick.
+        runs = [r for r in all_runs if r["ts"] <= now]
+        tail = runs[-streak_n:]
+        if len(tail) < streak_n:
+            continue
+        reasons = {r["reason"] for r in tail}
+        if len(reasons) != 1:
+            continue
+        reason = next(iter(reasons))
+        if reason not in _HOLD_NO_COMMIT_REASONS:
+            continue
+        if any(r["claim"] != CLAIM_NO_COMMIT for r in tail):
+            continue
+        newest = tail[-1]["ts"]
+        # TTL lapse: admit exactly one probe and let its outcome re-arm or clear.
+        if newest < horizon:
+            continue
+        # Re-scoped issue: the guard verdict this streak recorded is about a body the
+        # issue no longer has, so re-admit it early rather than holding on stale
+        # evidence.
+        if updated_ts and (updated_ts.get(issue) or 0.0) > newest:
+            continue
+        out.append({
+            "issue": issue,
+            "number": issue,
+            "reason": reason,
+            "streak": streak_n,
+            "last_ts": newest,
+        })
+    return out
+
+
+def reblock_streak_held_issues(
+    runs_dir: Path,
+    *,
+    streak_n: int = DEFAULT_REBLOCK_STREAK_HOLD_N,
+    ttl_h: int = DEFAULT_REBLOCK_STREAK_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+) -> set[int]:
+    """Issue numbers held after ``streak_n`` CONSECUTIVE identical re-blockable
+    terminals (#5869). Set view of :func:`reblock_streak_held_records`."""
+    return {int(r["issue"]) for r in reblock_streak_held_records(
+        runs_dir, streak_n=streak_n, ttl_h=ttl_h, now_ts=now_ts,
+        updated_ts=updated_ts)}
 
 
 def _subject_cites_issue(subject: str, issue: int) -> bool:
@@ -4845,6 +5540,9 @@ def _maybe_dispatch_contract_repair(
                                  REPAIR_LANE, backend, account=acct,
                                  spawn_probe_s=spawn_probe_s, log_prefix="repair",
                                  prompt_payload=rec["prompt"] if backend in ("claude", "opencode") else None)
+    # Durable first: the .issues sidecar below is swept with the corpse, so the
+    # ledger is what actually holds the cooldown open past this worker's death.
+    record_repair_attempt(runs_dir, rec["issues"], live=live)
     try:
         Path(str(spawned.get("log") or "")).with_suffix(
             REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(nums, encoding="utf-8")
@@ -5036,6 +5734,225 @@ def gate_opencode_gateway(planned: int, account: dict, *, probe=None) -> tuple[i
         return planned, None
     detail = verdict.get("block_reason") or "guard gateway unreachable"
     return 0, f"gateway_down: backend_unhealthy: {detail}"
+
+
+# --- Pre-spawn guard-argv probe (#5868 done-condition 3) ------------------------
+#
+# A `--compact-solvency-floor` flag-parse regression killed every worker AT SPAWN for
+# six days (2026-07-28 .. 08-03, ~350 worker-units, 100% death/day) and read as an
+# IDLE FLEET the whole time, because a death before the gateway binds classifies as
+# `unknown`. `internal/dispatchdoa` (#5868) now DETECTS that shape after the fact
+# (350/382 outage runs, 0 false positives on 290 clean runs). This is the prevention
+# half: probe the binary ONCE per build-id and refuse to dispatch a wave into one that
+# cannot accept the argv the dispatcher is about to hand it.
+#
+# WHAT THE PROBE IS, AND WHY IT IS NOT `guard --help`. Measured against the shipped
+# binary: `fak guard --help` exits 0 and prints a 1452-byte SHORT usage that does not
+# mention `--compact-solvency-floor` at all. An exit-code probe on `--help` would
+# therefore have reported HEALTHY through all six days of the outage — it proves the
+# binary runs, which was never in doubt; the binary ran fine, it just did not know one
+# flag. `fak guard -h -all` is the probe that discriminates: exit 0, ~31 KiB, and it
+# lists every registered flag (76 in the build measured here, matching the binary's own
+# "N flags in this build" self-report). Comparing that INVENTORY against the flags in
+# the planned argv is what catches a producer/binary skew, and it costs ~23 ms.
+#
+# THE CACHE HOLDS THE INVENTORY, NOT A VERDICT. Keyed on a build id -- (resolved path,
+# size, mtime_ns) -- so one exec covers every worker spawned against that binary. The
+# verdict is recomputed from the cached inventory on every tick, which is what makes
+# the refusal self-clearing from BOTH sides with no reset verb:
+#
+#   * REBUILD/REINSTALL the binary -> size/mtime change -> the build id changes -> the
+#     cache entry no longer matches -> a fresh probe runs. This is the operator
+#     recovery path, and it is the SAME action that fixes the actual outage.
+#   * FIX THE PRODUCER (drop the flag in dispatch_worker.py) -> the planned flag set
+#     changes -> the missing-flag set recomputes empty against the SAME cached
+#     inventory -> the fleet resumes with no re-exec and no cache invalidation.
+#   * The TTL expires the inventory even when neither side moved, so a cached reading
+#     can never outlive its evidence.
+#   * `DEFAULT_GUARD_PROBE_TTL_H = 0` disables the gate entirely.
+#
+# FAIL DIRECTION IS INVERTED FROM THE OTHER HOLDS, DELIBERATELY. Every other reader in
+# this file fails open so it can only ever ADD a hold; this one refuses to SPAWN, so
+# failing closed on a bad reading is itself an outage. It therefore refuses ONLY on a
+# positive observation: the probe exited cleanly AND returned a plausible inventory
+# (>= _GUARD_PROBE_MIN_FLAGS) AND a planned flag is provably absent from it. An
+# ambiguous reading -- exec error, timeout, non-zero exit, an implausibly short
+# inventory (e.g. an older binary that lacks `-all` and rejects it) -- is UNKNOWN: it
+# spawns anyway and is NOT cached, so it costs one 23 ms re-probe next tick and can
+# never wedge the fleet.
+_GUARD_PROBE_LEDGER = "guard-probe.json"
+DEFAULT_GUARD_PROBE_TTL_H = 24
+_GUARD_PROBE_TIMEOUT_S = 20.0
+# Below this the inventory is not trustworthy enough to refuse on (the shipped build
+# registers 76). An old binary that rejects `-all` prints a ~20-flag short usage, so
+# this is also what keeps such a binary UNKNOWN rather than falsely condemned.
+_GUARD_PROBE_MIN_FLAGS = 40
+# Flags `cmd/fak/guard.go` PEELS from argv before `fs.Parse` (guard.go:109-118), so
+# they are legitimately absent from the FlagSet's own `-h -all` inventory and must
+# never count as missing. `-all`/`-h` are the probe's own argv.
+_GUARD_PROBE_PEELED = frozenset({"core-lock-all", "all", "help", "h"})
+# Go's flag.PrintDefaults emits `  -name type` at exactly two spaces; the wrapped
+# description lines below it start with four spaces + a tab, and the hand-written
+# common-flags block uses `--name`. Anchoring on the two-space single-dash form takes
+# the DEFINITIONS only, never a flag merely NAMED inside another flag's prose.
+_GUARD_FLAG_DEF_RE = re.compile(r"^  -([A-Za-z][A-Za-z0-9_-]*)", re.M)
+
+
+def guard_build_id(fak_bin: str | Path | None) -> str | None:
+    """Identity of the guard binary a wave is about to be dispatched against:
+    ``<size>-<mtime_ns>-<basename>``. Stat-only, so it costs nothing per spawn and
+    changes the instant anyone rebuilds or reinstalls -- which is exactly the event
+    that must invalidate a cached inventory. Returns ``None`` (-> gate fails open)
+    when the path is missing or unstattable."""
+    if not fak_bin:
+        return None
+    try:
+        st = Path(fak_bin).stat()
+    except (OSError, ValueError):
+        return None
+    return f"{st.st_size}-{st.st_mtime_ns}-{Path(fak_bin).name}"
+
+
+def planned_guard_flags(command: list[str]) -> set[str]:
+    """The guard flag names in a guard-wrapped launch argv, as
+    ``dispatch_worker.guard_wrap`` builds it: ``[fak, guard, --provider, X, ...,
+    --audit, P, --, <agent command...>]``.
+
+    Scanning STOPS at the first bare ``--``: everything after it is the AGENT's argv,
+    parsed by claude/codex, and a flag there says nothing about the guard binary.
+    Returns an empty set for anything that is not a guard wrap (an unguarded launch
+    has no guard argv to be skewed against), which is the gate's fail-open path."""
+    if len(command) < 2 or command[1] != "guard":
+        return set()
+    flags: set[str] = set()
+    for tok in command[2:]:
+        if tok == "--":
+            break
+        if not tok.startswith("-") or tok == "-":
+            continue
+        name = tok.lstrip("-").split("=", 1)[0]
+        if name and name not in _GUARD_PROBE_PEELED:
+            flags.add(name)
+    return flags
+
+
+def probe_guard_flags(fak_bin: str | Path, *, runner=None,
+                      timeout_s: float = _GUARD_PROBE_TIMEOUT_S) -> dict[str, Any]:
+    """Run the one-shot inventory probe ``fak guard -h -all`` and parse the flags it
+    registers. This never binds a gateway and never launches an agent -- ``-h`` short
+    -circuits inside ``flag.Parse`` -- so it is safe to run on every dispatcher process.
+
+    Returns ``{"rc", "flags": sorted[...], "bytes", "error"}``. Any exception is
+    captured into ``error`` rather than raised: the caller treats an errored probe as
+    UNKNOWN and spawns anyway."""
+    argv = [str(fak_bin), "guard", "-h", "-all"]
+    # CREATE_NO_WINDOW is mandatory, not cosmetic: this runs once per dispatcher
+    # process under headless automation, and a console-tool spawn that flashes a
+    # window is exactly what the pre-push DESKTOP_POPUP_REGRESSION gate refuses (it
+    # refused this very function's first cut). Same spread as every other helper
+    # subprocess in the dispatch path (see _git_capture).
+    run = runner or (lambda a: subprocess.run(
+        a, capture_output=True, text=True, errors="replace", timeout=timeout_s,
+        creationflags=no_window_creationflags()))
+    try:
+        res = run(argv)
+    except Exception as exc:  # OSError, TimeoutExpired, anything the runner raises
+        return {"rc": None, "flags": [], "bytes": 0, "error": f"{type(exc).__name__}: {exc}"}
+    text = (getattr(res, "stdout", "") or "") + (getattr(res, "stderr", "") or "")
+    return {"rc": getattr(res, "returncode", None),
+            "flags": sorted(set(_GUARD_FLAG_DEF_RE.findall(text))),
+            "bytes": len(text), "error": None}
+
+
+def guard_flag_inventory(fak_bin: str | Path | None, runs_dir: Path, *, runner=None,
+                         now_ts: float | None = None,
+                         ttl_h: int = DEFAULT_GUARD_PROBE_TTL_H,
+                         record: bool = True) -> dict[str, Any]:
+    """The cached ``{build_id -> flags}`` inventory, probing at most ONCE per build-id
+    per TTL window. Returns ``{"build_id", "flags", "cached", "usable", "detail"}``;
+    ``usable`` is False for every ambiguous reading, and an unusable reading is never
+    written to the cache, so a transient failure costs one re-probe and nothing else."""
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    build_id = guard_build_id(fak_bin)
+    if not build_id:
+        return {"build_id": None, "flags": [], "cached": False, "usable": False,
+                "detail": f"unstattable guard binary {fak_bin!r}"}
+    ledger = Path(runs_dir) / _GUARD_PROBE_LEDGER
+    cache: dict[str, Any] = {}
+    try:
+        loaded = json.loads(ledger.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            cache = loaded
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(build_id)
+    if (isinstance(hit, dict) and isinstance(hit.get("flags"), list)
+            and (now - float(hit.get("ts") or 0.0)) <= ttl_h * 3600):
+        return {"build_id": build_id, "flags": list(hit["flags"]), "cached": True,
+                "usable": True, "detail": "cached"}
+    probed = probe_guard_flags(fak_bin, runner=runner)
+    flags = probed["flags"]
+    if probed["error"] or probed["rc"] not in (0, None) or len(flags) < _GUARD_PROBE_MIN_FLAGS:
+        return {"build_id": build_id, "flags": flags, "cached": False, "usable": False,
+                "detail": (f"inconclusive probe (rc={probed['rc']}, "
+                           f"{len(flags)} flags, err={probed['error']})")}
+    if record:
+        # Keyed on the build id AND pruned to it: the cache is a read-through of the
+        # CURRENT binary's own self-description, so a superseded build's row is dead
+        # weight, not history. Best effort -- a write failure just re-probes.
+        try:
+            Path(runs_dir).mkdir(parents=True, exist_ok=True)
+            ledger.write_text(json.dumps({build_id: {
+                "utc": dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(),
+                "ts": now, "bin": str(fak_bin), "flags": flags}}, indent=1),
+                encoding="utf-8")
+        except OSError:
+            pass
+    return {"build_id": build_id, "flags": flags, "cached": False, "usable": True,
+            "detail": f"probed {len(flags)} flags"}
+
+
+def gate_spawn_on_guard_argv(command: list[str], runs_dir: Path, *, runner=None,
+                             now_ts: float | None = None,
+                             ttl_h: int = DEFAULT_GUARD_PROBE_TTL_H,
+                             record: bool = True) -> dict[str, Any] | None:
+    """Refuse a wave whose guard binary provably cannot accept the planned argv.
+
+    Returns ``None`` to SPAWN (the only outcome for every ambiguous reading), or a
+    verdict dict naming the missing flags and the recovery path. The refusal fires
+    only on the positive observation described above the constants: a usable inventory
+    that is missing a flag the dispatcher is about to pass, which is precisely the
+    shape that produced ~350 dead-on-arrival worker-units over six days."""
+    if ttl_h <= 0:
+        return None
+    planned = planned_guard_flags(command)
+    if not planned:
+        return None
+    inv = guard_flag_inventory(command[0], runs_dir, runner=runner, now_ts=now_ts,
+                               ttl_h=ttl_h, record=record)
+    if not inv["usable"]:
+        return None
+    missing = sorted(planned - set(inv["flags"]))
+    if not missing:
+        return None
+    return {
+        "verdict": "GUARD_ARGV_UNSUPPORTED",
+        "build_id": inv["build_id"],
+        "missing_flags": missing,
+        "probe": {"flags": len(inv["flags"]), "cached": inv["cached"]},
+        "reason": (
+            f"guard binary {command[0]} (build {inv['build_id']}) does not register "
+            f"{len(missing)} flag(s) this dispatcher passes: "
+            + ", ".join(f"--{f}" for f in missing)
+            + " — every spawn against it would die at flag-parse before the gateway "
+              "binds and be miscounted as an idle fleet (#5868: ~350 worker-units "
+              "lost that way over six days). Planning 0 spawns. Recovery: rebuild or "
+              "reinstall fak (the build id changes and the probe re-runs by itself), "
+              "or drop the flag from tools/dispatch_worker.py (the refusal clears "
+              "against the same cached inventory, no re-probe needed). Set "
+              "DEFAULT_GUARD_PROBE_TTL_H=0 to disable the gate."),
+    }
 
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
@@ -5492,7 +6409,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # fail-open) OR a fresh local contract overlay (a repair worker's landed
     # backfill — the write path a worker can actually complete on this host).
     if (contract_hold_ttl_h > 0 or DEFAULT_MULTI_LANE_HOLD_TTL_H > 0
-            or DEFAULT_COLLISION_HOLD_TTL_H > 0):
+            or DEFAULT_COLLISION_HOLD_TTL_H > 0
+            or DEFAULT_REBLOCK_STREAK_HOLD_TTL_H > 0):
         refreshed_ts = open_issue_updated_map(root)
         for n, ts in contract_overlay_times(runs_dir).items():
             refreshed_ts[n] = max(refreshed_ts.get(n) or 0.0, ts)
@@ -5510,6 +6428,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # live tree periodically, so a committed/reverted path re-admits on its own.
     collision_held_prior = collision_held_issues(
         runs_dir, ttl_h=DEFAULT_COLLISION_HOLD_TTL_H, updated_ts=refreshed_ts)
+    # ...AND an issue whose last N finished workers ALL hit the SAME re-blockable
+    # terminal (#5869). ``held_no_commit`` above only holds the tick that WITNESSED
+    # the exit, so the next tick re-picked the issue with no memory of the refusal;
+    # this reads the retained .witness sidecars instead, so the hold survives the
+    # dispatcher process. Keyed on REPETITION rather than the reason class because
+    # 15% of the re-dispatches following a re-blockable terminal still land a commit
+    # — a first retry stays admitted, and only a proven-identical repeat is held.
+    reblock_streak_held = reblock_streak_held_issues(
+        runs_dir, streak_n=DEFAULT_REBLOCK_STREAK_HOLD_N,
+        ttl_h=DEFAULT_REBLOCK_STREAK_HOLD_TTL_H, updated_ts=refreshed_ts)
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).
     # Falls back to the single chosen lane when the router fold predates the
@@ -5545,6 +6473,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         for n in sorted(capability_skipped)]
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
             | multi_lane_held_prior | collision_held_prior
+            | reblock_streak_held
             | local_witnessed | audit_abstain_held | open_witnessed_held
             | capability_skipped)
     scan_stream = contract_scan_stream(eligible_lanes, skip)
@@ -5646,34 +6575,76 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return finish(payload)
     guard_livelock = active_guard_livelock_hold(root, runs_dir)
     if guard_livelock.get("active"):
-        reason = str(guard_livelock.get("reason") or "active guard livelock")
+        # Lane-scope the hold (#5861, the follow-on to #5858's identical fix for
+        # ACTIVE_COMPACT_RUNAWAY). A guard result livelock is ONE worker's local
+        # tool loop; it justifies not piling a SECOND worker onto the same lane,
+        # but it is no reason to idle every disjoint lane. Held fleet-wide it
+        # converts one worker's stuck tool_result into a whole-fleet stall --
+        # the same unit-fault-becomes-fleet-block shape as a lane lease held by
+        # a long-dead worker. Fail CLOSED when any livelock's lane is unknown
+        # (unreadable spawn header): we cannot prove disjointness then.
+        livelock_lanes = set(guard_livelock.get("lanes") or ())
+        lane_unknown = bool(guard_livelock.get("lane_unknown", True))
+        collides = (
+            lane_unknown
+            or not chosen_lane
+            or str(chosen_lane) in livelock_lanes
+        )
+        guard_livelock = {
+            **guard_livelock,
+            "scoped_lane": chosen_lane,
+            "collides": collides,
+        }
+        # Reported either way, so a scoped-past hold is legible, never a silent drop.
         payload["active_guard_livelock"] = guard_livelock
-        payload["launch_gate"] = launch_gate_blocked(
-            "ACTIVE_GUARD_LIVELOCK",
-            reason,
-            "wait-for-loop-worker-to-exit-or-fix-guard-result-livelock")
-        payload.update({
-            "ok": False,
-            "action": "active_guard_livelock",
-            "verdict": "ACTIVE_GUARD_LIVELOCK",
-            "reason": reason,
-        })
-        return finish(payload)
+        if collides:
+            reason = str(guard_livelock.get("reason") or "active guard livelock")
+            payload["launch_gate"] = launch_gate_blocked(
+                "ACTIVE_GUARD_LIVELOCK",
+                reason,
+                "wait-for-loop-worker-to-exit-or-fix-guard-result-livelock")
+            payload.update({
+                "ok": False,
+                "action": "active_guard_livelock",
+                "verdict": "ACTIVE_GUARD_LIVELOCK",
+                "reason": reason,
+            })
+            return finish(payload)
     compact_runaway = active_compact_runaway_hold(root, runs_dir)
     if compact_runaway.get("active"):
-        reason = str(compact_runaway.get("reason") or "active compact runaway")
+        # Lane-scope the hold (#5858). A compact runaway is ONE worker's local
+        # context condition; it justifies not piling a SECOND worker onto the
+        # same lane, but it is no reason to idle every disjoint lane. Held
+        # fleet-wide it converted one worker's overshoot into a 20-free-slot
+        # stall -- the same unit-fault-becomes-fleet-block shape as a lane lease
+        # held by a long-dead worker. Fail CLOSED when any runaway's lane is
+        # unknown (unreadable spawn header): we cannot prove disjointness then.
+        runaway_lanes = set(compact_runaway.get("lanes") or ())
+        lane_unknown = bool(compact_runaway.get("lane_unknown", True))
+        collides = (
+            lane_unknown
+            or not chosen_lane
+            or str(chosen_lane) in runaway_lanes
+        )
+        compact_runaway = {
+            **compact_runaway,
+            "scoped_lane": chosen_lane,
+            "collides": collides,
+        }
         payload["active_compact_runaway"] = compact_runaway
-        payload["launch_gate"] = launch_gate_blocked(
-            "ACTIVE_COMPACT_RUNAWAY",
-            reason,
-            "wait-for-loop-worker-to-exit-or-fix-compact-control")
-        payload.update({
-            "ok": False,
-            "action": "active_compact_runaway",
-            "verdict": "ACTIVE_COMPACT_RUNAWAY",
-            "reason": reason,
-        })
-        return finish(payload)
+        if collides:
+            reason = str(compact_runaway.get("reason") or "active compact runaway")
+            payload["launch_gate"] = launch_gate_blocked(
+                "ACTIVE_COMPACT_RUNAWAY",
+                reason,
+                "wait-for-loop-worker-to-exit-or-fix-compact-control")
+            payload.update({
+                "ok": False,
+                "action": "active_compact_runaway",
+                "verdict": "ACTIVE_COMPACT_RUNAWAY",
+                "reason": reason,
+            })
+            return finish(payload)
     if not chosen_lane:
         if pick.get("self_modify_held"):
             held = sorted(pick.get("self_modify_held"))
@@ -5953,6 +6924,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         payload["contract_held_prior"] = len(contract_held_prior)
     if collision_held_prior:
         payload["collision_held_prior"] = len(collision_held_prior)
+    # Never-silent-drop: name the issues this hold removed, not just a count, so a
+    # reader can tell a consecutive-identical re-block hold from a plain cooldown.
+    if reblock_streak_held:
+        payload["reblock_streak_held"] = sorted(reblock_streak_held)
     payload["issue_contract_gate"] = {
         "ok": bool(contract.get("ok")),
         "unavailable": bool(contract.get("unavailable")),
@@ -6206,6 +7181,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload["command"] = command
     payload["guarded"] = guarded
     payload["launch_gate"] = launch_gate_for_guard(guarded, backend)
+    # #5868 done-condition 3 — the LAST gate before exec, and the only one that reads
+    # the argv actually about to be handed over. `command` is fully built here, so the
+    # probe compares the real planned flags against this build-id's real inventory
+    # (one ~23 ms exec per binary, cached under .dispatch-runs/guard-probe.json). A
+    # skew means EVERY spawn against this binary dies at flag-parse before the gateway
+    # binds, so the correct response is a 0-spawn tick, not a per-issue hold. The lease
+    # acquired above is released first: refusing the wave must not strand the lane.
+    _argv_refusal = gate_spawn_on_guard_argv(
+        command, runs_dir, record=live) if guarded else None
+    if _argv_refusal:
+        if lease.get("acquired"):
+            payload["lease_release"] = release_lane_lease(
+                root, lease, runner=lease_runner)
+        payload.update({
+            "ok": False, "action": "guard_argv_unsupported",
+            "verdict": _argv_refusal["verdict"],
+            "guard_probe": {k: _argv_refusal[k]
+                            for k in ("build_id", "missing_flags", "probe")},
+            "reason": _argv_refusal["reason"],
+        })
+        return finish(payload)
     # Per-worker commit-sha tracking (#1324 proposal #2): stamp repo HEAD now, before
     # the worker can commit, so a later tick re-audits the commit THIS worker lands
     # (base..HEAD citing #target). Fail-open: a git error -> no base, and the witness

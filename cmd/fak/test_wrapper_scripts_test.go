@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTestShFastMirrorRetriesRsyncExit23AndForwardsVerbose(t *testing.T) {
@@ -124,7 +126,18 @@ func TestTestPs1PreservesShellMetacharsThroughWSL(t *testing.T) {
 	if _, err := exec.LookPath("wsl.exe"); err != nil {
 		t.Skip("wsl.exe unavailable")
 	}
-	script := filepath.Join(repoRootForWrapperTest(t), "test.ps1")
+	root := repoRootForWrapperTest(t)
+	// wsl.exe merely EXISTING does not mean WSL can SEE this checkout. When the drvfs
+	// /mnt/<drive> automount is broken -- `wsl.exe -e ls /mnt/c` answers "Input/output
+	// error" -- test.ps1's `wsl.exe -e bash /mnt/c/.../test.sh` cannot start at all,
+	// and this test hard-fails on a box-level fault that has nothing to do with the
+	// argument passing it guards. Probe the exact file test.ps1 will hand to bash and
+	// skip when WSL cannot read it. This narrows only WHEN the test runs; it never
+	// weakens WHAT it asserts, so a real #2248 regression on a healthy box still fails.
+	if reason := wslCannotReachWrapperScript(filepath.Join(root, "test.sh")); reason != "" {
+		t.Skip(reason)
+	}
+	script := filepath.Join(root, "test.ps1")
 
 	// Each pattern carries a metacharacter a wrapping shell would reparse. Passed
 	// as a single argv element, each must come back out of bash's "$@" unchanged.
@@ -154,6 +167,57 @@ func TestTestPs1PreservesShellMetacharsThroughWSL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// wslCannotReachWrapperScript reports, in one sentence fit for t.Skip, why WSL cannot
+// read winPath from inside the distro -- or "" when it can, which is the only case in
+// which a wsl.exe-bridged wrapper test is meaningful. It mirrors test.ps1's own path
+// translation (lowercased drive letter under the default /mnt automount; test.ps1
+// deliberately does not shell out to wslpath, because PowerShell mangles a `C:\...`
+// argument on the way in) and honours FAK_WSL_DISTRO the same way, so the probe targets
+// exactly the file test.ps1 would exec. A non-empty return always means a broken or
+// absent /mnt mount on this box, never a regression in the code under test.
+func wslCannotReachWrapperScript(winPath string) string {
+	mount, ok := wslMountPathForWrapperTest(winPath)
+	if !ok {
+		return "cannot map " + winPath + " onto a WSL /mnt path"
+	}
+	args := []string{}
+	if distro := os.Getenv("FAK_WSL_DISTRO"); distro != "" {
+		args = append(args, "-d", distro)
+	}
+	// `test -r` is the cheapest question that fails for every flavour of unreachable:
+	// automount off, drvfs I/O error, or the checkout genuinely absent inside WSL.
+	args = append(args, "-e", "test", "-r", mount)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "wsl.exe", args...).CombinedOutput()
+	if err == nil {
+		return ""
+	}
+	msg := "WSL cannot read " + mount + ", so test.ps1 cannot reach this checkout" +
+		" (the /mnt drvfs automount is broken or disabled on this box): " + err.Error()
+	if detail := strings.TrimSpace(string(out)); detail != "" {
+		msg += ": " + detail
+	}
+	return msg
+}
+
+// wslMountPathForWrapperTest translates `C:\a\b` to `/mnt/c/a/b`, the same inline
+// translation test.ps1 performs. It reports false for anything that is not a
+// drive-letter absolute path, since no /mnt mapping exists for those.
+func wslMountPathForWrapperTest(winPath string) (string, bool) {
+	if len(winPath) < 3 || winPath[1] != ':' || (winPath[2] != '\\' && winPath[2] != '/') {
+		return "", false
+	}
+	drive := winPath[0]
+	if drive >= 'A' && drive <= 'Z' {
+		drive += 'a' - 'A'
+	}
+	if drive < 'a' || drive > 'z' {
+		return "", false
+	}
+	return "/mnt/" + string(drive) + strings.ReplaceAll(winPath[2:], "\\", "/"), true
 }
 
 // wrapperTestEnv returns the current environment with any keys named in overrides

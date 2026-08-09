@@ -8,7 +8,7 @@
     ],
     "deliverable": "A single, tight explainer at `docs/explainers/tool-call-is-a-syscall.md` that teaches the core analogy from scratch: an OS kernel does not trust a user program's word that a write is safe \u2014 the syscall crosses a boundary the program does not control. fak does the same to the LLM. Open with the analogy, show the proposed-call -> verdict path, end with the one sentence a reader can repeat. ~600-900 words, one diagram reference (link to the B-dimension asset when it lands), zero jargon before it is defined.",
     "why": "This is the keystone explainer. Everyone who 'gets' fak got it through this analogy; right now it is scattered across the README and llms.txt. A dedicated, linkable page is the thing people share when they explain fak to someone else.",
-    "acceptance": "File exists with SEO front-matter (`title:`/`description:`); linked from `docs/explainers/` index and `INDEX.md`; a non-expert can restate 'model proposes, kernel disposes' after reading; `python tools/seo_aeo_scorecard.py` does not regress.",
+    "acceptance": "File exists with SEO front-matter (`title:`/`description:`); linked from `docs/explainers/` index and `INDEX.md`; a non-expert can restate 'model proposes, kernel disposes' after reading; `fak score seo` does not regress.",
     "lane": "docs-explainers"
   },
   {

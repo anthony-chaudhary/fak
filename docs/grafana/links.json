@@ -57,6 +57,22 @@
       "lifetime": "stack-local",
       "description": "is fak's cache method paying off? Track-1 WITNESSED reuse + Track-2 OBSERVED/projected-$ P&L (split by owner) + offline ablation arms — the Grafana twin of `fak cachevalue feed`",
       "source": "tools/grafana/dashboards/fak-cache-value-rollup.json"
+    },
+    {
+      "title": "FAK Fleet — Live Sessions & Roll-up",
+      "uid": "fak-fleet-overview",
+      "category": "rollup",
+      "lifetime": "stack-local",
+      "description": "the fleet top down — which sessions are alive RIGHT NOW (LIVE, from the durable session registry) beside the HISTORICAL cost/cache roll-ups, with a click-through per session; source `fak fleet metrics --serve` (scrape job fak_fleet)",
+      "source": "tools/grafana/dashboards/fak-fleet-overview.json"
+    },
+    {
+      "title": "FAK Fleet — Session Drill-down",
+      "uid": "fak-fleet-session",
+      "category": "debug",
+      "lifetime": "stack-local",
+      "description": "one session end to end — LIVE registry state (heartbeat liveness, cache posture, wall-clock budget) beside its HISTORICAL tokens, cache economics and kernel verdicts; reached by clicking a session on the fleet overview",
+      "source": "tools/grafana/dashboards/fak-fleet-session.json"
     }
   ]
 }

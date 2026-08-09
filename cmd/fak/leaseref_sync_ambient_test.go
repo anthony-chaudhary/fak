@@ -7,6 +7,9 @@ package main
 // region hold actually drives it at the before-decide / after-write boundaries.
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +51,8 @@ func TestAmbientLeaseRefSyncDefaultsOrigin(t *testing.T) {
 // the boundary folds it to a NONFATAL degraded report — the caller must keep
 // running on local lease evidence, never honest-stop on a dead link.
 func TestAmbientLeaseRefSyncDegradesNonFatalWithoutOrigin(t *testing.T) {
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
 	dir := initRegionTestRepo(t)
 	store := leaseref.NewInDir(dir)
 
@@ -70,6 +75,292 @@ func TestAmbientLeaseRefSyncDegradesNonFatalWithoutOrigin(t *testing.T) {
 	report = ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", false)
 	if report.Outcome != loopdrive.LeaseRefSyncDegraded || report.Fatal {
 		t.Fatalf("fetch-only degrade = %+v, want nonfatal degraded", report)
+	}
+}
+
+// TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner is the #5564 witness: with a
+// git that never returns — an auth-stalled or black-holed remote, simulated
+// deterministically through internal/leaseref's injected-Runner seam rather than
+// against a real network — the ambient boundary must GIVE UP and report, not
+// block the tick that called it.
+//
+// It fails in two distinguishable ways on a regression, both of them loud. If
+// the call site goes back to an unexpirable context the runner's <-ctx.Done()
+// never fires and the select below fails the test in bounded time with the
+// diagnosis, instead of wedging the package suite until the go-test timeout —
+// which is exactly how this bug spent its career being misread as a flake. If
+// the deadline survives but moves to a per-step budget, the second transport
+// call arrives with a LIVE context and that assertion names it.
+func TestAmbientLeaseRefSyncGivesUpOnAStalledGitRunner(t *testing.T) {
+	restore := ambientLeaseRefSyncBudget
+	ambientLeaseRefSyncBudget = 200 * time.Millisecond
+	t.Cleanup(func() { ambientLeaseRefSyncBudget = restore })
+	// The breaker (#5569) is process-global: start from a closed one so this
+	// witness really crosses the transport, and leave it closed for the next test.
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
+
+	type transportCall struct {
+		verb           string
+		hasDeadline    bool
+		expiredOnEntry bool
+	}
+	var calls []transportCall
+
+	// The stall. Only the two transport verbs hang; the local preamble git calls
+	// answer normally, so what is being witnessed is a wedged NETWORK git and not
+	// a store that cannot read its own ref database.
+	stalled := func(ctx context.Context, _ string, args ...string) (string, int, error) {
+		verb := ""
+		if len(args) != 0 {
+			verb = args[0]
+		}
+		switch verb {
+		case "push", "fetch":
+			_, hasDeadline := ctx.Deadline()
+			calls = append(calls, transportCall{verb: verb, hasDeadline: hasDeadline, expiredOnEntry: ctx.Err() != nil})
+			<-ctx.Done() // returns ONLY when the context does — never, if it cannot expire
+			return "", -1, ctx.Err()
+		case "for-each-ref":
+			// A non-empty local namespace, so the push direction is really attempted
+			// rather than short-circuited as PushSkippedEmpty (leaseref/sync.go).
+			return "refs/fak/locks/loop-region-loop\n", 0, nil
+		default:
+			return "", 0, nil
+		}
+	}
+	store := leaseref.NewWithRunner(stalled, t.TempDir())
+
+	// written=true plans BOTH steps (fetch-before-decide, push-after-write), which
+	// is what makes the one-budget-per-call property observable.
+	done := make(chan loopdrive.LeaseRefSyncReport, 1)
+	go func() {
+		done <- ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
+	}()
+	var report loopdrive.LeaseRefSyncReport
+	select {
+	case report = <-done:
+	case <-time.After(30 * ambientLeaseRefSyncBudget):
+		t.Fatal("ambient lease-ref sync never returned against a stalled git: the sync context cannot expire, so a slow remote hangs the tick (#5564)")
+	}
+
+	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
+		t.Fatalf("outcome = %q, want degraded — a give-up must be SURFACED, not swallowed: %+v", report.Outcome, report)
+	}
+	if report.Fatal {
+		t.Fatalf("a spent convergence budget must stay advisory, not fatal: %+v", report)
+	}
+	if report.Reason != loopdrive.ReasonLeaseRefSyncTransport {
+		t.Fatalf("reason = %q, want %q", report.Reason, loopdrive.ReasonLeaseRefSyncTransport)
+	}
+	if len(report.Failures) != 2 {
+		t.Fatalf("failures = %d, want both planned steps reported: %+v", len(report.Failures), report.Failures)
+	}
+	for _, f := range report.Failures {
+		if !strings.Contains(f, "budget") {
+			t.Errorf("failure %q does not name the deadline as the cause — the ledger reader would blame the remote", f)
+		}
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("transport calls = %+v, want one fetch then one push", calls)
+	}
+	if calls[0].verb != "fetch" || calls[1].verb != "push" {
+		t.Fatalf("transport order = %+v, want fetch-before-decide then push-after-write", calls)
+	}
+	if !calls[0].hasDeadline {
+		t.Error("the first transport call carried NO deadline: the ambient sync is back on an unexpirable context (#5564)")
+	}
+	if calls[0].expiredOnEntry {
+		t.Error("the first transport call started already expired: the budget is not being spent on real work")
+	}
+	if !calls[1].expiredOnEntry {
+		t.Error("the second transport call got a fresh live context: the budget is per-STEP, so the tick's exposure still multiplies by the plan's length")
+	}
+}
+
+// TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget is the #5569 witness: a
+// bounded cost that is re-paid on EVERY crossing is still a node re-learning,
+// at full price and forever, an answer it already has. After one crossing spends
+// the whole budget the boundary must skip the plan for N crossings, let exactly
+// ONE probe through, and resume the moment the transport answers again.
+//
+// Every assertion here is timing-free: it counts the transport verbs the
+// injected runner was actually asked to run, so "skipped" is witnessed as NO
+// GIT AT ALL rather than as a stopwatch reading. It runs the production N (the
+// skips cost no wall-clock) and shrinks only the budget, so the two crossings
+// that really stall cost 200ms each instead of 10s. NO REMOTE IS CONTACTED.
+func TestAmbientLeaseRefSyncBreakerSkipsAfterASpentBudget(t *testing.T) {
+	restore := ambientLeaseRefSyncBudget
+	ambientLeaseRefSyncBudget = 200 * time.Millisecond
+	t.Cleanup(func() { ambientLeaseRefSyncBudget = restore })
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
+
+	transport := 0  // git verbs that actually reached the wire
+	stalled := true // flipped when the node's credentials are "fixed"
+	run := func(ctx context.Context, _ string, args ...string) (string, int, error) {
+		verb := ""
+		if len(args) != 0 {
+			verb = args[0]
+		}
+		switch verb {
+		case "push", "fetch":
+			transport++
+			if stalled {
+				<-ctx.Done() // the wedged credential helper: returns only with the context
+				return "", -1, ctx.Err()
+			}
+			return "", 0, nil
+		case "for-each-ref":
+			// A non-empty local namespace, so the push direction is really attempted
+			// rather than short-circuited as PushSkippedEmpty (leaseref/sync.go).
+			return "refs/fak/locks/loop-region-loop\n", 0, nil
+		default:
+			return "", 0, nil
+		}
+	}
+	store := leaseref.NewWithRunner(run, t.TempDir())
+
+	// written=true plans BOTH steps, so one full crossing is two transport verbs.
+	cross := func() loopdrive.LeaseRefSyncReport {
+		return ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
+	}
+	nonfatal := func(when string, report loopdrive.LeaseRefSyncReport) {
+		t.Helper()
+		if report.Fatal {
+			t.Fatalf("%s: report is FATAL — a breaker that can fail a tick is worse than the cost it saves: %+v", when, report)
+		}
+	}
+	wantTransport := func(when string, want int) {
+		t.Helper()
+		if transport != want {
+			t.Fatalf("%s: %d transport verbs run, want %d", when, transport, want)
+		}
+	}
+
+	// 1. The first crossing pays the budget in full — #5564's behaviour, unchanged.
+	report := cross()
+	nonfatal("first crossing", report)
+	wantTransport("first crossing", 2)
+	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
+		t.Fatalf("first crossing outcome = %q, want degraded: %+v", report.Outcome, report)
+	}
+
+	// 2. The next N crossings are SKIPPED: no git runs at all, and the skip is
+	// SURFACED — degraded, with every planned step naming the breaker — so a node
+	// cannot go quietly isolated from the fleet while its report reads clean.
+	for i := 1; i <= ambientLeaseRefSyncBreakerSkips; i++ {
+		when := fmt.Sprintf("skip %d/%d", i, ambientLeaseRefSyncBreakerSkips)
+		report = cross()
+		nonfatal(when, report)
+		if transport != 2 {
+			t.Fatalf("%s: transport verbs rose to %d — the breaker never opened, so a wedged node still re-buys the answer every crossing (#5569)", when, transport)
+		}
+		if report.Outcome != loopdrive.LeaseRefSyncDegraded {
+			t.Fatalf("%s: outcome = %q, want degraded — a skipped sync must never read as 'synced fine': %+v", when, report.Outcome, report)
+		}
+		if len(report.Failures) != 2 {
+			t.Fatalf("%s: failures = %d, want both planned steps reported as skipped: %+v", when, len(report.Failures), report.Failures)
+		}
+		for _, f := range report.Failures {
+			if !strings.Contains(f, ambientLeaseRefSyncBreakerOpen) {
+				t.Errorf("%s: failure %q does not name the breaker, so a reader cannot tell a skip from a crossing that really failed", when, f)
+			}
+		}
+		if !strings.Contains(report.Summary, ambientLeaseRefSyncBreakerOpen) {
+			t.Errorf("%s: summary %q does not name the breaker", when, report.Summary)
+		}
+	}
+
+	// 3. Crossing N+1 is the PROBE: exactly one is let through. The transport is
+	// still wedged, so it spends the budget again and re-arms the breaker.
+	report = cross()
+	nonfatal("probe while still wedged", report)
+	wantTransport("probe while still wedged", 4)
+	if report.Outcome != loopdrive.LeaseRefSyncDegraded {
+		t.Fatalf("probe outcome = %q, want degraded: %+v", report.Outcome, report)
+	}
+
+	// 4. The credentials are fixed. The breaker is armed, so its remaining skips
+	// are still spent — the declared, bounded cost of remembering.
+	stalled = false
+	for i := 1; i <= ambientLeaseRefSyncBreakerSkips; i++ {
+		report = cross()
+		nonfatal("skip after recovery", report)
+		wantTransport("skip after recovery", 4)
+	}
+
+	// 5. The next probe finds a healthy transport, syncs for real, and CLOSES.
+	report = cross()
+	nonfatal("recovery probe", report)
+	wantTransport("recovery probe", 6)
+	if report.Outcome != loopdrive.LeaseRefSyncOK {
+		t.Fatalf("recovery probe outcome = %q, want ok — a recovered transport must sync: %+v", report.Outcome, report)
+	}
+
+	// 6. ...and the crossing AFTER it syncs immediately: a successful probe closes
+	// the breaker outright, so recovery costs one crossing, not another N.
+	report = cross()
+	nonfatal("after recovery", report)
+	if transport != 8 {
+		t.Fatalf("the crossing after a successful probe ran %d transport verbs, want 8: the breaker stayed armed on a verdict the transport already disproved", transport)
+	}
+	if report.Outcome != loopdrive.LeaseRefSyncOK {
+		t.Fatalf("post-recovery outcome = %q, want ok: %+v", report.Outcome, report)
+	}
+}
+
+// TestAmbientLeaseRefSyncBreakerIgnoresAnOrdinaryTransportFailure pins the OTHER
+// half of the trip rule (#5569): only a SPENT BUDGET arms the breaker. An
+// ordinary transport failure — no remote configured, an unknown remote, a
+// rejected update — already degrades instantly and cheaply, so there is nothing
+// to amortize, and a breaker there would only delay the recovery of a clone that
+// just gained its remote. Every crossing below must still reach the wire.
+func TestAmbientLeaseRefSyncBreakerIgnoresAnOrdinaryTransportFailure(t *testing.T) {
+	ambientLeaseRefSyncBreakerReset()
+	t.Cleanup(ambientLeaseRefSyncBreakerReset)
+
+	transport := 0
+	// A fast non-zero exit: git's shape for "no such remote", with no stall and no
+	// deadline involved, so the budget is never spent.
+	broken := func(_ context.Context, _ string, args ...string) (string, int, error) {
+		verb := ""
+		if len(args) != 0 {
+			verb = args[0]
+		}
+		switch verb {
+		case "push", "fetch":
+			transport++
+			return "", 128, nil
+		case "for-each-ref":
+			return "refs/fak/locks/loop-region-loop\n", 0, nil
+		default:
+			return "", 0, nil
+		}
+	}
+	store := leaseref.NewWithRunner(broken, t.TempDir())
+
+	for i := 1; i <= ambientLeaseRefSyncBreakerSkips+2; i++ {
+		report := ambientLeaseRefSyncImpl(loopdrive.LeaseRefSyncSurfaceLoopDriveTick, store, "origin", true)
+		if report.Fatal {
+			t.Fatalf("crossing %d: transport failure must stay advisory: %+v", i, report)
+		}
+		if report.Outcome != loopdrive.LeaseRefSyncDegraded {
+			t.Fatalf("crossing %d: outcome = %q, want degraded: %+v", i, report.Outcome, report)
+		}
+		if transport != 2*i {
+			t.Fatalf("crossing %d ran %d transport verbs in total, want %d: a cheap transport failure tripped the breaker, so a clone that just gained its remote waits %d crossings to find out (#5569)",
+				i, transport, 2*i, ambientLeaseRefSyncBreakerSkips)
+		}
+		for _, f := range report.Failures {
+			if strings.Contains(f, ambientLeaseRefSyncBreakerOpen) {
+				t.Fatalf("crossing %d reported a breaker skip %q for a failure the budget was never spent on", i, f)
+			}
+			if strings.Contains(f, "budget") {
+				t.Fatalf("crossing %d blamed the budget for a plain non-zero git exit: %q", i, f)
+			}
+		}
 	}
 }
 

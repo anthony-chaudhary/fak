@@ -16,15 +16,43 @@ package agent
 // trips. Only a window of true silence fires the timer, which closes the body to unblock
 // the read, and the Read is then reported as ErrUpstreamStalled — distinct from a normal
 // EOF or a client cancel so the gateway can log the cause and the test can assert it.
+//
+// That byte deadline alone answers "is the socket alive?", NOT "is the turn advancing?"
+// (#5486). On the Anthropic wire a keepalive `ping` is bytes like any other, so an upstream
+// that wedged the generation but still emits keepalives re-arms the idle window forever and
+// is indistinguishable from a healthy stream — which is exactly the transient-overload shape
+// the deadline was written to catch, and it blocks for the whole 600s ceiling instead. So
+// stallReader carries TWO deadlines answering two different questions:
+//
+//   - LIVENESS (bytes) — the idle timer above. `ping` re-arms it, and should.
+//   - PROGRESS (content) — a second, longer timer (the planner's StreamProgressTimeout config
+//     field, resolved by streamProgressWindow) armed when the body is wrapped and re-armed
+//     ONLY through noteProgress, which the SSE decode loops call for a
+//     frame that advances the TURN (content_block_start/delta, message_delta, a finish reason,
+//     a tool-call fragment) and deliberately NOT for `ping`/keepalive frames.
+//
+// Whichever fires first closes the body the same way; stallCause names which one, so the
+// UpstreamStalledError the gateway logs says whether the socket died or the turn wedged.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+)
+
+// stallKindIdle and stallKindNoProgress name WHICH deadline tripped a stallReader, carried
+// on UpstreamStalledError so the operator log separates "the upstream went silent on the
+// wire" from "the upstream kept the socket warm with keepalives but never advanced the
+// turn". Both are stalls to the gateway (a 504 upstream_stalled); only the cause differs.
+const (
+	stallKindIdle       = "idle"
+	stallKindNoProgress = "no-progress"
 )
 
 // ErrUpstreamStalled is the sentinel a streaming read returns when the upstream produced
@@ -42,13 +70,22 @@ var ErrUpstreamStalled = errors.New("agent: upstream stream stalled (no bytes wi
 // already begun streaming to the client; the gateway maps it to a terminal SSE error
 // frame the same way it does any mid-stream upstream error. Idle carries the window that
 // elapsed for the OPERATOR LOG; Err is the underlying ErrUpstreamStalled for errors.Is.
+//
+// Kind names WHICH deadline elapsed — stallKindIdle (no bytes at all) or stallKindNoProgress
+// (keepalives kept arriving but no frame advanced the turn, #5486). The zero value reads as
+// the idle case, so an existing keyed literal keeps its old meaning.
 type UpstreamStalledError struct {
 	Idle time.Duration
+	Kind string
 	Err  error
 }
 
-// Error formats the elapsed idle window as "planner: upstream stalled after <idle> idle".
+// Error formats the elapsed window, naming the no-progress case distinctly so an operator
+// reading the log is not told "silent" about an upstream that was in fact still pinging.
 func (e *UpstreamStalledError) Error() string {
+	if e.Kind == stallKindNoProgress {
+		return fmt.Sprintf("planner: upstream stalled after %s with no content progress (keepalives only)", e.Idle)
+	}
 	return fmt.Sprintf("planner: upstream stalled after %s idle", e.Idle)
 }
 
@@ -68,36 +105,85 @@ type stallReader struct {
 	window time.Duration
 	timer  *time.Timer
 
+	// progressWindow/progressTimer are the SECOND deadline (#5486): it runs continuously
+	// from the moment the body is wrapped and is reset only by noteProgress, never by a
+	// mere Read. A keepalive-only upstream therefore trips it even though every byte it
+	// sends keeps re-arming the idle timer above.
+	progressWindow time.Duration
+	progressTimer  *time.Timer
+
 	mu      sync.Mutex
-	tripped bool // the timer fired and closed rc — the next Read error is a stall
-	closed  bool // rc has been closed (by Close or the timer) — close exactly once
+	tripped bool   // a timer fired and closed rc — the next Read error is a stall
+	kind    string // which deadline fired: stallKindIdle or stallKindNoProgress
+	closed  bool   // rc has been closed (by Close or a timer) — close exactly once
 }
 
-// newStallReader wraps rc with an idle deadline of window. A non-positive window disables
-// the deadline (the reader is a transparent pass-through), so a caller can opt out without
-// a branch at the call site.
-func newStallReader(rc io.ReadCloser, window time.Duration) *stallReader {
-	s := &stallReader{rc: rc, window: window}
+// newStallReader wraps rc with an idle (inter-byte) deadline of window and a content
+// PROGRESS deadline of progressWindow. A non-positive window disables the corresponding
+// deadline (that half of the reader is a transparent pass-through), so a caller can opt
+// out without a branch at the call site. A progressWindow shorter than window is raised
+// to window: the progress deadline is by construction the outer, more forgiving one, and
+// letting it undercut the byte deadline would only mislabel a plain dead socket.
+func newStallReader(rc io.ReadCloser, window, progressWindow time.Duration) *stallReader {
+	if progressWindow > 0 && progressWindow < window {
+		progressWindow = window
+	}
+	s := &stallReader{rc: rc, window: window, progressWindow: progressWindow}
 	if window > 0 {
 		// Create the timer already stopped; Read arms it per call. AfterFunc has no
 		// channel to drain, so Stop/Reset alone manage its lifecycle cleanly.
-		s.timer = time.AfterFunc(window, s.trip)
+		s.timer = time.AfterFunc(window, func() { s.trip(stallKindIdle) })
 		s.timer.Stop()
+	}
+	if progressWindow > 0 {
+		// Armed immediately and left running: the turn has made no progress yet, and the
+		// clock on "no content since the stream opened" starts when the stream opens.
+		s.progressTimer = time.AfterFunc(progressWindow, func() { s.trip(stallKindNoProgress) })
 	}
 	return s
 }
 
-// trip is the timer callback: the window elapsed with no completed Read, so the upstream
-// is silent. Close the body to unblock the parked Read and mark the close as a stall.
-func (s *stallReader) trip() {
+// trip is the timer callback for both deadlines: the named window elapsed, so either the
+// upstream is silent (idle) or it is warm but not advancing the turn (no-progress). Close
+// the body to unblock the parked Read and record which deadline fired. Whichever timer
+// arrives first wins; the second finds the reader already closed and returns.
+func (s *stallReader) trip(kind string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
 	}
 	s.tripped = true
+	s.kind = kind
 	s.closed = true
 	_ = s.rc.Close()
+}
+
+// noteProgress records that the stream advanced the TURN and re-arms the progress deadline.
+// Callers MUST NOT call it for a `ping`/keepalive frame: re-arming on a frame that carries
+// no content is precisely the defect this deadline closes (#5486) — an upstream warm enough
+// to ping while producing nothing is the stalled-but-warm case worth catching. Safe to call
+// from the decode loop while a Read is parked; a no-op once the reader is closed.
+func (s *stallReader) noteProgress() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.progressTimer == nil || s.closed {
+		return
+	}
+	s.progressTimer.Reset(s.progressWindow)
+}
+
+// stallCause names the deadline that tripped this reader and the window it enforced, so the
+// caller can build an UpstreamStalledError that reports the real cause and a TRUTHFUL
+// elapsed window rather than assuming the idle one. A reader that has not tripped reports
+// the idle deadline, the one that would fire next.
+func (s *stallReader) stallCause() (string, time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.kind == stallKindNoProgress {
+		return stallKindNoProgress, s.progressWindow
+	}
+	return stallKindIdle, s.window
 }
 
 // Read arms the idle timer for window, performs one underlying Read, then stops the timer.
@@ -125,11 +211,14 @@ func (s *stallReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Close stops the idle timer and closes the wrapped body, idempotently — both an explicit
-// defer and the timer callback may reach it, so the underlying body is closed exactly once.
+// Close stops both deadlines and closes the wrapped body, idempotently — an explicit defer
+// and either timer callback may reach it, so the underlying body is closed exactly once.
 func (s *stallReader) Close() error {
 	if s.timer != nil {
 		s.timer.Stop()
+	}
+	if s.progressTimer != nil {
+		s.progressTimer.Stop()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -150,6 +239,81 @@ func (s *stallReader) Close() error {
 // whole-request timeout could never fire.
 func streamStallTimeout() time.Duration {
 	return envClampedTimeout("FAK_STREAM_STALL_TIMEOUT_S", 60*time.Second, 5, 600)
+}
+
+// DefaultStreamProgressTimeout is the CONTENT-progress deadline a planner uses when its
+// HTTPPlanner.StreamProgressTimeout config field is left at zero. It is the SINGLE SOURCE OF
+// TRUTH for that default — the DefaultCtxViewBudget idiom — so a front door that grows a
+// flag for the window defaults it to this constant rather than a bare literal and the two
+// can never drift. 300s sits well above the worst prefill-to-first-token gap on a large
+// cached prompt and above any extended-thinking pause (thinking streams content_block_deltas,
+// which count as progress), yet under the 600s whole-request ceiling `fak guard` sets — a
+// window past that ceiling could never fire.
+//
+// This deliberately is NOT an environment read. A behavioral deadline is configuration, not a
+// credential, so it lives on the config surface (internal/envconfiglint's CONFIG_NOT_ENV
+// rule); the environment is for declared secrets.
+const DefaultStreamProgressTimeout = 300 * time.Second
+
+// streamProgressMinWindow / streamProgressMaxWindow bound a configured content-progress
+// deadline. Below the floor the window would undercut the idle deadline and mislabel a plain
+// dead socket; above the ceiling it outlasts the 600s whole-request timeout and could never
+// fire. A configured value outside the band is not honored — the default is used instead.
+const (
+	streamProgressMinWindow = 5 * time.Second
+	streamProgressMaxWindow = 600 * time.Second
+)
+
+// streamProgressWindow resolves the planner's configured content-progress deadline into the
+// window newStallReader arms. Zero (unconfigured) is DefaultStreamProgressTimeout; a NEGATIVE
+// value is the explicit off switch and disables the deadline; an out-of-band positive value
+// falls back to the default rather than being clamped, so a typo'd window never silently
+// becomes a different real deadline.
+func (p *HTTPPlanner) streamProgressWindow() time.Duration {
+	switch {
+	case p.StreamProgressTimeout < 0:
+		return 0
+	case p.StreamProgressTimeout >= streamProgressMinWindow && p.StreamProgressTimeout <= streamProgressMaxWindow:
+		return p.StreamProgressTimeout
+	default:
+		return DefaultStreamProgressTimeout
+	}
+}
+
+// anthropicFrameAdvancesTurn reports whether an Anthropic SSE frame moved the TURN forward
+// (message_start, content_block_start/delta/stop, message_delta/stop, error) rather than
+// merely proving the socket is warm. Only `ping` is excluded — it is the wire's keepalive
+// and carries nothing about the generation, so counting it as progress would re-arm the
+// deadline that exists to catch a pinging-but-wedged upstream (#5486). Frames that omit the
+// `event:` line fall back to the payload's own "type", which is where a bare `data:` ping
+// still names itself; an undecodable payload counts as progress (it is not a keepalive, and
+// the byte deadline still covers the socket).
+func anthropicFrameAdvancesTurn(ev AnthropicSSEEvent) bool {
+	name := strings.TrimSpace(ev.Event)
+	if name == "" {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(ev.Data, &probe) == nil {
+			name = strings.TrimSpace(probe.Type)
+		}
+	}
+	return name != "ping"
+}
+
+// openAIChunkAdvancesTurn is the OpenAI-wire twin: a decoded stream chunk advances the turn
+// when it carries assistant content, reasoning content, a tool-call fragment, or a finish
+// reason. A role-only opener, an empty-delta keepalive chunk, or a usage-only trailer does
+// not — nor do the SSE comment / non-JSON heartbeat lines the decode loop drops before ever
+// reaching here, which is the OpenAI-shaped upstream's equivalent of a `ping`.
+func openAIChunkAdvancesTurn(c openAIStreamChunk) bool {
+	for _, ch := range c.Choices {
+		d := ch.Delta
+		if ch.FinishReason != "" || d.Content != "" || d.ReasoningContent != "" || len(d.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // envClampedTimeout reads a whole-second duration from env key, falling back to def when

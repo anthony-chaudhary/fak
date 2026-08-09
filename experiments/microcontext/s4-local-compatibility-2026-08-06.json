@@ -1,0 +1,148 @@
+{
+  "schema": "fak-microcontext-compatibility/1",
+  "verdict": "PASS",
+  "observed_at": "2026-08-06T20:02:58Z",
+  "provenance": "observed deterministic controlled-kernel mixed-workload planner",
+  "submitted": 98,
+  "cancelled": 1,
+  "rejected": 0,
+  "scheduled": 97,
+  "batches": 13,
+  "singleton_fallbacks": 1,
+  "max_queue_age_ms": 20,
+  "padding_tax": 0.07714561234329798,
+  "batch_fill": 0.9326923076923077,
+  "nominal_use": 0.9326923076923077,
+  "batch_ids": [
+    [
+      "unknown"
+    ],
+    [
+      "w-006",
+      "w-018",
+      "w-030",
+      "w-042",
+      "w-054",
+      "w-066",
+      "w-078",
+      "w-090"
+    ],
+    [
+      "w-003",
+      "w-015",
+      "w-027",
+      "w-039",
+      "w-051",
+      "w-063",
+      "w-075",
+      "w-087"
+    ],
+    [
+      "w-009",
+      "w-021",
+      "w-033",
+      "w-045",
+      "w-057",
+      "w-069",
+      "w-081",
+      "w-093"
+    ],
+    [
+      "w-000",
+      "w-012",
+      "w-024",
+      "w-036",
+      "w-048",
+      "w-060",
+      "w-072",
+      "w-084"
+    ],
+    [
+      "w-010",
+      "w-022",
+      "w-034",
+      "w-046",
+      "w-058",
+      "w-070",
+      "w-082",
+      "w-094"
+    ],
+    [
+      "w-007",
+      "w-019",
+      "w-031",
+      "w-043",
+      "w-055",
+      "w-067",
+      "w-079",
+      "w-091"
+    ],
+    [
+      "w-001",
+      "w-013",
+      "w-025",
+      "w-037",
+      "w-049",
+      "w-061",
+      "w-073",
+      "w-085"
+    ],
+    [
+      "w-004",
+      "w-016",
+      "w-028",
+      "w-040",
+      "w-052",
+      "w-064",
+      "w-076",
+      "w-088"
+    ],
+    [
+      "w-011",
+      "w-023",
+      "w-035",
+      "w-047",
+      "w-059",
+      "w-071",
+      "w-083",
+      "w-095"
+    ],
+    [
+      "w-005",
+      "w-017",
+      "w-029",
+      "w-041",
+      "w-053",
+      "w-065",
+      "w-077",
+      "w-089"
+    ],
+    [
+      "w-002",
+      "w-014",
+      "w-026",
+      "w-038",
+      "w-050",
+      "w-062",
+      "w-074",
+      "w-086"
+    ],
+    [
+      "w-008",
+      "w-020",
+      "w-032",
+      "w-044",
+      "w-056",
+      "w-068",
+      "w-080",
+      "w-092"
+    ]
+  ],
+  "claims": [
+    "compatible work coalesced while model/tool/phase classes remained isolated",
+    "aging, cancellation, bounded queues, padding cap, and singleton fail-open were exercised"
+  ],
+  "non_claims": [
+    "planner fill and padding are not model throughput, TTFT, or GPU slot telemetry"
+  ]
+}

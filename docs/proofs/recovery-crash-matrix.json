@@ -1,0 +1,12 @@
+[
+  {"id":1,"boundary":"checkpoint before local ref CAS","status":"NO_CHECKPOINT","next_action":"retry fak wip checkpoint; source and index remain authoritative"},
+  {"id":2,"boundary":"checkpoint after local ref CAS","status":"LOCAL_RECOVERABLE","next_action":"run fak wip reconcile and inspect refs/fak/wip/<session>"},
+  {"id":3,"boundary":"checkpoint after remote mirror and host loss","status":"REMOTE_RECOVERABLE","next_action":"fresh-clone, run fak wip sync --fetch-only, then fak wip reconcile"},
+  {"id":4,"boundary":"worker commit-tree after local anchor before trunk CAS","status":"LOCAL_ONLY","next_action":"run fak worktree worker recover and re-land or cherry-pick the named candidate"},
+  {"id":5,"boundary":"worker remote mirror after host loss before trunk CAS","status":"REMOTE_ONLY","next_action":"fresh-clone and run fak worktree worker recover --remote origin --fetch"},
+  {"id":6,"boundary":"worker candidate after trunk CAS","status":"LANDED","next_action":"clean the landed recovery ref; do not apply the candidate again"},
+  {"id":7,"boundary":"checkpoint reclaim ownership CAS","status":"OWNED_OR_REFUSED","next_action":"resume with the winning owner token or retry stale adoption with the witnessed old value"},
+  {"id":8,"boundary":"cleanup of unlanded local-only or unknown candidate","status":"REFUSED_OR_REPORT_ONLY","next_action":"prove trunk ancestry first; use explicit apply and peer authorization only after proof"},
+  {"id":9,"boundary":"remote publication outage","status":"LOCAL_ONLY","next_action":"retain the local named ref and retry remote publication; never claim replicated"},
+  {"id":10,"boundary":"operator crash-matrix status","status":"TYPED_ACTIONABLE","next_action":"consume this JSON row status and next_action; inspect the corresponding live witness on failure"}
+]

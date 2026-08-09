@@ -1,0 +1,58 @@
+{
+  "schema": "fak-microcontext-quality-ledger/1",
+  "run_id": "microcontext-ledger-microcontext-base-v1",
+  "base_id": "microcontext-base-v1",
+  "check_contract": "caller-supplied-independent-outcome-check",
+  "mode": "synthetic",
+  "provider": "",
+  "model": "",
+  "submitted": 10000,
+  "retired": 10000,
+  "failed": 0,
+  "cancelled": 0,
+  "retried": 0,
+  "elapsed_ms": 88,
+  "verification": {
+    "checked": 10000,
+    "passed": 10000,
+    "failed": 0
+  },
+  "claim_families": {
+    "orchestration": {
+      "submitted_total": 10000,
+      "physical_workers": 64
+    },
+    "inference": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "usage_responses": 0
+    },
+    "useful_work": {
+      "verified_completions": 10000,
+      "per_wall_second": 113636.36363636365
+    }
+  },
+  "error_classes": {},
+  "sample_ids": [
+    "ctx-00000000",
+    "ctx-00000001",
+    "ctx-00000002",
+    "ctx-00000003",
+    "ctx-00000004",
+    "ctx-00000005",
+    "ctx-00000006",
+    "ctx-00000007",
+    "ctx-00000008",
+    "ctx-00000009",
+    "ctx-00000010",
+    "ctx-00000011",
+    "ctx-00000012",
+    "ctx-00000013",
+    "ctx-00000014",
+    "ctx-00000015"
+  ],
+  "sample_limit": 16
+}
+
+
+

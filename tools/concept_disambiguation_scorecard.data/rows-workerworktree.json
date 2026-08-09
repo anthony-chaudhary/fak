@@ -1,0 +1,44 @@
+{
+  "rows": [
+    {
+      "id": "x2-pool-workerworktreepoolcapenv",
+      "canonical": "PoolCapEnv / FLEET_WORKER_WORKTREE_POOL (warm worktree-pool cap)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The environment knob bounding the per-worker warm worktree pool: the maximum number of IDLE detached worktrees kept per LANE under the worktree root. Unset, unparsable or negative reads as the default; 0 disables the pool and reproduces the pre-pool create/reap behaviour byte for byte.",
+      "distinction": "Not a pool of in-memory objects like PagedKVPool (x2-pool-pagedkvpool) and not a pool of accounts like BuildSeatPool (x2-pool-buildseatpool): this bounds ON-DISK git worktrees, so its cap governs disk residency and cold-sweep reclamation rather than allocation. It is a cap on IDLE members only — a worktree held by live work is never counted against it.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool",
+        "x2-pool-buildseatpool",
+        "x2-pool-workerworktreepoolcap"
+      ],
+      "aliases": [],
+      "grounding": "PoolCapEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x2-pool-workerworktreepoolcap",
+      "canonical": "PoolCap() (resolved worktree-pool cap)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The resolver that reads PoolCapEnv and returns the effective per-lane idle-worktree cap, failing open to the default on anything unreadable so a typo'd knob can never mean unbounded. Both Prepare and Reap consult it, so the pool is on or off for the whole lifecycle rather than per call site.",
+      "distinction": "Not the knob itself (x2-pool-workerworktreepoolcapenv): that is the env NAME, this is the parsed integer plus the fail-open policy applied to it. The distinction matters because the guarantee 'a bad value is never unbounded' lives here, not in the constant.",
+      "distinct_from": [
+        "x2-pool-workerworktreepoolcapenv",
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [],
+      "grounding": "PoolCap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

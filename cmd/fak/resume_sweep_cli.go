@@ -207,7 +207,17 @@ var sweepUUIDRE = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 // (one enumeration implementation, not a fork of the Python's PowerShell scrape).
 func liveResumeSIDs() map[string]bool {
 	out := map[string]bool{}
-	procs, _ := procguard.CollectRelations()
+	procs, collectErr := procguard.CollectRelations()
+	if collectErr != "" {
+		// #5385: an empty live-set and a census that never ran are the same VALUE here and
+		// opposite facts. Dropping this error made every session read as un-driven, so
+		// sessions with a running driver were printed under "resumable NOW" and acting on
+		// that list double-drives a healthy session. The set below is still the only answer
+		// this function has, so it is still returned; what changes is that the operator hears
+		// it is not a measurement — the same disclosure countLiveResumes makes in resume.go,
+		// on stderr so a --json consumer's stdout stays a clean record.
+		fmt.Fprintf(os.Stderr, "fak resume sweep: live-driver census failed (%s) — sessions below are NOT screened for a running driver\n", collectErr)
+	}
 	for _, p := range procs {
 		low := strings.ToLower(p.Cmdline)
 		if !strings.Contains(low, "claude") {

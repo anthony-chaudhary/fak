@@ -1,0 +1,41 @@
+{
+  "schema": "fak-upstream-gap-table/1",
+  "research_source": "https://github.com/ray-project/ray",
+  "upstream": {
+    "release": "ray-2.56.1",
+    "commit": "936f0d7d49d9da8ac1a9f04cc8a89faf2cb3c42a",
+    "license": "Apache-2.0",
+    "source": "https://github.com/ray-project/ray/tree/936f0d7d49d9da8ac1a9f04cc8a89faf2cb3c42a"
+  },
+  "claimed_envelope": {
+    "scheduler": "distributed tasks, actors, and placement groups",
+    "fault_model": "task/actor retry and reconstruction after process or node failure",
+    "transports_providers": ["Ray Client", "Ray Jobs API", "KubeRay", "AWS", "GCP", "Azure"]
+  },
+  "probe": {
+    "seam": "internal/fleet.ProbeRecovery",
+    "known_positive": "ray-known-positive.json",
+    "failure": "ray-cancelled-retry-exhausted.json"
+  },
+  "gaps": [
+    {
+      "finding": "Ray owns distributed execution while fak owns evidence-based worker supervision",
+      "disposition": "interoperate",
+      "fak_owner": "internal/fleet",
+      "reason": "adapter work is only warranted when a concrete Ray deployment is selected"
+    },
+    {
+      "finding": "retry exhaustion must remain a typed fail-closed escalation",
+      "disposition": "differentiate",
+      "fak_owner": "internal/fleet",
+      "reason": "automatic reconstruction must not erase exhausted-budget evidence"
+    },
+    {
+      "finding": "embed Ray as fak's default scheduler",
+      "disposition": "no-action",
+      "fak_owner": "internal/fleet",
+      "reason": "the bounded probe found no requirement that justifies a Python runtime dependency"
+    }
+  ],
+  "adopted_gaps": []
+}

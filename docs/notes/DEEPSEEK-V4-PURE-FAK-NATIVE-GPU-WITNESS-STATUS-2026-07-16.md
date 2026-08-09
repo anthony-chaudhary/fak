@@ -40,16 +40,27 @@ session, which now carries a working `SLACK_BOT_TOKEN` (the credential the issue
 filed without on 2026-07-14). No secret and no host/channel identifier is reproduced
 here.
 
-- **`... -dgx-host <node> -probe status`** → a live control thread was discovered
-  (host resolved to the sanctioned 80 GB-class node), but the control session replied
+- **`... -dgx-host <node> -probe status`** → a control thread was discovered (host
+  resolved to the sanctioned 80 GB-class node), and the probe then **deadlined**:
   **`STALE (no control reply within timeout)`**.
 - **`... sessions`** → **`no !sessions reply within timeout`**.
 
-**Read-back verdict:** the bridge reaches the lab GPU control channel at the Slack
-transport layer, but **no live `default-N` control session is currently answering** —
-consistent with the node being operator-gated (a live session must be brought up by
-the operator before jobs can be dispatched). This is a liveness blocker, not a fak
-defect.
+**Read-back verdict (corrected 2026-08-06, #5144):** the bridge reaches the lab GPU
+control channel at the Slack transport layer. Both verbs above then deadlined, and a poll
+that deadlines has inspected nothing — so this record does **not** establish that a control
+session was dead. By the class table in
+[the private control channel page](../private-comms-channel.md#when-a-readback-fails-which-class-which-fix)
+both readings are hub-side (`hub_timeout` / `no_tail_reply`), and neither implicates a
+session; `STALE` is the probe verb's version of the same conflation, covered in
+[its own section](../private-comms-channel.md#the-probe-verbs-own-verdict-stale-on-every-thread-at-once).
+
+The same-day root cause is settled and was **client-side**, with every shell healthy: the
+hub splits a long transcript tail across messages and the pre-fix client discarded the
+header-less ones (#5103; the fix ships in the private client under #5112). The verdict this
+note originally recorded — "no live control session is currently answering … a liveness
+blocker, not a fak defect" — read the evidence backwards on both halves; the bullets above
+are retained as the raw observation, which is all they ever were. Whether the node was
+*separately* operator-gated that day is not settled by this record either way.
 
 ## Target node (from the sanctioned node inventory, generic)
 
@@ -60,9 +71,12 @@ identifiers are intentionally omitted (public-leak discipline).
 
 ## Two concrete gates still open
 
-1. **Liveness gate (operator).** A live control session must be answering the bridge
-   (`sessions` returns a running `default-N`; `status` returns a live session) before
-   any native job can be dispatched and read back.
+1. **Liveness gate (client first, then operator).** A live control session must be
+   answering the bridge (`sessions` returns a running `default-N`; `status` returns a live
+   session) before any native job can be dispatched and read back — but confirm the client
+   is current *before* asking for a restart (#5112), because the pre-fix client produced
+   exactly this signature against healthy sessions. Restarting sessions cannot fix a
+   reassembly defect.
 2. **Native-loader gate (engineering).** DeepSeek-V4-Pro is a **1.6T-total / 49B-active
    MoE with 1M context**. Native in-kernel 1.6T-weight loading was explicitly deferred
    in the #3013 self-host runbook ("a native fak MoE follow-on … may be filed only if

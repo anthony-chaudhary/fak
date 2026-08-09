@@ -679,3 +679,46 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# --- provenance (#5609) -------------------------------------------------------------
+# The `As of` row dates every other number on the page. It rendered as `| As of |  (fak ) |`
+# for as long as the data directory carried no `meta` block: the card builder coerces a missing
+# key to "", so the renderer's `'?'` fallback could never fire — `.get(key, '?')` returns the
+# present empty string, not the default. The table still looked well-formed, which is exactly
+# why it survived. Empty is now treated as missing, and missing refuses.
+
+def test_provenance_row_renders_both_values() -> None:
+    got = cd.provenance_row({"as_of": "2026-08-05", "fak_version": "0.43.0"})
+    assert got == "| As of | 2026-08-05 (fak 0.43.0) |", got
+
+
+def test_provenance_row_refuses_empty_or_missing() -> None:
+    for card in (
+        {},                                               # neither key present
+        {"as_of": "", "fak_version": ""},                 # present and empty — the real bug
+        {"as_of": "2026-08-05"},                          # version missing
+        {"as_of": "2026-08-05", "fak_version": ""},       # version present and empty
+        {"fak_version": "0.43.0"},                        # date missing
+        {"as_of": "   ", "fak_version": "0.43.0"},        # whitespace is not a date
+        {"as_of": None, "fak_version": None},             # explicit null
+    ):
+        try:
+            out = cd.provenance_row(card)
+        except ValueError as exc:
+            assert "undated" in str(exc), str(exc)
+            continue
+        raise AssertionError(f"rendered {out!r} for {card!r}; an empty provenance must refuse")
+
+
+def test_committed_data_carries_a_populated_provenance() -> None:
+    """The shipped data directory must be able to date its own scorecard.
+
+    Without this the refusal above would simply move the failure to generation time for
+    everyone; the point is that the committed corpus satisfies it.
+    """
+    meta_path = Path(__file__).resolve().parent / "concept_disambiguation_scorecard.data" / "_meta.json"
+    meta = (json.loads(meta_path.read_text(encoding="utf-8")).get("meta") or {})
+    row_out = cd.provenance_row({"as_of": meta.get("as_of", ""),
+                                 "fak_version": meta.get("fak_version", "")})
+    assert row_out.startswith("| As of | ") and "(fak " in row_out, row_out

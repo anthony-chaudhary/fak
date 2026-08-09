@@ -9,6 +9,8 @@ package capindexgw
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/capindex"
@@ -103,4 +105,41 @@ func (r *MCPResolver) Fault(ref capindex.CapRef) (capindex.Capability, error) {
 // the index key on the same hash function.
 func simpleDigest(s string) string {
 	return capindex.Digest([]byte(s))
+}
+
+// CoreToolProposal is the structured input to the footprint-floor admission
+// check. Capability must be the exact catalog capability name; descriptions are
+// deliberately not fuzzy-matched because a false refusal would block novel work.
+type CoreToolProposal struct {
+	Name       string
+	Capability string
+}
+
+// CoreToolAdmission is the MCP-catalog-over-core-tool decision.
+type CoreToolAdmission struct {
+	Allowed  bool
+	Reason   string
+	Sidestep capindex.CapRef
+}
+
+// AdmitCoreTool refuses a permanent core-schema addition when its declared
+// capability is already reachable through the MCP catalog. The refusal names
+// the exact sidestep; unmatched or ambiguous free text remains admissible for
+// the rest of the proposal review pipeline.
+func (r *MCPResolver) AdmitCoreTool(proposal CoreToolProposal) CoreToolAdmission {
+	capability := strings.TrimSpace(proposal.Capability)
+	if capability == "" {
+		return CoreToolAdmission{Allowed: true}
+	}
+	for _, card := range r.Index() {
+		if card.Ref.Kind != capindex.CapKindMCPTool || card.Ref.Name != capability {
+			continue
+		}
+		return CoreToolAdmission{
+			Allowed:  false,
+			Sidestep: card.Ref,
+			Reason:   fmt.Sprintf("refuse core tool %q: capability is already reachable as MCP tool %q; use the MCP catalog sidestep", strings.TrimSpace(proposal.Name), card.Ref.Name),
+		}
+	}
+	return CoreToolAdmission{Allowed: true}
 }

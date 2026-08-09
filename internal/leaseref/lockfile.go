@@ -91,6 +91,24 @@ func (s *Store) ReapLockFiles(ctx context.Context, now time.Time, maxAge time.Du
 // Returned paths are relative to dir, slash-separated, sorted by the walk order
 // (lexical), so output is stable across platforms.
 func ReapLockFilesInDir(dir string, now time.Time, maxAge time.Duration) (reaped, kept []string, err error) {
+	return walkLockFiles(dir, now, maxAge, true)
+}
+
+// ScanLockFilesInDir is ReapLockFilesInDir's read-only twin: it classifies the same
+// directory by the same age bound and returns which *.lock files WOULD be reaped and
+// which would be kept, removing nothing. It exists so a dry-run (`fak git-daily
+// --dry-run`) previews the orphan set through the SAME walk that would do the reaping
+// — a caller that re-derived "which locks are orphaned" from its own copy of the rule
+// is exactly how a preview drifts away from the action it previews.
+func ScanLockFilesInDir(dir string, now time.Time, maxAge time.Duration) (orphans, kept []string, err error) {
+	return walkLockFiles(dir, now, maxAge, false)
+}
+
+// walkLockFiles is the one classification walk behind both the reaping and the
+// read-only entry points. With apply=false it stops short of os.Remove and reports the
+// same partition; every other rule (age bound, future-mtime fail-closed, vanished-file
+// tolerance, error joining) is shared by construction rather than by duplication.
+func walkLockFiles(dir string, now time.Time, maxAge time.Duration, apply bool) (reaped, kept []string, err error) {
 	if maxAge <= 0 {
 		maxAge = DefaultLockFileMaxAge
 	}
@@ -122,6 +140,10 @@ func ReapLockFilesInDir(dir string, now time.Time, maxAge time.Duration) (reaped
 		age := now.Sub(info.ModTime())
 		if age < maxAge {
 			kept = append(kept, rel) // fresh (or future-dated): possibly a live CAS, never raced
+			return nil
+		}
+		if !apply {
+			reaped = append(reaped, rel) // read-only preview: the orphan set, unremoved
 			return nil
 		}
 		if rmerr := os.Remove(path); rmerr != nil {

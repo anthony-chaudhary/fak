@@ -42,6 +42,29 @@ import (
 	"time"
 )
 
+// Outcome counters (#5838, follow-on to the micro-context fabric spine 28846558d0).
+//
+// The spans above answer "what did ONE agent do"; they did not answer "how did the
+// fabric do". A fleet run's success/refusal/error split lived only in the live host's
+// in-process audit sink, so once a run persisted its traces (--trace-out) the outcome
+// distribution was unrecoverable without hand-parsing the JSONL — a regression in the
+// refusal rate surfaced only as a bug report. The fold below derives the outcome from
+// the verdict legs already recorded, so it costs no new span kind, no new file format,
+// and no new dashboard: `fak micro` and `fak micro trace <id>` render it in place.
+//   - Promotion evidence: the counts fold identically from a live tracer and from a
+//     tracer reconstructed out of persisted JSONL (TestMicroOutcomeCountsSurviveJSONL),
+//     which is what makes them queryable after the run that produced them exited.
+//     Promote past the Mock planner once #2030 wires real gateway verdicts in — the
+//     vocabulary below is already keyed on verdict strings, not on the Mock's ALLOW.
+//   - Demotion / retirement: retire with the tracer itself (see the MicroTracer note
+//     above), or fold into an OpenTelemetry counter export if in-process spans are
+//     superseded — the classification would move, the vocabulary would not.
+//   - Invalidating assumption: a verdict string outside the closed refusal/error
+//     vocabularies is read as an ADMIT leg. That is the safe default while the Mock
+//     planner only ever emits ALLOW, but if a real gateway starts emitting a refusal
+//     spelled some third way, it would be silently counted as a success. The unknown
+//     bucket covers only the no-verdict-at-all case, not a misspelled refusal.
+
 // MicroSpanKind classifies one leg of a per-microagent trace timeline. The
 // security-relevant kinds (admission/seat/verdict) mirror rows the shared audit
 // ring also carries; the timeline carries every kind so the readout is complete.
@@ -97,6 +120,112 @@ func (t MicroTrace) Verdicts() []string {
 		out = append(out, s.Verdict)
 	}
 	return out
+}
+
+// MicroOutcome is the terminal classification of ONE micro-context invocation.
+// It is derived from the trace's verdict legs rather than stored alongside them, so
+// a tracer reconstructed from persisted JSONL folds to exactly the counts the live
+// host would have reported — no extra field to write, migrate, or keep in sync.
+type MicroOutcome string
+
+const (
+	// MicroOutcomeSuccess: the invocation ran its legs and the kernel admitted them.
+	MicroOutcomeSuccess MicroOutcome = "success"
+	// MicroOutcomeRefusal: the kernel refused at least one of this agent's calls.
+	// A refusal is a WORKING kernel, not a fault — it is counted apart from error
+	// precisely so a rising refusal rate is legible without looking like breakage.
+	MicroOutcomeRefusal MicroOutcome = "refusal"
+	// MicroOutcomeError: the invocation hit a hard failure (gateway/transport/step).
+	MicroOutcomeError MicroOutcome = "error"
+	// MicroOutcomeUnknown: the trace carries no verdict leg at all, so its outcome
+	// is not evidence either way. Kept as its own bucket rather than folded into
+	// success — an untraced agent must not inflate the success count.
+	MicroOutcomeUnknown MicroOutcome = "unknown"
+)
+
+// microRefusalVerdicts / microErrorVerdicts are the closed vocabularies the fold
+// classifies against, matched case-insensitively. Any other non-empty verdict is an
+// ADMIT leg (the Mock planner's ALLOW, and whatever a real gateway spells success).
+var (
+	microRefusalVerdicts = map[string]bool{"DENY": true, "DENIED": true, "REFUSE": true, "REFUSED": true, "BLOCK": true, "BLOCKED": true}
+	microErrorVerdicts   = map[string]bool{"ERROR": true, "ERRORED": true, "FAIL": true, "FAILED": true}
+)
+
+// Outcome classifies this whole trace. Precedence is error > refusal > success: an
+// agent that was admitted for two turns and then failed on the third is an error, and
+// one that was admitted twice and refused once is a refusal — the terminal fact about
+// the invocation, not the majority of its legs.
+func (t MicroTrace) Outcome() MicroOutcome {
+	sawVerdict, refused := false, false
+	for _, s := range t.Spans {
+		if s.Verdict == "" {
+			continue
+		}
+		sawVerdict = true
+		switch v := strings.ToUpper(strings.TrimSpace(s.Verdict)); {
+		case microErrorVerdicts[v]:
+			return MicroOutcomeError
+		case microRefusalVerdicts[v]:
+			refused = true
+		}
+	}
+	switch {
+	case !sawVerdict:
+		return MicroOutcomeUnknown
+	case refused:
+		return MicroOutcomeRefusal
+	}
+	return MicroOutcomeSuccess
+}
+
+// MicroOutcomeCounts is the fabric-level fold: how many invocations succeeded, were
+// refused, errored, or recorded no verdict. This is the counter surface #5838 names.
+type MicroOutcomeCounts struct {
+	Success int `json:"success"`
+	Refusal int `json:"refusal"`
+	Error   int `json:"error"`
+	Unknown int `json:"unknown"`
+}
+
+// Total is the number of invocations folded — every trace lands in exactly one
+// bucket, so the buckets always sum to the trace count.
+func (c MicroOutcomeCounts) Total() int {
+	return c.Success + c.Refusal + c.Error + c.Unknown
+}
+
+// Add counts one more invocation under the given outcome.
+func (c *MicroOutcomeCounts) Add(o MicroOutcome) {
+	switch o {
+	case MicroOutcomeSuccess:
+		c.Success++
+	case MicroOutcomeRefusal:
+		c.Refusal++
+	case MicroOutcomeError:
+		c.Error++
+	default:
+		c.Unknown++
+	}
+}
+
+// Render formats the counts as one operator-readable line. The unknown bucket is
+// printed only when it is non-zero, so the ordinary all-traced run reads clean while
+// a partially-traced one cannot hide its gap.
+func (c MicroOutcomeCounts) Render() string {
+	line := fmt.Sprintf("success=%d refusal=%d error=%d", c.Success, c.Refusal, c.Error)
+	if c.Unknown != 0 {
+		line += fmt.Sprintf(" unknown=%d", c.Unknown)
+	}
+	return line + fmt.Sprintf("  (%d invocation(s))", c.Total())
+}
+
+// Outcomes folds every known trace into the fabric-level counters. It is the whole
+// query surface: one call answers "how did this fleet run go", live or replayed.
+func (t *MicroTracer) Outcomes() MicroOutcomeCounts {
+	var c MicroOutcomeCounts
+	for _, tr := range t.Traces() {
+		c.Add(tr.Outcome())
+	}
+	return c
 }
 
 // MicroTracer multiplexes many per-agent traces in ONE single-process host, keyed
@@ -177,6 +306,7 @@ func (t *MicroTracer) Render(id string) (string, bool) {
 func (t MicroTrace) Render() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "trace %s — %d span(s), %d token(s)\n", t.TraceID, len(t.Spans), t.Tokens())
+	fmt.Fprintf(&b, "  outcome: %s\n", t.Outcome())
 	if v := t.Verdicts(); len(v) > 0 {
 		fmt.Fprintf(&b, "  verdicts: %s\n", strings.Join(v, ", "))
 	}

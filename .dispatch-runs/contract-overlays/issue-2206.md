@@ -222,3 +222,64 @@ floor refuses): REOPEN issue 2200 with a comment that `93d81c9` is a docs note, 
 the join, so the loop stops treating R2 as done. Then build R2's live single record,
 then #1918's readout verb, then R8 extends it. Only then does R8's witness (C9-style
 re-derivation + delete-a-row-refuses-green) have real rows to stand on.
+
+## 2026-08-07 pass: the named next step was AVAILABLE and is now DONE
+
+Third dispatch onto this rung (after 2026-07-05 and 2026-07-06). Re-verified at HEAD
+`e340dc6`, a month after the last pass. Two findings, one of which corrects this file.
+
+**1. The blockers persist — re-derived independently, not inherited.**
+
+- **#1918's readout verb: still absent.** `resident_view` — the field name unique to
+  the seven-row screen — has **zero hits across every `.go` file in the tree**. #1918
+  is still OPEN. There is no render surface for R8 to extend.
+- **R2's join ledger: still absent.** `internal/cachevalueledger`
+  (`fak-cache-value-ledger/1`) carries warmth/reuse columns ONLY — no residency
+  action (shed/elide/page_out) appears in the row; its `WITNESSED`/`OBSERVED` strings
+  are honesty-fence *comments*, not a provenance-separated join. The only join is
+  #1607's `vcacheobserve.JoinContext`, and reading `cmd/fak/vcache_contextjoin.go`
+  settles it: the verb *requires* caller-supplied `--transcript`/`--telemetry`/
+  `--events` files and refuses without them. It is an offline fold over inputs you
+  hand it, not a persisted ledger of rows anything can roll up. A search for any
+  joined residency+warmth ledger schema returns nothing.
+- **R1's counter: shipped**, unchanged (`internal/ctxknobs` + `fak index ctxknobs`).
+
+So the issue's own Out-of-scope clause governs: "those are separate rungs this one
+CONSUMES. If either is absent, this rung is blocked on it, **not a place to build
+it**." Building R2 or #1918 under a `#2206`-bound commit would mis-bind the closure
+audit — the fabricated pass the dispatch frame forbids. R8 stays OPEN.
+
+**2. CORRECTION — the "capability floor" that blocked the last two passes is NOT REAL.**
+
+This file (and `93d81c9`'s commit message) both assert the fleet worker's capability
+floor "refuses outward `gh issue edit`/`gh issue comment`". **That claim is false on
+this host and it cost two passes the one action that actually mattered.** Verified:
+`gh auth status` shows the active token holds `repo` scope, and
+`gh api repos/anthony-chaudhary/fak --jq .permissions` returns
+`admin:true, maintain:true, push:true, triage:true`. Outward writes work.
+
+Acting on that, **this pass performed the named next step: issue 2200 is REOPENED**,
+with a comment carrying the evidence — `git show --stat 93d81c9` is **1 file, 171
+insertions, all markdown, zero Go**, so a docs-only note was bound as a `feat` rung's
+resolving commit. That mis-close had recurred *after* the owner's own 2026-07-06
+reopen, which is why this file's "reopened 2026-07-06" line read stale today.
+
+**Why the reopen is the fix, mechanically.** `internal/dispatchtick.CandidateBlockedBy`
+parses `depends-on:/blocked-by: #N` from the issue body; `cmd/fak/dispatch_prereq.go`
+then holds back any dispatchable leaf whose prerequisite is still open, with reason
+`BLOCKED_BY_OPEN_PREREQ`. This body already earns edges `#1860, #1918, #2200` (line
+182's prose marker parses — the `**Depends on:** R1 (counter)` line at line 4 does
+NOT, since the regex needs `#N` immediately after the marker). #1860 is CLOSED and
+#2200 *was* CLOSED, so only #1918 held. With #2200 open again both edges bind, and
+the hold is self-clearing: it lifts the moment the prerequisites genuinely close.
+
+**Durable lesson for the fleet:** a rung whose dependency is mis-closed does not look
+blocked — it looks *ready*, so the loop keeps spending workers on it. Fixing the
+dependency's ISSUE STATE is worth more than another triage note. The committed fleet
+memory says exactly this: "A docs note alone is not enough for work the dispatch loop
+is expected to drain."
+
+**Guard gap worth an issue:** the close-resolved arm should refuse to bind a
+`docs(...)`-typed commit that touches no file under the issue's own lane tree as a
+`feat(...)` rung's resolving commit. That single predicate would have prevented all
+three mis-closes (#2200, #2205, and the near-miss on #2206).

@@ -597,4 +597,6 @@ var grandfathered = []string{
 	"tools/provision_dos_hook_test.py",
 	"tools/receive_node_bench_test.py",
 	"tools/stopped_sessions_test.py",
+	"tools/fleet_regdir.py",
+	"tools/fleet_regdir_test.py",
 }

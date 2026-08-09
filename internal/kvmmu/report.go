@@ -52,6 +52,15 @@ type SessionAttentionReport struct {
 	Curve        []TurnSN     `json:"curve"`         // S/N(t) over the run
 	IntegratedSN float64      `json:"integrated_sn"` // cost-weighted mean of S/N(t) over the run
 	BloatedSince int          `json:"bloated_since"` // first turn from which S/N declines as cache-hit climbs, or -1
+
+	// RetainedCeiling is the #3901 retained-mass gauge (#5123) for the BEST topN-span retention
+	// this session admits: the mass-maximizing set TopKSpansByMass names, which no other
+	// topN-subset can beat. It is not a decision anything took — it is the reference a real
+	// decision's own retained_mass_fraction (Context.LastRetainedMass, emitted at the
+	// eviction/selection boundary) is read against, so "we kept 0.94" becomes "we kept 0.94 where
+	// the best possible keep of that size was 0.99." Fail-closed with the gauge: Available is
+	// false when no attention was observed.
+	RetainedCeiling RetainedMassGauge `json:"retained_ceiling"`
 }
 
 // BuildSessionAttentionReport folds the accumulator and a recorded per-turn S/N curve into the
@@ -75,6 +84,16 @@ func BuildSessionAttentionReport(acc *AttentionAccumulator, curve []TurnSN, cost
 
 	// Build a SpanReport for every span the accumulator still holds.
 	snap := acc.Snapshot()
+
+	// The retention CEILING (#5123): grade the mass-maximizing topN keep with the same #3901
+	// gauge a live eviction emits, so the report carries the bar a decision is measured against.
+	// topN <= 0 means "no bound" everywhere else here (clip), so it means every observed span
+	// too — a ceiling over the whole set, which retains all of the mass by construction.
+	ceilingK := topN
+	if ceilingK <= 0 {
+		ceilingK = len(snap)
+	}
+	r.RetainedCeiling = RetainedMass(acc, TopKSpansByMass(acc, ceilingK), cost)
 	rows := make([]SpanReport, 0, len(snap))
 	for _, s := range snap {
 		first, last := hotSpan(s.Trajectory)

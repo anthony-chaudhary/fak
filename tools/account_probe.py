@@ -63,6 +63,7 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fleet_accounts  # noqa: E402
+import fleet_regdir  # noqa: E402
 import fleet_session_signals  # noqa: E402
 
 SCHEMA = "fleet.account-probe.v1"
@@ -71,9 +72,12 @@ SCHEMA = "fleet.account-probe.v1"
 # One JSON line per probe; the prev_status carry makes a status FLIP (ACCESS->OK, OK->AUTH)
 # a first-class greppable event for the status card and any alerting.
 def reg_dir() -> str:
-    return os.environ.get(
-        "FLEET_REG_DIR",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"))
+    """$FLEET_REG_DIR when the fleet names it, else the host ladder (fleet_regdir).
+
+    This is the dir the probe LEDGER is written under, so it is the one that decides
+    whether a host can derive a seat block at all -- resolving it to a second, ledger-less
+    registry is how "zero blocked seats" comes to mean "cannot tell"."""
+    return fleet_regdir.reg_dir()
 
 
 def probe_ledger_path(rd: str | None = None) -> str:
@@ -496,6 +500,14 @@ def classify_opencode_probe(result: dict[str, Any], *, base_url: str = "",
                 "block_reason": (f"provider quota exhausted; resets {reset}" if reset
                                  else "provider quota exhausted"),
                 "reset": reset, "weekly": (windows or {}).get("weekly")}
+    # A relay can pass through an upstream vendor's 401. Fence that borrowed status
+    # before the durable auth arm so a still-valid seat remains retryable.
+    lowered_body = (body or "").lower()
+    if status == 401 and any(pattern in lowered_body for pattern in (
+            "blocked by upstream provider", "request blocked by upstream")):
+        return {"status": "APIERR", "block_kind": "apierr",
+                "block_reason": "relay request blocked by upstream provider",
+                "reset": None, "weekly": None}
     if status in (401, 403) or (body and fleet_session_signals.is_auth_error(body)):
         kind = fleet_session_signals.auth_block_kind(body) if body else "auth"
         st = {"access": "ACCESS", "credit": "CREDIT"}.get(kind, "AUTH")

@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -191,7 +192,7 @@ func finalizeFak(k *kernel.Kernel, m *ArmMetrics) {
 // the real route and a routed call dispatches to the chosen engine. An empty engine
 // leaves Engine unset, so k.routeFor falls back to the loop's kernel default
 // ("localtools"): the no-manifest path is byte-for-byte the pre-routing loop.
-func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine string, ev traceEvent) (string, traceEvent) {
+func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine string, ev traceEvent, principal ...string) (string, traceEvent) {
 	args := []byte(rawArgs)
 	if len(args) == 0 {
 		args = []byte("{}")
@@ -201,7 +202,11 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 		ev.Note = "resolver error: " + err.Error()
 		return `{"error":"internal resolver failure"}`, ev
 	}
-	tc := &abi.ToolCall{Tool: tool, Args: ref, Engine: engine, Meta: metaFor(tool)}
+	meta := metaFor(tool)
+	if len(principal) != 0 && strings.TrimSpace(principal[0]) != "" {
+		meta[vdso.MetaPrincipal] = strings.TrimSpace(principal[0])
+	}
+	tc := &abi.ToolCall{Tool: tool, Args: ref, Engine: engine, Meta: meta}
 	r, v := k.Syscall(ctx, tc)
 	ev.Verdict = verdictName(v.Kind)
 	ev.By = v.By
@@ -655,7 +660,15 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				// #2528) the routed id is resolved through it to a residency-honest
 				// EngineRoute() first. No manifest => "" => the kernel default, so the
 				// historical loop is unchanged.
-				engine, rerr := cfg.resolveToolEngine(tool)
+				// Classify the exact metadata shape that execViaKernel will lower onto
+				// the ToolCall, so native manifest matching stays in parity with the
+				// proxy path for read_only and sensitivity labels.
+				// A call that CREATES delegated work (--spawn placement, #5420) takes its
+				// own rung here instead of inheriting this turn's: same pre-Syscall point,
+				// so the residency floor still adjudicates the real destination. Unarmed,
+				// or an agent type the operator never declared, falls through to the
+				// ordinary per-tool-call route unchanged.
+				engine, rerr := cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
 				if rerr != nil {
 					// Fail loud, exactly like the gateway's buildCall: a misconfigured roster
 					// must never silently dispatch a routed call to the wrong (or default)
@@ -667,7 +680,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 					ev.By = "route-accounts"
 					ev.Note = "ROUTE REFUSED (fail-loud): " + rerr.Error()
 				} else {
-					content, ev = execViaKernel(ctx, k, tool, rawArgs, engine, ev)
+					content, ev = execViaKernel(ctx, k, tool, rawArgs, engine, ev, cfg.principal)
 					// Out-of-band operator inbox (#2757): an ESCALATE-gated deny
 					// parks on the sessionctl pending-action queue for an external
 					// approve/deny when the session's inbox is open; the returned

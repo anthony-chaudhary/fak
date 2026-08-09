@@ -1,6 +1,9 @@
 package stallscan
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The fixtures below are pinned to LIVE captures from the reference box
 // (a Windows fleet host, 2026-07-07) during and between desktop freezes. Each asserts
@@ -522,5 +525,57 @@ func TestWorstHandleGrowth_picksMaxClimbAboveDeltaAndFloor(t *testing.T) {
 	// Raise the floor above every current count -> nothing qualifies.
 	if _, _, ok := worstHandleGrowth(base, cur, 1500, 100000); ok {
 		t.Fatalf("floor above all current counts must return ok=false")
+	}
+}
+
+func TestClassify_CPUSaturation_busyBox(t *testing.T) {
+	s := Sample{
+		CPUPercent:           97.5,
+		ProcessorQueueLength: 20,
+		ProcessorCount:       16,
+		AvailableMB:          32000,
+		TopCPU: []ProcCPU{
+			{PID: 41, Name: "worker.exe", Percent: 21.5},
+			{PID: 42, Name: "spinner.exe", Percent: 62.0},
+		},
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelStall || v.Cause != CauseCPUSaturation {
+		t.Fatalf("got level=%s cause=%s reasons=%v", v.Level, v.Cause, v.Reasons)
+	}
+	if v.TopCPUProcess != "spinner.exe" || v.TopCPUPID != 42 || v.TopCPUPercent != 62.0 {
+		t.Fatalf("missing CPU attribution: %+v", v)
+	}
+	if len(v.Reasons) != 2 || !strings.Contains(v.Reasons[0], "1.25 runnable waiters/core") || !strings.Contains(v.Reasons[1], "spinner.exe") {
+		t.Fatalf("reason does not carry normalized queue witness: %v", v.Reasons)
+	}
+}
+
+func TestClassify_FullCPUWithoutQueue_isNotStall(t *testing.T) {
+	s := Sample{CPUPercent: 99, ProcessorQueueLength: 2, ProcessorCount: 16}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelElevated || v.Cause != CauseCPUSaturation {
+		t.Fatalf("productive full-core use must warn, not claim grind: %+v", v)
+	}
+}
+
+func TestClassify_QueueWithoutFullCPU_isCalm(t *testing.T) {
+	s := Sample{CPUPercent: 45, ProcessorQueueLength: 32, ProcessorCount: 16}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelCalm {
+		t.Fatalf("queue without CPU pressure is not a witnessed busy box: %+v", v)
+	}
+}
+
+func TestClassify_CPUSaturation_isNormalizedAcrossHostSize(t *testing.T) {
+	thresholds := DefaultThresholds()
+	for _, s := range []Sample{
+		{CPUPercent: 95, ProcessorQueueLength: 4, ProcessorCount: 8},
+		{CPUPercent: 95, ProcessorQueueLength: 32, ProcessorCount: 64},
+	} {
+		v := Classify(s, thresholds)
+		if v.Level != LevelStall || v.Cause != CauseCPUSaturation {
+			t.Fatalf("sample %+v: %+v", s, v)
+		}
 	}
 }

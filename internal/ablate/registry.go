@@ -85,12 +85,13 @@ func registerBuiltins() {
 	env := map[string]string{
 		FeatureNormgate: "FAK_NORMGATE", FeatureRadix: "FAK_INKERNEL_RADIX", FeatureCompressor: "FAK_COMPRESSOR",
 		FeatureIFC: "FAK_IFC", FeatureGitgate: "FAK_GITGATE", FeatureCtxplanSeam: "FAK_CTXPLAN_SEAM",
-		FeatureWireScreen: "FAK_WIRE_SCREEN", FeatureWireRedact: "FAK_WIRE_REDACT", FeatureToonWire: "FAK_TOON_WIRE",
+		FeatureWireScreen: "FAK_WIRE_SCREEN", FeatureWireRedact: "FAK_WIRE_REDACT",
 		FeatureBreakpointPlan: "FAK_ABLATE_BP_PLAN", FeatureTTL1H: "FAK_ABLATE_TTL_1H",
 		FeaturePrefixGuard: "FAK_ABLATE_PREFIX_GUARD", FeatureUncachedTrim: "FAK_ABLATE_UNCACHED_TRIM",
 		FeatureNegframeReframe: "FAK_ABLATE_NEGFRAME_REFRAME",
 	}
 	Register(Concept{Token: FeatureVDSO, Runtime: func(bool) {}, Owner: "fak", Reversible: true, PrefixStable: true})
+	registerCacheLevers()
 	for token, variable := range env {
 		Register(Concept{Token: token, EnvVar: variable, Owner: "fak", Reversible: true, PrefixStable: true})
 	}

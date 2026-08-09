@@ -52,6 +52,14 @@ func TestMain(m *testing.M) {
 	// Keep console-pane tests hermetic. The production default reads ~/.fak/console.json;
 	// a developer's local preference file must not change package test behavior.
 	_ = os.Setenv("FAK_CONSOLE_FILE", filepath.Join(os.TempDir(), "fak-test-missing-console.json"))
+	// Keep the enroll path's OAuth token-family divorce hermetic. It runs by DEFAULT on every
+	// `add --adopt` / `enroll-current`, so without this stub each adopt test would exec a real
+	// `claude -p` against a fixture dir. A no-op spawn is the truthful stand-in for a tree with no
+	// credential service: it rotates nothing, so the divorce reports FAILED (warnings on stderr,
+	// never a nonzero rc) and every fixture's copied credential stays byte-identical, which is what
+	// the existing copy assertions pin. Tests that mean to witness a successful divorce inject their
+	// own rotating spawn instead.
+	divorceRefreshSpawn = func(context.Context, string) error { return nil }
 	os.Exit(m.Run())
 }
 

@@ -2,6 +2,7 @@ package zaitask
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -93,5 +94,78 @@ func TestClassifyRefusesFrontierWork(t *testing.T) {
 		if got := Classify("implement a security-critical scheduler", class); got.Suitable {
 			t.Fatalf("class %q = %+v, want refusal", class, got)
 		}
+	}
+}
+
+func TestRunErrorMessagesNameRecovery(t *testing.T) {
+	tests := []struct {
+		name   string
+		client Client
+		prompt string
+		want   string
+	}{
+		{name: "requires API key", client: Client{}, prompt: "task", want: "set Client.APIKey"},
+		{name: "requires prompt", client: Client{APIKey: "secret"}, prompt: "  ", want: "provide a non-empty task prompt"},
+		{name: "invalid base URL", client: Client{APIKey: "secret", BaseURL: ":"}, prompt: "task", want: "valid HTTP(S) URL"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.client.Run(context.Background(), tc.prompt, "", 1)
+			if err == nil || !strings.Contains(err.Error(), "recovery:") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want recovery naming %q", err, tc.want)
+			}
+		})
+	}
+
+	t.Run("request transport error", func(t *testing.T) {
+		client := Client{APIKey: "secret", HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("offline")
+		})}}
+		_, err := client.Run(context.Background(), "task", "", 1)
+		assertRecovery(t, err, "check endpoint/network availability")
+	})
+
+	t.Run("response read error", func(t *testing.T) {
+		client := Client{APIKey: "secret", HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: failingBody{}}, nil
+		})}}
+		_, err := client.Run(context.Background(), "task", "", 1)
+		assertRecovery(t, err, "inspect the endpoint transport")
+	})
+
+	for _, tc := range []struct {
+		name, body, want string
+		status           int
+	}{
+		{name: "oversize response", body: strings.Repeat("x", (8<<20)+1), status: http.StatusOK, want: "smaller max_tokens"},
+		{name: "invalid JSON", body: "not-json", status: http.StatusOK, want: "provider compatibility"},
+		{name: "provider refusal", body: `{"error":{"message":"resource exhausted"}}`, status: http.StatusTooManyRequests, want: "quota"},
+		{name: "missing choices", body: `{}`, status: http.StatusOK, want: "provider response compatibility"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			_, err := (Client{BaseURL: srv.URL, APIKey: "secret"}).Run(context.Background(), "task", "", 1)
+			assertRecovery(t, err, tc.want)
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, errors.New("read failed") }
+func (failingBody) Close() error             { return nil }
+
+func assertRecovery(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "recovery:") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want recovery naming %q", err, want)
 	}
 }

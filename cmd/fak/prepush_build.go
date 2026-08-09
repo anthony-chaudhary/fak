@@ -272,6 +272,11 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		w := emitTrunkRedWitness(stderr, r, "pre-push", res.BaseSha, res.PreExistingRed, extractUndefinedSymbol(res.Detail))
 		fmt.Fprint(stderr, trunkRedWitnessNote(w))
 	}
+	// Test-quality is advisory at the push seam: the baseline absorbs existing debt,
+	// and only growth is surfaced. Never turn scanner failure into an unrelated refusal.
+	if tqCode := runTestQuality(io.Discard, stderr, []string{"--root", r}); tqCode != 0 {
+		fmt.Fprintln(stderr, "fak hooks pre-push: WARNING: test-quality ratchet reported growth or could not run (advisory)")
+	}
 	if *report != "" {
 		if err := writeIndentedJSONFile(*report, res); err != nil {
 			fmt.Fprintf(stderr, "fak hooks pre-push: write report: %v\n", err)

@@ -3,10 +3,13 @@ package sharedtask
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
 func TestPublishEventFansOutAcceptedEvent(t *testing.T) {
@@ -484,5 +487,70 @@ func TestSubscribeViewMissingTaskCancelsSubscription(t *testing.T) {
 	}
 	if bus.Subscribers(topic) != 0 {
 		t.Fatalf("missing task left %d subscriber(s)", bus.Subscribers(topic))
+	}
+}
+
+func TestApplyAndPublishFencedChecksOwnershipAtResultBoundary(t *testing.T) {
+	ctx := context.Background()
+	leaseDir := t.TempDir()
+	cmd := exec.Command("git", "init", "--quiet", leaseDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	fences := leaseref.NewInDir(leaseDir)
+	t0 := time.Unix(4000, 0)
+	aToken, fv, err := fences.AcquireFenced(ctx, leaseref.Record{
+		ID: "task-result", TreeGlobs: []string{"task/**"}, Holder: "A", TTLSeconds: 10,
+	}, t0)
+	if err != nil || !fv.OK {
+		t.Fatalf("A acquire: verdict=%+v err=%v", fv, err)
+	}
+
+	store := NewStore(Policy{MaxScope: ScopeFleet})
+	task := mustCreate(t, store)
+	bus := a2achan.NewBus()
+	inbox, cancel := bus.Subscribe(EventTopic(task.TaskID))
+	defer cancel()
+
+	// Pause immediately before the result boundary and let B supersede A.
+	tResume := t0.Add(11 * time.Second)
+	bToken, fv, err := fences.AcquireFenced(ctx, leaseref.Record{
+		ID: aToken.ID, TreeGlobs: aToken.TreeGlobs, Holder: "B", TTLSeconds: 10,
+	}, tResume)
+	if err != nil || !fv.OK {
+		t.Fatalf("B supersede: verdict=%+v err=%v", fv, err)
+	}
+
+	patch := Patch{
+		Schema: SchemaPatch, TaskID: task.TaskID, BaseRev: task.Rev,
+		Actor: Actor{Kind: "agent", ID: "A"}, Scope: ScopeFleet, Durability: DurabilitySession,
+		Ops: []Op{{Op: "append", Path: "/notes", Value: noteValue("note_finished_result", ScopeFleet)}},
+	}
+	_, fv, _, published, err := store.ApplyAndPublishFenced(ctx, bus, "worker-A", patch, fences, aToken, tResume, a2achan.CapA2ASend)
+	if err != nil {
+		t.Fatalf("stale result boundary: %v", err)
+	}
+	if fv.OK || fv.Reason != leaseref.ReasonStaleLease || published != 0 {
+		t.Fatalf("stale boundary: fence=%+v published=%d, want STALE_LEASE and zero", fv, published)
+	}
+	if event, _, ok := bus.TryRecv(ctx, inbox, a2achan.CapA2ARecv); ok {
+		t.Fatalf("stale task result became externally visible: %+v", event)
+	}
+
+	current, ok := store.Get(task.TaskID)
+	if !ok {
+		t.Fatal("task missing after stale apply")
+	}
+	patch = Patch{
+		Schema: SchemaPatch, TaskID: task.TaskID, BaseRev: current.Rev,
+		Actor: Actor{Kind: "agent", ID: "B"}, Scope: ScopeFleet, Durability: DurabilitySession,
+		Ops: []Op{{Op: "append", Path: "/notes", Value: noteValue("note_current_result", ScopeFleet)}},
+	}
+	_, fv, verdict, published, err := store.ApplyAndPublishFenced(ctx, bus, "worker-B", patch, fences, bToken, tResume.Add(time.Second), a2achan.CapA2ASend)
+	if err != nil || !fv.OK || verdict.Kind != abi.VerdictAllow || published != 1 {
+		t.Fatalf("current boundary: fence=%+v verdict=%+v published=%d err=%v", fv, verdict, published, err)
+	}
+	if _, recv, ok := bus.TryRecv(ctx, inbox, a2achan.CapA2ARecv); !ok || recv.Kind != abi.VerdictAllow {
+		t.Fatalf("current holder result was not published: ok=%v verdict=%+v", ok, recv)
 	}
 }

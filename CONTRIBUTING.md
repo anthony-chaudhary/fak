@@ -103,22 +103,37 @@ from an old planning note when a current issue or authority disagrees.
 > [What your PR needs to pass](#what-your-pr-needs-to-pass) — and can skip to
 > [Licensing](#licensing--read-this-before-your-first-pr).
 
-1. Work from the repository root on `main`; this repository does not use contributor
-   feature branches. Install the repository hooks with
-   `python tools/install_trunk_guard.py` if `git config --get core.hooksPath` does not
-   report `tools/githooks`.
-2. Compile without writing an in-tree binary: `fak buildcheck --vet`. If no usable `fak`
-   binary exists yet, use a unique temporary output (`go build -o <temp-path> ./cmd/fak`),
-   then use that binary for subsequent checks.
-3. Run the proof matched to the change. `make test-fast` is the optional short feedback
-   gate; **`make ci` is the required pre-commit green gate** for build, vet, tests, and
-   claims lint. On native Windows, run
+1. **Maintainers and in-repo agents only — once per clone.** Work from the repository root
+   on `main`; this repository does not use contributor feature branches. Install the
+   repository hooks with `python tools/install_trunk_guard.py` if
+   `git config --get core.hooksPath` does not report `tools/githooks`. The guard polices
+   direct commits to *this* shared `main`; it has no role in a fork, so skip it entirely if
+   you are opening a pull request.
+2. **Everyone — the compile check.** Compile without writing an in-tree binary:
+   `fak buildcheck --vet`. It exists because this checkout is shared and a peer's untracked
+   Go files would otherwise change the answer; from a fork, plain
+   `go build ./... && go vet ./...` is the same check. If no usable `fak` binary exists yet,
+   use a unique temporary output (`go build -o <temp-path> ./cmd/fak`), then use that binary
+   for subsequent checks.
+3. **Everyone runs *a* proof; only direct-to-`main` work runs the full one.** Run the proof
+   matched to the change. `make test-fast` is the optional short feedback gate (the ~2-second
+   smoke tier: build, vet, and `go test -short ./...`, skipping the weight-backed model
+   witnesses); **`make ci` is the required pre-commit green gate** for build, vet, tests, and
+   claims lint. **Budget for it:** `make ci` chains 20 targets, including the full
+   `go test ./...` over the weight-backed model oracle that CI itself budgets at
+   `-timeout=25m` — so plan on **tens of minutes**, not a pause. Keep `make test-affected`
+   (a 30-second budget over the changed packages and their importers) as the inner loop and
+   save `make ci` for the commit itself. From a fork you do not run it at all: the tests for
+   the package you touched are enough, and CI runs the full gate on the PR — see
+   [What your PR needs to pass](#what-your-pr-needs-to-pass). On native Windows, run
    tests through `./test.ps1` under WSL because host application control blocks newly
    compiled test executables. Build and vet remain native-safe.
-4. After the explicit-path commit and before push, run `fak ci-preflight` as the
+4. **Maintainers and in-repo agents only — direct-to-`main`.** After the explicit-path commit
+   and before push, run `fak ci-preflight` as the
    **required committed-tip gate** in a clean temporary checkout, independent of the
    peer-dirty working tree. Thus "green" means both gates in order: `make ci` before the
-   commit and `fak ci-preflight` after it.
+   commit and `fak ci-preflight` after it. A forked PR has no push-to-`main` step, so this
+   gate does not apply to it.
 
 Build-profile details and platform commands live in
 [`docs/dev-tooling.md`](docs/dev-tooling.md). `AGENTS.md` is the machine-oriented authority
@@ -128,9 +143,9 @@ for shared-tree recovery, proof capture, and guarded commit mechanics.
 
 | Dimension | Current contract |
 |---|---|
-| Mode | Source contribution in the shared `main` checkout; installed-binary operation belongs to the operator route. |
+| Mode | Two source-contribution routes: a forked pull request, which needs no write access, and direct commits in the shared `main` checkout. Installed-binary operation belongs to the operator route. |
 | Generation | This page is the current `gen/now` contributor front door. Historical release notes and planning records do not override it. |
-| Lifecycle | Choose an issue → implement one coherent change → capture matched proof → run the full gate → commit explicit paths → push `main`. |
+| Lifecycle | **From a fork:** choose an issue → branch on your fork → implement one coherent change → run the checks for what you touched → `git commit -s` → open a pull request. **In the shared checkout:** choose an issue → implement one coherent change → capture matched proof → run the full gate → commit explicit paths → push `main`. |
 | Support | Contributor setup, architecture choice, tests, commit rules, and issue reporting are covered here; product use and production recovery are routed elsewhere. |
 
 ## Licensing — read this before your first PR
@@ -169,7 +184,32 @@ Contributions are accepted **inbound = outbound**: your change is licensed to th
 under the same license that governs that part of the tree (today, Apache-2.0 for the
 kernel), in addition to the CLA grant to Netra.
 
+## Dependency-heavy Go tools
+
+New repository tooling is Go, not Python. If a useful tool needs dependencies outside the
+root module's reviewed budget, do not add them to the root and do not fall back to Python.
+Use a quarantined nested module:
+
+- keep a small, stdlib-only façade in `tools/<name>/` so callers retain
+  `go run ./tools/<name> ...`;
+- place the dependency-heavy implementation below it, conventionally
+  `tools/<name>/<dep-heavy>/go.mod`;
+- have the façade enter/invoke that module explicitly, hiding the module boundary;
+- run `go test ./internal/dependencyquarantine` before submitting.
+
+The gate pins the root `go.mod` require set and `go.sum`, walks for nested `go.mod` files
+rather than maintaining a list, checks every `tools/` façade for non-stdlib imports, and
+builds/tests every discovered nested module in CI. Any intentional root dependency-budget
+change must update the allowlist in the same reviewed change.
 ## Development workflow
+
+> **Mixed audience — check the marker on each bullet.** Four of the eight below are
+> shared-checkout mechanics a forked pull request never performs: the setup route, the
+> work-directly-on-`main` trunk rule, explicit-path commits, and the verification trailer.
+> The other four apply to anyone touching this code, fork included — the two documentation
+> scorecards, the leaf-extension path, and the Windows note about running tests under WSL.
+> If you are contributing from a fork, your required checks end at
+> [What your PR needs to pass](#what-your-pr-needs-to-pass); read the rest for context only.
 
 - **Start from the setup route above.** For a subsystem optimization, continue through
   [`EXTENDING.md`](EXTENDING.md); for an existing package, run its focused tests before
@@ -181,8 +221,8 @@ kernel), in addition to the CLA grant to Netra.
   strawman-led headlines, orphans). It is read-only; a non-zero exit is a work-list, not a
   block. Regenerate the scorecard snapshot with `--markdown` after a docs pass. This is the whole-corpus analogue of
   `tools/readme_freshness_audit.py`, which checks the front page.
-- **Touching the docs site or the FAQ? Keep discoverability honest.** `python
-  tools/seo_aeo_scorecard.py --scope core` grades the published Pages surfaces on six
+- **Touching the docs site or the FAQ? Keep discoverability honest.** `fak score seo
+  --scope core` grades the published Pages surfaces on six
   SEO/AEO KPIs (title, description, headings, links, links_crawlable, answerability)
   plus site-level checks (sitemap, canonical, JSON-LD, `llms-full.txt`, citation_links)
   and counts *seo-debt*. Beyond the presence checks (is the meta/link/JSON-LD there?)
@@ -194,8 +234,10 @@ kernel), in addition to the CLA grant to Netra.
   If you
   changed the FAQ or `_config.yml`, re-run `python tools/gen_structured_data.py` to
   regenerate the JSON-LD (CI hard-gates that it is in sync). The discoverability
-  **scores** are strategic and live in the private repo (`--transfer`); the tool and the
-  read-only work-list are public.
+  **scores** are strategic and live in the private repo; the verb and the
+  read-only work-list are public. (This check was a `tools/seo_aeo_scorecard.py` script
+  before it was ported to the `fak score seo` verb; the script is gone, so an older
+  instruction naming it will fail.)
 - **Tests run through WSL, not native Windows** — from the repository root, `.\test.ps1`
   (whole suite) or `.\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
@@ -267,6 +309,18 @@ guard:
   is exactly the contribution that pays back.
 
 Pick one, read the entry doc it points to, and ship it small and by explicit path.
+
+> **Maintainers — keep the queue stocked.** The `good first issue` label is the front door
+> this page advertises twice — here and in
+> [Choose the route for your change](#choose-the-route-for-your-change) — and
+> `.github/PULL_REQUEST_TEMPLATE.md` welcomes first PRs into the same funnel, so an empty
+> queue is a dead link that returns no error. Check it with
+> `gh issue list --label "good first issue" --state open` during triage
+> and top it up from the *product* backlog, not only from documentation epics — a queue
+> stocked entirely out of one meta-epic drains the moment that epic closes. An issue is ready
+> for the label when its body names the file to touch, the expected result, and how to verify,
+> and a contributor can finish it with a fork and a pull request — no shared checkout, no
+> fleet tooling.
 
 ## Reporting issues
 

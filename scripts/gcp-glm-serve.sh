@@ -278,8 +278,11 @@ apt-get update -y || true
 apt-get install -y git python3 python3-pip curl $1 || true
 
 # Optional: join the Tailscale overlay so this laptop can dial the /v1 privately.
+# Bounded like every other curl in this script (#3479): an unattended GCE startup
+# script runs SEQUENTIALLY, so a stalled download here wedges provisioning of the
+# GPU VM *and* the idle-GPU + budget reapers installed further down.
 if [ -n "${RENDER_TS_AUTHKEY}" ]; then
-  curl -fsSL https://tailscale.com/install.sh | sh
+  curl -fsSL --connect-timeout 15 --max-time 120 https://tailscale.com/install.sh | sh
   tailscale up --authkey "${RENDER_TS_AUTHKEY}" --hostname "${VM_NAME}" || true
 fi
 
@@ -324,7 +327,7 @@ install_nccl_dev() {
   if ! apt-cache show libnccl-dev >/dev/null 2>&1; then
     . /etc/os-release
     repo="ubuntu\${VERSION_ID//./}/x86_64"
-    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/\${repo}/cuda-keyring_1.1-1_all.deb" -o /tmp/cuda-keyring.deb
+    curl -fsSL --connect-timeout 15 --max-time 120 "https://developer.download.nvidia.com/compute/cuda/repos/\${repo}/cuda-keyring_1.1-1_all.deb" -o /tmp/cuda-keyring.deb
     dpkg -i /tmp/cuda-keyring.deb
     apt-get update -y
   fi

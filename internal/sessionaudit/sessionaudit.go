@@ -789,14 +789,29 @@ func ProviderBucket(model string) string {
 		name string
 		subs []string
 	}{
+		// Open-weights families FIRST, because this list is first-hit-wins and one
+		// open-weights family embeds a vendor family name: "gpt-oss" contains "gpt".
+		// Classified after the vendor rows it bucketed as "OpenAI" — a placement claim
+		// fak's own tree disproves, since fak serves those weights itself (MXFP4
+		// dequant-on-load in internal/ggufload, a CI oracle in internal/covmatrix). That
+		// mislabel is not cosmetic: BucketOpenAI reports KNOWN/not-self-hosted, so
+		// locally-served tokens were counted as attributed vendor spend in the epic
+		// #5416 self-hosted fraction instead of sitting in the unknown remainder.
+		//
+		// This ordering is also the precondition for pricing gpt (#5115): PriceFor
+		// matches by substring too, so a "gpt" rate-card key would attach an OpenAI
+		// VENDOR price to gpt-oss. See TestOpenWeightsFamiliesAreNeverPricedAsVendor.
+		//
+		// "glm" and "kimi" are listed because this package PRICES them (see Pricing) —
+		// without an entry here a priced model landed in the bucket literally named
+		// "unpriced", which TestPricedModelsNeverLandInTheUnpricedBucket now forbids.
+		{BucketOpenWeights, []string{
+			"gpt-oss", "gptoss", "gpt_oss",
+			"qwen", "llama", "mistral", "mixtral", "phi-", "deepseek", "glm", "kimi",
+		}},
 		{BucketAnthropic, []string{"claude", "opus", "sonnet", "haiku", "fable"}},
 		{BucketGoogle, []string{"gemini", "gemma"}},
 		{BucketOpenAI, []string{"gpt", "o1-", "o3-", "o4-", "davinci"}},
-		// Open-weights families. "glm" and "kimi" are listed because this package
-		// PRICES them (see Pricing) — without an entry here a priced model landed in
-		// the bucket literally named "unpriced", which
-		// TestPricedModelsNeverLandInTheUnpricedBucket now forbids.
-		{BucketOpenWeights, []string{"qwen", "llama", "mistral", "mixtral", "phi-", "deepseek", "glm", "kimi"}},
 	} {
 		for _, sub := range b.subs {
 			if strings.Contains(m, sub) {

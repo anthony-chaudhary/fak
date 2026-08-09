@@ -82,6 +82,14 @@ func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok
 	switch t {
 	case TensorQ8_0:
 		return qk8_0, blockQ8_0Bytes, true
+	case TensorQ4_0:
+		// Legacy ggml 32-weight blocks (f16 scale + 16 nibble bytes, 18 B = 0.5625 B/weight;
+		// #5497). Resident target is the raw expert-quant store (AddResidentQ4_0 →
+		// kQuantMatRows). Without this row a native-q4_0 checkpoint — chosen precisely because
+		// it is the small artifact — takes the Q4→f32→Q8 round trip and ends up resident at
+		// Q8_0's 1.0625 B/weight, roughly DOUBLE its own on-disk size, having held both copies
+		// live at the round-trip's peak.
+		return qk4, blockQ4_0Bytes, true
 	case TensorQ4_K:
 		return qkK, blockQ4KBytes, true
 	case TensorQ5_K:

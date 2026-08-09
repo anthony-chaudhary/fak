@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +91,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/ctxvalue", s.handleFakCtxValue},
 		{"/v1/fak/revoke", s.handleFakRevoke},
 		{"/v1/fak/context/change", s.handleFakContextChange},
+		// /v1/fak/policy (exact, GET) is the read-only floor attestation (#3960); the
+		// longer exact /v1/fak/policy/reload (POST) is matched independently by the mux,
+		// so the observe route never shadows the reload route.
+		{"/v1/fak/policy", s.handleFakPolicyObserve},
 		{"/v1/fak/policy/reload", s.handleFakPolicyReload},
 		{"/v1/fak/route/reload", s.handleFakRouteReload},
 		{"/v1/fak/trace/reset", s.handleFakTraceReset},
@@ -208,6 +213,14 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // its own listener and calls Serve directly. It mirrors net/http.Server's
 // ListenAndServe/Serve split.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	// Record the address we actually bound so a served descriptor can name this
+	// process instead of a literal (#5642). This is the ONLY point where the chosen
+	// address is known — with an ephemeral ":0" bind the port does not exist until
+	// the listener does — and both entry points funnel through here.
+	if a := ln.Addr(); a != nil {
+		addr := a.String()
+		s.boundAddr.Store(&addr)
+	}
 	// Bounded timeouts so a single slow/idle connection cannot pin a goroutine +
 	// socket indefinitely (slow-loris-on-body / idle-keepalive DoS). ReadTimeout
 	// also caps body-delivery TIME (MaxBytesReader only caps SIZE).
@@ -482,7 +495,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	waitEPFanout, ok := s.startEPFanoutFollowers(w, r)
+	waitEPFanout, ok := s.startEPFanoutFollowers(w, r, epRouteChatCompletions)
 	if !ok {
 		return
 	}
@@ -1097,6 +1110,33 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if d, ok := s.planner.(*DualPlanner); ok {
 		data = append(data, map[string]any{"id": d.LocalModelID(), "object": "model", "owned_by": "fak"})
 	}
+	if s.roster != nil {
+		seen := make(map[string]struct{}, len(data)+len(s.roster.Bindings))
+		for _, item := range data {
+			seen[item["id"].(string)] = struct{}{}
+		}
+		for _, binding := range s.roster.Bindings {
+			id := strings.TrimSpace(binding.Model)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			data = append(data, map[string]any{
+				"id":       id,
+				"object":   "model",
+				"owned_by": "fak-route-accounts",
+			})
+		}
+		// Roster declaration order is not an API contract. Stable ordering also makes
+		// equivalent roster files advertise byte-identical catalogs. No-roster output
+		// deliberately keeps the historical order above.
+		sort.Slice(data, func(i, j int) bool {
+			return data[i]["id"].(string) < data[j]["id"].(string)
+		})
+	}
 	codexModels := make([]map[string]any, 0, len(data))
 	for _, row := range data {
 		id := strings.TrimSpace(fmt.Sprint(row["id"]))
@@ -1199,6 +1239,42 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority|wall|throughput}")
 			return
 		}
+		// #2439: the kernel ASSIGNS this control event's authority principal from the
+		// authenticated transport (the route's floor + the trusted front door's relay
+		// header), never from the request body. Authority-CONSUMING verbs — pause/resume
+		// via "run", and the policy-widening budget/wall/throughput — are then refused
+		// outright under a peer / timer / network principal, so "a webhook paused the run"
+		// or "a scheduled task widened the budget" is unrepresentable rather than patched
+		// per channel. Ordered before every verb dispatch so no shape escapes the check;
+		// each verb, refused or admitted, is journaled with its principal.
+		principal := kernelPrincipal(r)
+		if controlVerbConsumesAuthority(verb) && !principal.IsHuman() {
+			s.journalControlPrincipal(ControlPlaneEvent{
+				TraceID:   traceID,
+				Verb:      verb,
+				Principal: principal,
+				Refused:   true,
+				Reason:    ReasonPrincipalNotHuman,
+			})
+			writeErrCode(w, http.StatusForbidden, "principal_not_human",
+				ReasonPrincipalNotHuman+": the "+verb+" verb consumes user authority and arrived under the "+
+					string(principal)+" principal; a relayed message, a webhook delivery, or a scheduled task "+
+					"cannot spend the operator's authority — re-issue it from the human control wire")
+			return
+		}
+		// fork/export/import are their own shape (#2419): they act on the durable
+		// session CHAIN rather than on the drive table, so they take their own bodies
+		// and answer their own documents (session_teleport.go). Dispatched before the
+		// generic control path, which decodes a SessionControlRequest.
+		if s.handleTeleportVerb(w, r, traceID, verb) {
+			return
+		}
+		// checkpoint (#2425) is the same family: it binds the durable chain's head to a
+		// git tree witness in one record, so it carries its own body and answers its own
+		// document (session_checkpoint.go) rather than the drive-state control shape.
+		if s.handleSessionCheckpointVerb(w, r, traceID, verb) {
+			return
+		}
 		// steer is its own shape (operator input to a RUNNING session, #760): a different
 		// body and a different sink (the a2achan bus, not the drive table). Dispatch it
 		// before the generic control path. A refused steer (tainted/over-scoped/uncapped)
@@ -1257,7 +1333,13 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 						"); it is held as a quarantine stub and never reaches the loop")
 				return
 			}
-			if err := s.steerSession(r.Context(), traceID, sr.Principal, sr.Text); err != nil {
+			// #2439: the append reaches the bus under the KERNEL's principal. A steer is
+			// input, not an authority-consuming act, so a peer/timer steer still lands — but
+			// it lands labelled peer-agent/timer instead of being able to present as the
+			// operator by writing "operator" in its body. The journal row is written before
+			// the Send so a refused steer is still attributable to its principal.
+			s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
+			if err := s.steerSession(r.Context(), traceID, stampedSteerPrincipal(principal, sr.Principal), sr.Text); err != nil {
 				writeErr(w, http.StatusUnprocessableEntity, "steer refused: "+err.Error())
 				return
 			}
@@ -1289,6 +1371,10 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "session control refused (terminal or stale rev)")
 			return
 		}
+		// #2439: an ADMITTED control verb is journaled with its principal too — the record
+		// answers "which principal drove this session" for every event, not only the refused
+		// ones, so an absent row is evidence of an unstamped path rather than of a clean run.
+		s.journalControlPrincipal(ControlPlaneEvent{TraceID: traceID, Verb: verb, Principal: principal})
 		s.logf("gateway: session %s %s -> rev %d (%s)", traceID, verb, st.Rev, st.Run)
 		writeJSON(w, http.StatusOK, st)
 	default:

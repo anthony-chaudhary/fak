@@ -325,3 +325,118 @@ func TestReadRowsFromConsumesOnlyAppendedCompleteRows(t *testing.T) {
 		t.Fatalf("append rows=%+v next=%d err=%v", rows, next, err)
 	}
 }
+
+// A compound command must be labeled by the command that actually runs, not by the
+// navigation prefix that precedes it. Labeling the prefix collapsed 21.8% of the
+// guard-audit corpus onto stems like "cd fak", hiding distinct failures behind one
+// undiagnosable label (#5863). The label stays bounded to the same two scrubbed
+// atoms — this re-aims it, it does not widen it.
+func TestCommandStemLabelsOperativeCommandNotNavigationPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{"and-chain", "cd fak && go test ./...", "go test"},
+		{"semicolon-chain", "cd fak; go build ./cmd/fak", "go build"},
+		{"or-chain", "cd fak || go vet ./...", "go vet"},
+		{"pipe-chain", "cd fak | git status", "git status"},
+		{"no-space-connector", "cd fak&&go test ./...", "go test"},
+		{"newline-chain", "cd fak\ngo test ./...", "go test"},
+		{"powershell-set-location", "Set-Location fak; go test ./...", "go test"},
+		{"pushd", "pushd fak && git config --global user.name x", "git config"},
+		{"nested-navigation", "cd fak && cd internal && go test ./...", "go test"},
+		{"source-prefix", "source venv/bin/activate && python run.py", "python run.py"},
+		{"dot-prefix", ". venv/bin/activate && pytest tests", "pytest tests"},
+		{"export-prefix", "export GOFLAGS=-mod=mod && go test ./...", "go test"},
+		{"env-assignment-prefix", "CGO_ENABLED=0 go build ./...", "go build"},
+		// A bare navigation command has no operative successor: keep today's label
+		// rather than inventing one.
+		{"bare-navigation", "cd fak", "cd fak"},
+		{"navigation-only-chain", "cd fak && cd internal", "cd fak"},
+		// Non-compound commands are untouched.
+		{"plain", "git status --short", "git status"},
+		{"plain-with-flags", "go test -run TestX ./...", "go test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := commandStem(tc.command); got != tc.want {
+				t.Fatalf("commandStem(%q) = %q, want %q", tc.command, got, tc.want)
+			}
+		})
+	}
+}
+
+// Re-aiming the label must never re-aim it at a secret. The operative command is
+// scrubbed by exactly the same rules that scrubbed the prefix before it.
+func TestCommandStemScrubsSecretsInTheOperativeCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		deny    []string
+	}{
+		{"bearer-token-arg", "cd fak && curl -H authorization:bearer-abc123 https://x/y", []string{"abc123", "authorization", "bearer"}},
+		{"sk-token-arg", "cd fak && gh auth login --with-token sk-live-9f8e7d", []string{"sk-live", "9f8e7d"}},
+		{"secret-stem", "cd fak && ./deploy-secret-rotator.sh prod", []string{"secret", "rotator"}},
+		{"assignment-value", "cd fak && ANTHROPIC_API_KEY=sk-abc123 go test ./...", []string{"sk-abc123", "abc123", "API_KEY"}},
+		{"password-flag", "cd fak && mysql --password=hunter2 -u root", []string{"hunter2", "password"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := commandStem(tc.command)
+			for _, leak := range tc.deny {
+				if strings.Contains(strings.ToLower(got), strings.ToLower(leak)) {
+					t.Fatalf("commandStem(%q) = %q leaked %q", tc.command, got, leak)
+				}
+			}
+			if len(got) > maxArgsLabelLen+3 {
+				t.Fatalf("commandStem(%q) = %q exceeds the %d-char bound", tc.command, got, maxArgsLabelLen)
+			}
+			if fields := strings.Fields(got); len(fields) > 2 {
+				t.Fatalf("commandStem(%q) = %q emitted %d atoms, want at most 2", tc.command, got, len(fields))
+			}
+		})
+	}
+}
+
+// The bound is the leak defense, so it is asserted as an invariant over every
+// shape rather than only the cases above: whatever commandStem is aimed at, it
+// emits at most two atoms, stays inside maxArgsLabelLen, and never carries a
+// secretish needle.
+func TestCommandStemInvariantsHoldForEveryShape(t *testing.T) {
+	commands := []string{
+		"", "   ", ";;;", "&&", "|||", "\n\n",
+		"cd", "cd fak", "cd fak && go test ./...",
+		"cd fak && curl -H 'Authorization: Bearer abc123' https://api.example.com/v1",
+		"export ANTHROPIC_API_KEY=sk-ant-abc123 && cd fak && go test ./...",
+		"cd fak; git config --global user.password hunter2",
+		"cd /very/deep/path/that/keeps/going/and/going/and/going && " + strings.Repeat("verylongcommandname", 20),
+		"cd fak && " + strings.Repeat("a", 500),
+		"$env:TOKEN='sk-1'; cd fak; go test ./...",
+		". ./secrets.env && ./run --apikey=sk-9",
+		"cd fak && echo $ANTHROPIC_API_KEY | base64",
+	}
+	for _, cmd := range commands {
+		got := commandStem(cmd)
+		if len(got) > maxArgsLabelLen+3 {
+			t.Fatalf("commandStem(%q) = %q, len %d exceeds bound %d", cmd, got, len(got), maxArgsLabelLen)
+		}
+		if fields := strings.Fields(got); len(fields) > 2 {
+			t.Fatalf("commandStem(%q) = %q emitted %d atoms, want at most 2", cmd, got, len(fields))
+		}
+		if secretish(got) {
+			t.Fatalf("commandStem(%q) = %q is secretish", cmd, got)
+		}
+	}
+}
+
+// An env-assignment prefix must never surface its value. This holds for the
+// pre-existing single-segment form too, which previously folded "VAR=value" into
+// one stem atom.
+func TestCommandStemNeverLabelsAnAssignmentValue(t *testing.T) {
+	got := commandStem("MYVAR=hunter2 go test ./...")
+	if strings.Contains(got, "hunter2") || strings.Contains(got, "MYVAR") {
+		t.Fatalf("commandStem leaked an assignment: %q", got)
+	}
+	if got != "go test" {
+		t.Fatalf("commandStem = %q, want the operative command", got)
+	}
+}

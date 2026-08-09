@@ -114,6 +114,17 @@ jobs:
           go run ./cmd/livecodebench --fixture internal/livecodebench/testdata/fixture.json --check --json > /tmp/livecodebench-smoke.json
           grep -q '"result_claim_allowed": false' /tmp/livecodebench-smoke.json
 
+      # `dos` must be on PATH BEFORE `go test ./...`, not after (#5518). Two smokes shell
+      # to the real binary and skip gracefully when it is absent — handoff_chain_smoke_test.go
+      # and relay_handoff_rotate_close_test.go, both via the exec.LookPath("dos") pattern.
+      # dos-kernel was installed only in the dos-review step further down in THIS SAME job,
+      # ~730 lines below, so the test step above it always ran without it and those two
+      # tests have never once executed in CI. Installing here costs nothing: the later
+      # install is idempotent and becomes a no-op, and a failure here would have failed
+      # the job at that later step anyway.
+      - name: install dos-kernel before the tests (#5518)
+        run: python -m pip install --quiet --disable-pip-version-check dos-kernel
+
       # Test + coverage profile in one run (E-002): the same `go test ./...` gate, now
       # also writing a merged statement-coverage profile so the total is reported every
       # run. Reporting (not a hard threshold) is the foundation — a specific floor is a

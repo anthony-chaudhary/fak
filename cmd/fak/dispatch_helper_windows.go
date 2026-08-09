@@ -9,5 +9,5 @@ import (
 )
 
 func configureDispatchHelperCommand(cmd *exec.Cmd) {
-	windowgate.ConfigureBackgroundCommand(cmd)
+	windowgate.ConfigureDetachedCommand(cmd)
 }

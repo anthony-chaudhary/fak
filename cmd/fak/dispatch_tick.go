@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/leasequeue"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/regionadmit"
@@ -96,9 +97,21 @@ type dispatchTickOptions struct {
 	PlacementEvidence bool
 	RungPlacement     bool
 	AccountsRoster    string
-	Account           *dispatchtick.Account
-	Membership        *dispatchtick.Membership
-	DiscoverySnapshot *runsSnapshot
+	// HostProbeShellReuse declares the #3405 host-probe shell-reuse spine for this tick:
+	// route every Windows host probe of the tick (process scan, free RAM, worker rows, codex
+	// rows) through ONE warm racked PowerShell instead of one `powershell` process -- and one
+	// ConPTY/conhost -- per probe. It is the tick's own config surface
+	// (--host-probe-shell-reuse), not an environment read, for the same CONFIG_NOT_ENV reason
+	// as the placement settings above. It is a *bool rather than a bool because the two
+	// undeclared postures differ: nil means the caller declared nothing and takes the HOST
+	// default (on for Windows, where the ConPTY cost is; off for every other GOOS, whose
+	// probes never reach PowerShell), so a programmatic tick (wave / sweep / garden) that
+	// fills no field still gets the dividend, while an explicit false is a real off switch
+	// that puts every probe back on the historical one-shot spawn.
+	HostProbeShellReuse *bool
+	Account             *dispatchtick.Account
+	Membership          *dispatchtick.Membership
+	DiscoverySnapshot   *runsSnapshot
 }
 
 type dispatchLanePick struct {
@@ -255,6 +268,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	placementEvidence := fs.Bool("placement-evidence", false, "record #5416 placement evidence: write the .workclass/.zone sidecars beside each worker log and append the witness sweep's graded turn outcomes to the runs-directory journal (default off: no extra sidecars, no extra payload keys, no journal)")
 	rungPlacement := fs.Bool("rung-placement", false, "arm the automatic placement ladder: grade the account roster's bound models from the turn journal and start an UNPINNED worker on the cheapest rung the evidence supports, and re-dispatch an underpowered attempt one rung up (default off; also requires $FLEET_DISPATCH_RUNG_ACCOUNTS to declare which accounts this backend can dial)")
 	accountsRoster := fs.String("accounts-roster", "", "model-account roster consulted for placement zone ATTRIBUTION and grading only, never for dispatch (default: tools/model-accounts.json when it exists; with no roster nothing is attributed rather than defaulted to a rung)")
+	hostProbeShellReuse := fs.Bool("host-probe-shell-reuse", dispatchHostProbeShellReuseDefault(), "run this tick's Windows host probes (process scan, free RAM, worker rows, codex rows) on ONE warm racked PowerShell instead of one process -- and one ConPTY/conhost -- per probe (#3405/#3153); defaults on for Windows and off for every other GOOS, whose probes never reach PowerShell; =false puts every probe back on the historical one-shot spawn")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 
 	accountTag := fs.String("account-tag", "", "internal: forced account tag (used by dispatch wave)")
@@ -344,6 +358,13 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		RungPlacement:           *rungPlacement,
 		AccountsRoster:          strings.TrimSpace(*accountsRoster),
 	}
+	// The CLI always DECLARES the shell-reuse setting, because the flag's own default is
+	// already the host default -- so a bare `fak dispatch tick` and a programmatic tick that
+	// leaves the field nil resolve to the same posture, and an explicit
+	// --host-probe-shell-reuse=false survives as a real declaration rather than reading as
+	// "undeclared". Copied out of the flag set so opts owns the value.
+	reuseHostProbeShell := *hostProbeShellReuse
+	opts.HostProbeShellReuse = &reuseHostProbeShell
 	if *accountTag != "" || *accountTier != "" || *accountModel != "" || *accountDir != "" {
 		opts.Account = &dispatchtick.Account{
 			Tag:   *accountTag,
@@ -709,6 +730,16 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	dispatchRungPlacement = opts.RungPlacement
 	dispatchAccountsRoster = opts.AccountsRoster
 
+	// #3405: publish this tick's host-probe shell-reuse setting into the probe seam BEFORE
+	// preflight, which is what actually runs the probes. Without this call the whole reuse
+	// spine is inert code -- landed, tested, and never reached -- so every Windows tick keeps
+	// paying one `powershell` process, and one ConPTY/conhost, per probe (#3153). The arm
+	// hands back the teardown, deferred here rather than folded into `finish` so that the
+	// early error returns above the funnel cannot leak a warm console either: no console
+	// outlives the tick that opened it.
+	closeHostProbeShells := dispatchArmHostProbeShellReuse(opts.HostProbeShellReuse)
+	defer closeHostProbeShells()
+
 	// Per-phase wall-clock attribution (observability): a slow tick is otherwise a
 	// black box -- the dominant cost (the ~40s fleet_sessions.py registry scan) and
 	// the per-tick subprocess fan-out (preflight PowerShell probes, router gh/dos
@@ -799,6 +830,12 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// dry-run / nothing-held payloads stay byte-identical to before (#1396).
 	if opts.Live {
 		payload["witnessed_slots"] = witnessedSlots
+		// #2523: the spine-first fan-out default, wired at the ONE seam that knows a spine
+		// just shipped. Plan-only and fail-open (see dispatch_fanout.go); a turn that
+		// shipped nothing adds no key, so an idle payload is unchanged.
+		if fan := dispatchIssueFanout(root, runsDir, witnessRecords, time.Now()); fan != nil {
+			payload["issue_fanout"] = fan
+		}
 	}
 	if len(heldNoCommit) > 0 {
 		payload["held_no_commit"] = sortedSet(heldNoCommit)
@@ -813,6 +850,22 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		}
 		timings["total"] = time.Since(t0).Milliseconds()
 		p["timings_ms"] = timings
+		// #3405: report the reuse dividend for the tick that earned it, read here (inside the
+		// funnel) while the rack is still alive -- the deferred teardown drops it on the way
+		// out. tasks_run is the no-reuse cost this tick would have paid (one process per
+		// probe, the before), cold_spawns is what it actually paid (the after), and
+		// spawns_avoided is the difference: the ConPTY/conhost creations that did not happen.
+		// A tick that ran no warm task at all -- the spine off, or any non-Windows GOOS, whose
+		// probes never touch PowerShell -- adds no key, so those payloads stay byte-identical.
+		if st := dispatchHostProbeRackStats(); st.TasksRun > 0 {
+			p["host_probe_shells"] = map[string]any{
+				"cold_spawns":       st.ColdSpawns,
+				"warm_reuses":       st.WarmReuses,
+				"tasks_run":         st.TasksRun,
+				"unhealthy_retired": st.UnhealthyRetired,
+				"spawns_avoided":    st.SpawnsAvoided(),
+			}
+		}
 		if opts.RecordLoop {
 			p["loop_ledger"] = recordDispatchTickLoop(root, opts.LoopLedger, p)
 		}
@@ -1062,6 +1115,11 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	prompt := dispatchMapString(promptRec, "prompt")
 	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, launch)
 	if err != nil {
+		// #5565: the lane is leased from the statement above, and this return leaves no
+		// worker and no slot behind — nothing a witness sweep could ever grade. Hand the
+		// lane back under the acquire's own fencing token instead of pinning it for the
+		// full TTL. Fail-open, so an unreleasable lease still returns the build error.
+		releaseAbandonedLaneLease(root, lease, payload)
 		return nil, err
 	}
 	launchCommand, guarded := guardedDispatchCommand(root, pick.Lane, opts.Backend, command)
@@ -1070,6 +1128,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	}
 	env, err := dispatchWorkerEnv(opts.Backend, pick.Lane, root, runsDir, account, opts.Goal, opts.GoalProfile)
 	if err != nil {
+		releaseAbandonedLaneLease(root, lease, payload) // #5565, as above: no worker, no slot, no releaser.
 		return nil, err
 	}
 	env["FLEET_RESOLVE_ISSUE"] = strconv.Itoa(target)
@@ -1089,6 +1148,12 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["action"] = "broker_denied"
 		payload["verdict"] = "SPAWN_BROKER_DENIED"
 		payload["reason"] = "spawn broker denied dispatch worker launch: " + grant.Reason
+		// #5565: a refused launch never started a process, so the lane it holds fences
+		// nothing. It also leaves no log stem, which makes it unreachable by the #4324
+		// witness-sweep releaser — without this hand-back it stays pinned for the whole
+		// ~40-min TTL having done no work. Released BEFORE the record so the outcome is
+		// in the payload the ledger reads.
+		releaseAbandonedLaneLease(root, lease, payload)
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -1121,6 +1186,10 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["action"] = "spawn_failed"
 		payload["verdict"] = "SPAWN_FAILED"
 		payload["reason"] = err.Error()
+		// #5565: the spawner failed before any process existed (and so before any log
+		// stem or fence sidecar was written), the second of the two paths no releaser
+		// could ever reach. Hand the lane back now.
+		releaseAbandonedLaneLease(root, lease, payload)
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -1135,6 +1204,12 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
 	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
 	writeDispatchModelSidecar(spawned.Log, launch.Model)
+	// #4324: persist the fencing token this lane lease was acquired under, so the async
+	// witness sweep — a LATER tick process that never saw the acquire — can prove the
+	// lease is still this worker's and hand the lane back the moment the worker exits
+	// normally, instead of stranding it for the whole TTL. Nothing is written for a
+	// refused/fail-open acquire or a zero generation; such a lease keeps its TTL.
+	writeDispatchLeaseFenceSidecar(spawned.Log, lease)
 	// #5416 tracks E+F: persist the work class and placement rung resolved at prepare time
 	// beside the log, so the witness sweep reads what was true AT LAUNCH rather than
 	// re-deriving a present-tense answer about a finished slot. No-op when either could not
@@ -1145,6 +1220,15 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["action"] = "spawn_failed"
 		payload["verdict"] = "SPAWN_FAILED"
 		payload["reason"] = reason
+		// #5565: this rung fires only once the probe has proven the pid is NOT alive, so
+		// the lane fences a process that is already gone. Unlike the two returns above
+		// this slot DOES carry a fence sidecar, but the sweep would free it only for a
+		// log tail ClassifyNoCommitReason can name — and the commonest early exit is the
+		// silent, empty-log one, which grades NoCommitUnknown and is deliberately kept as
+		// the crash bucket. Releasing here does not weaken that sweep: it reaches the
+		// already-absent ref as ReleaseFenced's idempotent OK, and a lane re-acquired in
+		// the meantime has advanced its generation, so the sweep's stale token refuses.
+		releaseAbandonedLaneLease(root, lease, payload)
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -1229,7 +1313,7 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	req := regionadmit.Request{Actor: holder, Lane: lane, Tree: tree}
 	dec := regionadmit.Decide(req, regionLeases(live), tax)
 	if !dec.Admit {
-		return map[string]any{
+		refusal := map[string]any{
 			"acquired":  false,
 			"refused":   true,
 			"id":        id,
@@ -1242,6 +1326,34 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 			"lane_kind": leaseref.ArbiterLaneKind,
 			"mode":      laneMode,
 		}
+		// #5505: the tick's refusal takes a PLACE IN LINE instead of evaporating. Until now a
+		// LANE_LEASE_HELD tick recorded that it lost and nothing else, so the next tick re-raced
+		// from scratch and whoever polled first after a release won — a tick that had been
+		// refused for four hours had exactly the same odds as one that arrived 200ms ago. The
+		// ticket's id is stable across retries (actor+lane+resolved tree), so a returning tick
+		// REFRESHES its ticket and keeps the enqueue clock it earned.
+		//
+		// The same plane `fak loop region` mints on, through the same helper — one waiter list,
+		// so an operator's `fak loop region --lane X` and this tick queue in ONE line rather than
+		// two private ones. Class is `loop` because this IS the background dispatch driver; that
+		// is what keeps it from ranking ahead of a waiting operator.
+		//
+		// It runs AFTER the verdict and can only ADD a report key: the decision above and the
+		// refused:true the caller branches on (dispatchTickLiveSpawn's LANE_LEASE_HELD, the host
+		// enroll's) are already computed and are never read back from here. Every failure inside
+		// the helper is swallowed into a nil report, so an unwritable queue degrades the payload
+		// and never the decision.
+		//
+		// No `--no-queue` twin is wired here, unlike the loop-region verb: that flag exists for a
+		// PURE QUERY (an operator asking "may I?" who wants to leave no trace), and this function
+		// has no query-shaped caller — the dry-run WOULD_SPAWN/WOULD_ENROLL paths return before
+		// the acquire, and the scorecard's deliberate-collision probe runs against an isolated
+		// temp repo that is removed with its queue. Every caller that reaches here genuinely
+		// wants the region, so every caller genuinely wants its place in line.
+		if q := loopRegionEnqueue(root, req, tax, live, leasequeue.ClassLoop, now).payload(); q != nil {
+			refusal["queue"] = q
+		}
+		return refusal
 	}
 	// Record the tree the decision was MADE on: with an empty requested tree
 	// and a named lane, Decide admits on the lane's canonical taxonomy tree —
@@ -1251,12 +1363,40 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, go
 	if len(recTree) == 0 {
 		recTree = tree
 	}
-	rec := leaseref.Record{ID: id, TreeGlobs: recTree, Holder: holder, TTLSeconds: int64(ttlS)}
+	// Bind the lease to its OWNING SESSION (#5566). This is the WRITE side —
+	// leaseref.Record.SessionID on the record this tick is about to publish — and it is
+	// NOT the regionadmit.Request.SelfID decision twenty lines up. Do not fold the two:
+	// SelfID is compared against a LEASE id inside regionadmit.Decide and is deliberately
+	// left empty so a live lease on this lane refuses even when FAK_LEASE_OWNER pins the
+	// holder string (see the comment above `req`, and
+	// TestDispatchLaneLeaseSessionBindingKeepsSelfIDRefusal, which fails if a later change
+	// feeds this id into SelfID). SessionID is never read by Decide or by AcquireFenced;
+	// it is a field on the published blob that only the READ side (leaseref's liveness
+	// classification) consumes. Stamping it therefore cannot loosen any admission.
+	//
+	// What it fixes: leaseref.ClassifyLiveness's first branch is `SessionID == ""` ->
+	// peer-unknown / EvidenceNoBinding, which fails closed to not-reclaimable. Every lease
+	// this tick acquired landed in that branch, so a lane whose owner DIED without
+	// releasing could never be classified peer-dead and only the TTL ever freed it — and
+	// EvidenceNoBinding names the acquire call site (here) as the remedy. Bound, the same
+	// lane classifies peer-dead on a terminal STOPPED or a lapsed heartbeat, and peer-live
+	// while its owner heartbeats. This is the read-side complement of #5565's release: that
+	// one covers the owner that exited, this one the owner that died.
+	//
+	// A missing id degrades to exactly today's behaviour (empty -> EvidenceNoBinding), and a
+	// bound id with no descriptor is still peer-unknown, just under EvidenceNoDescriptor —
+	// a different remedy with a different owner (the publisher), never a false death.
+	rec := leaseref.Record{ID: id, TreeGlobs: recTree, Holder: holder, TTLSeconds: int64(ttlS), SessionID: dispatchLeaseSessionID()}
 	written, verdict, err := store.AcquireFenced(context.Background(), rec, now)
 	if err != nil {
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
 	if verdict.OK {
+		// The waiter got in, so it gives up the place it was holding (#5505) — otherwise a tick
+		// that finally acquired would keep a reservation that ranks ahead of the peers still
+		// waiting behind it for the whole ticket TTL. Best-effort and silent, exactly like the
+		// enqueue: the acquisition already succeeded and nothing below re-reads the queue.
+		loopRegionDequeue(root, req, tax)
 		return map[string]any{"acquired": true, "refused": false, "id": id, "holder": holder, "generation": written.Generation, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
 	}
 	return map[string]any{"acquired": false, "refused": true, "id": id, "holder": holder, "reason": string(verdict.Reason), "detail": verdict.Detail, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": laneMode}
@@ -1274,4 +1414,62 @@ func dispatchLeaseHolder() string {
 		host = runtime.GOOS
 	}
 	return fmt.Sprintf("%s:%d", host, os.Getpid())
+}
+
+// dispatchLeaseSessionID resolves the session id the lane lease binds to (#5566) — the
+// descriptor at refs/fak/locks/session-<id> that leaseref's liveness classification looks
+// up. Distinct from dispatchLeaseHolder, which names WHO holds the lane for a human
+// reading the ledger; this names WHICH SESSION's heartbeat decides whether that holder is
+// still alive. A holder string is free-form and unresolvable; a session id addresses a ref.
+//
+// FAK_SESSION_ID first: under `fak guard` a child is launched with it set to the
+// continuation trace id (guard_child.go), and that trace id is exactly the id
+// registerServeSessionDurability publishes the descriptor UNDER (session_durable.go), so
+// it is the binding with a real publisher behind it. CLAUDE_CODE_SESSION_ID second,
+// because that is what the Python dispatcher (tools/issue_resolve_dispatch.py's
+// lease_session_id) binds when it takes the SAME resolve-<lane> lease id — the two
+// dispatchers then name the same session rather than two views of one lane. Both names are
+// already in internal/envconfiglint's baseline; FAK_LEASE_SESSION_ID, the Python's own
+// first choice, deliberately is not read here because introducing it in Go would be a NEW
+// env-var read the CONFIG_NOT_ENV ratchet refuses.
+//
+// A malformed value is SKIPPED rather than passed through. Binding is an improvement on a
+// best-effort path, so it must never be able to turn a working acquire into a failed one:
+// an unusable id degrades to the empty string, which is precisely the pre-#5566 behaviour
+// (peer-unknown / EvidenceNoBinding, not reclaimable). This mirrors the Python's posture —
+// "the lease gate must never fail only because a harness exported a malformed session id".
+func dispatchLeaseSessionID() string {
+	for _, name := range []string{"FAK_SESSION_ID", "CLAUDE_CODE_SESSION_ID"} {
+		if v := strings.TrimSpace(os.Getenv(name)); validDispatchLeaseSessionID(v) {
+			return v
+		}
+	}
+	return ""
+}
+
+// validDispatchLeaseSessionID mirrors leaseref's own validSessionID (both it and validID
+// are unexported, so the rule is restated rather than imported): one safe ref segment, and
+// no leading `session-` — that prefix is the namespace marker leaseref itself supplies, so
+// a caller carrying it would address session-session-<id>. Kept deliberately conservative:
+// an id that fails here binds nothing at all instead of publishing a record pointing at a
+// ref that cannot exist.
+func validDispatchLeaseSessionID(id string) bool {
+	if id == "" || len(id) > 200 {
+		return false
+	}
+	if strings.HasPrefix(id, "-") || strings.HasPrefix(id, ".") {
+		return false
+	}
+	if strings.HasPrefix(id, "session-") {
+		return false
+	}
+	for _, c := range []byte(id) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-' || c == '_' || c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }

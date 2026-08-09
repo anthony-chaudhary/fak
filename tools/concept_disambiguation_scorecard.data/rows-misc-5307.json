@@ -201,7 +201,8 @@
       "distinction": "A METRICS recorder for compaction outcomes - NOT FAK_CTX_YIELD_CEILING (a scoring ceiling) and NOT injectionReachedContext (a security flag); it emits telemetry.",
       "distinct_from": [
         "cov5307-fak-ctx-yield-ceiling",
-        "cov5307-injection-reached-context"
+        "cov5307-injection-reached-context",
+        "guardcompactionwitness-3152"
       ],
       "aliases": [],
       "grounding": "observeCompaction",

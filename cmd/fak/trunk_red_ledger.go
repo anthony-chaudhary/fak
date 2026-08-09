@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -43,7 +45,11 @@ import (
 // `.fak/` gitignored runtime path so active gates never dirty tracked docs, and an
 // env override + mode-off switch.
 
-// trunkRedRecordSchema versions the row shape so a reader can evolve.
+// trunkRedRecordSchema versions the row shape so a reader can evolve. It stays at v1
+// across PURELY ADDITIVE optional fields (the `module` provenance stamp): the reader
+// filters rows by exact schema equality, so bumping it would make every already-written
+// row invisible — silently emptying the view instead of evolving it. A bump is for a
+// change that would make an old row MISREAD, which an absent optional field does not.
 const trunkRedRecordSchema = "fak.trunk-red.v1"
 
 // trunkRedNow is the injectable clock (mirrors prepushNow) so the recorder stays
@@ -61,6 +67,23 @@ type trunkRedRecord struct {
 	Packages   []string `json:"packages,omitempty"`    // the failing import paths (the shared break)
 	FirstBreak string   `json:"first_break,omitempty"` // first undefined symbol, when parseable
 	Session    string   `json:"session,omitempty"`     // best-effort session id, so distinct clones are countable
+	// Module is the PROVENANCE of the write: the Go module path of the repo this gate
+	// was actually run against, read from that repo's own go.mod at record time. It is
+	// what lets a reader tell a row recorded ABOUT this repo from one recorded about a
+	// different checkout — structurally, from a fact the writer knew, rather than by
+	// pattern-matching the row's package names downstream.
+	//
+	// The ledger is a FLEET ledger: `--ledger` / $FAK_TRUNK_RED_LEDGER deliberately let a
+	// gate file into a ledger that is not the gated repo's own, so foreign rows are a
+	// legitimate thing to hold, not something to refuse at write time. What was missing is
+	// that they arrived ANONYMOUS — a gate's own throwaway-repo fixture and a real trunk
+	// break were the same shape on disk, and only the fixture's package name told them
+	// apart. Naming the module at the point of creation is what makes that distinction a
+	// property of the row instead of a guess about its text.
+	//
+	// "" on any go.mod read failure, and on every row written before this field existed,
+	// which the reader must treat as UNKNOWN provenance — never as "foreign".
+	Module string `json:"module,omitempty"`
 }
 
 // trunkRedClass is the convergence key: the shared break's identity, independent of
@@ -186,6 +209,11 @@ func emitTrunkRedWitness(stderr io.Writer, root, gate, baseSha string, pkgs []st
 		Packages:   pkgs,
 		FirstBreak: strings.TrimSpace(firstBreak),
 		Session:    trunkRedSession(),
+		// Provenance, stamped from the repo actually being GATED — the one place in the
+		// system that knows it for certain. Resolved here rather than inferred later
+		// because after the row is on disk the only surviving clue is its package names,
+		// and reading provenance off those is exactly the guess this field replaces.
+		Module: trunkRedModulePath(root),
 	}
 	if err := appendTrunkRedRecord(ledger, rec); err != nil {
 		fmt.Fprintf(stderr, "fak: trunk-red witness append skipped (fail-open): %v\n", err)
@@ -272,53 +300,125 @@ func trunkRedWitnessNote(w trunkRedWitness) string {
 
 // ---- summary (fak trunk-red) ------------------------------------------------
 
+// trunkRedStatus is the EVIDENCE GRADE the fold assigns one break class. It exists
+// because "not provably resolved" and "still red" are different claims, and collapsing
+// them is how the fold came to assert 37 classes were "ALREADY red on the trunk" when
+// not one of them had been checked against HEAD at all. Only three answers are
+// admissible, and two of them are proofs.
+type trunkRedStatus string
+
+const (
+	// trunkRedStatusLive: the failing package's own tree at HEAD still REFERENCES the
+	// first-break symbol and declares it NOWHERE — the named break is still there.
+	trunkRedStatusLive trunkRedStatus = "still-undefined-at-head"
+	// trunkRedStatusUnprovable: neither proof could be made. The class is SURFACED with
+	// the reason, never dropped — a hidden live break is far worse than a surfaced stale
+	// one — but it is not asserted to be red either.
+	trunkRedStatusUnprovable trunkRedStatus = "unprovable"
+	// trunkRedStatusResolved: the trunk moved PAST the base AND the first-break symbol
+	// is declared at HEAD — the break is fixed, so the class folds out of the view.
+	trunkRedStatusResolved trunkRedStatus = "resolved"
+)
+
+// trunkRedVerdict is a status plus, when nothing could be proven, the NAMED reason the
+// class was surfaced anyway. The reason is the whole point: "unprovable" alone is the
+// same undifferentiated wall the fold is trying to stop printing.
+type trunkRedVerdict struct {
+	Status trunkRedStatus
+	Reason string
+}
+
+// The reasons a class can be surfaced without any proof about it. Each names a MISSING
+// WITNESS, not a guess about the break.
+const (
+	trunkRedReasonNoProbe           = "no resolve probe available"
+	trunkRedReasonNoRoot            = "no repo root to check HEAD against"
+	trunkRedReasonNoBase            = "the witness row carries no base sha"
+	trunkRedReasonNoSymbol          = "the witness row names no first-break symbol"
+	trunkRedReasonQualifiedSymbol   = "the first-break symbol is qualified, so it is declared in another package"
+	trunkRedReasonOutOfModule       = "the failing package(s) are not inside this module"
+	trunkRedReasonSymbolUncheckable = "git could not search HEAD for the symbol"
+	trunkRedReasonSymbolAbsent      = "HEAD neither declares nor references the symbol"
+	trunkRedReasonBaseNotMergedPast = "the remote trunk has not provably moved past the base"
+	trunkRedReasonUnnamedUnprovable = "the probe proved nothing and named no reason"
+	// trunkRedReasonForeignModule is the PROVENANCE verdict, and it is a stronger claim
+	// than trunkRedReasonOutOfModule: the row itself records that the gate which wrote it
+	// was run against a different module, so nothing about this repo's HEAD could confirm
+	// or clear it no matter what its packages are named. Out-of-module is INFERRED from
+	// the package strings after the fact; this is read off the writer's own stamp.
+	trunkRedReasonForeignModule = "the witness was recorded against a different module than this repo"
+)
+
+// trunkRedUnprovable is the surfaced-without-proof verdict.
+func trunkRedUnprovable(reason string) trunkRedVerdict {
+	if strings.TrimSpace(reason) == "" {
+		reason = trunkRedReasonUnnamedUnprovable
+	}
+	return trunkRedVerdict{Status: trunkRedStatusUnprovable, Reason: reason}
+}
+
 // trunkRedClassRollup is one converged shared break: the class, its member rows folded
-// to counts and the spread of clones/sessions/gates stuck on it, plus the first break
-// symbol for a one-glance headline.
+// to counts and the spread of clones/sessions/gates stuck on it, the first break symbol
+// for a one-glance headline, and the evidence grade that says whether the break was
+// PROVEN still there or merely could not be cleared.
 type trunkRedClassRollup struct {
-	Class      string   `json:"class"`
-	BaseSha    string   `json:"base_sha,omitempty"`
-	Packages   []string `json:"packages,omitempty"`
-	FirstBreak string   `json:"first_break,omitempty"`
-	Rows       int      `json:"rows"`
-	Sessions   int      `json:"sessions"`
-	Gates      []string `json:"gates,omitempty"`
-	FirstTs    string   `json:"first_ts,omitempty"`
-	LastTs     string   `json:"last_ts,omitempty"`
+	Class      string         `json:"class"`
+	BaseSha    string         `json:"base_sha,omitempty"`
+	Packages   []string       `json:"packages,omitempty"`
+	FirstBreak string         `json:"first_break,omitempty"`
+	Rows       int            `json:"rows"`
+	Sessions   int            `json:"sessions"`
+	Gates      []string       `json:"gates,omitempty"`
+	FirstTs    string         `json:"first_ts,omitempty"`
+	LastTs     string         `json:"last_ts,omitempty"`
+	Status     trunkRedStatus `json:"status,omitempty"`
+	KeepReason string         `json:"keep_reason,omitempty"` // set only when Status is unprovable
+	// Module is the provenance the member rows recorded: the module their gate ran
+	// against. "" means the rows predate the stamp — UNKNOWN provenance, not foreign.
+	Module string `json:"module,omitempty"`
 }
 
 // trunkRedSummary is the folded value view: the distinct shared breaks currently
-// witnessed, worst (most clones stuck) first. Classes PROVABLY resolved — the trunk
-// moved past the base AND the symbol that broke is defined at HEAD — are folded out
-// of the live view and only counted, so a wall of stale rows never buries the breaks
-// that are still biting.
+// witnessed, PROVEN-still-broken first. Classes PROVABLY resolved — the trunk moved
+// past the base AND the symbol that broke is declared at HEAD — are folded out and only
+// counted, so a wall of stale rows never buries the breaks that are still biting. The
+// rest are surfaced, but split into what was PROVEN still undefined at HEAD and what
+// merely could not be checked, each carrying the reason it could not be.
 type trunkRedSummary struct {
-	Ledger          string                `json:"ledger"`
-	Total           int                   `json:"total"`   // LIVE witness rows (resolved rows excluded)
-	Classes         []trunkRedClassRollup `json:"classes"` // distinct LIVE shared breaks
-	ResolvedClasses int                   `json:"resolved_classes,omitempty"`
-	ResolvedRows    int                   `json:"resolved_rows,omitempty"`
+	Ledger            string                `json:"ledger"`
+	Total             int                   `json:"total"`   // SURFACED witness rows (resolved rows excluded)
+	Classes           []trunkRedClassRollup `json:"classes"` // distinct SURFACED shared breaks
+	LiveClasses       int                   `json:"live_classes,omitempty"`
+	LiveRows          int                   `json:"live_rows,omitempty"`
+	UnprovableClasses int                   `json:"unprovable_classes,omitempty"`
+	UnprovableRows    int                   `json:"unprovable_rows,omitempty"`
+	ResolvedClasses   int                   `json:"resolved_classes,omitempty"`
+	ResolvedRows      int                   `json:"resolved_rows,omitempty"`
 }
 
 // summarizeTrunkRed folds ledger content into distinct convergence classes. Malformed
-// or foreign lines are skipped. Classes are ordered by session spread (how much of the
-// fleet is stuck), then row count, then class key — the worst shared break first.
+// or foreign lines are skipped. Classes PROVEN still undefined at HEAD come first — an
+// unprovable class outranking an actionable one is how the actionable one gets missed —
+// then by session spread (how much of the fleet is stuck), then row count, then class
+// key.
 //
-// resolved is the KEEP-SIDE resolve predicate. It is consulted ONCE PER CLASS, after
+// probe is the KEEP-SIDE evidence predicate. It is consulted ONCE PER CLASS, after
 // the fold rather than per row, so every row of a class shares one verdict and a class
 // can never be half-dropped (rows of one class may disagree about first_break, and a
 // class that surfaced with some of its rows silently missing would under-report how
-// much of the fleet is stuck). It must return true ONLY when the break is PROVABLY
-// resolved — see trunkRedGitResolver. A resolved class is folded out of the live view
-// and counted in ResolvedClasses/ResolvedRows instead.
+// much of the fleet is stuck). It may answer trunkRedStatusResolved ONLY when the break
+// is PROVABLY fixed — see trunkRedGitProbe. A resolved class is folded out of the view
+// and counted in ResolvedClasses/ResolvedRows instead. Every class it does not resolve
+// is surfaced, tagged with the grade it earned: PROVEN still undefined at HEAD, or
+// unprovable with the named reason.
 //
 // The fold refuses to even ASK about a class carrying no base sha or no first-break
-// symbol: with nothing to check ancestry or definedness against, such a class can never
-// be PROVEN resolved, so it is kept structurally — the keep-side invariant then holds
-// even against a buggy or always-true predicate, which is what pins it in a test. A nil
-// predicate likewise keeps everything. A hidden live break is far worse than a surfaced
+// symbol: with nothing to check ancestry or declaredness against, such a class can never
+// be PROVEN anything, so it is kept structurally — the keep-side invariant then holds
+// even against a buggy or always-resolved predicate, which is what pins it in a test. A
+// nil probe likewise keeps everything. A hidden live break is far worse than a surfaced
 // stale one, so every uncertainty resolves toward KEEP.
-func summarizeTrunkRed(content string, resolved func(trunkRedBreak) bool) trunkRedSummary {
+func summarizeTrunkRed(content string, probe func(trunkRedBreak) trunkRedVerdict) trunkRedSummary {
 	rows := jsonlledger.Parse(content, func(r trunkRedRecord) bool {
 		return r.Schema == trunkRedRecordSchema
 	})
@@ -337,6 +437,7 @@ func summarizeTrunkRed(content string, resolved func(trunkRedBreak) bool) trunkR
 				BaseSha:    r.BaseSha,
 				Packages:   r.Packages,
 				FirstBreak: r.FirstBreak,
+				Module:     r.Module,
 			}
 			byClass[class] = roll
 			order = append(order, class)
@@ -346,6 +447,12 @@ func summarizeTrunkRed(content string, resolved func(trunkRedBreak) bool) trunkR
 		roll.Rows++
 		if roll.FirstBreak == "" && r.FirstBreak != "" {
 			roll.FirstBreak = r.FirstBreak
+		}
+		// First non-empty wins, like FirstBreak: a class whose older rows predate the
+		// stamp still learns its provenance from a newer row, and an unstamped row never
+		// erases a stamped one.
+		if roll.Module == "" && r.Module != "" {
+			roll.Module = r.Module
 		}
 		if s := strings.TrimSpace(r.Session); s != "" {
 			sessionsByClass[class][s] = struct{}{}
@@ -376,16 +483,31 @@ func summarizeTrunkRed(content string, resolved func(trunkRedBreak) bool) trunkR
 		}
 		sort.Strings(gates)
 		roll.Gates = gates
-		if trunkRedClassResolved(*roll, resolved) {
+		verdict := trunkRedClassVerdict(*roll, probe)
+		if verdict.Status == trunkRedStatusResolved {
 			sum.ResolvedClasses++
 			sum.ResolvedRows += roll.Rows
 			continue
+		}
+		roll.Status = verdict.Status
+		roll.KeepReason = verdict.Reason
+		if verdict.Status == trunkRedStatusLive {
+			sum.LiveClasses++
+			sum.LiveRows += roll.Rows
+		} else {
+			sum.UnprovableClasses++
+			sum.UnprovableRows += roll.Rows
 		}
 		sum.Total += roll.Rows
 		sum.Classes = append(sum.Classes, *roll)
 	}
 	sort.SliceStable(sum.Classes, func(i, j int) bool {
 		a, b := sum.Classes[i], sum.Classes[j]
+		// A class PROVEN still undefined at HEAD outranks every unprovable one: it is
+		// the only kind the reader can act on without re-deriving the evidence.
+		if (a.Status == trunkRedStatusLive) != (b.Status == trunkRedStatusLive) {
+			return a.Status == trunkRedStatusLive
+		}
 		if a.Sessions != b.Sessions {
 			return a.Sessions > b.Sessions
 		}
@@ -408,32 +530,53 @@ type trunkRedBreak struct {
 	BaseSha    string
 	FirstBreak string
 	Packages   []string
+	// Module is the class's recorded provenance — the module the gate that wrote these
+	// rows was run against — or "" when the rows predate the stamp. A probe compares it
+	// to the module it is reading FOR; it never parses Packages to guess it.
+	Module string
 }
 
-// trunkRedClassResolved is the keep-side guard rail the fold puts AROUND the predicate.
-// It answers false — KEEP — for every class the predicate could not possibly prove
-// resolved, and only then asks. Deliberately structural: the invariant must not depend
-// on the predicate being correct.
-func trunkRedClassResolved(roll trunkRedClassRollup, resolved func(trunkRedBreak) bool) bool {
-	if resolved == nil {
-		return false // no way to check — KEEP
+// trunkRedClassVerdict is the keep-side guard rail the fold puts AROUND the probe. It
+// answers unprovable — KEEP, with a named reason — for every class the probe could not
+// possibly prove anything about, and only then asks. Deliberately structural: the
+// invariant must not depend on the probe being correct, which is why a test pins it
+// against a probe that claims EVERYTHING is resolved.
+//
+// A probe that answers trunkRedStatusUnprovable without naming a reason is given one, so
+// no surfaced class can ever appear in the view with an empty explanation.
+func trunkRedClassVerdict(roll trunkRedClassRollup, probe func(trunkRedBreak) trunkRedVerdict) trunkRedVerdict {
+	if probe == nil {
+		return trunkRedUnprovable(trunkRedReasonNoProbe) // no way to check — KEEP
 	}
 	base := strings.TrimSpace(roll.BaseSha)
 	sym := strings.TrimSpace(roll.FirstBreak)
-	if base == "" || sym == "" {
-		return false // no base to date, or no symbol to look up — KEEP
+	if base == "" {
+		return trunkRedUnprovable(trunkRedReasonNoBase) // nothing to date — KEEP
 	}
-	return resolved(trunkRedBreak{BaseSha: base, FirstBreak: sym, Packages: roll.Packages})
+	if sym == "" {
+		return trunkRedUnprovable(trunkRedReasonNoSymbol) // nothing to look up — KEEP
+	}
+	v := probe(trunkRedBreak{BaseSha: base, FirstBreak: sym, Packages: roll.Packages, Module: roll.Module})
+	switch v.Status {
+	case trunkRedStatusResolved, trunkRedStatusLive:
+		return trunkRedVerdict{Status: v.Status}
+	default:
+		return trunkRedUnprovable(v.Reason)
+	}
 }
 
-// trunkRedGitResolver returns the production resolve predicate for summarizeTrunkRed. A
-// break is PROVABLY resolved only when BOTH conjuncts hold:
+// trunkRedGitProbe returns the production evidence probe for summarizeTrunkRed. It
+// answers one of three grades, and TWO of them are proofs against HEAD:
 //
-//  1. its base sha is a STRICT ancestor of the remote trunk tip (`git merge-base
-//     --is-ancestor` exits 0 and the base is not the tip itself) — the trunk has moved
-//     PAST the commit the red was proven at; AND
-//  2. its first-break symbol is DEFINED at HEAD inside the failing packages' own
-//     directories — the thing that actually broke is back.
+//   - RESOLVED (fold the class out) requires BOTH conjuncts: the base sha is a STRICT
+//     ancestor of the remote trunk tip (`git merge-base --is-ancestor` exits 0 and the
+//     base is not the tip itself) — the trunk has moved PAST the commit the red was
+//     proven at — AND the first-break symbol is DECLARED at HEAD inside the failing
+//     packages' own directories: the thing that actually broke is back.
+//   - LIVE (surface it first) requires the mirror-image proof: HEAD's copy of the
+//     failing package still REFERENCES the first-break symbol and declares it nowhere,
+//     so the break the row names is still there.
+//   - UNPROVABLE (surface it, with the reason) is everything else.
 //
 // Conjunct 1 alone is NOT evidence of a fix, and shipping it alone is a live-break
 // hazard rather than a stale-row cleanup: every recorded base becomes an ancestor of the
@@ -442,42 +585,93 @@ func trunkRedClassResolved(roll trunkRedClassRollup, resolved func(trunkRedBreak
 // dropped 309 rows (91%) — everything except the bases git could not resolve at all.
 // Conjunct 2 is what makes the drop mean "fixed" instead of "old".
 //
-// EVERY uncertainty reports NOT resolved, keeping the class surfaced: no repo root, an
-// empty base or symbol, an unresolvable sha, a missing remote trunk ref (fresh clone, no
-// remote), a package outside this module, a symbol that is not a bare identifier, or any
-// git error at all. A hidden live break is far worse than a surfaced stale one.
+// The LIVE grade exists because the mirror mistake is just as costly in the other
+// direction: a fold whose only two answers are "resolved" and "not resolved" ends up
+// PRINTING every survivor as a live fleet blocker, which is the wall of stale-reading
+// signal this whole path exists to cut. LIVE is asserted only from the same class of
+// evidence a drop takes — a git read of HEAD, never the working tree, because on a
+// shared multi-session checkout the tree carries peers' uncommitted work.
 //
-// Both conjuncts are memoized — ancestry per base, definedness per symbol+dirs — so a
+// EVERY uncertainty is UNPROVABLE and keeps the class surfaced with its reason: no repo
+// root, an empty base or symbol, an unresolvable sha, a missing remote trunk ref (fresh
+// clone, no remote), a package outside this module, a symbol that is not a bare
+// identifier, or any git error at all.
+//
+// Both probes are memoized — ancestry per base, symbol state per symbol+dirs — so a
 // large ledger shells git once per distinct question rather than once per class, and
-// conjunct 2 is only asked when conjunct 1 already held.
-func trunkRedGitResolver(root string) func(trunkRedBreak) bool {
+// ancestry is only asked once the symbol reads as declared.
+func trunkRedGitProbe(root string) func(trunkRedBreak) trunkRedVerdict {
+	root = strings.TrimSpace(root)
 	mergedPast := map[string]bool{}
-	definedAtHead := map[string]bool{}
-	return func(b trunkRedBreak) bool {
+	stateAtHead := map[string]trunkRedSymbolState{}
+	// Resolved once for the whole fold: the module this probe is reading FOR.
+	readingModule := ""
+	if root != "" {
+		readingModule = strings.TrimSpace(trunkRedModulePath(root))
+	}
+	return func(b trunkRedBreak) trunkRedVerdict {
 		base := strings.TrimSpace(b.BaseSha)
 		sym := strings.TrimSpace(b.FirstBreak)
-		if strings.TrimSpace(root) == "" || base == "" || sym == "" {
-			return false // nothing checkable — KEEP
+		if root == "" {
+			return trunkRedUnprovable(trunkRedReasonNoRoot)
+		}
+		// PROVENANCE first, because it is the only fact here that comes from the writer
+		// rather than from re-deriving something about the row's text. A class whose rows
+		// record a different module was never about this repo, so no probe of this repo's
+		// HEAD can speak to it — and saying "recorded against a different module" is a
+		// materially better answer than the out-of-module inference below, which merely
+		// notices that the package strings do not map here.
+		//
+		// Both the empty cases keep the OLD answer on purpose: an unstamped row (every row
+		// written before the stamp existed) is UNKNOWN provenance, not foreign, and an
+		// unreadable local go.mod means we cannot compare at all. Neither may be upgraded
+		// into a foreign verdict — that would let a missing field masquerade as evidence.
+		if rowModule := strings.TrimSpace(b.Module); rowModule != "" && readingModule != "" && rowModule != readingModule {
+			return trunkRedUnprovable(trunkRedReasonForeignModule)
+		}
+		if base == "" {
+			return trunkRedUnprovable(trunkRedReasonNoBase)
+		}
+		if sym == "" {
+			return trunkRedUnprovable(trunkRedReasonNoSymbol)
+		}
+		if !trunkRedPlainIdent(sym) {
+			return trunkRedUnprovable(trunkRedReasonQualifiedSymbol)
 		}
 		dirs := trunkRedPackageDirs(root, b.Packages)
 		if len(dirs) == 0 {
-			return false // no in-module tree to search for the symbol — KEEP
-		}
-		merged, ok := mergedPast[base]
-		if !ok {
-			merged = trunkRedBaseMergedPast(root, base)
-			mergedPast[base] = merged
-		}
-		if !merged {
-			return false // the trunk has not provably moved past the base — KEEP
+			return trunkRedUnprovable(trunkRedReasonOutOfModule)
 		}
 		key := sym + " :: " + strings.Join(dirs, " ")
-		defined, ok := definedAtHead[key]
+		state, ok := stateAtHead[key]
 		if !ok {
-			defined = trunkRedSymbolDefinedAtHead(root, dirs, sym)
-			definedAtHead[key] = defined
+			state = trunkRedSymbolStateAtHead(root, dirs, sym)
+			stateAtHead[key] = state
 		}
-		return defined
+		switch state {
+		case trunkRedSymbolDeclared:
+			merged, ok := mergedPast[base]
+			if !ok {
+				merged = trunkRedBaseMergedPast(root, base)
+				mergedPast[base] = merged
+			}
+			if !merged {
+				return trunkRedUnprovable(trunkRedReasonBaseNotMergedPast)
+			}
+			return trunkRedVerdict{Status: trunkRedStatusResolved}
+		case trunkRedSymbolUndeclared:
+			// Referenced at HEAD in the failing package's own tree, declared nowhere in
+			// it, and nothing there even LOOKS like a declaration of it: the break the
+			// row names is still in the trunk's own HEAD.
+			return trunkRedVerdict{Status: trunkRedStatusLive}
+		case trunkRedSymbolAbsent:
+			// The reference itself is gone. Something changed, but "the caller was
+			// deleted" is not the repair conjunct 2 asks for, so this does not earn a
+			// drop — it earns a named surface.
+			return trunkRedUnprovable(trunkRedReasonSymbolAbsent)
+		default:
+			return trunkRedUnprovable(trunkRedReasonSymbolUncheckable)
+		}
 	}
 }
 
@@ -531,26 +725,88 @@ func trunkRedPackageDirs(root string, pkgs []string) []string {
 	return dirs
 }
 
-// trunkRedSymbolDefinedAtHead reports whether sym has a package-level Go declaration at
-// HEAD in one of dirs — resolve conjunct 2. It reads HEAD, never the working tree: on a
-// shared multi-session checkout the tree is full of peers' uncommitted work, and a
-// symbol that only exists in someone's unstaged edit is not a fix anyone else has.
+// trunkRedSymbolState is what a git read of HEAD could establish about the first-break
+// symbol inside the failing packages' own directories. It is deliberately FOUR-valued:
+// "git could not answer" and "the answer is no" are different facts, and a two-valued
+// probe that collapses them can only ever support one of the two proofs this fold needs.
+type trunkRedSymbolState int
+
+const (
+	// trunkRedSymbolUnknown: git could not answer, or the answer is ambiguous enough
+	// that neither proof may rest on it.
+	trunkRedSymbolUnknown trunkRedSymbolState = iota
+	// trunkRedSymbolDeclared: a package-level declaration of sym exists at HEAD.
+	trunkRedSymbolDeclared
+	// trunkRedSymbolUndeclared: sym is still referenced at HEAD in these dirs and
+	// declared nowhere in them.
+	trunkRedSymbolUndeclared
+	// trunkRedSymbolAbsent: HEAD's copy of these dirs neither declares nor mentions sym.
+	trunkRedSymbolAbsent
+)
+
+// trunkRedSymbolStateAtHead reads HEAD — never the working tree, because on a shared
+// multi-session checkout the tree is full of peers' uncommitted work and a symbol that
+// only exists in someone's unstaged edit is not a fix anyone else has — and grades what
+// it finds inside the failing packages' own directories.
 //
-// `git grep` exits non-zero both when it finds NO match and when it fails outright, and
-// this collapses the two to the same answer on purpose: false, meaning KEEP.
-func trunkRedSymbolDefinedAtHead(root string, dirs []string, sym string) bool {
+// The order of the three greps is the honesty of the answer:
+//
+//  1. a package-level declaration => DECLARED (the repair conjunct 2 asks for);
+//  2. else an INDENTED line that even looks like a declaration of sym — a grouped
+//     `var (...)` / `const (...)` member, a struct field — => UNKNOWN. The column-0
+//     pattern cannot see a grouped declaration, so this is the guard that stops a
+//     grouped-decl miss from being reported as a positive "still undeclared" proof;
+//  3. else a bare word reference => UNDECLARED (referenced but declared nowhere: the
+//     named break is still there); no reference at all => ABSENT.
+func trunkRedSymbolStateAtHead(root string, dirs []string, sym string) trunkRedSymbolState {
 	if strings.TrimSpace(root) == "" || len(dirs) == 0 || !trunkRedPlainIdent(sym) {
-		return false
+		return trunkRedSymbolUnknown
 	}
-	args := []string{"grep", "--no-color", "-I", "-l", "-E", trunkRedDefinitionPattern(sym), "HEAD", "--"}
+	if hit, ok := trunkRedGrepAtHead(root, dirs, "-E", trunkRedDefinitionPattern(sym)); !ok {
+		return trunkRedSymbolUnknown
+	} else if hit {
+		return trunkRedSymbolDeclared
+	}
+	if hit, ok := trunkRedGrepAtHead(root, dirs, "-E", trunkRedIndentedDeclPattern(sym)); !ok || hit {
+		return trunkRedSymbolUnknown
+	}
+	hit, ok := trunkRedGrepAtHead(root, dirs, "-F", "-w", "-e", sym)
+	if !ok {
+		return trunkRedSymbolUnknown
+	}
+	if hit {
+		return trunkRedSymbolUndeclared
+	}
+	return trunkRedSymbolAbsent
+}
+
+// trunkRedSymbolDefinedAtHead reports whether sym has a package-level Go declaration at
+// HEAD in one of dirs — resolve conjunct 2. Anything short of a proven declaration is
+// false, meaning KEEP.
+func trunkRedSymbolDefinedAtHead(root string, dirs []string, sym string) bool {
+	return trunkRedSymbolStateAtHead(root, dirs, sym) == trunkRedSymbolDeclared
+}
+
+// trunkRedGrepAtHead runs one `git grep` over dirs' Go files at HEAD. It returns whether
+// the pattern matched AND whether git could answer at all: `git grep` exits 1 for "no
+// match" and >1 for a real failure, so the two are kept apart rather than collapsed. A
+// failure read as "no match" would turn a broken git into evidence of absence, which is
+// exactly the kind of silent, agreeable answer this fold must never give.
+func trunkRedGrepAtHead(root string, dirs []string, pattern ...string) (hit, ok bool) {
+	args := append([]string{"grep", "--no-color", "-I", "-l"}, pattern...)
+	args = append(args, "HEAD", "--")
 	for _, d := range dirs {
 		args = append(args, d+"/*.go")
 	}
 	out, err := gitOut(root, args...)
-	if err != nil {
-		return false // no match, or git failed — either way KEEP
+	if err == nil {
+		return strings.TrimSpace(out) != "", true
 	}
-	return strings.TrimSpace(out) != ""
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, true // git ran and found nothing
+	}
+	return false, false // git could not answer
 }
 
 // trunkRedDefinitionPattern is the POSIX-ERE `git grep` pattern matching a PACKAGE-LEVEL
@@ -561,6 +817,17 @@ func trunkRedSymbolDefinedAtHead(root string, dirs []string, sym string) bool {
 // as undefined now exists.
 func trunkRedDefinitionPattern(sym string) string {
 	return "^(func|type|var|const)[[:space:]]+" + sym + "([[:space:]]|\\(|\\[|$)"
+}
+
+// trunkRedIndentedDeclPattern matches an INDENTED line that starts with sym — a grouped
+// `var (...)` / `const (...)` member, a struct field, a one-per-line parameter. None of
+// these proves a package-scope declaration, so they never earn a RESOLVED drop; what
+// they do is make the opposite claim unsafe, because a grouped declaration is a real
+// declaration the column-0 pattern cannot see. Matching here therefore downgrades the
+// symbol to UNKNOWN: over-matching costs a class its LIVE promotion, never its place in
+// the view.
+func trunkRedIndentedDeclPattern(sym string) string {
+	return "^[[:space:]]+" + sym + "([[:space:]]|,|=|$)"
 }
 
 // trunkRedPlainIdent reports whether sym is a bare Go identifier — the only shape this
@@ -617,12 +884,26 @@ func trunkRedBaseMergedPast(root, base string) bool {
 	return true
 }
 
+// trunkRedStatusLabel is the one-glance evidence grade printed beside a surfaced class.
+// An unprovable class ALWAYS carries its reason, so no line in the view can be read as a
+// bare assertion that the break is live.
+func trunkRedStatusLabel(c trunkRedClassRollup) string {
+	if c.Status == trunkRedStatusLive {
+		return "still undefined at HEAD"
+	}
+	reason := strings.TrimSpace(c.KeepReason)
+	if reason == "" {
+		reason = trunkRedReasonUnnamedUnprovable
+	}
+	return "unprovable: " + reason
+}
+
 // renderTrunkRed formats the folded view for a human reader.
 func renderTrunkRed(sum trunkRedSummary) string {
 	var b strings.Builder
 	if sum.Total == 0 {
 		if sum.ResolvedRows > 0 {
-			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base merged past on the remote trunk AND first-break symbol defined at HEAD).\n", sum.ResolvedClasses, sum.ResolvedRows)
+			fmt.Fprintf(&b, "fak trunk-red: no LIVE shared breaks — %d resolved class(es) across %d witness row(s) folded out (base merged past on the remote trunk AND first-break symbol declared at HEAD).\n", sum.ResolvedClasses, sum.ResolvedRows)
 			fmt.Fprintf(&b, "  ledger: %s", sum.Ledger)
 			return strings.TrimRight(b.String(), "\n")
 		}
@@ -631,15 +912,21 @@ func renderTrunkRed(sum trunkRedSummary) string {
 		b.WriteString("  A build gate records one row here each time it admits a commit/push over a break it proved was ALREADY red on the trunk (a peer's, not yours).")
 		return strings.TrimRight(b.String(), "\n")
 	}
-	fmt.Fprintf(&b, "fak trunk-red: %d shared break(s) across %d witness row(s)\n", len(sum.Classes), sum.Total)
+	fmt.Fprintf(&b, "fak trunk-red: %d shared break(s) across %d witness row(s) — %d still undefined at HEAD, %d unprovable\n",
+		len(sum.Classes), sum.Total, sum.LiveClasses, sum.UnprovableClasses)
 	fmt.Fprintf(&b, "  ledger: %s\n", sum.Ledger)
-	b.WriteString("  Each break below is ALREADY red on the trunk — every clone that touches it inherits it. Fix it at its source; one fix clears every stuck clone.\n")
+	if sum.LiveClasses > 0 {
+		b.WriteString("  [still undefined at HEAD] is the break actually biting: HEAD's own copy of the failing package still references the symbol and declares it nowhere. Fix it at its source; one fix clears every stuck clone.\n")
+	}
+	if sum.UnprovableClasses > 0 {
+		b.WriteString("  [unprovable] is surfaced ON PURPOSE and is NOT a claim the break is live: the fold could not prove it either way, for the reason on its own line. A hidden live break is far worse than a surfaced stale one.\n")
+	}
 	for _, c := range sum.Classes {
 		pkgs := strings.Join(c.Packages, " ")
 		if pkgs == "" {
 			pkgs = "(unnamed)"
 		}
-		fmt.Fprintf(&b, "  - %s\n", pkgs)
+		fmt.Fprintf(&b, "  - [%s] %s\n", trunkRedStatusLabel(c), pkgs)
 		fmt.Fprintf(&b, "      %d clone(s) across %d session(s) stuck", c.Rows, c.Sessions)
 		if len(c.Gates) > 0 {
 			fmt.Fprintf(&b, " (gate: %s)", strings.Join(c.Gates, ","))
@@ -659,7 +946,7 @@ func renderTrunkRed(sum trunkRedSummary) string {
 		}
 	}
 	if sum.ResolvedRows > 0 {
-		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base merged past on the remote trunk AND first-break symbol defined at HEAD)\n", sum.ResolvedClasses, sum.ResolvedRows)
+		fmt.Fprintf(&b, "  (+ %d resolved class(es) across %d row(s) folded out: base merged past on the remote trunk AND first-break symbol declared at HEAD)\n", sum.ResolvedClasses, sum.ResolvedRows)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -697,7 +984,7 @@ func runTrunkRed(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak trunk-red: read %s: %v\n", ledger, err)
 		return 1
 	}
-	sum := summarizeTrunkRed(content, trunkRedGitResolver(repoRoot()))
+	sum := summarizeTrunkRed(content, trunkRedGitProbe(repoRoot()))
 	sum.Ledger = ledger
 	if *jsonFlag {
 		enc := json.NewEncoder(stdout)

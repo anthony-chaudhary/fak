@@ -118,5 +118,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "kvprefixreusesupported",
+      "canonical": "KVPrefixReuseSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Config predicate reporting whether a *KVCache is a COMPLETE session prefix for this architecture — i.e. whether cloning the cache carries the whole of what the session already ingested. True for cached architectures whose per-layer K/V rows are the entire state; false for the gemma4 recompute bridge, whose state is the token history and whose cache stays empty.",
+      "distinction": "ExactSpanSupported asks whether an engine can EVICT an exact span from a cache it already holds; this asks whether the cache IS the state at all. A recompute architecture answers yes to neither, but for different reasons: eviction is inert because there are no rows, while prefix reuse is unsound because the rows were never where the prefix lived.",
+      "distinct_from": [
+        "x2-support-maturity-exactspansupported"
+      ],
+      "aliases": [],
+      "grounding": "KVPrefixReuseSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

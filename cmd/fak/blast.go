@@ -189,43 +189,36 @@ func liveBlastLeases(root string, now time.Time) ([]blastradius.Lease, error) {
 // a fixture the operator hands the estimator must be well-formed, unlike the shared
 // append ledgers that tolerate torn writes.
 func readBlastLeases(path string) ([]blastradius.Lease, error) {
+	return readBlastJSONL[blastradius.Lease](path)
+}
+
+// readBlastJSONL decodes one JSONL fixture into a slice of T. Blank lines are skipped so a
+// trailing newline is not read as a record, while a malformed line stays the hard error the
+// contract above demands, reported with its 1-based line number. Both fixture shapes the
+// join takes are parsed by this one rule, so leases and issues can never come to disagree
+// about what a well-formed fixture is.
+func readBlastJSONL[T any](path string) ([]T, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var out []blastradius.Lease
+	var out []T
 	for i, line := range strings.Split(string(data), "\n") {
 		s := strings.TrimSpace(line)
 		if s == "" {
 			continue
 		}
-		var l blastradius.Lease
-		if err := json.Unmarshal([]byte(s), &l); err != nil {
+		var v T
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
 			return nil, fmt.Errorf("%s line %d: %w", path, i+1, err)
 		}
-		out = append(out, l)
+		out = append(out, v)
 	}
 	return out, nil
 }
 
 func readBlastIssues(path string) ([]blastradius.Issue, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var out []blastradius.Issue
-	for i, line := range strings.Split(string(data), "\n") {
-		s := strings.TrimSpace(line)
-		if s == "" {
-			continue
-		}
-		var is blastradius.Issue
-		if err := json.Unmarshal([]byte(s), &is); err != nil {
-			return nil, fmt.Errorf("%s line %d: %w", path, i+1, err)
-		}
-		out = append(out, is)
-	}
-	return out, nil
+	return readBlastJSONL[blastradius.Issue](path)
 }
 
 // trimModulePrefix maps a full import path down to its repo-relative dir so the broken

@@ -140,6 +140,46 @@ _HEADER_BLOCK = re.compile(r"<#(.*?)#>", re.DOTALL)
 _TASKNAME = re.compile(r"\$TaskName\s*=\s*['\"]([^'\"]+)['\"]")
 _TICK_TOOL = re.compile(r"tools[\\/]([A-Za-z0-9_]+\.(?:py|ps1))")
 
+# A published task name has to be a STATIC literal. PowerShell interpolates a double-quoted
+# string, so a captured body carrying ``$`` or a backtick (``"Fleet$($Suffix)Doctor"``)
+# names no task that exists on the host; resolving it would mean RUNNING the registrar,
+# which this read-only fold never does. Refuse the guess and publish the marker instead —
+# a task name nothing answers to is worse in a ground-truth doc than an admitted gap. The
+# installer end of the same value was pinned to a literal by #5409; this is the reader end.
+_INTERPOLATED = re.compile(r"[$`]")
+NAME_UNRESOLVED = "(unresolved: interpolated name)"
+
+
+def _comment_start(line: str) -> int | None:
+    """Index of the ``#`` that opens a trailing comment on ``line``, else None. A ``#``
+    inside a quoted string is a character, not a comment, so only one standing at even
+    quote parity counts."""
+    single = double = 0
+    for i, ch in enumerate(line):
+        if ch == "'" and double % 2 == 0:
+            single += 1
+        elif ch == '"' and single % 2 == 0:
+            double += 1
+        elif ch == "#" and single % 2 == 0 and double % 2 == 0:
+            return i
+    return None
+
+
+def _strip_ps_comments(text: str) -> str:
+    """Blank every PowerShell comment, preserving line and column shape.
+
+    This is what anchors the task-name read to the script's real param/assignment site: a
+    ``$TaskName = '...'`` written in the ``<# ... #>`` usage header or in a ``#`` comment is
+    documentation of an override, not the default the task installs under, and must not win
+    the first-match race against it.
+    """
+    blanked = _HEADER_BLOCK.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    out: list[str] = []
+    for line in blanked.split("\n"):
+        cut = _comment_start(line)
+        out.append(line if cut is None else line[:cut])
+    return "\n".join(out)
+
 # Cadence is declared several ways across the registrars; resolve them all from the actual
 # trigger so a loop's real fire period is read, not a hard-coded guess:
 #   -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes)   ($EveryMinutes/$EveryMin/literal)
@@ -280,12 +320,20 @@ def parse_register_ps1(text: str, filename: str) -> dict[str, Any] | None:
     """Parse one ``register_*.ps1`` into a loop record, or None when it declares no task.
 
     Pure: takes the file text + its basename, returns
-    ``{surface, name, cadence, cadence_minutes, sink, tick, purpose, source}``.
+    ``{surface, name, cadence, cadence_minutes, sink, tick, purpose, source, name_unresolved}``.
+
+    The name is read from the COMMENT-STRIPPED text (a header-block mention cannot shadow
+    the param default) and is refused when it is not a static literal — the record still
+    carries the loop, with ``name`` set to :data:`NAME_UNRESOLVED` and ``name_unresolved``
+    true, so the doc, the Slack card and the exit code all show which registrar drifted.
     """
-    mname = _TASKNAME.search(text)
+    mname = _TASKNAME.search(_strip_ps_comments(text))
     if not mname:
         return None
     name = mname.group(1)
+    name_unresolved = _INTERPOLATED.search(name) is not None
+    if name_unresolved:
+        name = NAME_UNRESOLVED
 
     minutes, cadence = extract_cadence(text)
 
@@ -310,6 +358,7 @@ def parse_register_ps1(text: str, filename: str) -> dict[str, Any] | None:
         "tick": ("tools/" + tick) if tick else "",
         "purpose": purpose,
         "source": "tools/" + filename,
+        "name_unresolved": name_unresolved,
     }
 
 
@@ -414,6 +463,9 @@ def summarize(loops: list[dict[str, Any]]) -> dict[str, Any]:
         "local": by_sink.get(SINK_LOCAL, 0),
         "github": by_sink.get(SINK_GITHUB, 0),
         "by_sink": by_sink,
+        # Loops whose declared task name could not be read as a literal — a refusal count,
+        # carried so every sink (doc, Slack, --json, exit code) can surface it.
+        "unresolved": sum(1 for lp in loops if lp.get("name_unresolved")),
     }
 
 
@@ -442,6 +494,13 @@ def render_md(inv: dict[str, Any], now: str) -> str:
                f"Reporting to (inferred): {s['slack']} → Slack, {s['github']} → GitHub "
                f"issues, {s['repo']} → repo doc, {s['local']} → operator-local.")
     out.append("")
+
+    if s.get("unresolved"):
+        out.append(f"**Refused {s['unresolved']} task name(s).** A `$TaskName` default "
+                   "built from an interpolated string names no task that exists on the "
+                   f"host, so it is published as `{NAME_UNRESOLVED}` rather than guessed. "
+                   "Pin the default in the Source script to a quoted literal.")
+        out.append("")
 
     tasks = [lp for lp in loops if lp["surface"] == "scheduled-task"]
     if tasks:
@@ -484,6 +543,9 @@ def render_slack(inv: dict[str, Any], trend: str = "") -> str:
              f"({s['tasks']} scheduled tasks · {s['workflows']} cron workflows)"]
     lines.append(f"report → slack {s['slack']} · github {s['github']} · "
                  f"repo-doc {s['repo']} · local {s['local']}")
+    if s.get("unresolved"):
+        lines.append(f"refused {s['unresolved']} task name(s): an interpolated $TaskName "
+                     "names no real task — pin the default to a quoted literal")
     fast = _fastest(inv["loops"])
     if fast:
         parts = " · ".join(f"{lp['name']} {lp['cadence']}" for lp in fast)
@@ -639,6 +701,9 @@ def main(argv: list[str] | None = None) -> int:
               f"({s['tasks']} scheduled tasks · {s['workflows']} cron workflows) — "
               f"slack {s['slack']} · github {s['github']} · repo-doc {s['repo']} · "
               f"local {s['local']}")
+        if s.get("unresolved"):
+            print(f"  refused {s['unresolved']} task name(s): an interpolated $TaskName "
+                  f"names no real task — pin the default to a quoted literal")
         if args.md:
             print(f"  wrote {args.md}")
         if trend:
@@ -656,6 +721,11 @@ def main(argv: list[str] | None = None) -> int:
     # LastTaskResult surfaces the misconfiguration (a dry-run posting nothing is expected).
     if args.slack and not args.dry_run and slack_result is not None \
             and not slack_result.get("posted"):
+        return 1
+    # Same contract for a registrar whose task name is not a static literal: that is a
+    # declaration bug in the tree, not a transient hiccup, so LastTaskResult must show it.
+    # The doc is still rendered (carrying the marker) — this reports, it does not abort.
+    if s.get("unresolved"):
         return 1
     return 0
 

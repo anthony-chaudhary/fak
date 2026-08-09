@@ -21,12 +21,22 @@
 //
 // Out of scope for this spine (each is a separate epic child): cross-trace
 // auto-promotion (W2), the blast-radius agent set (W3), dispatcher hold wiring
-// (W4), fixer election (W5), the operator card (W7), and any
-// TTL/GC policy beyond the plain unexpired check here (W8). The witness-gated
+// (W4), fixer election (W5), and the operator card (W7). The witness-gated
 // auto-release (W6, #2718) folds through this core: WithResolve stamps a
 // superseding resolved row, and Match / FindLatestLive read a signature's state as
 // its LATEST row (append-to-supersede) — so a resolved (or expired) latest row
 // retracts the signature even though its earlier open rows still sit on the ledger.
+//
+// GC IS IN SCOPE AND HAS LANDED (#3471) — this paragraph used to say the opposite,
+// and the append-to-supersede design makes that a load-bearing correction: because
+// resolve/revoke/claim each ADD a row and DefaultRecordTTLSeconds only bounds MATCH
+// liveness, superseded and expired rows accrete on disk forever unless something
+// prunes them. Compact/CompactStats below are that fold (kept minimal current state:
+// every live signature, plus a bounded DefaultCompactKeepTerminal tail of
+// resolved/revoked history), driven by the `fak knownbad compact` verb in the shell;
+// the read side is bounded separately by the dispatch route's stat-keyed ledger cache
+// so the hot path no longer re-parses the whole file per tick. Read this before
+// re-filing "the ledger grows without bound" — the bound exists.
 package knownbad
 
 import (

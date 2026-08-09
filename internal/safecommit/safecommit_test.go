@@ -778,6 +778,59 @@ func TestReviewRefuteBlocksBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestReviewUnusableVerdictFailsClosed(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	locked := false
+	opts := baseOpts()
+	opts.Review = &ReviewOptions{
+		Model: "cheap-scout",
+		Reviewer: func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error) {
+			return modelroute.ReviewResult{Verdict: modelroute.ReviewVerdict("garbage")}, nil
+		},
+	}
+	lock := func(LockOptions) (func(), error) {
+		locked = true
+		return func() {}, nil
+	}
+
+	res, err := CommitWith(context.Background(), g.run, lock, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reason != ReasonReviewRefuted {
+		t.Fatalf("reason = %q, want %q", res.Reason, ReasonReviewRefuted)
+	}
+	if res.Review == nil || res.Review.Verdict != modelroute.ReviewRefute {
+		t.Fatalf("unusable reviewer answer must be recorded as refuted: %+v", res.Review)
+	}
+	if !strings.Contains(res.Review.Reason, `unusable verdict "garbage"`) {
+		t.Fatalf("review reason lost malformed verdict: %+v", res.Review)
+	}
+	if g.sawSubcommand("commit") || locked {
+		t.Fatalf("unusable reviewer answer must stop before lock/commit; locked=%v calls=%v", locked, g.calls)
+	}
+}
+
+func TestReviewAbsentFailsOpenAndRecords(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	opts.Review = &ReviewOptions{Model: "cheap-scout"}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Verified || res.Reason != "" {
+		t.Fatalf("absent reviewer must fail open to a verified commit, got %+v", res)
+	}
+	if res.Review == nil || res.Review.Verdict != modelroute.ReviewUnavailable {
+		t.Fatalf("absent review was not recorded as unavailable: %+v", res.Review)
+	}
+	if !g.sawSubcommand("commit") {
+		t.Fatalf("absent reviewer should still commit; calls=%v", g.calls)
+	}
+}
+
 func TestReviewUnavailableFailsOpenAndRecords(t *testing.T) {
 	g := &fakeGit{reply: onTrunkBase()}
 	opts := baseOpts()

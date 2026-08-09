@@ -1,5 +1,9 @@
 {
   "schema": "fak-concept-disambiguation-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-08-05",
+    "fak_version": "0.43.0"
+  },
   "glossary": "",
   "families": [
     {
@@ -36,7 +40,7 @@
         },
         {
           "category": "incidental",
-          "reason": "path helper naming \u003cgit-common-dir\u003e/fak/token-cache (#4330); concrete dir name, cf. cachedir/usercachedir",
+          "reason": "path helper naming <git-common-dir>/fak/token-cache (#4330); concrete dir name, cf. cachedir/usercachedir",
           "token": "TokenCacheDir"
         },
         {
@@ -153,23 +157,283 @@
           "category": "incidental",
           "reason": "A live Windows Scheduled Task name, recorded as a row of measured fleet data in the taskvc inventory -- not a term in the audit's vocabulary. Its meaning is entirely given by the task/capture pair it names, and the roster turns over whenever a fleet loop is added or retired, so positioning it would book concept coverage for the contents of a data table and go stale on the next fleet change. Matches the set-wide INCIDENTAL classification already applied to this inventory's task names and installer basenames in 24cc467aa.",
           "token": "July4CacheValueAutospawn"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "cache_creation_span"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "cacheCreationSpanLabel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "CacheCreationTokensHeadOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "CacheCreationTokensMessagePrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "inferCacheCreationTokensHeadOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "inferCacheCreationTokensMessagePrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "maybeUpgradeAnthropicCacheTTL1HScoped"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "UpgradeAnthropicStableCacheTTL1hHeadOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation and wire symbol for the #2186 managed-cache message-prefix ablation; not a new user-facing cache concept.",
+          "token": "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON field name on the guardCompactionWitness row for gateway's already-positioned CompactionCacheReadTokens / FakCompactionCacheReadTokens value. A serialization key that carries the warm witness on the row so an auditor never reaches for a fleet-cumulative cache_read; not a new cache concept.",
+          "token": "cache_read_at_fire"
+        },
+        {
+          "category": "incidental",
+          "reason": "A 64 MiB default byte bound on the gitbroker Class A object store; a sizing constant for one cache instance, not a cache concept.",
+          "token": "DefaultCacheBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the gitbroker stats document counting served-from-store answers; a wire label for an existing counter.",
+          "token": "cache_hits"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the gitbroker stats document counting answers that fell through to a live git spawn; a wire label for an existing counter.",
+          "token": "cache_misses"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the gitbroker stats document reporting the store's current byte footprint; a wire label for an existing gauge.",
+          "token": "cache_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constructor for the gitbroker Class A object store; it allocates the map and its byte bound, carrying no concept beyond the store it builds.",
+          "token": "newCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "local flag variable for canonical cached-input pricing; not a separate cache concept (#5771)",
+          "token": "cachedPrice"
+        },
+        {
+          "category": "incidental",
+          "reason": "local scheduler-weight flag for canonical cached-input tokens; not a separate cache concept (#5771)",
+          "token": "cachedWeight"
+        },
+        {
+          "category": "incidental",
+          "reason": "price field for the input.cached token class defined by tokenprofile; not a separate cache concept (#5771)",
+          "token": "InputCachedPerMillion"
+        },
+        {
+          "category": "incidental",
+          "reason": "price field for the input.uncached token class defined by tokenprofile; not a separate cache concept (#5771)",
+          "token": "InputUncachedPerMillion"
+        },
+        {
+          "category": "incidental",
+          "reason": "identifier for the canonical input.cached token class in tokenprofile; the class is documented by the #5771 spine, not an additional cache mechanism",
+          "token": "InputCached"
+        },
+        {
+          "category": "incidental",
+          "reason": "identifier for the canonical input.uncached token class in tokenprofile; the class is documented by the #5771 spine, not an additional cache mechanism",
+          "token": "InputUncached"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "no_cache_state_delta"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "ReasonCacheState"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "cache_state_changed"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "VerdictNoCacheStateDelta"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "CacheStateAllowlist"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "NewCacheStateAllowlist"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "NonCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "non_cache_fingerprint"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "cache_state_fingerprint"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "NonCacheParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): it names the cold-vs-warm CACHE-STATE dimension of a benchmark trial's declared setup, not a cache implementation (raw KV store / vCache page table / provider prompt cache / cachemeta sidecar) that this family disambiguates.",
+          "token": "DefaultCacheStateAllowlist"
+        },
+        {
+          "category": "incidental",
+          "reason": "an org-policy refusal reason string, not a cache-subsystem concept: it names why writing the last-good record failed, and matches this family only because the word cache is a substring of the file it writes",
+          "token": "cache_write_failed"
+        },
+        {
+          "category": "incidental",
+          "reason": "an org-policy refusal reason string, not a cache-subsystem concept: it names a last-good record stamped ahead of our clock, and matches this family only because the record it describes lives in a cache file",
+          "token": "cache_future_dated"
+        },
+        {
+          "category": "incidental",
+          "reason": "an org-policy refusal reason string, not a cache-subsystem concept: it names a last-good envelope that no longer verifies under the current trust anchor, which is a signature outcome rather than a caching one",
+          "token": "cache_no_longer_verifies"
+        },
+        {
+          "category": "incidental",
+          "reason": "an org-policy refusal reason string, not a cache-subsystem concept: it names a last-good record whose envelope bytes will not decode, and matches this family only by the word cache in the record's name",
+          "token": "cache_undecodable"
+        },
+        {
+          "category": "incidental",
+          "reason": "an org-policy refusal reason string, not a cache-subsystem concept: it names a last-good file that would not load at all, distinct from the ordinary absent case which is not a refusal",
+          "token": "cache_unreadable"
+        },
+        {
+          "category": "incidental",
+          "reason": "the environment variable naming the org last-good file's location; a configuration knob for the policy plane, matched here only because the file it points at is a cache",
+          "token": "FAK_ORG_POLICY_CACHE_PATH"
+        },
+        {
+          "category": "incidental",
+          "reason": "the resolver for the org last-good file path; a policy-plane path helper, matched here only because the file it resolves is a cache",
+          "token": "OrgPolicyCachePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "the Go constant holding the org last-good path environment variable's name; a policy-plane config identifier, matched here only by the word cache",
+          "token": "OrgPolicyCachePathEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #2830's local descriptor interface, not a new cache architecture concept",
+          "token": "CacheLever"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type for issue #2830 descriptors",
+          "token": "identityCacheLever"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private issue #2830 descriptor slice, not a distinct cache concept",
+          "token": "builtinCacheLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #2830 registry accessor, not a distinct cache mechanism",
+          "token": "CacheLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private issue #2830 registration helper, not a distinct cache mechanism",
+          "token": "registerCacheLevers"
         }
       ],
       "id": "cache",
       "ignore": [
+        "CacheCreationTokensHeadOnly",
+        "CacheCreationTokensMessagePrefix",
+        "CacheLever",
+        "CacheLevers",
+        "CacheStateAllowlist",
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
+        "DefaultCacheBytes",
+        "DefaultCacheStateAllowlist",
+        "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
+        "InputCached",
+        "InputCachedPerMillion",
+        "InputUncached",
+        "InputUncachedPerMillion",
         "July4CacheValueAutospawn",
+        "NewCacheStateAllowlist",
+        "NonCache",
+        "NonCacheParity",
+        "OrgPolicyCachePath",
+        "OrgPolicyCachePathEnv",
+        "ReasonCacheState",
         "TokenCacheDir",
+        "UpgradeAnthropicStableCacheTTL1hHeadOnly",
+        "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes",
+        "VerdictNoCacheStateDelta",
         "WindowCache",
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
+        "builtinCacheLevers",
         "cacheBurstBacktest",
+        "cacheCreationSpanLabel",
         "cacheValueGateFactsFromReport",
+        "cache_bytes",
+        "cache_creation_span",
+        "cache_future_dated",
+        "cache_hits",
+        "cache_misses",
+        "cache_no_longer_verifies",
+        "cache_read_at_fire",
+        "cache_state_changed",
+        "cache_state_fingerprint",
         "cache_trace_test",
+        "cache_undecodable",
+        "cache_unreadable",
+        "cache_write_failed",
         "cacheable",
         "cachebreakevents",
         "cachecreatetok",
@@ -177,6 +441,8 @@
         "cachecreation",
         "cachecreationtokensupgraded",
         "cached",
+        "cachedPrice",
+        "cachedWeight",
         "cachedecay",
         "cachedhits",
         "cachedir",
@@ -218,12 +484,19 @@
         "droppedcachedtokens",
         "fakcachevalueinputpermtokusd",
         "flushcache",
+        "identityCacheLever",
+        "inferCacheCreationTokensHeadOnly",
+        "inferCacheCreationTokensMessagePrefix",
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",
         "lastcacherd",
         "loadCacheValueGateBaseline",
+        "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
+        "newCache",
+        "no_cache_state_delta",
+        "non_cache_fingerprint",
         "normalizedSchemaCacheCap",
         "normalizedSchemaCacheLen",
         "observecachettlupgrade",
@@ -232,6 +505,7 @@
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
+        "registerCacheLevers",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
         "tokencache",
@@ -506,34 +780,304 @@
           "category": "incidental",
           "reason": "an ordinary English verb in a file-header comment describing that walk/run forward to the standing shells; not a guard-gate concept",
           "token": "DELEGATE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a Go symbol: the environment-variable NAME string that redirects where the positioned self-tighten overlay file (guardSelfTightenOverlay) is read from, used for tests and non-repo launches. A path knob for an already-positioned concept, not a distinct guard/gate concept of its own.",
+          "token": "FAK_GUARD_SELF_TIGHTEN_OVERLAY"
+        },
+        {
+          "category": "incidental",
+          "reason": "The unexported Go const that merely holds that env-var name string. A name binding for the positioned self-tighten overlay path override, not a distinct guard/gate concept - the same category as guardStopHookOperatorQuestionEnvMode, already ignored here.",
+          "token": "guardSelfTightenOverlayEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "The schema version tag string const for the positioned self-tighten overlay; the loader compares the file version against it and the writer stamps it. A wire-format label, not a distinct guard/gate concept.",
+          "token": "guardSelfTightenOverlayVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Path resolver for the positioned self-tighten overlay file: the env override when set, otherwise repo-local .fak/agent/self-tighten.json. File plumbing for the guard launch, not a distinct guard/gate decision concept.",
+          "token": "guardSelfTightenOverlayPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reader/validator for the positioned self-tighten overlay file: a missing file is a valid empty view, and a malformed or wrong-version one returns an error the caller turns into a wholesale refusal. It yields an error, never an amendment verdict - the strict-decode barrier it applies is described in the guardSelfTightenOverlay schema row. Same shape as readGuardStopsLedger, the overlay-file plumbing this family already ignores.",
+          "token": "loadGuardSelfTightenOverlay"
+        },
+        {
+          "category": "incidental",
+          "reason": "Normalize-and-write half of the same overlay-file round-trip, delegating the durable write to the existing writeGuardAllowOverlayAtomic primitive. File plumbing for the positioned self-tighten overlay, not a distinct guard/gate concept.",
+          "token": "saveGuardSelfTightenOverlay"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure copy-on-write builder of the union of the installed floor with the overlay, plus a count of the elements it would add. It authors no verdict - the gate re-derives the tighten/widen direction from the delta rather than trusting it - so it is construction plumbing under the positioned apply and admit rows.",
+          "token": "guardSelfTightenProposal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private slice-union helper used only by that proposal builder: copy the base, append the members not already present, return the copy and the count. A list primitive, not a distinct guard/gate concept.",
+          "token": "guardSelfTightenUnion"
+        },
+        {
+          "category": "incidental",
+          "reason": "One-line string formatter for the floor-source provenance the guard launch banner carries about the self-tighten overlay. It renders an already-decided verdict for humans and decides nothing itself, so it is presentation plumbing on the positioned apply path.",
+          "token": "guardSelfTightenFloorNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a symbol in this file: a test function name quoted in prose in a non-test header comment, pointing readers at the witness that the overlay path stays writable by the wrapped agent. The test itself lives in a _test.go file, which this gate excludes by construction, and a prose pointer to a witness names no guard/gate concept.",
+          "token": "TestGuardSelfTightenOverlayPathIsAgentWritable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported single-call-site string builder in cmd/fak/guard_split.go: it joins the overlay argv with either the self-closing tail or the bare '; exit' it replaced, and hands the result to Apple Terminal's do script. It carries no policy, authority or floor meaning - it is the shape of one shell line for one platform's terminal app.",
+          "token": "guardSplitAppleTerminalCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported env-var reader resolving the #5482 escape hatch (closing is the default; the variable opts out). Mechanism for a window-lifetime preference, not a concept the codebase reasons about - the analogous overlay env readers in this family are already ignored as plumbing.",
+          "token": "guardSplitAppleCloseOnExit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported const holding the literal shell tail appended to the companion window's command line so Terminal closes that window on a clean exit. It is a platform-specific string constant, not a distinction; its own header comment records that the close itself is unwitnessed without a Mac operator.",
+          "token": "guardSplitAppleCloseTail"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a Go symbol at all. This is the FILENAME guard_split_close_test.go quoted in a prose comment in a non-test header, naming which test witnesses the generated command line. The extractor read a snake_case filename as an identifier. Same shape as the test-name-in-prose token classified incidental for the #5411 self-tighten set.",
+          "token": "guard_split_close_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "a pure projection from procguard.Proc onto dispatchtick.ProcInfo, extracted from its caller only so the mapping is unit-testable without scanning real host processes; it introduces no new concept, the enumeration concept is procguard.CollectProcesses which is already positioned",
+          "token": "dispatchProcInfoFromProcguard"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "admitGuardShrinkLevers"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLock"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLockAllActive"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLockAllAdmitAmendment"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardCoreLockAllState"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardLaunchCoreLockAll"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "guardShrinkLeverInputs"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "printGuardLaunchPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "setGuardCoreLockAll"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "shrinkLeverGuardCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "coreLockLandGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartProcIsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartNodeWrapsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointBases"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointDirs"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Prose lifted from a doc comment (sessionctl's fail-closed rule, inherited rather than re-litigated). There is no symbol named litigated anywhere in the program.",
+          "token": "litigated"
+        },
+        {
+          "category": "incidental",
+          "reason": "A pure struct-building helper on cmd/fak's guard exit path. It admits nothing, refuses nothing and returns no verdict, so it is not a guard gate.",
+          "token": "newGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Appends one line to a gitignored runtime ledger under .fak/nightrun. No admission decision, no refusal, no gate.",
+          "token": "appendGuardCompactionWitnessTo"
+        },
+        {
+          "category": "incidental",
+          "reason": "A bufio.Scanner loop over a JSONL file. It decides nothing and refuses nothing.",
+          "token": "readGuardCompactionWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "A last-match-wins lookup helper over an append-only ledger. It carries no admission or refusal semantics.",
+          "token": "latestGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "A strings.Builder that produces banner text. It prints; it does not gate.",
+          "token": "formatGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Best-effort by contract: it returns the empty string rather than failing a session's exit when the ledger cannot be written or read back, which is the explicit opposite of a gate.",
+          "token": "recordGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Resolves a file path and returns it. No gating semantics whatsoever.",
+          "token": "guardCompactionWitnessLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "A schema version number. It gates nothing.",
+          "token": "guardCompactionWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "A path string constant. No gate, no decision.",
+          "token": "guardCompactionWitnessLedgerRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal \"head\" naming one --compact-anchor-head mode in the durable row's vocabulary. A serialization label for an already-shipped flag, not a new gate.",
+          "token": "guardCompactionAnchorHead"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal \"first-breakpoint\" naming the legacy warm-only anchor mode in the durable row's vocabulary. A serialization label, not a gate.",
+          "token": "guardCompactionAnchorFirst"
+        },
+        {
+          "category": "incidental",
+          "reason": "A two-line bool-to-string mapper for the row's anchor_mode field. It names a mode; it does not decide one.",
+          "token": "guardCompactionAnchorModeName"
+        },
+        {
+          "category": "incidental",
+          "reason": "A package var holding this launch's resolved anchor label so the exit funnel can stamp it without growing a parameter. Storage, not a gate.",
+          "token": "guardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "A one-line setter cmdGuard calls at boot to pin the anchor label for this launch's row. A setter, not a gate.",
+          "token": "setGuardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "The durable row type is positioned in the witness-proof family. It is a JSON record produced after the guarded child has exited and the gateway is torn down; it makes no admission or refusal decision, so it is not a guard-gate concept.",
+          "token": "guardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that filters expired entries out of one guard-allow overlay at read time; a TTL sweep over an existing structure, not a distinct gate concept.",
+          "token": "guardAllowDropExpired"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported bookkeeping helper that drops expiry stamps whose rule no longer exists in the overlay; housekeeping on the same map, not a separate concept.",
+          "token": "guardAllowPruneOrphanExpiry"
+        },
+        {
+          "category": "incidental",
+          "reason": "One-line RFC3339 UTC formatter for a guard-allow expiry timestamp; a format helper carrying no concept of its own.",
+          "token": "guardAllowExpiryStamp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local printer for the guard-allow expiry listing; a presentation helper for one CLI view, not a distinct concept.",
+          "token": "printGuardAllowExpiries"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plain accessor on StagedDiff listing which gates recorded a denominator this run. It names no new idea: the concept is the CANDIDATE DENOMINATOR ledger (#5602) it reads, and this is one of three method names on it.",
+          "token": "ReportedGates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Method name required by issue #2830's local CacheLever interface, not a new guard gate",
+          "token": "CorrectnessGate"
         }
       ],
       "exclude": [
-        "gateway",
         "aggregat",
         "delegat",
-        "propagat",
-        "navigat",
+        "gateway",
         "investigat",
+        "litigated",
+        "mitigat",
+        "navigat",
         "negat",
-        "mitigat"
+        "propagat"
       ],
       "id": "guard-gate",
       "ignore": [
         "AggregateHBMBytes",
         "CacheValueGateDebtKey",
+        "CorrectnessGate",
         "DELEGATE",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
+        "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
         "GATED_UNWITNESSED",
         "GateFlipped",
+        "ReportedGates",
+        "TestGuardSelfTightenOverlayPathIsAgentWritable",
+        "admitGuardShrinkLevers",
+        "appendGuardCompactionWitnessTo",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
+        "coreLockLandGate",
+        "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
         "fleetbarecommitguard",
+        "formatGuardCompactionWitness",
         "gate_test",
         "gate_verbtier",
         "gated",
@@ -542,7 +1086,22 @@
         "gates",
         "gatew",
         "gating",
+        "guardAllowDropExpired",
+        "guardAllowExpiryStamp",
+        "guardAllowPruneOrphanExpiry",
         "guardClaudeCommandIndex",
+        "guardCompactionAnchorFirst",
+        "guardCompactionAnchorHead",
+        "guardCompactionAnchorMode",
+        "guardCompactionAnchorModeName",
+        "guardCompactionWitness",
+        "guardCompactionWitnessLedger",
+        "guardCompactionWitnessLedgerRel",
+        "guardCompactionWitnessSchema",
+        "guardCoreLock",
+        "guardCoreLockAllActive",
+        "guardCoreLockAllAdmitAmendment",
+        "guardCoreLockAllState",
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
@@ -556,6 +1115,7 @@
         "guardKeychainAccessToken",
         "guardKeychainCred",
         "guardKeychainSupported",
+        "guardLaunchCoreLockAll",
         "guardOAuthKeychainSource",
         "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
@@ -563,6 +1123,20 @@
         "guardOperatorQuestionEscalationSlackText",
         "guardOperatorQuestionNormalizedOrWarn",
         "guardOperatorQuestionOptionLabels",
+        "guardSelfTightenFloorNote",
+        "guardSelfTightenOverlayEnv",
+        "guardSelfTightenOverlayPath",
+        "guardSelfTightenOverlayVersion",
+        "guardSelfTightenProposal",
+        "guardSelfTightenUnion",
+        "guardSessionStartDriverEntrypointBases",
+        "guardSessionStartDriverEntrypointDirs",
+        "guardSessionStartNodeWrapsDriver",
+        "guardSessionStartProcIsDriver",
+        "guardShrinkLeverInputs",
+        "guardSplitAppleCloseOnExit",
+        "guardSplitAppleCloseTail",
+        "guardSplitAppleTerminalCommand",
         "guardStopHookOperatorQuestionEnvMode",
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
@@ -570,6 +1144,7 @@
         "guard_bypass",
         "guard_operator_question",
         "guard_output_style",
+        "guard_split_close_test",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
         "guardbuildskewassessment",
@@ -589,13 +1164,24 @@
         "guardtrajectorywarningline",
         "guardwireretryhop",
         "installguardmcpregistration",
+        "latestGuardCompactionWitness",
         "loadCacheValueGateBaseline",
+        "loadGuardSelfTightenOverlay",
+        "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
+        "printGuardAllowExpiries",
+        "printGuardLaunchPostures",
+        "readGuardCompactionWitnesses",
         "readguardstopsledger",
         "readguardstoptranscript",
+        "recordGuardCompactionWitness",
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
+        "saveGuardSelfTightenOverlay",
+        "setGuardCompactionAnchorMode",
+        "setGuardCoreLockAll",
+        "shrinkLeverGuardCommand",
         "summarizeguardstops",
         "ungated",
         "unguarded"
@@ -689,34 +1275,163 @@
           "category": "incidental",
           "reason": "the stage's wire Name string, mirroring sessionRegistryRecoveryStage; a report label, not a concept",
           "token": "session_registry_recovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "not a symbol: the token extractor split the tab-separated header literal DRIFT/AGE_H/SESSION/LEAVES at its tab escape and glued the escape letter onto the column name SESSION",
+          "token": "tSESSION"
+        },
+        {
+          "category": "incidental",
+          "reason": "An internal helper that lists peer checkpoint refs under refs/fak/wip; a git-read detail of the existing checkpoint concept, not a distinct position.",
+          "token": "wipPeerCheckpointSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "A FILENAME referenced in a doc comment (internal/ggufload's gemma4_session_test.go), not a symbol this package declares; the scanner picked it up out of prose.",
+          "token": "gemma4_session_test"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartProcIsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartNodeWrapsDriver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointBases"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local predicate/table private to the SessionStart driver-pid witness (#5557); it names no new concept, it spells one existing rule -- which ancestor process IS the agent driver -- for one call site.",
+          "token": "guardSessionStartDriverEntrypointDirs"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported method on the fleet-bus applier that filters one drive table's snapshot to the steerable traces a directive's session axes name. It names a local step inside one Apply call, not a session-runtime concept.",
+          "token": "matchedSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "A boolean predicate on Selector reporting whether any session-scoped axis (lane/wave/label) was stated. A field-presence test on an existing type, not a concept of its own.",
+          "token": "NarrowsSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "The flag-parsing shell for the fak session checkpoint-witness verb; it reads the session's ledger but introduces no session-runtime concept beyond the trace it looks up.",
+          "token": "runSessionCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "HTTP handler method that serves the checkpoint verb on the session control subtree; a transport adapter over the existing session chain, introducing no session-runtime concept.",
+          "token": "handleSessionCheckpointVerb"
+        },
+        {
+          "category": "incidental",
+          "reason": "HTTP handler that routes a mid-flight verb to the named trace's mailbox; a transport adapter over the existing session registry.",
+          "token": "handleFakSessionMidflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field carrying caller-configured abstract load units in the token-profile forecast; not a runtime scheduler concept (#5771)",
+          "token": "scheduler_units"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field carrying caller-configured token-class coefficients; not a runtime scheduler concept (#5771)",
+          "token": "scheduler_weights"
+        },
+        {
+          "category": "incidental",
+          "reason": "subcommand dispatch case, exactly parallel to runSessionAuditCodex/Deep/Budget/Feed; the concept is the fak.turnbatch.v1 batching KPI, not its runner",
+          "token": "runSessionAuditBatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "path-to-session-id helper for the batch row (base name minus .jsonl), mirroring the evidence-minimal naming the sibling session-audit runners already use; a spelling detail, not a governed concept",
+          "token": "sessionNameForBatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON/metrics field spelling of the COMPACTION_THRASH session verdict, positioned as x2-context-ctx-reasoncompactionthrash. Same concept in its wire casing, not a session-runtime concept of its own.",
+          "token": "session_compaction_thrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported gateway metrics field accumulating the thrash session count behind the positioned counter x2-guard-gate-compactionthrashsessionstotal. Storage for that metric, not a distinct concept.",
+          "token": "compactThrashSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported local holding the same count while the metrics page is rendered. A render-time local for the positioned counter, not a distinct concept.",
+          "token": "thrashSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
+          "token": "fak_gateway_compaction_thrash_sessions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "private scheduler map implementing dispatch-authored affinity hints, not a public runtime concept",
+          "token": "sessionAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "setter for the private scheduler affinity map, not a separate session lifecycle concept",
+          "token": "SetSessionAffinity"
         }
       ],
       "id": "session-runtime",
       "ignore": [
         "ITERM_SESSION_ID",
+        "NarrowsSessions",
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
+        "SetSessionAffinity",
         "bumpSessionHandoffBlocks",
+        "compactThrashSessions",
         "confusedsessions",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
+        "fak_gateway_compaction_thrash_sessions_total",
+        "gemma4_session_test",
         "gen_session_effectiveness_svg",
+        "guardSessionStartDriverEntrypointBases",
+        "guardSessionStartDriverEntrypointDirs",
+        "guardSessionStartNodeWrapsDriver",
+        "guardSessionStartProcIsDriver",
         "guardsessiontempdir",
+        "handleFakSessionMidflight",
+        "handleSessionCheckpointVerb",
         "handoff_session_give_up",
         "interactivesession",
         "kernelSession",
+        "matchedSessions",
         "readSessionHandoffBlocks",
         "requireminimaxsession",
         "restartfreshsession",
+        "runSessionAuditBatch",
         "runSessionAuditCodex",
+        "runSessionCheckpointWitness",
         "runtuisessions",
         "sanitizeSessionForPath",
         "scheduled",
+        "scheduler_units",
+        "scheduler_weights",
         "schedulers",
         "scheduling",
+        "sessionAffinity",
+        "sessionNameForBatch",
         "sessionRegistryRecoveryStage",
+        "session_compaction_thrash",
         "session_registry_recovery",
         "sessionids",
         "sessions",
@@ -724,9 +1439,12 @@
         "slots",
         "slotting",
         "stopDispHandoffSessionGiveUp",
+        "tSESSION",
+        "thrashSessions",
         "topsessions",
         "totalslots",
-        "tuisessionrow"
+        "tuisessionrow",
+        "wipPeerCheckpointSessions"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -888,27 +1606,207 @@
           "category": "incidental",
           "reason": "unexported implementation helper picking the slot's own log path (else its commit sha) as a replay-stable evidence id — a keying detail of the producer, not an operator-facing witness-proof concept",
           "token": "witnessOutcomeID"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "coreLockWitnessFromMessage"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "coreLockWitnessFromMsgFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "CoreLockWitnessTrailer"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "WithCoreLockWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "the land-side adapter and witness readers for the already-positioned hard-self core lock; they name no new concept, they give the existing safecommit core-lock check its first caller on the worktree land path, which cannot use fak commit because a detached HEAD is OFF_TRUNK",
+          "token": "witnessGitRunner"
+        },
+        {
+          "category": "incidental",
+          "reason": "A local variable in finishGuardChildAndReport holding the already-rendered banner string that recordGuardCompactionWitness returned. The proof concept it carries is the guardCompactionWitness row positioned in this family; the binding itself exists only so the durable write happens outside the !quiet branch while the emit happens inside it.",
+          "token": "compactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "The unexported constructor that folds one session's gateway.AdjudicationSummary into the guardCompactionWitness row positioned in this family. Pure (no clock, no I/O) and adds no proof concept the row does not already carry.",
+          "token": "newGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "The O_APPEND JSONL writer for the guardCompactionWitness row positioned in this family. A file-I/O helper that makes the row durable; the durability concept belongs to the row, not to the writer.",
+          "token": "appendGuardCompactionWitnessTo"
+        },
+        {
+          "category": "incidental",
+          "reason": "The reader half of the guardCompactionWitness ledger positioned in this family. Skipping torn lines is concurrency robustness for a ledger every guarded session appends to, not a separate proof concept.",
+          "token": "readGuardCompactionWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "A reverse scan that returns the newest guardCompactionWitness row for one session id. A lookup over the row positioned in this family, not a concept of its own.",
+          "token": "latestGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Renders one guardCompactionWitness row into the guard exit banner via the shared guardSection/guardRow/guardNote helpers. Presentation of the row positioned in this family.",
+          "token": "formatGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "The exit-funnel entry point that appends the row, re-reads it, and renders only from what survived the round trip. It is the seam that uses the guardCompactionWitness row positioned in this family, not a second proof concept.",
+          "token": "recordGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "A one-line resolver wrapping nightrunLedgerPath for the compaction-health ledger. A path helper for the row positioned in this family.",
+          "token": "guardCompactionWitnessLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "An int constant (1) stamped on every row so a later reader can tell which shape wrote it. A version tag on the row positioned in this family.",
+          "token": "guardCompactionWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "The repo-relative path literal .fak/nightrun/compaction-health.jsonl, placed beside the harness-resources ledger the sibling exit-summary producer appends to. A path constant, not a proof concept.",
+          "token": "guardCompactionWitnessLedgerRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported reader that returns the live lane leases contesting one dead worker's sweep; a lookup over the existing lease store feeding the rung's stand-down, not a distinct witness concept.",
+          "token": "dispatchWitnessContestingLaneHolders"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported three-field struct carrying one contesting lease's id, globs and liveness class so the stand-down can name which holder it yielded to; a local record shape, not a concept.",
+          "token": "dispatchWitnessLaneHolder"
+        },
+        {
+          "category": "incidental",
+          "reason": "The workspace-axis payload of a sessionledger Checkpoint: a HEAD sha plus dirty-entry digests. Its meaning is wholly derived from the Checkpoint pair it forms half of, so it names a field, not a concept of its own.",
+          "token": "tree_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for that tree-axis payload; it hashes the dirty entries and returns the struct, carrying no concept beyond the value it builds.",
+          "token": "NewTreeWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "An 8 MiB read cap on a single file when hashing the tree axis; a resource bound on the witness computation, not a concept.",
+          "token": "maxWitnessFileBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON shape fak session checkpoint-witness prints; a serialization view of sessionledger.Checkpoint for one CLI verb, carrying no meaning the Checkpoint does not already hold.",
+          "token": "checkpointWitnessReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "The flag-parsing shell for the fak session checkpoint-witness verb; a CLI entry point, not a distinct concept.",
+          "token": "runSessionCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that re-checks a stored checkpoint against a freshly computed tree witness and names which axis diverged; a verb-local branch over sessionledger's own verify, not a separate concept.",
+          "token": "verifyCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-readable printer for one checkpoint record; a presentation helper for this command's stdout.",
+          "token": "renderCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that reads HEAD plus the dirty set from the working tree and builds a sessionledger.TreeWitness from it; an I/O adapter feeding the existing type.",
+          "token": "liveTreeWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "A wire error code string returned with HTTP 400 when a checkpoint request omits its tree-witness body; a refusal label, not a concept.",
+          "token": "checkpoint_no_tree_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field carrying an external quality witness reference, not a new proof taxonomy concept.",
+          "token": "QualityWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'witnessed' here means a trial leg actually PUBLISHED its setup fields so the pair can be judged at all - an input-presence fence on a benchmark record, not a cache-coherence world-state witness, not an RSI measurement witness, and not a Claim corroborated by WitnessResolver.",
+          "token": "VerdictSetupNotWitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'witnessed' here means a trial leg actually PUBLISHED its setup fields so the pair can be judged at all - an input-presence fence on a benchmark record, not a cache-coherence world-state witness, not an RSI measurement witness, and not a Claim corroborated by WitnessResolver.",
+          "token": "setup_not_witnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "The serialized wire value of the FindingHeldAxisUnwitnessed constant, not a second concept: it is the same finding rendered as its machine-readable JSON token, and the concept itself is positioned as findingheldaxisunwitnessed.",
+          "token": "held_axis_unwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "prose emphasis in the file-header comment describing the pre-#1348 defect; not a symbol or a concept",
+          "token": "WITNESSLESS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Close-time hygiene plumbing that drops the per-Server table entry; the concept is proxyFillWitnessTable, already positioned",
+          "token": "closeProxyFillWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "the process-global map holder for per-Server tables; the concept is proxyFillWitnessTable, already positioned",
+          "token": "proxyFillWitnesses"
         }
       ],
       "id": "witness-proof",
       "ignore": [
         "ClaimUnwitnessedCount",
+        "CoreLockWitnessTrailer",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
         "GradedVerdictUnwitnessed",
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
+        "NewTreeWitness",
+        "QualityWitness",
         "TurnOutcomesFromWitness",
+        "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
+        "WITNESSLESS",
+        "WithCoreLockWitness",
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
         "WitnessMove",
+        "appendGuardCompactionWitnessTo",
+        "checkpointWitnessReport",
+        "checkpoint_no_tree_witness",
+        "closeProxyFillWitnesses",
+        "compactionWitness",
+        "coreLockWitnessFromMessage",
+        "coreLockWitnessFromMsgFile",
         "dispatchWitnessArchiveStranded",
+        "dispatchWitnessContestingLaneHolders",
         "dispatchWitnessDirtyFile",
         "dispatchWitnessDirtyPaths",
         "dispatchWitnessDirtyPathsGit",
         "dispatchWitnessGitOut",
+        "dispatchWitnessLaneHolder",
         "dispatchWitnessRevertStranded",
         "dispatchWitnessSamePath",
         "dispatchWitnessStashPaths",
@@ -916,15 +1814,33 @@
         "dispatchWitnessStrandedBuildFails",
         "dispatchWitnessStrandedBuildFailsGo",
         "done_not_witnessed",
+        "formatGuardCompactionWitness",
+        "guardCompactionWitnessLedger",
+        "guardCompactionWitnessLedgerRel",
+        "guardCompactionWitnessSchema",
+        "held_axis_unwitnessed",
+        "latestGuardCompactionWitness",
+        "liveTreeWitness",
+        "maxWitnessFileBytes",
         "named_witness",
+        "newGuardCompactionWitness",
         "nwitness",
+        "proxyFillWitnesses",
+        "readGuardCompactionWitnesses",
+        "recordGuardCompactionWitness",
         "refutations",
         "refuted",
         "refutes",
         "refutil",
+        "renderCheckpointWitness",
         "revocations",
+        "runSessionCheckpointWitness",
+        "setup_not_witnessed",
+        "tree_witness",
+        "verifyCheckpointWitness",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessGitRunner",
         "witnessOutcomeID",
         "witnessScriptedFold",
         "witnessStrandedArchiveSuffix",
@@ -951,6 +1867,26 @@
           "category": "incidental",
           "reason": "kernelSession is a local unexported plumbing accessor that returns the *Session a matKernel (sessionQ4KKernel/backendKernel) wraps; not a domain concept, just a type-switch helper for the routed-expert capability gate.",
           "token": "kernelSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "The startup predicate that decides whether the self-hosted wire admits the three prompt-shrink levers. Not a distinct concept: it is a boolean over the already-positioned lever set, evaluated once at serve start, and it introduces no vocabulary a reader could confuse with a sibling -- the levers themselves carry the meaning.",
+          "token": "shrinkWireInKernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
+          "token": "fak_gateway_compaction_thrash_sessions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private runConfig helper that composes existing modelroute placement for one agent-loop tool call; not a new gateway engine concept.",
+          "token": "resolveCallEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter that invokes the existing modelroute spawn placer and resolves its selected account; not a new gateway engine concept.",
+          "token": "resolveSpawnEngine"
         }
       ],
       "id": "gateway-engine",
@@ -960,11 +1896,15 @@
         "engineered",
         "engineering",
         "engineers",
+        "fak_gateway_compaction_thrash_sessions_total",
         "gateways",
         "kernel32",
         "kernelSession",
         "kernels",
-        "kernelwiki"
+        "kernelwiki",
+        "resolveCallEngine",
+        "resolveSpawnEngine",
+        "shrinkWireInKernel"
       ],
       "min_files": 3,
       "name": "Gateway / engine family",
@@ -1010,8 +1950,83 @@
         },
         {
           "category": "incidental",
-          "reason": "A pure string-builder renderer in the guard exit-summary grammar, named by the format\u003cSection\u003e convention its dozen siblings share. It introduces no vocabulary: its meaning is wholly given by the concepts it prints, PolicyKnob and AmendGatedWiden, both positioned. Positioning the renderer would book concept coverage for a formatting helper and would need re-deciding for every sibling section.",
+          "reason": "A pure string-builder renderer in the guard exit-summary grammar, named by the format<Section> convention its dozen siblings share. It introduces no vocabulary: its meaning is wholly given by the concepts it prints, PolicyKnob and AmendGatedWiden, both positioned. Positioning the renderer would book concept coverage for a formatting helper and would need re-deciding for every sibling section.",
           "token": "formatAmendmentPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "call seams and typed inputs introduced alongside their only callers in guard boot; they name no new concept, they give the already-positioned core-lock-all reload verdict and prompt-shrink wire classifier their first guard-side callers",
+          "token": "printGuardLaunchPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal refactor seam, not a new policy concept: dispatchPreflightChurn was split into a thin wrapper over dispatchPreflightChurnState so the arming verdict (stallscan.Arming) can be returned alongside the ChurnCheck for the host_churn tick payload. It introduces no new admission rule, threshold, or vocabulary -- the policy lives in dispatchtick.ApplyChurnBackpressure.",
+          "token": "dispatchPreflightChurnState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned quote input record for the existing capability surface, not a new policy capability.",
+          "token": "CapabilitySnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Version identifier field inside the capability snapshot, not a policy concept.",
+          "token": "ToolPolicyVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Legacy default wire reason retained only in the quote CLI implementation, not a capability concept.",
+          "token": "capability_failure"
+        },
+        {
+          "category": "incidental",
+          "reason": "Quote revision helper reacting to a failed route, not a capability definition.",
+          "token": "ReviseForCapabilityFailure"
+        },
+        {
+          "category": "incidental",
+          "reason": "the environment variable naming the org policy source URL; a deployment configuration knob, not a capability or posture the adjudicator reasons about",
+          "token": "FAK_ORG_POLICY_URL"
+        },
+        {
+          "category": "incidental",
+          "reason": "the Go constant holding the org policy URL environment variable's name; a config identifier, not a policy concept requiring distinction from a sibling",
+          "token": "OrgPolicyURLEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "the environment variable naming the org last-good file's location; a deployment configuration knob, not a policy concept",
+          "token": "FAK_ORG_POLICY_CACHE_PATH"
+        },
+        {
+          "category": "incidental",
+          "reason": "the resolver for the org last-good file path; a filesystem path helper on the policy plane, not a capability or posture",
+          "token": "OrgPolicyCachePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "the Go constant holding the org last-good path environment variable's name; a config identifier, not a policy concept",
+          "token": "OrgPolicyCachePathEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local corpus adapter that selects the already-declared reference arm; it introduces no policy capability.",
+          "token": "referencePolicyForCorpusCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ordered doomloop actuator-rung enum, not a new policy capability",
+          "token": "StrengthToolPolicyGrammar"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized doomloop actuator-rung value, not a new policy capability",
+          "token": "tool_policy_grammar"
+        },
+        {
+          "category": "incidental",
+          "reason": "Agent-loop adapter over the already-positioned modelroute spawn-placement policy; not a new capability-policy primitive.",
+          "token": "SpawnPlacementPolicy"
         }
       ],
       "exclude": [
@@ -1019,23 +2034,40 @@
       ],
       "id": "policy-capability",
       "ignore": [
+        "CapabilitySnapshot",
+        "FAK_ORG_POLICY_CACHE_PATH",
+        "FAK_ORG_POLICY_URL",
+        "OrgPolicyCachePath",
+        "OrgPolicyCachePathEnv",
+        "OrgPolicyURLEnv",
+        "PolicyRevision",
         "ProgressCallAdjudicated",
         "ReusePolicy",
+        "ReviseForCapabilityFailure",
+        "SpawnPlacementPolicy",
+        "StrengthToolPolicyGrammar",
+        "ToolPolicyVersion",
         "adjudicate",
         "adjudicated",
         "adjudicates",
         "adjudication",
         "adjudicators",
         "capabilities",
+        "capability_failure",
+        "dispatchPreflightChurnState",
         "formatAmendmentPosture",
         "guardWindowsArgvPreflight",
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "policies",
         "policyErr",
+        "policy_changed",
         "policyblocks",
         "policylabel",
-        "postures"
+        "postures",
+        "printGuardLaunchPostures",
+        "referencePolicyForCorpusCell",
+        "tool_policy_grammar"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
@@ -1054,20 +2086,236 @@
           "category": "incidental",
           "reason": "closed-vocabulary enum member; its Context is the audited change's outdated base state, not the context-window concept",
           "token": "MechanismStaleContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #2186 cache attribution scope; not a new managed-context concept.",
+          "token": "noteCtxValueTTL1hScope"
+        },
+        {
+          "category": "incidental",
+          "reason": "A local string variable in cmd/fak's guard exit funnel. It holds pre-rendered banner text, reads no context window and mutates none; the compaction it reports on happened earlier, inside internal/gateway.",
+          "token": "compactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Copies already-measured compaction counters into a JSON row. It performs no compaction and touches no context window; the counters come from internal/gateway.",
+          "token": "newGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Marshals a row and appends it to a file on disk. No context-window state is read or written.",
+          "token": "appendGuardCompactionWitnessTo"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reads durable rows back from disk in append order. It has no relationship to a context window.",
+          "token": "readGuardCompactionWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selects a stored row by session id. It neither inspects nor alters any context window.",
+          "token": "latestGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formats stored counters into banner lines. No context-window state is involved.",
+          "token": "formatGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pins already-measured compaction counters to disk at session end. It runs after the gateway is torn down and manages no context window.",
+          "token": "recordGuardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Anchors a repo-relative .fak/nightrun path. Unrelated to context windows.",
+          "token": "guardCompactionWitnessLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "A JSON schema version integer. It carries no context-window meaning.",
+          "token": "guardCompactionWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "A gitignored runtime file path. Unrelated to context windows.",
+          "token": "guardCompactionWitnessLedgerRel"
+        },
+        {
+          "category": "incidental",
+          "reason": "A label recorded on the durable row so an anchor-starved count is interpretable. The head-anchoring behaviour it names lives in internal/gateway, not here.",
+          "token": "guardCompactionAnchorHead"
+        },
+        {
+          "category": "incidental",
+          "reason": "A label recorded on the durable row for the legacy anchor mode. The behaviour it names lives in internal/gateway, not in this file.",
+          "token": "guardCompactionAnchorFirst"
+        },
+        {
+          "category": "incidental",
+          "reason": "Maps the resolved --compact-anchor-head bool onto a label string. No context-window state.",
+          "token": "guardCompactionAnchorModeName"
+        },
+        {
+          "category": "incidental",
+          "reason": "Carries a label from flag parsing to the exit funnel. The anchoring itself is gateway behaviour.",
+          "token": "guardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "Assigns a package-level label string at guard boot. No context-window semantics.",
+          "token": "setGuardCompactionAnchorMode"
+        },
+        {
+          "category": "incidental",
+          "reason": "The durable row type is positioned in the witness-proof family. It records what compaction did for one session but owns no context window and performs no compaction; the counters it carries are measured in internal/gateway.",
+          "token": "guardCompactionWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported projection of one ctxplan eviction plan onto the wire contract struct; it reshapes a plan the compactor already produced and decides nothing about context itself.",
+          "token": "compactionContractFrom"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-trace take-once accessor over the pending-contract map; a lifecycle read on a record the compaction path already minted, introducing no context concept.",
+          "token": "takeCompactionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "The wire projection of one compaction boundary's eviction plan (class split, evicted bytes, replayable digests, continuation token). It reports what ctxplan's survival gate already decided; the concept lives in ctxplan's survival classes, not in this response shape.",
+          "token": "CompactionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "The mutex guarding the per-trace pending-contract map on Server; a concurrency primitive, not a concept.",
+          "token": "compactionContractMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported writer that latches one boundary's contract under its trace, bounded by the same session reaper; a map insert on a record the compaction path already minted.",
+          "token": "noteCompactionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "The integer schema version stamped on each contract so an unfamiliar reader treats the rest as opaque; a versioning constant.",
+          "token": "compactionContractVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "The closed continuation token string a boundary emits so the next turn does not read a shortened transcript as a reason to wrap up; a fixed literal, not a concept.",
+          "token": "compactionContractInstruction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported renderer turning one contract into the in-band [fak] line a content-block-only client can see; a presentation helper over the same record the typed field carries.",
+          "token": "compactionContractNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal value of ReasonCompactionThrash, positioned as x2-context-ctx-reasoncompactionthrash. Same concept spelled as its dos.toml reason code, not a second one.",
+          "token": "COMPACTION_THRASH"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal value of envCompactionThrashStop, positioned as x2-context-ctx-envcompactionthrashstop. Same concept spelled as its environment-variable name, not a second one.",
+          "token": "FAK_COMPACTION_THRASH_STOP"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported package constant holding the threshold (3) at which back-to-back context-event turns grade as thrash. A tuning literal inside the positioned verdict x2-context-ctx-reasoncompactionthrash, not a distinct concept.",
+          "token": "ctxThrashConsecutiveRefills"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported renderer turning one already-computed step-advice verdict into the model-facing advisory line. A projection of the existing managed-context step_advice concept, not a new one.",
+          "token": "ctxAdviceNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-state-entry dedupe wrapper around ctxAdviceNote so the pushed advisory fires once on the way into a pressure state. A delivery detail of the same advisory, not a distinct concept.",
+          "token": "ctxAdviceNoteOnce"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constructor for the session-gate refusal taken only when the stop is armed. An action taken on the positioned verdict x2-context-ctx-reasoncompactionthrash, not a separate concept.",
+          "token": "compactionThrashRefusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported renderer for that refusal's response body. Wire formatting of the same refusal, not a distinct concept.",
+          "token": "compactionThrashRefusalBody"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported per-session counter of consecutive at-limit refills, the state ctxThrashConsecutiveRefills is compared against. Internal bookkeeping for the positioned verdict, not a distinct concept.",
+          "token": "compactionThrashStreak"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported recorder incrementing the thrash count on the metrics page. The counting step of the positioned verdict and its metric x2-guard-gate-compactionthrashsessionstotal, not a separate concept.",
+          "token": "recordCompactionThrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "The JSON/metrics field spelling of the positioned verdict x2-context-ctx-reasoncompactionthrash. Same concept in its wire casing, not a second one.",
+          "token": "session_compaction_thrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "The gateway metrics counter, positioned once under guard-gate as x2-guard-gate-compactionthrashsessionstotal. Recorded there rather than duplicated per family.",
+          "token": "fak_gateway_compaction_thrash_sessions_total"
         }
       ],
       "id": "context-ctx",
       "ignore": [
+        "COMPACTION_THRASH",
+        "CompactionContract",
+        "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
+        "appendGuardCompactionWitnessTo",
         "cctx",
+        "compactionContractFrom",
+        "compactionContractInstruction",
+        "compactionContractMu",
+        "compactionContractNote",
+        "compactionContractVersion",
+        "compactionThrashRefusal",
+        "compactionThrashRefusalBody",
+        "compactionThrashStreak",
+        "compactionWitness",
         "compactions",
         "context",
         "contexts",
         "ctx",
+        "ctxAdviceNote",
+        "ctxAdviceNoteOnce",
+        "ctxThrashConsecutiveRefills",
         "ctxsleep",
+        "fak_gateway_compaction_thrash_sessions_total",
+        "formatGuardCompactionWitness",
+        "guardCompactionAnchorFirst",
+        "guardCompactionAnchorHead",
+        "guardCompactionAnchorMode",
+        "guardCompactionAnchorModeName",
+        "guardCompactionWitness",
+        "guardCompactionWitnessLedger",
+        "guardCompactionWitnessLedgerRel",
+        "guardCompactionWitnessSchema",
+        "latestGuardCompactionWitness",
+        "newGuardCompactionWitness",
+        "noteCompactionContract",
+        "noteCtxValueTTL1hScope",
+        "readGuardCompactionWitnesses",
         "recalled",
         "recalling",
-        "recalls"
+        "recalls",
+        "recordCompactionThrash",
+        "recordGuardCompactionWitness",
+        "session_compaction_thrash",
+        "setGuardCompactionAnchorMode",
+        "takeCompactionContract"
       ],
       "min_files": 3,
       "name": "Context-management family",
@@ -1128,13 +2376,19 @@
         },
         {
           "category": "incidental",
-          "reason": "A Go test function name cited in a doc comment as the place the HARD =\u003e un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
+          "reason": "A Go test function name cited in a doc comment as the place the HARD => un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
           "token": "TestModeDebtGradeInvariants"
+        },
+        {
+          "category": "incidental",
+          "reason": "GitDailyDebtKey is only the Go const that HOLDS the positioned corpus key git_daily_debt (internal/metrics/git_daily_health.go); the concept is the key value itself, positioned as gitdailydebt. Same shape as RatchetDebtKey, which is named inside climb_ratchet_debt's definition rather than positioned on its own.",
+          "token": "GitDailyDebtKey"
         }
       ],
       "id": "score-debt",
       "ignore": [
         "CacheValueGateDebtKey",
+        "GitDailyDebtKey",
         "NegationOperatorDebtKey",
         "ScorecardAxis",
         "ScorecardAxisOracle",
@@ -1149,7 +2403,7 @@
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",
-      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans \u003e= min_files only because the path is threaded through BuildPlan/IssueBody.",
+      "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member. Ignored: scorecardPath is a CLI flag variable / function parameter holding a file path to a scorecard JSON (cmd/fak/learningdebt.go, cmd/fak/mode_debt_dispatch.go, internal/learningdebt), not a distinct concept - an incidental helper that spans >= min_files only because the path is threaded through BuildPlan/IssueBody.",
       "roots": [
         "scorecard",
         "debt"
@@ -1164,7 +2418,7 @@
         },
         {
           "category": "build-tag-only",
-          "reason": "Sentinel error defined only in the non-linux mbind stub (decode_interleave_mbind_other.go, !(linux\u0026\u0026amd64)).",
+          "reason": "Sentinel error defined only in the non-linux mbind stub (decode_interleave_mbind_other.go, !(linux&&amd64)).",
           "token": "errInterleaveUnsupported"
         },
         {
@@ -1236,21 +2490,268 @@
           "category": "incidental",
           "reason": "unexported cmd/fak glue that reads the profile, resolves the module path from go.mod and calls CoverageScores/CoverageEntries; the named concepts are those two, this is their call site",
           "token": "joinCoverageScores"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed refusal for insufficient quote history, not a support or maturity state.",
+          "token": "ErrUnsupportedColdStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "VerdictParityOK"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "setup_parity_ok"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "VerdictSetupParityClean"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "setup_parity_clean"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "VerdictSetupParityFlagged"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "setup_parity_flagged"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "NonCacheParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "ParityHolds"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "SetupParityReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "SetupParityBlocks"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "DefaultSetupParityPairs"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'parity' applied to a NAMED comparison (one cold/warm trial pair's non-cache setup fields), the same parity-application shape this family already ignores as paritybench / parityreport / scoreparity - not a new rung on the support/coverage/correctness/parity/maturity ladder.",
+          "token": "DefaultSetupParityReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "local boolean accumulator, not a project support-maturity concept",
+          "token": "seenSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private float formatter for the parity card render; introduces no maturity concept.",
+          "token": "formatParityValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper implementing the existing git-daily health scorecard",
+          "token": "gitDailyCoverageKPI"
+        },
+        {
+          "category": "incidental",
+          "reason": "machine-readable KPI key within the existing git-daily health scorecard",
+          "token": "calendar_coverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #2830 CacheLever interface method, not a standalone maturity concept",
+          "token": "CorrectnessGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported one-line panel-header formatter for the parity dashboard card; presentation helper, not a governed concept",
+          "token": "parityPanelHeader"
+        },
+        {
+          "category": "incidental",
+          "reason": "caller-supplied input DTO folded by BuildParityDashboard; a parameter carrier for the parity dashboard, not a governed concept of its own",
+          "token": "ParityDashboardInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-metric latest fak-vs-SOTA readout struct inside a parity panel; a field carrier, not a governed concept",
+          "token": "ParityComparison"
+        },
+        {
+          "category": "incidental",
+          "reason": "type tag naming which way is better for one parity metric; a closed two-member enum, not an independently governed concept",
+          "token": "ParityDirection"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityDirection set (larger value is better); enum member, not a governed concept",
+          "token": "ParityHigherIsBetter"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityDirection set (smaller value is better); enum member, not a governed concept",
+          "token": "ParityLowerIsBetter"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (fak beats the baseline past its band); enum member, not a governed concept",
+          "token": "ParityAhead"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (fak within the metric tolerance band); enum member, not a governed concept",
+          "token": "ParityAtParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (fak trails the baseline past its band); enum member, not a governed concept",
+          "token": "ParityBehind"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityVerdict set (no comparison possible); enum member, not a governed concept",
+          "token": "ParityUnknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-axis declaration struct (slug, unit, direction, band) for one parity panel; a field carrier, not a governed concept",
+          "token": "ParityMetric"
+        },
+        {
+          "category": "incidental",
+          "reason": "one dated fak-and-SOTA measurement row fed into the parity dashboard; an input row carrier, not a governed concept",
+          "token": "ParitySample"
+        },
+        {
+          "category": "incidental",
+          "reason": "one point of a parity metric historical series; a field carrier, not a governed concept",
+          "token": "ParityPoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "per-metric grouping of declaration, history and latest comparison; a field carrier, not a governed concept",
+          "token": "ParityPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "type tag for the closed published/unpublished state of a parity dashboard; enum type, not a governed concept",
+          "token": "ParityPublishState"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityPublishState set (a real absolute base resolved a URL); enum member, not a governed concept",
+          "token": "ParityPublished"
+        },
+        {
+          "category": "incidental",
+          "reason": "member constant of the closed ParityPublishState set (no public URL, with a named reason); enum member, not a governed concept",
+          "token": "ParityUnpublished"
+        },
+        {
+          "category": "incidental",
+          "reason": "struct carrying the resolved publication state, URL and reason; a field carrier, not a governed concept",
+          "token": "ParityPublication"
+        },
+        {
+          "category": "incidental",
+          "reason": "versioned shape-tag string constant for the parity dashboard artifact; a schema literal, not a separate concept",
+          "token": "ParityDashboardSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported reducer turning one parity point into a direction-aware verdict; internal helper, not a governed concept",
+          "token": "compareParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported resolver deriving the public URL or naming why there is none; internal helper, not a governed concept",
+          "token": "resolveParityPublication"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus gauge family name exposing latest per-metric values by side; a concrete series name, not a governed concept",
+          "token": "fak_parity_value"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus gauge family name exposing the latest normalized fak-to-SOTA ratio; a concrete series name, not a governed concept",
+          "token": "fak_parity_ratio"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported const holding the literal KPI key string 'calendar_coverage'; named only so the weight map and the KPI cannot disagree by typo",
+          "token": "gitDailyCoverageKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "local bool carrying gitDailyCoverageKPI's second return (was the axis graded) to the weight map inside GradeGitDailyHealth",
+          "token": "coverageGraded"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "BAD_ACHIEVED_MATURITY",
         "ClaudeKeychainSupported",
+        "CorrectnessGate",
         "DecodeInterleaveUnsupported",
+        "DefaultSetupParityPairs",
+        "DefaultSetupParityReport",
         "DomainCoverage",
+        "ErrUnsupportedColdStart",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
+        "NonCacheParity",
+        "ParityAhead",
+        "ParityAtParity",
+        "ParityBehind",
+        "ParityComparison",
+        "ParityDashboardInput",
+        "ParityDashboardSchema",
+        "ParityDirection",
+        "ParityHigherIsBetter",
+        "ParityHolds",
+        "ParityLowerIsBetter",
+        "ParityMetric",
+        "ParityPanel",
+        "ParityPoint",
+        "ParityPublication",
+        "ParityPublishState",
+        "ParityPublished",
+        "ParitySample",
+        "ParityUnknown",
+        "ParityUnpublished",
+        "SetupParityBlocks",
+        "SetupParityReport",
         "SupportsRoutedExpertKQuant",
+        "VerdictParityOK",
+        "VerdictSetupParityClean",
+        "VerdictSetupParityFlagged",
         "achievedMaturity",
+        "calendar_coverage",
+        "compareParity",
         "correctnessclass",
         "correctnessdependson",
         "coverageBlock",
+        "coverageGraded",
         "coveragePath",
         "coveragebaseline",
         "coveragediscipline",
@@ -1259,16 +2760,27 @@
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "fak_parity_ratio",
+        "fak_parity_value",
+        "formatParityValue",
+        "gitDailyCoverageKPI",
+        "gitDailyCoverageKey",
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
+        "parityPanelHeader",
         "paritybench",
         "parityreport",
         "parseCoverageLine",
         "recurrentevictunsupportederror",
+        "resolveParityPublication",
         "scoreparity",
+        "seenSupport",
+        "setup_parity_clean",
+        "setup_parity_flagged",
+        "setup_parity_ok",
         "sourcecoverage",
         "streamingsupported",
         "supported",
@@ -1300,16 +2812,48 @@
       "roots": []
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "The Go binding of the already-positioned canonical token PIN_EVICT_REFUSED (c2421-pin-evict-refused) inside internal/agent's compaction bail vocabulary. A language-level constant NAME for one concept, deliberately spelled so its value is the same string as the dos.toml reason and the ctxplan constant - not a second concept.",
+          "token": "CompactReasonPinEvictRefused"
+        },
+        {
+          "category": "incidental",
+          "reason": "The ctxplan-side Go binding of the same canonical token PIN_EVICT_REFUSED (c2421-pin-evict-refused). One token from planner to wire to operator; the constant name is a binding, not a distinct concept.",
+          "token": "ReasonPinEvictRefused"
+        },
+        {
+          "category": "incidental",
+          "reason": "A parameter name on ctxplan.CheckEviction (c2421-check-eviction) naming the page IDs a foreign plan proposes to drop. A local identifier, not a concept.",
+          "token": "evictIDs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper that counts the REPLAYABLE rows in a contract's class split for the in-band note; a read over an existing record, not an eviction concept.",
+          "token": "replayableEvictedCount"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field on the contract totalling the wire bytes of the evicted pages; a measurement of an eviction the planner already decided, not an eviction concept.",
+          "token": "EvictedByteCount"
+        }
+      ],
       "id": "evict",
       "ignore": [
-        "evictable",
+        "CompactReasonPinEvictRefused",
+        "EvictedByteCount",
+        "EvictionsPerHit",
+        "ReasonPinEvictRefused",
+        "evictIDs",
         "evictSupported",
+        "evictable",
+        "evicting",
         "eviction",
         "evicts",
-        "evicting",
-        "EvictionsPerHit",
         "noteEviction",
-        "recordEvictChoice"
+        "recordEvictChoice",
+        "replayableEvictedCount"
       ],
       "min_files": 3,
       "name": "Eviction family",
@@ -1331,15 +2875,27 @@
           "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "decisionStderr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 result record within ctxplan reconciliation",
+          "token": "PlanStepDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue-local result value grouping retry action and observability reason; not a reusable decision-system concept.",
+          "token": "partialretrydecision"
         }
       ],
       "id": "decision",
       "ignore": [
+        "PlanStepDecision",
         "ReuseDecision",
         "appendsteerdecisions",
         "decisionStderr",
         "gooddecisionratio",
-        "kinddecisionsabout"
+        "kinddecisionsabout",
+        "partialretrydecision"
       ],
       "min_files": 3,
       "name": "Decision family",
@@ -1424,6 +2980,46 @@
           "category": "incidental",
           "reason": "Private single-call-site text formatter for one verb (fak wip blocked); it materializes no new concept — the vocabulary it prints (LAND/WAIT/IDLE/ACTIVE) is owned and defined by internal/wipattr.BlockState, and this function only lays those rows out as a table.",
           "token": "wipBlockedRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported single-call-site printer for the wip reconcile --reclaim listing; it renders rows but carries no domain meaning of its own — the positioned concepts are Reclaimable and ReclaimRow in internal/wiprecon",
+          "token": "wipReclaimRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-text output formatter for one verb (fak runaway), the exact shape of renderStallscan and its siblings in cmd/fak. Writes findings to an io.Writer; materializes no resource, owns no lifecycle, and is not part of any render/materialize abstraction.",
+          "token": "renderRunaway"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported per-verb string builder for one CLI table: it formats the fleetbus.Report that `fak fleet control` already owns and has no meaning outside that one command's stdout. Not a rendering concept.",
+          "token": "renderFleetControl"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-table printer for the one gitspawn bench report; carries no concept of its own beyond the render-materialize family root already positioned.",
+          "token": "renderGitSpawnReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local printer for the gitspawn bench baseline-vs-current comparison; a presentation helper for this command, not a distinct concept.",
+          "token": "renderGitSpawnDelta"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local human-table printer for one checkpoint record on this command's stdout; a presentation helper, not a rendering concept of its own.",
+          "token": "renderCheckpointWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported string-formatting helper local to set_comparability.go that renders an already-computed value-to-arms grouping into one finding's detail line. It carries no domain meaning of its own and is not part of any public shape.",
+          "token": "renderAxisPartition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Format-only helper for the existing compact-audit report; it adds a ranking presentation but does not materialize a distinct domain artifact or lifecycle.",
+          "token": "RenderCompactTrajectoryRanking"
         }
       ],
       "id": "render-materialize",
@@ -1431,6 +3027,7 @@
         "AllowsRender",
         "DefaultRender",
         "RenderAuditClusterReport",
+        "RenderCompactTrajectoryRanking",
         "RenderFidelity",
         "RenderKind",
         "RenderReopen",
@@ -1443,9 +3040,15 @@
         "materializes",
         "metricsrender",
         "priorwtrendercrash",
+        "renderAxisPartition",
+        "renderCheckpointWitness",
         "renderCommitDrainResult",
         "renderCommitVelocity",
+        "renderFleetControl",
         "renderGhostReport",
+        "renderGitSpawnDelta",
+        "renderGitSpawnReport",
+        "renderRunaway",
         "renderValidate",
         "renderVelocityLeg",
         "rendered",
@@ -1454,7 +3057,8 @@
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
         "tuioverviewsavingsrender",
-        "wipBlockedRender"
+        "wipBlockedRender",
+        "wipReclaimRender"
       ],
       "min_files": 2,
       "name": "Render / materialize family",
@@ -1558,6 +3162,91 @@
           "category": "incidental",
           "reason": "A row of measured data in the taskvc reboot-survival inventory, not a term in the audit's vocabulary. inventory.go is a census RECORD: each entry names one live Windows Scheduled Task and the installer basename that recreates it, as observed on this fleet on 2026-07-26. Its meaning is entirely given by the pair it forms, and the roster changes whenever a loop is added or retired. Positioning these would book concept coverage for the contents of a data table rather than for the audit's actual vocabulary (ORPHAN, INSTALLER_NAME_DRIFT, DeclaredTaskNames, Verify), and would go stale on the next fleet change without any concept having moved.",
           "token": "register_bench_plan_doc"
+        },
+        {
+          "category": "incidental",
+          "reason": "The options-taking variant of the existing wipLand verb; it carries no new concept, only the parameter object for the land scope declaration already positioned as wip land.",
+          "token": "wipLandWith"
+        },
+        {
+          "category": "incidental",
+          "reason": "The parameter struct for wipLandWith; a Go options-carrier for the already-positioned land verb, holding no distinction of its own.",
+          "token": "wipLandOptions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Positioned canonically in its primary family as c2421-plan-eviction (ctxplan.PlanEviction, the survival-class eviction planner). It surfaces in the plan family only because it RETURNS an EvictionPlan; the concept itself is an eviction verb, not a planning one.",
+          "token": "PlanEviction"
+        },
+        {
+          "category": "incidental",
+          "reason": "The recording half of the same StagedDiff accessor pair as Candidates and ReportedGates. A method name, not a distinct concept: the concept is the CANDIDATE DENOMINATOR (#5602) each gate records into.",
+          "token": "NoteCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported record struct carrying one gate's candidate count and its unit inside the StagedDiff ledger. A private field holder, not a concept in its own right: the concept is the CANDIDATE DENOMINATOR (#5602) that NoteCandidates records and Candidates reads back.",
+          "token": "candidateNote"
+        },
+        {
+          "category": "incidental",
+          "reason": "operator readout renderer for FilingPlan (mirrors ExplainPlan/ExplainMatrix/ExplainBisect in the same package); a rendering function, not a governed concept",
+          "token": "ExplainFilingPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Record kind constant, not a planning concept.",
+          "token": "KindCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local trace root identifier, not a planning concept.",
+          "token": "candidateID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanStepDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanReconciliation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "indexedPlanStep"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanLogEntry"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 implementation detail within ctxplan per-step reconciliation",
+          "token": "PlanLog"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 ctxplan reconciliation operation",
+          "token": "ReconcilePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #4400 local indexing helper",
+          "token": "indexPlanSteps"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed transport result row, not a planning abstraction",
+          "token": "RemoteDrainCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure checkpoint deletion policy fold, not a project planning abstraction",
+          "token": "PlanRemoteDrain"
         }
       ],
       "exclude": [
@@ -1572,18 +3261,33 @@
         "BuildSweepPlan",
         "Candidates",
         "DecodeInterleavePlan",
+        "ExplainFilingPlan",
         "FleetBenchPlanDoc",
+        "KindCandidate",
+        "NoteCandidates",
         "PlanDecodeInterleave",
+        "PlanEviction",
+        "PlanLog",
+        "PlanLogEntry",
+        "PlanReconciliation",
+        "PlanRemoteDrain",
         "PlanResolver",
+        "PlanStepDecision",
+        "ReconcilePlan",
+        "RemoteDrainCandidate",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
         "buildMainPlan",
+        "candidateID",
+        "candidateNote",
         "candidatePaths",
         "candidatemean",
         "candidates",
         "fitandplanserveggufexpertparallelpathondevice",
         "hostPlan",
+        "indexPlanSteps",
+        "indexedPlanStep",
         "notplanned",
         "nplan",
         "orderLaneCandidatesAged",
@@ -1603,7 +3307,9 @@
         "planting",
         "plants",
         "register_bench_plan_doc",
-        "runAblatePlan"
+        "runAblatePlan",
+        "wipLandOptions",
+        "wipLandWith"
       ],
       "min_files": 2,
       "name": "Plan family",
@@ -1615,13 +3321,87 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Windows print-spooler PROCESS NAME in internal/runaway's protected-names allowlist (never auto-terminate). Not a pooling concept: it is an OS image name matched case-insensitively against Win32_Process.Name, and shares only the substring 'pool'.",
+          "token": "spoolsv"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench setup-parity receipt symbol (issue #5704): 'pooled' is the VERB of aggregating the speedup across admitted trial pairs, the same verb-sense this family already ignores as poolspanscores - not a session bounded-LRU pool container and not a cachemeta PoolProfile.",
+          "token": "PooledSpeedupPct"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported package constant holding the off-by-default cap value (0) for the warm worktree pool; the concept it stands for is positioned as x2-pool-workerworktreepoolcapenv/x2-pool-workerworktreepoolcap. It is a default literal, not a distinct pool concept.",
+          "token": "defaultPoolCap"
+        },
+        {
+          "category": "incidental",
+          "reason": "The string literal VALUE of the PoolCapEnv constant, positioned as x2-pool-workerworktreepoolcapenv. It is the same concept spelled as its wire name, not a second one.",
+          "token": "FLEET_WORKER_WORKTREE_POOL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constant naming the sidecar directory (.fak-wt-pool) that holds the pool's idle markers. A file-layout detail of one package's pool implementation, not a pool concept.",
+          "token": "poolStateDir"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported constant naming the .idle marker suffix. A file-naming detail of the pool's on-disk marker format, not a pool concept.",
+          "token": "poolIdleExt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper joining the worktree root to poolStateDir. Path plumbing for one implementation, not a pool concept.",
+          "token": "poolStatePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper naming one member's idle-marker file. Path plumbing for one implementation, not a pool concept.",
+          "token": "poolMarker"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper listing a lane's idle members in sorted order and clearing markers whose worktree is gone. An internal enumeration step of the positioned pool cap, not a separate concept.",
+          "token": "poolIdleMembers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper re-pointing an already-materialized worktree at the new base and dropping uncommitted state before it is leased out. An internal step of the positioned pool lease, not a separate concept.",
+          "token": "resetPooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper taking an idle member for a new worker on the Prepare path. An internal step of the positioned pool cap, not a separate concept.",
+          "token": "leasePooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported helper returning a finished worktree to the idle set on the Reap path, up to the cap. An internal step of the positioned pool cap, not a separate concept.",
+          "token": "returnPooled"
+        }
+      ],
       "exclude": [
         "spool"
       ],
       "id": "pool",
       "ignore": [
+        "FLEET_WORKER_WORKTREE_POOL",
+        "PooledSpeedupPct",
+        "defaultPoolCap",
         "kvpoolbytes",
-        "poolspanscores"
+        "leasePooled",
+        "poolIdleExt",
+        "poolIdleMembers",
+        "poolMarker",
+        "poolStateDir",
+        "poolStatePath",
+        "poolspanscores",
+        "resetPooled",
+        "returnPooled",
+        "spoolsv"
       ],
       "min_files": 2,
       "name": "Pool family",
@@ -1633,12 +3413,20 @@
       ]
     },
     {
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "gitDailyDayLayout is a file-local mirror of Go's reference-date layout 2006-01-02, duplicated as a literal because internal/gitdaily (which owns gitdaily.DayLayout) sits a layer ABOVE internal/metrics and so cannot be imported here. It introduces no layout concept of its own.",
+          "token": "gitDailyDayLayout"
+        }
+      ],
       "id": "layout",
       "ignore": [
-        "layouts",
+        "archusesmlamoelayout",
         "defaultlayout",
-        "usesmlamoelayout",
-        "archusesmlamoelayout"
+        "gitDailyDayLayout",
+        "layouts",
+        "usesmlamoelayout"
       ],
       "min_files": 2,
       "name": "Layout family",
@@ -1755,14 +3543,77 @@
           "category": "incidental",
           "reason": "unexported package-main shell plumbing for the already-positioned tend-fleet meta-walk: a CLI-local router/fold/usage symbol, not a new domain concept",
           "token": "superloop_fleet"
+        },
+        {
+          "category": "incidental",
+          "reason": "The cmd-layer struct that renders the waiter-plane result for one \fak loop region invocation. Not a distinct concept: it is a report DTO over internal/leasequeue's Plan output, and it is deliberately nil-valued whenever the queue is unavailable so the report degrades and the admission decision never does.",
+          "token": "loopRegionQueueReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "The call-site helper that mints a waiter ticket after a refused region admission. Named for its file, not for a new idea; the concept is internal/leasequeue's Store.Mint, which this wraps with the cmd layer's arguments.",
+          "token": "loopRegionEnqueue"
+        },
+        {
+          "category": "incidental",
+          "reason": "The mirror of loopRegionEnqueue, dropping this actor's ticket once the region admits. Same rationale: a call-site wrapper over the leasequeue store, not a separate concept.",
+          "token": "loopRegionDequeue"
+        },
+        {
+          "category": "incidental",
+          "reason": "An adapter that projects the live lease set into the holder shape internal/leasequeue.Plan expects. Purely a shape conversion at the boundary between two existing concepts.",
+          "token": "loopRegionHolders"
+        },
+        {
+          "category": "incidental",
+          "reason": "The cmd-layer view of one waiter ticket. The ticket concept lives in internal/leasequeue; this is its local projection for rendering and carries no additional semantics.",
+          "token": "loopRegionTicket"
+        },
+        {
+          "category": "incidental",
+          "reason": "The dispatchaging class constant identifying loop-region waiters within the already-declared class taxonomy. It selects an existing weight rather than introducing a new class of thing.",
+          "token": "ClassLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Not a symbol at all -- this is the filename loop_region.go extracted from source text by the admission tokenizer. Filed as the same false-positive class as #5533, where a filename or test name quoted in prose is read as an introduced symbol. Classified incidental because there is no concept here to position.",
+          "token": "loop_region"
+        },
+        {
+          "category": "incidental",
+          "reason": "An unexported arm-and-return-stop wiring helper matching this file's sibling startXLoop functions. It starts the fleetbus drain goroutine for the lifetime of ctx and names no new kind of loop.",
+          "token": "startFleetBusLoop"
+        },
+        {
+          "category": "incidental",
+          "reason": "A NETWORK loopback address test (localhost/127.0.0.1/::1), not an iteration or dispatch loop. It is a local mirror of internal/modelroute.isLoopbackBaseURL used to keep the fleet trust boundary disjoint from the on-box/device zone; it shares only the substring 'loop' with the loop concept family.",
+          "token": "isLoopbackFleetHost"
+        },
+        {
+          "category": "incidental",
+          "reason": "A wire error code returned when a mid-flight verb names a trace with no owned run to reach; a refusal label, not a loop concept.",
+          "token": "midflight_no_owned_loop"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON report field naming, not a loop lifecycle concept",
+          "token": "OldestLoopID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only projection type, not a loop lifecycle concept",
+          "token": "LoopView"
         }
       ],
       "id": "loop",
       "ignore": [
         "BackgroundLoop",
+        "ClassLoop",
         "ClassPollingLoop",
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
+        "LoopView",
+        "OldestLoopID",
         "POLLING_LOOP",
         "appendlooprunevent",
         "buildtuiloopreport",
@@ -1773,6 +3624,13 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
+        "isLoopbackFleetHost",
+        "loopRegionDequeue",
+        "loopRegionEnqueue",
+        "loopRegionHolders",
+        "loopRegionQueueReport",
+        "loopRegionTicket",
+        "loop_region",
         "loopconsumes",
         "loopdoneunwitnessed",
         "looped",
@@ -1787,12 +3645,14 @@
         "loopsnapshotforid",
         "loopstate",
         "meta_superloop",
+        "midflight_no_owned_loop",
         "noloopledger",
         "q8prefillneedstokenloop",
         "recordloop",
         "register_scout_loop",
         "runSuperloopFleet",
         "runloop",
+        "startFleetBusLoop",
         "superloopFleetIntent",
         "superloopFleetNext",
         "superloopFleetReport",

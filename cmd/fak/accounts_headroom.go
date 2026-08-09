@@ -63,14 +63,25 @@ func rotationHeadroom(homeDir string) accounts.RotationHeadroom {
 	pol := fleetaccounts.LoadPolicy(paths)
 	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
 	rows := fleetaccounts.AnnotatedRoster(home, paths.ConfigHome, pol, reg)
-	now := time.Now().UTC()
+	return rosterHeadroom(rows, time.Now().UTC())
+}
+
+// rosterHeadroom is the ONE fold from a live runtime roster to the banded headroom signal:
+// the roster tiering plus the durable usage-limit cooldown override. Every producer of the
+// signal — the rotation planner (rotationHeadroom) and the `fak accounts headroom` display
+// verb alike — must go through here, so what an operator READS can never disagree with what
+// rotation ACTS on. It used to be two call sites and the display verb called
+// headroomFromRoster bare, printing a bucket `fak accounts cooldown` reported walled by a
+// live usage-limit cooldown as OFFERABLE — exactly the misread that tempts an operator into
+// `fak accounts cooldown --clear` on a genuinely rate-limited seat (#5853).
+//
+// The cooldown override is the fresher signal: an account the launcher just watched bounce
+// off its own cap is walled with certainty, where the roster's offerability read can lag or
+// miss a cap that fired seconds ago. Forcing every cooled bucket into the walled tier makes
+// rotation sort it last (and NextRotationDecision skip it as non-servable) until the window
+// elapses. Fail-open: an unreadable store leaves the roster signal as-is.
+func rosterHeadroom(rows []fleetaccounts.Account, now time.Time) accounts.RotationHeadroom {
 	hr := headroomFromRoster(rows, now)
-	// Durable usage-limit cooldown override: an account the launcher just watched
-	// bounce off its own cap is walled with certainty — a stronger, fresher signal
-	// than the live roster's offerability read, which can lag or miss a cap that
-	// fired seconds ago. Force every cooled bucket into the walled tier so rotation
-	// sorts it last (and NextRotationDecision skips it as non-servable) until the
-	// window elapses. Fail-open: an unreadable store leaves the roster signal as-is.
 	if cd, err := accounts.LoadCooldownStore(defaultCooldownStorePath()); err == nil {
 		hr = applyCooldownToHeadroom(hr, cd, now)
 	}
@@ -299,7 +310,7 @@ func runAccountsHeadroom(stdout, stderr io.Writer, args []string) int {
 	cwd, _ := os.Getwd()
 	paths := fleetaccounts.ResolvePaths(filepath.Join(findRepoRoot(cwd), "tools"))
 	rows := fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, fleetaccounts.LoadPolicy(paths), fleetaccounts.LoadRegistry(paths.RegistryPath))
-	payload := accountsHeadroomPayload{Schema: "fak.accounts-headroom.v1", Product: product, Headroom: headroomFromRoster(rows, time.Now().UTC()), SeatDeficit: buildAccountsSeatDeficit(rows, product, required)}
+	payload := accountsHeadroomPayload{Schema: "fak.accounts-headroom.v1", Product: product, Headroom: rosterHeadroom(rows, time.Now().UTC()), SeatDeficit: buildAccountsSeatDeficit(rows, product, required)}
 	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

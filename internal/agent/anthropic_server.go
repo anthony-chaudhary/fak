@@ -339,36 +339,30 @@ func AnthropicStopReason(finishReason string, hasToolUse bool) string {
 // is geometry-derived where the dimensions are cheaply recoverable and the flat imageTokenCost
 // ceiling otherwise (#5165).
 func EstimateAnthropicTokens(req *AnthropicMessagesRequest) int {
-	chars := len(req.System)
+	proseBytes := len(req.System)
 	for _, m := range req.Messages {
-		chars += len(m.Content)
-		for _, tc := range m.ToolCalls {
-			chars += len(tc.Function.Name) + len(tc.Function.Arguments)
-		}
+		proseBytes += messageBytes(m)
 	}
+	schemaBytes := 0
 	for _, t := range req.Tools {
-		chars += len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
+		schemaBytes += toolBytes(t)
 	}
 	// Count the preserved image blocks once. The decoder folded each image down to the
-	// "[image]" placeholder already summed into chars above, so subtract that placeholder's
-	// chars before the /4 estimate — otherwise imageTokenCost is charged ON TOP of the
-	// ~len("[image]")/4 tokens the placeholder itself already contributed (#5166). Images are
-	// then charged their real per-image cost from the preserved raw content blocks, which still
-	// carry the base64 the decoded placeholder dropped. countContentBlockImages walks the same
-	// top-level + tool_result nesting the decoder does.
+	// "[image]" placeholder already summed into proseBytes above, so subtract that
+	// placeholder before charging the preserved image's real cost (#5166).
 	numImages, imageTokens := 0, 0
 	for _, cb := range req.ContentBlocks {
 		n, tk := countContentBlockImages(cb)
 		numImages += n
 		imageTokens += tk
 	}
-	if drop := numImages * len("[image]"); drop < chars {
-		chars -= drop
+	if drop := numImages * len("[image]"); drop < proseBytes {
+		proseBytes -= drop
 	} else {
-		chars = 0
+		proseBytes = 0
 	}
-	tokens := chars/4 + imageTokens
-	return tokens
+	return estimateTokens(proseBytes, proseTokenDivisor) +
+		estimateTokens(schemaBytes, jsonSchemaTokenDivisor) + imageTokens
 }
 
 // countContentBlockImages counts image blocks in one preserved message content value and sums their

@@ -230,3 +230,70 @@ func TestMetalQ2_0UploadRejectsBadShapes(t *testing.T) {
 		t.Fatalf("UploadQ2_0 with a well-formed payload must return a handle")
 	}
 }
+
+func q2UploadTest(t *testing.T, out, in int, seed int64) (*Q2_0Weight, []byte, []float32) {
+	t.Helper()
+	codes, scales := q2_0RandomWeight(rand.New(rand.NewSource(seed)), out, in)
+	w := UploadQ2_0(codes, scales, out, in)
+	if w == nil {
+		t.Fatal("UploadQ2_0 returned nil for valid payload")
+	}
+	return w, codes, scales
+}
+func q2RequireClose(t *testing.T, got, want []float32) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("length %d != %d", len(got), len(want))
+	}
+	for i := range got {
+		if !q2_0CloseEnough(got[i], want[i]) {
+			t.Fatalf("[%d] got %g want %g", i, got[i], want[i])
+		}
+	}
+}
+
+func TestQ2_0GEMMParity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	ResetQ2_0()
+	defer ResetQ2_0()
+	const in, out, p = 64, 5, 3
+	w, codes, scales := q2UploadTest(t, out, in, 41)
+	X := make([]float32, p*in)
+	for i := range X {
+		X[i] = float32((i%13)-6) / 11
+	}
+	got := make([]float32, p*out)
+	w.GEMM(X, p, got)
+	for tok := 0; tok < p; tok++ {
+		q2RequireClose(t, got[tok*out:(tok+1)*out], q2_0RefGEMV(codes, scales, X[tok*in:(tok+1)*in], out, in))
+	}
+}
+
+func TestFusedMLPQ2_0Parity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	ResetQ2_0()
+	defer ResetQ2_0()
+	gate, gc, gs := q2UploadTest(t, 64, 64, 51)
+	up, uc, us := q2UploadTest(t, 64, 64, 52)
+	down, dc, ds := q2UploadTest(t, 7, 64, 53)
+	x := make([]float32, 64)
+	for i := range x {
+		x[i] = float32((i%9)-4) / 7
+	}
+	g := q2_0RefGEMV(gc, gs, x, 64, 64)
+	u := q2_0RefGEMV(uc, us, x, 64, 64)
+	inter := make([]float32, 64)
+	for i := range inter {
+		inter[i] = (g[i] / (1 + float32(math.Exp(float64(-g[i]))))) * u[i]
+	}
+	want := q2_0RefGEMV(dc, ds, inter, 7, 64)
+	got := make([]float32, 7)
+	if !FusedMLPQ2_0(gate, up, down, x, got) {
+		t.Fatal("FusedMLPQ2_0 refused valid shapes")
+	}
+	q2RequireClose(t, got, want)
+}

@@ -16,14 +16,21 @@ import (
 )
 
 type debugVarsResponse struct {
-	Gateway          debugGatewayVars               `json:"gateway"`
-	Runtime          debugRuntimeVars               `json:"runtime"`
-	Kernel           debugKernelVars                `json:"kernel"`
-	Inference        debugInferenceVars             `json:"inference"`
-	Upstream         debugUpstreamVars              `json:"upstream"`
-	VCache           *debugVCacheVars               `json:"vcache,omitempty"`
-	CacheAttribution *debugCacheAttributionVars     `json:"cache_attribution,omitempty"`
-	ManagedCache     *debugManagedCacheVars         `json:"managed_cache,omitempty"`
+	Gateway          debugGatewayVars           `json:"gateway"`
+	Runtime          debugRuntimeVars           `json:"runtime"`
+	Kernel           debugKernelVars            `json:"kernel"`
+	Inference        debugInferenceVars         `json:"inference"`
+	Upstream         debugUpstreamVars          `json:"upstream"`
+	VCache           *debugVCacheVars           `json:"vcache,omitempty"`
+	CacheAttribution *debugCacheAttributionVars `json:"cache_attribution,omitempty"`
+	ManagedCache     *debugManagedCacheVars     `json:"managed_cache,omitempty"`
+	// ShrinkLevers is the #5493 prompt-shrink-lever posture: which of the three levers are
+	// configured ON, and which of those the wire this gateway actually built can run. It sits
+	// beside ManagedCache because it answers the same class of question for a different lever
+	// family — configured-vs-live — and because the three levers it covers are the ones whose
+	// silent inertness on a self-hosted wire would otherwise be read as a verdict on the
+	// kernel. Omitted when no lever is configured on. See shrink_lever_live.go.
+	ShrinkLevers     *debugShrinkLeverVars          `json:"shrink_levers,omitempty"`
 	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
 	VCacheGovernor   []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
 	VCacheGovQuality *vcacheGovernorQualityVars     `json:"vcache_governor_quality,omitempty"`
@@ -31,9 +38,13 @@ type debugVarsResponse struct {
 	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
 	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
 	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
-	Sessions         []debugSessionVars             `json:"sessions,omitempty"`
-	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
-	ContextQueries   []ContextQueryAuditRecord      `json:"context_queries,omitempty"`
+	// MoEResidency is what a serve that declared an expert budget paid to keep the top-k
+	// activated experts resident (R6, #5617). Omitted unless some request actually engaged a
+	// routed-expert ring, so its absence means "not engaged" rather than "engaged, cost zero".
+	MoEResidency   *debugMoEResidencyVars    `json:"moe_residency,omitempty"`
+	Sessions       []debugSessionVars        `json:"sessions,omitempty"`
+	Assumptions    []SessionAssumption       `json:"assumptions,omitempty"`
+	ContextQueries []ContextQueryAuditRecord `json:"context_queries,omitempty"`
 	// Endpoints is the live accounts+nodes block — which Claude seats and which serving
 	// nodes THIS session is using (fak guard's status area). Nil/omitted unless the host
 	// set a provider (SetSessionEndpointsProvider) that has something to report.
@@ -328,6 +339,51 @@ type debugKVMemoryVars struct {
 	Splits             int     `json:"splits,omitempty"`
 }
 
+// debugMoEResidencyVars is the activated-expert residency block. Unlike the Prometheus family,
+// which leaves ratios to PromQL, this one carries the derived rates precomputed: /debug/vars is
+// read by a human answering "is the budget I declared the right size", and making them divide
+// page-in bytes by forwarded tokens in their head is how that question goes unanswered.
+type debugMoEResidencyVars struct {
+	Requests int64 `json:"requests"`
+	Tokens   int64 `json:"tokens"`
+
+	Lookups     int64 `json:"lookups"`
+	Hits        int64 `json:"hits"`
+	PageIns     int64 `json:"page_ins"`
+	Evictions   int64 `json:"evictions"`
+	Refusals    int64 `json:"refusals"`
+	PageInBytes int64 `json:"page_in_bytes"`
+
+	BudgetBytes int64 `json:"budget_bytes,omitempty"`
+	PeakBytes   int64 `json:"peak_bytes,omitempty"`
+
+	HitRate             float64 `json:"hit_rate"`
+	RefusalRate         float64 `json:"refusal_rate"`
+	ExpertBytesPerToken float64 `json:"expert_bytes_per_token"`
+	PeakBudgetUsed      float64 `json:"peak_budget_used,omitempty"`
+
+	// The most recent request's framing. Shape makes the byte rates readable (3% of experts
+	// activated is why an offload budget can be small); placement is the pin-set gauge, which
+	// describes one request and does not sum.
+	Experts           int     `json:"experts,omitempty"`
+	ExpertsPerToken   int     `json:"experts_per_token,omitempty"`
+	ActivatedFraction float64 `json:"activated_fraction,omitempty"`
+	PlacementBasis    string  `json:"placement_basis,omitempty"`
+	PlacementDrift    float64 `json:"placement_drift,omitempty"`
+	// PlacementServedShare is the complement of drift: the share of the request's expert touches
+	// the resident plan actually served. Named for what it measures rather than as "coverage",
+	// which in this repo already means how much of a surface a test exercises.
+	PlacementServedShare float64 `json:"placement_served_share,omitempty"`
+	SharedRingAgents     int     `json:"shared_ring_agents,omitempty"`
+	AgentsPerPageIn      float64 `json:"agents_per_page_in,omitempty"`
+
+	// ReconciliationFailures is the alarm; FailedChecks names what disagreed on the most recent
+	// unreconciled request, so an operator who sees a non-zero count is not left guessing which
+	// of the numbers above stopped being trustworthy.
+	ReconciliationFailures int64    `json:"reconciliation_failures"`
+	FailedChecks           []string `json:"failed_checks,omitempty"`
+}
+
 type debugRequestMemoryVars struct {
 	Backend       string                         `json:"backend"`
 	PromptTokens  int                            `json:"prompt_tokens"`
@@ -348,6 +404,24 @@ type debugCompactionVars struct {
 	UncachedTrimShedTokens      uint64            `json:"uncached_trim_shed_tokens"`
 	CacheReadTokens             uint64            `json:"cache_read_tokens"`
 	LastPostFireCacheReadTokens float64           `json:"last_post_fire_cache_read_tokens"`
+	// AnchorStarved was previously rendered ONLY on the Prometheus surface
+	// (fak_gateway_compaction_anchor_starved_total), so the JSON front door every operator tool
+	// actually polls could not tell the #1407 pathology from a benign short session. Same counter,
+	// same meaning — a subset of BailReasons["under_budget"].
+	AnchorStarved uint64 `json:"anchor_starved"`
+	// SolvencyForced is the fired-at-a-loss subset (Config.CompactSolvencyFloorTokens overrode the
+	// burst economics). Surfaced here so a fire count can be read net of survival buys.
+	SolvencyForced uint64 `json:"solvency_forced"`
+	// Budget is the CONFIGURED compaction line (Config.CompactHistoryBudget) this gateway resolved.
+	// `fak guard` overrides the flag default for every launch (resolveGuardCompactBudget), so the
+	// number in --help is NOT reliably the number in force; this is the one actually being compared.
+	Budget int `json:"budget"`
+	// LastSuffixTokens / PeakSuffixTokens are the compactible messages[] span the most recent and
+	// the largest-so-far bail measured against Budget. Headroom = Budget - LastSuffixTokens. They
+	// answer the question a bail-reason tally cannot: whether "under_budget" means this session is
+	// short, or means the line sits above the span this traffic ever reaches.
+	LastSuffixTokens uint64 `json:"last_suffix_tokens"`
+	PeakSuffixTokens uint64 `json:"peak_suffix_tokens"`
 }
 
 type debugHTTPMetricVars struct {
@@ -529,6 +603,8 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
 		ManagedCache:     managedCacheVars(s.cacheTTL1H, s.provider, m.adjudicationSummary()),
+		ShrinkLevers: shrinkLeverVars(s.anthropicPassthrough(), s.dualRoutesLocalModels(), s.provider,
+			s.compactHistoryBudget, s.elideStaleReads, s.deferColdTools),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
 		VCacheGovQuality: m.vcacheGovernorQualityVars(),
@@ -536,6 +612,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
+		MoEResidency:     debugMoEResidency(s.planner),
 		Sessions:         s.debugSessions(ctx, now),
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
@@ -557,6 +634,11 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 				UncachedTrimShedTokens:      compact.uncachedTrimShed,
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
+				AnchorStarved:               compact.anchorStarved,
+				SolvencyForced:              compact.solvencyForced,
+				Budget:                      s.compactHistoryBudget,
+				LastSuffixTokens:            compact.lastSuffixTokens,
+				PeakSuffixTokens:            compact.peakSuffixTokens,
 			},
 			RequestMemory:        debugRequestMemoryMetricRows(reqMemoryRows.plans),
 			RequestMemoryFit:     debugRequestMemoryFitRows(reqMemoryRows.fits),
@@ -886,6 +968,8 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		TotalTokenEquiv:                           ms.TotalTokenEquiv(),
 		ProviderPromptCacheReadTokenEquiv:         ms.ProviderPromptCacheReadTokenEquiv,
 		ProviderPromptCacheWritePremiumTokenEquiv: ms.ProviderPromptCacheWritePremiumTokenEquiv,
+		CacheCreationTokensHeadOnly:               sum.CacheCreationTokensHeadOnly,
+		CacheCreationTokensMessagePrefix:          sum.CacheCreationTokensMessagePrefix,
 		FakCompactionShedTokens:                   ms.FakCompactionShedTokens,
 		FakCompactionCacheReadTokens:              ms.FakCompactionCacheReadTokens,
 		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,
@@ -1085,6 +1169,57 @@ func debugOperationRows(rows []operationMetricSnapshot) []debugOperationMetricVa
 			By:          row.key.by,
 			Latency:     debugLatency(row.val),
 		})
+	}
+	return out
+}
+
+// debugMoEResidency renders a serve's activated-expert residency, or nil when there is nothing to
+// render — a proxy planner (no reporter) or a local one whose operator declared no expert budget,
+// so no session ever built a ring. Both are ordinary configurations, and reporting them as a block
+// of zeros would claim a measurement nobody took.
+func debugMoEResidency(p agent.Planner) *debugMoEResidencyVars {
+	reporter, ok := p.(agent.MoEResidencyReporter)
+	if !ok {
+		return nil
+	}
+	l := reporter.MoEResidencyStats()
+	if l.Requests == 0 {
+		return nil
+	}
+	last := l.Last
+	out := &debugMoEResidencyVars{
+		Requests:               l.Requests,
+		Tokens:                 l.Tokens,
+		Lookups:                l.Lookups,
+		Hits:                   l.Hits,
+		PageIns:                l.PageIns,
+		Evictions:              l.Evictions,
+		Refusals:               l.Refusals,
+		PageInBytes:            l.PageInBytes,
+		BudgetBytes:            l.BudgetBytes,
+		PeakBytes:              l.PeakBytes,
+		HitRate:                l.HitRate(),
+		RefusalRate:            l.RefusalRate(),
+		ExpertBytesPerToken:    l.ExpertBytesPerToken(),
+		PeakBudgetUsed:         l.PeakBudgetUsed(),
+		Experts:                last.Shape.Experts,
+		ExpertsPerToken:        last.Shape.ExpertsPerToken,
+		ActivatedFraction:      last.Shape.ActivatedFraction,
+		PlacementDrift:         last.Placement.Drift,
+		PlacementServedShare:   last.Placement.Coverage,
+		AgentsPerPageIn:        last.Rates.AgentsPerPageIn,
+		ReconciliationFailures: l.ReconciliationFailures,
+	}
+	if basis := strings.TrimSpace(last.Placement.Basis); basis != "" && basis != "none" {
+		out.PlacementBasis = basis
+	}
+	if last.Shared != nil {
+		out.SharedRingAgents = last.Shared.Agents
+	}
+	for _, c := range last.Reconciliation.Checks {
+		if !c.OK {
+			out.FailedChecks = append(out.FailedChecks, c.Name)
+		}
 	}
 	return out
 }

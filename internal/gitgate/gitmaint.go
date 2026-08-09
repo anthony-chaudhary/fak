@@ -18,8 +18,9 @@
 //     `verify`-clean with the loose/pack object counts unchanged.
 //
 //   - SAFE-WITH-GRACE (gated on BOTH the lock preflight AND the posture assert):
-//     `git maintenance run --task=loose-objects` (prune-packed drops only loose
-//     objects that ALREADY have a packed duplicate) and `--task=incremental-repack`
+//     `git maintenance run --task=loose-objects`, followed by `git prune-packed`
+//     (drops only loose objects that ALREADY have a packed duplicate), and
+//     `--task=incremental-repack`
 //     (multi-pack-index expire removes only fully-covered redundant packs; on Windows
 //     an open pack simply fails to unlink → fail-safe). These UNLINK redundant copies,
 //     so they run only when no git/fak transaction is in flight and the shared
@@ -144,6 +145,13 @@ var alwaysSafeSteps = [][]string{
 // proven are already covered, and only runs when unlocked + posture-safe.
 var graceSteps = [][]string{
 	{"maintenance", "run", "--task=loose-objects"},
+	// Git's loose-objects task prunes OLD packed duplicates before it packs the
+	// remaining reachable loose objects. Without this final pass, every object it just
+	// packed remains loose until tomorrow's tick: count-objects reports no reduction
+	// and the one-shot maintenance promise takes two days. prune-packed deletes only a
+	// byte-for-byte object already present in a pack and stays under the same posture +
+	// per-step lock re-probe as every other redundant-copy fold.
+	{"prune-packed"},
 	{"maintenance", "run", "--task=incremental-repack"},
 }
 
@@ -233,13 +241,15 @@ const (
 
 // CountObjects is the parsed `git count-objects -vH` snapshot for the before/after
 // witness. Raw is the verbatim text printed to the operator; the parsed fields let a
-// caller assert the loose backlog dropped with nothing pruned.
+// caller assert the loose backlog dropped and distinguish packed duplicates waiting for
+// prune-packed from genuinely unpacked objects.
 type CountObjects struct {
-	Raw       string `json:"raw"`
-	Count     int    `json:"count"`   // loose objects
-	InPack    int    `json:"in_pack"` // objects in packs
-	Packs     int    `json:"packs"`
-	Available bool   `json:"available"`
+	Raw           string `json:"raw"`
+	Count         int    `json:"count"`   // loose objects
+	InPack        int    `json:"in_pack"` // objects in packs
+	Packs         int    `json:"packs"`
+	PrunePackable int    `json:"prune_packable"` // loose objects already duplicated in packs
+	Available     bool   `json:"available"`
 }
 
 // MaintStep is one executed (or planned, or skipped) git step and its outcome.
@@ -296,8 +306,9 @@ func LooseBacklogHigh(co CountObjects) bool {
 // RunMaint executes the safe object-DB consolidation. The ALWAYS-SAFE tier
 // (multi-pack-index write, commit-graph write --reachable) runs unconditionally — it
 // is add-only and atomic, safe even mid-commit. The SAFE-WITH-GRACE tier (git
-// maintenance run --task=loose-objects / --task=incremental-repack, which may UNLINK a
-// fully-covered redundant copy) runs only when BOTH the posture assert and the lock
+// maintenance run --task=loose-objects / git prune-packed /
+// --task=incremental-repack, which may UNLINK a fully-covered redundant copy) runs only
+// when BOTH the posture assert and the lock
 // preflight pass, re-checking locks before every mutating step (TOCTOU). The
 // GRACE-PRUNE tier (opt-in, default-off) additionally requires the ≥2-week expire
 // floor and a quiet window (no live session lease) before its single supervised
@@ -649,6 +660,8 @@ func countObjects(ctx context.Context, run MaintRunner, dir string) CountObjects
 			co.InPack = leadingInt(val)
 		case "packs":
 			co.Packs = leadingInt(val)
+		case "prune-packable":
+			co.PrunePackable = leadingInt(val)
 		}
 	}
 	return co

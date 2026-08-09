@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-r"""Daily idea-scout — surface RELATED ideas from arXiv + GitHub and file them as
-issues, deduped and capped. The research-to-backlog arm of the fleet loop.
+r"""Daily idea-scout — surface RELATED ideas from arXiv, GitHub, Hacker News and
+Reddit and file them as issues, deduped and capped. The research-to-backlog arm of
+the fleet loop.
 
 The issue-dispatch loop (docs/dispatch-loop.md) RESOLVES the open backlog; nothing
 FEEDS it. This tool is the feeder: once a day it searches the outside world for
@@ -16,17 +17,46 @@ human can triage. Sources, both keyless-or-already-authed (no new secret):
                (fresh_per_topic repos sorted most-recently-updated, floored at the
                lower fresh_min_stars) so newly-created / trending / recently-pushed
                repos surface instead of only incumbents. fresh_per_topic: 0 disables it.
+  * Hacker News  Algolia's HN search API (https://hn.algolia.com/api/v1) — no key.
+  * Reddit     the public search JSON (https://www.reddit.com/search.json) — no key.
+
+The HN and Reddit lanes are points-scored rather than star-scored: a post under
+`min_points` is dropped pre-score, and `points` earns the same shape of bonus
+`stars` does. Both lanes long existed ONLY in the Go port (internal/ideascout),
+so a topic naming `hn`/`reddit` here gathered nothing and still reported success
+(#5549). The lane vocabulary is now declared once in SOURCE_LANES, a topic key no
+lane reads is REFUSED rather than ignored, and
+internal/ideascout/testdata/source_corpus.json pins the vocabulary and the parsers
+against the Go implementation so the two cannot drift apart again in silence.
 
 The hard part of an UNATTENDED issue filer is not fetching — it is NOT spamming.
-Three dedup rungs gate every candidate before it can become an issue:
+Four dedup rungs gate every candidate before it can become an issue:
 
-  1. seen-cache   .idea-scout/seen.json — a persistent {source_id: record} of every
-                  candidate ever FILED (or explicitly skipped). A source filed once
-                  is never filed again, even years later. This is the durable rung.
-  2. issue-body   the candidate's source URL / source_id stamped in any existing
-                  issue body ⇒ already filed (survives a lost cache).
-  3. title-near   token-overlap (Jaccard) with any existing issue title ⇒ a near-dup
-                  a human already opened by hand.
+  1. seen-cache   .idea-scout/seen.json — a node-local {source_id: record} of every
+                  candidate this machine FILED. A pure fast path: the cache is
+                  git-ignored, so it can be lost, and losing it must not (and no
+                  longer does) cost the guarantee. Rung 2 is what makes the promise.
+  2. filed-stamp  the candidate's source_id read back out of the
+                  `<!-- idea-scout-source: … -->` stamp on EVERY issue the scout has
+                  ever filed. THE DURABLE RUNG: a source filed once is never filed
+                  again, even years later. The index is built from a query TARGETED
+                  at the `idea-scout` label (`gh issue list --label idea-scout`), not
+                  from a fixed-size window of recent issues — so its completeness is
+                  a function of how many issues the SCOUT has filed (capped at
+                  --max-issues/day) and never of how fast the tracker as a whole
+                  grows. GitHub is the replicated store; nothing local is trusted.
+  3. issue-body   the candidate's source URL appears verbatim in some existing issue
+                  body ⇒ a human already opened it by hand. Best-effort: scanned over
+                  a recent-issue window (`issue_scan_limit`), so it is a bonus catch,
+                  never the guarantee.
+  4. title-near   token-overlap (Jaccard) with any existing issue title ⇒ a near-dup
+                  a human already opened by hand. Best-effort, same window as rung 3.
+
+Rung 2 is MANDATORY: if its index cannot be built — `gh` failed, or the label scan
+came back saturated at `scout_scan_limit` and may therefore be truncated — the run
+REFUSES (exit 2) instead of filing blind. A dedup index that silently degrades as
+the tracker grows is exactly how already-triaged sources get re-filed, so growth has
+to trip a loud refusal, not a quiet re-file.
 
 And a hard CAP: at most --max-issues per run (default 3), top-scored first, so even
 a pathological day cannot storm the tracker. Relevance is a TRANSPARENT integer
@@ -81,7 +111,61 @@ SCOUT_LABEL = "idea-scout"
 TRIAGE_LABEL = "needs-triage"
 TRIAGE_ONLY_LABEL = "triage-only"
 ARXIV_API = "http://export.arxiv.org/api/query"
+HN_ALGOLIA_API = "https://hn.algolia.com/api/v1/search_by_date"
+REDDIT_SEARCH_API = "https://www.reddit.com/search.json"
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+# ---- The source vocabulary (#5549) -------------------------------------------
+# One declaration of every gathering lane: the label it stamps on per-lane fetch
+# errors, the topic-config key that arms it, and the human name the run report
+# prints. Two lanes may share a topic key — `github` and `github-fresh` run the
+# same query on different sorts.
+#
+# Three things read this, so a lane cannot be half-added: load_config REFUSES a
+# topic key that is not here, the run report names the lanes it walked, and
+# internal/ideascout/testdata/source_corpus.json pins the list against the Go
+# scout's `sourceLanes`. Before #5549 the two implementations disagreed here and
+# nothing said so: `hn` and `reddit` existed only in Go, and a topic naming them
+# on THIS path — the scheduled one (tools/register_idea_scout.ps1) — gathered
+# zero candidates and reported a normal success.
+SOURCE_LANES: list[dict[str, str]] = [
+    {"label": "arxiv", "topic_key": "arxiv", "display": "arXiv"},
+    {"label": "github", "topic_key": "github", "display": "GitHub"},
+    {"label": "github-fresh", "topic_key": "github", "display": "GitHub"},
+    {"label": "hn", "topic_key": "hn", "display": "Hacker News"},
+    {"label": "reddit", "topic_key": "reddit", "display": "Reddit"},
+]
+
+# Topic-config keys that name no source lane: the topic's identity, its relevance
+# terms, and the area label filed issues hang under.
+TOPIC_META_KEYS: list[str] = ["key", "terms", "area"]
+
+
+def source_topic_keys() -> list[str]:
+    """Topic-config keys that arm a lane, in declaration order, de-duplicated
+    (`github` arms two lanes)."""
+    out: list[str] = []
+    for lane in SOURCE_LANES:
+        if lane["topic_key"] and lane["topic_key"] not in out:
+            out.append(lane["topic_key"])
+    return out
+
+
+def source_display_list() -> str:
+    """The lane vocabulary as the run report says it: "arXiv + GitHub + Hacker
+    News + Reddit". Derived, not spelled out, so the report cannot claim a lane
+    the gatherer does not walk."""
+    out: list[str] = []
+    for lane in SOURCE_LANES:
+        if lane["display"] not in out:
+            out.append(lane["display"])
+    return " + ".join(out)
+
+
+def source_label(source: str) -> str:
+    """Display name for a candidate's `source` field."""
+    return {"arxiv": "arXiv", "github": "GitHub", "hackernews": "Hacker News",
+            "reddit": "Reddit"}.get(source, source)
 
 # ---- Topics (baked-in defaults; override the whole set via --config) ----------
 # Each topic maps fak's domain onto a concrete arXiv query, a GitHub repo query,
@@ -96,6 +180,8 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         # GitHub repo search ANDs every term, so a long query matches ~nothing —
         # keep it 2-3 high-signal words and let score+min_stars+dedup narrow it.
         "github": "prompt injection defense",
+        "hn": "prompt injection",
+        "reddit": "prompt injection agent",
         "terms": ["prompt injection", "indirect", "jailbreak", "guardrail",
                   "defense", "tool", "agent", "untrusted", "quarantine"],
         "area": "security",
@@ -105,6 +191,8 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         "arxiv": '(abs:"tool use" OR abs:"function calling") AND '
                  '(abs:safety OR abs:permission OR abs:capability OR abs:policy)',
         "github": "agent tool security",
+        "hn": "agent tool permissions",
+        "reddit": "agent tool sandbox permission",
         "terms": ["tool call", "function calling", "capability", "permission",
                   "policy", "adjudicat", "default-deny", "sandbox", "syscall"],
         "area": "trust-floor",
@@ -114,6 +202,8 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         "arxiv": '(abs:LLM OR abs:agent) AND (abs:gateway OR abs:proxy OR '
                  'abs:serving OR abs:router)',
         "github": "llm gateway proxy",
+        "hn": "llm gateway",
+        "reddit": "llm gateway proxy router",
         "terms": ["gateway", "proxy", "serving", "router", "openai", "api",
                   "multi-agent", "shared cache", "audit"],
         "area": "agentic-serving",
@@ -123,6 +213,8 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         "arxiv": '(abs:"KV cache" OR abs:"prefix cache" OR abs:"prompt cache") AND '
                  '(abs:reuse OR abs:sharing OR abs:inference)',
         "github": "llm kv cache",
+        "hn": "prompt caching",
+        "reddit": "kv cache prompt caching inference",
         "terms": ["kv cache", "prefix cache", "prompt cache", "reuse", "radix",
                   "paged", "sharing", "turn", "prefill", "speculative"],
         "area": "prompt-caching",
@@ -132,6 +224,8 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         "arxiv": 'abs:"model context protocol" OR (abs:agent AND abs:"tool '
                  'poisoning")',
         "github": "MCP security",
+        "hn": "model context protocol",
+        "reddit": "model context protocol mcp",
         "terms": ["model context protocol", "mcp", "tool poisoning", "server",
                   "manifest", "untrusted", "supply chain"],
         "area": "mcp",
@@ -141,6 +235,8 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         "arxiv": '(abs:agent OR abs:"tool use") AND (abs:"function calling" OR '
                  'abs:fine-tuning OR abs:training) AND ti:LLM',
         "github": "function calling agent",
+        "hn": "open source llm agent",
+        "reddit": "local llm function calling agent",
         "terms": ["function calling", "tool use", "fine-tun", "training",
                   "checkpoint", "qwen", "llama", "reasoning"],
         "area": "model-arch",
@@ -154,12 +250,27 @@ DEFAULTS = {
     "max_issues": 3,      # hard cap on issues filed per run (anti-storm)
     "arxiv_per_topic": 8,  # arXiv results fetched per topic
     "github_per_topic": 6,  # GitHub repos fetched per topic (stars lane)
+    "hn_per_topic": 8,    # Hacker News stories fetched per topic
+    "reddit_per_topic": 8,  # Reddit posts fetched per topic
     "min_stars": 25,      # stars-lane repos under this many stars are dropped pre-score
+    # Coarse GitHub KiB proxy: rejects tiny scaffolds, but can drop dense small
+    # repos and admit large hollow ones; it is not a quality signal.
+    "min_repo_size_kb": 500,
+    "min_points": 10,     # HN/Reddit posts under this many points are dropped pre-score
     "fresh_per_topic": 6,  # recency-sorted GitHub repos fetched per topic (0 disables the fresh lane)
     "fresh_min_stars": 3,  # fresh-lane star floor: admits young repos the min_stars floor would drop
     "fresh_window_days": 45,  # pushed within this window earns the strong "actively updated" bonus
     "dup_jaccard": 0.55,  # title token-overlap to call a near-duplicate
-    "issue_scan_limit": 800,  # existing issues fetched for the dedup index
+    # Rung 3/4 only (URL-in-body + title-Jaccard vs HUMAN-opened issues): a recency
+    # window over the whole tracker. Deliberately NOT the anti-re-file guarantee —
+    # that is scout_scan_limit below, because this one shrinks in coverage every time
+    # the tracker gets busier.
+    "issue_scan_limit": 800,  # recent issues fetched for the soft near-dup rungs
+    # Rung 2, the durable one: every issue carrying the `idea-scout` LABEL, i.e. the
+    # scout's own filing history. Bounded by max_issues/day (≤3), not by tracker
+    # growth, so one number covers years. Saturating it is a REFUSAL, never a
+    # silent truncation — see the scout-index gate in main().
+    "scout_scan_limit": 5000,  # cap on the label-targeted filed-issue index
     "milestone": "",      # assign filed issues to this milestone title (empty = none)
     "project": "",        # ProjectsV2 number to add filed issues to (empty = none)
     "project_owner": "",  # owner login for --project (empty = repo owner / viewer)
@@ -172,6 +283,8 @@ W_RECENT_180 = 12
 W_RECENT_30 = 22       # additive on top of the 180 bonus → very fresh = +34
 STAR_DIVISOR = 100     # +1 per 100 stars …
 STAR_CAP = 30          # … capped
+HN_POINT_DIV = 20      # +1 per 20 HN/Reddit points …
+HN_POINT_CAP = 25      # … capped
 W_RECENT_PUSH = 10     # GitHub repo pushed within 90d
 W_FRESH_PUSH = 15      # … or +15 if pushed within fresh_window_days (actively updated)
 TRENDING_CAP = 20      # cap on the star-velocity (stars/day) trending bonus
@@ -251,6 +364,15 @@ def score_candidate(cand: dict[str, Any], topic: dict[str, Any],
         if bonus:
             score += bonus
             reasons.append(f"{stars} stars (+{bonus})")
+    # HN/Reddit carry `points` where GitHub carries `stars`: the crowd's own
+    # signal on the same 0..cap scale, so a heavily-upvoted post can clear
+    # min_score the way a well-starred repo does.
+    points = int(cand.get("extra", {}).get("points", 0) or 0)
+    if points:
+        bonus = min(points // HN_POINT_DIV, HN_POINT_CAP)
+        if bonus:
+            score += bonus
+            reasons.append(f"{points} points (+{bonus})")
     pushed = _parse_iso(cand.get("extra", {}).get("pushed_at", ""))
     if pushed is not None:
         days = (now - pushed).days
@@ -339,38 +461,182 @@ def parse_github_repos(items: list[dict[str, Any]], topic_key: str,
                 "stars": it.get("stargazersCount", 0),
                 "pushed_at": it.get("pushedAt", "") or it.get("updatedAt", ""),
                 "language": it.get("language", "") or "",
+                "size": it.get("size", 0),
             },
         })
     return out
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]*>")
+
+
+def _squash(s: str) -> str:
+    """Collapse every run of whitespace to one space (Go: `squashSpace`)."""
+    return " ".join((s or "").split())
+
+
+def _strip_tags(s: str) -> str:
+    """Remove the light HTML (<p>, <a>, <i>) the HN API leaves in `story_text`
+    so the summary is plain prose (Go: `stripTags`)."""
+    return _HTML_TAG_RE.sub(" ", s or "")
+
+
+def _first_non_blank(*values: str) -> str:
+    for v in values:
+        if (v or "").strip():
+            return v
+    return ""
+
+
+def parse_hackernews_json(json_text: str, topic_key: str) -> list[dict[str, Any]]:
+    """Turn an Algolia HN search response into candidate dicts.
+
+    A pure fold over the wire JSON: no network, no clock, so it replays from a
+    fixture. Link stories keep their outbound URL; text/self posts fall back to
+    the HN item permalink so the candidate always resolves to something a triager
+    can open. Mirrors internal/ideascout/parse.go `ParseHackerNewsJSON` — the two
+    are pinned against the same fixture bytes by
+    internal/ideascout/testdata/source_corpus.json."""
+    out: list[dict[str, Any]] = []
+    try:
+        doc = json.loads(json_text)
+    except (json.JSONDecodeError, TypeError):
+        return out
+    if not isinstance(doc, dict):
+        return out
+    for hit in doc.get("hits") or []:
+        if not isinstance(hit, dict):
+            continue
+        hid = str(hit.get("objectID") or "").strip()
+        if not hid:
+            continue
+        title = _squash(_first_non_blank(hit.get("title") or "",
+                                         hit.get("story_title") or ""))
+        if not title:
+            continue
+        permalink = f"https://news.ycombinator.com/item?id={hid}"
+        url = _first_non_blank(hit.get("url") or "", hit.get("story_url") or "",
+                               permalink)
+        out.append({
+            "source": "hackernews",
+            "source_id": f"hn:{hid}",
+            "url": url,
+            "title": title,
+            "summary": _squash(_strip_tags(hit.get("story_text") or "")),
+            "published": (hit.get("created_at") or "").strip(),
+            "topic": topic_key,
+            "extra": {
+                "points": int(hit.get("points", 0) or 0),
+                "num_comments": int(hit.get("num_comments", 0) or 0),
+                "discussion": permalink,
+                "author": hit.get("author", "") or "",
+            },
+        })
+    return out
+
+
+def parse_reddit_json(json_text: str, topic_key: str) -> list[dict[str, Any]]:
+    """Turn a Reddit listing/search response into candidate dicts.
+
+    Like the other parsers, a pure fold over the wire JSON. Reddit stamps posts
+    with a Unix `created_utc` float rather than an ISO string, so it is converted
+    to RFC3339 here (a deterministic transform, no wall clock) to match the shared
+    freshness path. Self/text posts carry the permalink in `url`; link posts carry
+    the outbound target, and the permalink is always kept as the discussion link.
+    Mirrors internal/ideascout/parse.go `ParseRedditJSON`."""
+    out: list[dict[str, Any]] = []
+    try:
+        doc = json.loads(json_text)
+    except (json.JSONDecodeError, TypeError):
+        return out
+    if not isinstance(doc, dict):
+        return out
+    children = ((doc.get("data") or {}).get("children")
+                if isinstance(doc.get("data"), dict) else None) or []
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        h = child.get("data") or {}
+        if not isinstance(h, dict):
+            continue
+        pid = str(h.get("id") or "").strip()
+        if not pid:
+            continue
+        title = _squash(h.get("title") or "")
+        if not title:
+            continue
+        permalink = f"https://www.reddit.com{h['permalink']}" if h.get("permalink") else ""
+        url = _first_non_blank(h.get("url") or "", permalink)
+        if not url:
+            url = f"https://www.reddit.com/comments/{pid}"
+        created = float(h.get("created_utc", 0) or 0)
+        published = (dt.datetime.fromtimestamp(int(created), dt.timezone.utc)
+                     .strftime("%Y-%m-%dT%H:%M:%SZ")) if created > 0 else ""
+        out.append({
+            "source": "reddit",
+            "source_id": f"reddit:{pid}",
+            "url": url,
+            "title": title,
+            "summary": _squash(_strip_tags(h.get("selftext") or "")),
+            "published": published,
+            "topic": topic_key,
+            "extra": {
+                "points": int(h.get("score", 0) or 0),
+                "num_comments": int(h.get("num_comments", 0) or 0),
+                "discussion": _first_non_blank(permalink, url),
+                "subreddit": h.get("subreddit", "") or "",
+            },
+        })
+    return out
+
+
+_STAMP_RE = re.compile(r"idea-scout-source:\s*([^\s>]+)")
+
+
+def stamp_index(issues: list[dict[str, Any]]) -> set[str]:
+    """Every `idea-scout-source:` stamp carried by `issues`, lower-cased.
+
+    This is rung 2's whole payload. Case is folded on BOTH sides (here and in
+    ``is_duplicate``) because GitHub repo names are case-insensitive while the
+    search API hands back whichever casing it feels like — an un-folded compare
+    lets `Acme/Repo` slip past a stamp that reads `acme/repo`."""
+    out: set[str] = set()
+    for iss in issues:
+        for m in _STAMP_RE.findall(iss.get("body") or ""):
+            out.add(m.strip().lower())
+    return out
+
+
 def existing_issue_index(issues: list[dict[str, Any]],
                          ) -> tuple[set[str], list[set[str]], str]:
-    """Build the dedup index from existing issues: every URL/source_id already
+    """Build the dedup index from existing issues: every source_id already
     stamped in a body, and the title token-sets for near-dup detection. Returns
-    (stamped_strings, title_token_sets, joined_bodies_lower)."""
-    stamped: set[str] = set()
+    (stamped_source_ids, title_token_sets, joined_bodies_lower)."""
     title_sets: list[set[str]] = []
     bodies: list[str] = []
     for iss in issues:
-        body = (iss.get("body") or "")
-        bodies.append(body.lower())
+        bodies.append((iss.get("body") or "").lower())
         title_sets.append(tokenize(iss.get("title") or ""))
-        for m in re.findall(r"idea-scout-source:\s*([^\s>]+)", body):
-            stamped.add(m.strip())
-    return stamped, title_sets, "\n".join(bodies)
+    return stamp_index(issues), title_sets, "\n".join(bodies)
 
 
 def is_duplicate(cand: dict[str, Any], seen: dict[str, Any],
                  stamped: set[str], title_sets: list[set[str]],
                  bodies_joined: str, dup_jaccard: float) -> str | None:
-    """Return the dedup rung that fires ('seen-cache' / 'issue-body' / 'title-near'),
-    or None if the candidate is genuinely new."""
+    """Return the dedup rung that fires ('seen-cache' / 'filed-stamp' /
+    'issue-body' / 'title-near'), or None if the candidate is genuinely new.
+
+    'filed-stamp' and 'issue-body' are reported separately on purpose: the first
+    is the durable, complete filing history (rung 2) and the second is a
+    best-effort URL sighting inside a recency window (rung 3). Collapsing them
+    would make a windowed guess indistinguishable from the guarantee in the
+    run report."""
     sid = cand["source_id"]
-    if sid in seen:
+    sid_l = sid.lower()
+    if sid in seen or sid_l in seen:
         return "seen-cache"
-    if sid in stamped:
-        return "issue-body"
+    if sid_l in stamped:
+        return "filed-stamp"
     url = cand["url"].lower()
     if url and url in bodies_joined:
         return "issue-body"
@@ -401,6 +667,17 @@ def render_issue(cand: dict[str, Any], score: int, reasons: list[str],
             facts.append("**Authors:** " + ", ".join(extra["authors"]))
         if cand.get("published"):
             facts.append(f"**Submitted:** {cand['published'][:10]}")
+    elif src in ("hackernews", "reddit"):
+        if extra.get("subreddit"):
+            facts.append(f"**Subreddit:** r/{extra['subreddit']}")
+        if extra.get("points"):
+            facts.append(f"**Points:** {extra['points']}")
+        if extra.get("num_comments"):
+            facts.append(f"**Comments:** {extra['num_comments']}")
+        if extra.get("discussion"):
+            facts.append(f"**Discussion:** {extra['discussion']}")
+        if cand.get("published"):
+            facts.append(f"**Posted:** {cand['published'][:10]}")
     else:  # github
         if extra.get("stars"):
             facts.append(f"**Stars:** {extra['stars']}")
@@ -412,7 +689,7 @@ def render_issue(cand: dict[str, Any], score: int, reasons: list[str],
     body = (
         f"> Auto-filed by the daily **idea-scout** "
         f"(`tools/idea_scout.py`, {today}). A candidate RELATED idea found on "
-        f"{src}; **needs human triage** — close as `wontfix`/`duplicate` if it is "
+        f"{source_label(src)}; **needs human triage** — close as `wontfix`/`duplicate` if it is "
         f"not worth pursuing.\n\n"
         f"**Source:** {cand['url']}\n\n"
         + ("\n".join(facts) + "\n\n" if facts else "")
@@ -443,18 +720,24 @@ def plan_issues(candidates: list[dict[str, Any]], topics_by_key: dict[str, dict]
                 seen: dict[str, Any], stamped: set[str],
                 title_sets: list[set[str]], bodies_joined: str,
                 cfg: dict[str, Any], today: str, now: dt.datetime,
-                ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Score → dedup → threshold → CAP. Returns (issues_to_file, skip_stats).
+                ) -> tuple[list[dict[str, Any]], dict[str, int],
+                           list[dict[str, str]]]:
+    """Score → dedup → threshold → CAP. Returns (issues_to_file, skip_stats,
+    dropped). `dropped` names the rung that stopped each individual source_id —
+    aggregate counts alone cannot answer "was THIS already-triaged source caught,
+    and by which rung", which is the only question that matters after a re-file.
     Deterministic: candidates are de-duplicated by source_id within the run and
     sorted by (score desc, source_id) before the cap so the plan is stable."""
-    stats = {"seen-cache": 0, "issue-body": 0, "title-near": 0,
+    stats = {"seen-cache": 0, "filed-stamp": 0, "issue-body": 0, "title-near": 0,
              "below-min": 0, "within-run-dup": 0}
+    dropped: list[dict[str, str]] = []
     scored: list[dict[str, Any]] = []
     run_seen: set[str] = set()
     for cand in candidates:
         sid = cand["source_id"]
         if sid in run_seen:
             stats["within-run-dup"] += 1
+            dropped.append({"source_id": sid, "rung": "within-run-dup"})
             continue
         run_seen.add(sid)
         topic = topics_by_key.get(cand["topic"], {"key": cand["topic"], "terms": []})
@@ -462,15 +745,18 @@ def plan_issues(candidates: list[dict[str, Any]], topics_by_key: dict[str, dict]
                             cfg["dup_jaccard"])
         if rung:
             stats[rung] += 1
+            dropped.append({"source_id": sid, "rung": rung})
             continue
         score, reasons = score_candidate(cand, topic, cfg, now)
         if score < cfg["min_score"]:
             stats["below-min"] += 1
+            dropped.append({"source_id": sid, "rung": "below-min"})
             continue
         scored.append(render_issue(cand, score, reasons, topic, today))
 
     scored.sort(key=lambda r: (-r["score"], r["source_id"]))
-    return scored[: cfg["max_issues"]], stats
+    dropped.sort(key=lambda d: (d["rung"], d["source_id"]))
+    return scored[: cfg["max_issues"]], stats, dropped
 
 
 # ============================================================================
@@ -486,6 +772,38 @@ def fetch_arxiv(query: str, max_results: int, timeout: int = 30) -> str:
     req = urllib.request.Request(f"{ARXIV_API}?{params}",
                                  headers={"User-Agent": "fak-idea-scout/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https/http arXiv)
+        return resp.read().decode("utf-8", "replace")
+
+
+def fetch_hackernews(query: str, limit: int, timeout: int = 30) -> str:
+    """Algolia's HN search API — keyless, like arXiv. Mirrors
+    internal/ideascout/fetch.go `LiveFetcher.FetchHackerNews`."""
+    params = urllib.parse.urlencode({
+        "query": query,
+        "tags": "story",
+        "hitsPerPage": str(limit),
+    })
+    req = urllib.request.Request(f"{HN_ALGOLIA_API}?{params}",
+                                 headers={"User-Agent": "fak-idea-scout/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https Algolia)
+        return resp.read().decode("utf-8", "replace")
+
+
+def fetch_reddit(query: str, limit: int, timeout: int = 30) -> str:
+    """Reddit's public search JSON — keyless. Mirrors
+    internal/ideascout/fetch.go `LiveFetcher.FetchReddit`."""
+    params = urllib.parse.urlencode({
+        "q": query,
+        "sort": "new",
+        "t": "week",
+        "limit": str(limit),
+    })
+    # Reddit rejects requests without a descriptive, non-default User-Agent.
+    req = urllib.request.Request(
+        f"{REDDIT_SEARCH_API}?{params}",
+        headers={"User-Agent": "fak-idea-scout/1.0 "
+                               "(+https://github.com/anthony-chaudhary/fak)"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https Reddit)
         return resp.read().decode("utf-8", "replace")
 
 
@@ -508,7 +826,7 @@ def fetch_github(query: str, limit: int) -> list[dict[str, Any]]:
     return gh_json([
         "search", "repos", query, "--limit", str(limit), "--sort", "stars",
         "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,"
-        "createdAt,language",
+        "createdAt,language,size",
     ])
 
 
@@ -520,15 +838,36 @@ def fetch_github_fresh(query: str, limit: int) -> list[dict[str, Any]]:
     return gh_json([
         "search", "repos", query, "--limit", str(limit), "--sort", "updated",
         "--json", "fullName,description,url,stargazersCount,pushedAt,updatedAt,"
-        "createdAt,language",
+        "createdAt,language,size",
     ])
 
 
 def fetch_existing_issues(limit: int) -> list[dict[str, Any]]:
+    """Rung 3/4 corpus: the `limit` most recent issues, whoever opened them. A
+    RECENCY WINDOW — it answers "did a human already write this up lately", and
+    that is all it is allowed to answer."""
     return gh_json([
         "issue", "list", "--state", "all", "--limit", str(limit),
         "--json", "number,title,body",
     ])
+
+
+def fetch_scout_issues(limit: int) -> list[dict[str, Any]]:
+    """Rung 2 corpus: every issue the scout has EVER filed, open or closed.
+
+    TARGETED, not windowed. `--label idea-scout` is a server-side filter, so the
+    result set is the scout's own filing history — it does not thin out because
+    unrelated issues were opened this week, which is precisely how the recency
+    window in ``fetch_existing_issues`` lost the guarantee. Every filed issue
+    carries the label (``render_issue`` always emits SCOUT_LABEL) and the
+    matching `<!-- idea-scout-source: … -->` stamp, so label ⊇ stamped-by-us.
+
+    `--state all` is load-bearing: a source whose issue was triaged and CLOSED is
+    the exact case that must not come back."""
+    return gh_json([
+        "issue", "list", "--state", "all", "--label", SCOUT_LABEL,
+        "--limit", str(limit), "--json", "number,title,body",
+    ], timeout=180)
 
 
 def ensure_scout_label() -> None:
@@ -638,21 +977,61 @@ def load_config(path: str | None) -> tuple[list[dict[str, Any]], dict[str, Any]]
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if isinstance(raw.get("topics"), list) and raw["topics"]:
             topics = raw["topics"]
-        for k, v in (raw.get("thresholds") or {}).items():
-            if k in cfg:
-                cfg[k] = v
+        supplied = raw.get("thresholds") or {}
+        _check_threshold_keys(supplied, cfg)
+        for k, v in supplied.items():
+            cfg[k] = v
     # Validate up front so a malformed --config fails clean (exit 2) instead of
     # silently scoring every candidate 0 (missing `terms`) or KeyError-ing at
     # render time (missing `key`). A topic must name itself, carry relevance
-    # terms, and query at least one source.
+    # terms, name only keys some lane reads, and query at least one source.
+    source_keys = source_topic_keys()
     for i, t in enumerate(topics):
         if not isinstance(t, dict) or not t.get("key"):
             raise ValueError(f"topic[{i}] missing non-empty 'key'")
         if not isinstance(t.get("terms"), list) or not t["terms"]:
             raise ValueError(f"topic '{t.get('key', i)}' missing non-empty 'terms' list")
-        if not t.get("arxiv") and not t.get("github"):
-            raise ValueError(f"topic '{t['key']}' must set 'arxiv' and/or 'github'")
+        _check_topic_keys(t)
+        if not any(t.get(k) for k in source_keys):
+            raise ValueError(f"topic '{t['key']}' must set at least one source: "
+                             + ", ".join(repr(k) for k in source_keys))
     return topics, cfg
+
+
+def _check_topic_keys(topic: dict[str, Any]) -> None:
+    """Refuse a topic key no lane reads (#5549).
+
+    A key that is merely ignored is the defect this repo actually hit: `hn` and
+    `reddit` existed only in the Go scout, so a topic naming them on the scheduled
+    Python path gathered zero candidates and still exited 0. Nothing said the lane
+    was missing. Refusing by name is the loud alternative — a config that names a
+    lane the running implementation cannot serve now fails clean (exit 2)."""
+    source_keys = source_topic_keys()
+    known = set(source_keys) | set(TOPIC_META_KEYS)
+    unknown = sorted(k for k in topic if k not in known)
+    if not unknown:
+        return
+    raise ValueError(
+        f"topic '{topic.get('key')}' names unknown key(s) "
+        + ", ".join(repr(k) for k in unknown)
+        + ": no source lane reads them, so they would gather nothing silently. "
+        "Known source keys: " + ", ".join(repr(k) for k in source_keys)
+        + "; other topic keys: " + ", ".join(repr(k) for k in TOPIC_META_KEYS))
+
+
+def _check_threshold_keys(supplied: dict[str, Any], cfg: dict[str, Any]) -> None:
+    """Refuse a threshold no knob reads, for the same reason `_check_topic_keys`
+    refuses an unknown topic key: a setting that appears to take and does not is
+    the silent failure. Previously unknown thresholds were dropped by an
+    `if k in cfg` filter, so `min_points` against an implementation with no points
+    floor read as accepted."""
+    unknown = sorted(k for k in supplied if k not in cfg)
+    if not unknown:
+        return
+    raise ValueError(
+        "thresholds name unknown key(s) " + ", ".join(repr(k) for k in unknown)
+        + ": no knob reads them. Known thresholds: "
+        + ", ".join(repr(k) for k in sorted(cfg)))
 
 
 # ============================================================================
@@ -660,8 +1039,17 @@ def load_config(path: str | None) -> tuple[list[dict[str, Any]], dict[str, Any]]
 # ============================================================================
 def gather_candidates(topics: list[dict[str, Any]], cfg: dict[str, Any],
                       errors: list[str]) -> list[dict[str, Any]]:
-    """Fetch + parse every topic from both sources. A failing source/topic is
-    logged to `errors` and skipped — one dead query never sinks the run."""
+    """Fetch + parse every topic across every lane it arms. A failing lane/topic
+    is logged to `errors` as `label[topic]: …` and skipped — one dead query never
+    sinks the run.
+
+    The lanes are spelled out longhand rather than folded over `SOURCE_LANES` —
+    they are not uniform enough to table without obscuring them — so `SOURCE_LANES`
+    stays the declared VOCABULARY and this stays the implementation. The two cannot
+    drift apart in either direction: `load_config` refuses a topic key no lane
+    declares (so a lane here with no vocabulary row is unreachable), and
+    internal/ideascout/testdata/source_corpus.json requires every declared key to
+    actually admit a candidate (so a row here with no lane body reds)."""
     cands: list[dict[str, Any]] = []
     for topic in topics:
         key = topic.get("key", "?")
@@ -675,7 +1063,8 @@ def gather_candidates(topics: list[dict[str, Any]], cfg: dict[str, Any],
             try:
                 items = fetch_github(topic["github"], cfg["github_per_topic"])
                 items = [it for it in items
-                         if int(it.get("stargazersCount", 0) or 0) >= cfg["min_stars"]]
+                         if int(it.get("size", 0) or 0) >= cfg["min_repo_size_kb"]
+                         and int(it.get("stargazersCount", 0) or 0) >= cfg["min_stars"]]
                 cands += parse_github_repos(items, key)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"github[{key}]: {e}")
@@ -687,19 +1076,52 @@ def gather_candidates(topics: list[dict[str, Any]], cfg: dict[str, Any],
             try:
                 items = fetch_github_fresh(topic["github"], cfg["fresh_per_topic"])
                 items = [it for it in items
-                         if int(it.get("stargazersCount", 0) or 0) >= cfg["fresh_min_stars"]]
+                         if int(it.get("size", 0) or 0) >= cfg["min_repo_size_kb"]
+                         and int(it.get("stargazersCount", 0) or 0) >= cfg["fresh_min_stars"]]
                 fresh = parse_github_repos(items, key)
                 for c in fresh:
                     c["extra"]["lane"] = "fresh"
                 cands += fresh
             except Exception as e:  # noqa: BLE001
                 errors.append(f"github-fresh[{key}]: {e}")
+        # The points-scored social lanes. Same lane order as the Go gatherer
+        # (internal/ideascout/gather.go) so the two walk topics identically.
+        if topic.get("hn"):
+            _append_points_lane(cands, errors, "hn", key, cfg,
+                                lambda t=topic: fetch_hackernews(
+                                    t["hn"], cfg["hn_per_topic"]),
+                                parse_hackernews_json)
+        if topic.get("reddit"):
+            _append_points_lane(cands, errors, "reddit", key, cfg,
+                                lambda t=topic: fetch_reddit(
+                                    t["reddit"], cfg["reddit_per_topic"]),
+                                parse_reddit_json)
     return cands
+
+
+def _append_points_lane(cands: list[dict[str, Any]], errors: list[str],
+                        label: str, topic_key: str, cfg: dict[str, Any],
+                        fetch: Any, parse: Any) -> None:
+    """Run one points-scored social lane (Hacker News, Reddit): fetch, record a
+    `label[topic]: …` error and admit nothing on failure, else admit the parsed
+    candidates that clear the shared `min_points` floor. The lanes differ only in
+    which fetch and which parser they name. Mirrors internal/ideascout/gather.go
+    `appendPointsLane`."""
+    try:
+        raw = fetch()
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"{label}[{topic_key}]: {e}")
+        return
+    floor = int(cfg.get("min_points", 0) or 0)
+    for c in parse(raw, topic_key):
+        if int(c["extra"].get("points", 0) or 0) >= floor:
+            cands.append(c)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Daily idea-scout: arXiv + GitHub → deduped, capped GitHub issues.")
+        description="Daily idea-scout: " + source_display_list()
+                    + " → deduped, capped GitHub issues.")
     ap.add_argument("--workspace", default=".",
                     help="repo root (holds .idea-scout/ cache). Default: cwd.")
     ap.add_argument("--config", help="JSON file overriding topics/thresholds.")
@@ -744,27 +1166,61 @@ def main(argv: list[str] | None = None) -> int:
     errors: list[str] = []
     candidates = gather_candidates(topics, cfg, errors)
 
-    # The existing-issue dedup index is mandatory: with no way to know what is
-    # already filed, --live could re-storm the tracker. If gh fails AND there is
-    # no cache, refuse rather than risk a spam run.
     seen = load_seen(workspace)
+
+    # ---- Rung 2, the durable one --------------------------------------------
+    # The scout's OWN filing history, pulled by label so the query is targeted at
+    # exactly the population being deduped. This is what makes "filed once, never
+    # filed again" true without trusting the git-ignored local cache. It is
+    # MANDATORY: if it cannot be built completely we refuse, because a partial
+    # index is indistinguishable from "this source is new" and re-files an
+    # already-triaged source.
+    scout_limit = int(cfg["scout_scan_limit"])
+    try:
+        scout_issues = fetch_scout_issues(scout_limit)
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"scout-index: {e}")
+        print(f"refuse: cannot build the filed-issue index (`gh issue list --label "
+              f"{SCOUT_LABEL}`); filing now could re-file an already-triaged "
+              f"source ({e})", file=sys.stderr)
+        return 2
+    if len(scout_issues) >= scout_limit:
+        # Saturation is ambiguous — gh returns exactly `limit` both when that is
+        # all there is and when it truncated. Refuse loudly rather than let the
+        # guarantee rot silently the way the 800-issue window did.
+        print(f"refuse: the filed-issue index came back saturated at "
+              f"scout_scan_limit={scout_limit}, so it may be truncated and a "
+              f"previously-filed source could be re-filed. Raise "
+              f"`thresholds.scout_scan_limit` (--config) above the number of "
+              f"issues the scout has ever filed.", file=sys.stderr)
+        return 2
+    stamped = stamp_index(scout_issues)
+
+    # ---- Rungs 3/4: the soft, windowed corpus of everything else -------------
+    # Human-opened issues that reference the same URL, or carry a near-identical
+    # title. Nice to have, never the guarantee. The pre-existing refusal is kept
+    # as-is (nothing here is relaxed on the back of rung 2): degrading these rungs
+    # onto a bare local cache is still a worse run than no run.
+    window_scanned = 0
     try:
         issues = fetch_existing_issues(cfg["issue_scan_limit"])
-        stamped, title_sets, bodies_joined = existing_issue_index(issues)
+        win_stamped, title_sets, bodies_joined = existing_issue_index(issues)
+        stamped |= win_stamped  # catches a filed issue whose label a human stripped
+        window_scanned = len(issues)
     except Exception as e:  # noqa: BLE001
         errors.append(f"issues: {e}")
         if not seen:
             print(f"refuse: cannot fetch existing issues and no seen-cache to fall "
                   f"back on ({e})", file=sys.stderr)
             return 2
-        stamped, title_sets, bodies_joined = set(), [], ""
+        title_sets, bodies_joined = [], ""
 
     if not candidates and errors:
         print("refuse: every source failed:\n  " + "\n  ".join(errors),
               file=sys.stderr)
         return 2
 
-    to_file, skip_stats = plan_issues(
+    to_file, skip_stats, dropped = plan_issues(
         candidates, topics_by_key, seen, stamped, title_sets, bodies_joined,
         cfg, today, now)
 
@@ -789,7 +1245,22 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "schema": SCHEMA, "date": today, "mode": "live" if args.live else "dry-run",
         "candidates_gathered": len(candidates),
+        # Make the durable rung's coverage auditable in the run record: a reader
+        # can see the filed-issue index was COMPLETE (label-targeted, unsaturated)
+        # rather than having to trust that it was.
+        "dedup_index": {
+            "filed_issues_scanned": len(scout_issues),
+            "filed_stamps": len(stamped),
+            "scout_scan_limit": scout_limit,
+            "scout_index_complete": True,
+            "window_issues_scanned": window_scanned,
+            "issue_scan_limit": cfg["issue_scan_limit"],
+        },
         "skipped": skip_stats,
+        # Per-source attribution, not just counts: which rung stopped which
+        # source_id. Lets an auditor re-run the dry-run and check by name that a
+        # known-already-triaged source is being caught, and by which rung.
+        "dropped": dropped,
         "planned": [
             {"title": i["title"], "labels": i["labels"], "url": i["url"],
              "source_id": i["source_id"], "score": i["score"], "topic": i["topic"]}
@@ -806,7 +1277,10 @@ def main(argv: list[str] | None = None) -> int:
     # Human report.
     print(f"idea-scout {today} — {result['mode']}")
     print(f"  gathered {len(candidates)} candidates from "
-          f"{len(topics)} topics × (arXiv + GitHub)")
+          f"{len(topics)} topics × ({source_display_list()})")
+    print(f"  dedup index: {len(stamped)} source stamps from "
+          f"{len(scout_issues)} filed issue(s) (label-targeted, complete) "
+          f"+ {window_scanned} recent issue(s) for the near-dup rungs")
     sk = ", ".join(f"{k}={v}" for k, v in skip_stats.items() if v) or "none"
     print(f"  deduped/dropped: {sk}")
     if not to_file:

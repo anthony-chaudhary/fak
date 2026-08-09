@@ -51,8 +51,10 @@ apt-get update -y
 apt-get install -y git golang-go python3 curl
 
 # Optional: join the Tailscale overlay so other nodes can dial the gateway.
+# Bounded (#3479): this startup script runs SEQUENTIALLY and unattended, so a stalled
+# download here wedges the VM's convergence and the systemd units installed after it.
 if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
-  curl -fsSL https://tailscale.com/install.sh | sh
+  curl -fsSL --connect-timeout 15 --max-time 120 https://tailscale.com/install.sh | sh
   tailscale up --authkey "${TAILSCALE_AUTHKEY:-}" --hostname "${VM_NAME}" || true
 fi
 

@@ -55,6 +55,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 )
@@ -79,6 +80,11 @@ const (
 	// MetaCaptureSeq is the kernel ToolCall.SeqNo of the captured submission — the join
 	// key back to the durable Row stream for the same call.
 	MetaCaptureSeq = "capture_seq"
+	// MetaCaptureRefused marks a whole-source ingest refusal. Such a row is
+	// auditable but carries only digests, never the denied source or payload.
+	MetaCaptureRefused      = "capture_refused"
+	MetaCaptureReason       = "capture_reason"
+	MetaCaptureSourceDigest = "capture_source_digest"
 )
 
 // TraceSink captures a live run's submitted calls into a payload-bearing turnbench.Trace.
@@ -103,6 +109,7 @@ type TraceSink struct {
 	recorded uint64 // calls actually appended
 	dropped  uint64 // offered but not recorded (unresolvable / out-of-band)
 	redacted uint64 // recorded with the payload replaced by a digest placeholder
+	refused  uint64 // recorded as a content-free whole-source refusal
 }
 
 // Options configures a TraceSink. All fields are optional with safe defaults.
@@ -185,6 +192,26 @@ func (s *TraceSink) Emit(ev abi.Event) {
 	}
 
 	digest := "sha256:" + hex.EncodeToString(sha256Sum(args))
+	if match := pathutil.CheckCaptureJSON(args, c.Meta); match.Refused {
+		// This is deliberately NOT mergeMeta(c.Meta, ...): producer metadata may
+		// repeat the denied source. The audit row keeps only closed/bounded fields.
+		call := turnbench.Call{
+			Tool: c.Tool,
+			Meta: map[string]string{
+				MetaWorld:               s.world,
+				MetaArgsDigest:          digest,
+				MetaCaptureSeq:          utoa(c.SeqNo),
+				MetaCaptureRefused:      "true",
+				MetaCaptureReason:       match.Reason,
+				MetaCaptureSourceDigest: match.SourceDigest,
+			},
+			Args: json.RawMessage(`{"__capture_refused__":"` + match.SourceDigest + `"}`),
+		}
+		s.calls = append(s.calls, call)
+		s.recorded++
+		s.refused++
+		return
+	}
 	taint := s.flowTaint(c)
 
 	meta := mergeMeta(c.Meta, map[string]string{
@@ -244,6 +271,10 @@ func (s *TraceSink) Recorded() uint64 { return load(s, func() uint64 { return s.
 // nil call). For a TOTAL capture this is zero; a non-zero value is the honest signal that
 // the trace is incomplete and a fleet-scale claim built on it must be qualified.
 func (s *TraceSink) Dropped() uint64 { return load(s, func() uint64 { return s.dropped }) }
+
+// Refused is the number of sources rejected before their bytes entered the
+// payload-bearing corpus. Each refusal still contributes one digest-only audit row.
+func (s *TraceSink) Refused() uint64 { return load(s, func() uint64 { return s.refused }) }
 
 // Complete reports the "trace is total" witness: every offered call was recorded, none
 // fell to an out-of-band path. Total() == Recorded()+Dropped() is an invariant the sink

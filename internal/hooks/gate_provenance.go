@@ -50,6 +50,10 @@ var provenanceScanExts = map[string]bool{".md": true, ".html": true, ".txt": tru
 
 func gateProvenanceLabel(d *StagedDiff) ([]Finding, error) {
 	var findings []Finding
+	// PROVENANCE_LABEL is LINE-scoped: it judges added lines inside scannable files, so its
+	// denominator is counted in lines rather than files. Units are per gate on purpose (#5602) —
+	// naming which one this is beats forcing one unit across gates that do not share one.
+	judged := 0
 	for _, f := range d.sortedFiles() {
 		if startsWithAny(f, provenanceSkipPrefixes) || provenanceSkipBasenames[baseName(f)] {
 			continue
@@ -57,6 +61,7 @@ func gateProvenanceLabel(d *StagedDiff) ([]Finding, error) {
 		if !provenanceScanExts[lowerExt(f)] {
 			continue
 		}
+		judged += len(d.AddedByFile[f])
 		for _, al := range d.AddedByFile[f] {
 			if fix, bad := lineViolates(al.Text); bad {
 				findings = append(findings, Finding{
@@ -66,6 +71,7 @@ func gateProvenanceLabel(d *StagedDiff) ([]Finding, error) {
 			}
 		}
 	}
+	d.NoteCandidates("PROVENANCE_LABEL", judged, "added line(s) in scannable file(s)")
 	return findings, nil
 }
 

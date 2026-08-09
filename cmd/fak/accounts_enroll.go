@@ -29,6 +29,11 @@ type enrollParams struct {
 	noSync   bool
 	probeURL string // OAuth profile endpoint override ($FAK_OAUTH_PROFILE_URL); "" = default
 	dryRun   bool   // print the enrollment plan without mutating anything (#3954)
+	// noDivorce opts OUT of the default post-copy OAuth token-family divorce. See addParams.
+	// enroll-current is the path that hits this hazard hardest: its source is by definition a dir
+	// still in live use, so leaving the copied family shared logs that session out later, without
+	// warning (witnessed 2026-08-06).
+	noDivorce bool
 
 	homeDir      string
 	registryPath string
@@ -78,6 +83,7 @@ func runAccountsEnrollCurrent(stdout, stderr io.Writer, p enrollParams) int {
 		force:         p.force,
 		probeIdentity: true,
 		probeURL:      p.probeURL,
+		noDivorce:     p.noDivorce,
 		dryRun:        p.dryRun,
 		homeDir:       p.homeDir,
 		registryPath:  p.registryPath,

@@ -241,7 +241,8 @@
    "definition": "internal/cacheprice.ShedTokenEquiv's warmWitness parameter is the OBSERVED provider cache_read count witnessing how many shed compaction tokens the provider was already serving warm; the function blends min(shed, warmWitness) at ReadMultiplier and the remainder at full input price.",
    "distinction": "A per-call numeric OBSERVED count fed into a pricing formula, not a qualitative per-row provenance label like ProvenanceWitnessed.",
    "distinct_from": [
-    "witness-proof-provenancewitnessed"
+     "witness-proof-provenancewitnessed",
+     "guardcompactionwitness-3152"
    ],
    "aliases": [
     "warmWitness",

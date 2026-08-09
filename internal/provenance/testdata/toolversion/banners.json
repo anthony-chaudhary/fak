@@ -1,0 +1,215 @@
+{
+  "_comment": "Committed live tool-version self-reports for #5677. 'positive' cases prove the signal can succeed; 'adversarial' cases carry a banner that literally contains the pin, so the historical strings.Contains(banner, pin) check returned a false green on exactly these inputs; 'boundary' cases pin the distinct non-comparison states. Driven by internal/provenance/toolversion_test.go.",
+  "cases": [
+    {
+      "name": "exact-match-known-positive",
+      "kind": "positive",
+      "pin": "2.43.0",
+      "probe": {
+        "tool": "git",
+        "path": "/usr/bin/git",
+        "raw": "git version 2.43.0\n",
+        "found": true
+      },
+      "want_state": "match",
+      "want_satisfied": true,
+      "want_live": "2.43.0"
+    },
+    {
+      "name": "exact-match-v-prefixed-banner",
+      "kind": "positive",
+      "pin": "20.11.1",
+      "probe": {
+        "tool": "node",
+        "path": "/usr/local/bin/node",
+        "raw": "v20.11.1\n",
+        "found": true
+      },
+      "want_state": "match",
+      "want_satisfied": true,
+      "want_live": "20.11.1"
+    },
+    {
+      "name": "path-confusion",
+      "kind": "adversarial",
+      "pin": "1.2.3",
+      "probe": {
+        "tool": "mytool",
+        "path": "/opt/toolchain-1.2.3/bin/mytool",
+        "raw": "/opt/toolchain-1.2.3/bin/mytool version 2.0.0\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "mismatch",
+      "want_satisfied": false,
+      "want_live": "2.0.0"
+    },
+    {
+      "name": "path-confusion-windows-drive",
+      "kind": "adversarial",
+      "pin": "1.2.3",
+      "probe": {
+        "tool": "mytool",
+        "path": "C:\\tools\\mytool-1.2.3\\mytool.exe",
+        "raw": "C:\\tools\\mytool-1.2.3\\mytool.exe version 2.0.0\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "mismatch",
+      "want_satisfied": false,
+      "want_live": "2.0.0"
+    },
+    {
+      "name": "longer-token-confusion",
+      "kind": "adversarial",
+      "pin": "1.2.3",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool version 1.2.30\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "mismatch",
+      "want_satisfied": false,
+      "want_live": "1.2.30"
+    },
+    {
+      "name": "longer-token-confusion-extra-component",
+      "kind": "adversarial",
+      "pin": "1.2.3",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool 1.2.3.4\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "mismatch",
+      "want_satisfied": false,
+      "want_live": "1.2.3.4"
+    },
+    {
+      "name": "interpreter-version-confusion",
+      "kind": "adversarial",
+      "pin": "3.11.4",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool 2.0.0 (Python 3.11.4)\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "mismatch",
+      "want_satisfied": false,
+      "want_live": "2.0.0"
+    },
+    {
+      "name": "prerelease-is-not-its-release",
+      "kind": "adversarial",
+      "pin": "1.2.3",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool version 1.2.3-rc1\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "mismatch",
+      "want_satisfied": false,
+      "want_live": "1.2.3-rc1"
+    },
+    {
+      "name": "no-version-output",
+      "kind": "boundary",
+      "pin": "1.0.0",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool: no version information available\n",
+        "found": true
+      },
+      "want_state": "no_version",
+      "want_satisfied": false
+    },
+    {
+      "name": "name-fused-version-is-not-mined",
+      "kind": "boundary",
+      "pin": "1.22.3",
+      "probe": {
+        "tool": "go",
+        "path": "/usr/local/go/bin/go",
+        "raw": "go version go1.22.3 linux/amd64\n",
+        "found": true
+      },
+      "substring_trap": true,
+      "want_state": "no_version",
+      "want_satisfied": false
+    },
+    {
+      "name": "missing-executable",
+      "kind": "boundary",
+      "pin": "1.0.0",
+      "probe": {
+        "tool": "mytool",
+        "raw": "",
+        "found": false
+      },
+      "want_state": "absent",
+      "want_satisfied": false
+    },
+    {
+      "name": "failing-executable",
+      "kind": "boundary",
+      "pin": "1.0.0",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool: error while loading shared libraries: libfoo.so.1\n",
+        "found": true,
+        "err": "exit status 127"
+      },
+      "want_state": "probe_failed",
+      "want_satisfied": false
+    },
+    {
+      "name": "constraint-pin-is-never-exact-matched",
+      "kind": "boundary",
+      "pin": ">=1.2.0",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool version 1.5.0\n",
+        "found": true
+      },
+      "want_state": "constraint_pin",
+      "want_satisfied": false
+    },
+    {
+      "name": "wildcard-pin-is-a-constraint",
+      "kind": "boundary",
+      "pin": "1.2.*",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool version 1.2.9\n",
+        "found": true
+      },
+      "want_state": "constraint_pin",
+      "want_satisfied": false
+    },
+    {
+      "name": "unusable-pin",
+      "kind": "boundary",
+      "pin": "latest",
+      "probe": {
+        "tool": "mytool",
+        "path": "/usr/bin/mytool",
+        "raw": "mytool version 1.5.0\n",
+        "found": true
+      },
+      "want_state": "pin_invalid",
+      "want_satisfied": false
+    }
+  ]
+}

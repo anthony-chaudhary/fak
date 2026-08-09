@@ -1,0 +1,168 @@
+# internal/enumlint baseline — the COUNTED floor for #5935.
+#
+# Format: <rule>\t<pkg>\t<owner>\t<type>\t<count>
+# Blank lines and '#' comments are skipped. Any other line that does not parse
+# is a hard ERROR, never a skipped line: a skipped row reads as a floor of zero
+# for that key, which turns this package's bug into a denial in someone else's
+# diff.
+#
+# This file records the non-exhaustive sites that EXISTED when the gate landed.
+# It is SHRINK-ONLY in spirit: fix a site, regenerate, and the floor tightens
+# and can never go back up.
+#
+# Regenerate with FormatBaseline over a whole-tree Scan; TestBaselineIsParseableAndTight
+#
+# When the ratchet reds on a NEW site, do NOT paste it in here. The finding
+# names the file, the line, and every missing member with its own declaration
+# line — pay it at the source, in the lane that owns it, in one of two ways:
+#   * cover the member (add the case / the map row / the slice element), or
+#   * decide about it explicitly: give the switch a default, or write
+#     //enumlint:exempt <reason> at the site, or add a reasoned entry to
+#     exemptions in internal/enumlint/exempt.go.
+literal	internal/abi	coreReasonNames	ReasonCode	1
+literal	internal/adjudicator	reversibilityClassOrder	ReversibilityClass	1
+literal	internal/adjudicator	reversibilityFamilies	ReversibilityClass	1
+literal	internal/architest	staleClaimRules	claimKind	1
+literal	internal/auditreason	permanentSignatures	Reason	1
+literal	internal/auditreason	transientReasons	Reason	1
+literal	internal/auditreason	transientSignatures	Reason	1
+literal	internal/cachemeta	DefaultPoolProfiles	ResidencyTier	1
+literal	internal/cachemeta	DefaultTierProfiles	ResidencyTier	1
+literal	internal/cachemeta	localTierLadder	ResidencyTier	1
+literal	internal/canon	adaptAnthropicUsage	TokenClass	1
+literal	internal/canon	adaptLocalUsage	TokenClass	1
+literal	internal/canon	adaptOpenAIUsage	TokenClass	1
+literal	internal/compute	nvArches	NVCompute	1
+literal	internal/compute	rocmArches	ROCmFamily	1
+literal	internal/conceptbench	goldenRows	Concept	1
+literal	internal/contextq	IndexViewTypes	ViewType	1
+literal	internal/dispatchtick	bucketWorkClass	LaunchBucket	1
+literal	internal/dispatchtick	highRiskVerbs	MetaAction	1
+literal	internal/dispatchtick	readOnlyVerbs	MetaAction	1
+literal	internal/docrender	corpusRules	Kind	1
+literal	internal/engine	measuredProvenances	CacheProvenance	1
+literal	internal/executionroute	StateKind.BoundAxes	CompatAxis	3
+literal	internal/fleetmon	eligibleClasses	Classification	1
+literal	internal/growthgate	DefaultBudget.PerClass	Class	1
+literal	internal/growthgate	matchers	Class	1
+literal	internal/harnessprofile	builtins.Repoint	RepointMechanism	3
+literal	internal/ifc	StrictGatedSinks	SinkClass	1
+literal	internal/livecodebench	validSuite.Problems	Scenario	1
+literal	internal/loopmap	entries	Kind	1
+literal	internal/maturity	ladder	Rung	1
+literal	internal/model	v4ExpectedPrecisions	V4Precision	3
+literal	internal/modelroute	DefaultRoster.Accounts	ProviderKind	1
+literal	internal/modelroute	mechanismKeywords	MechanismClass	1
+literal	internal/modelroute	rosterFixture.Accounts	ProviderKind	1
+literal	internal/modelroute	threeZoneRoster.Accounts	ProviderKind	1
+literal	internal/modelroute	zoneRoster.Accounts	ProviderKind	1
+literal	internal/negframe	GuardRuntimeCorpus	BroadcastTier	1
+literal	internal/negframe	rules	Category	1
+literal	internal/negframe	triggerOnlyRules	Category	1
+literal	internal/nightrun	witnessTasks.Requires	Requirement	6
+literal	internal/rehydrate	canonicalFiresAt	Reason	1
+literal	internal/relay	axisOrder	Axis	1
+literal	internal/runaway	DefaultPolicy.KillOwners	Owner	1
+literal	internal/runaway	DefaultPolicy.StrandedOwners	Owner	1
+literal	internal/scorecardpane	contextHealthRank	ContextHealthSeverity	1
+literal	internal/session	corruptRegistryFixtures	RecoveryCause	1
+literal	internal/sessionctl	broadcastRunStates	ControlOp	1
+literal	internal/sessionobs	cleanCorpus	Outcome	1
+literal	internal/superloop	registry.Members	MemberKind	7
+literal	internal/taskvc	inventory	Status	1
+literal	internal/vcacheobserve	buildOwnerSlices	Provenance	1
+literal	internal/verifierexposure	DeclaredInventory	Kind	1
+literal	internal/watchdoghealth	attentionRemedy	Status	1
+literal	internal/worktype	Programs	Class	1
+literal	internal/worktype	programRegistry	Class	1
+switch	internal/abi	FoldRank	VerdictKind	1
+switch	internal/agent	CompactAnthropicHistoryWithOptions	headBurstVerdict	1
+switch	internal/agent	ElideAnthropicResultsWithOutcome	spliceVerdict	1
+switch	internal/agent	ElideStaleReadsWithOutcome	spliceVerdict	1
+switch	internal/agent	ToolTerminalVerbosity.admits	ToolTerminalVerbosity	1
+switch	internal/agent	compactSpliceVerdict	spliceVerdict	1
+switch	internal/architest	computePin	effectClass	1
+switch	internal/assumecheck	Outcome.RefusalReason	Outcome	1
+switch	internal/auditreason	ToolFailurePayloadForCommand	ToolFailure	1
+switch	internal/auditusage	TestFold_ChainBroken_SurfacesFindingButKeepsRecoveredRows	SinkKind	1
+switch	internal/brittleness	TestDetectFromCommitsMerges	Class	1
+switch	internal/cachemeta	Lifecycle.Advance	EntryState	1
+switch	internal/cachevaluereport	FoldShapeTrend	Trend	1
+switch	internal/citeverify	Verify	Status	1
+switch	internal/codexlifecycle	ClassifyOutcome	EnvelopeKind	1
+switch	internal/compactcohere	CountRefusal	PruneRefusal	1
+switch	internal/compute	cudaBackend.uploadClass	Dtype	2
+switch	internal/contextq	RunWorkflowMemoryBench	MaterializationKind	1
+switch	internal/covmatrix	StaleCells	Support	1
+switch	internal/dispatchaudit	TestFoldRollupAndDedup	Backend	1
+switch	internal/dispatchtick	EvaluateRollout	RolloutMode	1
+switch	internal/dispatchtick	WorkShapeForIssue	WorkShape	1
+switch	internal/dojocal	FoldTrend	RecalKind	1
+switch	internal/dojocal	RunIteration	RecalKind	1
+switch	internal/doomloop	predicateFor	Strength	1
+switch	internal/egresslist	Builder.add	Kind	1
+switch	internal/egresslist	TestRulesAreSortedDeterministically	Kind	1
+switch	internal/enginecache	resumeFromBoundary	resumeBug	1
+switch	internal/fleet	attentionOf	InferenceStatus	1
+switch	internal/fleetmon	ValidateLedger	Outcome	1
+switch	internal/gardenbundle	PlanTick	ActKind	1
+switch	internal/gardenbundle	PlanWalk	WalkDisposition	1
+switch	internal/gateway	gatewayMetrics.attributeServedTurn	servingLocality	1
+switch	internal/ggufload	checkpointExpertQuant	TensorType	1
+switch	internal/ggufload	residentExpertBlockGeometry	TensorType	1
+switch	internal/ggufload	w3FixturePayload	TensorType	1
+switch	internal/ifc	SinkClass.String	SinkClass	1
+switch	internal/loopmgr	LoopState.Phase	LoopState	1
+switch	internal/loopmgr	SummarizeFrom	EventKind	1
+switch	internal/loopmgr	SummarizeFrom	RunStatus	1
+switch	internal/looprecover	RunFact.ApplyProbe	ProbeVerdict	1
+switch	internal/maturity	nextWorkFor	Rung	1
+switch	internal/microagent	journalKind	EventKind	1
+switch	internal/model	AdmitV4Checkpoint	V4Disposition	1
+switch	internal/model	TestV4AdmitConsistentWithQuantGate	V4Precision	1
+switch	internal/model	expertWeight.ringStaging	kQuantKind	1
+switch	internal/model	kQuantKind.blockWeights	kQuantKind	1
+switch	internal/modelroute	KindBaseURL	ProviderKind	1
+switch	internal/modelroute	ServingReport.verdict	ServingState	1
+switch	internal/modelroute	ZoneOfKind	ProviderKind	1
+switch	internal/modelroute	complexityRank	Complexity	1
+switch	internal/nightrun	TestBacklogNoDupIDsAndSourcesPresent	Source	1
+switch	internal/operatortouches	Fold	SourceClass	1
+switch	internal/orchestration	Resolve	WorkClass	1
+switch	internal/policy	TestAmendmentMatrixCentralChannel	AmendmentClass	1
+switch	internal/provenance	PinKind.String	PinKind	1
+switch	internal/provenance	Tier.String	Tier	1
+switch	internal/provenance	VerifyToolVersion	PinKind	1
+switch	internal/provenance	VersionState.String	VersionState	1
+switch	internal/quality	Bisect	PointState	2
+switch	internal/resume	DecideWatchdogRow	PartialRetryAction	1
+switch	internal/resume	Plan	Strategy	1
+switch	internal/resume	classifyTail	EventKind	1
+switch	internal/resume	completedToolEffects	EmittedBlockKind	1
+switch	internal/resume/rehome	reselectDuplicateOwner	ReselectMode	1
+switch	internal/runaway	Summarize	Owner	1
+switch	internal/safecommit	ClassifyPaths	PathState	1
+switch	internal/scmbridge	RuleResume	StopCause	1
+switch	internal/servicelease	Sim.reconcile	ActionKind	1
+switch	internal/serviceledger	Event.Validate	EventType	1
+switch	internal/serviceledger	WriteTimeline	EventType	1
+switch	internal/serviceledger	phaseOf	EventType	1
+switch	internal/session	RunState.Phase	RunState	1
+switch	internal/session	RunStateFromPhase	RunState	1
+switch	internal/session	Table.DebitClarificationQuery	RunState	1
+switch	internal/session	Table.nonAdvancingVerdictLocked	RunState	1
+switch	internal/session	canonicalReason	RunState	1
+switch	internal/session	notableTransition	RunState	1
+switch	internal/session	slotCauseFor	RunState	1
+switch	internal/sessionjournal	FoldEvents	Kind	1
+switch	internal/shipgate	CanaryVerdict.String	CanaryVerdict	1
+switch	internal/shipgate	TestEvaluateDeterministicRepeat	Decision	1
+switch	internal/superloop	TestRootFoldCountsEachScorecardOnce	MemberKind	1
+switch	internal/supervisoragent	LowerInEnvelope	Authorization	1
+switch	internal/toollint	TestFromKernelSeededSurfaceAndSilentHints	Code	1
+switch	internal/toolproc	hookCallState	EventKind	1
+switch	internal/toolproc	hookResolveID	EventKind	1
+switch	internal/toolproc	sessionEndedUnretracted	EventKind	1
+switch	internal/vcacheobserve	summarizeChanges	AttributionCause	1
+switch	internal/vdso	TestCacheEmission_ConsumerTracking	CacheEventKind	1
+switch	internal/wiprecon	AdoptVerdict.Granted	AdoptVerdict	1

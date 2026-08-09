@@ -34,8 +34,11 @@ import (
 //
 // Honest tension, carried from the issue: a warm agent accrues context/token cost and goes
 // stale. The reserve therefore stays tiny (WarmBandConfig.MaxWarm, which the caller sets at
-// or below the dispatch-side effective worker cap), is cap-bounded by construction (Reserve
-// refuses past its limit, so Warm never exceeds Cap), and is horizoned. CORRECTNESS NEVER
+// or below the dispatch-side effective worker cap), is cap-bounded TWICE over — by
+// construction (Reserve refuses past its limit, so Warm never exceeds Cap) and by the
+// producer, which keeps warm + resident <= the high-water cap even when MaxWarm is set above
+// it, since a warm agent holds a whole context and so costs what a resident costs — and is
+// horizoned. CORRECTNESS NEVER
 // DEPENDS ON A WARM HIT: every Acquire miss falls through to the cold HibernationStore.Wake,
 // so a miss costs exactly the status-quo cold start and never a lost agent. A shed
 // cold-parks rather than discards — discarding a live enrolled agent mid-flight would lose
@@ -113,6 +116,11 @@ type WarmBandConfig struct {
 	// warm agent holds its whole in-RAM context, so the reserve trades RAM for Thaws. The
 	// bound is taken as a plain int rather than imported, the same way Scheduler takes a
 	// plain priority — this package stays decoupled from the dispatch layer.
+	//
+	// Because it is a plain int, this package cannot validate it against the cap the caller
+	// actually sized, so setting it ABOVE High does not buy a bigger warm pool: the producer
+	// independently holds warm + resident <= High. An oversized MaxWarm is therefore inert
+	// rather than dangerous, and High is the one number that bounds total in-RAM contexts.
 	MaxWarm int
 	// Dir roots the HibernationStore (one <id>.hib file per parked agent). Required.
 	Dir string
@@ -230,6 +238,31 @@ func (b *WarmBand) Enroll(id string, r Restorable) error {
 	b.mu.Lock()
 	b.addParkedLocked(id)
 	b.mu.Unlock()
+	b.kick()
+	return nil
+}
+
+// Recover registers an agent whose frozen context already exists in the band's
+// HibernationStore. Unlike Enroll it never rewrites the snapshot. This is the
+// process-restart seam: a fresh WarmBand can rebuild its in-memory registry from
+// a durable list of ids while preserving each agent's last committed state.
+func (b *WarmBand) Recover(id string, r Restorable) error {
+	if r == nil {
+		return ErrNilAgent
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return ErrWarmBandClosed
+	}
+	if _, dup := b.blanks[id]; dup {
+		return ErrDuplicateID
+	}
+	if !b.store.Parked(id) {
+		return fmt.Errorf("microagent: warm band recover %q: %w", id, ErrNotEnrolled)
+	}
+	b.blanks[id] = r.Blank
+	b.addParkedLocked(id)
 	b.kick()
 	return nil
 }
@@ -491,9 +524,8 @@ func (b *WarmBand) produce() {
 
 // refill is the acquire-side background production loop: while WarmRefill reports residency
 // below the low-water mark, warm-wake parked agents into the reserve one at a time. The batch
-// is bounded three ways — by the fold (which refills only up to the high-water cap), by how
-// many agents are actually parked, and by the reserve's own remaining room — so the pool can
-// never exceed its cap.
+// is bounded three ways — by the high-water cap, by how many agents are actually parked, and
+// by the reserve's own remaining room — so the warm pool can never exceed EITHER bound.
 func (b *WarmBand) refill() {
 	for {
 		select {
@@ -510,6 +542,21 @@ func (b *WarmBand) refill() {
 		b.mu.Unlock()
 
 		want := b.rc.WarmRefill(avail)
+		if want > 0 {
+			// Charge the already-warm agents against the high-water cap. The fold answers
+			// in RESIDENT-SLOT terms (high-water minus residency) and a refill never moves
+			// residency, so on its own the answer is recomputed IDENTICALLY every pass and
+			// never bounds the batch: the producer would drain the store all the way to
+			// MaxWarm. Whenever MaxWarm is set above the high-water cap (the reserve cap is
+			// a caller-supplied int this package cannot validate), that silently pins far
+			// more in-RAM contexts than the cap the caller sized from the dispatch-side
+			// effective worker cap — the exact overrun the band's honest tension forbids. A
+			// warm agent holds its whole context, so it costs what a resident costs; the
+			// invariant the producer must keep is warm + resident <= high-water.
+			if headroom := b.rc.Limit() - b.rc.Resident() - b.reserve.Len(); want > headroom {
+				want = headroom
+			}
+		}
 		if room := b.reserve.Cap() - b.reserve.Len(); want > room {
 			want = room
 		}

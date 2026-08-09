@@ -7,7 +7,7 @@ Allow: /
 # allows them, but naming each one makes the intent to be crawled-and-cited
 # unambiguous and durable: it survives any future wildcard tightening and guards
 # against a single accidental Disallow silently delisting fak from an answer engine.
-# Keep this list in sync with tools/seo_aeo_scorecard.py (the ai_crawlers check).
+# Keep this list in sync with internal/seoaeoscore (the ai_crawlers check); `fak score seo` verifies it.
 
 # OpenAI (ChatGPT, OpenAI search)
 User-agent: GPTBot

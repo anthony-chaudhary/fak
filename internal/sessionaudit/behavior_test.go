@@ -3,13 +3,14 @@ package sessionaudit
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
 // TestBehaviorLensMatchesPythonReference pins the ported BehaviorLens detectors
 // against the golden `behavior` dict that `python tools/session_audit.py deep`
 // emits for the shared fixture testdata/behaviorlens.jsonl. The fixture exercises
-// every detector: a successful read-storm (success loop 8), a verbatim
+// every detector: a successful read-storm (now intentionally benign), a verbatim
 // repeat-failure loop (3× same Bash command+error), per-file mutation churn (5×
 // Edit of one region), a timeout kill, a foreground sleep-poll, a ≥300s stall
 // gap, and all three not-read sub-classes (post_resume / self_duplicate /
@@ -32,8 +33,8 @@ func TestBehaviorLensMatchesPythonReference(t *testing.T) {
 		MaxFailureMass:   3,
 		FileChurn:        []FileChurnRow{{File: "/repo/C.go", Count: 5, DistinctRegions: 1, Reverts: 0}},
 		MaxFileChurn:     5,
-		SuccessLoops:     []SuccessLoopRow{{Tool: "Read", Target: "/repo/R.go", Count: 8}},
-		MaxSuccessLoop:   8,
+		SuccessLoops:     []SuccessLoopRow{},
+		MaxSuccessLoop:   1,
 		StallGaps:        1,
 		MaxGapS:          600.0,
 	}
@@ -101,5 +102,33 @@ func TestBehaviorLensEmptyTranscript(t *testing.T) {
 	if b.MaxRepeatFailure != 0 || b.MaxFailureMass != 0 || b.MaxFileChurn != 0 || b.MaxSuccessLoop != 0 ||
 		b.StallGaps != 0 || b.MaxGapS != 0 || b.TimeoutKills != 0 || b.SleepPolls != 0 {
 		t.Fatalf("expected zero maxima/counters, got %+v", b)
+	}
+}
+
+func TestRepeatBenignToolFailuresDoNotScoreAsLoops(t *testing.T) {
+	const calls = 12
+	benign := newBehaviorLens()
+	unsafe := newBehaviorLens()
+	for i := 0; i < calls; i++ {
+		benign.noteToolUse("read-"+strconv.Itoa(i), "Read", json.RawMessage(`{"file_path":"large.log","offset":1}`), `{"file_path":"large.log","offset":1}`)
+		benign.noteToolResult("read-"+strconv.Itoa(i), true, "same transient failure")
+		unsafe.noteToolUse("bash-"+strconv.Itoa(i), "Bash", json.RawMessage(`{"command":"exit 1"}`), `{"command":"exit 1"}`)
+		unsafe.noteToolResult("bash-"+strconv.Itoa(i), true, "same transient failure")
+	}
+
+	gotBenign := benign.summary()
+	if gotBenign.MaxRepeatFailure != 0 || gotBenign.MaxFailureMass != 0 || len(gotBenign.RepeatFailures) != 0 {
+		t.Fatalf("12 repeated benign Read failures scored as a loop: %+v", gotBenign)
+	}
+	if gotBenign.ToolErrors["Read"] != calls {
+		t.Fatalf("benign exclusion must not hide real error count: got %d want %d", gotBenign.ToolErrors["Read"], calls)
+	}
+
+	gotUnsafe := unsafe.summary()
+	if gotUnsafe.MaxRepeatFailure != calls || gotUnsafe.MaxFailureMass != calls {
+		t.Fatalf("12 repeated non-benign Bash failures scored repeat=%d mass=%d, want %d", gotUnsafe.MaxRepeatFailure, gotUnsafe.MaxFailureMass, calls)
+	}
+	if len(gotUnsafe.RepeatFailures) != 1 || gotUnsafe.RepeatFailures[0].Count != calls {
+		t.Fatalf("non-benign repetition row = %+v, want one row scoring %d", gotUnsafe.RepeatFailures, calls)
 	}
 }

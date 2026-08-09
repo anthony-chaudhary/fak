@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,11 +89,15 @@ const (
 //	auto     grind      OFF        mechanical work never recovers the wall-clock cost
 //	auto     unknown    OFF        conservative: unclassifiable work probably needs no rigor
 //
-// `auto` is the default. The interactive launcher has no work class to hand in, so a bare
-// `fak accounts launch` resolves auto→unknown→OFF: lean and fast by default, with --ultracode=on
-// as the operator's explicit opt-in. `true`/`false` stay accepted as on/off aliases so a script
-// written against the old bool flag keeps working. An unrecognized posture is a loud error rather
-// than a silent default — the same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
+// The FLAG default is `on`, not `auto`: a new instance should already BE in ultracode when it
+// starts, so nobody has to type `/effort ultracode` into a fresh session — the posture a launch
+// is born with is the one that survives, since a session-only --settings cannot be retrofitted
+// onto an already-running agent. `auto` is still the work-class-aware posture and stays one flag
+// away (`--ultracode=auto`) for a caller that CAN classify its work; the interactive launcher
+// carries no work class, so auto→unknown→OFF remains the lean/fast escape hatch #5016 wanted, and
+// `--ultracode=off` suppresses it outright. `true`/`false` stay accepted as on/off aliases so a
+// script written against the old bool flag keeps working. An unrecognized posture is a loud error
+// rather than a silent default — the same fail-on-bad-mode discipline normalizeManagedCacheMode uses.
 func resolveUltracodePosture(posture string, kind ultracodeWorkKind) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(posture)) {
 	case "on", "true":
@@ -233,7 +238,7 @@ type launchParams struct {
 	useHeadroom      bool   // default true — order the rotation by the live runtime headroom signal
 	useGuard         bool   // default true
 	skipPerms        bool   // default true
-	ultracodePosture string // ultracode posture: auto|on|off (default auto — resolved by resolveUltracodePosture)
+	ultracodePosture string // ultracode posture: auto|on|off (default on — resolved by resolveUltracodePosture)
 	model            string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit    bool
 	fallbackModel    string // default Fable 5 — comma-separated fallback CHAIN tried when the default Opus 4.8 startup is unavailable
@@ -374,10 +379,11 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", mcErr)
 		return 2
 	}
-	// Ultracode posture (#5016): auto|on|off, default auto. The interactive launcher carries no
-	// work class, so `auto` resolves through ultracodeKindUnknown to the conservative OFF and an
-	// operator opts in explicitly with --ultracode=on. Fail loud on a bad posture, exactly as the
-	// managed-cache mode does above.
+	// Ultracode posture: auto|on|off, default ON — an instance this launcher starts is born in
+	// ultracode rather than needing an operator to type /effort ultracode into it. The interactive
+	// launcher carries no work class, so the #5016 work-class table is reached only by an explicit
+	// `--ultracode=auto` (which resolves through ultracodeKindUnknown to OFF); `--ultracode=off`
+	// is the direct opt-out. Fail loud on a bad posture, exactly as the managed-cache mode does above.
 	ultracodeOn, ucErr := resolveUltracodePosture(p.ultracodePosture, ultracodeKindUnknown)
 	if ucErr != nil {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", ucErr)
@@ -405,6 +411,14 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	}
 	launchArgv := grant.Argv
 	launchEnv := envSliceFromMap(grant.Env)
+
+	// #5503 (diagnosability half): never hand a child an argv that references a variable the
+	// same launch has already removed from that child's environment. See
+	// launchStrippedAPIKeyEnvRefusal — this REFUSES, it never re-admits the stripped variable.
+	if refusal := launchStrippedAPIKeyEnvRefusal(launchArgv, grant); refusal != "" {
+		fmt.Fprint(stderr, refusal)
+		return 2
+	}
 
 	if p.dryRun {
 		fmt.Fprintln(stderr, "  (dry-run — not launching)")
@@ -478,6 +492,76 @@ func launchSeatAPIKeyEnv(home accounts.Home) string {
 		}
 	}
 	return strings.TrimSpace(os.Getenv(fleetGuardAPIKeyEnvEnv))
+}
+
+// launchGuardAPIKeyEnvRef returns the env-var NAME the guard argv's `--api-key-env` references,
+// or "" when the launch names none. Only the GUARD half of the argv is scanned — everything
+// after the `--` separator belongs to the wrapped agent, and a passthrough flag that happens to
+// spell `--api-key-env` is the child's own concern, not this launch's contradiction.
+func launchGuardAPIKeyEnvRef(argv []string) string {
+	for i, arg := range argv {
+		if arg == "--" {
+			return ""
+		}
+		switch {
+		case arg == "--api-key-env" || arg == "-api-key-env":
+			if i+1 < len(argv) {
+				return strings.TrimSpace(argv[i+1])
+			}
+		case strings.HasPrefix(arg, "--api-key-env="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--api-key-env="))
+		case strings.HasPrefix(arg, "-api-key-env="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "-api-key-env="))
+		}
+	}
+	return ""
+}
+
+// launchStrippedAPIKeyEnvRefusal names the one contradiction a launch can build against itself
+// (#5503): the argv references `--api-key-env NAME`, and the SAME launch has already removed
+// NAME from the environment it is about to hand that child. An api-key seat carries its own
+// env-var reference (launchSeatAPIKeyEnv), the shaper splices it into the guard argv, and then
+// the always-on #2358 inherited-secret floor — policy.StripInheritedSecrets, applied to every
+// brokered spawn by sanitizeLaunchEnv — drops NAME because it is credential-shaped. Both halves
+// are working as designed; only their COMPOSITION is broken, and nothing downstream can see it:
+// the guard child reads an empty NAME and reports it as "set but that env var is empty — export
+// it", which misdiagnoses an operator who did export it, and on the passthrough wires it goes
+// unremarked entirely.
+//
+// The parent is the only place that can tell the difference, because it alone saw the variable
+// present BEFORE the floor swept it — that is exactly what grant.Metadata.StrippedSecretEnv
+// records (NAMES only, never values). So the refusal fires only on the stripped terminal: a
+// variable the operator simply never exported keeps its existing handling (the seat-servability
+// gate for an api-key seat, guard's own empty-named-key gate for the fleet knob), and the
+// passthrough wires are not newly refused.
+//
+// This permits nothing. It relaxes no floor, re-admits no variable, and reveals no value — it
+// only converts a silent/misattributed downstream failure into a named refusal at the boundary
+// that caused it. Returns "" when there is nothing to refuse; otherwise a ready-to-print block.
+func launchStrippedAPIKeyEnvRefusal(argv []string, grant launchBrokerGrant) string {
+	name := launchGuardAPIKeyEnvRef(argv)
+	if name == "" {
+		return ""
+	}
+	if strings.TrimSpace(grant.Env[name]) != "" {
+		return "" // the child can read it — nothing contradictory about this launch
+	}
+	if !slices.Contains(grant.Metadata.StrippedSecretEnv, name) {
+		return "" // never present to begin with; not this floor's doing, so do not blame it
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak accounts launch: refusing to launch — this launch would hand the child "+
+		"`--api-key-env %s` while removing %s from that child's environment, so the agent would "+
+		"start with no upstream key.\n", name, name)
+	fmt.Fprintf(&b, "  cause: the always-on #2358 inherited-secret floor (policy.StripInheritedSecrets, "+
+		"applied to every brokered spawn) stripped %s on the way to the child because the variable is "+
+		"credential-shaped — its NAME matches a secret marker (TOKEN/SECRET/PASSWORD/CREDENTIAL/COOKIE/…) "+
+		"or its VALUE is secret-shaped under a name the floor does not spare. %s IS set in this shell; "+
+		"the floor is why the child cannot see it.\n", name, name)
+	fmt.Fprintf(&b, "  fix: hold the key in a variable the floor spares and re-point the seat at it — "+
+		"`fak accounts add --name <seat> --api-key-env ANTHROPIC_API_KEY` (or OPENAI_API_KEY) — and export "+
+		"the key under THAT name. fak records and prints the NAME only, never the key.\n")
+	return b.String()
 }
 
 // printAccountsLaunchPlan renders the human-readable launch plan summary to stderr: the resolved

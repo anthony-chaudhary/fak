@@ -9,7 +9,8 @@
       "distinction": "Not the fak context-management plane (context-MMU, recall, ctxplan); these are Go-runtime cancellation/deadline plumbing, unrelated to model-visible context bytes.",
       "distinct_from": [
         "context-MMU (ctxmmu)",
-        "recall (session core dump)"
+        "recall (session core dump)",
+        "x2-context-ctx-reasoncompactionthrash"
       ],
       "aliases": [
         "newrequestwithcontext",
@@ -34,7 +35,9 @@
       "distinct_from": [
         "ctxplan (context planner)",
         "contextq (materializer)",
-        "x2-plan-planof"
+        "x2-plan-planof",
+        "x2-context-ctx-reasoncompactionthrash",
+        "x2-context-ctx-envcompactionthrashstop"
       ],
       "aliases": [],
       "grounding": "basecontextplan",
@@ -361,7 +364,8 @@
         "RenderPlan",
         "render (verb)",
         "rendered-ctxplan",
-        "x-ci-coverage-render-materialize-renderers"
+        "x-ci-coverage-render-materialize-renderers",
+        "x2-render-materialize-gitdailyrenderhealth"
       ],
       "aliases": [],
       "grounding": "renderer",
@@ -403,7 +407,9 @@
       "distinct_from": [
         "RenderTrace (agent)",
         "Rendered",
-        "x-ci-coverage-render-materialize-renderbest"
+        "x-ci-coverage-render-materialize-renderbest",
+        "rendergitspawnreport",
+        "x2-render-materialize-gitdailyrenderhealth"
       ],
       "aliases": [],
       "grounding": "rendertext",
@@ -440,7 +446,9 @@
       "definition": "sessionobs.RenderContrast writes the value-vs-waste session-observation contrast report to a writer (value/waste counts, separability, and per-feature discriminators ranked worst-first).",
       "distinction": "Not the bench RenderMarkdown reports; RenderContrast emits the session-obs learn contrast view, not a benchmark comparison.",
       "distinct_from": [
-        "RenderMarkdown (bench report)"
+        "RenderMarkdown (bench report)",
+        "rendergitspawnreport",
+        "rendergitspawndelta"
       ],
       "aliases": [],
       "grounding": "rendercontrast",
@@ -632,7 +640,8 @@
       "definition": "cachevaluereport.RenderTwoTrack renders the cache-value profit-and-loss two-track report side by side (the WITNESSED reuse track and its OBSERVED-dollar projection) with the verdict.",
       "distinction": "Not the bench RenderMarkdown reports; RenderTwoTrack renders the cache-value P&L two-track view, not a benchmark comparison.",
       "distinct_from": [
-        "RenderMarkdown (bench report)"
+        "RenderMarkdown (bench report)",
+        "rendercachevalueregress"
       ],
       "aliases": [],
       "grounding": "rendertwotrack",

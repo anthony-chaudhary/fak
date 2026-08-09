@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
 
 // hooks_test.go — end-to-end CLI tests for `fak hooks` against a real temp git repo. Skipped if
@@ -298,5 +301,33 @@ func TestRunHooks_commitMsgBlocksUnnamedFreshDeletion(t *testing.T) {
 	errb.Reset()
 	if code := runHooks(&out, &errb, []string{"commit-msg", "--root", repo, good}); code != 0 {
 		t.Fatalf("message naming the deleted note should pass, got %d; stderr=%s", code, errb.String())
+	}
+}
+
+func TestEmitFindingsJSONOrdersBlockingBeforeAdvisory(t *testing.T) {
+	findings := []hooks.Finding{
+		{Gate: "PUBLIC_LEAK", File: "docs/leak.md", Line: 2, Detail: "redact", Advisory: true},
+		{Gate: "DUPLICATION", File: "internal/x/new.go", Line: 9, Detail: "copied block"},
+	}
+	var out, errb bytes.Buffer
+	orderFindingsForRepair(findings)
+	emitFindingsJSON(&out, &errb, findings, nil, nil, runScope{})
+	if errb.Len() != 0 {
+		t.Fatalf("emitFindingsJSON stderr = %s", errb.String())
+	}
+	var report struct {
+		Findings []hooks.Finding `json:"findings"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out.String())
+	}
+	if len(report.Findings) != 2 {
+		t.Fatalf("findings = %#v, want two", report.Findings)
+	}
+	if report.Findings[0].Gate != "DUPLICATION" || report.Findings[0].Advisory {
+		t.Fatalf("findings[0] = %#v, want binding DUPLICATION", report.Findings[0])
+	}
+	if report.Findings[1].Gate != "PUBLIC_LEAK" || !report.Findings[1].Advisory {
+		t.Fatalf("findings[1] = %#v, want advisory PUBLIC_LEAK", report.Findings[1])
 	}
 }

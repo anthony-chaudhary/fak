@@ -22,7 +22,8 @@ import (
 //
 // It runs the always-safe tier (git multi-pack-index write, git commit-graph write
 // --reachable — add-only, atomic, safe even mid-commit) unconditionally, and the
-// safe-with-grace tier (git maintenance run --task=loose-objects / --task=incremental-repack,
+// safe-with-grace tier (git maintenance run --task=loose-objects / git prune-packed /
+// --task=incremental-repack,
 // which unlink ONLY fully-covered redundant copies) only when the lock preflight AND
 // the shared no-auto-gc posture both pass, re-checking locks before every mutating step.
 // It never prunes unreachable objects, never full-repacks, never edits .git/config, and

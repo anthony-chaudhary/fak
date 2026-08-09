@@ -70,6 +70,30 @@ func debugStatsSink(on bool) func(string, ...any) {
 	}
 }
 
+// streamProgressTimeoutOff is the gateway.Config/HTTPPlanner encoding for "no
+// content-progress deadline at all": a NEGATIVE duration, which
+// agent.(*HTTPPlanner).streamProgressWindow resolves to a disabled window. It is deliberately
+// NOT the zero value — on that field zero means "unconfigured, take
+// agent.DefaultStreamProgressTimeout", so the operator's off switch cannot be passed through
+// as-is and has to be translated here.
+const streamProgressTimeoutOff = -1 * time.Second
+
+// serveStreamProgressTimeout maps --stream-progress-timeout onto that encoding.
+//
+// The flag spells "off" as 0 because that is what every other serve knob with an off switch
+// spells it as (--ctx-view-budget 0, --compact-history-budget 0, --elide-result-bytes 0,
+// --assume-session-turns 0, --metrics-snapshot 0): an operator who wants no deadline types a
+// zero, never a negative duration. The flag DEFAULTS to agent.DefaultStreamProgressTimeout
+// rather than 0, so a zero here is always something the operator typed — the ambiguity the
+// raw config field has (where 0 is the unconfigured state) does not exist at the front door.
+// Every other value rides through verbatim for streamProgressWindow to band-check.
+func serveStreamProgressTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return streamProgressTimeoutOff
+	}
+	return d
+}
+
 func configureServeToolEngines() {
 	// Serve exposes fak_read over MCP even when it is not running the demo agent loop.
 	// Register only the confined read miss engine; agent.Configure would also install
@@ -88,6 +112,7 @@ type serveFlags struct {
 	replicaBaseURLs              repeatedStringFlag
 	model                        *string
 	apiKeyEnv                    *string
+	streamProgressTimeout        *time.Duration
 	engineCacheEngine            *string
 	engineCacheBaseURL           *string
 	engineCacheAdminKeyEnv       *string
@@ -123,6 +148,7 @@ type serveFlags struct {
 	contextBudgetTokens          *int
 	resetOnBudget                *bool
 	cpuOffloadExperts            *bool
+	nCPUMoE                      *string
 	metal                        *bool
 	expertParallel               *int
 	tensorParallel               *int
@@ -139,6 +165,10 @@ type serveFlags struct {
 	nativeMaxTurns               *int
 	vdsoProxyFill                *bool
 	metricsSnapshot              *time.Duration
+	fleetBus                     *bool
+	fleetBusDir                  *string
+	fleetBusID                   *string
+	fleetBusInterval             *time.Duration
 }
 
 // newServeFlagSet defines the full `fak serve` flag surface and returns the set
@@ -154,6 +184,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
+	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
 	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
 	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
@@ -189,6 +220,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
+	sf.nCPUMoE = fs.String(serveNCPUMoEFlag, "", "with --gguf --backend: GRADE the expert spill instead of taking --cpu-offload-experts' all-or-nothing split (#5628, epic #5606). `auto` sizes the number of host-spilled MoE layers against the device budget compute.DeviceMemoryInfo measures, keeping the rest device-resident behind a bounded expert ring; `N` spills exactly N MoE layers; `off` (the default) is the ungraded placement --cpu-offload-experts alone makes, byte-for-byte. Spelled as llama.cpp spells it, so a working --n-cpu-moe number carries over. A grade that is not auto/off/a count >= 0 REFUSES the launch here, before the multi-minute load — a misspelled grade must never fall back to a placement the operator did not choose. Equivalent to "+agent.ExpertSpillEnv+"; passing the flag WINS over that env var, including an explicit `off`.")
 	sf.metal = fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
@@ -205,6 +237,10 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
 	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, .fak/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
+	sf.fleetBus = fs.Bool("fleet-bus", false, "JOIN THE FLEET CONTROL BUS (#5600, epic #5599): announce this serve as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak fleet control send` reaches every live instance at once — the cross-PROCESS fan-out the per-gateway `sessionctl` broadcast and the display-only `fleetspine` each stop short of. Each drained directive is applied through the SAME writes the single-session verbs ride (steer ⇒ the a2achan operator turn, needs --native; pause/resume/cancel/terminate/throttle ⇒ session.Table.Transition) and every one draws an ACK carrying what this process OBSERVED change — the return path that lets the control point say \"3 of 4 applied, 1 refused STEER_NO_OWNED_LOOP\" instead of \"sent\". Exactly-once under at-least-once redelivery: a per-(instance,directive) O_EXCL claim means a directive re-read after a restart is recognised, never re-applied. Off by default (arming a control plane must be stated); the bus directory is --fleet-bus-dir.")
+	sf.fleetBusDir = fs.String("fleet-bus-dir", "", "with --fleet-bus: the shared bus directory (default: FAK_FLEET_BUS, else <FLEET_STATE_DIR>/bus, else beside the fleet registry). On one machine a directory IS a real cross-process control plane; it is an honest cross-HOST one only where the directory itself is shared (a UNC path, an SMB/NFS mount) — which is what FLEET_STATE_DIR already exists to point at.")
+	sf.fleetBusID = fs.String("fleet-bus-id", "", "with --fleet-bus: this instance's stable bus identity (default: serve-<host>-<pid>). Pass a name to keep one identity across restarts — the id is what the exactly-once apply claim is keyed on, so two live processes sharing one id deliberately share one claim (only one of them applies a given directive).")
+	sf.fleetBusInterval = fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live instance flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	return fs, sf
 }
 
@@ -251,6 +287,19 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 
+	// Prompt-shrink lever WIRE admission (#5493): --compact-history-budget,
+	// --elide-stale-reads and --defer-cold-tools are each gated, inside the gateway, on
+	// the Anthropic passthrough, so on any other upstream wire all three stand down to
+	// identity. Refuse by name when the operator EXPLICITLY enabled one here, and name
+	// the default-on ones that are merely inert, so "enabled but inert" is never silent
+	// and a ~0-saving A/B on this wire cannot be read as a verdict on the kernel. Placed
+	// beside the bind rule for the same reason: it reads parsed flags only and binds
+	// nothing, so it answers in milliseconds rather than after a weight load
+	// (shrink_lever_wire.go).
+	if !admitServeShrinkLevers(fs, sf, os.Stderr) {
+		os.Exit(2)
+	}
+
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
 	// startup phase.
@@ -288,11 +337,20 @@ func warnIfNotFakWorkspace(stderr io.Writer) {
 	if err != nil {
 		wd = "(unknown cwd)"
 	}
-	fmt.Fprintf(stderr,
-		"fak serve: WARNING — no dos.toml found upward from cwd %q; this is not a fak workspace. "+
-			"The dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo. "+
-			"Launch fak serve from a fak checkout, or set the MCP server config \"cwd\" to your fak workspace root.\n",
-		wd)
+	// A warning rather than a refusal, which is exactly why it needs the same shape
+	// as a bail: nothing stops, so an operator who skims this line serves a
+	// silently mis-bound tree for the rest of the session.
+	writeConfigBail(stderr, configBail{
+		Verb:    "fak serve",
+		Reason:  bailNotAWorkspace,
+		Summary: "WARNING — this is not a fak workspace; the dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo",
+		Knobs: []bailKnob{
+			bailCWD(wd, "no dos.toml found walking upward").want("a directory inside your fak checkout"),
+		},
+		// Nothing stops here, so the fix has to stay INLINE — a warning that makes
+		// you run a second command to learn the remedy is one you scroll past.
+		Check: "git rev-parse --show-toplevel   # the repo this cwd actually resolves to\n          launch fak serve from a fak checkout, or set the MCP server entry's \"cwd\" to your fak workspace root",
+	})
 }
 
 // serveKeyPrincipals resolves the repeated `--key-principal PRINCIPAL=ENV_VAR` specs into
@@ -309,7 +367,17 @@ func warnIfNotFakWorkspace(stderr io.Writer) {
 func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io.Writer) (map[string]string, bool) {
 	keyPrincipals, err := gateway.ParseKeyPrincipals(specs, lookupEnv)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak serve: --key-principal %v — refusing to start a gateway whose tenant keyset did not fully resolve (an unresolved binding leaves that tenant attributed by the caller-supplied X-Fak-Principal header instead of by its key)\n", err)
+		// The summary keeps the original sentence intact, X-Fak-Principal clause and
+		// all: it is what says WHY this fails closed rather than warning, and the
+		// block is meant to add a next step, never to cost the reason.
+		writeConfigBail(stderr, configBail{
+			Verb:    "fak serve",
+			Reason:  bailKeyPrincipalUnresolved,
+			Summary: fmt.Sprintf("--key-principal %v — refusing to start a gateway whose tenant keyset did not fully resolve (an unresolved binding leaves that tenant attributed by the caller-supplied X-Fak-Principal header instead of by its key)", err),
+			Knobs: []bailKnob{
+				bailFlag("key-principal", strings.Join(specs, " ")).want("PRINCIPAL=ENV_VAR per tenant, each naming a set, distinct env var"),
+			},
+		})
 		return nil, false
 	}
 	return keyPrincipals, true
@@ -328,7 +396,16 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	if *sf.routeManifest != "" {
 		loaded, err := modelroute.LoadManifest(*sf.routeManifest)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: --route-manifest:", err)
+			writeConfigBail(os.Stderr, configBail{
+				Verb:    "fak serve",
+				Reason:  bailRouteManifestInvalid,
+				Summary: fmt.Sprintf("--route-manifest did not load: %v", err),
+				Knobs: []bailKnob{
+					bailFlag("route-manifest", *sf.routeManifest),
+					bailFile(*sf.routeManifest, "did not load").want("a modelroute manifest whose every plan member resolves"),
+				},
+				Bind: []string{"path=" + *sf.routeManifest},
+			})
 			os.Exit(1)
 		}
 		routeMan = &loaded
@@ -345,7 +422,16 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	if *sf.routeAccounts != "" {
 		loaded, err := modelroute.LoadRoster(*sf.routeAccounts)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: --route-accounts:", err)
+			writeConfigBail(os.Stderr, configBail{
+				Verb:    "fak serve",
+				Reason:  bailRouteManifestInvalid,
+				Summary: fmt.Sprintf("--route-accounts did not load: %v", err),
+				Knobs: []bailKnob{
+					bailFlag("route-accounts", *sf.routeAccounts),
+					bailFile(*sf.routeAccounts, "did not load").want("a fak-accounts/v1 roster carrying env var NAMES, never secrets"),
+				},
+				Bind: []string{"path=" + *sf.routeAccounts},
+			})
 			os.Exit(1)
 		}
 		routeRoster = &loaded
@@ -445,6 +531,13 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		Native:         *sf.native,
 		NativeMaxTurns: *sf.nativeMaxTurns,
 		VDSOProxyFill:  *sf.vdsoProxyFill,
+		// Streaming CONTENT-progress deadline (#5486, --stream-progress-timeout): the
+		// window a warm-but-unadvancing proxied stream is given before the turn is ended.
+		// gateway.newConfiguredHTTPPlanner carries it onto every proxy planner, where
+		// agent.(*HTTPPlanner).streamProgressWindow band-checks it. The flag's 0 means OFF
+		// and is translated here into that resolver's negative encoding; every other value
+		// (including the 300s default) passes through untouched.
+		StreamProgressTimeout: serveStreamProgressTimeout(*sf.streamProgressTimeout),
 	})
 	must(err)
 	srv.SetModelLoadProfile(rt.loadProfile)
@@ -557,6 +650,17 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 
 		DenyAllStops: adj.DenyAllStops,
 
+		// WHY turns failed upstream (#5487) — carried off the in-memory /metrics surface
+		// and into the durable row, which is the only record that survives a
+		// per-invocation `fak guard` process. Note adj.Errored above does NOT cover this:
+		// it counts kernel adjudication ERROR verdicts, a different population, so before
+		// this line a stalled turn moved nothing at all in the row. Sourced from the FULL
+		// snapshot on purpose — RotationEvidenceSnapshot and TransientWireErrorSnapshot
+		// are deliberately narrower and would both drop "stalled". Deliberately nil when
+		// the session hit no upstream error, so the omitempty field stays ABSENT (not
+		// instrumented) instead of asserting a measured zero.
+		UpstreamErrorKinds: srv.UpstreamErrorKindsSnapshot(),
+
 		CacheTTLUpgradesUpgraded: adj.CacheTTLUpgraded,
 		CacheTTLUpgradeReasons:   adj.CacheTTLUpgradeReasons,
 
@@ -569,11 +673,71 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 // same append-only JSONL pattern persistCacheValueObservations already uses for the
 // narrower cache-value axis (#1303). Best-effort: a write failure never fails the
 // session. context is a free-form label (e.g. "http"/"stdio").
-func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration) {
-	row := gatewayusageledger.NewRow("exit", sessionType, context, "", uptime, gatewayUsageProvenance(srv), gatewayUsageCounters(srv), time.Now())
+//
+// sessionID is the row's JOIN KEY back to a named session, and it is the caller's job to
+// pass one ONLY when the row really describes a single session — see
+// gatewayUsageSessionID. The ledger's session_id has been optional since the schema
+// landed and every caller passed "", so no historical row carries one; that is why the
+// fleet exporter publishes an identified/unidentified census rather than assuming the
+// per-session drill-down covers the corpus.
+func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration, sessionID string) {
+	row := gatewayusageledger.NewRow("exit", sessionType, context, sessionID, uptime, gatewayUsageProvenance(srv), gatewayUsageCounters(srv), time.Now())
 	if err := gatewayusageledger.Append(nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel), row); err != nil {
 		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)
 	}
+}
+
+// guardSharedTraceSentinel is the CONSTANT trace resolveGuardSessionID hands an ordinary
+// non-durable `fak guard` launch. Every such launch on every machine gets this same
+// string, so it identifies the guard PATH, not a session.
+const guardSharedTraceSentinel = "guard"
+
+// gatewayUsageSessionID returns the id a usage row may be stamped with, or "" when the
+// caller's trace is not a per-session identity.
+//
+// WHY THIS FILTER EXISTS. The join key is only useful if it is unique per session, and a
+// non-durable guard launch resolves to the shared "guard" sentinel. Stamping that would be
+// strictly WORSE than leaving the field empty: thousands of unrelated sessions would
+// collapse into one enormous series on a per-session panel, and it would look like a real
+// session rather than like missing data. An empty id is honestly absent — it shows up in
+// the exporter's unidentified census — while a shared id is a wrong answer that reads as a
+// right one.
+func gatewayUsageSessionID(trace string) string {
+	trace = strings.TrimSpace(trace)
+	if trace == "" || trace == guardSharedTraceSentinel {
+		return ""
+	}
+	return trace
+}
+
+// serveUsageSessionID names the session a `fak serve` exit row describes — but ONLY when
+// the process hosted exactly one.
+//
+// A serve gateway MULTIPLEXES a session table, so unlike guard (one process, one wrapped
+// agent) its exit counters are a process total that can span many traces. Stamping any one
+// of those traces would attribute the WHOLE process's tokens, turns and verdicts to a
+// single session — a per-session cost panel would then show one session having spent what
+// five of them did, and nothing on the panel would reveal the blend.
+//
+// So the rule is the one case where the process total and the session total are the same
+// number: Len()==1. A single-session serve (the dispatch launcher's usual shape — one
+// worker process for one lane's work) becomes drillable; a genuinely multiplexed one stays
+// honestly unidentified and lands in the exporter's unidentified census, where it reads as
+// "this row covers more than one session" instead of as a wrong attribution.
+//
+// The table is read at EXIT, after the last turn, so Len() is the count of sessions that
+// survived to the end. An LRU-evicted mid-run session is not counted — which is the
+// conservative direction: eviction can only turn a would-be-stamped row into an
+// unidentified one, never the reverse.
+func serveUsageSessionID(tbl *session.Table) string {
+	if tbl == nil || tbl.Len() != 1 {
+		return ""
+	}
+	snap := tbl.Snapshot()
+	if len(snap) != 1 {
+		return ""
+	}
+	return gatewayUsageSessionID(snap[0].TraceID)
 }
 
 // gatewayUsageProvenance stamps the calibration-relevant config the Server actually ran
@@ -825,6 +989,28 @@ func resolveServeChatBackend(backendName string) (compute.Backend, error) {
 	return be, nil
 }
 
+// writeBackendUnavailableBail renders the BACKEND_UNAVAILABLE bail for a --backend
+// this binary never registered. Shared by the serve entry points so both report
+// the same knobs; resolveServeChatBackend fails for exactly this one reason, so a
+// non-nil error from it is always this bail.
+//
+// The name is not silently downgraded to CPU: a typo that quietly served on the
+// wrong device would misreport every throughput number taken from that run.
+func writeBackendUnavailableBail(w io.Writer, verb, backendName string) {
+	writeConfigBail(w, configBail{
+		Verb:    verb,
+		Reason:  bailBackendUnavailable,
+		Summary: fmt.Sprintf("--backend %q is not registered in this binary", backendName),
+		Knobs: []bailKnob{
+			bailFlag("backend", backendName).want(fmt.Sprintf("one of %v, or omit --backend to serve on the CPU path", compute.Registered())),
+		},
+		// Keep the build-tag half of the original message: "not registered" reads
+		// as a runtime/device problem, but the usual cause is a binary compiled
+		// without the tag, which no amount of checking the device will reveal.
+		Check: fmt.Sprintf("fak doctor serve   # decode tier and serve readiness; a device backend needs BOTH a build tag (-tags %s) and a reachable device", backendName),
+	})
+}
+
 // resolveServeMetal decides whether `fak serve` runs the in-kernel chat through the
 // Apple-Silicon Metal GPU forward. Metal auto-selects when this binary has the backend
 // linked and a usable device is present; --metal/FAK_METAL=1 only changes the unavailable
@@ -961,11 +1147,11 @@ func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resi
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
-func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backend, contextBudgetTokens int) error {
+func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int) error {
 	if ws == nil || be == nil {
 		return nil
 	}
-	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, serveDeviceFitBudget(be))
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, serveDeviceFitBudget(be))
 	if err != nil {
 		return err
 	}
@@ -993,11 +1179,21 @@ func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBud
 	return appendServeGGUFDevicePlan(ws, plan, contextBudgetTokens, fit), nil
 }
 
-func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+// serveGGUFCPUOffloadMemoryPlan plans the --cpu-offload-experts split: dense/router/attention
+// weights device-scoped, routed and shared experts host-scoped.
+//
+// ranks is how many expert-parallel ranks this process's weights are split across — 1 for every
+// unsharded serve, which plans exactly as it always has. Above 1 the rank has been handed a band
+// and admits only experts [Lo,Hi) into the host expert pool (the loader's WithExpertShard seam),
+// so the routed set must be charged one band and not in full: charging every rank the whole set
+// overstated host demand ~ranks-fold and made RefuseHostScopedPlanIfTooBigForHost refuse a serve
+// that fits — before the authoritative rank-local gate (refuseEPPlanIfUnfit, #2997) could run at
+// all (#4952).
+func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	if ws == nil {
 		return nil, nil
 	}
-	plan, err := ws.EstimateCPUOffloadExpertsMemoryPlan()
+	plan, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks)
 	if err != nil {
 		return nil, err
 	}
@@ -1103,8 +1299,13 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
-func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, contextBudgetTokens, serveDeviceFitBudget(be))
+// fitAndPlanServeGGUFCPUOffloadPathOnDevice keeps serveDeviceFitBudget's generic device headroom
+// even for a sharded rank, rather than the tighter EP load-time one: on this arm the routed
+// experts are host-resident, so the device side is the dense remainder plus KV — not the tight
+// resident-EP case 0.05 exists for. ranks changes which routed bytes are charged, never the
+// headroom.
+func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, ranks, contextBudgetTokens, serveDeviceFitBudget(be))
 	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
@@ -1114,9 +1315,9 @@ func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTok
 	})
 }
 
-func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
+func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, ranks, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
 	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, fit)
+		return serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
 	})
 }
 
@@ -1144,10 +1345,14 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 	q4kOpts = append(q4kOpts, serveDenseKQuantOptions(backend)...)
 	if expertShard != nil {
 		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
-		q4kArm := cpuOffloadExperts || os.Getenv("FAK_Q4K") != ""
-		if !q4kArm {
-			must(fmt.Errorf("fak serve: --expert-parallel sharded load requires the resident-Q4K path; set FAK_Q4K=1 (or --cpu-offload-experts) so this rank admits only its expert band"))
-		}
+		must(serveShardSeamRefusal(backend, cpuOffloadExperts, serveShardSeamEnvQ4K()))
+	}
+	// How many ranks this process's WEIGHTS are actually split across. A rank is sharded only when
+	// it was handed a band: expertRanks alone must never select a per-rank plan, or an unsharded
+	// process would under-account the full model it really loads and pass a fit it should fail.
+	residentRanks := 1
+	if expertShard != nil && expertRanks > 1 {
+		residentRanks = expertRanks
 	}
 	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed — the ~50-100x
@@ -1171,7 +1376,12 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// load from ~100 min to minutes. The per-request session decodes Q4_K (s.Q4K=true) on both
 		// the device (dense) and host (offloaded experts). The fit check still uses the dense-vs-
 		// expert split so experts dwarfing VRAM stay host-scoped while the dense side must fit.
-		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens)
+		// #4952: a sharded rank admits only its expert band (WithExpertShard above), so the host
+		// expert pool must be charged that band and not the whole routed set — otherwise the
+		// host-scope refusal below over-refuses ~ranks-fold, and it does so BEFORE the authoritative
+		// rank-local gate (refuseEPPlanIfUnfit) ever runs. residentRanks is 1 for every unsharded
+		// serve, which plans exactly as before.
+		memPlan, err := fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
 		must(err)
 		// #971 blocker 3: the dense weights fit-checked above land in VRAM, but the routed MoE
 		// experts (~424 GiB for GLM-5.2 Q4_K) are pinned in HOST RAM — and a device backend does not
@@ -1193,8 +1403,8 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
 		var memPlan compute.MemoryPlan
 		var err error
-		if expertShard != nil && expertRanks > 1 {
-			memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, expertRanks, contextBudgetTokens)
+		if residentRanks > 1 {
+			memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens)
 		} else {
 			memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
 		}

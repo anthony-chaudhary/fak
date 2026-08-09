@@ -225,8 +225,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	if mode == "issues" {
 		issues, err := decodeIssueContractIssues(b)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue contract: %v\n", err)
-			return 2
+			return issueContractDecodeRefusal(stderr, err)
 		}
 		result.Reviews = make([]issuecontract.Review, 0, len(issues))
 		for _, issue := range issues {
@@ -242,8 +241,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		candidates, err := decodeIssueContractCandidates(b)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue contract: %v\n", err)
-			return 2
+			return issueContractDecodeRefusal(stderr, err)
 		}
 		result.Reviews = make([]issuecontract.Review, 0, len(candidates))
 		for _, c := range candidates {
@@ -269,6 +267,15 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		return 3
 	}
 	return 0
+}
+
+// issueContractDecodeRefusal reports input this command cannot even parse. Both accepted
+// input shapes -- issue drafts and dedupe candidates -- refuse with the same wording and the
+// same exit 2 (usage, not a failed review), so an operator who fed the wrong file gets one
+// answer regardless of which mode they asked for.
+func issueContractDecodeRefusal(stderr io.Writer, err error) int {
+	fmt.Fprintf(stderr, "fak issue contract: %v\n", err)
+	return 2
 }
 
 func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup, []issueContractDuplicateGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup) {

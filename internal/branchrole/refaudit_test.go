@@ -2,6 +2,7 @@ package branchrole
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,8 @@ func TestClassifyHardcodedRef(t *testing.T) {
 		{".github/workflows/ci.yml", "branches: [main, master]", RefClassWorkflowCovered},
 		{"tools/extend_preflight.py", `branch == "master"`, RefClassDevelopmentSource},
 		{"tools/fleet_control_pane.py", `DEFAULT_WORKTREE_MASTER_REF = "origin/master"`, RefClassDevelopmentSource},
+		{"tools/dispatch_worker.py", "fresh origin/main worktree", RefClassDevelopmentSource},
+		{"internal/corelockgate/corelockgate.go", "HEAD and origin/main move", RefClassDevelopmentSource},
 		{"docs/stable-releases/2026-06-stable.md", "committed to `master`", RefClassHistorical},
 		{"tools/bench_migrate.py", `"branch": "master"`, RefClassFixture},
 		{"tools/demo_robustness_scorecard.py", `@(latest|main|master)`, RefClassPublicGuard},
@@ -52,6 +55,77 @@ func TestScanHardcodedRefFileHandlesLongLines(t *testing.T) {
 	}
 	if rows[1].Line != 3 || rows[1].Text != "git switch master" {
 		t.Fatalf("line after the long line misread: %+v", rows[1])
+	}
+}
+
+// TestAuditHardcodedRefsScansOnlyWhatGitTracks pins the boundary of the live-tree
+// gate: it audits what is committed or staged, and nothing else.
+//
+// Before the fix the walk pruned only gitignored paths, so an UNTRACKED file reddened
+// the audit. On this shared multi-session trunk checkout that is not a governance
+// signal but a false one -- #4334's live red came from a peer's uncommitted
+// cmd/fak/stallscan_skew.go, a file this session could neither classify honestly (it
+// may never land, or land renamed) nor commit (it is not this session's to commit).
+//
+// The staged arm is the other half, and the reason this is a boundary rather than a
+// blanket exemption: dropping untracked content must NOT let the worker who is
+// actually landing a fresh unclassified ref slip past the ratchet. Staging is what
+// git commit does, so that worker is still gated at exactly the moment it matters.
+func TestAuditHardcodedRefsScansOnlyWhatGitTracks(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	git("init")
+
+	// Identical unclassified content in all three; only git's view of each differs.
+	// The slash is load-bearing: the audit matches `origin/main`, so prose like
+	// "git fetch origin main" would sail past hardcodedRefLine and prove nothing.
+	const ref = "// resolved against origin/main at read time\n"
+	write("cmd/fak/staged_ref.go", ref)
+	write("cmd/fak/untracked_ref.go", ref)
+	write("cmd/fak/ignored_ref.go", ref)
+	write(".gitignore", "ignored_ref.go\n")
+
+	// Staging is the entire distinction under test: `ls-files --others` is defined
+	// against the INDEX, so `git add` is what flips a file from other to tracked.
+	// This test deliberately makes no commit -- a commit here would either run the
+	// host's real hooks against a throwaway repo or have to skip them, and skipping
+	// commit guards is exactly the thing this repo refuses. The already-committed
+	// arm needs no synthetic fixture anyway: TestHardcodedRefAuditCurrentTreeClassified
+	// below audits this repo's own trunk, which is nothing but committed content.
+	git("add", "--", "cmd/fak/staged_ref.go")
+
+	findings, err := AuditHardcodedRefs(root)
+	if err != nil {
+		t.Fatalf("AuditHardcodedRefs: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, finding := range findings {
+		seen[finding.Path] = true
+	}
+	if !seen["cmd/fak/staged_ref.go"] {
+		t.Errorf("cmd/fak/staged_ref.go is in git's index and must still be audited; got %+v", findings)
+	}
+	for _, unwanted := range []string{"cmd/fak/untracked_ref.go", "cmd/fak/ignored_ref.go"} {
+		if seen[unwanted] {
+			t.Errorf("%s is not tracked and must not red another session's gate; got %+v", unwanted, findings)
+		}
 	}
 }
 

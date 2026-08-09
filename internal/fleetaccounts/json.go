@@ -39,6 +39,12 @@ func (a Account) MarshalJSON() ([]byte, error) {
 		o.set("agent", derefStr(a.Agent))
 		o.set("profile_source", derefStr(a.ProfileSource))
 		o.set("route_weight", derefInt(a.RouteWeight))
+		if a.RoutingCostPerMTok != nil {
+			o.set("routing_cost_per_mtok", derefFloat64(a.RoutingCostPerMTok))
+		}
+		if a.BilledCostPerMTok != nil {
+			o.set("billed_cost_per_mtok", derefFloat64(a.BilledCostPerMTok))
+		}
 	}
 
 	// Claude worker identity + reconciliation (present iff stamped at classify time)

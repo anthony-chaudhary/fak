@@ -38,7 +38,15 @@ set -uo pipefail
 
 DS_DIR="${DS_DIR:-/opt/deepseek2}"
 # A real deepseek2 GGUF. V2-Lite is the small resident default; override for V3.
-DS_REPO="${DS_REPO:-bartowski/DeepSeek-V2-Lite-Chat-GGUF}"
+# Deliberately NOT bartowski/DeepSeek-V2-Lite-Chat-GGUF: that repo is not publicly
+# fetchable. The HF model API answers 401 for it while openai-community/gpt2 and this
+# repo both answer 200, so it is that repo specifically, not an unauthenticated host.
+# The failure is silent in the worst way -- `hf download` prints "Invalid username or
+# password", downloads nothing, and STILL exits 0 -- so rc is not evidence here; only
+# the resolve_gguf re-check below catches it (DOWNLOAD_FAIL rc=0 no gguf matching...).
+# mradermacher's is public, ungated, and carries DeepSeek-V2-Lite-Chat.Q4_K_M.gguf,
+# which the DS_GLOB default already matches.
+DS_REPO="${DS_REPO:-mradermacher/DeepSeek-V2-Lite-Chat-GGUF}"
 DS_SUBDIR="${DS_SUBDIR:-}"                       # some repos put shards flat (no quant subdir)
 DS_GLOB="${DS_GLOB:-*Q4_K_M*.gguf}"             # which quant file(s) to fetch/serve
 PORT="${PORT:-8000}"

@@ -718,11 +718,27 @@ func dedup(in []string) []string {
 // Evaluate one tool call (used by both --check and --hook)
 // --------------------------------------------------------------------------- //
 
+// Hints carries the IO-derived facts the pure classifiers cannot resolve on
+// their own. The command layer owns the reads; the core stays hermetic. A zero
+// Hints disables exactly the rungs that need one, never the rest.
+type Hints struct {
+	// LiveMonitorIDs are the Monitor task ids still streaming, for the Read rung.
+	LiveMonitorIDs map[string]bool
+	// LeafDeclarations is the lane/tier taxonomy the UNDECLARED_LEAF rung compares
+	// a written internal/<leaf> path against.
+	LeafDeclarations LeafDeclarations
+}
+
 func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string) []Violation {
-	return evaluateWithLiveMonitorIDs(toolName, toolInput, workspaceRoot, safeRoots, nil)
+	return evaluateWithHints(toolName, toolInput, workspaceRoot, safeRoots, Hints{})
 }
 
 func evaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, liveMonitorIDs map[string]bool) []Violation {
+	return evaluateWithHints(toolName, toolInput, workspaceRoot, safeRoots, Hints{LiveMonitorIDs: liveMonitorIDs})
+}
+
+func evaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, hints Hints) []Violation {
+	liveMonitorIDs := hints.LiveMonitorIDs
 	switch toolName {
 	case "Bash":
 		command := stringField(toolInput, "command")
@@ -744,7 +760,8 @@ func evaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, works
 		if fp == "" {
 			fp = stringField(toolInput, "notebook_path")
 		}
-		return classifyWritePath(fp, workspaceRoot, safeRoots)
+		violations := classifyWritePath(fp, workspaceRoot, safeRoots)
+		return append(violations, classifyUndeclaredLeaf(fp, workspaceRoot, hints.LeafDeclarations)...)
 	}
 	return nil
 }
@@ -758,6 +775,13 @@ func Evaluate(toolName string, toolInput map[string]any, workspaceRoot string, s
 // a live Monitor's tasks/<id>.output path when the caller supplies live ids.
 func EvaluateWithLiveMonitorIDs(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, liveMonitorIDs map[string]bool) []Violation {
 	return evaluateWithLiveMonitorIDs(toolName, toolInput, workspaceRoot, safeRoots, liveMonitorIDs)
+}
+
+// EvaluateWithHints classifies one tool call with every IO-derived hint the
+// command layer resolved: live Monitor ids for the Read rung, and the lane/tier
+// taxonomy for the UNDECLARED_LEAF rung on Write/Edit.
+func EvaluateWithHints(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string, hints Hints) []Violation {
+	return evaluateWithHints(toolName, toolInput, workspaceRoot, safeRoots, hints)
 }
 
 func stringField(m map[string]any, key string) string {
@@ -778,9 +802,11 @@ func readPath(m map[string]any) string {
 }
 
 func renderReason(violations []Violation) string {
-	var outOfTree, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops []Violation
+	var outOfTree, interactive, sleeps, liveMonitorReads, workspaceCd, networkLoops, undeclaredLeaves []Violation
 	for _, v := range violations {
 		switch v.Reason {
+		case ReasonUndeclaredLeaf:
+			undeclaredLeaves = append(undeclaredLeaves, v)
 		case ReasonInteractiveHang:
 			interactive = append(interactive, v)
 		case ReasonForegroundSleep:
@@ -813,6 +839,9 @@ func renderReason(violations []Violation) string {
 	}
 	if len(networkLoops) > 0 {
 		blocks = append(blocks, renderNetworkLoopReason(networkLoops))
+	}
+	if len(undeclaredLeaves) > 0 {
+		blocks = append(blocks, renderUndeclaredLeafReason(undeclaredLeaves))
 	}
 	return strings.Join(blocks, " | ")
 }

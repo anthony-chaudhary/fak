@@ -38,6 +38,7 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "Track-1 WITNESSED kernel ledger (docs/nightrun/cache-value.jsonl)")
 	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "Track-2 OBSERVED-$ ledger (.fak/nightrun/cache-savings.jsonl)")
 	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (.fak/nightrun/gateway-usage.jsonl)")
+	recallInjectionLedger := fs.String("recall-injection-ledger", cachevaluereport.DefaultRecallInjectionLedger, "numbers-only recall injection debit ledger (.fak/recall-injections.jsonl)")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	asJSON := fs.Bool("json", false, "emit the two-track report as JSON instead of the table")
@@ -66,6 +67,12 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 		ContextBudgetTokens: *contextBudget,
 	})
 	report.Since = *since
+	recallDebit, err := cachevaluereport.ReadRecallInjectionDebit(*recallInjectionLedger)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak cachevalue report: recall injection ledger: %v\n", err)
+		return 1
+	}
+	report.RecallInjectionDebit = recallDebit
 	if *devSessions {
 		devRep := foldDevSessionBenefit(*devSessionDays, *devSessionMax, *devSessionAllNamespaces, now)
 		report.DevSessionBenefit = &devRep

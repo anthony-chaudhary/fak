@@ -187,8 +187,8 @@ func TestRunCommitSubmit_refusesMissingStampBeforeWritingQueue(t *testing.T) {
 		"--path", "internal/commitintent/store.go",
 		"-m", "feat(commitintent): add submit cli",
 	})
-	if code != 3 {
-		t.Fatalf("want validation refusal exit 3, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	if code != safecommit.ExitRefused {
+		t.Fatalf("want validation refusal exit %d, got %d stderr=%q stdout=%q", safecommit.ExitRefused, code, errb.String(), out.String())
 	}
 	if _, err := os.Stat(filepath.Join(queueDir, "queue.json")); !os.IsNotExist(err) {
 		t.Fatalf("queue should not be written on refusal, stat err=%v", err)
@@ -442,17 +442,34 @@ func TestRunCommit_humanOutputShowsLockHoldDuration(t *testing.T) {
 	}
 }
 
-func TestRunCommit_offTrunkExit3(t *testing.T) {
+// TestRunCommit_offTrunkIsRefusedNotContention pins OFF_TRUNK to the verdict exit (4), not
+// the retryable contention exit (3): HEAD stays off-trunk however long you back off, so a
+// lander must replan rather than retry (#5505 W4).
+func TestRunCommit_offTrunkIsRefusedNotContention(t *testing.T) {
 	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
 		return safecommit.Result{Reason: safecommit.ReasonOffTrunk, Detail: "on feature/x, expected development branch main", Paths: o.Paths}, nil
 	})
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "msg"})
-	if code != 3 {
-		t.Fatalf("a pre-commit refusal should exit 3, got %d", code)
+	if code != safecommit.ExitRefused {
+		t.Fatalf("a refusal on the merits should exit %d, got %d", safecommit.ExitRefused, code)
 	}
 	if !strings.Contains(out.String(), "score:") {
 		t.Fatalf("human refusal output should include score, got %q", out.String())
+	}
+}
+
+// TestRunCommit_lockBusyKeepsExit3 pins the OTHER half of the #5505 W4 split at the CLI
+// boundary: LOCK_BUSY keeps exit 3, the code every existing retry loop already backs off
+// on. The split moved the verdicts out to 4; it did not repurpose 3.
+func TestRunCommit_lockBusyKeepsExit3(t *testing.T) {
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{Reason: safecommit.ReasonLockBusy, Detail: "held by pid 1234", Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "msg"})
+	if code != 3 {
+		t.Fatalf("LOCK_BUSY must keep exit 3 (retryable contention), got %d", code)
 	}
 }
 
@@ -615,8 +632,9 @@ Ship the review rung.
 
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "feat(loop): add review (#1185) (fak cmd)", "--review-model", "cheap-scout"})
-	if code != 3 {
-		t.Fatalf("review refute should exit 3, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	if code != safecommit.ExitRefused {
+		t.Fatalf("review refute should exit %d (a verdict, not contention), got %d stderr=%q stdout=%q",
+			safecommit.ExitRefused, code, errb.String(), out.String())
 	}
 	events, err := loopmgr.Load(ledger)
 	if err != nil {

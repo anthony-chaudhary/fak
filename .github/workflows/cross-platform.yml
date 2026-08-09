@@ -50,6 +50,12 @@ jobs:
 
       # The whole module must compile on this OS. Default tags / default CGO — the
       # same invocation an end user runs after `go install ...@latest`.
+      # The launchshim acceptance is stdlib-only and safe on native Windows.
+      # It witnesses both provider identities and lossless config lifecycle on every
+      # claimed OS family instead of relying on compile-only evidence (#5810).
+      - name: launchshim acceptance (Claude + Codex)
+        run: go test ./internal/launchshim -run 'TestProviderAcceptanceMatrix|TestConcurrentSaveNeverTearsConfig|TestCanonicalCommand|TestActivationLifecyclePreservesUserBytesAndConverges|TestActivationBlocksResolveShimFirst' -count=1
+
       - name: build (whole module compiles)
         run: go build ./...
 

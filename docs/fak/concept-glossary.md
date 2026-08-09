@@ -2022,3 +2022,115 @@ The operator-configured exclude / include_only gate that drops a discovered acco
 The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier.
 
 **Distinct from:** Not the manifest validator and not the envelope verifier it dispatches to, and not the policy document itself: it is the CLI-level router that decides which checker owns the file, keyed on the payload's schema shape rather than on its filename or extension.
+
+
+### guardSelfTightenOverlay (self-tighten overlay schema)
+
+cmd/fak/guard_self_tighten_overlay.go: the on-disk schema of the overlay the WRAPPED AGENT may author for itself (.fak/agent/self-tighten.json) - a ratchet-only subset of the policy manifest carrying only Deny, BlockHosts and SelfModifyGlobs, each of which can only narrow the floor. It declares no allow / allow_prefix / posture field and is decoded with DisallowUnknownFields, so a forged widening cannot even be spelled: it fails to decode and the overlay is refused wholesale rather than partially applied (#5181, epic #5170 Track F).
+
+**Distinct from:** The AGENT-authored tighten-only overlay schema, the one amendment channel the wrapped agent may write for itself - NOT guardAllowOverlay (operator-authored, widen-only allow lists) and NOT guardDenyOverlay (operator-authored, tighten-only but trusted on arrival). Being agent-authored is exactly why it alone is admitted through the amendment gate instead of being unioned into the floor on sight, and why it deliberately does not live under the self-modify-protected .fak/guard/ tree the operator overlays use.
+
+
+### guardAdmitSelfTightenProposal
+
+cmd/fak/guard_self_tighten_overlay.go: the admit-and-install step for an agent-authored tighten proposal. It routes the pair (installed floor, proposed floor) through admitSelfTightenOverlay and replaces policy.Runtime.Adjudicator with the proposal ONLY on an admit verdict, refusing with AmendmentFrozenViolation when there is no runtime to amend. A refusal returns the class and reason and leaves the live floor untouched, so a proposal is installed wholesale or not at all (#5411).
+
+**Distinct from:** The INSTALLER that holds the authority to replace the live floor - NOT admitSelfTightenOverlay (guardselftighten), which is a pure classifier that judges a delta and mutates nothing. This is the single place an agent-authored proposal reaches the running adjudicator, and adding it is what turned that classifier from unreachable code into an armed gate. It also differs from guardApplyDenyOverlay, which mutates a runtime with no verdict at all because its overlay is operator-authored and trusted. It deliberately takes an already-built proposal rather than the overlay, so the delta barrier can be exercised with a widening the schema barrier could never spell.
+
+
+### guardApplySelfTightenOverlay
+
+cmd/fak/guard_self_tighten_overlay.go: the launch-boundary entry point loadGuardCapabilityFloor calls to fold the agent's self-tighten overlay into the capability floor. It builds the union of the installed floor with the overlay, submits that proposal to the amendment gate, and returns the verdict, the amendment class and the count of elements added so the floor-source provenance can record them. An empty overlay short-circuits to a no-op admit without building a proposal, so the ordinary launch stays byte-identical to the pre-overlay floor.
+
+**Distinct from:** The launch-boundary COMPOSITION - union, then gate, then provenance - which owns no verdict of its own: guardAdmitSelfTightenProposal holds the admit decision and the sole write to the live runtime, and this only sequences and reports it. It also differs from guardApplyDenyOverlay, which applies an operator-authored overlay straight onto the runtime with no gate. Its scope is the launch boundary only: mid-session reload paths do not call it, so a running session's behaviour is unchanged.
+
+
+### guardSharedHookSettingsPath
+
+The cmd/fak/guard.go resolver that answers which single --settings file every guard hook installer must name, so SessionStart, toolproc, Stop and PreCompact converge on one payload instead of each passing the path it was handed.
+
+**Distinct from:** It RESOLVES WHICH FILE the installers share; it does not write one. writeGuardSettingsFileAtomic performs the write, and guardStopHookInstall / the PreCompact analogue are per-hook RESULT RECORDS of an install that has already chosen its path. The distinction is load-bearing rather than cosmetic: #5510 showed that when a caller's payload names a different settings file, Claude's last-wins --settings silently discards guard's entire hook stack, so the identity of this one path is what keeps the stack armed.
+
+
+### KVPrefixReuseSupported
+
+Config predicate reporting whether a *KVCache is a COMPLETE session prefix for this architecture — i.e. whether cloning the cache carries the whole of what the session already ingested. True for cached architectures whose per-layer K/V rows are the entire state; false for the gemma4 recompute bridge, whose state is the token history and whose cache stays empty.
+
+**Distinct from:** ExactSpanSupported asks whether an engine can EVICT an exact span from a cache it already holds; this asks whether the cache IS the state at all. A recompute architecture answers yes to neither, but for different reasons: eviction is inert because there are no rows, while prefix reuse is unsound because the rows were never where the prefix lived.
+
+
+### PIN_EVICT_REFUSED (survival-class compaction refusal)
+
+The closed refusal token a history compaction names when the plan it was about to forward would have evicted a page the kernel classes PINNED - the session's active steer, its live continuation seed, or a standing system invariant (#2421). Registered in dos.toml [reasons.PIN_EVICT_REFUSED] and in the internal/agent compaction bail vocabulary; on it the outbound body is forwarded UNCHANGED rather than compacted lossily.
+
+**Distinct from:** A REFUSAL to evict, decided on contract grounds before or after the drop, not an eviction outcome or state: StateEvictable labels a span's residency state and EvictUnderBudget performs a budget-gated eviction, while this token is what the compactor returns when it declines to evict at all.
+
+
+### ctxplan.ClassEvictable (survival class)
+
+The least-protected member of ctxplan's survival-class vocabulary (#2421): a context page that may be dropped and is then genuinely gone - aged transcript prose. It is the ZERO value of SurvivalClass, so an unstamped or unrecognised page falls to it and can never be silently promoted into the protected set by a kind string the model supplied.
+
+**Distinct from:** A page-KIND-derived survival class in the compaction contract, distinct from StateEvictable, which is a ctxresidency runtime STATE of a span; and distinct from its sibling ClassReplayable, which is equally droppable but whose full bytes stay recoverable through the content-addressed store.
+
+
+### ctxplan.CheckEviction (survival-class adjudication)
+
+The verification half of the survival-class contract (#2421): given typed pages and the page IDs some other planner proposes to drop, it returns PIN_EVICT_REFUSED when any of them classes PINNED and empty otherwise. It is what makes the guarantee hold for eviction plans ctxplan did not author - a byte splicer on a wire body, say.
+
+**Distinct from:** ADJUDICATES a drop produced elsewhere, distinct from PlanEviction which AUTHORS one, and distinct from KVCache.TryEvict, which performs a fallible exact-span removal rather than judging whether a removal is permitted.
+
+
+### ctxplan.PlanEviction (survival-class eviction planner)
+
+The planner half of the survival-class contract (#2421): it plans the drop that brings typed pages down to a token budget while honouring each page's class - refusing whole with PIN_EVICT_REFUSED when the PINNED floor alone exceeds the budget, and otherwise shedding the EVICTABLE set before it touches a single REPLAYABLE page.
+
+**Distinct from:** Class-aware and refusal-capable, distinct from EvictUnderBudget, which evicts to a budget with no survival contract and therefore no outcome in which it declines; and distinct from CheckEviction, which judges a plan rather than producing one.
+
+
+### git_daily_debt
+
+git_daily_debt is the debt key of the git-daily health scorecard (internal/metrics/git_daily_health.go, const GitDailyDebtKey, schema fak-git-daily-health/1): the count of concrete, re-derivable repairs the card found while grading Daily lock-aware Git hygiene from its fak-git-daily/1 ledger over three axes - adoption (is the OS trigger still landing runs), outcome_health (what share of recorded ticks refused a tier or hit an incident), and fold_drift (the trailing streak of non-ok ticks that is the #4602 signature).
+
+**Distinct from:** Unlike climb_ratchet_debt (milestone ratchet rungs) and the other per-card *_debt integers, git_daily_debt counts ONLY defects derivable from the fak-git-daily/1 rows the daily tick appends. It never counts a scheduler fire: a deliberately skipped tick (ALREADY_RAN_TODAY, TICK_BUSY) writes no ledger row, so zero debt means every RECORDED run was healthy, not that nothing was skipped.
+
+
+### renderGitSpawnReport (bench gitspawn single-run view)
+
+renderGitSpawnReport writes ONE gitspawn measurement run to a writer: per-hot-path git process spawn counts, the window each count was taken over, the per-command table, and the calibration line (injected vs counted) that states this run's own undercount factor.
+
+**Distinct from:** Not renderGitSpawnDelta, which needs two reports and prints movement; renderGitSpawnReport renders a single run's absolute counts and reads no baseline. Not RenderText/RenderContrast (agentdemo walkthrough, sessionobs contrast) -- this is the bench gitspawn spawn-count view.
+
+
+### renderGitSpawnDelta (bench gitspawn baseline comparison)
+
+renderGitSpawnDelta writes the movement between TWO gitspawn reports to a writer: for each hot path present in both, the baseline spawn count, the current count, and the change -- the view that answers whether a rung actually removed spawns.
+
+**Distinct from:** Not renderGitSpawnReport, which renders one run's absolute counts and reads no baseline; renderGitSpawnDelta requires a loaded baseline report and prints only movement. Not RenderContrast (sessionobs value-vs-waste) -- this compares two runs of the same bench.
+
+
+### guardCompactionWitness (durable per-session compaction-health row)
+
+cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it.
+
+**Distinct from:** The post-hoc WITNESS OF RECORD: keyed by session id and readable with no live gateway anywhere. NOT the LIVE in-session verdict (#3099 / observeCompaction, the in-process metrics recorder that dies with the process) and NOT the honest shed ACCOUNTING (#3095 / warmWitness, which prices shed tokens against observed cache_read). Also not CompactSessionReport, which reconstructs compaction health by parsing a rollout transcript file -- this row is folded from the gateway's own counters at exit and changes nothing about how they are measured.
+
+
+### agentHookDelegate
+
+agentHookDelegate is one registered child process for one agent-LIFECYCLE event (PreToolUse/PostToolUse/Stop): the compiled stand-in for a single hooks entry in .claude/settings.json, carrying the event it serves and an Argv resolver that reports whether the delegate is present on this box at all.
+
+**Distinct from:** Not hooks.Gate or hooks.HygieneGate, which are COMMIT-boundary checks run in-process over a staged diff or tracked tree and whose could-not-run is exit 2; an agentHookDelegate is an out-of-process child on the tool-call path, where exit 2 is the harness BLOCK signal and could-not-run must therefore report as exit 1.
+
+
+### repoguardArgv
+
+repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a repo root: the compiled tools/.bin/repoguard if present, else the tools/repo_guard.py source, else NOT-PRESENT. It answers only 'what should be executed here, and does it exist', never whether the guard allows the call.
+
+**Distinct from:** Not repoguard itself (the separate cmd/repoguard binary that renders the permission decision on stdout), and not agentHookDelegate (the registry entry that OWNS this resolver alongside its event). repoguardArgv deliberately omits the settings.json wrapper's staleness probe, which blanked a stale binary and fell through to a source path it never confirmed existed -- silently running nothing.
+
+
+### micro-context
+
+A lightweight logical agent execution context containing only a task delta, bounded mutable state, capabilities, budget, continuation identity, and output contract over an immutable shared agent base.
+
+**Distinct from:** A logical scheduling and isolation unit over one shared base; not a full harness process, not a provider context-window limit, and not context-MMU result-byte admission.

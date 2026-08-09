@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/maturity"
 	"github.com/anthony-chaudhary/fak/internal/modver"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -28,6 +30,7 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", defaultModverLedger, "ledger path (repo-relative unless absolute)")
 	scoresPath := fs.String("scores", "", `flat {"module": number} JSON file to join as scores`)
 	coveragePath := fs.String("coverage", "", "go coverage profile (go test -coverprofile) to fold into per-module statement coverage and join as scores")
+	maturityJoin := fs.Bool("maturity", false, "grade each declared capability with internal/maturity and join its lifecycle-ladder position as scores")
 	only := fs.String("only", "", "show only modules whose name has this prefix (e.g. internal/, cmd/fak, or tools/)")
 	sortKey := fs.String("sort", "name", "sort order for display: name|rev|date")
 	top := fs.Int("top", 0, "show only the first N modules after sorting (0 = all)")
@@ -39,10 +42,16 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak version modules: unexpected args: %v\n", fs.Args())
 		return 2
 	}
-	if *scoresPath != "" && *coveragePath != "" {
-		// Both write the same score column; silently letting one win would make
-		// the joined number's origin unreadable in the ledger.
-		fmt.Fprintln(stderr, "fak version modules: --scores and --coverage both set the module score; pass one")
+	joins := 0
+	for _, on := range []bool{*scoresPath != "", *coveragePath != "", *maturityJoin} {
+		if on {
+			joins++
+		}
+	}
+	if joins > 1 {
+		// They all write the same score column; silently letting one win would
+		// make the joined number's origin unreadable in the ledger.
+		fmt.Fprintln(stderr, "fak version modules: --scores, --coverage, and --maturity all set the module score; pass one")
 		return 2
 	}
 	root := resolveRoot(pathutil.ExpandTilde(*dir))
@@ -77,6 +86,11 @@ func runVersionModules(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *coveragePath != "" {
 		if code := joinCoverageScores(stderr, root, *coveragePath, &rep); code != 0 {
+			return code
+		}
+	}
+	if *maturityJoin {
+		if code := joinMaturityScores(stderr, root, &rep); code != 0 {
 			return code
 		}
 	}
@@ -138,6 +152,33 @@ func joinCoverageScores(stderr io.Writer, root, profile string, rep *modver.Repo
 	return 0
 }
 
+// joinMaturityScores grades every declared capability with internal/maturity and
+// joins each leaf's lifecycle-ladder position as the report's score (#2468).
+// Grading HERE — inside the same run, before --stamp reads the report — is what
+// lets one command, `fak version modules --maturity --stamp`, land a ledger stamp
+// answering "is this leaf production-grade at its current rev?"; the --scores path
+// needs a separately produced file.
+//
+// The scorecard is marshaled and handed to the adapter as bytes on purpose: that
+// is the identical seam an operator gets by piping `fak maturity --json`, so the
+// in-process path and the piped-file path cannot drift apart. The joined score is
+// labeled witnessed — every rung is re-derived from evidence on disk, not modeled.
+func joinMaturityScores(stderr io.Writer, root string, rep *modver.Report) int {
+	b, err := json.Marshal(maturity.Build(maturity.Options{Root: root}))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak version modules: build maturity scorecard: %v\n", err)
+		return 1
+	}
+	scores, err := modver.MaturityScores(b)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
+		return 2
+	}
+	matched := rep.JoinScores(modver.MaturityEntries(scores))
+	fmt.Fprintf(stderr, "fak version modules: joined %d/%d maturity scores\n", matched, len(scores))
+	return 0
+}
+
 // stampModverLedger appends the delta rows (modules whose rev/score moved
 // since their last ledger row) and reports what it wrote.
 func stampModverLedger(stdout, stderr io.Writer, root, ledger string, rep modver.Report) int {
@@ -150,6 +191,12 @@ func stampModverLedger(stdout, stderr io.Writer, root, ledger string, rep modver
 		fmt.Fprintf(stderr, "fak version modules: read ledger: %v\n", err)
 		return 1
 	}
+	// The score-regression advisory (#2470) runs BEFORE the append: afterwards the
+	// row this stamp is about to write is itself the module's last scored row, and
+	// the comparison it needs — freshly joined score vs. last remembered score —
+	// would compare the number against itself. It is advisory, so it only writes to
+	// stderr; the stamp still happens and the exit code is untouched.
+	modver.ScoreDropAdvisory(stderr, modver.ScoreDrops(rep, prev))
 	rows := modver.DeltaRows(rep, prev, time.Now().UTC().Format(time.RFC3339))
 	if len(rows) == 0 {
 		fmt.Fprintf(stdout, "fak version modules: ledger current — 0 of %d modules moved\n", len(rep.Modules))

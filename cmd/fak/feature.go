@@ -40,7 +40,8 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
 	plane := fs.String("plane", "all", "catalog plane: dev, live, or all")
 	detail := fs.String("detail", "", "fault detail for one selected card name/detail_ref")
-	limit := fs.Int("limit", 0, "cap the number of query cards (0 = all)")
+	limit := fs.Int("limit", 0, "cap query cards (0 = bounded default)")
+	all := fs.Bool("all", false, "return every matching card")
 	missingContext := fs.String("missing-context", "", "comma-separated missing context keys to turn into bounded clarification questions")
 	asJSON := fs.Bool("json", false, "emit stable JSON")
 	var args []string
@@ -74,6 +75,7 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 		Plane:          selfquery.Plane(*plane),
 		Detail:         *detail,
 		Limit:          *limit,
+		All:            *all,
 		MissingContext: splitCSV(*missingContext),
 	})
 	if err != nil {
@@ -88,11 +90,7 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	if len(resp.Cards) > 0 {
-		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-		for _, c := range resp.Cards {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", c.Name, c.Kind, c.Effect, c.Source, truncRunes(c.Summary, 96))
-		}
-		if code := flushTab(tw, stderr, "fak feature query"); code != 0 {
+		if code := writeFeatureRows(stdout, stderr, resp.Cards); code != 0 {
 			return code
 		}
 	}
@@ -112,6 +110,15 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	return 0
+}
+
+func writeFeatureRows(stdout, stderr io.Writer, cards []selfquery.FeatureCard) int {
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	for _, c := range cards {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			c.Name, c.Kind, c.Effect, c.Source, truncRunes(c.Summary, 96), c.Freshness)
+	}
+	return flushTab(tw, stderr, "fak feature query")
 }
 
 func printClarifications(w io.Writer, plan *selfquery.ClarificationPlan) {

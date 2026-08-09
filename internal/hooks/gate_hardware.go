@@ -31,6 +31,9 @@ func gateHardwareTell(d *StagedDiff) ([]Finding, error) {
 		"PUBLIC-SCRUB-POLICY.md":             true,
 	}
 	var findings []Finding
+	// Counted after the git read, so the denominator names the docs whose blobs this gate
+	// actually scanned — not the ones it merely reached and then skipped (#5602).
+	judged := 0
 	for _, path := range d.StagedPaths {
 		path = strings.ReplaceAll(path, "\\", "/")
 		if !strings.HasSuffix(path, ".md") || selfRef[path] {
@@ -50,6 +53,7 @@ func gateHardwareTell(d *StagedDiff) ([]Finding, error) {
 		if err != nil || code != 0 {
 			continue
 		}
+		judged++
 		for _, hit := range residualHardwareDocHits(blob) {
 			if added[strings.TrimSpace(hit.Detail)] {
 				findings = append(findings, Finding{
@@ -61,6 +65,7 @@ func gateHardwareTell(d *StagedDiff) ([]Finding, error) {
 			}
 		}
 	}
+	d.NoteCandidates("HARDWARE_TELL", judged, "staged markdown doc(s) scanned")
 	return findings, nil
 }
 

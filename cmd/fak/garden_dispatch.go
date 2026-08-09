@@ -426,11 +426,61 @@ func gardenDispatchCandidates(plan gardenbundle.WalkPlan) []gardenbundle.WalkDec
 	return out
 }
 
+// The skip buckets that carry a CONTENTION meaning. They are named constants rather
+// than inline literals because witnessGardenDispatch turns each one into a ledger
+// metric key (`skipped_<bucket>`, hyphens folded to underscores), so these two strings
+// ARE the ledger's category vocabulary for contention — the thing #4321 asks to keep
+// un-conflatable.
+//
+// Two different mechanisms both get called a "collision" in this launcher, and folding
+// them into one bucket is what made ~231 working-tree refusals unreadable as a class in
+// ledger analysis:
+//
+//   - gardenSkipLaneContended is LANE-LEASE contention: a live peer holds the lane's
+//     fenced lease (or the same issue is already in flight, or the ordering layer saw a
+//     COLLISION_RISK). It clears BY ITSELF when that peer finishes or the TTL lapses.
+//     The correct response is to wait, or to pick a disjoint lane.
+//   - gardenSkipWorktreeCotenancy is WORKING-TREE co-tenancy: uncommitted peer WIP sits
+//     in the one shared checkout and NO live lease owns it. Nothing clears it but a
+//     human/peer commit or revert; waiting is exactly the wrong move. The correct
+//     response is commit-by-path landing, or the sanctioned detached per-worker worktree
+//     (#1334 / epic #3165).
+//
+// Same word, opposite remedy, so they must never share a bucket.
+const (
+	gardenSkipLaneContended     = "contended"
+	gardenSkipWorktreeCotenancy = "worktree-cotenancy"
+)
+
+// gardenDispatchCotenancyVerdicts is the CLOSED set of tick verdicts that mean
+// working-tree co-tenancy. It is deliberately an explicit table, never a substring rule
+// over "COLLISION"/"WIP": a future refusal code must be classified on purpose rather
+// than inherit a class from its spelling — DIRTY_PATH_COLLISION and
+// dispatchorder.ReasonCollisionRisk both contain "COLLISION" and belong to DIFFERENT
+// classes, which is precisely how the two got conflated in the first place.
+//
+// This mirrors the producer's own vocabulary: tools/issue_resolve_dispatch.py stamps
+// REFUSAL_CLASS_WORKTREE_COTENANCY on exactly these verdicts (its _REFUSAL_CLASSES
+// table) and REFUSAL_CLASS_LANE_LEASE on LANE_LEASE_HELD. Go cannot import Python, so
+// garden_dispatch_refusalclass_test.go parses that table back OUT of the Python source
+// and fails when either side drifts — without that pin, a third co-tenancy code added
+// on the producer side would silently fall through to the untyped "refused" bucket
+// here, which is the bug this constant exists to close.
+var gardenDispatchCotenancyVerdicts = map[string]bool{
+	"DIRTY_PATH_COLLISION": true,
+	"SAME_ISSUE_WIP":       true,
+}
+
 // gardenDispatchSkipReason buckets a refusing tick verdict into the typed reason
-// vocabulary the acceptance criteria ask for (capped / no-seat / contended / ...),
-// without inventing a second verdict space -- it is a pure re-label of the SAME
-// verdict evaluateDispatchTick already returns.
+// vocabulary the acceptance criteria ask for (capped / no-seat / contended /
+// worktree-cotenancy / ...), without inventing a second verdict space -- it is a pure
+// re-label of the SAME verdict evaluateDispatchTick already returns.
 func gardenDispatchSkipReason(verdict, action string) string {
+	// Checked before the switch so the closed table above is the single source of
+	// truth for this class -- a verdict added there is bucketed without editing here.
+	if gardenDispatchCotenancyVerdicts[verdict] {
+		return gardenSkipWorktreeCotenancy
+	}
 	switch verdict {
 	case "REFUSE_AT_CAP":
 		return "capped"
@@ -443,7 +493,7 @@ func gardenDispatchSkipReason(verdict, action string) string {
 	case "BACKEND_UNHEALTHY":
 		return "backend-unhealthy"
 	case "LANE_BUSY", "LANE_LEASE_HELD", "IN_FLIGHT_DUPLICATE", dispatchorder.ReasonCollisionRisk:
-		return "contended"
+		return gardenSkipLaneContended
 	case "SELF_MODIFY_HOLD":
 		return "self-modify-hold"
 	case "NO_LANE", "NO_ISSUE":

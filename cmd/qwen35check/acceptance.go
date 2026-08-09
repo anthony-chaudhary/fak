@@ -25,11 +25,19 @@ const (
 	acceptanceManifestSchema = "fak-qwen35check-exact-qwen36-reference/1"
 	acceptanceReportSchema   = "fak-qwen35check-exact-qwen36-cuda-comparison/1"
 
+	// These four MUST track EXPECTED_SHA256/EXPECTED_SIZE in
+	// tools/qwen36_a100_fak_serve.sh and scripts/gcp-qwen-serve.sh — the launchers that
+	// actually serve this checkpoint. The previous pin here (16547398784 / 33625d8d…) is
+	// the exact source internal/modelreg records in blockedSources as "known stale (HTTP
+	// 404)", so acceptance mode demanded a checkpoint the repo itself refuses to fetch: it
+	// failed on identity before comparing a single logit, and the GDN/SSM parity this mode
+	// exists to prove could never run. A drifted pin here does not fail loudly, it fails
+	// silently and looks like "parity unproven" forever.
 	acceptanceModelID         = "Qwen/Qwen3.6-27B"
 	acceptanceCheckpointRepo  = "unsloth/Qwen3.6-27B-GGUF"
 	acceptanceCheckpointFile  = "Qwen3.6-27B-Q4_K_M.gguf"
-	acceptanceCheckpointBytes = int64(16547398784)
-	acceptanceCheckpointSHA   = "33625d8dc3a5dd8d88c324d47db58561b11f7072816287078bfe58b4c55782f9"
+	acceptanceCheckpointBytes = int64(16817244384)
+	acceptanceCheckpointSHA   = "5ed60d0af4650a854b1755bd392f9aef4872643dc25a254bc68043fa638392a0"
 	acceptanceModelRevision   = "sha256:" + acceptanceCheckpointSHA
 
 	acceptanceLoadPath    = "gguf-q4_k_m/resident-q4k"

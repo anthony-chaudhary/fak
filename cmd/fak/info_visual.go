@@ -292,10 +292,13 @@ func guardInfoHitPct(v guardInfoVars) float64 { return guardInfoHitFrac(v) * 100
 // attribution block yet (nil pointer), so the trends panel stays silent on a session
 // that avoided nothing rather than fabricating a saving.
 func guardInfoTurnsSaved(v guardInfoVars) uint64 {
-	if v.CacheAttribution == nil {
+	if v.CacheAttribution != nil && v.CacheAttribution.FakVDSOAvoidedCalls > 0 {
+		return v.CacheAttribution.FakVDSOAvoidedCalls
+	}
+	if v.Adjudication == nil {
 		return 0
 	}
-	return v.CacheAttribution.FakVDSOAvoidedCalls
+	return v.Adjudication.Transformed
 }
 
 func guardInfoMult(v guardInfoVars) float64 {

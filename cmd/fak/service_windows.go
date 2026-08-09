@@ -86,10 +86,12 @@ func runWindowsServiceDispatcher(stdout, stderr io.Writer) int {
 	return 0
 }
 
-func secureWindowsServiceState(path string) error {
-	// SYSTEM + Builtin Administrators + LocalService full control, protected from
-	// permissive parent inheritance. CI/interactive users do not own this state.
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)")
+// applyWindowsSDDL parses sddl and installs its DACL on path, replacing whatever the
+// parent directory would otherwise have granted. Both the service-state and the shared-dir
+// hardeners below differ only in the SDDL they demand, so the parse/extract/apply sequence
+// lives here once and neither can drift into a weaker apply.
+func applyWindowsSDDL(path, sddl string) error {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return err
 	}
@@ -99,16 +101,14 @@ func secureWindowsServiceState(path string) error {
 	}
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }
+
+func secureWindowsServiceState(path string) error {
+	// SYSTEM + Builtin Administrators + LocalService full control, protected from
+	// permissive parent inheritance. CI/interactive users do not own this state.
+	return applyWindowsSDDL(path, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)")
+}
 func secureWindowsSharedDir(path string) error {
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)(A;OICI;GRGW;;;AU)")
-	if err != nil {
-		return err
-	}
-	dacl, _, err := sd.DACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+	return applyWindowsSDDL(path, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)(A;OICI;GRGW;;;AU)")
 }
 
 func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (serviceResult, int) {

@@ -1,0 +1,1878 @@
+{
+  "schema": "fak.devindex.exec-audit.v1",
+  "established": true,
+  "status": "fail",
+  "reason": "41/104 executable package(s) untested or unreachable, 0 stale pin(s)",
+  "domain": 104,
+  "tested": 86,
+  "reached": 72,
+  "packages": [
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/a2ademo",
+      "dir": "cmd/a2ademo",
+      "binary": "a2ademo",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 102,
+          "text": "- [SHIPPED] `a2achan`: the first in-kernel primitive that DELIVERS an addressed value from one agent to a DIFFERENT one, gated by the same default-deny floor th…"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/agentbenchdemo",
+      "dir": "cmd/agentbenchdemo",
+      "binary": "agentbenchdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 116,
+          "text": "Run:     \"go run ./cmd/agentbenchdemo -selfcheck\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 272,
+          "text": "go run ./cmd/agentbenchdemo"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/agentdojoprobe",
+      "dir": "cmd/agentdojoprobe",
+      "binary": "agentdojoprobe",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/agentdojoredteam",
+      "dir": "cmd/agentdojoredteam",
+      "binary": "agentdojoredteam",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "BENCHMARK-AUTHORITY.md",
+          "line": 271,
+          "text": "**Reproduce:** `go run ./cmd/agentdojoredteam -json`"
+        },
+        {
+          "class": "script",
+          "file": "examples/agentdojo-redteam/run.sh",
+          "line": 40,
+          "text": "exec go run -C \"$FAK_DIR\" ./cmd/agentdojoredteam \"$@\""
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/agenticbench",
+      "dir": "cmd/agenticbench",
+      "binary": "agenticbench",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 123,
+          "text": "Run:     \"go run ./cmd/agenticbench -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epi…"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/attnsnrsi",
+      "dir": "cmd/attnsnrsi",
+      "binary": "attnsnrsi",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/auditreceipt",
+      "dir": "cmd/auditreceipt",
+      "binary": "auditreceipt",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/batchbench",
+      "dir": "cmd/batchbench",
+      "binary": "batchbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 158,
+          "text": "Run:     \"go run ./cmd/batchbench -dir internal/model/.cache/smollm2-135m\","
+        },
+        {
+          "class": "script",
+          "file": "tools/run_overnight_soak.ps1",
+          "line": 368,
+          "text": "$batchbench = Join-Path $binDir 'batchbench.exe'"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/benchscore",
+      "dir": "cmd/benchscore",
+      "binary": "benchscore",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 144,
+          "text": "Run:     \"go run ./cmd/benchscore -root experiments/benchmark/runs\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/benchmark/ARM64-QKERNEL-SCORE.md",
+          "line": 9,
+          "text": "go run ./cmd/benchscore -root experiments/benchmark/runs/by-machine/node-macos-a"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/browseractionbench",
+      "dir": "cmd/browseractionbench",
+      "binary": "browseractionbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 151,
+          "text": "Run:     \"go run ./cmd/browseractionbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
+          "line": 401,
+          "text": "go run ./cmd/browseractionbench `"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/cachedemo",
+      "dir": "cmd/cachedemo",
+      "binary": "cachedemo",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/causalbench",
+      "dir": "cmd/causalbench",
+      "binary": "causalbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 165,
+          "text": "Run:     \"go run ./cmd/causalbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "BENCHMARK-AUTHORITY.md",
+          "line": 504,
+          "text": "**Reproduce:** `go run ./cmd/causalbench -selfcheck` (zero files, exits non-zero on any violation)"
+        },
+        {
+          "class": "script",
+          "file": "tools/demo_headless_smoke.py",
+          "line": 122,
+          "text": "doc_command=\"go run ./cmd/causalbench -selfcheck -out causalbench-witness.json\","
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/cfgprobe",
+      "dir": "cmd/cfgprobe",
+      "binary": "cfgprobe",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/coalescebench",
+      "dir": "cmd/coalescebench",
+      "binary": "coalescebench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarks/COALESCE-NET-TOKS-RESULTS.md",
+          "line": 20,
+          "text": "\u003e Reproduce: `go run ./cmd/coalescebench` (defaults below; same flags → byte-identical"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/codesearch",
+      "dir": "cmd/codesearch",
+      "binary": "codesearch",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/conceptbench",
+      "dir": "cmd/conceptbench",
+      "binary": "conceptbench",
+      "has_test": true,
+      "test_files": 4,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 234,
+          "text": "{benchmark: \"concept-benchmark\", run: \"go run ./cmd/conceptbench -replay cmd/conceptbench/testdata/replay\"},"
+        },
+        {
+          "class": "script",
+          "file": "tools/bench_plan.py",
+          "line": 70,
+          "text": "\"concept-benchmark\": {\"cmd\": \"go run ./cmd/conceptbench --replay cmd/conceptbench/testdata/replay\", \"model\": (None, \"n/a\"), \"headline\": False},"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/crossauditcalibrate",
+      "dir": "cmd/crossauditcalibrate",
+      "binary": "crossauditcalibrate",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "experiments/crossaudit-calibration-3854/REPORT.md",
+          "line": 80,
+          "text": "go run ./cmd/crossauditcalibrate `"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/crossauditdogfood",
+      "dir": "cmd/crossauditdogfood",
+      "binary": "crossauditdogfood",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "experiments/crossaudit-dogfood-3859/REPORT.md",
+          "line": 91,
+          "text": "go run ./cmd/crossauditdogfood `"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/crossauditfixture",
+      "dir": "cmd/crossauditfixture",
+      "binary": "crossauditfixture",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/modelroute/crossaudit_accidental_corpus_test.go",
+          "line": 77,
+          "text": "cmd := exec.Command(\"go\", \"build\", \"-o\", bin, \"../../cmd/crossauditfixture\")"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/ctxbench",
+      "dir": "cmd/ctxbench",
+      "binary": "ctxbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 171,
+          "text": "Run:     \"go run ./cmd/ctxbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 176,
+          "text": "- [SHIPPED] `normgate` (rank-5 canonicalize-and-decode ResultAdmitter, in front of ctxmmu) lifts agent-evasion catch 0→20/24 and cuts private real-transcript …"
+        },
+        {
+          "class": "script",
+          "file": "examples/normgate-evasion/run.sh",
+          "line": 18,
+          "text": "FAK_NORMGATE=off go run -C \"$FAK_DIR\" ./cmd/ctxbench -chain -corpus \"$CORPUS\""
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/ctxdemo",
+      "dir": "cmd/ctxdemo",
+      "binary": "ctxdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "LEARNING-PATH.md",
+          "line": 1875,
+          "text": "go run ./cmd/ctxdemo -print  # read the same table's (refx)=35.5x cold column vs fak-win=1.1x warm column side by side"
+        },
+        {
+          "class": "script",
+          "file": "tools/context_tape.py",
+          "line": 44,
+          "text": "`--from-json \u003c(go run ./cmd/ctxdemo -print -json)`; the mirror is for a zero-dependency"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/ctxplanbench",
+      "dir": "cmd/ctxplanbench",
+      "binary": "ctxplanbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 181,
+          "text": "Run: \"go run ./cmd/ctxplanbench -selfcheck\","
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 156,
+          "text": "- [SHIPPED] Planned view MEASURED over the heaviest REAL session transcripts (issue #559, `cmd/ctxplanbench`): the empirical counterpart to `scaling.go`'s synth…"
+        },
+        {
+          "class": "script",
+          "file": "tools/claim_repro_scorecard.py",
+          "line": 49,
+          "text": "# (`go run ./cmd/ctxplanbench -selfcheck`) isn't folded into a bogus dir name."
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/ctxplandemo",
+      "dir": "cmd/ctxplandemo",
+      "binary": "ctxplandemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/CACHE-FRONTIER-OPERATING-PLAN.md",
+          "line": 94,
+          "text": "go run ./cmd/ctxplandemo -selfcheck"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/customlintfixture",
+      "dir": "cmd/customlintfixture",
+      "binary": "customlintfixture",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/hooks/customlint_test.go",
+          "line": 22,
+          "text": "cmd := exec.Command(\"go\", \"build\", \"-o\", bin, \"../../cmd/customlintfixture\")"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/cxlpooldemo",
+      "dir": "cmd/cxlpooldemo",
+      "binary": "cxlpooldemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 262,
+          "text": "go run ./cmd/cxlpooldemo"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/deletioncert",
+      "dir": "cmd/deletioncert",
+      "binary": "deletioncert",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 158,
+          "text": "- [SHIPPED] Provable-deletion certificate (`internal/deletioncert`, demo `cmd/deletioncert`): a `DeletionCertificate` binds the evicted span, `EvictedCount`, th…"
+        },
+        {
+          "class": "script",
+          "file": "spaces/hf-demo/app.py",
+          "line": 94,
+          "text": "body = _run([\"./deletioncert\", \"-selfcheck\"])"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/demorace",
+      "dir": "cmd/demorace",
+      "binary": "demorace",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/ctxdemo/main.go",
+          "line": 498,
+          "text": "fmt.Fprintln(os.Stderr, \"no model present on disk — need a ladder model (see cmd/demorace ladder)\")"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarking/FINAL-ANALYSIS.md",
+          "line": 278,
+          "text": "./demorace.exe -addr 127.0.0.1:8147"
+        },
+        {
+          "class": "script",
+          "file": "tools/demo_browser_contract_test.py",
+          "line": 102,
+          "text": "write(root, \"cmd/demorace/README.md\", \"FAK_DEMO_BASE_PATH=/demorace go run ./cmd/demorace\\n\")"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/devexmeter",
+      "dir": "cmd/devexmeter",
+      "binary": "devexmeter",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/devfresh",
+      "dir": "cmd/devfresh",
+      "binary": "devfresh",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/diagtok",
+      "dir": "cmd/diagtok",
+      "binary": "diagtok",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/dispatchworker",
+      "dir": "cmd/dispatchworker",
+      "binary": "dispatchworker",
+      "has_test": true,
+      "test_files": 3,
+      "evidence": [
+        {
+          "class": "build-target",
+          "file": "Makefile",
+          "line": 52,
+          "text": "go build -o tools/.bin/dispatchworker ./cmd/dispatchworker"
+        },
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/loopindex.go",
+          "line": 128,
+          "text": "liProbe(\"dispatch_worker\", \"a dispatch worker exists to fan out across disjoint lanes (cmd/dispatchworker)\","
+        },
+        {
+          "class": "script",
+          "file": "tools/dos_supervisor_watchdog.py",
+          "line": 195,
+          "text": "for name in (\"dispatchworker.exe\", \"dispatchworker\"):"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/dojorsi",
+      "dir": "cmd/dojorsi",
+      "binary": "dojorsi",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/dropindemo",
+      "dir": "cmd/dropindemo",
+      "binary": "dropindemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 178,
+          "text": "go run ./cmd/dropindemo            # -\u003e http://127.0.0.1:8154"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/extseamsdemo",
+      "dir": "cmd/extseamsdemo",
+      "binary": "extseamsdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/extension-seams.md",
+          "line": 16,
+          "text": "go run ./cmd/extseamsdemo -selfcheck"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fak",
+      "dir": "cmd/fak",
+      "binary": "fak",
+      "has_test": true,
+      "test_files": 912,
+      "evidence": [
+        {
+          "class": "build-target",
+          "file": ".github/ISSUE_TEMPLATE/worker-ready-issue.yml",
+          "line": 183,
+          "text": "placeholder: \"Example: go test ./cmd/fak -run TestMaturityRoute\""
+        },
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/dispatchworker/guard.go",
+          "line": 427,
+          "text": "exe = \"fak.exe\""
+        },
+        {
+          "class": "documented-example",
+          "file": ".claude/skills/agent-readiness/SKILL.md",
+          "line": 107,
+          "text": "go run ./cmd/fak score agent-readiness            # human scorecard + friction-debt work-list"
+        },
+        {
+          "class": "installer",
+          "file": ".github/copilot-instructions.md",
+          "line": 21,
+          "text": "(`go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly)."
+        },
+        {
+          "class": "script",
+          "file": "examples/adjudication-demo/run.sh",
+          "line": 48,
+          "text": "( cd \"$FAK_DIR\" \u0026\u0026 go build -o \"$BIN\" ./cmd/fak )"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fak-deepswe-runner",
+      "dir": "cmd/fak-deepswe-runner",
+      "binary": "fak-deepswe-runner",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/swebench/runner.go",
+          "line": 419,
+          "text": "return []string{\"fak-deepswe-runner.exe\", \"fak-deepswe-runner.cmd\", \"fak-deepswe-runner.bat\", \"fak-deepswe-runner\"}"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
+          "line": 238,
+          "text": "$env:FAK_DEEPSWE_RUNNER = \"C:\\path\\to\\fak-deepswe-runner.exe\""
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fakc",
+      "dir": "cmd/fakc",
+      "binary": "fakc",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fakchat",
+      "dir": "cmd/fakchat",
+      "binary": "fakchat",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md",
+          "line": 242,
+          "text": "go run ./cmd/fakchat --gguf Qwen3.6-27B.q4_k_m.gguf --tokenizer \u003ctok-dir\u003e --prompt \"Say OK.\" --max-new 1"
+        },
+        {
+          "class": "script",
+          "file": "tools/qwen36_mac_parity_gate.sh",
+          "line": 195,
+          "text": "FAK_QPROFILE=1 go run -tags fakmetal ./cmd/fakchat \\"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fanbench",
+      "dir": "cmd/fanbench",
+      "binary": "fanbench",
+      "has_test": true,
+      "test_files": 2,
+      "evidence": [
+        {
+          "class": "build-target",
+          "file": ".github/workflows/fanout-cadence.yml",
+          "line": 85,
+          "text": "go run ./cmd/fanbench \\"
+        },
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 230,
+          "text": "{benchmark: \"fan-benchmark\", run: \"go run ./cmd/fanbench -agents 1,4 -sub-turns 1 -trials 1 -prefixes smoke -out /tmp/fak-fanbench.json -csv /tmp/fak-fanbench.c…"
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 200,
+          "text": "- [SHIPPED] Rough cost lens — \"usage saved vs the SOTA frontier\" on every routing decision (`internal/modelroute/cost.go`; surfaced as the `fak route` `usage`…"
+        },
+        {
+          "class": "script",
+          "file": "examples/autogen-groupchat/groupchat_demo.py",
+          "line": 186,
+          "text": "print(\"  deterministic ladder is `go run ./cmd/fanbench --grid canonical`. The\")"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fanoutdemo",
+      "dir": "cmd/fanoutdemo",
+      "binary": "fanoutdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 274,
+          "text": "go run ./cmd/fanoutdemo               # the issue fan-out planner, spine-first guard + full plan"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fanrun",
+      "dir": "cmd/fanrun",
+      "binary": "fanrun",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/bench/fanrun.go",
+          "line": 204,
+          "text": "AppVersion: appversion.Current(), Command: \"cmd/fanrun\","
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 234,
+          "text": "- [SHIPPED] `fanrun` (`cmd/fanrun`, engine `internal/bench/fanrun.go`) is the MEASURED live capstone to `fanbench`'s modeled curve: it actually RUNS N real agen…"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fleetbench",
+      "dir": "cmd/fleetbench",
+      "binary": "fleetbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 197,
+          "text": "Run: \"go run ./cmd/fleetbench -grid log -turn-max 8 -agent-max 8 -trials 4\","
+        },
+        {
+          "class": "documented-example",
+          "file": "LEARNING-PATH.md",
+          "line": 1857,
+          "text": "go run ./cmd/fanbench -agent-max 1024 -grid log  # then: go run ./cmd/fleetbench -agents 50 -turns 50 -trials 24 -profile read-heavy -granularity resource"
+        },
+        {
+          "class": "script",
+          "file": "tools/eraser_sweep.sh",
+          "line": 19,
+          "text": "go build -o \"$BIN\" ./cmd/fleetbench"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fleetctl",
+      "dir": "cmd/fleetctl",
+      "binary": "fleetctl",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/fleet.md",
+          "line": 18,
+          "text": "go build -o fleetctl ./cmd/fleetctl"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/fleetserve",
+      "dir": "cmd/fleetserve",
+      "binary": "fleetserve",
+      "has_test": true,
+      "test_files": 2,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 234,
+          "text": "- [SHIPPED] `fanrun` (`cmd/fanrun`, engine `internal/bench/fanrun.go`) is the MEASURED live capstone to `fanbench`'s modeled curve: it actually RUNS N real agen…"
+        },
+        {
+          "class": "script",
+          "file": "internal/model/bench_llamacpp_turn_agents.py",
+          "line": 6,
+          "text": "go run ./cmd/fleetserve -quant -turns 1,2,4 -concurrency 1,4,8 ..."
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/gemma4diag",
+      "dir": "cmd/gemma4diag",
+      "binary": "gemma4diag",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/ggufmeta",
+      "dir": "cmd/ggufmeta",
+      "binary": "ggufmeta",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/ggufprobe",
+      "dir": "cmd/ggufprobe",
+      "binary": "ggufprobe",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/glmcfgdiag",
+      "dir": "cmd/glmcfgdiag",
+      "binary": "glmcfgdiag",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/glmdsatput",
+      "dir": "cmd/glmdsatput",
+      "binary": "glmdsatput",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md",
+          "line": 160,
+          "text": "go run -tags cuda ./cmd/glmdsatput -layers 8 -hidden 2048 -backend cuda -decode-steps 64 -json"
+        },
+        {
+          "class": "script",
+          "file": "tools/dgx_glm_throughput_run.sh",
+          "line": 149,
+          "text": "if ! go build -tags cuda -o /tmp/fakgpu/glmdsatput ./cmd/glmdsatput \u003e\u003e \"$LOG\" 2\u003e\u00261; then"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/gpucheck",
+      "dir": "cmd/gpucheck",
+      "binary": "gpucheck",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 313,
+          "text": "return prefix + \"export PATH=$HOME/.local/go/bin:$PATH; CUDA_HOME=/usr/local/cuda FAK_CUDA_ARCH=\" + arch + \" bash internal/compute/build_cuda.sh binary ./cmd/gp…"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarks/GPU-QWEN-RESULTS.md",
+          "line": 162,
+          "text": "FAK_CUDA_F16=1 go run -tags cuda ./cmd/gpucheck   -hf \u003cqwen2.5-1.5b-dir\u003e -backend cuda -n 12"
+        },
+        {
+          "class": "script",
+          "file": "tools/bench_plan.py",
+          "line": 61,
+          "text": "\"gpu-benchmark\":     {\"cmd\": \"go run -tags cuda ./cmd/gpucheck\",               \"model\": (\"qwen2.5-3b\", \"Q8_0\"),            \"headline\": True},"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/guarddemo",
+      "dir": "cmd/guarddemo",
+      "binary": "guarddemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/hooks/gate_browsercontract_test.go",
+          "line": 47,
+          "text": "demoWrite(t, root, \"cmd/guarddemo/README.md\", \"FAK_DEMO_BASE_PATH=/guarddemo go run ./cmd/guarddemo\\n\")"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 24,
+          "text": "go run ./cmd/guarddemo -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH fak: 0 (per scenario)"
+        },
+        {
+          "class": "script",
+          "file": "tools/demo_browser_contract_test.py",
+          "line": 50,
+          "text": "write(root, \"cmd/guarddemo/README.md\", \"FAK_DEMO_BASE_PATH=/guarddemo go run ./cmd/guarddemo\\n\")"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/hwcachedemo",
+      "dir": "cmd/hwcachedemo",
+      "binary": "hwcachedemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 250,
+          "text": "- [SHIPPED] **Hardware-aware cache placement \u0026 lifecycle (CXL/NUMA-far tiers, zero-copy share, per-tier TTL, demote-not-evict).** `internal/cachemeta` models th…"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/kpiprobe",
+      "dir": "cmd/kpiprobe",
+      "binary": "kpiprobe",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/rsiloop/main.go",
+          "line": 52,
+          "text": "probePkg := flag.String(\"probe\", \"./cmd/kpiprobe\", \"the KPI probe package path\")"
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 271,
+          "text": "- [SHIPPED] RSI **closed loop** (`internal/rsiloop`, `cmd/rsiloop`): the true loop over `cmd/rsicycle`'s one-shot. Where `rsicycle` takes the keep-bit's witness…"
+        },
+        {
+          "class": "script",
+          "file": "tools/rsi_maturity_scorecard.py",
+          "line": 42,
+          "text": "``--probe`` is the only non-static check: it runs ``go run ./cmd/kpiprobe -dump``"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/lensviz",
+      "dir": "cmd/lensviz",
+      "binary": "lensviz",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/livecodebench",
+      "dir": "cmd/livecodebench",
+      "binary": "livecodebench",
+      "has_test": true,
+      "test_files": 4,
+      "evidence": [
+        {
+          "class": "build-target",
+          "file": ".github/workflows/ci.yml",
+          "line": 114,
+          "text": "go run ./cmd/livecodebench --fixture internal/livecodebench/testdata/fixture.json --check --json \u003e /tmp/livecodebench-smoke.json"
+        },
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch_test.go",
+          "line": 127,
+          "text": "name, args, route, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: \"node-macos-a\", Command: \"go run ./cmd/livecodebench --check --json\"})"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarks/LIVECODEBENCH-RUNBOOK.md",
+          "line": 178,
+          "text": "go run ./cmd/livecodebench contract \\"
+        },
+        {
+          "class": "script",
+          "file": "tools/bench_plan.py",
+          "line": 69,
+          "text": "\"livecodebench\":     {\"cmd\": \"go run ./cmd/livecodebench --check --json\",        \"model\": (\"served-coding-model\", \"official\"), \"headline\": True},"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/loadgen",
+      "dir": "cmd/loadgen",
+      "binary": "loadgen",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/longctxbench",
+      "dir": "cmd/longctxbench",
+      "binary": "longctxbench",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 217,
+          "text": "Run:     \"go run ./cmd/longctxbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "LEARNING-PATH.md",
+          "line": 1032,
+          "text": "go run ./cmd/longctxbench  (compute the contention-free work floor; compare naive setup payments = agents x turns vs coherent = 1 per legal shared scope for a 5…"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/loophealth",
+      "dir": "cmd/loophealth",
+      "binary": "loophealth",
+      "has_test": true,
+      "test_files": 2,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/marketdemo",
+      "dir": "cmd/marketdemo",
+      "binary": "marketdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/integrations/extension-descriptors.md",
+          "line": 15,
+          "text": "go run ./cmd/marketdemo -selfcheck"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/memqdemo",
+      "dir": "cmd/memqdemo",
+      "binary": "memqdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/CACHE-FRONTIER-OPERATING-PLAN.md",
+          "line": 95,
+          "text": "go run ./cmd/memqdemo"
+        },
+        {
+          "class": "script",
+          "file": "tools/demo_headless_smoke.py",
+          "line": 112,
+          "text": "doc_command=\"go run ./cmd/memqdemo -report memqdemo-report.json\","
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/microcontextdemo",
+      "dir": "cmd/microcontextdemo",
+      "binary": "microcontextdemo",
+      "has_test": true,
+      "test_files": 14,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/hooks/gate_microcontext_nudge.go",
+          "line": 19,
+          "text": "return []Finding{{Gate: \"PARALLEL_FABRIC_NUDGE\", File: \"(staged diff)\", Detail: \"new parallel-agent fan-out does not name the bounded micro-context route; run `…"
+        },
+        {
+          "class": "documented-example",
+          "file": "INDEX.md",
+          "line": 33,
+          "text": "- **Micro-context fabric research** — one immutable agent base, bounded physical model slots, and 100 / 1,000 / 10,000 logical contexts; start with the [resea…"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/modelbench",
+      "dir": "cmd/modelbench",
+      "binary": "modelbench",
+      "has_test": true,
+      "test_files": 2,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 290,
+          "text": "return \"printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -v $HOME/models/smollm2-135m:/models/smollm2-135m -w /src golang:1.26 /usr/local/g…"
+        },
+        {
+          "class": "documented-example",
+          "file": "GPU.md",
+          "line": 231,
+          "text": "Reproduce: fak `FAK_CUDA_GRAPH=1 go run -tags cuda ./cmd/modelbench -dir"
+        },
+        {
+          "class": "script",
+          "file": "internal/compute/build_cuda.sh",
+          "line": 258,
+          "text": "go run -tags \"$GO_TAGS\" ./cmd/modelbench -dir \"$dir\" -backend cuda \\"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/modelprof",
+      "dir": "cmd/modelprof",
+      "binary": "modelprof",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/negframescan",
+      "dir": "cmd/negframescan",
+      "binary": "negframescan",
+      "has_test": false,
+      "test_files": 0,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/notes/negframe-positivity-audit.md",
+          "line": 16,
+          "text": "go run ./cmd/negframescan"
+        }
+      ],
+      "status": "untested"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/o1proof1b",
+      "dir": "cmd/o1proof1b",
+      "binary": "o1proof1b",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/paritybench",
+      "dir": "cmd/paritybench",
+      "binary": "paritybench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 227,
+          "text": "{benchmark: \"parity\", run: \"go run ./cmd/paritybench -out-json /tmp/fak-parity.json -out-md /tmp/fak-parity.md\"},"
+        },
+        {
+          "class": "script",
+          "file": "tools/bench_plan.py",
+          "line": 68,
+          "text": "\"parity\":            {\"cmd\": \"go run ./cmd/paritybench\",                        \"model\": (None, \"n/a\"),                     \"headline\": False},"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/pipelinegen",
+      "dir": "cmd/pipelinegen",
+      "binary": "pipelinegen",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/poisonedmcpdemo",
+      "dir": "cmd/poisonedmcpdemo",
+      "binary": "poisonedmcpdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/integrations/harden-any-mcp.md",
+          "line": 63,
+          "text": "go run ./cmd/poisonedmcpdemo            # -\u003e the before/after table"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/polymodelbench",
+      "dir": "cmd/polymodelbench",
+      "binary": "polymodelbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 243,
+          "text": "Run:     \"go run ./cmd/polymodelbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 161,
+          "text": "- [SHIPPED] Poly-model serving core (`internal/polymodel`, foundation leaf, stdlib-only): the deterministic **\"host many models, share the prefill, decode one\"*…"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/prefixlint",
+      "dir": "cmd/prefixlint",
+      "binary": "prefixlint",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/q4kdiag",
+      "dir": "cmd/q4kdiag",
+      "binary": "q4kdiag",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/notes/GLM52-LANE-F-ACTIVE-SET-FROM-GGUF-HEADER-2026-07-06.md",
+          "line": 149,
+          "text": "go run ./cmd/q4kdiag -gguf \u003cshard1\u003e -plan-only 2\u003e\u00261 | grep -i expert_used_count"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/q8bench",
+      "dir": "cmd/q8bench",
+      "binary": "q8bench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 249,
+          "text": "Run:     \"go run ./cmd/q8bench -dir internal/model/.cache/smollm2-135m\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarks/M3-LLAMACPP-RESULTS.md",
+          "line": 39,
+          "text": "Reproduce: `go run ./cmd/q8bench` (prints the argmax-exact gate + decode/prefill A/B)."
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/q8kernel",
+      "dir": "cmd/q8kernel",
+      "binary": "q8kernel",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "script",
+          "file": "tools/run_overnight_soak.ps1",
+          "line": 366,
+          "text": "$q8 = Join-Path $binDir 'q8kernel.exe'"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/qwen35check",
+      "dir": "cmd/qwen35check",
+      "binary": "qwen35check",
+      "has_test": true,
+      "test_files": 2,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md",
+          "line": 52,
+          "text": "go run ./cmd/qwen35check -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf \\"
+        },
+        {
+          "class": "script",
+          "file": "tools/qwen36_mac_parity_gate.sh",
+          "line": 141,
+          "text": "go run ./cmd/qwen35check \\"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/qwen36codedemo",
+      "dir": "cmd/qwen36codedemo",
+      "binary": "qwen36codedemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 368,
+          "text": "PORT=8154 ./qwen36codedemo -public-readonly \u0026"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/radixbench",
+      "dir": "cmd/radixbench",
+      "binary": "radixbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 279,
+          "text": "return \"printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -v $HOME/models/smollm2-135m:/models/smollm2-135m -w /src golang:1.26 /usr/local/g…"
+        },
+        {
+          "class": "documented-example",
+          "file": "BENCHMARK-AUTHORITY.md",
+          "line": 913,
+          "text": "go run ./cmd/radixbench \\"
+        },
+        {
+          "class": "script",
+          "file": "examples/radixattention/run.sh",
+          "line": 53,
+          "text": "echo \"    go run ./cmd/radixbench -workload \\\\\""
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/repoguard",
+      "dir": "cmd/repoguard",
+      "binary": "repoguard",
+      "has_test": true,
+      "test_files": 4,
+      "evidence": [
+        {
+          "class": "build-target",
+          "file": "Makefile",
+          "line": 42,
+          "text": "go build -o tools/.bin/repoguard ./cmd/repoguard"
+        },
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/hooks_agent.go",
+          "line": 92,
+          "text": "bin := filepath.Join(root, \"tools\", \".bin\", \"repoguard.exe\")"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/rsicycle",
+      "dir": "cmd/rsicycle",
+      "binary": "rsicycle",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 271,
+          "text": "- [SHIPPED] RSI **closed loop** (`internal/rsiloop`, `cmd/rsiloop`): the true loop over `cmd/rsicycle`'s one-shot. Where `rsicycle` takes the keep-bit's witness…"
+        },
+        {
+          "class": "script",
+          "file": "tools/extend_preflight.py",
+          "line": 171,
+          "text": "\"Gate 3 - Prove faster:  go run ./cmd/rsicycle ...  (KEEP only on a measured strict gain; \""
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/rsiloop",
+      "dir": "cmd/rsiloop",
+      "binary": "rsiloop",
+      "has_test": true,
+      "test_files": 3,
+      "evidence": [
+        {
+          "class": "build-target",
+          "file": ".github/workflows/ci.yml",
+          "line": 887,
+          "text": "go run ./cmd/rsiloop -mode track -repo . -baseline-ref HEAD -journal \"${RUNNER_TEMP:-/tmp}/rsi-track.jsonl\""
+        },
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 271,
+          "text": "- [SHIPPED] RSI **closed loop** (`internal/rsiloop`, `cmd/rsiloop`): the true loop over `cmd/rsicycle`'s one-shot. Where `rsicycle` takes the keep-bit's witness…"
+        },
+        {
+          "class": "script",
+          "file": "tools/rsi_maturity_scorecard_test.py",
+          "line": 103,
+          "text": "\"run: go run ./cmd/rsiloop -mode track\\n\")"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/sessionbench",
+      "dir": "cmd/sessionbench",
+      "binary": "sessionbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "cmd/fak/benchloop_fleet_dispatch.go",
+          "line": 224,
+          "text": "{benchmark: \"session-benchmark\", run: \"go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json\"},"
+        },
+        {
+          "class": "documented-example",
+          "file": "BENCHMARK-AUTHORITY.md",
+          "line": 919,
+          "text": "go run ./cmd/sessionbench \\"
+        },
+        {
+          "class": "script",
+          "file": "experiments/vllm/glm52-agentic-battery/run.sh",
+          "line": 39,
+          "text": "go run ./cmd/sessionbench -synthetic smollm2-135m -turns 50 -agents 5 -prefix 2048 -decode 32 -result 64 -counts-only -out experiments/vllm/sessionbench-synthet…"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/simpledemo",
+      "dir": "cmd/simpledemo",
+      "binary": "simpledemo",
+      "has_test": true,
+      "test_files": 2,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/urllint/urllint_test.go",
+          "line": 48,
+          "text": "t.Errorf(\"fix: derive the url via cmd/simpledemo's modelDownload (covered by the reachability test), or add the file to the allowlist with a reason\")"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/fak/related-items.md",
+          "line": 110,
+          "text": "go run ./cmd/simpledemo"
+        },
+        {
+          "class": "script",
+          "file": "scripts/fetch-gguf.ps1",
+          "line": 112,
+          "text": "Write-Host \"  go run ./cmd/simpledemo -gguf `$env:USERPROFILE\\.cache\\fak-models\\gguf\\$ModelName.gguf -tok `$env:USERPROFILE\\.cache\\fak-models\\tokenizers\\qwen2.5…"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/terminalbench",
+      "dir": "cmd/terminalbench",
+      "binary": "terminalbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 284,
+          "text": "Run:     \"go run ./cmd/terminalbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md",
+          "line": 78,
+          "text": "go run ./cmd/terminalbench --contract \\"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/timewolfdemo",
+      "dir": "cmd/timewolfdemo",
+      "binary": "timewolfdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 186,
+          "text": "go run ./cmd/timewolfdemo          # → http://127.0.0.1:8155"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/tokendemo",
+      "dir": "cmd/tokendemo",
+      "binary": "tokendemo",
+      "has_test": true,
+      "test_files": 3,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "CLAIMS.md",
+          "line": 219,
+          "text": "- [SHIPPED] World-pluggable replay (`turnbench.RunWithWorld`) + the tool-call token ledger demo (`cmd/tokendemo`): `RunWithCalls` is now `RunWithWorld(…, agen…"
+        },
+        {
+          "class": "script",
+          "file": "tools/demo_headless_smoke_test.py",
+          "line": 50,
+          "text": "go run ./cmd/tokendemo   -print"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/toktdiag",
+      "dir": "cmd/toktdiag",
+      "binary": "toktdiag",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/toolsandboxbench",
+      "dir": "cmd/toolsandboxbench",
+      "binary": "toolsandboxbench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 291,
+          "text": "Run:     \"go run ./cmd/toolsandboxbench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "BENCHMARK-AUTHORITY.md",
+          "line": 369,
+          "text": "go run ./cmd/toolsandboxbench `"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/topobench",
+      "dir": "cmd/topobench",
+      "binary": "topobench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 298,
+          "text": "Run:     \"go run ./cmd/topobench\","
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/tpcheck",
+      "dir": "cmd/tpcheck",
+      "binary": "tpcheck",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/trychatdemo",
+      "dir": "cmd/trychatdemo",
+      "binary": "trychatdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/modver/modver_test.go",
+          "line": 23,
+          "text": "{\"cmd/trychatdemo/page.html\", \"cmd/trychatdemo\", \"cmd\", true},"
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/run-the-demos.md",
+          "line": 188,
+          "text": "go run ./cmd/trychatdemo           # → http://127.0.0.1:8157"
+        },
+        {
+          "class": "script",
+          "file": "tools/demo_headless_smoke.py",
+          "line": 181,
+          "text": "doc_command='go run ./cmd/trychatdemo -json -msg \"what time is it? also delete my account\"',"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/turntaxdemo",
+      "dir": "cmd/turntaxdemo",
+      "binary": "turntaxdemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "BENCHMARK-AUTHORITY.md",
+          "line": 191,
+          "text": "committed pin; a green-trunk re-run (`go run ./cmd/turntaxdemo -selfcheck`) is the reproduce"
+        },
+        {
+          "class": "script",
+          "file": "spaces/hf-demo/app.py",
+          "line": 100,
+          "text": "body = _run([\"./turntaxdemo\", \"-print\", \"-suite\", \"turntax-airline\"], {\"NO_COLOR\": \"1\"})"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/unseedemo",
+      "dir": "cmd/unseedemo",
+      "binary": "unseedemo",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "docs/CACHE-FRONTIER-OPERATING-PLAN.md",
+          "line": 96,
+          "text": "go run ./cmd/unseedemo -print"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/wdcheck",
+      "dir": "cmd/wdcheck",
+      "binary": "wdcheck",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/webbench-convert",
+      "dir": "cmd/webbench-convert",
+      "binary": "webbench-convert",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 334,
+          "text": "Run:    \"go run ./cmd/webbench-convert \u003cwebvoyager-export.jsonl\u003e \u003cout.jsonl\u003e\","
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/webbench-run",
+      "dir": "cmd/webbench-run",
+      "binary": "webbench-run",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 344,
+          "text": "Run:    \"go run ./cmd/webbench-run --dataset testdata/webbench/sample-tasks.jsonl --api-key $GLM_API_KEY\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/webbench-blockers.md",
+          "line": 57,
+          "text": "go build -o webbench-run.exe ./cmd/webbench-run"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/webbench-token-measure",
+      "dir": "cmd/webbench-token-measure",
+      "binary": "webbench-token-measure",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 354,
+          "text": "Run: \"go run ./cmd/webbench-token-measure --demo\","
+        },
+        {
+          "class": "documented-example",
+          "file": "docs/webbench-blockers.md",
+          "line": 67,
+          "text": "./webbench-token-measure.exe --responses experiments/webbench/real-measurements-*.jsonl"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/wfmembench",
+      "dir": "cmd/wfmembench",
+      "binary": "wfmembench",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "dispatcher-registration",
+          "file": "internal/benchcatalog/catalog.go",
+          "line": 360,
+          "text": "Run:     \"go run ./cmd/wfmembench\","
+        },
+        {
+          "class": "documented-example",
+          "file": "experiments/wfmembench/WFMEMBENCH-RESULTS.md",
+          "line": 12,
+          "text": "go run ./cmd/wfmembench -out experiments/wfmembench"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/wgscan",
+      "dir": "cmd/wgscan",
+      "binary": "wgscan",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/cmd/zaitask",
+      "dir": "cmd/zaitask",
+      "binary": "zaitask",
+      "has_test": false,
+      "test_files": 0,
+      "status": "orphan"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/experiments/negframe-steerability-ab",
+      "dir": "experiments/negframe-steerability-ab",
+      "binary": "negframe-steerability-ab",
+      "has_test": true,
+      "test_files": 2,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/experiments/qwen36/coherence-gate",
+      "dir": "experiments/qwen36/coherence-gate",
+      "binary": "coherence-gate",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/experiments/qwen36/gdn-divergence-sensitivity",
+      "dir": "experiments/qwen36/gdn-divergence-sensitivity",
+      "binary": "gdn-divergence-sensitivity",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/experiments/qwen36/gdn-quant-length-sensitivity",
+      "dir": "experiments/qwen36/gdn-quant-length-sensitivity",
+      "binary": "gdn-quant-length-sensitivity",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/experiments/qwen36/gdn-recurrence-bench",
+      "dir": "experiments/qwen36/gdn-recurrence-bench",
+      "binary": "gdn-recurrence-bench",
+      "has_test": true,
+      "test_files": 1,
+      "status": "unreachable"
+    },
+    {
+      "import_path": "github.com/anthony-chaudhary/fak/experiments/qwen36/token3-divergence-probe",
+      "dir": "experiments/qwen36/token3-divergence-probe",
+      "binary": "token3-divergence-probe",
+      "has_test": true,
+      "test_files": 1,
+      "evidence": [
+        {
+          "class": "documented-example",
+          "file": "experiments/qwen36/gdn-quant-length-sensitivity/README.md",
+          "line": 130,
+          "text": "go run ./experiments/qwen36/token3-divergence-probe -fak /tmp/fak_dump -llama /tmp/llama_dump -auto"
+        }
+      ],
+      "status": "ok"
+    }
+  ],
+  "exceptions": [],
+  "failures": [
+    "github.com/anthony-chaudhary/fak/cmd/a2ademo",
+    "github.com/anthony-chaudhary/fak/cmd/agentdojoprobe",
+    "github.com/anthony-chaudhary/fak/cmd/agenticbench",
+    "github.com/anthony-chaudhary/fak/cmd/attnsnrsi",
+    "github.com/anthony-chaudhary/fak/cmd/auditreceipt",
+    "github.com/anthony-chaudhary/fak/cmd/benchscore",
+    "github.com/anthony-chaudhary/fak/cmd/cachedemo",
+    "github.com/anthony-chaudhary/fak/cmd/cfgprobe",
+    "github.com/anthony-chaudhary/fak/cmd/codesearch",
+    "github.com/anthony-chaudhary/fak/cmd/crossauditcalibrate",
+    "github.com/anthony-chaudhary/fak/cmd/customlintfixture",
+    "github.com/anthony-chaudhary/fak/cmd/devexmeter",
+    "github.com/anthony-chaudhary/fak/cmd/devfresh",
+    "github.com/anthony-chaudhary/fak/cmd/diagtok",
+    "github.com/anthony-chaudhary/fak/cmd/dojorsi",
+    "github.com/anthony-chaudhary/fak/cmd/fakc",
+    "github.com/anthony-chaudhary/fak/cmd/gemma4diag",
+    "github.com/anthony-chaudhary/fak/cmd/ggufmeta",
+    "github.com/anthony-chaudhary/fak/cmd/ggufprobe",
+    "github.com/anthony-chaudhary/fak/cmd/glmcfgdiag",
+    "github.com/anthony-chaudhary/fak/cmd/gpucheck",
+    "github.com/anthony-chaudhary/fak/cmd/kpiprobe",
+    "github.com/anthony-chaudhary/fak/cmd/lensviz",
+    "github.com/anthony-chaudhary/fak/cmd/loadgen",
+    "github.com/anthony-chaudhary/fak/cmd/longctxbench",
+    "github.com/anthony-chaudhary/fak/cmd/loophealth",
+    "github.com/anthony-chaudhary/fak/cmd/modelprof",
+    "github.com/anthony-chaudhary/fak/cmd/negframescan",
+    "github.com/anthony-chaudhary/fak/cmd/o1proof1b",
+    "github.com/anthony-chaudhary/fak/cmd/pipelinegen",
+    "github.com/anthony-chaudhary/fak/cmd/prefixlint",
+    "github.com/anthony-chaudhary/fak/cmd/toktdiag",
+    "github.com/anthony-chaudhary/fak/cmd/tpcheck",
+    "github.com/anthony-chaudhary/fak/cmd/wdcheck",
+    "github.com/anthony-chaudhary/fak/cmd/wgscan",
+    "github.com/anthony-chaudhary/fak/cmd/zaitask",
+    "github.com/anthony-chaudhary/fak/experiments/negframe-steerability-ab",
+    "github.com/anthony-chaudhary/fak/experiments/qwen36/coherence-gate",
+    "github.com/anthony-chaudhary/fak/experiments/qwen36/gdn-divergence-sensitivity",
+    "github.com/anthony-chaudhary/fak/experiments/qwen36/gdn-quant-length-sensitivity",
+    "github.com/anthony-chaudhary/fak/experiments/qwen36/gdn-recurrence-bench"
+  ],
+  "stale_pins": []
+}

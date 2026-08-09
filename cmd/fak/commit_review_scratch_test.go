@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/growthgate"
 )
 
 const scratchPreamble = `---
@@ -241,7 +243,9 @@ func TestRotateGoalScratchLogSealsWithoutLoss(t *testing.T) {
 		appendGoalScratchLog(goal, "NOT_YET turn "+pad4(i), rotate)
 	}
 
-	segments, err := filepath.Glob(logPath + ".*")
+	// Sealed segments infix the index before the extension ("GOAL.scratch.001.log"), so the
+	// glob is stem-anchored; the ACTIVE file does not match it.
+	segments, err := filepath.Glob(strings.TrimSuffix(logPath, ".log") + ".*.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +277,45 @@ func TestRotateGoalScratchLogSealsWithoutLoss(t *testing.T) {
 	after, err := os.Stat(logPath)
 	if err != nil || after.Size() != before.Size() {
 		t.Fatalf("non-positive rotate threshold must be a no-op")
+	}
+}
+
+// TestGoalScratchLogSegmentsStayGrowthVisible closes the #3826 retention promise against the
+// leak budget epics (#3287 / #3455): unbounded history is only acceptable while the growth
+// ratchet can still SEE it. Rotation is where that nearly broke — growthgate's walk pre-filter
+// admits a file by its ".jsonl"/".log"/".err" suffix, so sealing to "<path>.NNN" (the natural
+// naming) would have made every sealed segment invisible to `fak growthgate`, and the sealed
+// segments are exactly where the history piles up. This pins BOTH halves of the contract: a
+// sealed segment is admitted by the census walk AND classified ClassLog, whose remedy
+// ("rotate by size; reap when COLD") is the one that actually applies.
+func TestGoalScratchLogSegmentsStayGrowthVisible(t *testing.T) {
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	if err := os.WriteFile(goal, []byte(scratchPreamble), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := goalScratchLogPath(goal)
+	const rotate = int64(200) // tiny, so several segments are sealed inside the run
+	for i := 0; i < 40; i++ {
+		appendGoalScratchLog(goal, "NOT_YET turn "+pad4(i), rotate)
+	}
+
+	segments, err := filepath.Glob(strings.TrimSuffix(logPath, ".log") + ".*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) == 0 {
+		t.Fatalf("no sealed segment beside %s — rotation never fired", logPath)
+	}
+	// The ACTIVE file has always been growth-visible; the regression risk is the sealed tail,
+	// so assert over both together.
+	for _, p := range append(segments, logPath) {
+		if !isGrowthCandidate(p) {
+			t.Fatalf("%s is not a growth candidate — the census walk skips it, so its bytes are unbudgeted", p)
+		}
+		if got := growthgate.ClassifyPath(p); got != growthgate.ClassLog {
+			t.Fatalf("growthgate.ClassifyPath(%s) = %q, want %q (remedy %q must apply)",
+				p, got, growthgate.ClassLog, growthgate.ClassLog.Remedy())
+		}
 	}
 }
 

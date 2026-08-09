@@ -76,7 +76,12 @@ type gatewayMetrics struct {
 	// Anthropic usage block does not split 5m vs 1h creation tokens (#2179). A turn's
 	// write only lands here when Server.ttl1hActiveFor reports true for its trace.
 	inferCacheCreationTokensUpgraded uint64
-	inferDecodeSecs                  float64
+	// Split the upgraded write arm into the original head-only baseline and the
+	// message-prefix extension (#2186). Provider usage cannot subdivide a single
+	// write further, so each served turn is attributed by its admitted layout.
+	inferCacheCreationTokensHeadOnly      uint64
+	inferCacheCreationTokensMessagePrefix uint64
+	inferDecodeSecs                       float64
 	// Prefill (time-to-first-token) is split from decode ONLY on a path that can
 	// observe the first content delta — the streaming Anthropic passthrough. On a
 	// buffered turn the planner returns one all-up duration with no observable
@@ -130,14 +135,32 @@ type gatewayMetrics struct {
 	//   - OBSERVED (provider-reported, relayed): compactCacheReads / compactLastCacheRd are the
 	//     upstream's cache_read_input_tokens. fak attributes nothing to itself from them.
 	// Kept off inferenceMu — different hot path, no lock coupling.
-	compactMu             sync.Mutex
-	compactAttempts       map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
-	compactBailReasons    map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
-	compactDropped        uint64            // WITNESSED: whole messages stubbed out across all fires
-	compactShed           uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
-	compactCacheReads     uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
-	compactLastCacheRd    float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
-	compactAnchorStarved  uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
+	compactMu            sync.Mutex
+	compactAttempts      map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
+	compactBailReasons   map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
+	compactDropped       uint64            // WITNESSED: whole messages stubbed out across all fires
+	compactShed          uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
+	compactCacheReads    uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
+	compactLastCacheRd   float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
+	compactAnchorStarved uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
+	// WITNESSED headroom: how far the MOST RECENT under_budget bail sat from firing
+	// (agent.CompactOutcome.SuffixTokens, the compactible messages[] span — the system/tools floor
+	// is a separate top-level block and is NOT counted here). The bail reason alone cannot tell a
+	// session that is one turn from the cut apart from one structurally incapable of ever reaching
+	// it, because the compactor computes this split on every bail and then discards it. Recording
+	// the last and peak values turns "under_budget x872" into a distance, which is the difference
+	// between "the budget is fine, this session is short" and "the line sits above the band this
+	// traffic ever occupies". Zero until the first under_budget bail carries a span.
+	compactLastSuffixTokens uint64
+	compactPeakSuffixTokens uint64
+	// WITNESSED: sessions whose window refilled to the compaction limit ctxThrashConsecutiveRefills
+	// turns RUNNING (#2424, ctxadvice.go). Counted ONCE per thrashing stretch. Deliberately its
+	// own counter rather than a compactAttempts["bailed"] + compactBailReasons row: compaction
+	// FIRED on every one of those turns, so booking it as a bail would both inflate the bailed
+	// lump and (via compactBailPartition) skew the alertable candidate-bail rate with a reason the
+	// compactor never emitted. It joins the AdjudicationSummary.CompactionBailReasons map at read
+	// time instead, where an operator asking "why is compaction not holding this session" reads it.
+	compactThrashSessions uint64
 	compactSolvencyForced uint64            // WITNESSED: fires the burst economics REFUSED that the context-solvency floor forced anyway (agent.CompactOutcome.SolvencyForced). A subset of attempts[fired]; these are deliberately unprofitable bursts bought to keep the session inside its window, so they must never be read as cache wins.
 	uncachedTrimResults   uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
 	uncachedTrimShed      uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
@@ -671,7 +694,9 @@ type AdjudicationSummary struct {
 	// inferCacheCreationTokensUpgraded). 0 means either the lever was off or every write
 	// stayed on the 5m tier; MechanismSavings/ProviderCacheNetSavings price the remainder
 	// (CacheCreationTokens - CacheCreationTokensUpgraded) at the 5m tier as before (#2179).
-	CacheCreationTokensUpgraded uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
+	CacheCreationTokensUpgraded      uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
+	CacheCreationTokensHeadOnly      uint64 `json:"cache_creation_tokens_head_only,omitempty"`
+	CacheCreationTokensMessagePrefix uint64 `json:"cache_creation_tokens_message_prefix,omitempty"`
 
 	// Compaction* folds the Anthropic history-compaction visibility into the same guard exit
 	// summary, split WITNESSED (what fak authored) vs OBSERVED (what the provider reported):
@@ -849,6 +874,8 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.VendorOutputTokens = m.inferVendorComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	sum.CacheCreationTokensUpgraded = m.inferCacheCreationTokensUpgraded
+	sum.CacheCreationTokensHeadOnly = m.inferCacheCreationTokensHeadOnly
+	sum.CacheCreationTokensMessagePrefix = m.inferCacheCreationTokensMessagePrefix
 	// Observed per-turn E2E latency distribution (same lock observeInferenceTimed holds
 	// when it writes inferE2EHist), so the exit line can price turns-saved into wall-clock
 	// at the session's own measured per-turn cost.
@@ -879,8 +906,22 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.ToolRefTurns, sum.ToolRefConverted = m.toolRefSanitizeSnapshot()
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	sum.ToolFeedbackTurns, _ = m.toolFeedbackSnapshot()
-	if len(comp.bailReasons) > 0 {
-		sum.CompactionBailReasons = comp.bailReasons
+	// COMPACTION_THRASH (#2424) rides this same map. It is NOT part of the CompactionBailed
+	// lump — the lever FIRED on every thrashing turn — but an operator reading "why is
+	// compaction not holding this session" needs it beside the bail reasons, and a verdict
+	// published nowhere is the gap the issue reports. Kept out of comp.bailReasons (and so
+	// out of bail_reason_total's closed set and compactBailPartition's alertable rate) by
+	// folding into a fresh map here; its own /metrics counter is
+	// fak_gateway_compaction_thrash_sessions_total.
+	if len(comp.bailReasons) > 0 || comp.thrashSessions > 0 {
+		reasons := make(map[string]uint64, len(comp.bailReasons)+1)
+		for k, v := range comp.bailReasons {
+			reasons[k] = v
+		}
+		if comp.thrashSessions > 0 {
+			reasons[ReasonCompactionThrash] = comp.thrashSessions
+		}
+		sum.CompactionBailReasons = reasons
 	}
 	// Managed-cache TTL-upgrade outcomes (#1844 C6): split the snapshot's one outcome
 	// map into the AUTHORED count and the refusal-reason breakdown, attaching the map only
@@ -1025,7 +1066,7 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 	// ATTRIBUTED, not provider-reported — the Anthropic usage block never splits 5m
 	// vs 1h creation tokens, so this is fak's own per-turn upgrade witness
 	// (noteCtxValueTTL1h), read BEFORE this turn's write is folded into the total.
-	s.metrics.recordCacheCreationTierSplit(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID))
+	s.metrics.recordCacheCreationTierSplit(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID), s.ttl1hMessagePrefixFor(traceID))
 	// Record this turn into the per-family live-observe window (#935) BEFORE the sink
 	// gates below, so the per-family / governor / warmth view is populated even with
 	// --log off and --debug-stats off. The family is the session/trace prefix; the token
@@ -1073,6 +1114,7 @@ func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream b
 		"cached_prompt_tokens":        usage.CachedPromptTokens(),
 		"cache_read_input_tokens":     usage.CacheReadInputTokens,
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+		"cache_creation_span":         cacheCreationSpanLabel(usage.CacheCreationInputTokens, s.ttl1hActiveFor(traceID), s.ttl1hMessagePrefixFor(traceID)),
 		"total_tokens":                usage.TotalTokens,
 		"compaction_fired":            compacted,
 		"context_event":               contextEvent,

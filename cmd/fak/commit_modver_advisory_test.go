@@ -16,17 +16,19 @@ import (
 // it stays inside the preview's latency budget.
 
 // TestModulesForPaths_projectsStagedPathsToModules pins the pure projection the advisory rests on:
-// internal/<leaf> and cmd/<leaf> paths fold to their module keys (deduped, sorted); a file under no
-// tracked keyspace (root-level or docs/*) bumps no module and is dropped.
+// internal/<leaf> and cmd/<leaf> paths fold to their module keys (deduped, sorted); docs/ prose folds
+// to its page or section module (#2460); a file under no tracked keyspace (root-level, or a docs/
+// data file that is not .md) bumps no module and is dropped.
 func TestModulesForPaths_projectsStagedPathsToModules(t *testing.T) {
 	got := modver.ModulesForPaths([]string{
 		"internal/modver/modver.go",
 		"internal/modver/trend.go", // same module, deduped to one
 		"cmd/fak/commit_preview.go",
-		"docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md", // docs/* -> no module
-		"README.md", // root-level -> no module
+		"docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md", // docs/ prose -> the docs/notes section
+		"docs/nightrun/module-versions.jsonl",               // generated ledger -> no module
+		"README.md",                                         // root-level -> no module
 	})
-	want := []string{"cmd/fak", "internal/modver"} // sorted, deduped
+	want := []string{"cmd/fak", "docs/notes", "internal/modver"} // sorted, deduped
 	if len(got) != len(want) {
 		t.Fatalf("ModulesForPaths = %v, want %v", got, want)
 	}
@@ -43,7 +45,7 @@ func TestModulesForPaths_noTrackedPathsIsNil(t *testing.T) {
 	if got := modver.ModulesForPaths(nil); got != nil {
 		t.Errorf("empty path set: want nil, got %v", got)
 	}
-	if got := modver.ModulesForPaths([]string{"README.md", "docs/x.md"}); got != nil {
+	if got := modver.ModulesForPaths([]string{"README.md", "docs/_config.yml"}); got != nil {
 		t.Errorf("untracked-only path set: want nil, got %v", got)
 	}
 }
@@ -59,7 +61,7 @@ func TestRenderModuleAdvisory_line(t *testing.T) {
 }
 
 // TestRenderModuleAdvisory_quietWhenNone confirms the renderer writes NOTHING when no module is
-// bumped — a docs-only or root-only commit produces no advisory noise.
+// bumped — a root-only or generated-data commit produces no advisory noise.
 func TestRenderModuleAdvisory_quietWhenNone(t *testing.T) {
 	var b bytes.Buffer
 	renderModuleAdvisory(&b, nil)
@@ -88,21 +90,43 @@ func TestRunCommitPreview_namesBumpedModules(t *testing.T) {
 	}
 }
 
-// TestRunCommitPreview_docsOnlyBumpsNoModule is the negative fixture: a docs-lane commit bumps no
-// tracked module, so the advisory stays quiet while the preview still exits 0.
-func TestRunCommitPreview_docsOnlyBumpsNoModule(t *testing.T) {
+// TestRunCommitPreview_docsPageBumpsItsSection is the CLI-level half of the #2460 witness: now that
+// docs/ is a versioned keyspace, a docs-lane prose commit is no longer invisible to the advisory —
+// it names the docs/<dir> section the page belongs to, so the rev a doc-freshness pass later reads
+// from the ledger is the same key the preview announced. Exit stays 0: the advisory never gates.
+func TestRunCommitPreview_docsPageBumpsItsSection(t *testing.T) {
 	tmp := t.TempDir()
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{
 		"--preview", "--dir", tmp,
-		"-m", "docs(docs): clarify the spine note (#2495) (fak docs)",
+		"-m", "docs(docs): clarify the spine note (#2460) (fak docs)",
 		"--path", "docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md",
 	})
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d (out=%q err=%q)", code, out.String(), errb.String())
 	}
+	if want := "bumps modules: docs/notes"; !strings.Contains(out.String(), want) {
+		t.Errorf("docs prose commit must bump its section, want %q; got:\n%s", want, out.String())
+	}
+}
+
+// TestRunCommitPreview_generatedDocsDataBumpsNoModule is the negative fixture that survives #2460:
+// docs/ carries generated data beside its prose, and appending to a nightrun ledger must stay quiet.
+// This is the property that keeps the module-versions stamp convergent — the stamp writes exactly
+// this file, so if it bumped a module every stamp would dirty the next one.
+func TestRunCommitPreview_generatedDocsDataBumpsNoModule(t *testing.T) {
+	tmp := t.TempDir()
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--preview", "--dir", tmp,
+		"-m", "docs(modver): stamp the module-versions ledger (#2460) (fak docs)",
+		"--path", "docs/nightrun/module-versions.jsonl",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d (out=%q err=%q)", code, out.String(), errb.String())
+	}
 	if strings.Contains(out.String(), "bumps modules:") {
-		t.Errorf("docs-only commit must bump no module; got:\n%s", out.String())
+		t.Errorf("a generated docs data file must bump no module; got:\n%s", out.String())
 	}
 }
 

@@ -1,0 +1,250 @@
+{
+  "schema": "setup-parity.v1",
+  "provenance": {
+    "kind": "SIMULATED",
+    "command": "go test ./internal/bench -run TestSetupParity -count=1",
+    "generated_by": "fak/internal/bench.CompareTrialPairs",
+    "note": "Pairs are labeled fixture setups (declared field names + values, never a live host readout): the run witnesses canonicalization, the allowlist binding, the omitted-field refusal, and the typed mismatch vocabulary. A real harness feeds the same receipt shape by reporting its own setup fields for each leg."
+  },
+  "canonicalization": "trim-outer-whitespace; sort-by-field-name; length-prefixed-digest; duplicate-name-refused",
+  "allowlist_binding": "allow:18c0d78fb323a165",
+  "cache_state_allowlist": [
+    "cache.entries_present",
+    "cache.prefix_tokens_reused",
+    "cache.state"
+  ],
+  "pairs": [
+    {
+      "pair": "honest-warm-reuse",
+      "canonicalization": "trim-outer-whitespace; sort-by-field-name; length-prefixed-digest; duplicate-name-refused",
+      "allowlist_binding": "allow:18c0d78fb323a165",
+      "cache_state_allowlist": [
+        "cache.entries_present",
+        "cache.prefix_tokens_reused",
+        "cache.state"
+      ],
+      "cold": {
+        "label": "cold",
+        "fields": 9,
+        "setup_fingerprint": "sha256:7e2c087024db3121",
+        "non_cache_fingerprint": "sha256:e5adb9f24d7b9b5d",
+        "cache_state_fingerprint": "sha256:ada6e01cad749d2c"
+      },
+      "warm": {
+        "label": "warm",
+        "fields": 9,
+        "setup_fingerprint": "sha256:129737e2732bb9c2",
+        "non_cache_fingerprint": "sha256:e5adb9f24d7b9b5d",
+        "cache_state_fingerprint": "sha256:7a5b30f41278cf60"
+      },
+      "deltas": [
+        {
+          "field": "cache.entries_present",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:ea793caac2bfe344",
+          "warm_value_digest": "sha256:786a29adf3bd216d"
+        },
+        {
+          "field": "cache.prefix_tokens_reused",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:32b17db1cc5bbd2a",
+          "warm_value_digest": "sha256:eae14c049d74f966"
+        },
+        {
+          "field": "cache.state",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:e709658113f2b3df",
+          "warm_value_digest": "sha256:e10b1e762f533cc2"
+        }
+      ],
+      "non_cache_parity": true,
+      "cache_state_changed": true,
+      "verdict": "setup_parity_ok",
+      "finding": "every non-cache setup field is identical under the declared canonical form (non-cache fingerprint sha256:e5adb9f24d7b9b5d on both legs) and only allowlisted cache state moved; the gain is attributable.",
+      "cold_ms": 1000,
+      "warm_ms": 640,
+      "gain_reported": true,
+      "speedup_pct": 36
+    },
+    {
+      "pair": "retuned-thread-count",
+      "canonicalization": "trim-outer-whitespace; sort-by-field-name; length-prefixed-digest; duplicate-name-refused",
+      "allowlist_binding": "allow:18c0d78fb323a165",
+      "cache_state_allowlist": [
+        "cache.entries_present",
+        "cache.prefix_tokens_reused",
+        "cache.state"
+      ],
+      "cold": {
+        "label": "cold",
+        "fields": 9,
+        "setup_fingerprint": "sha256:7e2c087024db3121",
+        "non_cache_fingerprint": "sha256:e5adb9f24d7b9b5d",
+        "cache_state_fingerprint": "sha256:ada6e01cad749d2c"
+      },
+      "warm": {
+        "label": "warm",
+        "fields": 9,
+        "setup_fingerprint": "sha256:a63b8071eef798dd",
+        "non_cache_fingerprint": "sha256:c0971bd19c95ca95",
+        "cache_state_fingerprint": "sha256:7a5b30f41278cf60"
+      },
+      "deltas": [
+        {
+          "field": "cache.entries_present",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:ea793caac2bfe344",
+          "warm_value_digest": "sha256:786a29adf3bd216d"
+        },
+        {
+          "field": "cache.prefix_tokens_reused",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:32b17db1cc5bbd2a",
+          "warm_value_digest": "sha256:eae14c049d74f966"
+        },
+        {
+          "field": "cache.state",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:e709658113f2b3df",
+          "warm_value_digest": "sha256:e10b1e762f533cc2"
+        },
+        {
+          "field": "exec.threads",
+          "reason": "setup_value_changed",
+          "allowed": false,
+          "cold_value_digest": "sha256:82ecf8cd9cf1eda1",
+          "warm_value_digest": "sha256:f2761d6616cc910b"
+        }
+      ],
+      "non_cache_parity": false,
+      "cache_state_changed": true,
+      "verdict": "setup_value_changed",
+      "finding": "undeclared non-cache setup changed between the legs (exec.threads); the timing delta is not attributable to cache reuse, so no gain is reported.",
+      "cold_ms": 1000,
+      "warm_ms": 210,
+      "gain_reported": false,
+      "speedup_pct": 0
+    },
+    {
+      "pair": "dropped-policy-field",
+      "canonicalization": "trim-outer-whitespace; sort-by-field-name; length-prefixed-digest; duplicate-name-refused",
+      "allowlist_binding": "allow:18c0d78fb323a165",
+      "cache_state_allowlist": [
+        "cache.entries_present",
+        "cache.prefix_tokens_reused",
+        "cache.state"
+      ],
+      "cold": {
+        "label": "cold",
+        "fields": 9,
+        "setup_fingerprint": "sha256:7e2c087024db3121",
+        "non_cache_fingerprint": "sha256:e5adb9f24d7b9b5d",
+        "cache_state_fingerprint": "sha256:ada6e01cad749d2c"
+      },
+      "warm": {
+        "label": "warm",
+        "fields": 8,
+        "setup_fingerprint": "sha256:1143dc1991893404",
+        "non_cache_fingerprint": "sha256:581aa273d8fe3179",
+        "cache_state_fingerprint": "sha256:7a5b30f41278cf60"
+      },
+      "deltas": [
+        {
+          "field": "cache.entries_present",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:ea793caac2bfe344",
+          "warm_value_digest": "sha256:786a29adf3bd216d"
+        },
+        {
+          "field": "cache.prefix_tokens_reused",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:32b17db1cc5bbd2a",
+          "warm_value_digest": "sha256:eae14c049d74f966"
+        },
+        {
+          "field": "cache.state",
+          "reason": "cache_state_changed",
+          "allowed": true,
+          "cold_value_digest": "sha256:e709658113f2b3df",
+          "warm_value_digest": "sha256:e10b1e762f533cc2"
+        },
+        {
+          "field": "policy.max_tokens",
+          "reason": "setup_field_omitted",
+          "allowed": false,
+          "cold_value_digest": "sha256:0979ef47421f67be",
+          "warm_value_digest": "absent"
+        }
+      ],
+      "non_cache_parity": false,
+      "cache_state_changed": true,
+      "verdict": "setup_field_omitted",
+      "finding": "the warm trial did not declare policy.max_tokens, which the cold trial did: an omitted field is UNPROVEN, never equal, so the comparison is refused before any gain is reported.",
+      "cold_ms": 1000,
+      "warm_ms": 655,
+      "gain_reported": false,
+      "speedup_pct": 0
+    },
+    {
+      "pair": "cache-never-moved",
+      "canonicalization": "trim-outer-whitespace; sort-by-field-name; length-prefixed-digest; duplicate-name-refused",
+      "allowlist_binding": "allow:18c0d78fb323a165",
+      "cache_state_allowlist": [
+        "cache.entries_present",
+        "cache.prefix_tokens_reused",
+        "cache.state"
+      ],
+      "cold": {
+        "label": "cold",
+        "fields": 9,
+        "setup_fingerprint": "sha256:7e2c087024db3121",
+        "non_cache_fingerprint": "sha256:e5adb9f24d7b9b5d",
+        "cache_state_fingerprint": "sha256:ada6e01cad749d2c"
+      },
+      "warm": {
+        "label": "warm",
+        "fields": 9,
+        "setup_fingerprint": "sha256:7e2c087024db3121",
+        "non_cache_fingerprint": "sha256:e5adb9f24d7b9b5d",
+        "cache_state_fingerprint": "sha256:ada6e01cad749d2c"
+      },
+      "deltas": [],
+      "non_cache_parity": true,
+      "cache_state_changed": false,
+      "verdict": "no_cache_state_delta",
+      "finding": "no declared cache-state field changed, so this is not a cold/warm pair: whatever the timing delta measures, it is not a cache gain.",
+      "cold_ms": 1000,
+      "warm_ms": 968,
+      "gain_reported": false,
+      "speedup_pct": 0
+    }
+  ],
+  "gain_eligible": [
+    "honest-warm-reuse"
+  ],
+  "refused": [
+    {
+      "pair": "retuned-thread-count",
+      "reason": "setup_value_changed"
+    },
+    {
+      "pair": "dropped-policy-field",
+      "reason": "setup_field_omitted"
+    },
+    {
+      "pair": "cache-never-moved",
+      "reason": "no_cache_state_delta"
+    }
+  ],
+  "pooled_speedup_pct": 36,
+  "verdict": "setup_parity_flagged",
+  "finding": "3 of 4 pair(s) were REFUSED and excluded from the gain (retuned-thread-count=setup_value_changed, dropped-policy-field=setup_field_omitted, cache-never-moved=no_cache_state_delta); the pooled 36.0000% is computed over the 1 admitted pair(s) only."
+}

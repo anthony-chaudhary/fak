@@ -180,6 +180,7 @@ func renderCommitStatus(w io.Writer, rep commitlane.Report) {
 	}
 	renderCommitLockLine(w, rep.CommitLock)
 	renderIndexLockLine(w, rep.IndexLock)
+	writeIndexChurnLines(w, rep.IndexChurn)
 	if rep.Owner != nil {
 		fmt.Fprintf(w, "  owner: pid=%d %s\n", rep.Owner.PID, processLabel(*rep.Owner))
 	}
@@ -241,6 +242,54 @@ func renderIndexLockLine(w io.Writer, lock commitlane.IndexLock) {
 	fmt.Fprintf(w, "  git index lock: %s%s (%s)\n", state, age, lock.Path)
 	if lock.Detail != "" {
 		fmt.Fprintf(w, "    %s\n", lock.Detail)
+	}
+}
+
+// indexChurnPathPreview bounds how many no-op paths the text renderer names inline. The
+// churn set reached 51 entries at filing (#5339); an operator needs the count and a
+// sample, and the full list is always available in --json and in the remedy line.
+const indexChurnPathPreview = 5
+
+// writeIndexChurnLines surfaces the no-op staged-deletion audit (#5339) and OFFERS the
+// scoped clear as text. It prints the remedy; it never runs it, and no code path in fak
+// runs it either — on a shared clone an automatic `git restore --staged` would silently
+// discard a peer's in-flight index work, so the un-stage stays an operator decision made
+// against a path list they can read first.
+//
+// (Named write*, not render*, deliberately: CONCEPT_ADMISSION gates a NEW identifier whose
+// normalized token contains a concept-family root, and "render" is a root of the
+// render-materialize family. The sibling render* helpers here predate the corpus and are
+// grandfathered; a new one would block the commit until the corpus carried a row for it.)
+//
+// Paths outside the no-op set (a real deletion, or a file that exists but differs from
+// HEAD) are counted separately and never appear in the remedy: the offer is scoped to
+// exactly the entries proven byte-identical to HEAD.
+func writeIndexChurnLines(w io.Writer, audit *commitlane.StagedDeletionAudit) {
+	if audit == nil || len(audit.Rows) == 0 {
+		return
+	}
+	noop := audit.NoOpCount()
+	if noop == 0 {
+		fmt.Fprintf(w, "  index churn: none (%d staged deletion(s), all real or unproven)\n", len(audit.Rows))
+		return
+	}
+	fmt.Fprintf(w, "  index churn: %d of %d staged deletion(s) are no-ops (on disk, byte-identical to HEAD)\n",
+		noop, len(audit.Rows))
+	shown := audit.NoOpPaths
+	if len(shown) > indexChurnPathPreview {
+		shown = shown[:indexChurnPathPreview]
+	}
+	for _, p := range shown {
+		fmt.Fprintf(w, "    %s\n", p)
+	}
+	if rest := noop - len(shown); rest > 0 {
+		fmt.Fprintf(w, "    ... and %d more\n", rest)
+	}
+	if other := len(audit.Rows) - noop; other > 0 {
+		fmt.Fprintf(w, "    (%d other staged deletion(s) left alone: real or unproven)\n", other)
+	}
+	if audit.Remedy != "" {
+		fmt.Fprintf(w, "    clear only these (not run for you): %s\n", audit.Remedy)
 	}
 }
 

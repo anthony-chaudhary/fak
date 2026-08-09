@@ -223,6 +223,7 @@ func ClassifyRepeats(records []CallRecord, cfg RepeatConfig) RepeatReport {
 		g       RepeatGroup
 		nc      NormalCall
 		times   []int64 // observation times, in stream order
+		bytes   []int64 // per-observation output sizes, aligned to times
 		seenRaw map[string]bool
 	}
 	groups := map[string]*acc{}
@@ -261,6 +262,7 @@ func ClassifyRepeats(records []CallRecord, cfg RepeatConfig) RepeatReport {
 		}
 		a.seenRaw[rec.Raw] = true
 		a.times = append(a.times, rec.AtMS)
+		a.bytes = append(a.bytes, rec.OutputBytes)
 	}
 
 	report := RepeatReport{Schema: RepeatReportSchema, Config: cfg}
@@ -272,7 +274,7 @@ func ClassifyRepeats(records []CallRecord, cfg RepeatConfig) RepeatReport {
 		a.g.MinSpacingMS, a.g.MaxSpacingMS, a.g.MedianSpacingMS = spacingStats(spacings)
 		a.g.Class = classify(a.nc.Class, a.g.Count, a.g.MedianSpacingMS, cfg)
 		a.g.Reuse = reuseFor(a.g.Class)
-		a.g.AvoidableSpawns, a.g.AvoidableInputBytes = avoidable(a.g, a.times, perObsBytes(records, a.nc.Identity, cfg))
+		a.g.AvoidableSpawns, a.g.AvoidableInputBytes = avoidable(a.g, a.times, a.bytes)
 		report.Groups = append(report.Groups, a.g)
 		report.Totals.Groups++
 		report.Totals.OutputBytes += a.g.OutputBytes
@@ -372,18 +374,15 @@ func avoidable(g RepeatGroup, times []int64, bytes []int64) (int, int64) {
 	}
 }
 
-// perObsBytes reprojects the flat record stream into the per-observation output
-// sizes for one identity, in stream order — the alignment `avoidable` needs. Kept
-// as a small re-scan so ClassifyRepeats's accumulator stays free of a bytes slice.
-func perObsBytes(records []CallRecord, identity string, cfg RepeatConfig) []int64 {
-	var out []int64
-	for _, rec := range records {
-		if Normalize(rec, cfg).Identity == identity {
-			out = append(out, rec.OutputBytes)
-		}
-	}
-	return out
-}
+// The per-observation output sizes `avoidable` needs are accumulated inline with
+// the group's observation times (see the acc.bytes append above), so the fold
+// stays a single pass. It used to be a per-group re-scan of the whole record
+// stream that re-ran Normalize on every record, which made ClassifyRepeats
+// O(groups x records) — on the real top-100 rollout corpus that is ~10^9+ Normalize
+// calls and the replay never finishes (#5120, and the reason #5410 deleted the
+// replay witness instead of running it). Accumulating is exactly equivalent: the
+// re-scan selected the same records, in the same stream order, as the loop that
+// appends to acc.times.
 
 // interSpacings returns the inter-arrival gaps of a group's observations, sorted
 // ascending so the stats are order-independent (a group's times may arrive out of

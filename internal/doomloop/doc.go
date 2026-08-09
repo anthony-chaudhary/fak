@@ -18,8 +18,11 @@
 //   - trajctl's ActivityDivergenceScorer models "busy but not moving" (activity
 //     high while the witnessed-commit curve is flat), but its nudge actuator is
 //     unwired and it needs a declared Objective a live fleet worker rarely has.
-//   - relay.NoProgressEscape counts K empty legs of verified progress, but it is
-//     orphaned - nothing calls it - and works per-leg, not on a live worker.
+//   - relay.NoProgressEscape counts K empty legs of verified progress, but it
+//     works per-leg, not on a live worker. (It is no longer orphaned: relay's
+//     IdleAwareEscape embeds it (idle.go) and superloop.go:259 drives ObserveLeg
+//     /Advances from non-test code. Neither reads a live worker's effort curve,
+//     so the gap below is unchanged - only the "nothing calls it" half is stale.)
 //   - loopmgr.WitnessGap measures real progress (witnessed-done), but only on
 //     ENDED runs, retrospectively.
 //

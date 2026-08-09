@@ -1,0 +1,81 @@
+{
+  "name": "known-positive",
+  "note": "A four-threshold sweep whose retained arm survives the price of the search: raw p = 0.004, bonferroni over the complete family = 0.016, still under alpha = 0.05. This is the fixture that proves the signal CAN succeed — the contract is not a refusal machine, it certifies an improvement that is genuinely there.",
+  "certification": {
+    "alpha": 0.05,
+    "rule": "min-p",
+    "adjustment": "bonferroni",
+    "declared_arms": 4,
+    "winner": "kv-evict-threshold-0.50"
+  },
+  "family": [
+    {
+      "id": "kv-evict-threshold-0.50",
+      "point": "kv_evict_threshold=0.50",
+      "p_value": 0.004,
+      "evidence": {
+        "case_id": "kv-eviction/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "kv-evict-threshold-0.60",
+      "point": "kv_evict_threshold=0.60",
+      "p_value": 0.21,
+      "evidence": {
+        "case_id": "kv-eviction/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "kv-evict-threshold-0.70",
+      "point": "kv_evict_threshold=0.70",
+      "p_value": 0.44,
+      "evidence": {
+        "case_id": "kv-eviction/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    },
+    {
+      "id": "kv-evict-threshold-0.80",
+      "point": "kv_evict_threshold=0.80",
+      "p_value": 0.63,
+      "evidence": {
+        "case_id": "kv-eviction/long-context",
+        "state": "pass",
+        "provenance": {
+          "model": "fixture-7b",
+          "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+          "engine": "fak/cpu",
+          "oracle": "greedy-token-diff",
+          "revision": "git:38185e22199bf791df73195b93ba29bbebeed8e3",
+          "baseline": "sha256:baseline-postselection-v1"
+        }
+      }
+    }
+  ]
+}

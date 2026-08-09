@@ -146,7 +146,18 @@ func TestHardwareTell_PythonParity(t *testing.T) {
 	cmd := exec.Command(py, args...)
 	cmd.Dir = clone
 	out, _ := cmd.CombinedOutput()
-	pyBad := cmd.ProcessState.ExitCode() == 1
+	// The scrubber's exit codes are 0 = clean, 1 = a prose hardware name was found,
+	// 2 = a doc could not be read. Only 0 and 1 are VERDICTS. Reading "exit == 1" as
+	// the Python verdict without first excluding the rest compares a CRASH against a
+	// FINDING: an uncaught traceback also exits 1, so a doc the scrubber choked on was
+	// reported as a hardware tell with no file and no line. A scrubber that could not
+	// read a doc has not cleared it either, so a non-verdict exit fails this gate
+	// rather than resolving to "clean".
+	code := cmd.ProcessState.ExitCode()
+	if code != 0 && code != 1 {
+		t.Fatalf("python scrubber produced no verdict (exit %d), so the doc set is unchecked:\n%s", code, out)
+	}
+	pyBad := code == 1
 
 	if goBad != pyBad {
 		t.Fatalf("VERDICT MISMATCH: go bad=%v (%d findings) vs python bad=%v\npython said: %s\ngo findings: %+v",

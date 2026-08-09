@@ -5,7 +5,7 @@ import (
 	"math"
 )
 
-// quant_iquant.go holds the resident IQ3_XXS / IQ4_XS / Q8_0 dequant blocks used by
+// quant_iquant.go holds the resident IQ3_XXS / IQ4_XS / Q8_0 / Q4_0 dequant blocks used by
 // kQuantMatRows. These mirror internal/ggufload's dequant routines, but live in model to avoid an
 // import cycle on the hot residentMatRows path.
 
@@ -15,6 +15,26 @@ func q8_0DequantBlock(dst []float32, blk []byte) {
 	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
 	for j := 0; j < q8_0BlockWeights; j++ {
 		dst[j] = float32(int8(blk[2+j])) * d
+	}
+}
+
+// q4_0DequantBlock writes the 32 weights of one 18-byte legacy ggml Q4_0 block into dst
+// (len >= 32). It is ggufload.dequantQ4_0Scalar factored to one block, so the resident
+// dequant is arithmetically identical to the f32 reference the loader would otherwise have
+// produced — the same discipline q8_0DequantBlock keeps for Q8_0.
+//
+// The nibble order is the ggml INTERLEAVE and is the whole correctness question here: the
+// low nibble of byte j is element j, the HIGH nibble of byte j is element j+16, and each
+// code is re-centered by -8 before scaling (y = (nibble-8)*d). This deliberately differs
+// from the re-quantized int4 store's packing, which lays consecutive elements in the low
+// then high nibble of the SAME byte. Reading file bytes with that other order would
+// silently transpose half of every block, so the two must never share a decoder.
+func q4_0DequantBlock(dst []float32, blk []byte) {
+	d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+	qs := blk[2:q4_0BlockBytes]
+	for j := 0; j < q4_0BlockWeights/2; j++ {
+		dst[j] = float32(int(qs[j]&0x0f)-8) * d
+		dst[j+q4_0BlockWeights/2] = float32(int(qs[j]>>4)-8) * d
 	}
 }
 

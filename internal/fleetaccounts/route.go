@@ -103,10 +103,11 @@ func in(s string, opts ...string) bool {
 	return false
 }
 
-func routeRank(r Account) (int, int, int, string, string) {
+func routeRank(r Account) (int, int, int, float64, string, string) {
 	return -derefInt(r.RouteWeight),
 		derefInt(r.LiveSessions),
 		derefInt(r.ActiveSessions),
+		derefFloat64(r.RoutingCostPerMTok),
 		r.Product,
 		strmatch.FirstNonEmpty(r.Tag, r.Account)
 }
@@ -308,8 +309,8 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 }
 
 func rankLess(a, b Account) bool {
-	aw, al, aa, ap, at := routeRank(a)
-	bw, bl, ba, bp, bt := routeRank(b)
+	aw, al, aa, ac, ap, at := routeRank(a)
+	bw, bl, ba, bc, bp, bt := routeRank(b)
 	if aw != bw {
 		return aw < bw
 	}
@@ -318,6 +319,9 @@ func rankLess(a, b Account) bool {
 	}
 	if aa != ba {
 		return aa < ba
+	}
+	if ac != bc {
+		return ac < bc
 	}
 	if ap != bp {
 		return ap < bp

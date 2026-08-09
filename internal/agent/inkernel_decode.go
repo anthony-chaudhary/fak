@@ -133,6 +133,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// decode Q4_K directly — no f32/Q8 round-trip. (The old gate forced Q8/F32 on any backend.)
 	s.Q4K = p.q4k
 	s.CPUOffloadExperts = p.cpuOffloadExperts
+	// …and the GRADED form of that same placement (#5612), when the operator sized one: which MoE
+	// layers spill to host, and how many device bytes the routed-expert ring (#5611) may hold. No
+	// grade -> no-op, so the line above remains the whole placement decision it was.
+	p.applyExpertSpill(s)
 	// Apple-Silicon Metal GPU forward (`fak serve --metal`): engage the metalgemm GPU
 	// prefill + GPU-resident Q8 decode on the CPU session. Guarded to backend==nil — Metal
 	// is the CPU-session seam (s.Backend stays nil), and setting s.Metal on a device session
@@ -252,6 +256,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	gen, stopped, err = ln.gen, ln.stopped, ln.err
 	decodeS = time.Since(td).Seconds()
+	// 5) R6/#5617: fold this request's activated-expert residency into the serve-scoped ledger while
+	// the session is still alive — the `defer s.Close()` above takes the ring, and with it every
+	// counter the offload ladder built, the moment this function returns. The token count is what
+	// was actually FORWARDED (the prompt suffix the prefix cache could not serve, plus what was
+	// generated), because a token served from cache activated no expert and would make the ring's
+	// bytes-per-token read cheaper than it is. Inert on a session with no ring, which is the default.
+	p.noteMoEResidency(s, int64(len(ids)-matched+gen))
 	return
 }
 

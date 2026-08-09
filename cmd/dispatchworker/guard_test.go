@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -208,6 +209,134 @@ func TestClaudeGuardCompactHistoryBudget(t *testing.T) {
 	if turns := drain / claudeGuardCompactHistoryBudget; turns < claudeGuardTurnsPerEpoch {
 		t.Errorf("drain budget %d funds only %d turns at the shed-line resident %d, want >= %d: compaction is unreachable before BUDGET_CONTEXT_EXHAUSTED",
 			drain, turns, claudeGuardCompactHistoryBudget, claudeGuardTurnsPerEpoch)
+	}
+}
+
+// TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker pins the THIRD launch path to the
+// two guard budgets this file derives. Go (here) and Python (tools/dispatch_worker.py) were
+// already pinned to each other; tools/launch_goal_detached.ps1 spawns the same kind of
+// headless guarded worker through the same `fak guard` flags and was pinned to NEITHER, so
+// it silently kept the pre-#2972 shape after both siblings were fixed.
+//
+// What that cost, and why the assertions below are the two that matter: on wave fw08081943
+// (2026-08-08) all 9 detached workers died `409 ... BUDGET_CONTEXT_EXHAUSTED` 6-8 minutes
+// into a 45-minute runway — ~15% of it, the exact signature both siblings' comments record
+// for the starved-budget regime. The compactor was NOT at fault and the logs prove it: 37
+// fires, 1.21M tokens shed, 0 anchor_starved, 0 solvency_forced, and all 65 bails were
+// correct-by-design reasons (under_budget 54, too_few_msgs 10, burst_unprofitable 1). The
+// launcher was simply handing guard a flat 200000 CUMULATIVE allowance against measured
+// residents of 73k-294k per turn — ~2 funded turns — then reaping the worker after 3
+// restart hops instead of 16.
+//
+// Both numbers are asserted against the DERIVATION rather than a literal so a future
+// envelope change moves all three launch paths together instead of re-opening this gap.
+func TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker(t *testing.T) {
+	path := filepath.Join("..", "..", "tools", "launch_goal_detached.ps1")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	ps1 := string(b)
+
+	// (a) The cumulative drain allowance. The launcher declares it as a param default.
+	m := regexp.MustCompile(`\[int\]\$ContextBudgetTokens\s*=\s*(\d+)`).FindStringSubmatch(ps1)
+	if m == nil {
+		t.Fatalf("%s: no [int]$ContextBudgetTokens default found — did the param rename?", path)
+	}
+	gotBudget, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatalf("parse ContextBudgetTokens %q: %v", m[1], err)
+	}
+	wantBudget, err := strconv.Atoi(claudeGuardContextBudgetTokens("", "", nil))
+	if err != nil {
+		t.Fatalf("parse derived budget: %v", err)
+	}
+	if gotBudget != wantBudget {
+		t.Errorf("%s -ContextBudgetTokens = %d, want %d (the derived per-epoch allowance):\n"+
+			"  the flag is a CUMULATIVE allowance, so it funds budget/resident turns — %d at the\n"+
+			"  %d shed-line resident funds %d turn(s), and a worker that cannot run an epoch dies\n"+
+			"  BUDGET_CONTEXT_EXHAUSTED mid-issue. Keep it equal to claudeGuardContextBudgetTokens.",
+			path, gotBudget, wantBudget, gotBudget, claudeGuardCompactHistoryBudget,
+			gotBudget/claudeGuardCompactHistoryBudget)
+	}
+
+	// (b) The restart limit. A low cap is not a safety margin — it is a second, tighter
+	// deadline that reaps a HEALTHY worker long before its wall clock.
+	m = regexp.MustCompile(`"--restart-limit",\s*"(\d+)"`).FindStringSubmatch(ps1)
+	if m == nil {
+		t.Fatalf("%s: no --restart-limit argv pair found", path)
+	}
+	if m[1] != claudeGuardRestartLimit {
+		t.Errorf("%s --restart-limit = %s, want %s (claudeGuardRestartLimit): a worker relaunches\n"+
+			"  every ~%d turns under the derived budget, so a low cap ends the run before the\n"+
+			"  --max-duration wall clock does.", path, m[1], claudeGuardRestartLimit, claudeGuardTurnsPerEpoch)
+	}
+
+	// (c) The property both numbers exist to protect, asserted end-to-end: a worker sitting
+	// AT the shed line must still have a whole epoch funded. This is what actually failed in
+	// fw08081943, and it fails for any future pair of values that individually look fine.
+	if turns := gotBudget / claudeGuardCompactHistoryBudget; turns < claudeGuardTurnsPerEpoch {
+		t.Errorf("%s funds only %d turn(s) at the %d shed-line resident, want >= %d: compaction is\n"+
+			"  unreachable before the cumulative budget drains, which is the whole-wave death mode.",
+			path, turns, claudeGuardCompactHistoryBudget, claudeGuardTurnsPerEpoch)
+	}
+}
+
+// TestDetachedLauncherDefaultsSpawnFromABareInvocation pins the three param defaults that
+// decide whether `launch_wave_detached.ps1 -Count 30 -Launch` spawns a wave or zero workers
+// (#5895). A cron, a CI step and a refill loop all issue the bare form, so a default that
+// only works when overridden is a default that does not work.
+//
+// The failure was silent in the worst way: each spawn threw `pointer file not found` and the
+// launcher reported a wave, so the run read as launched-and-unproductive rather than never
+// started. Nothing in the tracked tree asserted these strings — the same coverage gap that
+// let the guard budget drift in TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker.
+func TestDetachedLauncherDefaultsSpawnFromABareInvocation(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+	for _, name := range []string{"launch_goal_detached.ps1", "launch_wave_detached.ps1"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(repoRoot, "tools", name)
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			ps1 := string(b)
+
+			// (a) The default pointer must name a file that is actually in the tree. The
+			// previous default died to a rename, not a typo, so pin existence rather than
+			// any particular name.
+			m := regexp.MustCompile(`\[string\]\$PointerFile\s*=\s*"([^"]+)"`).FindStringSubmatch(ps1)
+			if m == nil {
+				t.Fatalf("%s: no [string]$PointerFile default found — did the param rename?", name)
+			}
+			pointer := filepath.Join(repoRoot, filepath.FromSlash(m[1]))
+			body, err := os.ReadFile(pointer)
+			if err != nil {
+				t.Fatalf("%s: default -PointerFile %q is not in the tree (%v): every spawn throws\n"+
+					"  `pointer file not found` and the wave is zero workers.", name, m[1], err)
+			}
+
+			// (b) The rendered /goal condition must clear the launcher's own 4000 cap. Count
+			// RUNES, not bytes: PowerShell compares $cond.Length, which is chars, and this
+			// pointer carries multibyte glyphs — byte length overstates it by ~28.
+			if cond := len([]rune("/goal " + string(body))); cond > 4000 {
+				t.Errorf("%s: default -PointerFile %q renders a %d-char /goal condition (>4000 cap):\n"+
+					"  the launcher throws per spawn, so the wave is zero workers. Shrink the pointer.",
+					name, m[1], cond)
+			}
+
+			// (c) No default may hardcode an absolute path. The old -Workspace named a sibling
+			// clone whose missing tools/proc_resource_guard.py fail-safed the preflight to
+			// REFUSE_INSPECT (cap=4, granted=0), and the old -LogDir pinned that same sibling's
+			// .goal-runs — which is how a liveness probe reads ANOTHER wave's artifacts and a
+			// recycled id lets a predecessor vouch for a corpse. Both must derive.
+			absDefault := regexp.MustCompile(`\[string\]\$(Workspace|LogDir)\s*=\s*"([a-zA-Z]:[\\/]|\\\\)[^"]*"`)
+			for _, bad := range absDefault.FindAllStringSubmatch(ps1, -1) {
+				t.Errorf("%s: -%s defaults to the absolute path %q; derive it from $PSScriptRoot\n"+
+					"  (tools/ -> repo root) or from $Workspace so a bare invocation targets THIS checkout.",
+					name, bad[1], strings.TrimSpace(bad[0]))
+			}
+		})
 	}
 }
 

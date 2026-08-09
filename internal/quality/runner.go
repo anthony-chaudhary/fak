@@ -23,6 +23,20 @@ func (r ReferenceRunner) Run(c QualityCase) (Trace, error) {
 	return t, nil
 }
 
+// EffectiveRequest makes ReferenceRunner the package's one CONCRETE
+// RequestAdapter (#4518). The reference is the baseline every other verdict is
+// measured against, so leaving it merely ASSUMED faithful is the weakest link in
+// the record: a run could report an audited engine against an unaudited golden
+// path and still call itself evidence. The declaration is exact rather than
+// generous — the case's own prompt and params, with nothing unsupported —
+// because a reference trace is BY DEFINITION the answer to the case's own
+// request. Declaring it costs nothing on a faithful run (requestFidelity finds
+// no drop and no diff, so no verdict is appended) and upgrades every result's
+// reference record from Declared:false to an actual measurement.
+func (ReferenceRunner) EffectiveRequest(c QualityCase) EffectiveRequest {
+	return EffectiveRequest{Prompt: c.Prompt, Params: c.Params}
+}
+
 // ScriptedRunner is an engine-path adapter that replays a fixed trace. It models a
 // specific engine build/mode for hermetic tests and for the CLI demo, and is the
 // shape real engine adapters take: capture the engine's decode into a Trace and
@@ -73,8 +87,9 @@ func DemoCase() QualityCase {
 
 // DemoEngine returns an engine runner for the demo case with an optional injected
 // defect: "" reproduces the reference (clean pass); "decode" flips one token so the
-// greedy differential oracle fails at that index; "report" corrupts the text so the
-// grounding rubric fails on a forbidden/omitted claim. This is the deterministic
+// greedy differential oracle fails at that index; "stop" decodes past the reference's
+// last token so the failure localizes to the stop decision; "report" corrupts the text
+// so the grounding rubric fails on a forbidden/omitted claim. This is the deterministic
 // mutant source the spine test and CLI use to prove each gate trips.
 func DemoEngine(defect string) ScriptedRunner {
 	ref := DemoCase().Reference
@@ -86,6 +101,16 @@ func DemoEngine(defect string) ScriptedRunner {
 		return ScriptedRunner{
 			Label: "engine-decode-defect",
 			Trace: Trace{Tokens: toks, Text: "Throughput decreased 12% week over week."},
+		}
+	case "stop":
+		// The stop token is not honored: the engine reproduces the reference and
+		// then keeps decoding past it. Every shared token still agrees, so the
+		// only thing that differs is where the stream ended — the planted defect
+		// that localizes to the "stops" stage rather than to the decode (#4520).
+		toks := append(append([]string(nil), ref.Tokens...), "Also", ",", "revenue", "rose", ".")
+		return ScriptedRunner{
+			Label: "engine-stop-defect",
+			Trace: Trace{Tokens: toks, Text: ref.Text + " Also, revenue rose."},
 		}
 	case "report":
 		// Tokens match, but the assembled text drops the required "12%" figure and

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -23,16 +22,50 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// guardGoalParked answers "is THIS account still walled off this goal?" — never
+// the account-blind "is this lane parked?" it used to answer. Every branch below
+// consults it BEFORE rotation.rotateAfterExit, so a positive verdict
+// short-circuits account rotation entirely; when the verdict was lane-scoped
+// that meant one account's 1h Retry-After stopped every account on the lane for
+// as long as the park lasted, while the dispatcher kept dispatching into it and
+// each child was killed mid-tool_use with no report and no commit. The scoping
+// (and the retire-when-due claim) lives in goalpark.Store.Resolve so the guard
+// cannot re-acquire an ad-hoc, account-blind condition here; a blank or foreign
+// account falls through to rotation, which is the whole point.
 func guardGoalParked() (goalpark.Record, bool) {
-	goal := strings.TrimSpace(os.Getenv("DISPATCH_GOAL"))
-	if goal == "" {
-		goal = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
-	}
+	goal, account := parkGoalIdentity()
 	if goal == "" {
 		return goalpark.Record{}, false
 	}
-	rec, err := (goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}).Load(goal)
-	return rec, err == nil && rec.ClaimedAt == 0 && rec.ParkedUntil > time.Now().Unix()
+	// Name this guard in the park's exactly-once claim ledger, so `fak goal-park
+	// status` shows WHICH supervisor resumed a due park rather than an anonymous
+	// claim.
+	supervisor := "fak-guard"
+	if account != "" {
+		supervisor += "/" + account
+	}
+	return goalParkStore().Resolve(goal, account, supervisor, time.Now())
+}
+
+// guardParkProbeStatus renders WHY a park declined this run rather than only
+// that it did. A park that reports nothing but "parked until T" is unfalsifiable
+// from the log: an operator reading a torn-down worker cannot tell whether the
+// wall is still being tested or has sealed shut. The probe ledger is the whole
+// anti-self-seal contract (goalpark.AdmitProbe), so it belongs on the same line
+// as the teardown it explains.
+func guardParkProbeStatus(rec goalpark.Record, now time.Time) string {
+	next := "budget spent"
+	if rec.Probes < goalpark.ProbeBudget {
+		since := rec.LastProbeAt
+		if since == 0 {
+			since = rec.ParkedAt
+		}
+		next = time.Until(time.Unix(since, 0).Add(rec.ProbeInterval())).Round(time.Second).String()
+		if !now.Before(time.Unix(since, 0).Add(rec.ProbeInterval())) {
+			next = "open"
+		}
+	}
+	return fmt.Sprintf("probes=%d/%d next_probe=%s", rec.Probes, goalpark.ProbeBudget, next)
 }
 
 func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
@@ -64,8 +97,18 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
 		runErr := windowgate.RunInNewJob(child)
 		if rec, parked := guardGoalParked(); parked {
-			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
-			break
+			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
+			// #5862: a bare `break` here left the loop with NO teardown at all — no
+			// witness row, no journal flush/Close, no refusal carry-forward sidecar, and
+			// no gateway cancel — so a parked session's journal stayed zero-byte and its
+			// cause was unrecoverable. Tear down exactly like the supervised loop's parked
+			// branches: witness first (finishGuardChildAndReport closes the journal), then
+			// report. runErr is deliberately dropped for the same reason the supervised
+			// sibling drops it — a park is a scheduled resume, not a session failure, so
+			// the process keeps the exit-0 semantics the `break` already had.
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
+			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
 		}
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
@@ -216,7 +259,17 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case guardChildCompleted:
 			runErr := event.RunErr
 			if rec, parked := guardGoalParked(); parked {
-				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; next=%s\n", rec.ParkedUntil, rec.Reason, rec.NextAction)
+				fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
+				// #5862: this is the branch the FLEET takes. Dispatch always passes
+				// --max-duration (1740s), and maxDurationLimit > 0 routes every dispatched
+				// worker into this supervised loop (guard.go), so a turn-0 provider 429 that
+				// parks the goal tears down HERE. It used to skip the witness while its
+				// guardChildRestart sibling below wrote one — and that asymmetry alone is why
+				// a parked session's journal was zero-byte even though its .refusals.json
+				// sidecar (written inside finishGuardChildAndReport) was not. The child has
+				// already exited on this branch, so there is nothing to stop: append the
+				// witness before the report, which closes the journal.
+				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
@@ -261,7 +314,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case guardChildRestart:
 			if rec, parked := guardGoalParked(); parked {
 				if !quiet {
-					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s\n", rec.ParkedUntil, rec.Reason)
+					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s %s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()))
 				}
 				stopGuardChild(child, wait, 2*time.Second)
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
@@ -562,6 +615,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 			fmt.Fprintln(os.Stderr, "fak guard: "+snap.Report())
 		}
 	}
+	// Pin THIS session's compaction health durably BEFORE the banner and OUTSIDE the !quiet
+	// gate (#3152). The counters live only on the gateway we just tore down, so without this
+	// row a finished session leaves no checkable answer to "did compaction fire for THIS
+	// session?" — and a headless `--quiet` worker, which prints no banner at all, is exactly
+	// the session an auditor comes back to. Best-effort: an unwritable ledger returns "" and
+	// the banner simply omits the block, never failing the exit.
+	compactionWitness := recordGuardCompactionWitness(guardCompactionWitnessLedger(), guardTraceID, srv.AdjudicationSummary(), time.Now())
 	if !quiet {
 		// The wrapped agent (Claude Code) paints a full-screen alternate-screen TUI over this
 		// same terminal and, on a crash or an abnormal exit, can tear it down mid-escape-sequence
@@ -604,6 +664,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		// in a post-hoc `fak traj score`. Empty (silent) unless trajectory recording
 		// is on, exactly like the sibling lines stay quiet when their signal is absent.
 		emit(guardContextHealthLine())
+		// The durable compaction witness (#3152), rendered from the row pinned above —
+		// not from the live counters — so the operator reads the same bytes a later
+		// `fak guard compaction-witness` audit will read and the banner can never
+		// disagree with the witness of record. Empty (silent) when there was no session
+		// id or the ledger round trip failed — exactly the cases where there is no
+		// durable row to point an auditor at, so printing a block would overclaim.
+		emit(compactionWitness)
 		// The amendment posture (#5184): who could have moved which policy surface
 		// this session. Read from the compiled-in PolicyKnobRegistry, never from
 		// session state, so it is a property of the BINARY the operator is running
@@ -629,7 +696,12 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// Until now only `fak serve` exits reached this ledger, so the per-session WHY
 	// behind a zero fak-slice (burst_unprofitable vs anchor-starved vs under_budget)
 	// was unrecoverable after exit on the flagship guard path (epic #1601 gap).
-	persistGatewayUsageObservation(srv, "guard", agentName, sessionWindow)
+	// The guard path is the one that CAN name its session: one guard process wraps one
+	// agent session, so guardTraceID is a true per-session join key (unless it is the
+	// shared non-durable sentinel, which gatewayUsageSessionID drops). Stamping it is what
+	// lets `fak fleet metrics` drill a fleet roll-up down to this named session instead of
+	// stopping at a process-level total.
+	persistGatewayUsageObservation(srv, "guard", agentName, sessionWindow, gatewayUsageSessionID(guardTraceID))
 	if dojoMode {
 		_ = persistLiveDojoEpisode("guard", srv)
 	}

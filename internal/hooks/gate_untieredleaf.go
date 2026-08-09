@@ -84,6 +84,10 @@ func gateUntieredLeaf(d *StagedDiff) ([]Finding, error) {
 		})
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
+	// The denominator is the set of NEW leaves this commit introduces — almost always zero, and
+	// that zero is the point: it separates "no new leaf to check" from "every new leaf declared
+	// its tier", which this gate reported identically before (#5602).
+	d.NoteCandidates("UNTIERED_LEAF", len(newLeaves), "new internal/<leaf>/ package(s)")
 	return findings, nil
 }
 

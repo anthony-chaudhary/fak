@@ -1,0 +1,222 @@
+{
+  "schema": "fak-microcontext-kernel-prefix-ab/1",
+  "captured_at": "2026-08-07T00:51:00Z",
+  "endpoint_mode": "fak-controlled OpenAI-compatible in-kernel endpoint with FAK_INKERNEL_RADIX=on",
+  "cache_implementation": "in-kernel RadixAttention exact-prefix reuse; endpoint-native fak_gateway_kv_prefix_* counters",
+  "model": "Qwen2.5-0.5B Instruct Q8_0",
+  "model_artifact": "qwen2.5-0.5b-instruct-q8_0.gguf (675710816 bytes)",
+  "hardware": "sanctioned GCP L4 node; CPU reference execution for this endpoint",
+  "forward_path": "cpu/reference, Q8 AVX-512 fused decode; no CUDA execution claim",
+  "base_fingerprint_sha256": "70ebbd666525e5810d9f6f7e694aaa93380f302f944a68944bc914b930e31357",
+  "reset_control": "each arm used a newly started fak process, so the RadixAttention tree began cold",
+  "warm_control": "within each arm one process and one model instance were preserved across all eight sequential requests",
+  "unique_mutation": "Unique-{task:08x} was inserted at the first semantic bytes after the fixed chat-template wrapper",
+  "unique": {
+    "name": "unique-fresh-process-sequential",
+    "prefix_mode": "unique",
+    "contexts": 8,
+    "physical_workers": 1,
+    "wall_ms": 67661.28147400002,
+    "completed": 8,
+    "failed": 0,
+    "prompt_tokens": 5760,
+    "cached_prompt_tokens": 85,
+    "ttft_p50_ms": 8099.737046999962,
+    "ttft_p95_ms": 8137.692562999973,
+    "contexts_per_second": 0.11823601069504032,
+    "kernel_prompt_tokens_delta": 5760,
+    "kernel_reused_tokens_delta": 85,
+    "kernel_turns_delta": 8,
+    "cold_first": {
+      "task": 0,
+      "wall_ms": 10980.652726000017,
+      "prompt_tokens": 720,
+      "cached_prompt_tokens": 1,
+      "completion_tokens": 1,
+      "nonempty": true
+    },
+    "warm_rest": {
+      "contexts": 7,
+      "wall_ms": 56679.5445759999,
+      "cached_prompt_tokens": 84
+    },
+    "rows": [
+      {
+        "task": 0,
+        "wall_ms": 10980.652726000017,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 1,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 1,
+        "wall_ms": 8079.413693999982,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 2,
+        "wall_ms": 8137.692562999973,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 3,
+        "wall_ms": 8091.573582000024,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 4,
+        "wall_ms": 8072.523644999933,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 5,
+        "wall_ms": 8065.356453000049,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 6,
+        "wall_ms": 8133.247591999975,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 7,
+        "wall_ms": 8099.737046999962,
+        "prompt_tokens": 720,
+        "cached_prompt_tokens": 12,
+        "completion_tokens": 1,
+        "nonempty": true
+      }
+    ],
+    "fresh_process": true
+  },
+  "shared": {
+    "name": "shared-fresh-process-sequential",
+    "prefix_mode": "shared",
+    "contexts": 8,
+    "physical_workers": 1,
+    "wall_ms": 31312.87729500002,
+    "completed": 8,
+    "failed": 0,
+    "prompt_tokens": 5608,
+    "cached_prompt_tokens": 4859,
+    "ttft_p50_ms": 3328.6441189999323,
+    "ttft_p95_ms": 3377.8975540000147,
+    "contexts_per_second": 0.2554859435187524,
+    "kernel_prompt_tokens_delta": 5608,
+    "kernel_reused_tokens_delta": 4859,
+    "kernel_turns_delta": 8,
+    "cold_first": {
+      "task": 0,
+      "wall_ms": 8058.987388999981,
+      "prompt_tokens": 701,
+      "cached_prompt_tokens": 1,
+      "completion_tokens": 1,
+      "nonempty": true
+    },
+    "warm_rest": {
+      "contexts": 7,
+      "wall_ms": 23252.891092000027,
+      "cached_prompt_tokens": 4858
+    },
+    "rows": [
+      {
+        "task": 0,
+        "wall_ms": 8058.987388999981,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 1,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 1,
+        "wall_ms": 3328.6441189999323,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 2,
+        "wall_ms": 3377.8975540000147,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 3,
+        "wall_ms": 3337.2019939999973,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 4,
+        "wall_ms": 3308.238082999992,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 5,
+        "wall_ms": 3281.466499999965,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 6,
+        "wall_ms": 3315.64448600011,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      },
+      {
+        "task": 7,
+        "wall_ms": 3303.7983560000157,
+        "prompt_tokens": 701,
+        "cached_prompt_tokens": 694,
+        "completion_tokens": 1,
+        "nonempty": true
+      }
+    ],
+    "fresh_process": true
+  },
+  "shared_vs_unique_throughput_ratio": 2.1608132921340975,
+  "shared_vs_unique_wall_ratio": 2.160813292134097,
+  "shared_warm_cached_fraction": 0.9900142653352354,
+  "usage_kernel_reconciliation": true,
+  "tuned_sequential_baseline": "unique arm: fresh process, one physical worker, sequential requests, same host/model/config; first-byte mutation defeats common semantic-prefix reuse",
+  "provider_native_batch_status": "unsupported: endpoint /v1/batches returned HTTP 404; no provider-native batch result is blended into this cache A/B",
+  "claim_verdict": "net-true",
+  "claim_scope": "Observed 2.160813x useful context throughput and wall improvement for eight one-token requests on this Qwen2.5-0.5B Q8 CPU-reference fixture; shared warm requests reused 4,858/4,907 prompt tokens.",
+  "excluded_claims": [
+    "no CUDA throughput claim",
+    "no orchestration-concurrency gain claim",
+    "no longer-generation or cross-model generalization",
+    "no provider billing-cache interpretation"
+  ]
+}

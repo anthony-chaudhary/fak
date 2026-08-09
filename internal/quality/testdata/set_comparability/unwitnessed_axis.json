@@ -1,0 +1,39 @@
+{
+  "name": "unwitnessed-axis",
+  "note": "The could-not-establish fixture (#5660): the same campaign again, except the third arm simply never says which tokenizer it ran under. It is NOT the adversarial fixture with a different value — it is the absence of a value, which is the case a gate is most tempted to wave through on the reasoning that the other two arms matched so this one probably did too. The gate must refuse to guess: an unwitnessed held axis is could_not_establish, distinct from both the pass and the proven difference. This fixture also pins the precedence rule — 'engine' PROVABLY differs here as well, and the verdict is still could_not_establish, because you cannot claim to have enumerated the confounds of a set you could not fully see. Both findings are reported.",
+  "campaign": {
+    "id": "sampler-sweep-2026w32",
+    "held_axes": ["model", "tokenizer", "engine", "dataset"]
+  },
+  "arms": [
+    {
+      "id": "baseline-greedy",
+      "role": "control",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    },
+    {
+      "id": "candidate-topp",
+      "role": "treatment",
+      "axes": {
+        "model": "fixture-7b",
+        "tokenizer": "fixture-tokenizer@sha256:tokenizer-v1",
+        "engine": "fak/cuda",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    },
+    {
+      "id": "candidate-minp",
+      "role": "treatment",
+      "axes": {
+        "model": "fixture-7b",
+        "engine": "fak/cpu",
+        "dataset": "sampler-distribution/short-prompt@v3"
+      }
+    }
+  ]
+}

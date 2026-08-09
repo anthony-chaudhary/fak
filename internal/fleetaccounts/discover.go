@@ -40,13 +40,15 @@ type Account struct {
 
 	// Worker profile (omitted for non-worker rows, matching the Python row which only
 	// stamps these on worker rows). Pointers so an unset profile serializes as absent.
-	ModelTier     *int    `json:"model_tier,omitempty"`
-	Model         *string `json:"model,omitempty"`
-	SmallModel    *string `json:"small_model,omitempty"`
-	ModelEffort   *string `json:"model_effort,omitempty"`
-	Agent         *string `json:"agent,omitempty"`
-	ProfileSource *string `json:"profile_source,omitempty"`
-	RouteWeight   *int    `json:"route_weight,omitempty"`
+	ModelTier          *int     `json:"model_tier,omitempty"`
+	Model              *string  `json:"model,omitempty"`
+	SmallModel         *string  `json:"small_model,omitempty"`
+	ModelEffort        *string  `json:"model_effort,omitempty"`
+	Agent              *string  `json:"agent,omitempty"`
+	ProfileSource      *string  `json:"profile_source,omitempty"`
+	RouteWeight        *int     `json:"route_weight,omitempty"`
+	RoutingCostPerMTok *float64 `json:"routing_cost_per_mtok,omitempty"`
+	BilledCostPerMTok  *float64 `json:"billed_cost_per_mtok,omitempty"`
 
 	// Claude worker identity (stamped at classify time, then reconciled).
 	AccountUUID *string `json:"account_uuid,omitempty"`
@@ -839,6 +841,13 @@ func derefBool(p *bool) bool {
 	}
 	return *p
 }
+func derefFloat64(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 func derefInt(p *int) int {
 	if p == nil {
 		return 0

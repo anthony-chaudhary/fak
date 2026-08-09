@@ -40,7 +40,13 @@ blank-import line in `internal/registrations` (use `fak new-leaf`). Because
 each leaf is its **own directory**, two ideas added in parallel by two fleet workers
 edit **disjoint files** and cannot collide — which is what keeps the `dos-arbitrate`
 file-tree leases disjoint (`dos.toml` declares one lane per leaf), regardless of the
-import edges between them.
+import edges between them. A leaf's lane is the **root** of a lane namespace, not the
+whole of it: `internal/laneadmit` derives `gateway/server` and `gateway/server.go`
+from the tree with no `dos.toml` row, so the addressable lane count can follow the
+repo rather than the hand-typed roster. That is algebra so far — the dispatch/loop
+admission path (`internal/regionadmit`) has not adopted it, so today's leases are
+still one-per-leaf. See
+[region admission](docs/region-admission.md#sub-lanes-the-vocabulary-is-derived-not-enumerated).
 
 ## How a new idea bakes in (the only mechanism)
 

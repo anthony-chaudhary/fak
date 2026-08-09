@@ -23,9 +23,10 @@ behind every contribution (and every review) deserve respect.
 
 ## Enforcement
 
-Report conduct issues privately to the maintainer (see the repository
-owner's GitHub profile) or, if you are comfortable doing so, in the thread
-where it happened. Maintainers may edit or remove comments, lock threads,
+Report conduct issues privately to the repository owner and maintainer,
+[@anthony-chaudhary](https://github.com/anthony-chaudhary), through the contact
+routes listed on that profile — or, if you are comfortable doing so, in the
+thread where it happened. Maintainers may edit or remove comments, lock threads,
 and ban repeat offenders. Reports are handled with discretion.
 
 ## Attribution

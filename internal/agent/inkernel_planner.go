@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -45,9 +46,15 @@ type InKernelPlanner struct {
 	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
 	metal             bool            // Apple-Silicon metalgemm GPU forward on the CPU session (s.Metal); engaged ONLY when backend==nil (the CPU-session seam). No-op on non-Metal builds.
 	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
-	maxNew            int
-	temp              float64
-	seed              int64
+	// expertSpill is the resolved graded expert placement (`--n-cpu-moe`, #5612) this planner
+	// installs on every session it builds: how many MoE layers spill to host and how many device
+	// bytes the routed-expert ring may hold. nil — the default and every planner that was never
+	// given a grade — leaves placement exactly as cpuOffloadExperts alone decided it. Resolved once
+	// by SetExpertSpill (inkernel_expert_spill.go), never per request.
+	expertSpill *model.ExpertSpillPlacement
+	maxNew      int
+	temp        float64
+	seed        int64
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
@@ -87,6 +94,12 @@ type InKernelPlanner struct {
 
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
+
+	// moeResidencyState is the serve-scoped fold of every request's activated-expert residency
+	// (R6/#5617, inkernel_moe_residency.go). It is embedded because the ring lives on a session
+	// this planner builds and closes PER REQUEST, so without a planner-scoped ledger the whole
+	// ladder's accounting is destroyed at each teardown and no serve surface can see it.
+	moeResidencyState
 
 	oomRetryMu sync.Mutex
 	oomRetry   map[string]*inKernelOOMRetryClassStats
@@ -177,6 +190,12 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
 	}
+	// The GRADED expert spill (#5612, inkernel_expert_spill.go) is OFF unless the operator asks:
+	// FAK_N_CPU_MOE=auto sizes it against the measured device budget, FAK_N_CPU_MOE=<N> states it.
+	// Unset — every serve today — nothing is resolved and the placement stays exactly what
+	// cpuOffloadExperts alone made it. Resolved HERE, once, because sizing walks every resident
+	// tensor name and the device path builds a session per request.
+	p.setExpertSpillFromEnv()
 	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off disables it
 	// (the A/B "tree OFF" arm). Most device backends keep authoritative KV in the backend
 	// HAL store, so host KV clones are disabled there. GLM-MoE-DSA is the exception: its
@@ -208,6 +227,19 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 }
 
 func inKernelPlannerPrefixReuseSupported(m *model.Model, backend compute.Backend) bool {
+	// Fail closed for a RECOMPUTE session before the host/device split (#5548). The gemma4
+	// bridge keeps its prefix in the session's token history and leaves s.Cache empty, so the
+	// snapshot this planner admits (step 3 of generateReusedContextWithBias) carries none of
+	// it. Nothing downstream can notice: truncatePrefix returns a non-nil zero-length clone,
+	// the nil-guard passes, and the tree matches on token ids — so a partial hit would prefill
+	// only the divergent suffix against a session that never saw the prefix. Refusing here is
+	// also honest about the saving: `matched` feeds the reused-vs-prompt witness line and the
+	// KV-prefix KPI, and a recompute forward re-runs the whole prefix on every ingest, so any
+	// non-zero reuse it reported would be a saving it never realized. Reuse returns when #5496
+	// lands the cached path.
+	if m != nil && !m.Cfg.KVPrefixReuseSupported() {
+		return false
+	}
 	if backend == nil {
 		return true
 	}
@@ -804,6 +836,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// remote tier serves matches, that share moves into the external bucket at this same tap.
 	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, matched)
 	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
+	compReuseEntry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: p.modelID, PromptTokens: int64(promptTok), CachedTokens: int64(matched)})
 
 	// Split a Qwen3.5 reasoning block off the decoded text BEFORE it becomes Content
 	// (and before the tool-call lift below reads it). A reasoning model (Ornith) opens
@@ -816,9 +849,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// model that does not emit <think>.
 	reasoning, content := splitReasoning(sb.String())
 	comp = &Completion{
-		Message:      Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
-		FinishReason: finishReason,
-		Usage:        Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},
+		Message:       Message{Role: "assistant", Content: content, ReasoningContent: reasoning},
+		FinishReason:  finishReason,
+		ProviderCache: &compReuseEntry,
+		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a

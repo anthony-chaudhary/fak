@@ -203,12 +203,35 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 		// than from a second counter, so the two numbers cannot drift apart (#5443).
 		m.compactAttempts["bailed"]++
 		m.compactBailReasons[out.Reason]++
+		// Headroom witness: the compactible span this bail measured. Recorded for every bail that
+		// resolved one (under_budget and burst_unprofitable both carry it; the pre-eligibility
+		// bails resolve no span and leave it 0, so they never pull the peak down).
+		if out.SuffixTokens > 0 {
+			m.compactLastSuffixTokens = uint64(out.SuffixTokens)
+			if uint64(out.SuffixTokens) > m.compactPeakSuffixTokens {
+				m.compactPeakSuffixTokens = uint64(out.SuffixTokens)
+			}
+		}
 		if out.AnchorStarved {
 			// A subset of under_budget: the anchor protected a prefix larger than the budget, so
 			// the lever could not fire. Counted apart so "idle" can be proven NOT a short session.
 			m.compactAnchorStarved++
 		}
 	}
+}
+
+// recordCompactionThrash books one COMPACTION_THRASH verdict (#2424): a session whose window
+// refilled to the compaction limit ctxThrashConsecutiveRefills turns running. Called from
+// observeCtxValue the turn the run reaches the line, so the count is sessions-that-thrashed,
+// not turns-spent-thrashing. Always on — the STOP that acts on it is opt-in, but a signal an
+// operator cannot see is the gap #2424 exists to close. Nil-safe like every sibling recorder.
+func (m *gatewayMetrics) recordCompactionThrash() {
+	if m == nil {
+		return
+	}
+	m.compactMu.Lock()
+	m.compactThrashSessions++
+	m.compactMu.Unlock()
 }
 
 // compactBailPartition splits a bail-reason tally into the half the compactor decided BEFORE
@@ -876,13 +899,32 @@ func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok, c
 // was already active for this turn), else leaves them counted only in the unsplit
 // inferCacheCreationTokens total — the same conservative "priced at 5m" convention
 // MechanismSavings/ProviderCacheNetSavings apply to any unattributed write (#2179).
-func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded bool) {
+func cacheCreationSpanLabel(cacheCreateTok int, upgraded, messagePrefix bool) string {
+	if cacheCreateTok <= 0 {
+		return "none"
+	}
+	if !upgraded {
+		return "head_5m"
+	}
+	if messagePrefix {
+		return "message_prefix_1h"
+	}
+	return "head_1h"
+}
+
+func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded, messagePrefix bool) {
 	if m == nil || cacheCreateTok <= 0 || !upgraded {
 		return
 	}
 	m.inferenceMu.Lock()
-	m.inferCacheCreationTokensUpgraded += uint64(cacheCreateTok)
-	m.inferenceMu.Unlock()
+	defer m.inferenceMu.Unlock()
+	n := uint64(cacheCreateTok)
+	m.inferCacheCreationTokensUpgraded += n
+	if messagePrefix {
+		m.inferCacheCreationTokensMessagePrefix += n
+	} else {
+		m.inferCacheCreationTokensHeadOnly += n
+	}
 }
 
 func (s *Server) observePlannerRequestMemory() {

@@ -659,7 +659,7 @@ var registry = []Super{
 		// quality/loop/night intents walk them, so "is every scoreboard number healthy?"
 		// had no worst-first walk. This intent gives it one, honestly: the members that
 		// carry a MEASURABLE debt are the outward-facing scorecards whose numbers get
-		// posted (product, release-readiness, steerability, milestone) — each a real
+		// posted (product, release-readiness, steerability, milestone, osp-residual) — each a real
 		// control-pane card key NOT walked by another intent, so the once-only fold still
 		// counts each scorecard exactly once. The feeds that have no scorecard (blockers,
 		// cachevalue, capacity, node-usage, backlog) are a DELIVERY-liveness question — are
@@ -676,8 +676,7 @@ var registry = []Super{
 		// re-folds the pending dev->release delta and appends docs/nightrun/steerpr-overlay.jsonl,
 		// read through the same cross-ledger loop-health fold every other KindLoop member uses.
 		// It carries NO scorecard ref, so the once-only invariant is untouched (this addition
-		// double-counts nothing at the root); the osp_residual CARD and its scorecard member
-		// are #5022's deliverable, deliberately kept out of this registration. Its Enter is the
+		// double-counts nothing at the root). Its Enter is the
 		// concrete verb that retires the debt the loop measures — `fak steer prs`, a read-only
 		// fold that exits 0 — so the worklist's action column is runnable exactly as printed.
 		// A host with no overlay ledger, or a ledger loopfleet cannot fold, reads UNMEASURED
@@ -685,7 +684,7 @@ var registry = []Super{
 		// ticking for a week must surface, which is the whole reason to register it.
 		Name:   "tend-scoreboards",
 		Title:  "tend the scoreboard/reporting surfaces",
-		About:  "walk the outward-facing report scorecards fak posts to Slack (product, release, steerability, milestone) plus the steerability-overlay maintenance loop's liveness, surface the feed-delivery liveness, then enter the worst-first report in debt",
+		About:  "walk the outward-facing report scorecards fak posts to Slack (product, release, steerability, milestone, osp-residual) plus the steerability-overlay maintenance loop's liveness, surface the feed-delivery liveness, then enter the worst-first report in debt",
 		Floor:  0,
 		Budget: GenerationBudget{Stream: "gen/next", MaxMinutes: 15, TokenCeiling: 100000, MaxWorkers: 1},
 		Members: []Member{
@@ -693,6 +692,7 @@ var registry = []Super{
 			{Kind: KindScorecard, Ref: "release", Why: "release-readiness debt: the release-cadence feed reports an unready release", Enter: "python tools/release_readiness_scorecard.py --json"},
 			{Kind: KindScorecard, Ref: "steer", Why: "steerability debt: the steering-guard feed reports the fleet is hard to steer", Enter: "/steerability-score"},
 			{Kind: KindScorecard, Ref: "milestone", Why: "milestone debt: the milestone feed reports the roadmap climb has stalled", Enter: "/milestone-score"},
+			{Kind: KindScorecard, Ref: "osp_residual", Why: "operator-steerability residual debt (#5022): forming units in the pending dev->release delta the kernel could not witness — the pile that owes an operator a look, which without a posted number only exists in an ad-hoc command run", Enter: "go run ./cmd/fak steer prs --json"},
 			{Kind: KindLoop, Ref: "steerpr-overlay", Why: "operator-steerability overlay liveness (#5039): the maintenance loop (#5023) that re-folds the pending dev->release delta as commits land — dark or unread means the residual pile an operator steers by stopped being recomputed, and an unwitnessed claim can sit unseen for a week", Enter: "fak steer prs"},
 			{Kind: KindSurface, Ref: "fak slack beat", Why: "reporting-feed delivery liveness: are the scoreboard channels actually receiving the posts the feeds send (blockers, cachevalue, capacity, node-usage, backlog have no scorecard, only a delivery pulse)?"},
 		},
@@ -791,7 +791,7 @@ var registry = []Super{
 			{Kind: KindSuperloop, Ref: "improve-loops", Why: "the loops keep everything else tended; a dark loop below starves the rest"},
 			{Kind: KindSuperloop, Ref: "improve-trajectory", Why: "trajectory health: are the steered objectives on-course, or drifting/stalling off their intended curve?"},
 			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
-			{Kind: KindSuperloop, Ref: "tend-scoreboards", Why: "the reporting family: are the scoreboard numbers fak posts to Slack (product, release, steerability, milestone) healthy, and are the feeds delivering?"},
+			{Kind: KindSuperloop, Ref: "tend-scoreboards", Why: "the reporting family: are the scoreboard numbers fak posts to Slack (product, release, steerability, milestone, osp-residual) healthy, and are the feeds delivering?"},
 			{Kind: KindSuperloop, Ref: "tend-fleet", Why: "the generic fleet meta-walker (#4958): every ledgered loop worst-first on liveness × progress × follow-on, with the reporting-family feeders (#4862) re-parented beneath it as one child"},
 			{Kind: KindSuperloop, Ref: "run-the-night", Why: "the overnight productivity meta-loop: are issues draining and is every account limit + node actually being used?"},
 		},

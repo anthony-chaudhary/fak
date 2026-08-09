@@ -27,7 +27,18 @@ param(
   [string]$At = '03:30',                     # daily run time (HH:mm, 24h)
   [int]$EveryHours = 4,                      # also repeat every N hours within the day (0 = daily only)
   [string[]]$AllowBranch = @('fak-v0.1'),    # long-lived worktree branches to RETAIN, never prune
-  [string]$TaskName = ''
+  # The live task is named FleetWorktreeDoctor, bare -- that is what the versioned
+  # capture declares (tools/scheduled-tasks/FleetWorktreeDoctor.xml: <URI>\FleetWorktreeDoctor</URI>)
+  # and what internal/taskvc's inventory binds this installer to. A LITERAL default,
+  # never an interpolated one: a name built at runtime (the old
+  # "FleetWorktreeDoctor-$repoSlug") cannot be read out of the script statically, so
+  # nothing could prove a reinstall UPDATES the live task instead of registering a
+  # second, differently-named worktree janitor beside it (#5409, same class as the
+  # FleetStaleWorkGarden reconcile in #3323). The cost is deliberate and accepted:
+  # the name is machine-global, so two clones on one box now share one task rather
+  # than each getting its own. -TaskName is still a parameter -- an operator who
+  # genuinely wants a per-clone instance passes one explicitly.
+  [string]$TaskName = 'FleetWorktreeDoctor'
 )
 $ErrorActionPreference = 'Stop'
 
@@ -35,12 +46,6 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Repo      = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $Doctor    = Join-Path $ScriptDir 'worktree_doctor.py'
-# Task Scheduler names are machine-global. Derive a stable per-checkout suffix so
-# sibling repositories cannot silently overwrite or inspect each other's janitor.
-if (-not $TaskName) {
-  $repoSlug = ([IO.Path]::GetFileName($Repo) -replace '[^A-Za-z0-9_.-]', '-')
-  $TaskName = "FleetWorktreeDoctor-$repoSlug"
-}
 $LogDir    = Join-Path $env:LOCALAPPDATA 'Fleet\watchdog'
 $Log       = Join-Path $LogDir 'worktree_doctor.log'
 

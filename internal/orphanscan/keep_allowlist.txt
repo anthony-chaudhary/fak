@@ -1,0 +1,40 @@
+# keep_allowlist.txt — the checked-in suppression tier for the orphan-func gate (#3167).
+#
+# TWO SUPPRESSION TIERS, and this is the SECOND one. Prefer the first:
+#
+#   1. //orphanscan:keep <reason> on the func's own doc comment — use this whenever you
+#      can edit the file. It is local, greppable, and travels with the code, so a reader
+#      at the definition sees why the scan cannot see the wiring.
+#   2. THIS FILE — for the cases tier 1 cannot express: a func in a package whose lane is
+#      held by another loop (so the source cannot be edited right now), or a standing
+#      baseline entry that pins KNOWN debt so the gate can ratchet on NEW orphans only.
+#
+# FORMAT — one entry per line:
+#
+#     <package-dir> <func-name> # <reason>
+#
+# The package dir is repo-relative and slash-separated (the same `relPrefix` the scan is
+# given). A line whose first non-space character is `#` is a comment. The reason is
+# REQUIRED: an entry with no reason is a parse error, because an unexplained suppression
+# is how a ratchet quietly becomes a rubber stamp.
+#
+# BASELINE ENTRIES ARE DEBT, NOT A BLESSING. An entry tagged `baseline:` below names a
+# real orphan that the gate is deliberately not failing on today. Each one is a live
+# finding for the owning lane to wire or delete; pruning the line IS the fix landing.
+# `TestDogfoodRealRepo` logs (advisory, never fails) any entry that is no longer an
+# orphan, so a stale line surfaces on the next run instead of rotting here forever.
+#
+# NOTE on `cmdBenchIngest`: #3167 named it as the exemplar allowlist case. It is NOT
+# listed here because it is no longer an orphan — `cmd/fak/main.go` dispatches
+# `case "bench-ingest": cmdBenchIngest(args)`, so the scan sees a real in-package
+# reference and never flags it. Adding it would create a stale entry on day one.
+
+# --- cmd/fak (lane `cmd`, held by another loop at the time of writing) ---
+
+cmd/fak cmdGitSpawnBench # baseline: redundant wrapper, not a dropped feature — the `bench gitspawn` sub-dispatch (cmd/fak/main.go) calls runGitSpawnBench directly, so this cmd* shim has no call site. Fix is to delete the shim.
+cmd/fak cmdRunaway # baseline: genuinely unreachable verb — cmd/fak/main.go has no `case "runaway":`, yet cmd/fak/runaway.go re-execs `<self> runaway --json`, so that self-call cannot resolve. Fix is to add the dispatch case.
+cmd/fak dispatchPreflightChurn # baseline: leftover wrapper from the dispatchPreflightChurnState split — the live caller (cmd/fak/dispatch_tick_preflight.go) uses the ...State form. Fix is to delete the wrapper.
+
+# --- internal/gateway (lane `gateway`) ---
+
+internal/gateway isMidflightVerb # baseline: classifier authored beside the mid-flight mailbox route but never consulted by it. Fix is to wire it into the control-plane route or delete it.

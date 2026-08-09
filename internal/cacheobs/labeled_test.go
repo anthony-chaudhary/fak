@@ -1,6 +1,10 @@
 package cacheobs
 
-import "testing"
+import (
+	"fmt"
+	"sync"
+	"testing"
+)
 
 // labeled_test.go — the #3391 eligibility-filtered denominator and the (model, tenant)
 // series breakdown: the fair hit-rate excludes the always-cold head, clamps keep it
@@ -135,5 +139,60 @@ func TestLabeledNilObserverSafe(t *testing.T) {
 	o.ObserveLabeled(Labels{Model: "m"}, 10, 0, 0, 10) // must not panic
 	if rows := o.LabeledSnapshot(); rows != nil {
 		t.Fatalf("nil observer rows = %+v, want nil", rows)
+	}
+}
+
+// TestLabeledAttributionConcurrentSessions is the race witness for #3638. Each
+// tenant label represents one gateway session. Distinct, non-overlapping token
+// counts make any shared-counter contamination visible, while the aggregate
+// reconciliation proves no update disappeared under contention.
+func TestLabeledAttributionConcurrentSessions(t *testing.T) {
+	const sessions = 32
+	const turnsPerSession = 200
+
+	o := New()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for session := 1; session <= sessions; session++ {
+		session := session
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			labels := Labels{Model: "synthetic-upstream", Tenant: fmt.Sprintf("session-%02d", session)}
+			<-start
+			for turn := 0; turn < turnsPerSession; turn++ {
+				prompt := session*1000 + turn + 1
+				reused := session
+				o.ObserveLabeled(labels, prompt, prompt, reused, prompt)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	rows := o.LabeledSnapshot()
+	if len(rows) != sessions {
+		t.Fatalf("labeled rows = %d, want %d", len(rows), sessions)
+	}
+
+	var wantPrompt, wantReused uint64
+	for i, row := range rows {
+		session := i + 1
+		wantTenant := fmt.Sprintf("session-%02d", session)
+		if row.Labels != (Labels{Model: "synthetic-upstream", Tenant: wantTenant}) {
+			t.Fatalf("row %d labels = %+v, want tenant %q", i, row.Labels, wantTenant)
+		}
+		wantSessionPrompt := uint64(turnsPerSession*(session*1000+1) + turnsPerSession*(turnsPerSession-1)/2)
+		wantSessionReused := uint64(turnsPerSession * session)
+		if row.Turns != turnsPerSession || row.PromptTokens != wantSessionPrompt || row.EligibleTokens != wantSessionPrompt || row.ReusedTokens != wantSessionReused {
+			t.Fatalf("%s attribution = %+v, want turns=%d prompt=eligible=%d reused=%d", wantTenant, row, turnsPerSession, wantSessionPrompt, wantSessionReused)
+		}
+		wantPrompt += wantSessionPrompt
+		wantReused += wantSessionReused
+	}
+
+	global := o.Snapshot()
+	if global.Turns != sessions*turnsPerSession || global.PromptTokens != wantPrompt || global.EligibleTokens != wantPrompt || global.ReusedTokens != wantReused {
+		t.Fatalf("global attribution = %+v, want turns=%d prompt=eligible=%d reused=%d", global, sessions*turnsPerSession, wantPrompt, wantReused)
 	}
 }

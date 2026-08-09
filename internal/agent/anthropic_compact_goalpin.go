@@ -34,6 +34,14 @@ func isGoalPinnedMessage(el json.RawMessage) bool {
 	return isCompactGoalText(text)
 }
 
+// IsGoalPinnedMessage is isGoalPinnedMessage exported for the ONE consumer that must classify a
+// messages[] element the same way this compactor does: the gateway's survival-class gate (#2421),
+// which types a goal-marked turn ctxplan.KindActiveSteer (PINNED) and then verifies the compacted
+// body still carries its bytes. Sharing the predicate rather than re-typing the marker is what
+// keeps the two in step — a classifier that pinned a message this compactor does NOT hoist would
+// refuse every compaction, and one that missed a message it DOES hoist would guarantee nothing.
+func IsGoalPinnedMessage(el json.RawMessage) bool { return isGoalPinnedMessage(el) }
+
 // lastGoalPinInRange returns the index of the LAST (most recent = active) goal-marked message in
 // [start, end), or -1 if none. The active goal wins when several are marked, matching the decoded
 // planner's "the session's ACTIVE goal" semantics (ctxplan_session.go).

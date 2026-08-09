@@ -109,15 +109,9 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 		}
 		if witness.State == "succeeded" {
 			if err := ingestBenchFleetWitness(*root, req, witness); err != nil {
-				witness.State = "failed"
-				witness.Error = "ingest benchmark witness: " + err.Error()
-				req.State = witness.State
-				_ = writeBenchFleetRequest(path, req)
+				markBenchFleetRunFailed(&witness, &req, path, "ingest benchmark witness", err)
 			} else if err := updateBenchFleetCatalog(*root); err != nil {
-				witness.State = "failed"
-				witness.Error = "update benchmark catalog: " + err.Error()
-				req.State = witness.State
-				_ = writeBenchFleetRequest(path, req)
+				markBenchFleetRunFailed(&witness, &req, path, "update benchmark catalog", err)
 			}
 		}
 		report.Witnesses = append(report.Witnesses, witness)
@@ -139,6 +133,19 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 		return 1
 	}
 	return 0
+}
+
+// markBenchFleetRunFailed demotes a run that EXECUTED cleanly but whose post-run
+// bookkeeping (witness ingest, catalog update) failed. A witness the fleet cannot record
+// is not a success, so the witness and its queue request both flip to "failed" carrying
+// stage as the reason, and the request is written back so the queue reflects it. stage
+// names the step that failed; err is appended in the "<stage>: <err>" shape an operator
+// already reads off the witness file.
+func markBenchFleetRunFailed(w *benchFleetWitness, req *benchFleetRequest, path, stage string, err error) {
+	w.State = "failed"
+	w.Error = stage + ": " + err.Error()
+	req.State = w.State
+	_ = writeBenchFleetRequest(path, *req)
 }
 
 func executeBenchFleetRequest(root string, req benchFleetRequest, run benchFleetExec) benchFleetWitness {
@@ -200,63 +207,54 @@ func hasBenchNodeWitness(output string) bool {
 
 func benchFleetRemoteCommand(req benchFleetRequest) string {
 	prefix := "printf 'FAK_BENCH_NODE='; hostname; cd ~/fak && "
-	if req.Benchmark == "turn-tax" && strings.HasPrefix(req.Machine, "gcp-") {
-		// Replay the committed airline trace with output isolated under /tmp. This is
-		// bounded, deterministic real turn-tax execution on every provisioned node.
-		run := "go run ./cmd/fak turntax -suite turntax-airline -out /tmp/fak-turntax-report.json"
-		if req.Machine == "gcp-g2-l4-32" {
-			// Container-Optimized OS mounts the persistent home filesystem noexec.
-			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/fak turntax -suite turntax-airline -out /tmp/fak-turntax-report.json"
+	// Every gcp-* node run below obeys ONE rule: execute the bounded, committed workload
+	// on the node under its own Go toolchain — except on Container-Optimized OS
+	// (gcp-g2-l4-32), which mounts the persistent home filesystem noexec, where the SAME
+	// workload runs against the SAME provisioned source inside the pinned Go container.
+	// The table carries only what differs per benchmark (its command, and for a run that
+	// needs a credential in the container, the extra `docker run` flags and the container
+	// form of the command); the rule itself is written once, below the table.
+	if strings.HasPrefix(req.Machine, "gcp-") {
+		for _, row := range []struct{ benchmark, run, dockerFlags, dockerRun string }{
+			// Replay the committed airline trace with output isolated under /tmp. This is
+			// bounded, deterministic real turn-tax execution on every provisioned node.
+			{benchmark: "turn-tax", run: "go run ./cmd/fak turntax -suite turntax-airline -out /tmp/fak-turntax-report.json"},
+			// Use the same bounded synthetic session workload on every node so the fleet
+			// compares the real session execution path without an unbounded model load.
+			{benchmark: "session-benchmark", run: "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json"},
+			// Assemble the committed cross-model cards on each node with outputs isolated
+			// under /tmp; the canonical fleet witness captures the resulting parity summary.
+			{benchmark: "parity", run: "go run ./cmd/paritybench -out-json /tmp/fak-parity.json -out-md /tmp/fak-parity.md"},
+			// Bound the generated fan-out matrix so every scheduled node produces a real,
+			// reproducible topology witness without leaving output files in the source tree.
+			{benchmark: "fan-benchmark", run: "go run ./cmd/fanbench -agents 1,4 -sub-turns 1 -trials 1 -prefixes smoke -out /tmp/fak-fanbench.json -csv /tmp/fak-fanbench.csv"},
+			// The concept replay is intentionally bounded and deterministic. Run it on each
+			// provisioned node to fill the topology cell with node-authored lineage rather
+			// than accepting the control point's local replay as a remote witness.
+			{benchmark: "concept-benchmark", run: "go run ./cmd/conceptbench -replay cmd/conceptbench/testdata/replay"},
+			// Replace the planner's <task> placeholder with the real bounded agent workload.
+			// The node reads its mode-0600 gateway credential locally; no secret enters argv
+			// or the canonical witness captured by the control point. The container arm reads
+			// the same mode-0600 file, handing it to the container as an env var instead.
+			{
+				benchmark:   "agent-live",
+				run:         "export FAK_GROQ_API_KEY=$(cat $HOME/.config/fak/groq.key); go run ./cmd/fak agent -provider openai -base-url https://api.groq.com/openai/v1 -api-key-env FAK_GROQ_API_KEY -model qwen/qwen3.6-27b -max-turns 10",
+				dockerFlags: "-e FAK_GROQ_API_KEY=$(cat $HOME/.config/fak/groq.key) ",
+				dockerRun:   "go run ./cmd/fak agent -provider openai -base-url https://api.groq.com/openai/v1 -api-key-env FAK_GROQ_API_KEY -model qwen/qwen3.6-27b -max-turns 10",
+			},
+		} {
+			if req.Benchmark != row.benchmark {
+				continue
+			}
+			if req.Machine == "gcp-g2-l4-32" {
+				containerRun := row.dockerRun
+				if containerRun == "" {
+					containerRun = row.run
+				}
+				return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm " + row.dockerFlags + "-v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/" + containerRun
+			}
+			return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + row.run
 		}
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
-	}
-	if req.Benchmark == "session-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
-		// Use the same bounded synthetic session workload on every node so the fleet
-		// compares the real session execution path without an unbounded model load.
-		run := "go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json"
-		if req.Machine == "gcp-g2-l4-32" {
-			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/sessionbench -synthetic tiny -agents 2 -turns 2 -reps 1 -out /tmp/fak-sessionbench.json"
-		}
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
-	}
-	if req.Benchmark == "parity" && strings.HasPrefix(req.Machine, "gcp-") {
-		// Assemble the committed cross-model cards on each node with outputs isolated
-		// under /tmp; the canonical fleet witness captures the resulting parity summary.
-		run := "go run ./cmd/paritybench -out-json /tmp/fak-parity.json -out-md /tmp/fak-parity.md"
-		if req.Machine == "gcp-g2-l4-32" {
-			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/paritybench -out-json /tmp/fak-parity.json -out-md /tmp/fak-parity.md"
-		}
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
-	}
-	if req.Benchmark == "fan-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
-		// Bound the generated fan-out matrix so every scheduled node produces a real,
-		// reproducible topology witness without leaving output files in the source tree.
-		run := "go run ./cmd/fanbench -agents 1,4 -sub-turns 1 -trials 1 -prefixes smoke -out /tmp/fak-fanbench.json -csv /tmp/fak-fanbench.csv"
-		if req.Machine == "gcp-g2-l4-32" {
-			// Container-Optimized OS mounts the persistent home filesystem noexec.
-			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/fanbench -agents 1,4 -sub-turns 1 -trials 1 -prefixes smoke -out /tmp/fak-fanbench.json -csv /tmp/fak-fanbench.csv"
-		}
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
-	}
-	if req.Benchmark == "concept-benchmark" && strings.HasPrefix(req.Machine, "gcp-") {
-		// The concept replay is intentionally bounded and deterministic. Run it on each
-		// provisioned node to fill the topology cell with node-authored lineage rather
-		// than accepting the control point's local replay as a remote witness.
-		if req.Machine == "gcp-g2-l4-32" {
-			// Container-Optimized OS mounts the persistent home filesystem noexec.
-			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/conceptbench -replay cmd/conceptbench/testdata/replay"
-		}
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; go run ./cmd/conceptbench -replay cmd/conceptbench/testdata/replay"
-	}
-	if req.Benchmark == "agent-live" && strings.HasPrefix(req.Machine, "gcp-") {
-		// Replace the planner's <task> placeholder with the real bounded agent workload.
-		// The node reads its mode-0600 gateway credential locally; no secret enters argv
-		// or the canonical witness captured by the control point.
-		run := "export FAK_GROQ_API_KEY=$(cat $HOME/.config/fak/groq.key); go run ./cmd/fak agent -provider openai -base-url https://api.groq.com/openai/v1 -api-key-env FAK_GROQ_API_KEY -model qwen/qwen3.6-27b -max-turns 10"
-		if req.Machine == "gcp-g2-l4-32" {
-			return "printf 'FAK_BENCH_NODE='; hostname; docker run --rm -e FAK_GROQ_API_KEY=$(cat $HOME/.config/fak/groq.key) -v $HOME/fak:/src -w /src golang:1.26 /usr/local/go/bin/go run ./cmd/fak agent -provider openai -base-url https://api.groq.com/openai/v1 -api-key-env FAK_GROQ_API_KEY -model qwen/qwen3.6-27b -max-turns 10"
-		}
-		return prefix + "export PATH=$HOME/.local/go/bin:$PATH; " + run
 	}
 	if req.Benchmark == "qwen36" && (strings.HasPrefix(req.Machine, "gcp-") || req.Machine == "a100" || req.Machine == "cpu-server-a") {
 		// The planner explicitly asks for Qwen3.6 through a gateway. Each compute node

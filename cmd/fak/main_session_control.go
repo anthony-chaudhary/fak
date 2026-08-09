@@ -89,6 +89,12 @@ func listSessions(_ context.Context) []gateway.SessionState {
 func decideSession(ctx context.Context, traceID string) gateway.SessionVerdict {
 	traceID = strings.TrimSpace(traceID)
 	v := serveSessions.Decide(traceID)
+	// #5640: this is the one boundary EVERY served session crosses, so it is where the
+	// broadcast tag registry is produced — tag the trace with this process's routing
+	// identity on the way in, drop it once the session is terminal. Without a producer
+	// here the registry stays empty and every --lane/--wave/--label fleet directive
+	// resolves to zero sessions. See serve_session_tag.go.
+	tagServedSessionAdmit(traceID, v.State)
 	persistServeSessionRevision(ctx, traceID, v.State)
 	return toGatewaySessionVerdict(v)
 }
@@ -194,6 +200,12 @@ func controlSession(ctx context.Context, traceID, verb string, req gateway.Sessi
 	st, ok, err := applySessionControlDurable(ctx, serveSessions, serveSessionDurability, traceID, verb, req)
 	if err != nil {
 		return gateway.SessionState{}, false, err
+	}
+	// #5640: an operator stop through this route is the one session end that produces no
+	// following admission, so the broadcast tag would otherwise outlive the session it
+	// names. Only on a TAKEN write — a refused CAS changed nothing.
+	if ok {
+		dropServedSessionTagIfEnded(traceID, st)
 	}
 	return toGatewaySessionState(st), ok, nil
 }

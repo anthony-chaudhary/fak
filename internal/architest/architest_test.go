@@ -58,6 +58,7 @@ var tier = map[string]int{
 	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":         1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
 	"dispatchconservation": 1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
+	"dispatchdoa":          1, // #5868: pure DOA-spawn detector — grades a worker log into "the dispatcher spawned it, it wrote a stub, it never reached the guard's agent-launch banner" and folds a window into a clear/warn/alarm spawn-health rung; stdlib-only, imports nothing internal, off the hot path.
 	"eveparity":            1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
 	"eveimport":            1, // read-only Eve run/OTel evidence importer (#2606): pure deterministic fold of saved NDJSON session streams / eve.* spans into session-ledger rows with default body redaction; stdlib-only, imports nothing internal, off the hot path.
 	"benchcatalog":         1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
@@ -87,6 +88,7 @@ var tier = map[string]int{
 	"accounts":             1, "accountobs": 1, "guardaudit": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "cachevalue": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "fleetreap": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 1, "fleetaccounts": 1, "fleetbottleneck": 1, "flock": 1, "ghspam": 1, "issuecontractrepair": 1, "jsonlledger": 1, "kvbudget": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "refutil": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
+	"sessiondiag":   1,                                                                            // bounded redacted Codex SQLite/log and process-incident classifier (#5992); stdlib-only, off the hot path.
 	"deepseekbench": 1, "deepseekv4kv": 1, "deepseekv4moe": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench/KV/MoE fixture cores (#3014/#3017/#3018), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
 	"guardvars": 1, "xprobe": 1, // guardvars: pure /debug/vars sessions-row schema (SessionVars) the fak info agents pane renders. xprobe: throwaway end-to-end buildcheck-fallback ping probe (Ping). Both stdlib-only, import nothing internal, off the hot path.
 	"glm52prefillsweep": 1, "turnkind": 1, // glm52prefillsweep: GLM-5.2 prefill-latency sweep planner + benchmark-ledger driver (#3085/#3086); imports windowgate(1) for hidden subprocesses. turnkind: content-free last-user-turn structural classifier (#3307); imports nothing internal. Both off the hot path.
@@ -102,6 +104,7 @@ var tier = map[string]int{
 	"watchdoghealth":       1,                // pure health-digest for the DEFAULT watchdog monitors (fak.watchdog-health.v1): folds the live probe + persisted autoheal heal-state into a closed per-monitor status vocabulary + a worst-of fleet rollup for `fak watchdog status`; stdlib-only, imports nothing internal, off the hot path.
 	"resumemetrics":        1,                // in-process expvar metrics for the resume/heal watchdog (#3803): expvar counters + strings only; imports nothing internal, off the hot path.
 	"resumebackoff":        1,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
+	"commitlifecycle":      1,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
 	"wipref":               1,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
 	"wipattr":              1,                // pure dirty-hunk-to-checkpoint attribution fold (#3874); stdlib-only, imports nothing internal, off the hot path.
 	"wiprecon":             1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
@@ -121,6 +124,7 @@ var tier = map[string]int{
 	"focusscore":           1,                // fleet convergence/breadth focus scorecard over the trajctl objective tree; imports trajctl(1)+pkg/scorecard, off the hot path.
 	"memgate":              1,                // memory-pressure admission fold for heavy model loads; stdlib + windowgate shell helpers, off the hot path.
 	"memorycotravel":       1,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
+	"memoryindex":          1,                // stdlib-only memory-index reconciliation mechanism; off the hot path.
 	"memorystability":      1,                // stdlib-only fleet-memory stability governor over drift trajectories; off the hot path.
 	"memoryread":           1,                // read-only committed fleet-memory digest renderer; stdlib-only, off the hot path.
 	"fleetmemory":          1,                // cross-agent lessons ledger (#2141) + its write-time dedup guard (#2142): New/Match/Inject fold publishable lessons into a key-indexed Ledger and select by trigger for peer injection (freshness re-verify is the caller's job — the dos_recall discipline); stdlib-only, imports nothing internal, off the hot path.
@@ -141,6 +145,7 @@ var tier = map[string]int{
 	"toolcoverage":         1,                // read-only tools/*.py sibling-test coverage audit over skills/CI references; stdlib-only, off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
+	"modelsrc":             2,                // model-source URL registry; transports stay behind ReaderAt openers.
 	"skillenv":             4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
 	"guardroute":           4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"guardcomplaint":       4,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
@@ -193,7 +198,8 @@ var tier = map[string]int{
 	"cachevaluereport": 2, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"auditusage":       2, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
 	"harvest":          2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2, "gitgate": 2, "safecommit": 2, "patchcommit": 2,
+	"launchshim": 1, // user-local launch configuration + direct-bypass policy; stdlib-only foundation consumed by cmd/fak.
+	"journal":    2, "gitgate": 2, "gitdaily": 2, "safecommit": 2, "patchcommit": 2,
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 	"capindex": 2, // protocol-blind capability keystone (#1104 C1): CapRef/Capability/Index/Resolver + skill resolver, imports only abi(0). The gateway-backed MCP/A2A resolvers live in capindexgw(4) so the core stays importable by the tier-3 skill-loader (ctxresidency/ctxmmu, #1106).
 
@@ -219,6 +225,7 @@ var tier = map[string]int{
 	"tokenizer":        1,
 	"answershape":      1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
 	"codelint":         1,
+	"codexmcpdiag":     1, // pure Codex MCP startup evidence classifier (#5980); stdlib-only, off the hot path.
 	"codexlifecycle":   1, // pure exactly-once Codex task-lifecycle fold keyed by exact turn_id (#4785): events in, typed terminal (complete/aborted/superseded/process_death/live) + provenance out; stdlib-only, imports nothing internal, off the hot path.
 	"polymodel":        1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
 	"reachdelta":       3, // typed policy reach-expansion referee (#4220): composes adjudicator policy sets with knownbad accepted-risk records; off the hot path.
@@ -273,6 +280,7 @@ var tier = map[string]int{
 	"loopmgr":          1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing â€” those stay in the producers.
 	"leaseref":         1, // cross-machine lease VISIBILITY substrate (#825): persists a lease record under refs/fak/locks/<id> so lease state rides ordinary git fetch/push between clones. Distribution, NOT atomic acquisition. Shells to git off the hot path through one Runner seam; imports only dormancy(1) for the lease's LastActiveAt clock (#1179).
 	"laneadmit":        1, // pure lane/tree admission fold for dispatch/loop/manual surfaces: lane taxonomy + live leases -> COLLISION_RISK verdict; imports dispatchorder(1)+stdlib, off the hot path.
+	"lanebeat":         1, // #5864: the pure authority rung for REFRESHING a DOS lane lease — the writer the kernel's heartbeat_at liveness evidence never had (0 HEARTBEAT ops in 3584 WAL entries). Folds the supervisor's structural readings of the holder process (alive / output-growth / spawn budget) against the live lease set into a beat-or-named-refusal, fail-closed in every rung so a beat can never outlive the work it attests. Imports nothing internal, no clock, no process table, off the hot path; the `dos` I/O lives at the cmd/fak witness-sweep call site.
 	"guard":            1, // agent-spawn containment seam (#824): the Linux Landlock read-only-.git/hooks hook-floor for the child `fak guard` spawns, via a re-exec trampoline. Pure spec/resolution core + raw-syscall linux impl + no-op twin; opt-in, off by default, fails open; imports only stdlib (syscall/unsafe on linux), nothing internal.
 	"goalpark":         1, // durable long Retry-After goal parking and exactly-once supervisor claim (#4805)
 	"codexmcphealth":   2, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
@@ -398,6 +406,7 @@ var tier = map[string]int{
 	"timeoutphase":     1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
 	"vllmcompile":      1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":   1,
+	"orchestration":    1, // pure portable workflow-plan/profile resolution contract; stdlib-only, no provider adapters, off the hot path.
 	"devexmeter":       1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
 	"toolproc":         2,
 	"regionadmit":      2,
@@ -446,7 +455,7 @@ var tier = map[string]int{
 	"projectreport":         1, // the ProjectsV2 board control-pane fold: a pure fold of board item × {Status,Generation,Priority} into the same schema/ok/verdict/finding envelope milestonereport uses, with a fail-closed UNMEASURED verdict for an unreadable board. The `gh` read lives in cmd/fak; this leaf is stdlib-only, imports nothing internal, off the hot path.
 	"projectcompletion":     2, // weighted production-scope aggregation over canonical issuecontract metadata; imports issuecontract only, off the hot path.
 	"catchupscore":          1, // the dev-system CATCH-UP control-pane scorecard (`fak score catchup`): folds intake/measurement/index/trunk/loops into a 0..1 caught-up fraction + an unbounded catchup_backlog headline. Pure fold, stdlib-only, imports nothing internal, off the hot path.
-	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
+	"seoaeoscore":           1, // seo/aeo discoverability scorecard (Go port of the former tools/seo_aeo_scorecard.py): front-matter/JSON-LD/llms.txt + crawlable-link audit over the git-tracked doc surface; stdlib-only, imports nothing internal, off the hot path.
 	"zaitask":               4,
 	"macfit":                2,
 	"roofline":              1, // pure-Go GLM-5.2 roofline dashboard fold (#3090): folds committed benchmark run artifacts × transcribed ceiling estimates into one current-vs-80%target-vs-ceiling table; stdlib-only, imports nothing internal, laptop-composable (no GPU), off the hot path.
@@ -481,6 +490,20 @@ var tier = map[string]int{
 	"taskvc":                1, // #3323 (reboot-survival audit): binds the fleet's live Windows Scheduled Tasks to the versioned installers that recreate them — the reboot-survival record `fak schedscan` cannot give (schedscan reports live task HEALTH, never whether a task is rebuildable at all). Pure literal-only parse of an installer's -TaskName defaults (an interpolated default is never treated as coverage) + Verify, which refuses a coverage claim the tree does not back (INSTALLER_NAME_DRIFT) or an unexplained gap (ORPHAN_FLEET_TASK); the declared Inventory carries the residual orphans with a named reason each. Imports windowgate(1)+stdlib for the `git ls-files` call, off the hot path. NOT pureRoot (it imports a sibling leaf).
 	"skilleffectiveness":    3, // skill-effectiveness scorecard pure core: probes every .claude/skills SKILL.md for the affordances that make a skill discoverable (frontmatter description), triggerable (an explicit use-when phrase), and affordable (per-load-tier word budgets), plus the queried loader's queryable/paging/in-sync health, and folds skill_debt through the shared kernel. Imports capindex(2)+pkg/scorecard+stdlib, off the hot path.
 	"skillfootprint":        3, // #5444 (epic #3229): the resident .claude/skills DESCRIPTION floor — the fold `fak skill footprint` renders (Fold/Measure over the shipped SkillResolver cards) PLUS the one-way ratchet gating it (SkillDescriptionBudgetBytes, SKILL_DESC_BUDGET_EXCEEDED / _STALE), held together so the scorecard and the gate can never become rival authorities on what the resident floor is. The userland twin of mcpfootprint's MCP ratchet. Imports capindex(2)+stdlib, off the hot path.
+	"leasequeue":            2, // #5505: the WAITER PLANE a region-admission refusal never had — Plan ranks waiting tickets with dispatchaging's aging law over their ENQUEUE clock, tests each with regionadmit's one conflict predicate against live holders + this pass's grants + every higher-ranked waiter's reservation (conservative backfill), and hands each queued waiter seatpark's poll schedule plus its blocker, place in line and (only when the blocker's expiry is declared) an ETA. The pure fold holds/acquires/reaps nothing; store.go is the one I/O half (a same-machine per-ticket journal under the git dir). Imports regionadmit(2)+dispatchaging(1)+seatpark(1), off the hot path.
+	"corelockgate":          1, // #5392: the single owner of the hard-self core-lock question every path to the trunk must ask (CoreLockCheck + CheckCoreLockHardSelf + the confirm/refute/abstain witness semantics). Pushed DOWN out of safecommit(2) so the sanctioned detached worker-worktree lander — workerworktree(1), which `fak commit` cannot serve because it refuses a detached HEAD — can ask the SAME question without the upward foundation->mechanism import this gate refuses, and without a second copy of the policy. The tier-2 witness resolver is inverted into a registration seam (RegisterResolverFactory, called from internal/witness's init); with none registered the gate fails CLOSED. Imports corelocks(1)+corelockaudit(1)+abi(0), off the hot path. NOT pureRoot (it imports sibling leaves).
+	"fleetbus":              1, // #5600 (epic #5599): the fleet control bus — the cross-PROCESS join sessionctl(3)/broadcast (per-gateway, ack-less) and fleetspine(1) (display-only, one-way) each lack. Three envelopes (directive/instance/ack) over a swappable Bus, with the return path as the load-bearing half: a directive is never its own witness, the consuming instance's ack is. Declares NO ops — the bus is a carrier and the APPLIER (cmd/fak) owns op meaning, which is exactly what keeps a fleet-level carrier from importing sessionctl(3) and lets it carry control ops that are not session ops. Exactly-once application under at-least-once delivery via a per-(instance,directive) O_EXCL claim marker. Imports flock(1)+jsonlledger(1), off the hot path. NOT pureRoot (it imports sibling leaves).
+	"gitbroker":             1, // #5622 (rung 3 of epic #5619): the resident per-repo git query broker separate short-lived client processes share over one AF_UNIX socket — token-authed transport, a Class A (content-addressed, full-OID keyed) object cache that by construction needs no invalidation, and a mandatory provenance tag (broker/cache/fallback-spawn) on every answer. Fail-open is the safety argument: every client call is deadlined and ANY broker problem re-derives the answer by spawning git through the same Runner, so a dead broker costs latency and a provenance tag, never bytes. Imports windowgate(1)+stdlib (net/os/exec/crypto) — every `git cat-file --batch` spawn takes the no-window hook, since the fallback path spawns under background automation on a Windows fleet; off the hot path. NOT pureRoot (it imports a sibling leaf).
+	"tokenprofile":          2,
+	"docrender":             1,
+	"learningobservation":   1, // #5982 (parent #2908): content-addressed observation/candidate/witness/verdict records plus the seven closed-enum lineage relations. Pure stdlib durable substrate; admission policy remains outside this leaf. Off the hot path.
+	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
+	"testenv":               1, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
+	"estimatecal":           1, // #5899 (epic #3229): pure in-memory estimate-vs-billed correction ratio fold keyed by provider/model; stdlib-only, imports nothing internal, off the hot path.
+	"docreach":              1, // Pure document-reachability census; repository I/O stays in cmd/fak.
+	"testquality":           0, // #5936: pure stdlib Go test AST quality findings plus counted baseline ratchet; repository I/O and CLI wiring stay in cmd/fak.
+	"dependencyquarantine":  0, // #5947: stdlib-only repository dependency-budget and nested-module quarantine checker; imports no sibling leaf.
+	"enumlint":              0, // #5935: pure stdlib Go AST closed-enum discovery, exhaustiveness rules, and counted baseline ratchet; repository I/O is caller-selected.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -505,7 +528,7 @@ var pureRoot = map[string]bool{
 	"codexmemory": true, "commitintent": true, "commitissuelink": true, "compactcohere": true, "conflationscore": true,
 	"corelocks": true, "covmatrix": true, "ctxknobs": true, "ctxplan": true, "ctxplans": true, "deadlineadmit": true, "deepseekbench": true,
 	"deepseekv4kv": true, "deepseekv4moe": true, "defaultvaluescore": true, "deletioncert": true, "demoutil": true, "deploymanifest": true, "devexmeter": true,
-	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
+	"dispatchaging": true, "dispatchauto": true, "dispatchconservation": true, "dispatchdoa": true, "dispatchorder": true, "doomloop": true, "dormancy": true, "dropin": true, "dsparity": true, "egressfloor": true, "egresslist": true,
 	"evebridge": true, "eveimport": true, "eveparity": true, "fakrpc": true, "fleetcap": true,
 	"fleetcompare": true, "fleetfreeze": true, "fleetmemory": true, "fleetmetrics": true, "fleetspine": true, "flock": true,
 	"fusedturn": true, "ghspam": true, "godsplitplan": true, "growthgate": true,

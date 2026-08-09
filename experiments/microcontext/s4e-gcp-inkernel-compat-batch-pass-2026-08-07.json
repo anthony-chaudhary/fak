@@ -1,0 +1,39 @@
+{
+  "schema": "fak-microcontext-compat-batch-execution/1",
+  "verdict": "PASS",
+  "captured_at": "2026-08-07T01:19:45Z",
+  "model_artifact": "qwen2.5-0.5b-instruct-q8_0.gguf (675710816 bytes)",
+  "hardware": "GCP-sanctioned-L4-controlled-node CPU-reference",
+  "forward_path": "in-kernel GGUF lean-Q8 model.NewBatchFromPrefixReserve + BatchSession.StepBatchActive",
+  "submitted": 25,
+  "scheduled": 24,
+  "cancelled": 1,
+  "rejected": 0,
+  "compatibility_classes": 3,
+  "executed_batches": 3,
+  "max_batch": 8,
+  "prefix_tokens_prefilled_once": 64,
+  "useful_token_steps": 94,
+  "allocated_steps": 144,
+  "real_padding_tax": 0.3472222222222222,
+  "real_batch_fill": 1,
+  "queue_delay_p50_ms": 7841.120571,
+  "queue_delay_p95_ms": 16966.26813,
+  "batch_wall_ms": 29756.985165,
+  "tuned_sequential_wall_ms": 16045.241721,
+  "batch_tokens_per_second": 3.1589221649564916,
+  "tuned_sequential_tokens_per_second": 5.858434645890867,
+  "batch_vs_sequential_throughput_ratio": 0.5392092522824632,
+  "nonempty_logit_rows": 94,
+  "expected_logit_rows": 94,
+  "isolation_check": "planner retained 3 model/tool/bucket classes; each lane cloned one exact 64-token prefix KV and held an independent cache; batch=94 sequential=94 finite rows",
+  "claims": [
+    "real compatibility plans executed through NewBatchFromPrefixReserve and StepBatchActive",
+    "aggregate token-step throughput is compared with same-model prefix-cloned sequential decode"
+  ],
+  "non_claims": [
+    "token IDs are a deterministic mixed-workload fixture, not useful text quality",
+    "aggregate throughput is not single-stream latency or orchestration concurrency"
+  ]
+}
+

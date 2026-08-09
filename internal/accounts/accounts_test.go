@@ -3,6 +3,7 @@ package accounts
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -469,6 +470,34 @@ func TestServeAtWalksPastCooledDownSeat(t *testing.T) {
 	}
 }
 
+// TestServeAtStopsOnServingHop is skip-cooled-hop's control: the SAME chain, a live
+// non-empty store, and a real now — but the cooled account is a DIFFERENT seat, so the
+// first hop that can serve stops the walk. It pins two things the cooldown-blind Serve
+// baseline cannot, because there the overlay is absent rather than merely inapplicable:
+// the overlay is keyed per ACCOUNT (an armed store does not make every seat suspect), and
+// ServeAt never OVER-walks past a serving seat to a further one.
+func TestServeAtStopsOnServingHop(t *testing.T) {
+	r := cooldownServeFixture()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	// Cool the seat BEYOND sink — the one an over-walking resolver would land on.
+	cd.Cool(UUIDBucketKey("u-anchor"), CooldownUsageLimit, "weekly limit", now, now.Add(2*time.Hour))
+
+	h, chain, entry, err := r.ServeAt("gone", cd, now)
+	if err != nil {
+		t.Fatalf("ServeAt: %v", err)
+	}
+	if h.Name != "sink" {
+		t.Fatalf("ServeAt landed on %q, want sink (an uncooled hop stops the walk — no over-walk)", h.Name)
+	}
+	if strings.Join(chain, ",") != "gone" {
+		t.Fatalf("chain = %v, want [gone] (sink SERVES, so it is the landing, not a hop)", chain)
+	}
+	if entry != nil {
+		t.Fatalf("sink serves outright, so the all-cooled entry must be nil, got %+v", entry)
+	}
+}
+
 // TestServeAtRehomesCooledRequestedSeat covers the directly-pinned case: the requested
 // seat itself is otherwise Ready but throttled, so it falls forward like any other
 // unserveable seat instead of serving into the wall.
@@ -531,6 +560,49 @@ func TestServeableAtMatchesCanServeAndCooldown(t *testing.T) {
 	}
 }
 
+// TestServeableAtNilStoreMatchesCanServe pins the cd-nil half of serveableAt's contract
+// across the whole vocabulary CanServe classifies — ready, disabled, missing-dir and
+// tombstoned — at a zero now AND at a real one. Both halves of the no-overlay gate matter
+// separately: zero-now is the Serve delegation path, while a nil store at a REAL now is
+// the path a caller takes when it has a clock but no cooldown store. Seat for seat the two
+// must agree; that equality is what lets Serve keep delegating to ServeAt unchanged.
+func TestServeableAtNilStoreMatchesCanServe(t *testing.T) {
+	disabled := false
+	// Identity mirrors the seat name so NameLie stays quiet — an identity mismatch would
+	// class a "ready" fixture as unserveable for the wrong reason.
+	id := func(name string) Identity {
+		return Identity{Email: name + "@example.test", AccountUUID: "u-" + name, Exists: true, HasCreds: true}
+	}
+	nodir := id("nodir")
+	nodir.Exists = false
+
+	cases := []struct {
+		name string
+		home Home
+		want bool
+	}{
+		{"ready", Home{Name: "ready", Dir: "/h/.claude-ready", Identity: id("ready")}, true},
+		{"disabled", Home{Name: "off", Dir: "/h/.claude-off", Identity: id("off"), Enabled: &disabled}, false},
+		{"missing-dir", Home{Name: "nodir", Dir: "/h/.claude-nodir", Identity: nodir}, false},
+		{"tombstoned", Home{Name: "gone", Status: StatusTombstoned, RehomeTo: "ready"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Self-check the fixture first: a seat that does not model what its name claims
+			// would make the equality below pass for the wrong reason.
+			if got := tc.home.CanServe(); got != tc.want {
+				t.Fatalf("CanServe() = %v, want %v — fixture does not model a %s seat", got, tc.want, tc.name)
+			}
+			for _, now := range []time.Time{{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)} {
+				if got := serveableAt(tc.home, nil, now); got != tc.want {
+					t.Fatalf("serveableAt(%s, nil, %v) = %v, want CanServe() = %v (a nil store applies NO overlay)",
+						tc.name, now, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 // TestServeAtAllCooledDownResolvesSoonestReset pins the terminal case: when every
 // reachable, otherwise-serveable seat is throttled, ServeAt neither hard-errors nor
 // silently lands — it returns the soonest-reset seat WITH its cooldown entry as the
@@ -569,12 +641,104 @@ func TestServeAtStructuralFailureStaysLoud(t *testing.T) {
 	r := Registry{Homes: []Home{
 		{Name: "a", Status: StatusTombstoned, RehomeTo: "b"},
 		{Name: "b", Status: StatusTombstoned, RehomeTo: "a"},
+		{Name: "dangle", Status: StatusTombstoned, RehomeTo: "nowhere"},
 	}}
 	if _, _, entry, err := r.ServeAt("a", cd, now); err == nil || entry != nil {
 		t.Fatalf("a rehome cycle with no serveable seat must stay fail-loud, got entry=%v err=%v", entry, err)
 	}
 	if _, _, entry, err := r.ServeAt("ghost", cd, now); err == nil || entry != nil {
 		t.Fatalf("an unknown name must stay fail-loud, got entry=%v err=%v", entry, err)
+	}
+	// A rehome target that is not in the registry at all: the overlay must not convert a
+	// structurally broken chain into a degraded landing, because there is nothing to land on.
+	if _, _, entry, err := r.ServeAt("dangle", cd, now); err == nil || entry != nil {
+		t.Fatalf("a dangling rehome target must stay fail-loud, got entry=%v err=%v", entry, err)
+	}
+}
+
+// deadRolePairFixture is the shape that broke the `f` launcher on the maintainers' box:
+// BOTH role seats are live-but-unserveable — the active seat's config dir had been
+// re-logged into another account and the anchor needed a login — while ready seats sat in
+// the pool. The role-only fall-forward bounced active->anchor->active and the walk died on
+// its OWN cycle guard ("accounts: rehome cycle through ..."), so a bare `fak accounts
+// launch` refused to start anything at all.
+func deadRolePairFixture() Registry {
+	ready := func(name, uuid string) Home {
+		return Home{Name: name, Dir: "/h/.claude-" + name,
+			Identity: Identity{Email: name + "@example.test", AccountUUID: uuid, Exists: true, HasCreds: true}}
+	}
+	// Live (never tombstoned) but cannot serve: the dir is there, the credentials are not.
+	dead := func(name string) Home {
+		return Home{Name: name, Dir: "/h/.claude-" + name, Identity: Identity{Exists: true}}
+	}
+	return Registry{
+		Roles: map[string]string{RoleActive: "active-dead", RoleAnchor: "anchor-dead"},
+		// pool-ready sits BETWEEN the two dead role seats so the sweep is proven to be a
+		// registry-order scan of the whole roster, not a lucky first/last hit.
+		Homes: []Home{dead("anchor-dead"), ready("pool-ready", "u-pool"), dead("active-dead")},
+	}
+}
+
+// TestServeAtDeadRolePairFallsForwardToPool pins the fix: once both roles are exhausted the
+// walk sweeps the POOL instead of dead-ending on its cycle guard.
+func TestServeAtDeadRolePairFallsForwardToPool(t *testing.T) {
+	r := deadRolePairFixture()
+
+	h, chain, entry, err := r.ServeAt("active-dead", nil, time.Time{})
+	if err != nil {
+		t.Fatalf("a dead active+anchor pair must fall forward to a ready pool seat, got: %v", err)
+	}
+	if h.Name != "pool-ready" {
+		t.Fatalf("served %q, want pool-ready", h.Name)
+	}
+	if entry != nil {
+		t.Fatalf("nothing is cooled here: entry must be nil, got %v", entry)
+	}
+	if got := strings.Join(chain, ","); got != "active-dead,anchor-dead" {
+		t.Fatalf("chain = %v, want [active-dead anchor-dead] (both refused role hops)", chain)
+	}
+	// Serve (the cooldown-blind wrapper the older callers still use) gets the same rescue.
+	if h, _, err := r.Serve("active-dead"); err != nil || h.Name != "pool-ready" {
+		t.Fatalf("Serve = %q,%v, want pool-ready,<nil>", h.Name, err)
+	}
+}
+
+// TestServeAtDeadRolePairDegradesOntoCooledPool pins the next rung down: when the only
+// pool seat is held back solely by an active cooldown, the walk still REACHES it, so the
+// all-cooled terminal degrades onto it (with its entry) rather than refusing to resolve.
+func TestServeAtDeadRolePairDegradesOntoCooledPool(t *testing.T) {
+	r := deadRolePairFixture()
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	cd := &CooldownStore{entries: map[string]CooldownEntry{}}
+	cd.Cool(UUIDBucketKey("u-pool"), CooldownUsageLimit, "weekly limit", now, now.Add(20*time.Minute))
+
+	h, chain, entry, err := r.ServeAt("active-dead", cd, now)
+	if err != nil {
+		t.Fatalf("an all-cooled pool must degrade, not hard-error: %v", err)
+	}
+	if h.Name != "pool-ready" {
+		t.Fatalf("served %q, want pool-ready", h.Name)
+	}
+	if entry == nil || !entry.ResetAt.Equal(now.Add(20*time.Minute)) {
+		t.Fatalf("the cooled landing must carry its entry as the degraded signal, got %v", entry)
+	}
+	if got := strings.Join(chain, ","); got != "active-dead,anchor-dead" {
+		t.Fatalf("chain = %v, want [active-dead anchor-dead]", chain)
+	}
+	// Once the window elapses the same registry resolves clean, with no manual action.
+	if _, _, entry, err := r.ServeAt("active-dead", cd, now.Add(time.Hour)); err != nil || entry != nil {
+		t.Fatalf("an elapsed cooldown must resolve clean, got entry=%v err=%v", entry, err)
+	}
+}
+
+// TestServeAtEmptyPoolStaysLoud pins that the pool sweep is a rescue, not a silent landing:
+// strip the one ready seat and the same walk fails loud again.
+func TestServeAtEmptyPoolStaysLoud(t *testing.T) {
+	r := deadRolePairFixture()
+	r.Homes = slices.DeleteFunc(slices.Clone(r.Homes), func(h Home) bool { return h.Name == "pool-ready" })
+
+	if h, _, entry, err := r.ServeAt("active-dead", nil, time.Time{}); err == nil || entry != nil {
+		t.Fatalf("no seat can serve: must stay fail-loud, got seat=%q entry=%v err=%v", h.Name, entry, err)
 	}
 }
 

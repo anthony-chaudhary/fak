@@ -279,6 +279,217 @@ def _fak_command(root: Path) -> list[str] | None:
     return [found] if found else None
 
 
+# --- which `fak` build made this decision? (binary provenance) --------------- #
+# THREE independent resolvers pick a `fak` binary on ONE dispatch tick, and on a
+# dev host they routinely pick THREE DIFFERENT builds:
+#
+#   preflight_gate  `_fak_command` (above)                  $FAK_BIN -> <root>/fak[.exe] -> PATH
+#                   ...runs the account router here, and the SAME repo-root rule
+#                   is what `issue_resolve_dispatch._fak_command_prefix` uses to
+#                   run the `fak issue contract` admission gate.
+#   worker_guard    `dispatch_worker.resolve_fak_bin`       $FAK_BIN -> <ws>/tools/.bin/fak[.exe] -> PATH
+#                   ...the binary every dispatched worker is FRONTED by.
+#   path            `shutil.which("fak")`                   PATH only
+#                   ...what `issue_resolve_dispatch._fak_bin` runs the lease gate with.
+#
+# Because each rule hits a different candidate BEFORE falling through to PATH,
+# they only agree by accident. That is survivable for behaviour drift, but not for
+# accountability: when a gate REFUSES, "which build decided that?" was pure
+# archaeology. Worse, `<root>/fak.exe` is a hand-build — it is routinely a
+# `+uncommitted` working-tree compile, i.e. an admission gate whose verdict comes
+# from code no one reviewed and no commit pins.
+#
+# This block MEASURES that, and nothing else. It deliberately does NOT unify or
+# reorder resolution: `resolve_fak_bin` returns None to fail OPEN (launch the
+# worker unwrapped) on a host with no fak built, and every probe here is
+# stat+`version` only, so a broken/missing/hanging binary degrades to an
+# `error` field and never changes a verdict.
+FAK_BIN_PROVENANCE_SCHEMA = "fak-bin-provenance/v1"
+FAK_BIN_PROVENANCE_FILE = "fak-bin-provenance.json"
+# `<path> version` prints `build: <id>[ +uncommitted]` on its second line.
+_FAK_BUILD_RE = re.compile(r"^build:\s*(\S+)(?P<dirty>\s+\+uncommitted)?", re.M)
+_FAK_VERSION_TIMEOUT_S = 20
+# Keyed on (path, size, mtime_ns) so one tick pays at most ONE `version` spawn per
+# distinct on-disk build, and a rebuild mid-process invalidates itself.
+_FAK_IDENTITY_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+
+
+def _fak_version_text(path: str) -> tuple[str, str | None]:
+    """``(stdout, error)`` from ``<path> version``. Never raises."""
+    try:
+        proc = subprocess.run([path, "version"], capture_output=True, text=True,
+                              timeout=_FAK_VERSION_TIMEOUT_S,
+                              creationflags=_no_window_creationflags())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return "", str(exc)
+    if proc.returncode != 0:
+        return proc.stdout or "", (proc.stderr or proc.stdout or "").strip()[-200:] \
+            or f"returncode {proc.returncode}"
+    return proc.stdout or "", None
+
+
+def fak_build_identity(path: str | Path | None, *,
+                       probe: Callable[[str], tuple[str, str | None]] | None = None,
+                       ) -> dict[str, Any]:
+    """Identity of ONE `fak` binary: absolute path, build id, and clean/dirty.
+
+    ``build_key`` is ``<size>-<mtime_ns>-<basename>`` — byte-identical to
+    ``issue_resolve_dispatch.guard_build_id``, so a provenance row JOINS directly
+    against the guard-probe inventory already on disk in ``.dispatch-runs``.
+
+    ``dirty`` is True only when the binary itself reports ``+uncommitted`` — a
+    build compiled from an unreviewed working tree. ``None`` means "could not be
+    determined" (the binary would not run); it is never coerced to False, because
+    silently reporting an unknown build as clean is the exact failure this exists
+    to prevent."""
+    if not path:
+        return {"path": None, "resolved": False, "error": "no fak binary resolved"}
+    p = Path(path)
+    row: dict[str, Any] = {"path": str(p), "resolved": True}
+    try:
+        st = p.stat()
+        row["size"] = st.st_size
+        row["mtime_ns"] = st.st_mtime_ns
+        row["build_key"] = f"{st.st_size}-{st.st_mtime_ns}-{p.name}"
+    except OSError as exc:
+        row["error"] = str(exc)
+        return row
+    cache_key = (str(p), int(row["size"]), int(row["mtime_ns"]))
+    cached = _FAK_IDENTITY_CACHE.get(cache_key)
+    if cached is not None and probe is None:
+        return dict(cached)
+    text, err = (probe or _fak_version_text)(str(p))
+    match = _FAK_BUILD_RE.search(text or "")
+    row["build"] = match.group(1) if match else None
+    row["dirty"] = bool(match.group("dirty")) if match else None
+    if err:
+        row["error"] = err
+    if probe is None:
+        _FAK_IDENTITY_CACHE[cache_key] = dict(row)
+    return row
+
+
+def fak_bin_resolutions(root: Path, env: dict[str, str] | None = None,
+                        ) -> dict[str, str | None]:
+    """resolver name -> the ABSOLUTE `fak` path it picks on this host, right now.
+
+    Each entry CALLS the real resolver rather than restating its rule, so this
+    table cannot drift away from what dispatch actually executes. The worker
+    resolver is imported lazily and defensively: ``dispatch_preflight`` is
+    imported by callers that may not have ``tools/`` on ``sys.path``, and a
+    provenance record must never be able to break the spawn gate.
+
+    Caveat worth stating rather than hiding: ``worker_guard`` is evaluated against
+    the PREFLIGHT's env, not the child env the worker is finally spawned with. No
+    ``worker_env`` builder sets ``FAK_BIN`` today, so the two agree; if one ever
+    does, this row becomes a prediction rather than a record."""
+    e = env if env is not None else dict(os.environ)
+    gate = _fak_command(root)
+    out: dict[str, str | None] = {
+        "preflight_gate": gate[0] if gate else None,
+        "worker_guard": None,
+        "path": shutil.which("fak"),
+    }
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import dispatch_worker  # noqa: PLC0415  (lazy by design; see docstring)
+        out["worker_guard"] = dispatch_worker.resolve_fak_bin(root, e)
+    except Exception:  # noqa: BLE001  — provenance is advisory; never fail the gate
+        out["worker_guard"] = None
+    return out
+
+
+def fak_bin_provenance(root: Path, env: dict[str, str] | None = None, *,
+                       identity: Callable[..., dict[str, Any]] | None = None,
+                       ) -> dict[str, Any]:
+    """The full resolver -> binary table, plus the two facts worth alarming on:
+
+    ``agree``  — do all resolvers that resolved AT ALL point at one build_key?
+                 False means a single tick spans multiple disagreeing builds.
+    ``dirty``  — the resolver names whose binary self-reports ``+uncommitted``,
+                 i.e. a gate about to be decided by unreviewed code.
+    """
+    ident = identity or fak_build_identity
+    resolutions = fak_bin_resolutions(root, env)
+    rows = {name: ident(path) for name, path in resolutions.items()}
+    keys = {r.get("build_key") for r in rows.values() if r.get("build_key")}
+    builds = sorted({str(r["build"]) for r in rows.values() if r.get("build")})
+    return {
+        "schema": FAK_BIN_PROVENANCE_SCHEMA,
+        "resolvers": rows,
+        "distinct_builds": len(keys),
+        "builds": builds,
+        # One binary (or none resolvable) => nothing to disagree about.
+        "agree": len(keys) <= 1,
+        "dirty": sorted(n for n, r in rows.items() if r.get("dirty")),
+        "unresolved": sorted(n for n, r in rows.items() if not r.get("resolved")),
+    }
+
+
+def fak_bin_warnings(prov: dict[str, Any]) -> list[str]:
+    """Operator-facing lines for a provenance table. EMPTY when there is nothing
+    to say — a fleet whose resolvers agree on one clean build stays silent."""
+    rows = prov.get("resolvers") or {}
+    lines: list[str] = []
+    for name in prov.get("dirty") or []:
+        row = rows.get(name) or {}
+        lines.append(
+            f"DIRTY_FAK_BIN: gate '{name}' will execute {row.get('path')} "
+            f"(build {row.get('build')} +uncommitted) — this gate's verdict comes "
+            "from an unreviewed working-tree build that no commit pins")
+    if not prov.get("agree"):
+        detail = ", ".join(
+            f"{n}={(rows.get(n) or {}).get('build') or '?'}@{(rows.get(n) or {}).get('path')}"
+            for n in sorted(rows) if (rows.get(n) or {}).get("resolved"))
+        lines.append(
+            f"FAK_BIN_DISAGREEMENT: {prov.get('distinct_builds')} different `fak` "
+            f"builds are in play on one tick — {detail}")
+    return lines
+
+
+def record_fak_bin_provenance(root: Path, prov: dict[str, Any],
+                              *, now: str | None = None) -> Path | None:
+    """Persist the table to ``.dispatch-runs/fak-bin-provenance.json``, keyed on the
+    resolver->build_key FINGERPRINT so a disagreement that happened at 03:00 is still
+    answerable at 09:00 (a last-write-wins snapshot only ever answers "right now").
+    Each key carries ``first_utc``/``last_utc``/``ticks``; the file therefore stays
+    bounded by the number of DISTINCT configurations, not by tick count.
+
+    Best-effort and never raises: a provenance record that could fail a spawn gate
+    would be worse than the blindness it replaces."""
+    rows = prov.get("resolvers") or {}
+    fingerprint = "|".join(
+        f"{n}={(rows.get(n) or {}).get('build_key') or '-'}" for n in sorted(rows))
+    stamp = now or dt.datetime.now(dt.timezone.utc).isoformat()
+    path = Path(root) / ".dispatch-runs" / FAK_BIN_PROVENANCE_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict):
+                doc = {}
+        except (OSError, ValueError):
+            doc = {}
+        prior = doc.get(fingerprint) if isinstance(doc.get(fingerprint), dict) else {}
+        doc[fingerprint] = {
+            "first_utc": prior.get("first_utc") or stamp,
+            "last_utc": stamp,
+            "ticks": int(prior.get("ticks") or 0) + 1,
+            "agree": prov.get("agree"),
+            "dirty": prov.get("dirty"),
+            "builds": prov.get("builds"),
+            "resolvers": {n: {k: r.get(k) for k in ("path", "build", "dirty", "build_key")}
+                          for n, r in rows.items()},
+        }
+        doc["schema"] = FAK_BIN_PROVENANCE_SCHEMA
+        tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(doc, indent=1, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+        return path
+    except OSError:
+        return None
+
+
 def account_check(root: Path, *, work_kind: str, product: str) -> dict[str, Any]:
     """Native account route returns a credential-ready worker seat, or fails closed.
 
@@ -1480,12 +1691,22 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         seat_f = pool.submit(seat_check, root, product=product)
         host_res_f = pool.submit(host_resources)
         alive_proc_f = pool.submit(proc_worker_count, root, product=product)
+        # Advisory only: which `fak` build each resolver picks, and whether any gate
+        # is about to run an unreviewed `+uncommitted` compile. Probed in the same
+        # pool because it is pure I/O (stat + one bounded `version` per distinct
+        # build) and must not add serial latency to the spawn path.
+        fak_bin_f = pool.submit(fak_bin_provenance, root)
         host = host_f.result()
         acct = acct_f.result()
         kern = kern_f.result()
         seat = seat_f.result()
         host_res = host_res_f.result()
         alive_proc = alive_proc_f.result()
+        try:
+            fak_bin = fak_bin_f.result()
+        except Exception as exc:  # noqa: BLE001 — provenance NEVER decides a verdict
+            fak_bin = {"schema": FAK_BIN_PROVENANCE_SCHEMA, "error": str(exc),
+                       "resolvers": {}, "agree": True, "dirty": []}
     host_cap_info = host_capacity(**host_res)
     host_cap = host_cap_info.get("host_cap")
 
@@ -1611,12 +1832,22 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
                   f"(t{acct.get('tier')}) free, {live}/{cap} live (headroom {headroom})")
 
     ok = verdict == OK_VERDICT
+    # Bind the verdict to the build that produced it. Recorded (not just returned)
+    # because the tick payload projects preflight through an ALLOWLIST, so a new key
+    # alone would never reach the durable run record; the `.dispatch-runs` file is
+    # readable after the fact by anyone asking "which build refused?". Warnings go to
+    # stderr so they surface in the dispatcher's captured log even under `--json`,
+    # where stdout must stay parseable.
+    record_fak_bin_provenance(root, fak_bin)
+    for line in fak_bin_warnings(fak_bin):
+        print(f"dispatch_preflight: {line}", file=sys.stderr)
     return {
         "schema": SCHEMA,
         "ok": ok,
         "verdict": verdict,
         "reason": reason,
         "workspace": str(root),
+        "fak_bin": fak_bin,
         "cap": cap,
         "live": live,
         "headroom": headroom,
@@ -1667,6 +1898,14 @@ def render(p: dict[str, Any]) -> str:
             f"  weekly-cap: {weekly.get('account') or a.get('tag') or '-'} cooling "
             f"until {weekly.get('until')} (kind={weekly.get('kind') or 'weekly'}, "
             f"resets {weekly.get('reset_text') or '?'})")
+    fak_bin = p.get("fak_bin") or {}
+    gate = (fak_bin.get("resolvers") or {}).get("preflight_gate") or {}
+    if gate.get("resolved"):
+        lines.append(
+            f"  fak_bin: gate={gate.get('build') or '?'}"
+            f"{' +uncommitted' if gate.get('dirty') else ''} @ {gate.get('path')}  "
+            f"({fak_bin.get('distinct_builds')} distinct build(s) across resolvers)")
+    lines.extend(f"  !! {w}" for w in fak_bin_warnings(fak_bin))
     return "\n".join(lines)
 
 

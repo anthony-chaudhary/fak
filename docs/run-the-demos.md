@@ -30,6 +30,14 @@ local set (§1), the headless witnesses for exact accounting (§2), the live-mod
 **Cache-frontier walkthrough** immediately below is an *optional* specialized path, for
 when your goal is fak's caching value-add specifically rather than the whole catalog.
 
+## Micro-context fabric floor
+
+```bash
+go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64
+```
+
+This is the LCD proof for one immutable agent base serving 10,000 independently accounted logical contexts through 64 bounded physical worker slots. It is deterministic, offline, and must report 10,000 completed, zero failed, one shared-base installation, and peak in-flight work no greater than 64. Its context rate is synthetic scheduler throughput, **not** model tokens/s. Controlled model/cache witnesses are indexed in [`docs/research/README.md`](research/README.md).
+
 ## Cache-frontier walkthrough
 
 Use this path when the goal is fak's caching value-add rather than the whole demo

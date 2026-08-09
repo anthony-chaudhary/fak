@@ -1,0 +1,328 @@
+{
+  "cases": [
+    {
+      "name": "accepted",
+      "role": "known-positive: a 1000-call arm resolves every published scalar, so the artifact supports a conclusion",
+      "resolution": {
+        "schema": "fak.instrument_resolution.v1",
+        "verdict": "MEASURABLE",
+        "reason": "every published scalar is at or above its slice's instrument floor",
+        "conclusive": true,
+        "measurable": 7,
+        "below_resolution": 0,
+        "unmeasured": 0,
+        "floors": [
+          {
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "rate_quantum": 0.001,
+            "resolvable": true
+          },
+          {
+            "slice": "vdso_off",
+            "denominator": 1000,
+            "rate_quantum": 0.001,
+            "resolvable": true
+          }
+        ],
+        "readouts": [
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "vdso_hit_rate",
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "quantum": 0.001,
+            "claim": 0.75,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 0.75 is at least one output quantum 0.001 on a denominator of 1000"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "preflight_catch_rate",
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "quantum": 0.001,
+            "claim": 0.5,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 0.5 is at least one output quantum 0.001 on a denominator of 1000"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "context_pollution_rate",
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "quantum": 0.001,
+            "claim": 0.25,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 0.25 is at least one output quantum 0.001 on a denominator of 1000"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tokens_per_task",
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "quantum": 0.001,
+            "claim": 1,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 1.0 is at least one output quantum 0.001 on a denominator of 1000"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tool_call_p50_ns",
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "quantum": 0.1001001001001001,
+            "claim": 50,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 50.0 is at least one output quantum 0.1001 on a denominator of 1000"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tool_call_p99_ns",
+            "slice": "vdso_on",
+            "denominator": 1000,
+            "quantum": 0.1001001001001001,
+            "claim": 1,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 1.0 is at least one output quantum 0.1001 on a denominator of 1000"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "token_delta_pct",
+            "slice": "delta",
+            "denominator": 1500,
+            "quantum": 0.06666666666666667,
+            "claim": 33.33,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 33.33 is at least one output quantum 0.066667 on a denominator of 1500"
+          }
+        ]
+      },
+      "refusal": ""
+    },
+    {
+      "name": "refused",
+      "role": "refusal: a 12-call arm cannot resolve the p99 tail it publishes, so the artifact straddles the ceiling and refuses",
+      "resolution": {
+        "schema": "fak.instrument_resolution.v1",
+        "verdict": "MIXED",
+        "reason": "slices straddle the instrument ceiling (6 measurable, 1 below resolution, 0 unmeasured): the artifact supports no single conclusion",
+        "conclusive": false,
+        "measurable": 6,
+        "below_resolution": 1,
+        "unmeasured": 0,
+        "floors": [
+          {
+            "slice": "vdso_on",
+            "denominator": 12,
+            "rate_quantum": 0.08333333333333333,
+            "resolvable": true
+          },
+          {
+            "slice": "vdso_off",
+            "denominator": 12,
+            "rate_quantum": 0.08333333333333333,
+            "resolvable": true
+          }
+        ],
+        "readouts": [
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "vdso_hit_rate",
+            "slice": "vdso_on",
+            "denominator": 12,
+            "quantum": 0.08333333333333333,
+            "claim": 0.5,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 0.5 is at least one output quantum 0.083333 on a denominator of 12"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "preflight_catch_rate",
+            "slice": "vdso_on",
+            "denominator": 12,
+            "quantum": 0.08333333333333333,
+            "claim": 0.25,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 0.25 is at least one output quantum 0.083333 on a denominator of 12"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "context_pollution_rate",
+            "slice": "vdso_on",
+            "denominator": 12,
+            "quantum": 0.08333333333333333,
+            "claim": 0.5,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 0.5 is at least one output quantum 0.083333 on a denominator of 12"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tokens_per_task",
+            "slice": "vdso_on",
+            "denominator": 12,
+            "quantum": 0.08333333333333333,
+            "claim": 83,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 83.0 is at least one output quantum 0.083333 on a denominator of 12"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tool_call_p50_ns",
+            "slice": "vdso_on",
+            "denominator": 12,
+            "quantum": 9.090909090909092,
+            "claim": 50,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 50.0 is at least one output quantum 9.090909 on a denominator of 12"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tool_call_p99_ns",
+            "slice": "vdso_on",
+            "denominator": 12,
+            "quantum": 9.090909090909092,
+            "claim": 1,
+            "claim_known": true,
+            "verdict": "BELOW_RESOLUTION",
+            "reason": "claim 1.0 is smaller than one output quantum 9.090909 on a denominator of 12: the instrument cannot represent a change this small (this is NOT a measured zero)"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "token_delta_pct",
+            "slice": "delta",
+            "denominator": 1200,
+            "quantum": 0.08333333333333333,
+            "claim": 16.7,
+            "claim_known": true,
+            "verdict": "MEASURABLE",
+            "reason": "claim 16.7 is at least one output quantum 0.083333 on a denominator of 1200"
+          }
+        ]
+      },
+      "refusal": "metrics: instrument resolution refused the conclusion (MIXED): slices straddle the instrument ceiling (6 measurable, 1 below resolution, 0 unmeasured): the artifact supports no single conclusion"
+    },
+    {
+      "name": "adversarial_vacuous",
+      "role": "adversarial: a report that observed nothing must not read as a green comparison — every slice is UNMEASURED, not zero",
+      "resolution": {
+        "schema": "fak.instrument_resolution.v1",
+        "verdict": "UNMEASURED",
+        "reason": "no slice was observed: every scalar in this artifact is unmeasured, not zero",
+        "conclusive": false,
+        "measurable": 0,
+        "below_resolution": 0,
+        "unmeasured": 7,
+        "floors": [
+          {
+            "slice": "vdso_on",
+            "denominator": 0,
+            "rate_quantum": 0,
+            "resolvable": false
+          },
+          {
+            "slice": "vdso_off",
+            "denominator": 0,
+            "rate_quantum": 0,
+            "resolvable": false
+          }
+        ],
+        "readouts": [
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "vdso_hit_rate",
+            "slice": "vdso_on",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": true,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "preflight_catch_rate",
+            "slice": "vdso_on",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": true,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "context_pollution_rate",
+            "slice": "vdso_on",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": true,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tokens_per_task",
+            "slice": "vdso_on",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": true,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tool_call_p50_ns",
+            "slice": "vdso_on",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": false,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "tool_call_p99_ns",
+            "slice": "vdso_on",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": false,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          },
+          {
+            "schema": "fak.instrument_resolution.v1",
+            "metric": "token_delta_pct",
+            "slice": "delta",
+            "denominator": 0,
+            "quantum": 0,
+            "claim": 0,
+            "claim_known": true,
+            "verdict": "UNMEASURED",
+            "reason": "denominator 0: nothing was observed for this slice, so any scalar it carries is unmeasured, not zero"
+          }
+        ]
+      },
+      "refusal": "metrics: instrument resolution refused the conclusion (UNMEASURED): no slice was observed: every scalar in this artifact is unmeasured, not zero"
+    }
+  ],
+  "issue": "https://github.com/anthony-chaudhary/fak/issues/5667",
+  "note": "Instrument-resolution ceilings for the A/B report shape. Generated by TestInstrumentResolutionReceiptGolden (UPDATE_GOLDEN=1); pure in-process values, no host state.",
+  "schema": "fak.instrument_resolution.v1"
+}

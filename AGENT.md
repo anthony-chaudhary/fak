@@ -1,5 +1,10 @@
 # AGENT.md — fak
 
+> **Not the human contributor guide.** This file is operating instructions for *automated*
+> contributors working inside the maintainers' shared checkout. Humans want
+> [`README.md`](README.md) for what fak is and [`CONTRIBUTING.md`](CONTRIBUTING.md) for how
+> to contribute; nothing on this page applies to you.
+
 > Some agent harnesses (Amp, OpenCode, and others adopting the single-file `AGENT.md`
 > convention) auto-load this file. It mirrors [`AGENTS.md`](AGENTS.md), which is the
 > canonical, fuller entry point — read that for the complete build/test/run, repo map,

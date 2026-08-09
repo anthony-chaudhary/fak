@@ -487,6 +487,82 @@ func TestWarmBandProducerRefillsBelowLowWater(t *testing.T) {
 	}
 }
 
+// TestWarmBandProducerStopsAtHighWater pins the #5072 honest tension as an executable
+// bound: the producer must never hold more contexts in RAM than the high-water cap the
+// caller sized from the dispatch-side effective worker cap, EVEN when MaxWarm is set
+// above it. MaxWarm is a plain caller-supplied int this package cannot validate, so the
+// producer — not the reserve — has to be the binding constraint.
+//
+// The invariant is warm + resident <= High, because a warm agent holds its whole in-RAM
+// context and therefore costs what a resident costs. Residency sits at 0 here, so the
+// whole cap is available to the reserve and the bound reduces to warm <= High.
+//
+// This is a REGRESSION witness. Before the fix, WarmRefill's answer was recomputed
+// identically on every pass (a refill never moves residency), so it never bounded the
+// batch and the producer drained the store all the way to MaxWarm: with these numbers it
+// warmed all 8 enrolled agents against a high-water cap of 2.
+func TestWarmBandProducerStopsAtHighWater(t *testing.T) {
+	const (
+		enrolled = 8
+		high     = 2
+		maxWarm  = 8 // deliberately ABOVE high: the producer must still stop at high
+	)
+	band, err := microagent.NewWarmBand(microagent.WarmBandConfig{
+		Low: 1, High: high, MaxWarm: maxWarm, Dir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewWarmBand: %v", err)
+	}
+	defer band.Close()
+
+	log := newWarmLog()
+	for i := 0; i < enrolled; i++ {
+		id := fmt.Sprintf("hw%d", i)
+		if err := band.Enroll(id, &warmAgent{id: id, turns: 4, log: log}); err != nil {
+			t.Fatalf("Enroll %q: %v", id, err)
+		}
+	}
+
+	// The producer must reach the cap (it is genuinely producing, not merely inert)...
+	waitWarm(t, band, high)
+	// ...and then STOP there. Every Enroll above kicked it, so an unbounded producer
+	// overshoots within milliseconds — the settle window catches it far more cheaply
+	// than it took to reach the cap in the first place.
+	peak := 0
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if w := band.Stats().Warm; w > peak {
+			peak = w
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if peak > high {
+		t.Errorf("warm peaked at %d with residency 0 and a high-water cap of %d — the producer "+
+			"pinned more in-RAM contexts than the effective cap allows", peak, high)
+	}
+	s := band.Stats()
+	if s.Warm != high {
+		t.Errorf("warm = %d, want exactly the high-water cap %d", s.Warm, high)
+	}
+	if s.Refills != high {
+		t.Errorf("refills = %d, want exactly %d — the producer must stop at the cap, not drain the store",
+			s.Refills, high)
+	}
+	if s.Parked != enrolled-high {
+		t.Errorf("parked = %d, want %d (the rest must stay frozen on disk)", s.Parked, enrolled-high)
+	}
+	if s.Thaws != 0 {
+		t.Errorf("thaws = %d, want 0 — nothing acquired, so no cold wake was on any critical path", s.Thaws)
+	}
+	// The bound must not have cost correctness: a still-parked agent still acquires.
+	if _, err := band.Acquire(context.Background(), fmt.Sprintf("hw%d", enrolled-1)); err != nil {
+		t.Fatalf("Acquire of an agent the bound left parked: %v", err)
+	}
+	if got := band.Stats().Thaws; got != 1 {
+		t.Errorf("thaws = %d after acquiring a parked agent, want exactly 1 cold wake", got)
+	}
+}
+
 // waitWarm blocks until the producer has warmed want agents into the reserve, failing
 // the test if it never gets there. It is the shared "the pre-warm has happened" gate.
 func waitWarm(t *testing.T, band *microagent.WarmBand, want int) microagent.WarmBandStats {
@@ -626,5 +702,58 @@ func TestWarmBandSkipsNonRestorableAgent(t *testing.T) {
 	s := band.Stats()
 	if s.Parked != 0 || s.Warm != 0 || s.Thaws != 0 || s.Hits != 0 || s.Peak != 0 {
 		t.Errorf("band touched a non-Restorable agent: %+v", s)
+	}
+}
+
+func TestWarmBandRecoverAfterProcessRestart(t *testing.T) {
+	dir := t.TempDir()
+	log := newWarmLog()
+	original := &warmAgent{id: "restartable", turns: 2, log: log}
+
+	first, err := microagent.NewWarmBand(microagent.WarmBandConfig{Dir: dir, Low: 1, High: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Enroll("restartable", original); err != nil {
+		t.Fatal(err)
+	}
+	h, err := first.Acquire(context.Background(), "restartable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := h.Step(context.Background(), nil); err != nil || done {
+		t.Fatalf("first step done=%v err=%v", done, err)
+	}
+	if err := first.Yield("restartable"); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+
+	second, err := microagent.NewWarmBand(microagent.WarmBandConfig{Dir: dir, Low: 1, High: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	blank := &warmAgent{log: log}
+	if err := second.Recover("restartable", blank); err != nil {
+		t.Fatal(err)
+	}
+	h, err = second.Acquire(context.Background(), "restartable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := h.Step(context.Background(), nil); err != nil || !done {
+		t.Fatalf("resumed step done=%v err=%v", done, err)
+	}
+	second.Retire("restartable")
+	if got := second.Stats(); got.Resident != 0 || got.Parked != 0 {
+		t.Fatalf("post-retire stats=%+v", got)
+	}
+	var state warmState
+	if err := json.Unmarshal(log.snapshot()["restartable"], &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Took != 2 || len(state.Hist) != 2 {
+		t.Fatalf("restored state=%+v", state)
 	}
 }

@@ -208,6 +208,19 @@ def issue_text_targets_trust_critical(text: str) -> str | None:
     m = _TRUST_CRITICAL_TEXT_RE.search(text or "")
     return m.group(1) if m else None
 
+# Default cap for the `gh issue list` fetch. MUST stay above the real open-issue
+# count: `gh issue list` returns NEWEST-first, so a fetch that hits the cap silently
+# drops the OLDEST open issues, which then never reach a lane and so are never
+# dispatch candidates (an unrouted issue is skipped, but an unFETCHED one is not even
+# counted). Measured 2026-08-06 at 1383 open: the historical 1000 default truncated,
+# hiding 383 open issues — 203 of them cleanly ROUTABLE — from every dispatch picker,
+# while `counts.open` reported 897 as if that were the whole backlog. The cost of a
+# larger cap is zero until the backlog reaches it (gh returns only what exists; the
+# full 1383-issue fetch measured 34s against the callers' 130s timeout), so this
+# matches the value `.github/workflows/issue-lane-router.yml` already pins for the
+# label backfill. `compute_coverage` still flags truncation if the backlog outgrows it.
+DEFAULT_ISSUE_LIMIT = 3000
+
 # Scope token -> lane, when the scope is not itself a lane name. Conservative and
 # derived from real issue scopes vs the real lane roster. Override via --config.
 SCOPE_ALIAS: dict[str, str] = {
@@ -286,6 +299,29 @@ CONFIDENCE_RANK = {
 # so they never trip the uppercase-bounded hardware-name scrubber (scrub_hardware_names).
 GPU_CAP_LABELS = {"cuda", "gpu", "multi-gpu"}
 GPU_CAP_KEYWORDS = ("h100", "a100", "dgx", "nvidia")
+
+# The maintainer-applied "this needs sanctioned physical hardware" label. Unlike the
+# accelerator signals above — which INFER the requirement from prose — this one is a
+# human judgement, so it is precise by construction and needs no regex. It carries its
+# own `hardware` capability rather than `gpu`, because the work it gates is not always
+# accelerator work: #4750 projects desired state into systemd and #4754 wants a real
+# crash/reboot/partition host, neither of which a lone GPU satisfies. A node that can
+# serve it declares FLEET_NODE_CAPS=hardware; a datacenter GPU box declares
+# `gpu,hardware`. The two caps are ANDed by the dispatcher's subset test, so a
+# single-GPU dev node no longer claims multi-node lab campaigns it cannot finish.
+#
+# The measured gap this closes (#4835): the label alone was invisible here, so a P0
+# needing 8-GPU hardware plus a live lab witness returned NO caps and was dispatched 13
+# times on this GPU-less host AFTER the Part-B gate landed. Its own parent #4784 IS
+# gated — only because its body happens to spell the accelerator bare, while #4835
+# writes the digit-suffixed node label, which _has_keyword's whole-token boundary
+# rejects. That near-miss is deliberately NOT cured by loosening the matcher to accept a
+# numeric/plural suffix: doing so newly gates #5595 and #5594, which merely CITE the lab
+# box while being ordinary locally-runnable work (#5595 names it only to describe
+# #4835's parked-ness). A false skip silently starves the backlog with no operator
+# signal, so the precise human label wins over the broader regex.
+HARDWARE_CAP_LABEL = "gated/hardware"
+HARDWARE_CAP = "hardware"
 
 # ---------------------------------------------------------------------------
 # Work-CLASS axis (infra / frontdoor / dev) — orthogonal to the lane an issue
@@ -564,6 +600,30 @@ def _scope_token(title: str) -> str | None:
     return bare.group(1).strip().lower() if bare else None
 
 
+def _norm_scope(token: str | None) -> str:
+    """A scope/lane token with word separators folded out, for punctuation-insensitive
+    matching (`cache-value` -> `cachevalue`).
+
+    Lane names in `dos.toml` are unpunctuated (`cachevalue`, `sessionjournal`), but
+    issue authors write the SAME leaf hyphenated in a Conventional-Commits scope
+    (`feat(cache-value): ...`). The exact-scope rung is a literal `==`, so those
+    titles matched nothing and the issues went UNROUTED — invisible to the lane
+    picker forever, because an unrouted issue never enters `lanes[...]` and so is
+    never a dispatch candidate. Folding the separator is a pure widening of the
+    exact-scope rung: no two lanes share a normalized form (asserted in the tests),
+    so a hit is unambiguous."""
+    return re.sub(r"[-_ ]", "", (token or "").lower())
+
+
+def _norm_lane_index(lane_set: set[str]) -> dict[str, str]:
+    """Normalized-lane-name -> lane. Lanes whose normalized form is shared are
+    DROPPED rather than guessed, so this index only ever resolves unambiguously."""
+    seen: dict[str, list[str]] = {}
+    for lane in lane_set:
+        seen.setdefault(_norm_scope(lane), []).append(lane)
+    return {k: v[0] for k, v in seen.items() if len(v) == 1}
+
+
 def _type_token(title: str) -> str | None:
     """The leading type from `type(scope):` for nonstandard issue families."""
     m = _SCOPE_RE.search(title or "")
@@ -582,21 +642,31 @@ def _has_keyword(text: str, keyword: str) -> bool:
 
 def issue_required_caps(issue: dict[str, Any]) -> list[str]:
     """The hardware capabilities a host must declare (FLEET_NODE_CAPS) to run this
-    issue. Returns ["gpu"] when the issue carries an unambiguous accelerator signal —
-    a cuda/gpu/multi-gpu label or scope, or a named-accelerator keyword (h100/a100/
-    dgx/nvidia) in the title/body — else []. The dispatcher's capability gate skips an
-    issue whose required_caps a node lacks, leaving it OPEN + visible for a GPU-capable
-    node's dispatcher to claim; it does NOT stop or cool the issue. Pure + deterministic."""
+    issue, sorted and deduplicated.
+
+    Contributes "gpu" when the issue carries an unambiguous accelerator signal — a
+    cuda/gpu/multi-gpu label or scope, or a named-accelerator keyword (h100/a100/dgx/
+    nvidia) in the title/body — and "hardware" when it carries the maintainer-applied
+    HARDWARE_CAP_LABEL (see that constant for why the human label is its own capability
+    rather than an alias for "gpu"). Both can apply, and the dispatcher requires the
+    node to declare every one of them; [] means any host can run it.
+
+    The dispatcher's capability gate skips an issue whose required_caps a node lacks,
+    leaving it OPEN + visible for a capable node's dispatcher to claim; it does NOT stop
+    or cool the issue. Pure + deterministic."""
     labels = {ln.lower() for ln in _label_names(issue)}
+    caps: set[str] = set()
+    if HARDWARE_CAP_LABEL in labels:
+        caps.add(HARDWARE_CAP)
     if labels & GPU_CAP_LABELS:
-        return ["gpu"]
+        caps.add("gpu")
     scope = _scope_token(str(issue.get("title") or ""))
     if scope in GPU_CAP_LABELS:
-        return ["gpu"]
+        caps.add("gpu")
     text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
     if any(_has_keyword(text, kw) for kw in GPU_CAP_KEYWORDS):
-        return ["gpu"]
-    return []
+        caps.add("gpu")
+    return sorted(caps)
 
 
 def is_blocked_by_human(issue: dict[str, Any], *, label: str = BLOCKED_BY_HUMAN_LABEL) -> bool:
@@ -787,6 +857,11 @@ def _route_by_ladder(
     # Rung 2: exact scope == lane.
     scope_lane = None
     scope_conf = None
+    # Set only by rung 3b, so the emitted signal names the issue's OWN scope token
+    # (`scope:cache-value->cachevalue`). Without it the token falls back to the
+    # Conventional-Commits TYPE and the audit trail reads `scope:feat->cachevalue`,
+    # which tells an operator nothing about why the lane was chosen.
+    folded_scope = False
     if scope and scope in lane_set and scope not in exclusive:
         scope_lane, scope_conf = scope, "exact-scope"
     # Rung 3: alias scope -> lane.
@@ -794,6 +869,16 @@ def _route_by_ladder(
         scope_lane, scope_conf = scope_alias[scope], "alias"
     elif typ and typ in scope_alias and scope_alias[typ] in lane_set:
         scope_lane, scope_conf = scope_alias[typ], "alias"
+    # Rung 3b: punctuation-insensitive scope == lane (`cache-value` -> `cachevalue`).
+    # Deliberately placed BELOW the explicit alias rungs, never above: two shipped
+    # aliases (`terminal-bench` -> bench, `support-maturity` -> tools) ALSO match a
+    # same-named lane once the hyphen is folded, and the hand-written alias is the
+    # operator's stated intent. Running this last means the new rung can only ever
+    # rescue a scope that matched NOTHING, so it cannot re-route any issue that
+    # routes today. Graded `alias` (not `exact-scope`) for the same reason — a
+    # separator-folded hit is weaker evidence than a literal lane name.
+    elif scope and (_folded := _norm_lane_index(lane_set).get(_norm_scope(scope))):
+        scope_lane, scope_conf, folded_scope = _folded, "alias", True
 
     # Rung 4: label -> lane.
     label_lane = None
@@ -822,7 +907,7 @@ def _route_by_ladder(
     if scope in exclusive:
         return _blocked_route(issue, scope, f"exclusive-scope:{scope}", "exclusive")
     if scope_lane in exclusive:
-        token = scope if scope in scope_alias else typ
+        token = scope if (scope in scope_alias or folded_scope) else typ
         return _blocked_route(issue, scope_lane, f"scope:{token}->{scope_lane}", "exclusive")
     if label_lane in exclusive:
         return _blocked_route(issue, label_lane, f"label->{label_lane}", "exclusive")
@@ -901,7 +986,8 @@ def _route_by_ladder(
                       f"body-lane:{body_lane}" + demote_note, False)
 
     if scope_lane is not None:
-        token = scope if scope in lane_set or scope in scope_alias else typ
+        token = scope if (scope in lane_set or scope in scope_alias
+                          or folded_scope) else typ
         return _route(issue, scope_lane, scope_conf,
                       f"scope:{token}->{scope_lane}" + demote_note, False)
     if label_lane is not None:
@@ -1229,7 +1315,7 @@ def compute_coverage(*, issues_fetched: int, issue_limit: int) -> dict[str, Any]
 def collect(
     workspace: Path,
     *,
-    issue_limit: int = 1000,
+    issue_limit: int = DEFAULT_ISSUE_LIMIT,
     max_unrouted_frac: float = 0.25,
     fetcher: IssueFetcher | None = None,
     scope_alias: dict[str, str] | None = None,
@@ -1495,7 +1581,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Route open GitHub issues to dos.toml lanes (read-only).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
-    ap.add_argument("--issue-limit", type=int, default=1000, help="max open issues to fetch")
+    ap.add_argument("--issue-limit", type=int, default=DEFAULT_ISSUE_LIMIT,
+                    help="max open issues to fetch")
     ap.add_argument("--max-unrouted-frac", type=float, default=0.25,
                     help="ACTION verdict when UNROUTED fraction exceeds this")
     ap.add_argument("--config", default="", help="JSON file overriding scope_alias / label_alias")
@@ -1522,6 +1609,8 @@ def main(argv: list[str] | None = None) -> int:
                          "GitHub (create the labels + `gh issue edit`). The only "
                          "outward-facing action this tool takes; operator-gated.")
     args = ap.parse_args(argv)
+    if args.apply_labels_write and not args.apply_labels:
+        ap.error("--apply-labels-write requires --apply-labels")
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     scope_alias = label_alias = None

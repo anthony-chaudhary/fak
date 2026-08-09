@@ -32,7 +32,8 @@
       "distinction": "Each is a single concrete enum VALUE on its subsystem's stance type, NOT the general tool-admission posture concept that selects fail-closed vs admit-and-log behavior.",
       "distinct_from": [
         "posture (tool admission)",
-        "ResetPolicy (gateway)"
+        "ResetPolicy (gateway)",
+        "orgpostureinert"
       ],
       "aliases": [
         "posturewarm",
@@ -218,7 +219,8 @@
       "distinct_from": [
         "disambiguation-debt",
         "scorecard control pane",
-        "x2-session-runtime-sessionobsdebt"
+        "x2-session-runtime-sessionobsdebt",
+        "x2-score-debt-gitdailyhealthdebtkey"
       ],
       "aliases": [
         "conflationdebt",
@@ -248,7 +250,8 @@
       "distinction": "These are SPECIFIC scorecard instances and their payload/baseline artifacts, NOT the generic scorecard concept and NOT the control pane that folds them all together.",
       "distinct_from": [
         "scorecard",
-        "scorecard control pane"
+        "scorecard control pane",
+        "x2-score-debt-gitdailyhealthdebtkey"
       ],
       "aliases": [
         "codequalityscorecard",
@@ -459,7 +462,8 @@
       "distinction": "It witnesses a CONCRETE evict capability of one engine/pool (an instance of support), distinct from the general support concept and from correctness, which would prove the eviction is bit-exact rather than merely available.",
       "distinct_from": [
         "support",
-        "correctness"
+        "correctness",
+        "kvprefixreusesupported"
       ],
       "aliases": [
         "supportsexactspan",
@@ -548,7 +552,9 @@
       "distinction": "It is the physical PAGED KV block allocator for inference, NOT the polymodel model-residency LRU Pool nor the cachemeta per-tier PoolProfile.",
       "distinct_from": [
         "Pool (polymodel residency)",
-        "PoolProfile"
+        "PoolProfile",
+        "x2-pool-workerworktreepoolcapenv",
+        "x2-pool-workerworktreepoolcap"
       ],
       "aliases": [
         "newpagedkvpool",
@@ -570,7 +576,8 @@
       "distinction": "It is a fleet ACCOUNT-SEAT capacity pool for dispatch admission, NOT a KV/memory block pool (PagedKVPool family) nor the polymodel model-residency Pool.",
       "distinct_from": [
         "Pool (session)",
-        "Pool (polymodel residency)"
+        "Pool (polymodel residency)",
+        "x2-pool-workerworktreepoolcapenv"
       ],
       "aliases": [],
       "grounding": "buildseatpool",

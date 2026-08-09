@@ -80,7 +80,7 @@ func main() {
 	case "recover":
 		cmdRecover(os.Args[2:])
 	case "concept":
-		os.Exit(runConcept(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runConceptCLI(os.Stdout, os.Stderr, os.Args[2:]))
 	case "rename-concept":
 		cmdRenameConcept(os.Args[2:])
 	case "session":
@@ -121,6 +121,10 @@ func main() {
 		cmdToolproc(os.Args[2:])
 	case "stallscan":
 		cmdStallscan(os.Args[2:])
+	case "learning-observation":
+		cmdLearningObservation(os.Args[2:])
+	case "sessiondiag":
+		cmdSessionDiag(os.Args[2:])
 	case "host-crash":
 		cmdHostCrash(os.Args[2:])
 	case "host-relaunch-broker":
@@ -197,6 +201,10 @@ func main() {
 		cmdDebug(os.Args[2:])
 	case "policy":
 		cmdPolicy(os.Args[2:])
+	case "enroll":
+		// Pin (or show, or revoke) this box's org trust anchor — the opt-in door to
+		// the org-policy plane, #5323. See cmd/fak/enroll.go.
+		cmdEnroll(os.Args[2:])
 	case "egress":
 		cmdEgress(os.Args[2:])
 	case "eve":
@@ -212,6 +220,8 @@ func main() {
 		cmdLint(os.Args[2:])
 	case "codelint":
 		cmdCodelint(os.Args[2:])
+	case "breath":
+		cmdBreath(os.Args[2:])
 	case "tool-coverage-audit":
 		cmdToolCoverageAudit(os.Args[2:])
 	case "answer-shape":
@@ -246,14 +256,6 @@ func main() {
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":
 		cmdWorkflowAudit(os.Args[2:])
-	case "tree-doctor":
-		cmdTreeDoctor(os.Args[2:])
-	case "git-maint":
-		cmdGitMaint(os.Args[2:])
-	case "clean-bins":
-		cmdCleanBins(os.Args[2:])
-	case "self-update":
-		cmdSelfUpdate(os.Args[2:])
 	case "slack":
 		cmdSlack(os.Args[2:])
 	case "chatops":
@@ -278,6 +280,8 @@ func main() {
 		// Per-agent RSS + CPU density witness for the in-process microagent host
 		// vs the guarded-CLI baseline (#2008; mock engine, no spend).
 		cmdMicroBench(os.Args[2:])
+	case "token-profile":
+		cmdTokenProfile(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
@@ -493,6 +497,8 @@ func main() {
 		cmdSkill(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
+	case "test-quality":
+		cmdTestQuality(os.Args[2:])
 	case "quality":
 		// The missing-middle quality ladder spine (epic #4509): `fak quality run|explain`
 		// runs one versioned case through a reference path and an engine path, applies a
@@ -538,12 +544,35 @@ func main() {
 		cmdNodeUsage(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
+	case "capabilities":
+		// The memory-forward "what can I do?" surface (cmd/fak/capabilities.go over
+		// internal/selfquery, #1500 / epic #1494). It shipped with full flag parsing,
+		// a usage block, three passing unit tests, and its own guard-startup banner
+		// (guard_capabilities.go) telling the wrapped agent to run `fak capabilities
+		// [<intent>]` -- plus two .claude/skills lines (field-borrow, study-repo) and
+		// an INDEX.md mention doing the same -- but never a dispatch arm, so the
+		// advertised verb answered "unknown verb" while runCapabilities was exercised
+		// only by capabilities_test.go (#5558, the same defect class #5546 closed for
+		// `fak idea-scout`). No wrapper was ever authored or swept here: runCapabilities
+		// is called directly, same shape as the idea-scout fix.
+		os.Exit(runCapabilities(os.Stdout, os.Stderr, os.Args[2:]))
 	case "savings-vector":
 		cmdSavingsVector(os.Args[2:])
 	case "horizon-recovery":
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "idea-scout":
+		// The research-to-issue feeder as a verb (cmd/fak/ideascout.go over
+		// internal/ideascout). It shipped with a full Go port of tools/idea_scout.py, a
+		// doc page (docs/idea-scout.md) naming `fak idea-scout` as the AGENT-facing half
+		// of the two-implementation contract, and two .claude/skills/question-loop lines
+		// pointing agents at it -- but never a dispatch arm, so the advertised verb
+		// answered "unknown verb" and the Go port was exercised only by its own unit test
+		// (#5546). The `cmdIdeaScout` wrapper it was authored with was later swept as dead
+		// code (#1419): the caller it was missing was THIS arm, not the wrapper.
+		// Dry-run is the default; --live is what files real issues (see ideaScoutUsage).
+		os.Exit(runIdeaScout(os.Stdout, os.Stderr, os.Args[2:]))
 	case "issue":
 		cmdIssue(os.Args[2:])
 	case "complain":
@@ -592,6 +621,8 @@ func main() {
 		cmdReadmeVisualAudit(os.Args[2:])
 	case "codex-memory":
 		cmdCodexMemory(os.Args[2:])
+	case "dormancy":
+		cmdDormancy(os.Args[2:])
 	case "version", "-v", "--version":
 		cmdVersion(os.Stdout)
 	case "-h", "--help", "help":
@@ -612,6 +643,10 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 	switch name {
 	case "run":
 		cmdRun(args)
+	case "launch":
+		cmdLaunch(args)
+	case "tool-width":
+		cmdToolWidth(args)
 	case "replay":
 		// Explicit, unambiguous spelling of the trace-replay path (`fak run --trace`).
 		cmdRunTrace(args)
@@ -654,6 +689,18 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdWorktreeVerb(args)
 	case "wip":
 		cmdWip(args)
+	case "tree-doctor":
+		cmdTreeDoctor(args)
+	case "git-maint":
+		cmdGitMaint(args)
+	case "git-daily":
+		cmdGitDaily(args)
+	case "gitd":
+		cmdGitd(args)
+	case "clean-bins":
+		cmdCleanBins(args)
+	case "self-update":
+		cmdSelfUpdate(args)
 	case "preflight":
 		cmdPreflight(args)
 	case "ci-preflight":
@@ -862,6 +909,9 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchPost(os.Stdout, os.Stderr, argv[1:]))
 		case "request":
 			os.Exit(runBenchRequest(os.Stdout, os.Stderr, argv[1:]))
+		case "gitspawn":
+			// #5620: git process spawns per unit of work on the three hot paths.
+			os.Exit(runGitSpawnBench(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
@@ -1003,13 +1053,15 @@ func cmdAgent(argv []string) {
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	routeManifest := fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
+	routeAccounts := fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
-	loadedRoute, runOpts, err := loadAgentRouteOptions(*routeManifest)
+	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)
 	if loadedRoute != nil {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *routeManifest)
 	}
+	announceAgentRouteAccounts(os.Stderr, *routeAccounts, loadedAccounts)
 
 	var planner agent.Planner
 	if *offline || *baseURL == "" {
@@ -1042,6 +1094,9 @@ func cmdAgent(argv []string) {
 		_ = os.WriteFile(*logOut, agent.RenderTrace(trace), 0o644)
 	}
 	agent.PrintReport(os.Stdout, res, trace, *out)
+	// The summary above names the file; this names the DIRECTORY it went to, so
+	// the first-run proof never leaves an unfindable artifact behind (#5473).
+	announceAgentReport(os.Stderr, *out)
 }
 
 func loadAgentRouteOptions(path string) (*modelroute.Manifest, []agent.RunOption, error) {

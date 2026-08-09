@@ -5,6 +5,8 @@ package main
 //	fak workflow lint [<script>|-]   refute a fak-blind workflow: exit 1 unless it
 //	                                 references self-index + memory + shared-path
 //	fak workflow seed                emit the fak-native Workflow seed template
+//	fak workflow resume <run-dir>    skip only the steps whose completion is witnessed,
+//	                                 re-execute everything else (#2444, workflow_resume.go)
 //
 // `lint` is a real gate — exit 0 = FAK-NATIVE, exit 1 = FAK-BLIND — so it can sit on
 // the ultracode generation path and a fak-guarded session cannot emit a workflow that
@@ -34,6 +36,8 @@ func runWorkflow(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 		return workflowLint(stdout, stderr, stdin, argv[1:])
 	case "seed":
 		return workflowSeed(stdout, stderr, argv[1:])
+	case "resume":
+		return workflowResume(stdout, stderr, argv[1:], nil)
 	default:
 		fmt.Fprintf(stderr, "fak workflow: unknown subcommand %q\n", argv[0])
 		writeWorkflowUsage(stderr)
@@ -122,7 +126,8 @@ func workflowSeed(stdout, stderr io.Writer, argv []string) int {
 }
 
 func writeWorkflowUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak workflow <lint|seed> [args]")
+	fmt.Fprintln(w, "usage: fak workflow <lint|seed|resume> [args]")
 	fmt.Fprintln(w, "  lint [<script>|-]   refute a fak-blind workflow (exit 1 unless self-index + memory + shared-path)")
 	fmt.Fprintln(w, "  seed                emit the fak-native Workflow seed template")
+	fmt.Fprintln(w, "  resume <run-dir>    replay only witnessed steps, re-execute the rest (skipped=N executed=M)")
 }

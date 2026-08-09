@@ -26,9 +26,22 @@ func TestModuleOf(t *testing.T) {
 		{".github\\workflows\\release-cadence.yml", ".github/workflows/release-cadence.yml", "workflow", true},
 		{".github/workflows/nested/x.yml", "", "", false},   // Actions ignores subdirs
 		{".github/actions/setup/action.yml", "", "", false}, // not the workflows keyspace
-		{"docs/notes/X.md", "", "", false},
-		{"cmd/orphan.go", "", "", false},      // directly under a root: no module
-		{"internal/orphan.go", "", "", false}, // directly under a root: no module
+		{"cmd/orphan.go", "", "", false},                    // directly under a root: no module
+		{"internal/orphan.go", "", "", false},               // directly under a root: no module
+		// docs/ is a hybrid prose keyspace (#2460): top-level pages are file-keyed,
+		// sections are directory-keyed, and only .md prose counts.
+		{"docs/notes/X.md", "docs/notes", "docs", true},
+		{"docs/architecture.md", "docs/architecture.md", "docs", true}, // top-level page: file-keyed
+		{"docs/fak/edge-quickstart.md", "docs/fak", "docs", true},      // section page: keys the section
+		{"docs/adoption/deep/nested/x.md", "docs/adoption", "docs", true},
+		{"docs\\fak\\concept-glossary.md", "docs/fak", "docs", true}, // backslash-normalized
+		{"docs/nightrun/module-versions.jsonl", "", "", false},       // generated ledger: data, not prose
+		{"docs/nightrun/README.md", "docs/nightrun", "docs", true},   // but prose beside it still counts
+		{"docs/_config.yml", "", "", false},                          // site config: not prose
+		{"docs/benchmark-methodology.witness.txt", "", "", false},    // witness artifact: not prose
+		{"docs/adoption-visuals/chart.svg", "", "", false},           // image: not prose
+		{"docs/README.md", "docs/README.md", "docs", true},           // top-level page
+		{"docs", "", "", false},                                      // the root itself is no module
 		// tools/ is a flat, family-keyed script keyspace.
 		{"tools/account_probe.py", "tools/account_probe", "tools", true},
 		{"tools/account_probe_test.py", "tools/account_probe", "tools", true}, // _test folds into the family
@@ -232,6 +245,90 @@ func TestToolsKeyspace(t *testing.T) {
 		if r.Kind != "tools" || !strings.HasPrefix(r.Module, "tools/") {
 			t.Errorf("ledger row not a tools row: %+v", r)
 		}
+	}
+}
+
+// TestDocsKeyspace is the #2460 witness: docs/ prose flows through Snapshot as a
+// "docs" module carrying a derived r<rev>+g<sha> version and is emittable as a
+// ledger row (the "live stamp containing docs rows"), so docfreshrsi can read a
+// doc's rev from the ledger instead of guessing at staleness. It pins the hybrid
+// granularity — a top-level page is its own module, a section page keys its
+// docs/<dir> at any depth — and the .md-only rule that keeps the ledger
+// convergent: appending to docs/nightrun/module-versions.jsonl, the ledger this
+// very package writes, must bump NO module, or every stamp would dirty the next.
+func TestDocsKeyspace(t *testing.T) {
+	const docsLog = "\x1e" + "dc222222\t2026-08-03T12:00:00Z\n" +
+		"docs/architecture.md\n" +
+		"docs/fak/edge-quickstart.md\n" +
+		"docs/fak/concept-glossary.md\n" + // same section twice in one commit: counts once
+		"docs/nightrun/module-versions.jsonl\n" + // the ledger itself: bumps nothing
+		"docs/_config.yml\n" + // site config: not prose
+		"\x1e" + "dc111111\t2026-08-02T09:00:00Z\n" +
+		"docs/architecture.md\n" +
+		"docs/adoption/deep/nested/playbook.md\n"
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("dchead01\n"), nil
+		case "ls-files":
+			return []byte("docs/architecture.md\x00docs/fak/edge-quickstart.md\x00" +
+				"docs/fak/concept-glossary.md\x00docs/adoption/deep/nested/playbook.md\x00" +
+				"docs/nightrun/module-versions.jsonl\x00docs/_config.yml\x00"), nil
+		case "log":
+			return []byte(docsLog), nil
+		}
+		t.Fatalf("unexpected git args: %v", args)
+		return nil, nil
+	}
+	rep, err := Snapshot(context.Background(), t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Three modules survive: the top-level page docs/architecture.md and the two
+	// sections docs/fak + docs/adoption. The ledger and the site config are data.
+	if len(rep.Modules) != 3 {
+		t.Fatalf("got %d modules, want 3 (one page + two sections): %+v", len(rep.Modules), rep.Modules)
+	}
+	arch := findModuleMV(t, rep, "docs/architecture.md")
+	if arch.Kind != "docs" || arch.Rev != 2 || arch.LastCommit != "dc222222" {
+		t.Fatalf("docs/architecture.md = %+v, want kind=docs rev=2 last=dc222222 (both commits touch it)", arch)
+	}
+	if v := arch.Version(); v != "r2+gdc222222" {
+		t.Errorf("Version() = %q, want r2+gdc222222", v)
+	}
+	// The section counts once for the commit, not once per page in it.
+	fak := findModuleMV(t, rep, "docs/fak")
+	if fak.Kind != "docs" || fak.Rev != 1 || fak.LastCommit != "dc222222" {
+		t.Fatalf("docs/fak = %+v, want kind=docs rev=1 last=dc222222 (two pages, one commit)", fak)
+	}
+	// Nesting depth does not fragment the section key.
+	adopt := findModuleMV(t, rep, "docs/adoption")
+	if adopt.Kind != "docs" || adopt.Rev != 1 {
+		t.Fatalf("docs/adoption = %+v, want kind=docs rev=1 (deep nesting still keys the section)", adopt)
+	}
+	// The ledger this package writes must never become a module: if it did, every
+	// stamp would bump docs/nightrun and the next stamp could never report clean.
+	for _, m := range rep.Modules {
+		if m.Name == "docs/nightrun" {
+			t.Errorf("docs/nightrun became a module from a .jsonl-only commit: %+v — the stamp would never converge", m)
+		}
+	}
+	// The docs modules must be emittable as ledger rows (empty prior ledger).
+	rows := DeltaRows(rep, nil, "2026-08-03T12:00:00Z")
+	if len(rows) != 3 {
+		t.Fatalf("ledger rows = %+v, want three docs rows", rows)
+	}
+	for _, r := range rows {
+		if r.Kind != "docs" || !strings.HasPrefix(r.Module, "docs/") {
+			t.Errorf("ledger row not a docs row: %+v", r)
+		}
+	}
+	// The docfreshrsi integration seam: a corpus key resolves to the module key
+	// whose rev the ledger carries, git-free.
+	if got := ModulesForPaths([]string{"docs/fak/edge-quickstart.md", "docs/architecture.md",
+		"docs/nightrun/module-versions.jsonl"}); len(got) != 2 ||
+		got[0] != "docs/architecture.md" || got[1] != "docs/fak" {
+		t.Errorf("ModulesForPaths = %v, want [docs/architecture.md docs/fak] (the ledger maps to no module)", got)
 	}
 }
 

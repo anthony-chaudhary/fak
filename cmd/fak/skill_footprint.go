@@ -102,6 +102,7 @@ func runSkillFootprint(out, errw io.Writer, argv []string) int {
 			"skill_count":             fp.SkillCount,
 			"description_floor_bytes": fp.DescFloor,
 			"name_floor_bytes":        fp.NameFloor,
+			"intent_floor_bytes":      fp.IntentFloor,
 			"resident_floor_bytes":    residentFloor,
 			"card_floor_bytes":        fp.CardFloor,
 			"approx_tokens":           skillfootprint.ApproxTokens(residentFloor),
@@ -120,6 +121,10 @@ func runSkillFootprint(out, errw io.Writer, argv []string) int {
 		*profile, fp.SkillCount, residentFloor, skillfootprint.ApproxTokens(residentFloor), fp.DescFloor, fp.NameFloor, fp.CardFloor, *includeMCP)
 	fmt.Fprintf(out, "  description budget (#5444): %d B committed, measured %d B -> %s\n",
 		skillfootprint.SkillDescriptionBudgetBytes, fp.DescFloor, skillDescriptionBudgetStatus(fp))
+	// The #5560 residency split, reported next to the floor it moved: the at-rest card
+	// now carries a capped one-line intent, not the full description prose.
+	fmt.Fprintf(out, "  at-rest intent slice (#5560): %d B (~%d tokens) across %d skill(s); the full description stays the in-process ranking key and faults in with the body\n",
+		fp.IntentFloor, skillfootprint.ApproxTokens(fp.IntentFloor), fp.SkillCount)
 	if len(heaviest) == 0 {
 		fmt.Fprintln(out, "  (no skills discovered under .claude/skills)")
 		return 0

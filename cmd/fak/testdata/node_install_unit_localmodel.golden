@@ -1,0 +1,72 @@
+=== launchd (macOS) ===
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Written by: fak node install — regenerate with: fak node install -->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fak.serve-gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/Users/youruser/.config/fak/serve-wrapper.sh</string>
+      <string>/Users/youruser/.local/bin/fak</string>
+      <string>serve</string>
+      <string>--provider</string><string>openai</string>
+      <string>--base-url</string><string>http://127.0.0.1:8131/v1</string>
+      <string>--model</string><string>qwen3.6-27b</string>
+      <string>--addr</string><string>127.0.0.1:8080</string>
+      <string>--policy</string><string>/Users/youruser/.config/fak/node-policy.json</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>FAK_AUDIT_JOURNAL</key>
+      <string>/Users/youruser/.config/fak/logs/serve_audit.jsonl</string>
+      <key>FAK_PLANNER_TIMEOUT_S</key>
+      <string>1800</string>
+      <key>FAK_HTTP_WRITE_TIMEOUT_S</key>
+      <string>1800</string>
+      <key>FAK_PROVIDER_EXTRA_BODY_JSON</key>
+      <string>{&quot;top_k&quot;:20,&quot;chat_template_kwargs&quot;:{&quot;preserve_thinking&quot;:true}}</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/youruser/.config/fak/logs</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/youruser/.config/fak/logs/serve.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/youruser/.config/fak/logs/serve.err</string>
+  </dict>
+</plist>
+
+=== systemd --user (Linux) ===
+[Unit]
+Description=fak serve gateway (always-on adjudicating proxy for http://127.0.0.1:8131/v1)
+After=network.target
+
+[Service]
+ExecStart=/Users/youruser/.local/bin/fak serve --provider openai --base-url http://127.0.0.1:8131/v1 --model qwen3.6-27b --addr 127.0.0.1:8080 --policy /Users/youruser/.config/fak/node-policy.json
+Restart=always
+RestartSec=3
+Environment=FAK_AUDIT_JOURNAL=/Users/youruser/.config/fak/logs/serve_audit.jsonl
+Environment="FAK_PLANNER_TIMEOUT_S=1800"
+Environment="FAK_HTTP_WRITE_TIMEOUT_S=1800"
+Environment="FAK_PROVIDER_EXTRA_BODY_JSON={\"top_k\":20,\"chat_template_kwargs\":{\"preserve_thinking\":true}}"
+StandardOutput=append:/Users/youruser/.config/fak/logs/serve.log
+StandardError=append:/Users/youruser/.config/fak/logs/serve.err
+
+[Install]
+WantedBy=default.target
+
+=== Scheduled Task runner (Windows) ===
+@echo off
+rem Written by: fak node install — regenerate with: fak node install
+set "FAK_AUDIT_JOURNAL=/Users/youruser/.config/fak/logs\serve_audit.jsonl"
+set FAK_PLANNER_TIMEOUT_S=1800
+set FAK_HTTP_WRITE_TIMEOUT_S=1800
+set FAK_PROVIDER_EXTRA_BODY_JSON={"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}
+"/Users/youruser/.local/bin/fak" serve --provider openai --base-url http://127.0.0.1:8131/v1 --model qwen3.6-27b --addr 127.0.0.1:8080 --policy "/Users/youruser/.config/fak/node-policy.json" >> "/Users/youruser/.config/fak/logs\serve.log" 2>> "/Users/youruser/.config/fak/logs\serve.err"

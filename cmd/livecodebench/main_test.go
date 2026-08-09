@@ -384,3 +384,29 @@ func TestRunPreflightNeverProbesNetworkByDefault(t *testing.T) {
 		}
 	}
 }
+
+// A 404 from /rows is the ONLY thing a caller sees when the dataset viewer refuses a
+// script-based dataset, and it invites the wrong fix (re-probe every release). Assert the
+// message carries the real reason and names the offline path instead.
+func TestRowsFetchFailureExplainsViewerRefusal(t *testing.T) {
+	const ds = "livecodebench/code_generation_lite"
+	const why = "The dataset viewer doesn't support this dataset because it runs arbitrary Python code."
+
+	got := rowsFetchFailure(404, ds, "release_v6", why)
+	for _, want := range []string{"HTTP 404", ds, "release_v6", "arbitrary Python code", "--from", "hf download"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("404 message missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "ANY --release-version") {
+		t.Fatalf("404 message should say the release pin is not the problem:\n%s", got)
+	}
+
+	// No reason to add, or a status that is not a 404: stay terse, never invent a cause.
+	if got := rowsFetchFailure(404, ds, "release_v6", "   "); !strings.HasSuffix(got, "config=release_v6") {
+		t.Fatalf("empty refusal should leave the bare message, got %q", got)
+	}
+	if got := rowsFetchFailure(500, ds, "release_v6", why); strings.Contains(got, "--from") {
+		t.Fatalf("non-404 should not claim the viewer refused it, got %q", got)
+	}
+}

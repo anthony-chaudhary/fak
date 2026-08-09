@@ -726,7 +726,16 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if *restartOnBudget && *contextBudget <= 0 {
-		fmt.Fprintln(stderr, "fak console agent: --restart-on-budget requires --context-budget-tokens N")
+		writeConfigBail(stderr, configBail{
+			Verb:    "fak console agent",
+			Reason:  bailBudgetFlagIncoherent,
+			Summary: "--restart-on-budget has no budget to restart against",
+			Knobs: []bailKnob{
+				bailFlag("restart-on-budget", "true"),
+				bailFlag("context-budget-tokens", strconv.Itoa(*contextBudget)).want("a positive token count, or drop --restart-on-budget"),
+			},
+			Check: "fak console agent --help   # both budget flags and their defaults",
+		})
 		return 2
 	}
 	if *apiTimeoutMS < 0 {
@@ -860,13 +869,28 @@ func computeTargetCredMissing(tgt computeTarget, keyEnv string, getenv func(stri
 	if env == "" || strings.TrimSpace(getenv(env)) != "" {
 		return "", false // target needs no bearer, or the bearer is present
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "fak console agent: target %q is reachable but its gateway credential $%s is empty.\n", tgt.Name, env)
-	fmt.Fprintf(&b, "  export it (e.g. %s=$(ssh <gateway-host> 'cat ~/.fak-gateway-key')), or pick another target (`fak c --list-targets`)", env)
+	// Reachability and authorization fail differently, and the operator cannot tell
+	// them apart from the outside: the mac gateway answers /healthz unauthenticated,
+	// so the target looks up right until the first real call. Name the credential and
+	// where to get it rather than letting the generic downstream message do it.
+	check := fmt.Sprintf("export %s=$(ssh <gateway-host> 'cat ~/.fak-gateway-key')\n          fak c --list-targets   # every target and the credential it needs", env)
 	if strings.EqualFold(tgt.Name, "mac") {
-		fmt.Fprint(&b, ";\n  or run `fak claude-mac-fak`, which fetches the Mac bearer over SSH for you")
+		check += "\n          fak claude-mac-fak     # fetches the Mac bearer over SSH for you"
 	}
-	return b.String(), true
+	var b strings.Builder
+	writeConfigBail(&b, configBail{
+		Verb:    "fak console agent",
+		Reason:  bailKeyEnvUnset,
+		Summary: fmt.Sprintf("target %q is reachable, but its gateway credential is empty", tgt.Name),
+		Knobs: []bailKnob{
+			bailFlag("gateway-key-env", env),
+			bailEnv(env, "").want("the bearer token " + tgt.GatewayURL + " accepts"),
+		},
+		Check: check,
+		Bind:  []string{"env=" + env},
+	})
+	// The caller Fprintln's this, and the block already ends in a newline.
+	return strings.TrimRight(b.String(), "\n"), true
 }
 
 // applyComputeTarget folds a resolved target into the launch options WITHOUT clobbering

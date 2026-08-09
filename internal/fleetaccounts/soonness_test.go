@@ -1,6 +1,11 @@
 package fleetaccounts
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -111,4 +116,133 @@ func TestResetIsFutureUnchanged(t *testing.T) {
 	if r := resetIsFuture("May 1, 3pm", snNow); r == nil || *r {
 		t.Fatalf("May 1 (expired dated) should be past (false), got %v", r)
 	}
+}
+
+func TestResetTimeResolvesWeekdayNamedWeeklyResets(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Thursday after 09:00: both full and abbreviated Monday forms must name
+	// the following Monday, not today's time-only occurrence.
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, la)
+	wantMonday := time.Date(2026, 6, 8, 9, 0, 0, 0, la)
+	for _, raw := range []string{"Monday at 9am", "mon 9am"} {
+		t.Run(raw, func(t *testing.T) {
+			got, ok := resetTime(raw, now)
+			if !ok || !got.Equal(wantMonday) {
+				t.Fatalf("resetTime(%q) = %v, %v; want %v, true", raw, got, ok, wantMonday)
+			}
+		})
+	}
+
+	// Same weekday at/before now rolls a full week rather than reopening early.
+	mondayAtNine := time.Date(2026, 6, 8, 9, 0, 0, 0, la)
+	got, ok := resetTime("Monday at 9am", mondayAtNine)
+	wantNextWeek := time.Date(2026, 6, 15, 9, 0, 0, 0, la)
+	if !ok || !got.Equal(wantNextWeek) {
+		t.Fatalf("same-instant Monday = %v, %v; want %v, true", got, ok, wantNextWeek)
+	}
+
+	// An explicit date remains authoritative even if its weekday token is wrong.
+	nowBeforeDate := time.Date(2026, 5, 28, 12, 0, 0, 0, la)
+	got, ok = resetTime("Mon Jun 3 at 9am", nowBeforeDate)
+	wantDate := time.Date(2026, 6, 3, 9, 0, 0, 0, la)
+	if !ok || !got.Equal(wantDate) {
+		t.Fatalf("explicit date = %v, %v; want %v, true", got, ok, wantDate)
+	}
+}
+
+func TestWeekdayNamedWeeklyThrottleTracksItsResetBoundary(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := time.Date(2026, 6, 4, 12, 0, 0, 0, la)
+	reset, ok := resetTime("Monday at 9am", before)
+	if !ok {
+		t.Fatal("weekday reset did not parse")
+	}
+	thr := map[string]any{"reset": "Monday at 9am", "weekly": "Monday at 9am"}
+	if got := DisambiguateCap(thr, CapObservation{}, before, DefaultCapPolicy()); !got.Active || !got.WeeklyActive {
+		t.Fatalf("before reset: active=%v weekly_active=%v; want true/true", got.Active, got.WeeklyActive)
+	}
+	// Persist the concrete reset instant, as the runtime does when it carries a
+	// parsed cap forward. It must release immediately after that boundary rather
+	// than reinterpret the recurring weekday as another future week.
+	thr["reset"] = reset.Format("Jan 2, 3:04pm")
+	thr["weekly"] = reset.Format("Jan 2, 3:04pm")
+	after := reset.Add(time.Minute)
+	if got := DisambiguateCap(thr, CapObservation{}, after, DefaultCapPolicy()); got.Active || got.WeeklyActive {
+		t.Fatalf("after reset: active=%v weekly_active=%v; want false/false", got.Active, got.WeeklyActive)
+	}
+}
+
+func TestWeekdayResetFixtureMatchesPythonParser(t *testing.T) {
+	type fixture struct {
+		Reset   string `json:"reset"`
+		NowUTC  string `json:"now_utc"`
+		WantUTC string `json:"want_utc"`
+	}
+	fixturePath := filepath.Join("testdata", "weekday_reset_parity.json")
+	data, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []fixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) < 6 {
+		t.Fatalf("weekday fixture count = %d; want at least 6", len(fixtures))
+	}
+	for _, fx := range fixtures {
+		now, err := time.Parse(time.RFC3339, fx.NowUTC)
+		if err != nil {
+			t.Fatalf("now %q: %v", fx.NowUTC, err)
+		}
+		want, err := time.Parse(time.RFC3339, fx.WantUTC)
+		if err != nil {
+			t.Fatalf("want %q: %v", fx.WantUTC, err)
+		}
+		got, ok := resetTime(fx.Reset, now)
+		if !ok || !got.Equal(want) {
+			t.Errorf("Go resetTime(%q) = %v, %v; want %v, true", fx.Reset, got, ok, want)
+		}
+	}
+
+	python, prefix := fleetaccountsPython(t)
+	_, sourceFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+	script := `
+import datetime as dt, json, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools"))
+import issue_resolve_dispatch as parser
+fixtures = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8-sig"))
+for fixture in fixtures:
+    now = dt.datetime.fromisoformat(fixture["now_utc"].replace("Z", "+00:00")).replace(tzinfo=None)
+    got = parser._parse_reset_to_utc(fixture["reset"], now)
+    want = dt.datetime.fromisoformat(fixture["want_utc"].replace("Z", "+00:00")).replace(tzinfo=None)
+    if got != want:
+        raise SystemExit(f'{fixture["reset"]!r}: Python got {got!r}, want {want!r}')
+`
+	args := append(append([]string{}, prefix...), "-c", script, repoRoot, filepath.Join(repoRoot, "internal", "fleetaccounts", fixturePath))
+	cmd := exec.Command(python, args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Python reset parser disagrees with shared fixture: %v\n%s", err, output)
+	}
+}
+
+func fleetaccountsPython(t *testing.T) (string, []string) {
+	t.Helper()
+	for _, candidate := range []struct {
+		name   string
+		prefix []string
+	}{{"python3", nil}, {"python", nil}, {"py", []string{"-3"}}} {
+		if path, err := exec.LookPath(candidate.name); err == nil {
+			return path, candidate.prefix
+		}
+	}
+	t.Skip("no Python interpreter on PATH; cannot witness Go/Python reset parity")
+	return "", nil
 }

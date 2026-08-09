@@ -62,6 +62,58 @@ WITNESS_OK = "diff-witnessed"
 # dos grades test-line-dominant), booking 0 closes for the whole class.
 RESOLVING_CLAIM_KINDS = {"code_effect", "test", "test_cover"}
 NONRESOLVING_HOLD = "CLAIM_KIND_NONRESOLVING"
+# Author-disclaimed resolution gate (#5865): every OTHER gate here reasons over the
+# ISSUE (labels, body, timeline) or over the commit's DIFF SHAPE (claim kind, touched
+# paths). None reads the commit MESSAGE -- which is exactly where an author states
+# scope. The witnessed harm: #2694 was planned `would_close` on 2726d19, whose own body
+# says "this commit does not claim it [...] No artifact is claimed under `visuals/` [...]
+# The issue stays open." It got through because the #2998 claim gate has a docs-rung
+# carve-out (a `docs(`-titled issue accepts a doc claim) and #2694's body carries no
+# unchecked task box for the #3870 coverage gate to catch.
+#
+# The gate is deliberately RUNG-BLIND, because the carve-out is only one of the doors
+# this class walks through: 3dbe6bf2 (#3258) is `code_effect` over real source paths and
+# still says "claiming it as a served endpoint now would be claiming an integration that
+# has no witness". A commit that disclaims its own resolution cannot witness one at any
+# rung.
+#
+# Markers are AUTHOR-PLACED disclaimers, never an inference over general commit wording.
+# Measured over the last 1500 commits this set matches 7 (0.47%), and every hit is a
+# genuine "I did not finish this" note. A bare `follow-on` marker was REJECTED for this
+# set on that measurement: it matches 56/1500 (3.7%) and would falsely refuse fec8da6f76,
+# one of #2299's own witnesses ("The cmd/fak host wiring [...] is a deferred follow-on").
+DISCLAIMED_HOLD = "COMMIT_DISCLAIMS_RESOLUTION"
+# The witness commit message could not be read. Unlike the issue-side gates this is an
+# ALLOW with an audit note, not a hold -- see ``disclaimer_binds_closure``.
+DISCLAIM_UNREADABLE_NOTE = "COMMIT_BODY_UNREADABLE"
+# `does not` / `doesn't` / `doesnt`, with either quote glyph (issue+commit prose uses the
+# smart quote U+2019 freely, and a marker that missed it would be trivially evadable).
+_NT = r"does\s*n[o’']?t"
+_DISCLAIM_MARKERS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("the issue stays open", re.compile(
+        r"\b(?:the|this)\s+issue\s+(?:still\s+)?(?:stays|remains|is\s+still)\s+open\b",
+        re.IGNORECASE)),
+    ("does not close the issue", re.compile(
+        rf"\b{_NT}\s+close\s+(?:this|the)\s+issue\b", re.IGNORECASE)),
+    ("leaves the issue open", re.compile(
+        r"\b(?:leaves?|keeps?)\s+(?:the\s+|this\s+)?issue\s+open\b", re.IGNORECASE)),
+    ("this commit does not claim it", re.compile(
+        rf"\bthis\s+(?:commit|change|patch)\s+{_NT}\s+"
+        r"(?:claim|close|resolve|satisfy|witness)\b", re.IGNORECASE)),
+    ("no artifact is claimed", re.compile(
+        r"\bno\s+(?:artifact|witness|evidence|resolution|fix)\s+is\s+claimed\b",
+        re.IGNORECASE)),
+    ("the work has no witness", re.compile(
+        r"\b(?:has|have|with|carries)\s+no\s+witness\b", re.IGNORECASE)),
+    ("not yet witnessed", re.compile(
+        r"\bnot\s+yet\s+witnessed\b|\bno\s+witness\s+yet\b", re.IGNORECASE)),
+    ("would be claiming", re.compile(
+        r"\bwould\s+be\s+claiming\b", re.IGNORECASE)),
+)
+# The one NUMBERED form, scoped to the issue actually under consideration. A body saying
+# "#5847 stays OPEN" disclaims *that* issue: holding every OTHER issue's close on it would
+# be an over-refusal, so this marker is compiled per-candidate against its own number.
+_DISCLAIM_THIS_ISSUE_TMPL = r"#{n}\s+(?:still\s+)?(?:stays|remains)\s+open\b"
 # State-readback idempotency (#2641): `gh issue close` returning rc 0 proves the
 # COMMAND ran, not that the issue is durably closed — a concurrent/lagging reopen
 # leaves it OPEN/REOPENED. The closure loop reads the authoritative state back and
@@ -89,6 +141,31 @@ COVERAGE_UNKNOWN_HOLD = "COVERAGE_UNKNOWN"
 # A reopen with no newer commit stays open; an unreadable timeline fails CLOSED.
 REOPEN_NO_NEW_COMMIT_HOLD = "REOPENED_NO_NEW_COMMIT"
 REOPEN_UNKNOWN_HOLD = "REOPEN_UNKNOWN"
+# Absent GitHub context vs UNKNOWN answer. Every gate below (#4374 reopen, #3870
+# coverage, #4747 observed-effect) asks GitHub a question ABOUT AN ISSUE, which
+# presupposes the workspace is bound to a GitHub repository at all. When it is not,
+# gh does not return an unknown answer -- it reports the question is unaskable:
+#   gh issue view <n>                     -> "no git remotes found"
+#   gh api repos/{owner}/{repo}/...       -> "unable to expand placeholder in path:
+#                                             no git remotes found"
+# Failing CLOSED there is a category error, not caution, and it is what made the
+# hermetic end-to-end smokes (cmd/fak/handoff_chain_smoke_test.go,
+# cmd/fak/relay_handoff_rotate_close_test.go -- both drive this script against a
+# throwaway `git init` workspace with NO remote) assert `would_close` yet always get
+# a hold. A gate with no tracker to consult is INAPPLICABLE, not UNKNOWN.
+# The relaxation cannot cause a wrong close: in exactly the workspaces this matches,
+# `gh issue close` is unrunnable for the same reason, so a --live run there ends in
+# close_failed, never a false close. Anywhere gh CAN resolve a repo -- i.e. every
+# real run against a real issue -- a failed read is still a genuine unknown and
+# still fails closed, so the #4374 safety property is untouched.
+GH_CONTEXT_ABSENT_NOTE = "GH_CONTEXT_ABSENT"
+_NO_GH_REPO_RE = re.compile(r"no git remotes? found|not a git repository",
+                            re.IGNORECASE)
+# Identity-compared marker returned by ``fetch_issue_meta`` for that same case. It is
+# a dict so the return type stays ``dict | None``, but callers test it with ``is`` --
+# a plain ``None`` keeps meaning "unreadable" (fail CLOSED), which is what every
+# existing caller and stub already expects.
+NO_GITHUB_CONTEXT: dict[str, Any] = {"_gh_context": "absent"}
 # Observed-effect gate (#4747): a MODEL-CORRECTNESS defect (real-weight,
 # architecture, coherence) may only auto-close on OBSERVED-EFFECT evidence — an
 # independent real artifact demonstrating the original symptom is gone.
@@ -155,6 +232,18 @@ def run_capture(cmd: list[str], cwd: Path, timeout: int) -> tuple[int, str, str]
     except (OSError, UnicodeError) as exc:
         return 127, "", str(exc)
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def gh_context_absent(stderr: str) -> bool:
+    """Did a failed gh call fail because this workspace is bound to NO GitHub repo?
+
+    That is gh saying the QUESTION is unaskable, not that the ANSWER is unknown --
+    the distinction the reopen/coverage/observed-effect gates need so an absent
+    tracker reads as *gate inapplicable* instead of *fail closed*. Deliberately
+    matches gh's own no-repo wording only: any other failure (auth, network, rate
+    limit, a 404 on a nonexistent issue, gh missing) is a genuine unknown and keeps
+    failing CLOSED, so an unrecognized message always falls back to the safe side."""
+    return bool(_NO_GH_REPO_RE.search(stderr or ""))
 
 
 def load_audit(root: Path, audit_json: str | None, max_commits: int) -> dict[str, Any]:
@@ -253,6 +342,76 @@ def claim_binds_resolution(rv: dict[str, Any], row: dict[str, Any]) -> tuple[boo
                    f"cannot resolve a non-docs issue")
 
 
+def commit_body(root: Path, sha: str) -> str | None:
+    """The witness commit's full message (subject + body), or None if unreadable."""
+    if not sha:
+        return None
+    rc, out, _ = run_capture(["git", "show", "-s", "--format=%B", sha], root, timeout=15)
+    return None if rc != 0 else (out or "")
+
+
+def _excerpt(text: str, match: "re.Match[str]", pad: int = 60) -> str:
+    """The matched disclaimer plus surrounding words, flattened onto one line.
+
+    The hold reason has to be checkable by a human reading the plan without going back
+    to git, so it quotes the author's own sentence rather than just naming the marker."""
+    start = max(0, match.start() - pad)
+    end = min(len(text), match.end() + pad)
+    return " ".join(text[start:end].split())
+
+
+def commit_disclaims_resolution(number: Any, body: str) -> tuple[bool, str | None]:
+    """Pure commit-message -> (binds, hold_reason) author-disclaimer decision (#5865).
+
+    Holds (returns False) only when the author EXPLICITLY wrote that this commit does not
+    resolve the issue -- "The issue stays open", "this commit does not claim it", "no
+    artifact is claimed", "would be claiming an integration that has no witness". Those
+    are statements of fact by the one person who knew the scope; no diff-shape or
+    label heuristic can outvote them, so the gate applies at every rung.
+
+    A NUMBERED disclaimer is scoped to the issue it names: "#5847 stays OPEN" holds a
+    close of #5847 and nothing else. Everything else binds -- the marker set is
+    high-precision by measurement (7/1500 recent commits), never a general read of
+    hedging language."""
+    text = body or ""
+    for label, rx in _DISCLAIM_MARKERS:
+        m = rx.search(text)
+        if m:
+            return False, (
+                f"{DISCLAIMED_HOLD}: the witness commit's own message disclaims "
+                f"resolution ({label}) -- \"{_excerpt(text, m)}\"; a commit that says it "
+                f"does not resolve #{number} cannot witness that it does")
+    if number is not None:
+        rx = re.compile(_DISCLAIM_THIS_ISSUE_TMPL.format(n=re.escape(str(number))),
+                        re.IGNORECASE)
+        m = rx.search(text)
+        if m:
+            return False, (
+                f"{DISCLAIMED_HOLD}: the witness commit's own message says #{number} "
+                f"stays open -- \"{_excerpt(text, m)}\"")
+    return True, None
+
+
+def disclaimer_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does the witness commit's own message permit closing this issue? (#5865)
+
+    Unlike the issue-side gates, an unreadable input here ALLOWS (with an audit note)
+    instead of failing closed, and that asymmetry is deliberate rather than a lapse: this
+    gate only ever ADDS a refusal on POSITIVE evidence -- a disclaimer the author wrote.
+    An absent or unreadable commit message is not evidence of a disclaimer. Failing
+    closed on it would convert every workspace where `git show` cannot resolve the
+    witness into a blanket hold, which is a large unwitnessed behavior change, and it
+    would strand exactly the rows the pre-existing gates already decide correctly. The
+    safety property is unchanged: a row this gate abstains on is still subject to every
+    other gate, precisely as it was before #5865."""
+    body = commit_body(root, str(row.get("sha") or ""))
+    if body is None:
+        return True, (f"{DISCLAIM_UNREADABLE_NOTE}: could not read the witness commit "
+                      f"message for {str(row.get('sha') or '?')[:10]}, so there is no "
+                      "disclaimer evidence either way")
+    return commit_disclaims_resolution(row.get("number"), body)
+
+
 def classify_coverage(number: Any, body: str,
                       labels: set[str]) -> tuple[bool, str | None]:
     """Pure body/label -> (binds, hold_reason) coverage decision (#3870).
@@ -282,11 +441,18 @@ def fetch_issue_meta(root: Path, number: Any) -> dict[str, Any] | None:
 
     None is the fail-SAFE signal: the coverage gate treats an unreadable body as
     COVERAGE_UNKNOWN and keeps the issue open (a transient gh error self-heals on the
-    next tick) rather than closing something it could not inspect."""
+    next tick) rather than closing something it could not inspect.
+
+    ``NO_GITHUB_CONTEXT`` (identity-compared) is the distinct third answer: gh
+    reported there is no repository bound to this workspace, so there is no issue
+    body in existence to inspect and the body-reading gates are INAPPLICABLE rather
+    than unknown -- see GH_CONTEXT_ABSENT_NOTE."""
     if number is None:
         return None
-    rc, out, _ = run_capture(
+    rc, out, err = run_capture(
         ["gh", "issue", "view", str(number), "--json", "body,labels"], root, timeout=30)
+    if rc != 0 and gh_context_absent(err):
+        return NO_GITHUB_CONTEXT
     if rc != 0 or not out:
         # rc!=0, or a rc-0 call that still yielded no stdout (a rare gh hiccup):
         # unreadable -> COVERAGE_UNKNOWN (hold), never crash the live close tick.
@@ -306,9 +472,14 @@ def coverage_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str |
     """Does a single resolving commit actually close this whole issue? (#3870)
 
     Fetches the issue's live body/labels and classifies; an unreadable body holds as
-    COVERAGE_UNKNOWN -- never a silent close of an issue we could not inspect."""
+    COVERAGE_UNKNOWN -- never a silent close of an issue we could not inspect. A
+    workspace bound to no GitHub repository has no body to read at all, so the gate
+    is INAPPLICABLE there (allowed, with an audit note), not unknown."""
     number = row.get("number")
     meta = fetch_issue_meta(root, number)
+    if meta is NO_GITHUB_CONTEXT:
+        return True, (f"{GH_CONTEXT_ABSENT_NOTE}: no GitHub repository is bound to "
+                      "this workspace, so the #3870 coverage gate is not applicable")
     if meta is None:
         return False, (f"{COVERAGE_UNKNOWN_HOLD}: could not read #{number} "
                        "body/labels to confirm full coverage")
@@ -367,9 +538,15 @@ def observed_effect_binds_closure(root: Path,
 
     Fetches the issue's live body/labels and classifies; an unreadable body
     holds as EFFECT_EVIDENCE_UNKNOWN -- never a silent close of a possible
-    model-defect issue we could not inspect."""
+    model-defect issue we could not inspect. A workspace bound to no GitHub
+    repository has no body to read at all, so the gate is INAPPLICABLE there
+    (allowed, with an audit note), not unknown."""
     number = row.get("number")
     meta = fetch_issue_meta(root, number)
+    if meta is NO_GITHUB_CONTEXT:
+        return True, (f"{GH_CONTEXT_ABSENT_NOTE}: no GitHub repository is bound to "
+                      "this workspace, so the #4747 observed-effect gate is not "
+                      "applicable")
     if meta is None:
         return False, (f"{EFFECT_UNKNOWN_HOLD}: could not read #{number} "
                        "body/labels to check observed-effect evidence")
@@ -424,24 +601,32 @@ def _parse_iso(ts: str) -> datetime | None:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def latest_reopen_ts(root: Path, number: Any) -> tuple[bool, datetime | None]:
-    """(read_ok, most-recent ``reopened`` timeline datetime | None) for #4374.
+def latest_reopen_ts(root: Path, number: Any) -> tuple[bool | None, datetime | None]:
+    """(read_status, most-recent ``reopened`` timeline datetime | None) for #4374.
 
-    ``read_ok`` is False ONLY when the timeline could not be read (gh error): the
-    caller then fails CLOSED (holds the close) rather than guessing the issue was
-    never reopened. A successful read with no ``reopened`` event returns
-    ``(True, None)``. ``gh api`` substitutes ``{owner}``/``{repo}`` from the repo,
-    and ``--paginate`` walks every page, so a reopen on any page is seen; the
-    per-page ``--jq`` emits one ``created_at`` line per reopened event and we take
-    the max (lexical==chronological only within a format, so parse then max)."""
+    ``read_status`` is TRI-state, deliberately not a plain bool:
+      * ``True``  -- the timeline was read. A successful read with no ``reopened``
+        event returns ``(True, None)``.
+      * ``False`` -- gh errored while a repository WAS resolvable: a genuine
+        unknown, so the caller fails CLOSED (holds the close) rather than guessing
+        the issue was never reopened.
+      * ``None``  -- gh reported there is no repository to ask at all (a workspace
+        with no git remote). There is no timeline in existence to supersede the
+        witness, so the caller treats the gate as INAPPLICABLE. Safe because a
+        ``gh issue close`` in that same workspace cannot run either.
+
+    ``gh api`` substitutes ``{owner}``/``{repo}`` from the repo, and ``--paginate``
+    walks every page, so a reopen on any page is seen; the per-page ``--jq`` emits
+    one ``created_at`` line per reopened event and we take the max (lexical==
+    chronological only within a format, so parse then max)."""
     if number is None:
         return True, None
-    rc, out, _ = run_capture(
+    rc, out, err = run_capture(
         ["gh", "api", f"repos/{{owner}}/{{repo}}/issues/{number}/timeline",
          "--paginate", "--jq", '.[] | select(.event=="reopened") | .created_at'],
         root, timeout=30)
     if rc != 0:
-        return False, None
+        return (None if gh_context_absent(err) else False), None
     stamps = [t for line in out.splitlines() if (t := _parse_iso(line))]
     return True, (max(stamps) if stamps else None)
 
@@ -465,13 +650,21 @@ def reopen_blocks_close(root: Path, row: dict[str, Any]) -> tuple[bool, str | No
     override a ``reopened`` event if a commit landed AFTER it. Returns
     ``(allowed, hold_reason)``:
       - ``(True, None)``  -> never reopened, or a commit landed since the reopen
+      - ``(True, GH_CONTEXT_ABSENT: ...)`` -> there is no GitHub repository bound to
+        this workspace, so no timeline exists to supersede anything: the gate is
+        INAPPLICABLE (allowed, with an audit note), not unknown. See
+        GH_CONTEXT_ABSENT_NOTE above for why this cannot yield a wrong close.
       - ``(False, REOPENED_NO_NEW_COMMIT: ...)`` -> reopened with no newer commit;
         re-closing would silently undo the correction (the witnessed #4350 harm)
       - ``(False, REOPEN_UNKNOWN: ...)`` -> timeline (or the witness commit's date)
-        unreadable; fail CLOSED, since we cannot prove no reopen supersedes it.
+        unreadable in a workspace that DOES resolve a repo; fail CLOSED, since we
+        cannot prove no reopen supersedes it.
     """
     number = row.get("number")
     read_ok, reopen = latest_reopen_ts(root, number)
+    if read_ok is None:
+        return True, (f"{GH_CONTEXT_ABSENT_NOTE}: no GitHub repository is bound to "
+                      "this workspace, so the #4374 reopen gate is not applicable")
     if not read_ok:
         return False, (f"{REOPEN_UNKNOWN_HOLD}: could not read #{number} timeline "
                        "to confirm no reopen supersedes the witness")
@@ -530,6 +723,17 @@ def close_cmd(row: dict[str, Any]) -> list[str]:
     return ["gh", "issue", "close", str(row["number"]), "--comment", close_comment(row)]
 
 
+def note_gate(item: dict[str, Any], msg: str | None) -> None:
+    """Record a gate note on a row that was ALLOWED through anyway.
+
+    A gate that declined to apply (GH_CONTEXT_ABSENT) must not be invisible: the
+    original defect was precisely that a gate's disposition was not legible from the
+    plan. The note rides on the row so `--json` consumers and any later audit can see
+    which gates abstained and why, without changing the row's action."""
+    if msg:
+        item.setdefault("gate_notes", []).append(msg)
+
+
 def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
              max_commits: int, require_pushed: bool = True) -> dict[str, Any]:
     audit = load_audit(root, audit_json, max_commits)
@@ -545,6 +749,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
+    skipped_disclaimed = 0
     close_not_persistent = already_counted = 0
     skipped_partial = skipped_coverage_unknown = 0
     skipped_reopened = skipped_reopen_unknown = 0
@@ -568,6 +773,21 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             skipped_nonresolving += 1
             results.append(item)
             continue
+        # #5865: a commit whose own message disclaims resolution -- "The issue stays
+        # open", "this commit does not claim it", "would be claiming an integration that
+        # has no witness" -- can never witness that resolution, at ANY rung. Runs here,
+        # ahead of every gh probe, because it is a local git read and a self-disclaimed
+        # witness needs no tracker round-trip to refuse. An unreadable message ALLOWS
+        # with an audit note (see disclaimer_binds_closure): the gate adds refusals on
+        # positive evidence only, it never converts silence into a hold.
+        undisclaimed, disclaim_hold = disclaimer_binds_closure(root, row)
+        if not undisclaimed:
+            item["action"] = "skip_disclaimed"
+            item["reason"] = disclaim_hold
+            skipped_disclaimed += 1
+            results.append(item)
+            continue
+        note_gate(item, disclaim_hold)  # gate abstained (commit message unreadable)
         if gate_active and not reachable_from_origin(root, row["sha"]):
             item["action"] = "skip_unpushed"
             item["reason"] = "resolving commit not on origin/main yet (not durable)"
@@ -591,6 +811,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
                 skipped_reopened += 1
             results.append(item)
             continue
+        note_gate(item, reopen_hold)  # gate abstained (no GitHub context)
         # #3870: a diff-witnessed commit closes an issue only when the issue is not
         # EXPLICITLY multi-part. A read-only body/label probe runs even in dry-run so
         # the plan reflects the hold; an unreadable body holds (COVERAGE_UNKNOWN) and
@@ -606,6 +827,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
                 skipped_partial += 1
             results.append(item)
             continue
+        note_gate(item, cover_hold)  # gate abstained (no GitHub context)
         # #4747: a model-correctness defect closes only on OBSERVED-EFFECT
         # evidence -- an independent real artifact showing the original symptom
         # gone -- never on an instrumentation/diagnostic commit satisfying an
@@ -624,6 +846,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
                 skipped_effect_unobserved += 1
             results.append(item)
             continue
+        note_gate(item, effect_hold)  # gate abstained (no GitHub context)
         if not live:
             item["action"] = "would_close"
             results.append(item)
@@ -681,6 +904,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             1 for r in results if r.get("action") == "would_close"),
             "skipped_unwitnessed": skipped,
             "skipped_nonresolving": skipped_nonresolving,
+            "skipped_disclaimed": skipped_disclaimed,
             "skipped_partial": skipped_partial,
             "skipped_coverage_unknown": skipped_coverage_unknown,
             "skipped_reopened": skipped_reopened,
@@ -716,6 +940,7 @@ def render(p: dict[str, Any]) -> str:
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
                  f"skipped={c.get('skipped_unwitnessed')} "
                  f"nonresolving={c.get('skipped_nonresolving')} "
+                 f"disclaimed={c.get('skipped_disclaimed')} "
                  f"partial={c.get('skipped_partial')} "
                  f"coverage_unknown={c.get('skipped_coverage_unknown')} "
                  f"reopened={c.get('skipped_reopened')} "
@@ -735,7 +960,8 @@ def render(p: dict[str, Any]) -> str:
 def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
-    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_partial",
+    if action in {"skip_unwitnessed", "skip_nonresolving", "skip_disclaimed",
+                  "skip_partial",
                   "skip_coverage_unknown", "skip_reopened", "skip_reopen_unknown",
                   "skip_effect_unobserved", "skip_effect_unknown",
                   "skip_unpushed", CLOSE_ALREADY_COUNTED}:

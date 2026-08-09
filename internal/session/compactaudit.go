@@ -340,6 +340,19 @@ type pendingFire struct {
 // size is the rollout's byte length, recorded so the report can show append-only bytes
 // beside resident context and refuse the "big file = broken" read.
 func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionReport, error) {
+	rep, _, err := scanCompactRollout(r, path, size, RegrowthReplayOptions{})
+	return rep, err
+}
+
+// ScanCompactRolloutReplay is ScanCompactRollout with the #5254 counterfactual dedup replay
+// armed: opt.Fold is run over the tool-result bodies of every post-fire window and the returned
+// RegrowthReplayStat scores what that mechanism would have collapsed. A zero-value opt (nil Fold)
+// is exactly ScanCompactRollout. Bodies live in memory for one window and are never persisted.
+func ScanCompactRolloutReplay(r io.Reader, path string, size int64, opt RegrowthReplayOptions) (CompactSessionReport, RegrowthReplayStat, error) {
+	return scanCompactRollout(r, path, size, opt)
+}
+
+func scanCompactRollout(r io.Reader, path string, size int64, opt RegrowthReplayOptions) (CompactSessionReport, RegrowthReplayStat, error) {
 	rep := CompactSessionReport{Path: path, Bytes: size}
 	br := bufio.NewReaderSize(r, 64<<10)
 
@@ -358,6 +371,8 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 		pending []*pendingFire
 	)
 	tracker := newRegrowthTracker()
+	replay := newRegrowthReplay(opt)
+	tracker.replay = replay
 
 	// fire records one compaction fire of `kind` at `ts` and, only when that call
 	// actually appended a NEW fire (recordFire coalesces a same-fire pair reported by
@@ -384,7 +399,7 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 			break
 		}
 		if err != nil {
-			return rep, fmt.Errorf("%s: %w", path, err)
+			return rep, replayStatOf(replay), fmt.Errorf("%s: %w", path, err)
 		}
 		line := strings.TrimSpace(string(head))
 		if line == "" {
@@ -502,7 +517,18 @@ func ScanCompactRollout(r io.Reader, path string, size int64) (CompactSessionRep
 	rep.FireCount = len(rep.Fires)
 	tracker.finalize(&rep)
 	finalizeCompactReport(&rep)
-	return rep, nil
+	return rep, replayStatOf(replay), nil
+}
+
+// replayStatOf reports the replay's score, counting this rollout, or the zero stat when the
+// replay was never armed.
+func replayStatOf(rp *regrowthReplay) RegrowthReplayStat {
+	if rp == nil {
+		return RegrowthReplayStat{}
+	}
+	st := rp.stat
+	st.Rollouts = 1
+	return st
 }
 
 // recordFire admits a fire event, folding the compacted/context_compacted PAIR into a

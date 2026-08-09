@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/commitlifecycle"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/growthgate"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -116,6 +117,8 @@ func emitGardenJSON(w io.Writer, p gardenbundle.Payload) {
 // run in the loop ledger and registers itself in the loop registry, so the tick
 // is visible in `fak loop health` and re-arms at boot (the #1281 durable-loop
 // registration precedent: a schedule definition that survives a restart).
+var gardenReclaimInspect = inspectGardenReclaim
+
 const gardenTickLoopID = "garden-stale-work-tick"
 
 // gardenTickIntervalSeconds is the registered cadence: hourly. The stale-work
@@ -183,6 +186,7 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	results := gardenbundle.Collect(root, "", time.Duration(*timeout)*time.Second, false)
+	results = append(results, gardenReclaimInspect(stderr, root))
 	plan := gardenbundle.PlanTick(results, *dryRun)
 
 	growthApply := growthApplyEnabled(*growthApplyFlag)
@@ -536,6 +540,30 @@ func growthReapLedgerPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".fak", "growthgate-reap.jsonl")
+}
+
+// inspectGardenReclaim reads the existing RECLAIM worklist and surfaces only its
+// actionable head. It deliberately does not land, delete, or update checkpoint refs.
+func inspectGardenReclaim(stderr io.Writer, root string) gardenbundle.MemberResult {
+	rows, err := commitLifecycleQueue(context.Background(), root)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak garden tick: commit lifecycle queue: %v\n", err)
+		return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "errored", Detail: err.Error()}
+	}
+	counts := make(map[string]int)
+	var actionable []commitlifecycle.Row
+	for _, row := range rows {
+		counts[string(row.State)]++
+		if row.State != commitlifecycle.Shipped {
+			actionable = append(actionable, row)
+		}
+	}
+	if len(actionable) == 0 {
+		return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "ok", Counts: counts}
+	}
+	head := actionable[0]
+	detail := fmt.Sprintf("%d non-terminal; head=%s next=%s", len(actionable), head.State, commitLifecycleActionText(head.Action))
+	return gardenbundle.MemberResult{Key: "commit_lifecycle", Label: "Commit lifecycle queue", State: "action", Detail: detail, Counts: counts}
 }
 
 // collectGrowthLogs is the schedule-driven growthgate collector wired to the

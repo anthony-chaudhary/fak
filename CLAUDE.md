@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> **Not the human contributor guide.** This file is operating instructions for *automated*
+> contributors working inside the maintainers' shared checkout. Humans want
+> [`README.md`](README.md) for what fak is and [`CONTRIBUTING.md`](CONTRIBUTING.md) for how
+> to contribute; nothing on this page applies to you.
+
 The canonical agent instructions for this repo are in **[`AGENTS.md`](AGENTS.md)** —
 read it first for build/test/run, the repo map, and the rules.
 

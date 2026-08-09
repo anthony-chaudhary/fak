@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetcap"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/stallscan"
 	"github.com/anthony-chaudhary/fak/internal/turntaxmeter"
 )
 
@@ -120,7 +121,8 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// tail spawns nothing on this hot path); a missing/stale reading yields a zero-pressure
 	// ChurnCheck (the fold abstains), so a box without the self-monitor is byte-identical to
 	// before. It only lowers the effective cap, never raises it.
-	res = dispatchtick.ApplyChurnBackpressure(res, dispatchPreflightChurn())
+	churnCheck, churnArming := dispatchPreflightChurnState()
+	res = dispatchtick.ApplyChurnBackpressure(res, churnCheck)
 	// The fresh_seat cap term (#3579): fold fleetaccounts' AUTHORITATIVE fresh-account
 	// ceiling (BuildCapacityPreflight's TrueConcurrentCeiling -- distinct session slots
 	// that can actually serve fresh) into the launch cap. The seat gate above counts
@@ -132,6 +134,44 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	// the fold abstains) leaves the preflight byte-identical to before.
 	res = dispatchApplyFreshSeatCeiling(res, slow.FreshSeatCeiling)
 	out := res.Map()
+	// Churn ARMING readout. The host_churn term fails open -- an unmeasured host must
+	// never block dispatch -- but failing open SILENTLY is how it sat inert for weeks
+	// while the box kept freezing: a tick with no ledger and a tick on a genuinely calm
+	// host produced byte-identical payloads, so every reader concluded "no churn" when
+	// the truth was "no measurement". This block is always present and names which of
+	// the two it is, so an absent signal reads as absent rather than as healthy.
+	out["host_churn"] = map[string]any{
+		"armed":  churnArming.Armed(),
+		"state":  string(churnArming.Status()),
+		"detail": churnArming.Reason(),
+		"age_seconds": func() any {
+			if s := churnArming.Status(); s == stallscan.ArmStateMissing || s == stallscan.ArmStateDisabled {
+				return nil // nothing to age
+			}
+			return churnArming.AgeSeconds
+		}(),
+		"spawn_burst": churnArming.SpawnBurst,
+		// Publish the window and the derived rate next to the raw count. A bare count
+		// is not comparable across callers sampling at different intervals, so a
+		// payload carrying only the count invites a reader to compare two numbers that
+		// were never the same quantity. Both are null when the reading predates the
+		// window being recorded — which is the honest answer, rather than a rate
+		// divided by an assumed interval.
+		"spawn_window_seconds": func() any {
+			if churnArming.SpawnWindowSeconds <= 0 {
+				return nil
+			}
+			return churnArming.SpawnWindowSeconds
+		}(),
+		"spawn_rate_per_sec": func() any {
+			if churnArming.SpawnWindowSeconds <= 0 {
+				return nil
+			}
+			return float64(churnArming.SpawnBurst) / churnArming.SpawnWindowSeconds
+		}(),
+		"threshold":      churnCheck.Threshold,
+		"rate_threshold": dispatchtick.DefaultChurnBurstRate,
+	}
 	// Debounce transparency (#3376): when the RAW worker-count probe disagrees with the
 	// load that was actually PUBLISHED to admission -- a change still waiting out its
 	// coalescing window -- surface the raw sample alongside it, so an operator reading a
@@ -611,33 +651,74 @@ func dispatchStallLedgerPath() string {
 // zero-value check -- a no-op fold that leaves the preflight untouched. A box that never
 // runs `fak stallscan --watch` therefore behaves exactly as before this term existed.
 func dispatchPreflightChurn() dispatchtick.ChurnCheck {
+	check, _ := dispatchPreflightChurnState()
+	return check
+}
+
+// dispatchPreflightChurnState is dispatchPreflightChurn plus the ARMING verdict: not just
+// what the churn signal said, but whether this host was measured at all.
+//
+// The two are separated because they answer different questions and are consumed by
+// different readers. The ChurnCheck feeds the pure admission fold, which must abstain on
+// anything it cannot trust. The Arming feeds the tick PAYLOAD, which must be able to tell
+// an operator that the abstention happened -- and why -- because a silently-abstaining
+// gate is indistinguishable from a gate that examined a calm host and passed it. That
+// ambiguity is the ghost: the reaper reports health it never measured.
+//
+// Fail-open is preserved exactly: every non-armed state still yields the zero-value
+// ChurnCheck, so a box with no self-monitor admits work byte-identically to before this
+// term existed. Only the reporting changed.
+func dispatchPreflightChurnState() (dispatchtick.ChurnCheck, stallscan.Arming) {
 	threshold := dispatchChurnThreshold()
-	if threshold <= 0 {
-		return dispatchtick.ChurnCheck{} // term disabled via env
+	enabled := threshold > 0
+	fresh := dispatchChurnFreshness()
+
+	read := dispatchReadChurnLedger()
+	arming := stallscan.ClassifyArming(read, time.Now(), fresh, enabled)
+	if !arming.Armed() {
+		return dispatchtick.ChurnCheck{}, arming
 	}
+	return dispatchtick.ChurnCheck{
+		Recent:        arming.SpawnBurst,
+		WindowSeconds: arming.SpawnWindowSeconds,
+		Threshold:     threshold,
+		MinWorkers:    dispatchChurnMinWorkers(),
+	}, arming
+}
+
+// dispatchReadChurnLedger is the impure half: it reads the self-monitor ledger tail and
+// reports WHAT it managed to get, without deciding whether that is good enough. The
+// Found/Parsed split is deliberate -- "a writer is running but emitting the wrong shape"
+// and "no writer at all" call for different operator actions, so they must not collapse
+// into one silent zero.
+func dispatchReadChurnLedger() stallscan.LedgerRead {
 	line := dispatchLastLine(dispatchStallLedgerPath())
 	if line == "" {
-		return dispatchtick.ChurnCheck{} // no self-monitor ledger -> abstain
+		return stallscan.LedgerRead{} // no ledger / empty -> not found
 	}
 	var rec struct {
 		TS     string `json:"ts"`
 		Sample struct {
-			SpawnBurst int `json:"spawn_burst"`
+			SpawnBurst         int     `json:"spawn_burst"`
+			SpawnWindowSeconds float64 `json:"spawn_window_seconds"`
 		} `json:"sample"`
 	}
 	if err := json.Unmarshal([]byte(line), &rec); err != nil {
-		return dispatchtick.ChurnCheck{} // garbled tail -> abstain
+		return stallscan.LedgerRead{Found: true} // garbled tail
 	}
-	if fresh := dispatchChurnFreshness(); fresh > 0 {
-		ts, err := time.Parse(time.RFC3339Nano, rec.TS)
-		if err != nil || time.Since(ts) > fresh {
-			return dispatchtick.ChurnCheck{} // stale reading -> the burst it saw may have drained
-		}
+	ts, err := time.Parse(time.RFC3339Nano, rec.TS)
+	if err != nil {
+		// A record whose stamp will not parse cannot be aged, so it can never be
+		// shown to be fresh. Report it as garbled rather than as a zero-time
+		// reading that would classify as astronomically stale.
+		return stallscan.LedgerRead{Found: true}
 	}
-	return dispatchtick.ChurnCheck{
-		Recent:     rec.Sample.SpawnBurst,
-		Threshold:  threshold,
-		MinWorkers: dispatchChurnMinWorkers(),
+	return stallscan.LedgerRead{
+		Found:              true,
+		Parsed:             true,
+		Timestamp:          ts,
+		SpawnBurst:         rec.Sample.SpawnBurst,
+		SpawnWindowSeconds: rec.Sample.SpawnWindowSeconds,
 	}
 }
 

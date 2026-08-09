@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Hermetic tests for tools/idea_scout.py.
 
-NOTHING live runs: arXiv/GitHub fetches and `gh` are never called. The pure
-logic — Atom/JSON parsing, the transparent relevance score, the three dedup
-rungs, issue rendering, and the score→dedup→threshold→CAP planner — is exercised
-directly with fixtures, plus a real tmp-dir round-trip of the seen-cache.
+NOTHING live runs: arXiv/GitHub fetches and `gh` are never called — every fetcher
+main() can reach, INCLUDING the fresh GitHub lane, is stubbed. The pure logic —
+Atom/JSON parsing, the transparent relevance score, the four dedup rungs, issue
+rendering, and the score→dedup→threshold→CAP planner — is exercised directly with
+fixtures, plus a real tmp-dir round-trip of the seen-cache.
+
+``FiledStampDurabilityTest`` carries the #5543 regression: a source filed once is
+never filed again even with the local cache gone and the original issue outside
+the recency window.
 """
 from __future__ import annotations
 
@@ -59,11 +64,11 @@ GH_FIXTURE = [
      "description": "A capability gateway and policy adjudicator for LLM tool calls",
      "url": "https://github.com/acme/agent-firewall",
      "stargazersCount": 540, "pushedAt": "2026-06-15T00:00:00Z",
-     "createdAt": "2025-01-01T00:00:00Z", "language": "Go"},
+     "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455},
     {"fullName": "tiny/nostars",
      "description": "barely related", "url": "https://github.com/tiny/nostars",
      "stargazersCount": 3, "pushedAt": "2020-01-01T00:00:00Z",
-     "createdAt": "2019-01-01T00:00:00Z", "language": "Python"},
+     "createdAt": "2019-01-01T00:00:00Z", "language": "Python", "size": 135},
 ]
 
 TOPIC = {"key": "prompt-injection-defense",
@@ -104,6 +109,7 @@ class GithubParseTest(unittest.TestCase):
         self.assertEqual(cands[0]["source_id"], "github:acme/agent-firewall")
         self.assertEqual(cands[0]["extra"]["stars"], 540)
         self.assertEqual(cands[0]["extra"]["language"], "Go")
+        self.assertEqual(cands[0]["extra"]["size"], 7455)
 
     def test_source_id_is_lowercased(self) -> None:
         # GitHub repo names are case-insensitive; the dedup key must normalize so
@@ -117,6 +123,22 @@ class GithubParseTest(unittest.TestCase):
         seen = {"github:acme/agent-firewall": {"filed_at": "2026-01-01"}}
         self.assertEqual(
             M.is_duplicate(c, seen, set(), [], "", 0.55), "seen-cache")
+
+    def test_both_fetchers_request_repo_size(self) -> None:
+        calls: list[list[str]] = []
+        orig = M.gh_json
+        try:
+            M.gh_json = lambda args: calls.append(list(args)) or []
+            M.fetch_github("agent", 2)
+            M.fetch_github_fresh("agent", 2)
+        finally:
+            M.gh_json = orig
+
+        self.assertEqual(len(calls), 2)
+        for argv in calls:
+            fields = argv[argv.index("--json") + 1].split(",")
+            self.assertIn("size", fields)
+            self.assertNotIn("diskUsage", fields)
 
 
 class ScoreTest(unittest.TestCase):
@@ -178,14 +200,39 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(
             M.is_duplicate(cand, seen, set(), [], "", 0.55), "seen-cache")
 
-    def test_issue_body_source_stamp_rung(self) -> None:
+    def test_filed_stamp_rung(self) -> None:
+        # The source_id stamp is rung 2 and is reported under its OWN name: it is
+        # the complete filing history, not the windowed URL sighting of rung 3.
         issues = [{"number": 1, "title": "old",
                    "body": "stuff\n<!-- idea-scout-source: arxiv:2606.01234 -->"}]
         stamped, tsets, bodies = self._index(issues)
         cand = {"source_id": "arxiv:2606.01234",
                 "url": "https://arxiv.org/abs/2606.01234", "title": "X"}
         self.assertEqual(
-            M.is_duplicate(cand, {}, stamped, tsets, bodies, 0.55), "issue-body")
+            M.is_duplicate(cand, {}, stamped, tsets, bodies, 0.55), "filed-stamp")
+
+    def test_filed_stamp_rung_folds_case(self) -> None:
+        # GitHub hands back whichever casing it likes; an un-folded compare would
+        # let `Acme/Repo` slip past a stamp reading `acme/repo`.
+        stamped = M.stamp_index(
+            [{"body": "<!-- idea-scout-source: github:acme/agent-firewall -->"}])
+        self.assertEqual(stamped, {"github:acme/agent-firewall"})
+        cand = {"source_id": "github:Acme/Agent-Firewall",
+                "url": "https://github.com/Acme/Agent-Firewall", "title": "X"}
+        self.assertEqual(
+            M.is_duplicate(cand, {}, stamped, [], "", 0.55), "filed-stamp")
+
+    def test_closed_issue_stamp_still_blocks(self) -> None:
+        # The regression #5543 was built on: a source whose issue was triaged and
+        # CLOSED came back as a fresh needs-triage ticket. A stamp is a stamp
+        # regardless of state — the index is fetched with `--state all`.
+        stamped = M.stamp_index(
+            [{"body": "closed long ago\n"
+                      "<!-- idea-scout-source: github:fu351/doberman-core -->"}])
+        cand = {"source_id": "github:fu351/doberman-core",
+                "url": "https://github.com/fu351/Doberman-Core", "title": "X"}
+        self.assertEqual(
+            M.is_duplicate(cand, {}, stamped, [], "", 0.55), "filed-stamp")
 
     def test_issue_body_url_rung(self) -> None:
         issues = [{"number": 2, "title": "manual",
@@ -272,7 +319,7 @@ class PlanTest(unittest.TestCase):
         # make one clearly top-scored via extra stars
         cands[3]["source"] = "github"
         cands[3]["extra"] = {"stars": 3000, "pushed_at": "2026-06-20T00:00:00Z"}
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             cands, self._topics(), {}, set(), [], "", cfg, "2026-06-22", NOW)
         self.assertEqual(len(to_file), 2)  # capped
         self.assertEqual(to_file[0]["source_id"], "arxiv:3")  # highest score first
@@ -283,7 +330,7 @@ class PlanTest(unittest.TestCase):
         cands = [{"source": "arxiv", "source_id": "arxiv:x", "url": "u",
                   "title": "agent guardrail", "summary": "", "published": "",
                   "topic": TOPIC["key"], "extra": {}}]
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             cands, self._topics(), {}, set(), [], "", cfg, "2026-06-22", NOW)
         self.assertEqual(to_file, [])
         self.assertEqual(stats["below-min"], 1)
@@ -294,7 +341,7 @@ class PlanTest(unittest.TestCase):
                 "title": "agent guardrail policy", "summary": "",
                 "published": "2026-06-10T00:00:00Z", "topic": TOPIC["key"],
                 "extra": {}}
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             [cand, dict(cand)], self._topics(), {}, set(), [], "", cfg,
             "2026-06-22", NOW)
         self.assertEqual(len(to_file), 1)
@@ -306,7 +353,7 @@ class PlanTest(unittest.TestCase):
                 "title": "agent guardrail policy", "summary": "",
                 "published": "2026-06-10T00:00:00Z", "topic": TOPIC["key"],
                 "extra": {}}
-        to_file, stats = M.plan_issues(
+        to_file, stats, dropped = M.plan_issues(
             [cand], self._topics(), {"arxiv:known": {}}, set(), [], "", cfg,
             "2026-06-22", NOW)
         self.assertEqual(to_file, [])
@@ -323,7 +370,7 @@ class GatherTest(unittest.TestCase):
                  "description": "a brand-new agent tool sandbox",
                  "url": "https://github.com/newco/fresh-agent",
                  "stargazersCount": 8, "pushedAt": "2026-06-18T00:00:00Z",
-                 "createdAt": "2026-06-10T00:00:00Z", "language": "Go"}
+                 "createdAt": "2026-06-10T00:00:00Z", "language": "Go", "size": 7455}
         topics = [{"key": "t", "github": "agent tool", "terms": ["agent", "tool"]}]
         cfg = dict(M.DEFAULTS)  # min_stars=25, fresh_min_stars=3, fresh_per_topic=6
         errors: list[str] = []
@@ -340,10 +387,40 @@ class GatherTest(unittest.TestCase):
         self.assertEqual(cands[0]["source_id"], "github:newco/fresh-agent")
         self.assertEqual(cands[0]["extra"].get("lane"), "fresh")
 
+    def test_repo_size_floor_applies_to_stars_and_fresh_lanes(self) -> None:
+        tiny = {"fullName": "x/scaffold", "url": "https://github.com/x/scaffold",
+                "description": "thin scaffold", "stargazersCount": 9000,
+                "updatedAt": "2026-07-09T00:00:00Z", "language": "Go", "size": 135}
+        real = dict(tiny, fullName="x/real", url="https://github.com/x/real", size=7455)
+        cfg = dict(M.DEFAULTS)
+        topic = {"key": "agents", "github": "agents", "terms": ["agents"]}
+        orig_g, orig_f = M.fetch_github, M.fetch_github_fresh
+        try:
+            M.fetch_github = lambda q, n: [dict(tiny), dict(real)]
+            M.fetch_github_fresh = lambda q, n: [dict(tiny), dict(real)]
+            candidates = M.gather_candidates([topic], cfg, [])
+        finally:
+            M.fetch_github, M.fetch_github_fresh = orig_g, orig_f
+        self.assertNotIn(tiny["url"], {c["url"] for c in candidates})
+        real_candidates = [c for c in candidates if c["url"] == real["url"]]
+        self.assertEqual(len(real_candidates), 2)  # stars lane and fresh lane
+        self.assertEqual({c["extra"].get("lane") for c in real_candidates},
+                         {None, "fresh"})
+
+        # `size` is admission-only. Carrying it into extra must not perturb the
+        # established score or its human-readable reasons.
+        star_candidate = next(c for c in real_candidates
+                              if c["extra"].get("lane") is None)
+        without_size = dict(star_candidate, extra=dict(star_candidate["extra"]))
+        without_size["extra"].pop("size")
+        self.assertEqual(M.score_candidate(star_candidate, topic, cfg, NOW),
+                         M.score_candidate(without_size, topic, cfg, NOW))
+
     def test_fresh_lane_respects_fresh_min_stars(self) -> None:
         toy = {"fullName": "toy/repo", "url": "https://github.com/toy/repo",
                "description": "", "stargazersCount": 1,
-               "pushedAt": "2026-06-19T00:00:00Z", "createdAt": "2026-06-15T00:00:00Z"}
+               "pushedAt": "2026-06-19T00:00:00Z",
+               "createdAt": "2026-06-15T00:00:00Z", "size": 7455}
         topics = [{"key": "t", "github": "agent tool", "terms": ["agent"]}]
         cfg = dict(M.DEFAULTS)  # fresh_min_stars=3
         errors: list[str] = []
@@ -373,12 +450,26 @@ class ConfigCacheTest(unittest.TestCase):
             p = Path(d) / "cfg.json"
             p.write_text(json.dumps({
                 "topics": [{"key": "only", "arxiv": "abs:x", "terms": ["x"]}],
-                "thresholds": {"max_issues": 9, "bogus": 1},
+                "thresholds": {"max_issues": 9},
             }), encoding="utf-8")
             topics, cfg = M.load_config(str(p))
             self.assertEqual([t["key"] for t in topics], ["only"])
             self.assertEqual(cfg["max_issues"], 9)
-            self.assertNotIn("bogus", cfg)  # unknown keys ignored
+
+    def test_config_refuses_unknown_threshold(self) -> None:
+        # Was "unknown keys ignored" until #5549. A threshold no knob reads is
+        # the same silent failure as a topic key no lane reads: the setting looks
+        # accepted and does nothing. `min_points` was exactly this — a real knob
+        # in the Go scout and an ignored word here.
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "cfg.json"
+            p.write_text(json.dumps({
+                "topics": [{"key": "only", "arxiv": "abs:x", "terms": ["x"]}],
+                "thresholds": {"max_issues": 9, "bogus": 1},
+            }), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                M.load_config(str(p))
+            self.assertIn("'bogus'", str(ctx.exception))
 
     def test_seen_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -414,18 +505,39 @@ class MainHermeticTest(unittest.TestCase):
     caches; the cap is never exceeded."""
 
     def setUp(self) -> None:
-        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_existing_issues,
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_hackernews, M.fetch_reddit,
+                      M.fetch_existing_issues, M.fetch_scout_issues,
                       M.create_issue, M.ensure_scout_label)
 
     def tearDown(self) -> None:
-        (M.fetch_arxiv, M.fetch_github, M.fetch_existing_issues,
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_hackernews, M.fetch_reddit,
+         M.fetch_existing_issues, M.fetch_scout_issues,
          M.create_issue, M.ensure_scout_label) = self._orig
 
     def _stub(self, *, arxiv: str = "", github_items=None, existing=None,
-              created_urls=None):
+              filed=None, created_urls=None):
         M.fetch_arxiv = lambda *a, **k: arxiv
-        M.fetch_github = lambda *a, **k: list(github_items or [])
+        # Legacy end-to-end fixtures predate GitHub's size admission field;
+        # default them to a clearly substantive repository unless a test sets
+        # an explicit size to exercise the floor.
+        M.fetch_github = lambda *a, **k: [
+            dict(item, size=item.get("size", 7455))
+            for item in (github_items or [])]
+        # EVERY lane must be stubbed or main() reaches the real `gh search repos`
+        # / arXiv / HN / Reddit: the suite is meant to be hermetic, and a live
+        # lane silently injects today's real results into every fixture. The HN
+        # and Reddit lanes landed with #5549 and DEFAULT_TOPICS arms them, so a
+        # missing stub here is a live network call, not an empty lane.
+        M.fetch_github_fresh = lambda *a, **k: []
+        M.fetch_hackernews = lambda *a, **k: ""
+        M.fetch_reddit = lambda *a, **k: ""
         M.fetch_existing_issues = lambda *a, **k: list(existing or [])
+        # `filed` is the label-targeted rung-2 corpus: every issue the scout has
+        # EVER filed, deliberately disjoint from the recency window above so a
+        # test can prove the guarantee does not come from the window.
+        M.fetch_scout_issues = lambda *a, **k: list(filed or [])
         M.ensure_scout_label = lambda: None
         calls: list = []
 
@@ -498,6 +610,526 @@ class MainHermeticTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             rc, _ = self._run(["--workspace", d])
             self.assertEqual(rc, 2)  # refuse rather than risk a blind run
+
+
+class FiledStampDurabilityTest(unittest.TestCase):
+    """#5543: a source filed once must never be filed again — with NO local cache
+    and with the original issue far outside the recency window.
+
+    The bug was that the only two non-local rungs were a git-ignored cache and a
+    fixed-size scan of the most recent `issue_scan_limit` issues. Once the tracker
+    outgrew that window, an old filed issue became invisible and its source was
+    re-filed. These tests pin the replacement: the guarantee comes from a
+    label-targeted index of the scout's own filing history, so an EMPTY window and
+    an EMPTY cache still block a re-file."""
+
+    # The real re-file from the ticket: #528 filed it, triage closed it, and months
+    # later #5298 filed it again because #528 had fallen out of the 800-window.
+    OLD_FILED = [{"number": 528, "title": "idea-scout: fu351/Doberman-Core",
+                  "body": "auto-filed long ago\n"
+                          "<!-- idea-scout-source: github:fu351/doberman-core -->"}]
+    REPO = {"fullName": "fu351/Doberman-Core",
+            "description": "an agent tool guardrail policy capability gateway",
+            "url": "https://github.com/fu351/Doberman-Core",
+            "stargazersCount": 900, "pushedAt": "2026-06-20T00:00:00Z",
+            "createdAt": "2025-01-01T00:00:00Z", "language": "Go", "size": 7455}
+
+    def setUp(self) -> None:
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_hackernews, M.fetch_reddit,
+                      M.fetch_existing_issues, M.fetch_scout_issues,
+                      M.create_issue, M.ensure_scout_label)
+        M.fetch_arxiv = lambda *a, **k: ""
+        # hermetic: no live lane may run. DEFAULT_TOPICS arms hn/reddit (#5549).
+        M.fetch_github_fresh = lambda *a, **k: []
+        M.fetch_hackernews = lambda *a, **k: ""
+        M.fetch_reddit = lambda *a, **k: ""
+        M.ensure_scout_label = lambda: None
+        self.created: list = []
+
+        def _create(issue, *, milestone=""):
+            self.created.append(issue)
+            return "https://github.com/x/y/issues/1"
+        M.create_issue = _create
+
+    def tearDown(self) -> None:
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_hackernews, M.fetch_reddit,
+         M.fetch_existing_issues, M.fetch_scout_issues,
+         M.create_issue, M.ensure_scout_label) = self._orig
+
+    def _run(self, argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = M.main(argv)
+        return rc, buf.getvalue()
+
+    def test_old_filed_source_blocked_with_empty_cache_and_empty_window(self) -> None:
+        M.fetch_github = lambda *a, **k: [dict(self.REPO)]
+        M.fetch_existing_issues = lambda *a, **k: []   # window has aged it out
+        M.fetch_scout_issues = lambda *a, **k: list(self.OLD_FILED)
+        with tempfile.TemporaryDirectory() as d:       # no seen.json at all
+            rc, out = self._run(["--workspace", d, "--live", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(self.created, [], "re-filed an already-filed source")
+        self.assertEqual(payload["planned"], [])
+        self.assertEqual(payload["skipped"]["filed-stamp"], 1)
+        self.assertTrue(payload["dedup_index"]["scout_index_complete"])
+
+    def test_control_unfiled_source_is_still_admitted(self) -> None:
+        # Same wiring, a source that is genuinely absent from the filing history:
+        # it MUST still be planned. Otherwise the fix is just "refuse everything".
+        novel = dict(self.REPO, fullName="brandnew/agent-policy-gateway",
+                     url="https://github.com/brandnew/agent-policy-gateway")
+        M.fetch_github = lambda *a, **k: [novel]
+        M.fetch_existing_issues = lambda *a, **k: []
+        M.fetch_scout_issues = lambda *a, **k: list(self.OLD_FILED)
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._run(["--workspace", d, "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual([p["source_id"] for p in payload["planned"]],
+                         ["github:brandnew/agent-policy-gateway"])
+        self.assertEqual(payload["skipped"]["filed-stamp"], 0)
+
+    def test_refuse_when_scout_index_unavailable(self) -> None:
+        # The durable rung is mandatory. A populated seen-cache must NOT buy a pass:
+        # that local file is exactly what proved unreliable.
+        M.fetch_github = lambda *a, **k: [dict(self.REPO)]
+        M.fetch_existing_issues = lambda *a, **k: []
+
+        def _boom(*a, **k):
+            raise RuntimeError("gh: label query failed")
+        M.fetch_scout_issues = _boom
+        with tempfile.TemporaryDirectory() as d:
+            M.save_seen(Path(d), {"github:something": {"filed_at": "2026-01-01"}})
+            rc, _ = self._run(["--workspace", d, "--live"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(self.created, [])
+
+    def test_refuse_when_scout_index_saturates_its_limit(self) -> None:
+        # A scan that returns exactly the limit is ambiguous — complete, or
+        # truncated? Refuse. This is the tripwire the 800-window never had: it
+        # degraded silently instead, which is how #5543 happened.
+        M.fetch_github = lambda *a, **k: [dict(self.REPO)]
+        M.fetch_existing_issues = lambda *a, **k: []
+        saturating = [{"number": i, "title": f"idea-scout: r{i}",
+                       "body": f"<!-- idea-scout-source: github:acme/r{i} -->"}
+                      for i in range(4)]
+        cfg_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(cfg_dir.cleanup)
+        cfg_path = Path(cfg_dir.name) / "cfg.json"
+        cfg_path.write_text(json.dumps({"thresholds": {"scout_scan_limit": 4}}),
+                            encoding="utf-8")
+        M.fetch_scout_issues = lambda *a, **k: list(saturating)
+        with tempfile.TemporaryDirectory() as d:
+            rc, _ = self._run(["--workspace", d, "--live",
+                               "--config", str(cfg_path)])
+        self.assertEqual(rc, 2)
+        self.assertEqual(self.created, [])
+
+    def test_scout_index_query_is_label_targeted_not_windowed(self) -> None:
+        # The whole point: the query is scoped to the population being deduped.
+        # If this ever reverts to a bare recency listing the guarantee dies again.
+        seen_args: list = []
+        orig = M.gh_json
+        try:
+            M.gh_json = lambda args, **kw: seen_args.append(args) or []
+            M.fetch_scout_issues(5000)
+        finally:
+            M.gh_json = orig
+        argv = seen_args[0]
+        self.assertIn("--label", argv)
+        self.assertEqual(argv[argv.index("--label") + 1], M.SCOUT_LABEL)
+        # closed issues are the ones that get re-filed, so they must be in scope
+        self.assertEqual(argv[argv.index("--state") + 1], "all")
+
+    def test_scout_scan_limit_is_a_distinct_knob_from_the_window(self) -> None:
+        # Guards against the rejected "just raise issue_scan_limit" fix: the
+        # durable rung must not be governed by the recency window's size.
+        _, cfg = M.load_config(None)
+        self.assertIn("scout_scan_limit", cfg)
+        self.assertNotEqual(cfg["scout_scan_limit"], cfg["issue_scan_limit"])
+        self.assertGreater(cfg["scout_scan_limit"], cfg["issue_scan_limit"])
+
+
+# ============================================================================
+# The SHARED corpus (#5547).
+#
+# internal/ideascout/testdata/dedup_corpus.json is read by BOTH scouts: the
+# classes below and internal/ideascout/ideascout_test.go. It is the mechanical
+# replacement for the prose "Two implementations, one contract" table in
+# docs/idea-scout.md — the tie that let the SAME dedup defect be fixed twice,
+# once per implementation (cfe66c656 here for #5543, then 00f270957d2a in Go for
+# #5544). A rung that changes in tools/idea_scout.py and not in
+# internal/ideascout (or the other way round) now reds a test instead of aging
+# into a re-filed issue.
+#
+# The file lives under the Go package's testdata/ because Go excludes testdata
+# from builds and vet, while tools/*.json in this directory are scout CONFIG
+# files (--config) and a corpus dropped here would read as one.
+# ============================================================================
+
+CORPUS_PATH = ROOT / "internal" / "ideascout" / "testdata" / "dedup_corpus.json"
+
+
+def load_corpus() -> dict:
+    corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+    assert corpus["schema"] == "fak/idea-scout-dedup-corpus@1", corpus["schema"]
+    return corpus
+
+
+CORPUS = load_corpus()
+
+
+class SharedDedupCorpusTest(unittest.TestCase):
+    """Every per-rung verdict in the shared corpus, asserted against
+    ``is_duplicate``. internal/ideascout/ideascout_test.go asserts the SAME
+    verdicts from the SAME file."""
+
+    def _index(self):
+        # The corpus's index_build_rule: the durable stamps come from the
+        # label-targeted filing history, unioned with any stamp still visible in
+        # the recency window; the soft rungs see the window and nothing else.
+        stamped = M.stamp_index(CORPUS["scout_issues"])
+        win_stamped, title_sets, bodies = M.existing_issue_index(
+            CORPUS["window_issues"])
+        return stamped | win_stamped, title_sets, bodies
+
+    def test_every_rung_case(self) -> None:
+        stamped, title_sets, bodies = self._index()
+        for case in CORPUS["dedup_cases"]:
+            with self.subTest(case=case["name"]):
+                got = M.is_duplicate(case["candidate"], CORPUS["seen"], stamped,
+                                     title_sets, bodies, CORPUS["dup_jaccard"])
+                self.assertEqual(
+                    got, case["want"] or None,
+                    f"shared corpus {case['name']}: {case['why']} "
+                    f"(internal/ideascout/ideascout_test.go asserts the same "
+                    f"verdict from the same file — a rung that moves in only one "
+                    f"implementation must red here)")
+
+    def test_window_only_counterfactual(self) -> None:
+        # With the durable rung removed (no scout index) and the seen-cache gone,
+        # every case must come back NEW. That is the exact state #5543 was found
+        # in, and it is what keeps the filed-stamp cases above from passing for
+        # some unrelated reason.
+        win_stamped, title_sets, bodies = M.existing_issue_index(
+            CORPUS["window_issues"])
+        for case in CORPUS["window_only_cases"]:
+            with self.subTest(case=case["name"]):
+                got = M.is_duplicate(case["candidate"], {}, win_stamped,
+                                     title_sets, bodies, CORPUS["dup_jaccard"])
+                self.assertEqual(
+                    got, case["want"] or None,
+                    f"the corpus no longer exercises the defect: {case['why']}")
+
+    def test_rung_vocabulary_matches_the_planner(self) -> None:
+        # The rung VOCABULARY is part of the contract too: renaming, adding or
+        # dropping a rung on one side only is exactly the drift this corpus
+        # exists to catch, and per-case verdicts alone would not see it.
+        _, stats, _ = M.plan_issues([], {}, {}, set(), [], "",
+                                    dict(M.DEFAULTS), "2026-08-02", NOW)
+        self.assertEqual(sorted(stats), sorted(CORPUS["skip_stat_keys"]))
+        exercised = {c["want"] for c in CORPUS["dedup_cases"] if c["want"]}
+        self.assertEqual(exercised, set(CORPUS["rungs"]))
+        for rung in CORPUS["rungs"]:
+            self.assertIn(rung, stats)
+
+
+class SharedRunCorpusTest(unittest.TestCase):
+    """Replay each shared run case end to end through main(), with every
+    network/gh boundary stubbed. Hermetic and DRY-RUN: create_issue raises if it
+    is ever reached, so no path here can file anything.
+
+    The stubs model GitHub the way the two dedup corpora actually see it:
+    fetch_existing_issues TRUNCATES the newest-first tracker to the caller's
+    limit (a recency window), while fetch_scout_issues answers a query targeted
+    at the idea-scout label and so returns the scout's whole filing history
+    however old. internal/ideascout/ideascout_test.go stubs the Go Fetcher the
+    same way."""
+
+    def setUp(self) -> None:
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_hackernews, M.fetch_reddit,
+                      M.fetch_existing_issues, M.fetch_scout_issues,
+                      M.create_issue, M.ensure_scout_label)
+
+    def tearDown(self) -> None:
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_hackernews, M.fetch_reddit,
+         M.fetch_existing_issues, M.fetch_scout_issues,
+         M.create_issue, M.ensure_scout_label) = self._orig
+
+    def _wire(self, case: dict) -> None:
+        M.fetch_arxiv = lambda *a, **k: ""
+        M.fetch_github = lambda *a, **k: [
+            dict(repo, size=repo.get("size", 7455)) for repo in case["repos"]]
+        M.fetch_github_fresh = lambda *a, **k: []
+        M.fetch_hackernews = lambda *a, **k: ""
+        M.fetch_reddit = lambda *a, **k: ""
+        M.ensure_scout_label = lambda: None
+
+        def _no_filing(*a, **k):
+            raise AssertionError("corpus replay is dry-run: nothing may ever be filed")
+        M.create_issue = _no_filing
+
+        window = list(case["window_issues"])
+        scout = list(case["scout_issues"])
+        window_error = case.get("window_error", "")
+        scout_error = case.get("scout_error", "")
+
+        def _window(limit, *a, **k):
+            if window_error:
+                raise RuntimeError(window_error)
+            return window[:limit] if limit >= 0 else list(window)
+
+        def _scout(limit, *a, **k):
+            if scout_error:
+                raise RuntimeError(scout_error)
+            return scout[:limit] if limit >= 0 else list(scout)
+        M.fetch_existing_issues = _window
+        M.fetch_scout_issues = _scout
+
+    def test_every_run_case(self) -> None:
+        for case in CORPUS["runs"]:
+            with self.subTest(case=case["name"]):
+                self._replay(case)
+
+    def _replay(self, case: dict) -> None:
+        self._wire(case)
+        expect = case["expect"]
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            cfg_path = ws / "corpus_config.json"
+            cfg_path.write_text(json.dumps(case["config"]), encoding="utf-8")
+            if case.get("seen"):
+                M.save_seen(ws, dict(case["seen"]))
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = M.main(["--workspace", str(ws), "--config", str(cfg_path),
+                             "--json"])
+            stdout, stderr = out.getvalue(), err.getvalue()
+
+            if expect["refuse"]:
+                self.assertEqual(rc, 2, f"{case['name']} must REFUSE: {case['why']}")
+                for want in expect.get("refuse_contains", []):
+                    self.assertIn(want, stderr, case["name"])
+                return
+
+            self.assertEqual(rc, 0, f"{case['name']}: {stderr}")
+            payload = json.loads(stdout)
+            self.assertEqual([p["source_id"] for p in payload["planned"]],
+                             expect["planned"], f"{case['name']}: {case['why']}")
+            for rung, n in expect["skipped"].items():
+                self.assertEqual(payload["skipped"][rung], n,
+                                 f"{case['name']} skipped[{rung}]: {payload['skipped']}")
+            self.assertEqual(payload["dropped"], expect["dropped"], case["name"])
+            got_index = {k: payload["dedup_index"][k] for k in expect["dedup_index"]}
+            self.assertEqual(got_index, expect["dedup_index"], case["name"])
+            if not case.get("seen"):
+                self.assertFalse(M.cache_path(ws).exists(),
+                                 f"{case['name']} is dry-run and must write no cache")
+
+
+# ============================================================================
+# The SHARED SOURCE corpus (#5549).
+#
+# internal/ideascout/testdata/source_corpus.json is the gather-stage sibling of
+# dedup_corpus.json, read by BOTH scouts: the class below and
+# internal/ideascout/ideascout_test.go (TestSharedSourceCorpus*).
+#
+# #5547 made the DEDUP contract mechanical after the same defect had to be fixed
+# twice, once per implementation. #5549 is that hazard one stage earlier and it
+# had already fired: `hn` and `reddit` existed only in the Go scout, so a topic
+# naming them on the SCHEDULED path (this file's subject, wired by
+# tools/register_idea_scout.ps1) gathered zero candidates, recorded zero errors
+# and exited 0. Nothing failed; the lanes were simply never read. This corpus
+# pins the lane vocabulary, the admissible config keys, what each parser folds
+# the same wire bytes into, the points bonus, and that a declared key actually
+# gathers — so the next lane to grow on one side only reds instead of ageing
+# into a re-filed issue.
+# ============================================================================
+
+SOURCE_CORPUS_PATH = ROOT / "internal" / "ideascout" / "testdata" / "source_corpus.json"
+
+
+def load_source_corpus() -> dict:
+    corpus = json.loads(SOURCE_CORPUS_PATH.read_text(encoding="utf-8"))
+    assert corpus["schema"] == "fak/idea-scout-source-corpus@1", corpus["schema"]
+    return corpus
+
+
+SOURCE_CORPUS = load_source_corpus()
+
+
+class SharedSourceCorpusTest(unittest.TestCase):
+    """Every source-lane claim in the shared source corpus, asserted against this
+    implementation. internal/ideascout/ideascout_test.go asserts the SAME claims
+    from the SAME file."""
+
+    def setUp(self) -> None:
+        # gather_candidates reaches the module-level fetchers, so every lane is
+        # stubbed here — a missing stub is a live network call, not a test
+        # failure, which is how the HN lane first escaped into this suite.
+        self._orig = (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+                      M.fetch_hackernews, M.fetch_reddit)
+        M.fetch_arxiv = lambda *a, **k: ""
+        M.fetch_github = lambda *a, **k: []
+        M.fetch_github_fresh = lambda *a, **k: []
+        M.fetch_hackernews = lambda *a, **k: ""
+        M.fetch_reddit = lambda *a, **k: ""
+
+    def tearDown(self) -> None:
+        (M.fetch_arxiv, M.fetch_github, M.fetch_github_fresh,
+         M.fetch_hackernews, M.fetch_reddit) = self._orig
+
+    # -- vocabulary ---------------------------------------------------------
+    def test_lane_vocabulary_matches_the_corpus(self) -> None:
+        # The lane list, the topic keys that arm it, and the display string the
+        # run report prints. A lane added here and not in internal/ideascout
+        # (or the other way round) reds.
+        self.assertEqual([lane["label"] for lane in M.SOURCE_LANES],
+                         SOURCE_CORPUS["lanes"])
+        self.assertEqual(M.source_topic_keys(), SOURCE_CORPUS["topic_keys"])
+        self.assertEqual(M.TOPIC_META_KEYS, SOURCE_CORPUS["meta_keys"])
+        self.assertEqual(M.source_display_list(), SOURCE_CORPUS["display_list"])
+        declared = set(SOURCE_CORPUS["topic_keys"])
+        for lane in M.SOURCE_LANES:
+            self.assertIn(lane["topic_key"], declared, lane["label"])
+
+    def test_threshold_vocabulary_matches_the_corpus(self) -> None:
+        # Every knob a --config `thresholds` block may set. This list is what
+        # caught hn_per_topic / reddit_per_topic / min_points being Go-only: a
+        # config could set min_points here and it was silently dropped.
+        self.assertEqual(sorted(M.DEFAULTS),
+                         sorted(SOURCE_CORPUS["threshold_keys"]))
+
+    def test_default_topics_arm_every_declared_lane(self) -> None:
+        # Non-vacuity for the shipped config: the vocabulary would still match
+        # if no baked-in topic ever used the new lanes, and then the scheduled
+        # run would gather from them exactly never.
+        for key in SOURCE_CORPUS["topic_keys"]:
+            armed = [t["key"] for t in M.DEFAULT_TOPICS if t.get(key)]
+            self.assertTrue(armed, f"no DEFAULT_TOPICS entry queries '{key}'")
+
+    # -- config -------------------------------------------------------------
+    def test_config_cases(self) -> None:
+        for case in SOURCE_CORPUS["config_cases"]:
+            with self.subTest(case=case["name"]):
+                with tempfile.TemporaryDirectory() as d:
+                    path = Path(d) / "config.json"
+                    path.write_text(json.dumps({"topics": [case["topic"]]}),
+                                    encoding="utf-8")
+                    if not case["refuse"]:
+                        M.load_config(str(path))  # must not raise
+                        continue
+                    with self.assertRaises(ValueError, msg=case["why"]) as ctx:
+                        M.load_config(str(path))
+                    for want in case.get("refuse_contains", []):
+                        self.assertIn(want, str(ctx.exception), case["name"])
+
+    # -- parsers ------------------------------------------------------------
+    def test_parse_cases(self) -> None:
+        parsers = {"hn": M.parse_hackernews_json, "reddit": M.parse_reddit_json}
+        for case in SOURCE_CORPUS["parse_cases"]:
+            with self.subTest(case=case["name"]):
+                parse = parsers[case["lane"]]
+                got = parse(case["payload"], case["topic"])
+                self.assertEqual(len(got), len(case["want"]),
+                                 f"{case['name']}: {case['why']} (got {got})")
+                for i, want in enumerate(case["want"]):
+                    for field, value in want.items():
+                        self.assertEqual(
+                            got[i][field], value,
+                            f"{case['name']} candidate {i} field '{field}': "
+                            f"{case['why']} (internal/ideascout folds the same "
+                            f"bytes and asserts the same value)")
+
+    # -- score --------------------------------------------------------------
+    def test_score_cases(self) -> None:
+        for case in SOURCE_CORPUS["score_cases"]:
+            with self.subTest(case=case["name"]):
+                topic = {"key": "probe", "terms": case["terms"]}
+                score, reasons = M.score_candidate(
+                    dict(case["candidate"]), topic, dict(M.DEFAULTS), NOW)
+                self.assertEqual(score, case["want_score"],
+                                 f"{case['name']}: {case['why']} ({reasons})")
+                joined = "; ".join(reasons)
+                if case["want_reason_contains"]:
+                    self.assertIn(case["want_reason_contains"], joined,
+                                  case["name"])
+                else:
+                    self.assertNotIn("points", joined, case["name"])
+
+    # -- gather -------------------------------------------------------------
+    def test_gather_cases(self) -> None:
+        for case in SOURCE_CORPUS["gather_cases"]:
+            with self.subTest(case=case["name"]):
+                self._gather(case)
+
+    def _gather(self, case: dict) -> None:
+        hn_error = case.get("hn_error", "")
+        reddit_error = case.get("reddit_error", "")
+
+        def _hn(*a, **k):
+            if hn_error:
+                raise RuntimeError(hn_error)
+            return case.get("hn_payload", "")
+
+        def _reddit(*a, **k):
+            if reddit_error:
+                raise RuntimeError(reddit_error)
+            return case.get("reddit_payload", "")
+
+        cfg = dict(M.DEFAULTS)
+        cfg["min_points"] = case["min_points"]
+        cfg["min_repo_size_kb"] = case.get(
+            "min_repo_size_kb", cfg["min_repo_size_kb"])
+        errors: list[str] = []
+        original_fetchers = (M.fetch_github, M.fetch_github_fresh,
+                             M.fetch_hackernews, M.fetch_reddit)
+        try:
+            M.fetch_github = lambda *a, **k: [
+                dict(repo) for repo in case.get("github_repos", [])]
+            M.fetch_github_fresh = lambda *a, **k: [
+                dict(repo) for repo in case.get("github_fresh_repos", [])]
+            M.fetch_hackernews = _hn
+            M.fetch_reddit = _reddit
+            cands = M.gather_candidates([dict(case["topic"])], cfg, errors)
+        finally:
+            (M.fetch_github, M.fetch_github_fresh,
+             M.fetch_hackernews, M.fetch_reddit) = original_fetchers
+        self.assertEqual([c["source_id"] for c in cands],
+                         case["want_source_ids"],
+                         f"{case['name']}: {case['why']} "
+                         f"(internal/ideascout runs the same case through "
+                         f"GatherCandidates)")
+        if case.get("assert_size_score_neutral"):
+            for cand in cands:
+                without_size = dict(cand, extra=dict(cand["extra"]))
+                without_size["extra"].pop("size", None)
+                self.assertEqual(
+                    M.score_candidate(cand, case["topic"], cfg, NOW),
+                    M.score_candidate(without_size, case["topic"], cfg, NOW),
+                    f"{case['name']}: repo size must stay admission-only")
+        for want in case.get("want_errors_contain", []):
+            self.assertIn(want, "; ".join(errors), case["name"])
+        if not case.get("want_errors_contain"):
+            self.assertEqual(errors, [], case["name"])
+
+    def test_corpus_covers_every_points_lane(self) -> None:
+        # Keeps the gather cases honest: a lane added to the vocabulary with no
+        # case proving it actually ADMITS a candidate would let the #5549 defect
+        # back in under a green suite.
+        covered = {key for case in SOURCE_CORPUS["gather_cases"]
+                   if case["want_source_ids"]
+                   for key in SOURCE_CORPUS["topic_keys"]
+                   if case["topic"].get(key)}
+        for key in ("hn", "reddit"):
+            self.assertIn(key, covered,
+                          f"no gather case admits a candidate through '{key}'")
 
 
 if __name__ == "__main__":

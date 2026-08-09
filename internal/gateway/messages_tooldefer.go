@@ -72,11 +72,19 @@ var defaultHotToolSet = map[string]bool{
 
 // deferResult is the outcome of a defer transform: Changed with the spliced Body on a
 // fired turn, else a named Reason for the fail-safe identity.
+//
+// ColdNames carries WHICH defs were marked, in tools[] order (#3647). The transform is the
+// only place that identity exists — past this point the names are recoverable only by
+// re-parsing the spliced body for defer_loading keys — so dropping them here is what left
+// the operator surfaces reporting a bare count with no answer to "which tools went cold".
+// It is observability-only: nothing in the splice, the byte-equality proof, or the
+// determinism the session cache depends on reads this field.
 type deferResult struct {
 	Body      []byte
 	Changed   bool
 	Reason    string
 	ColdCount int
+	ColdNames []string
 }
 
 // maybeDeferColdTools is the req.Raw transform slotted next to maybeCompactInboundTools.
@@ -94,7 +102,12 @@ func (s *Server) maybeDeferColdTools(req *agent.AnthropicMessagesRequest, trace 
 		_, err := agent.DecodeAnthropicMessagesRequest(b)
 		return err
 	})
-	s.metrics.observeToolDefer(res.ColdCount, res.Changed)
+	// Names ride with the count (#3647). observeToolDefer has taken them since the deferred-tool
+	// list was added to /debug/vars and the `fak info` Cache tab, but this — the only live caller —
+	// passed none, so the distinct-name set stayed empty on every real session and both operator
+	// surfaces reported a shed count with no answer to WHICH tools went cold. The unit tests could
+	// not catch it: they populate the name set at levels above this seam.
+	s.metrics.observeToolDefer(res.ColdCount, res.Changed, res.ColdNames...)
 	if !res.Changed {
 		// #3621: book the eligible-but-inert turn. Everything above this line is the
 		// eligibility gate (lever on, Anthropic passthrough, ablation off), so reaching here
@@ -163,6 +176,7 @@ func deferColdToolsInBody(raw []byte, hot map[string]bool, decode func([]byte) e
 	// gain defer_loading:true. Track whether the block was cached to carry the anchor.
 	newElems := make([]json.RawMessage, 0, len(elems)+1)
 	cold := 0
+	var coldNames []string
 	lastHadCacheControl := false
 	for i, m := range parsed {
 		if i == len(parsed)-1 {
@@ -182,6 +196,7 @@ func deferColdToolsInBody(raw []byte, hot map[string]bool, decode func([]byte) e
 		}
 		newElems = append(newElems, nb)
 		cold++
+		coldNames = append(coldNames, name)
 	}
 	if cold == 0 {
 		return deferResult{Reason: "no_cold_tools"}
@@ -212,7 +227,7 @@ func deferColdToolsInBody(raw []byte, hot map[string]bool, decode func([]byte) e
 			return deferResult{Reason: "decode_failed"}
 		}
 	}
-	return deferResult{Body: out, Changed: true, ColdCount: cold}
+	return deferResult{Body: out, Changed: true, ColdCount: cold, ColdNames: coldNames}
 }
 
 // toolSearchToolElement is the injected tool_search_tool descriptor, optionally

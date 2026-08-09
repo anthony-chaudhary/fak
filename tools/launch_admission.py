@@ -66,13 +66,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_LEDGER = os.path.join(
-    os.environ.get("FLEET_REG_DIR", os.path.join(HERE, "_registry")),
-    "resume_ledger.jsonl",
-)
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import fleet_regdir  # noqa: E402  -- the host's one registry dir (never a second one)
+
+# The resume ledger lives in the RUNTIME registry: $FLEET_REG_DIR when the fleet names it,
+# else the host ladder. Reading a second, forked registry here would grade admission
+# against a ledger no launcher writes -- every launch looks like a first launch.
+DEFAULT_LEDGER = os.path.join(fleet_regdir.reg_dir(), "resume_ledger.jsonl")
 
 VERDICT_ADMIT = "ADMIT"
 VERDICT_DEFER = "DEFER"

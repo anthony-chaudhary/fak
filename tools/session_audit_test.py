@@ -11,6 +11,7 @@ fix from 2026-06-20 (heaviest session 093ca0fc: 901->455 turns, $634->$323) hold
 from __future__ import annotations
 
 import importlib.util
+import collections
 import contextlib
 import io
 import json
@@ -286,7 +287,9 @@ class ReportScopeAndMixTest(unittest.TestCase):
         self.assertNotIn("recent sessions, this machine", md)
         self.assertNotIn("Machine-wide totals", md)
 
-    def test_default_audit_warns_when_subagents_are_excluded(self) -> None:
+    def test_top_level_only_warns_about_the_spend_it_hides(self) -> None:
+        # #3226 flipped the default; the NOTE now belongs to the opt-OUT view and
+        # must point at the flag that is actually hiding the spend.
         sa = load()
         with tempfile.TemporaryDirectory() as d:
             _write_transcript_in(
@@ -296,7 +299,7 @@ class ReportScopeAndMixTest(unittest.TestCase):
                 d, "C--work-fak", "session-a/subagents/worker.jsonl",
                 [_assistant("sub", out=2_000, cread=3_000, ccreate=400)])
             args = SimpleNamespace(root=[d], since_days=None, ns_prefix="",
-                                   all=True, include_subagents=False,
+                                   all=True, top_level_only=True,
                                    max=None, md=None, json=None)
             out = io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
@@ -304,8 +307,9 @@ class ReportScopeAndMixTest(unittest.TestCase):
             md = out.getvalue()
 
         self.assertIn("NOTE: +1 subagent transcripts uncounted", md)
-        self.assertIn("re-run with `--include-subagents`", md)
+        self.assertIn("drop `--top-level-only` to fold them in", md)
         self.assertIn("+2,000 output tok", md)
+        self.assertIn("top-level session transcripts ONLY", md)
 
     def test_hang_gate_exits_nonzero_over_threshold(self) -> None:
         # record→view→gate (#2365 d3): --gate-hangs turns the hang counter into a CI
@@ -364,6 +368,133 @@ class ReportScopeAndMixTest(unittest.TestCase):
         self.assertIn("| haiku | 150 | 15.0% |", md)
         self.assertIn("Opus output share", md)
         self.assertIn("| C--work-fak | 1 | 1,000 | 85.0% |", md)
+
+
+def _run_audit(sa, root, **kw):
+    """Run `audit` over `root`, returning (json payload, stdout markdown)."""
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+    tmp.close()
+    args = SimpleNamespace(**{"root": [root], "since_days": None, "ns_prefix": "",
+                              "all": True, "max": None, "md": None, "json": tmp.name,
+                              "top_level_only": False, **kw})
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        sa.cmd_audit(args)
+    return json.loads(Path(tmp.name).read_text(encoding="utf-8")), out.getvalue()
+
+
+class SubagentFoldTest(unittest.TestCase):
+    """#3226 — subagent / workflow transcripts are ~23% of billed spend and hold EVERY
+    delegated turn, yet the rollup counted only top-level sessions: the headline cost
+    understated reality and no behavioral detector could see a fan-out stuck in a loop.
+    They are folded in by default now; `--top-level-only` preserves the old view. The
+    witness is the reconciliation: default total == top-level-only total + the subagent
+    delta the NOTE prints, with nothing counted twice."""
+
+    def _fixture(self, d):
+        """One top-level session + one subagent under it. The subagent is BOTH the
+        heavier spender and the only transcript carrying a stuck retry loop."""
+        _write_transcript_in(d, "C--work-fak", "sess-a.jsonl", [
+            _assistant("top", out=100, cread=1_000, ccreate=100, tool="Read",
+                       tool_id="r1", tool_input={"file_path": "C:/x/a.go"}),
+        ])
+        recs = [_assistant("sub-0", out=2_000, cread=3_000, ccreate=400)]
+        for i in range(3):   # a verbatim retry loop, visible only inside the subagent
+            recs += [_assistant(f"sub-{i+1}", out=10, cread=0, ccreate=0, tool="Bash",
+                                tool_id=f"t{i}", tool_input={"command": "go build ./..."}),
+                     _user_result(f"t{i}", "Exit code 1")]
+        _write_transcript_in(d, "C--work-fak", "sess-a/subagents/worker.jsonl", recs)
+
+    def test_default_total_equals_top_level_only_plus_subagent_delta(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._fixture(d)
+            full, full_md = _run_audit(sa, d)
+            only, only_md = _run_audit(sa, d, top_level_only=True)
+
+        # The NOTE the top-level-only view prints IS the delta the default folds in.
+        delta = only["excluded_subagents"]
+        self.assertEqual(delta["count"], 1)
+        self.assertIsNone(full["excluded_subagents"], "nothing is excluded by default")
+
+        for k in ("output", "input", "cache_read", "cache_create"):
+            self.assertEqual(
+                full["aggregate"]["totals"].get(k, 0),
+                only["aggregate"]["totals"].get(k, 0) + delta["tokens"].get(k, 0),
+                f"{k}: default == top-level-only + the NOTE's delta, exactly")
+        self.assertAlmostEqual(full["aggregate"]["total_cost_usd"],
+                               only["aggregate"]["total_cost_usd"] + delta["cost_usd"],
+                               places=9)
+        # …and nothing is counted twice: one extra transcript, not two, and the
+        # per-namespace rollup grows by exactly that one.
+        self.assertEqual(full["aggregate"]["n_sessions"],
+                         only["aggregate"]["n_sessions"] + 1)
+        self.assertEqual(full["aggregate"]["per_namespace"]["C--work-fak"]["sessions"],
+                         only["aggregate"]["per_namespace"]["C--work-fak"]["sessions"] + 1)
+        self.assertIn("1 top-level + 1 subagent", full_md)
+        self.assertNotIn("NOTE: +1 subagent transcripts uncounted", full_md)
+        self.assertIn("NOTE: +1 subagent transcripts uncounted", only_md)
+
+    def test_subagent_namespace_is_the_parent_namespace_not_the_subdir(self) -> None:
+        # A subagent lives at <ns>/<session>/subagents/<agent>.jsonl, so
+        # basename(dirname(path)) is "subagents" — folding on that would invent a
+        # bogus namespace and split the rollup.
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._fixture(d)
+            full, full_md = _run_audit(sa, d)
+        self.assertEqual(list(full["aggregate"]["per_namespace"]), ["C--work-fak"])
+        self.assertNotIn("subagents", full["aggregate"]["per_namespace"])
+        self.assertIn("1 namespaces folded (C--work-fak)", full_md)
+
+    def test_behavioral_lens_sees_subagent_turns_attributed_to_parent(self) -> None:
+        # The retry loop exists ONLY in the subagent transcript. Default view must
+        # surface it, labelled with the parent session an operator can open; the
+        # top-level-only view is blind to it (that is the gap #3226 names).
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._fixture(d)
+            full, full_md = _run_audit(sa, d)
+            only, _ = _run_audit(sa, d, top_level_only=True)
+
+        rows = full["aggregate"]["behavior"]["repeat_failure_sessions"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["session"], "sess-a",
+                         "a subagent finding is attributed to its PARENT session")
+        self.assertEqual(rows[0]["ns"], "C--work-fak")
+        self.assertEqual(rows[0]["count"], 3)
+        self.assertEqual(full["aggregate"]["behavior"]["per_tool"]["Bash"]["errors"], 3)
+        self.assertIn("sess-a→worker", full_md,
+                      "a folded subagent row is labelled parent→agent, not as a session")
+
+        self.assertEqual(only["aggregate"]["behavior"]["repeat_failure_sessions"], [],
+                         "top-level-only stays blind to the subagent's loop")
+
+    def test_fold_table_reconciles_and_warns_against_adding_it_back(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._fixture(d)
+            _, md = _run_audit(sa, d)
+        self.assertIn("Subagent / workflow fold — INCLUDED in every total above", md)
+        self.assertIn("adding it back on would double-count", md)
+        self.assertIn("| top-level sessions | 1 |", md)
+        self.assertIn("| subagent / workflow | 1 |", md)
+        self.assertIn("| **TOTAL (= scope totals above)** | 2 |", md)
+        self.assertNotIn("True spend = top-level + this", md,
+                         "the old add-them-up framing double-counts now")
+
+    def test_max_caps_top_level_sessions_not_the_interleaved_list(self) -> None:
+        # --max has always meant "top-level sessions"; folding subagents into the
+        # same list must not silently redefine it as "transcripts".
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            self._fixture(d)
+            _write_transcript_in(d, "C--work-fak", "sess-b.jsonl",
+                                 [_assistant("b", out=50, cread=0, ccreate=0)])
+            full, _ = _run_audit(sa, d, max=2)
+        kinds = collections.Counter(s.get("kind") for s in full["sessions"])
+        self.assertEqual(kinds["session"], 2, "both top-level sessions kept")
+        self.assertEqual(kinds["subagent"], 1, "its parent survived the cap, so it rides along")
 
 
 class BillingBucketTest(unittest.TestCase):

@@ -45,7 +45,6 @@ package leaseref
 
 import (
 	"context"
-	"strings"
 	"time"
 )
 
@@ -90,15 +89,17 @@ type RemovalEvent struct {
 // is the right posture even for the reader's own lease: if MY session's heartbeat lapsed, my
 // registrations are dead too, and the arbiter must not be told otherwise.
 func CascadeDrop(rec Record, sessions map[string]SessionDescriptor, now time.Time) (RemovalEvent, bool) {
-	class, evidence := ClassifyLiveness(rec, sessions, "", now)
+	class, kind, evidence := ClassifyLiveness(rec, sessions, "", now)
 	if class != LivenessPeerDead {
 		return RemovalEvent{}, false
 	}
-	// Only a PRESENT descriptor can yield peer-dead, so this lookup always hits; the reason
-	// mirrors ClassifyLiveness's own precedence (terminal state before heartbeat lapse).
-	d := sessions[rec.SessionID]
+	// The reason reads straight off the typed evidence kind (#5484). It used to re-derive
+	// the STOPPED test from the descriptor and rely on a comment to keep that in step with
+	// ClassifyLiveness's own precedence (terminal state before heartbeat lapse); routing
+	// through the kind is the same by-construction argument the delegation above makes, one
+	// field deeper. Exactly two kinds yield peer-dead, so this is total.
 	reason := RemovalSessionExpired
-	if strings.EqualFold(strings.TrimSpace(d.PCBState), sessionStateStopped) {
+	if kind == EvidenceTerminalStopped {
 		reason = RemovalSessionStopped
 	}
 	return RemovalEvent{

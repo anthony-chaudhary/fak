@@ -308,7 +308,10 @@ assumption 1 surviving its first contact with real data on 46 of 52 rows. The 6
 mixed-witness cache-savings row (assumption 1's named hard case) does not appear
 in the structured record as a separable claim at all — which is itself the
 evidence that per-*claim* rather than per-*row* granularity is the real
-requirement.
+requirement. Issue #3431 resolves that design decision in
+[`notes/PER-CLAIM-BENCHMARK-WITNESS-GRANULARITY-2026-08-09.md`](notes/PER-CLAIM-BENCHMARK-WITNESS-GRANULARITY-2026-08-09.md):
+mixed rows get optional stable assertions with their own status and witness kind,
+while the scalar row remains a conservative compatibility envelope.
 
 ## Handoff (continue from here without the epic)
 
@@ -318,12 +321,17 @@ A future agent picking this up should, in order:
    `registry.jsonl`. Do not redo it by hand. The residual is the 6
    `unknown`-provenance rows and the mixed-witness cache-savings row, which the
    structured record does not decompose.
-2. **Reconcile `status` against `provenance`.** The one `canonical × modeled` cell
+2. ~~**Decide per-claim versus per-row witness granularity**~~ — **done** in the
+   [#3431 decision note](notes/PER-CLAIM-BENCHMARK-WITNESS-GRANULARITY-2026-08-09.md).
+   Adopt optional claim-level assertions only for mixed rows, keep a conservative
+   scalar roll-up for old consumers, and add `simulated` at claim level to recover
+   the currently-collapsed `gen/second-next` rung.
+3. **Reconcile `status` against `provenance`.** The one `canonical × modeled` cell
    is the concrete target: either demote its status, or render every row as
    `status (entitled: <horizon>)` so the pair cannot be read apart. A CI check
    that merely *reports* the `canonical × modeled` count is the cheapest first
    gate and would have caught this cell without a human.
-3. **If assumption 2 survives**, build the read-only `fak bench authority-view
+4. **If assumption 2 survives**, build the read-only `fak bench authority-view
    --json` verb before wiring any gate. Derive first, refuse later; a gate on an
    underived column would hard-code the very human judgment the design claims to
    have eliminated. Read it from `registry.jsonl`, or from the typed seam already

@@ -168,6 +168,11 @@ func TestCodexLoopHookMissingSessionFile(t *testing.T) {
 // direct-provider session.
 func TestCodexLoopHookOversizedPayload(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
+	// Neutralize an ambient FAK_GUARD_ACTIVE: inside a `fak guard` session the hook
+	// allow-silents before it ever reads the transcript, so the block subtest below
+	// would see empty stdout. CI runners have no such variable, which is the only
+	// reason this omission stayed invisible.
+	t.Setenv(guardActiveEnv, "")
 	home, sessionID := writeCodexHookSessionFromLines(t, []string{codexHookMetaLine(t, "openai")})
 
 	t.Run("object exceeds 1MiB limit is allowed", func(t *testing.T) {
@@ -188,6 +193,7 @@ func TestCodexLoopHookOversizedPayload(t *testing.T) {
 // in an earlier session_meta. The direct-provider block must survive a partial tail.
 func TestCodexLoopHookPartialFinalLine(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "") // ambient `fak guard` would allow-silently; see above
 
 	t.Run("openai meta then partial final line still blocks", func(t *testing.T) {
 		home, sessionID := writeCodexHookSessionFromLines(t, []string{
@@ -235,6 +241,7 @@ func TestCodexLoopHookPartialFinalLine(t *testing.T) {
 // forge the emitted decision (the reason string is JSON-escaped).
 func TestCodexLoopHookEdgeProviderStrings(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
+	t.Setenv(guardActiveEnv, "") // ambient `fak guard` would allow-silently; see above
 
 	for _, tc := range []struct {
 		name           string

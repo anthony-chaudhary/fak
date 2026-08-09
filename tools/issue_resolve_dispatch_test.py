@@ -9,7 +9,10 @@ directly.
 from __future__ import annotations
 
 import importlib.util
+import ast
 import atexit
+import datetime as dt
+import inspect
 import json
 import os
 import re
@@ -17,6 +20,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -324,6 +329,148 @@ class ActiveGuardLivelockTest(unittest.TestCase):
 
         self.assertFalse(hold["active"])
 
+    @staticmethod
+    def _livelock_fixture(root: Path, rows: list[dict], *,
+                          lane: str | None = "quality") -> tuple[Path, Path]:
+        """Write a live worker's resolve log + guard journal under ``root``."""
+        import json
+        runs = root / ".dispatch-runs"
+        audit_dir = runs / "guard-audit"
+        audit_dir.mkdir(parents=True)
+        audit = audit_dir / "tools-claude-1234.jsonl"
+        audit.write_text("\n".join(json.dumps(r) for r in rows),
+                         encoding="utf-8")
+        log = runs / "resolve-2720-20260705-202908.log"
+        header = (f"# fak-spawn issue=2720 lane={lane} backend=claude\n"
+                  if lane else "")
+        log.write_text(f"{header}audit log  : {audit}\n", encoding="utf-8")
+        log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+        return runs, audit
+
+    @staticmethod
+    def _quarantine_row() -> dict:
+        return {"kind": "QUARANTINE", "verdict": "QUARANTINE",
+                "tool": "tool_result", "reason": "SECRET_EXFIL",
+                "args_digest": "abc123"}
+
+    @staticmethod
+    def _clean_row(i: int) -> dict:
+        return {"kind": "DECIDE", "verdict": "ALLOW", "tool": "Bash",
+                "args_digest": f"clean{i}"}
+
+    def test_guard_livelock_clears_once_the_worker_escapes(self) -> None:
+        """A worker that already broke OUT of the livelock is not livelocked.
+
+        Regression for #5861: the scan counted all-time quarantines in an
+        append-only journal, so the tally could never fall back under the
+        threshold. Once a worker crossed it the hold LATCHED for the life of the
+        journal -- here, through 400 consecutive clean decisions after the
+        livelock ended. The hold must describe a livelock happening NOW.
+        """
+        import tempfile
+        mod = load()
+        rows = ([self._quarantine_row() for _ in range(10)]
+                + [self._clean_row(i) for i in range(400)])
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, audit = self._livelock_fixture(root, rows)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+                hit = mod._guard_result_livelock(audit)
+
+        self.assertFalse(hold["active"])
+        self.assertFalse(hit["livelock"])
+        # The escape was SEEN and the pre-escape burst forgotten, not merely
+        # outweighed -- so the hold clears on recovery instead of latching.
+        self.assertEqual(hit["escapes"], 1)
+        self.assertEqual(hit["count"], 0)
+        self.assertEqual(hit["rows"], 410)
+
+    def test_scattered_quarantines_are_not_a_livelock(self) -> None:
+        """Ten quarantines spread singly across thousands of productive rows --
+        never two adjacent -- is a lifetime tally, not a livelock (#5861)."""
+        import tempfile
+        mod = load()
+        rows: list[dict] = []
+        for burst in range(10):
+            rows.extend(self._clean_row(burst * 200 + i) for i in range(200))
+            rows.append(self._quarantine_row())
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, audit = self._livelock_fixture(root, rows)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+                hit = mod._guard_result_livelock(audit)
+
+        self.assertFalse(hold["active"])
+        self.assertFalse(hit["livelock"])
+        # Each repeat lands a full escape window after the previous one, so each
+        # starts a fresh burst instead of accumulating into a false fuse.
+        self.assertEqual(hit["count"], 1)
+
+    def test_tight_livelock_still_fires_after_the_escape_window(self) -> None:
+        """The recency window must not disarm a worker that IS spinning now."""
+        import tempfile
+        mod = load()
+        # Long productive prefix, then a tight burst that never lets up.
+        rows = ([self._clean_row(i) for i in range(300)]
+                + [self._quarantine_row() for _ in range(12)])
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, audit = self._livelock_fixture(root, rows)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+                hit = mod._guard_result_livelock(audit)
+
+        self.assertTrue(hold["active"])
+        self.assertEqual(hit["count"], 12)
+        self.assertEqual(hit["rows_since"], 0)
+
+    def test_guard_livelock_stamps_the_lane_it_burns(self) -> None:
+        """Each livelock candidate names its lane, so the hold can be lane-scoped
+        instead of idling every disjoint lane (#5861)."""
+        import tempfile
+        mod = load()
+        rows = [self._quarantine_row() for _ in range(10)]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, _ = self._livelock_fixture(root, rows, lane="quality")
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertEqual(hold["candidates"][0]["lane"], "quality")
+        self.assertEqual(hold["lanes"], ["quality"])
+        self.assertFalse(hold["lane_unknown"])
+        self.assertIn("lane 'quality'", hold["reason"])
+
+    def test_guard_livelock_without_spawn_header_reports_unknown_lane(self) -> None:
+        """An unreadable spawn header yields no lane, and the hold SAYS so, so
+        the caller can fail closed rather than guess disjointness (#5861)."""
+        import tempfile
+        mod = load()
+        rows = [self._quarantine_row() for _ in range(10)]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs, _ = self._livelock_fixture(root, rows, lane=None)
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_guard_livelock_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertIsNone(hold["candidates"][0]["lane"])
+        self.assertEqual(hold["lanes"], [])
+        self.assertTrue(hold["lane_unknown"])
+
 
 class ActiveCompactRunawayTest(unittest.TestCase):
     def test_live_worker_past_compact_becomes_spawn_hold(self) -> None:
@@ -381,6 +528,87 @@ class ActiveCompactRunawayTest(unittest.TestCase):
                 hold = mod.active_compact_runaway_hold(root, runs)
 
         self.assertFalse(hold["active"])
+
+    def test_compact_runaway_clears_after_compaction_shed(self) -> None:
+        """A worker the harness ALREADY pulled back under budget is not a runaway.
+
+        Regression for #5858: the scan used to count all-time past-compact turns,
+        so once a worker overshot, the hold LATCHED for the rest of its life even
+        though compaction fired, shed the context, and the worker kept making
+        progress. The hold must describe compact control failing NOW.
+        """
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir(parents=True)
+            log = runs / "resolve-4568-20260807-041054.log"
+            lines = [
+                "# fak-spawn issue=4568 lane=quality backend=claude",
+                # Overshoot: 3 turns >=20k past compact (the old latch trigger).
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:126.3k ctx:126.3k/96.0k dist:30.3k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:130.1k ctx:130.1k/96.0k dist:34.1k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:134.1k ctx:134.1k/96.0k dist:38.1k-past-compact",
+                # Compaction FIRES and sheds 66k: proof compact control works.
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:68.1k ctx:68.1k/96.0k",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:90.3k ctx:90.3k/96.0k",
+                "fak-turn trace=guard ok compact=fired finish=tool_use "
+                "budget=spent:93.3k ctx:93.3k/96.0k",
+            ]
+            log.write_text("\n".join(lines), encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_compact_runaway_hold(root, runs)
+                hit = mod._compact_runaway_from_log(log)
+
+        self.assertFalse(hold["active"])
+        self.assertFalse(hit["runaway"])
+        # The shed was seen and the pre-shed overshoot forgotten, not merely
+        # outweighed -- so the hold clears immediately on recovery.
+        self.assertEqual(hit["sheds"], 1)
+        self.assertEqual(hit["count"], 0)
+
+    def test_compact_runaway_stamps_the_lane_it_burns(self) -> None:
+        """Each runaway candidate names its lane, so the hold can be lane-scoped
+        instead of idling every disjoint lane (#5858)."""
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir(parents=True)
+            log = runs / "resolve-4568-20260807-041054.log"
+            lines = [
+                "# fak-spawn issue=4568 lane=quality backend=claude",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:126.3k ctx:126.3k/96.0k dist:30.3k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:130.1k ctx:130.1k/96.0k dist:34.1k-past-compact",
+                "fak-turn trace=guard ok compact=none-past-budget finish=tool_use "
+                "budget=spent:134.1k ctx:134.1k/96.0k dist:38.1k-past-compact",
+            ]
+            log.write_text("\n".join(lines), encoding="utf-8")
+            log.with_suffix(".pid").write_text("1234\n", encoding="utf-8")
+
+            with mock.patch.object(mod.dispatch_preflight,
+                                   "resolve_sidecar_pid_is_live",
+                                   return_value=True):
+                hold = mod.active_compact_runaway_hold(root, runs)
+
+        self.assertTrue(hold["active"])
+        self.assertEqual(hold["candidates"][0]["lane"], "quality")
+        self.assertEqual(hold["lanes"], ["quality"])
+        self.assertFalse(hold["lane_unknown"])
+        self.assertIn("lane 'quality'", hold["reason"])
 
 
 class LiveResolutionLanesTest(unittest.TestCase):
@@ -665,6 +893,67 @@ class PruneDeadSidecarsTest(unittest.TestCase):
             out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], ["repair-1207-20260702-180000.pid"])
             self.assertEqual(sorted(p.name for p in runs.glob("repair-1207-*")), [])
+
+    def test_repair_cooldown_outlives_the_sidecar_sweep(self) -> None:
+        """The repair cooldown must survive the corpse it was read off.
+
+        Regression: `recently_repaired_issues` read the `repair-*.log` mtime and
+        its `.issues` batch sidecar -- both of which `prune_dead_sidecars` unlinks
+        the moment the groomer exits. So the 360-min anti-churn window silently
+        collapsed to the groomer's OWN LIFETIME, which the live-repair scan already
+        covers, and the same un-repairable heads were re-groomed every ~40 min
+        (measured on this host: 62/186 grooming events inside the window, median
+        gap 43 min). The durable ledger must still cool the whole batch after the
+        sweep has taken every file the old reader depended on.
+        """
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            mod.record_repair_attempt(runs, [3238, 5255, 4318],
+                                      live=True, now_ts=now - 40 * 60)
+            pid_file = runs / "repair-3238-20260702-180000.pid"
+            pid_file.write_text("58753", encoding="utf-8")
+            stem = pid_file.with_suffix("")
+            stem.with_suffix(".log").write_text("", encoding="utf-8")
+            stem.with_suffix(mod.REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(
+                "3238,5255,4318", encoding="utf-8")
+            os.utime(pid_file, (now - 40 * 60, now - 40 * 60))
+
+            def probe(pid):
+                return {"alive": False}
+
+            mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            # Every file the OLD reader used is gone -- that is the bug's premise.
+            self.assertEqual(sorted(runs.glob("repair-3238-*")), [])
+            cooled = mod.recently_repaired_issues(
+                runs, cooldown_min=360, now_ts=now)
+
+        self.assertEqual(cooled, {3238, 5255, 4318})
+
+    def test_repair_cooldown_expires_with_its_window(self) -> None:
+        """...and clears itself: past the window the batch is groomable again with
+        no reset verb, so an issue is never pinned out permanently."""
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            mod.record_repair_attempt(runs, [3238, 5255],
+                                      live=True, now_ts=now - 361 * 60)
+            expired = mod.recently_repaired_issues(
+                runs, cooldown_min=360, now_ts=now)
+            # A dry run stays side-effect-free, so it never cools anything.
+            mod.record_repair_attempt(runs, [999], live=False, now_ts=now)
+            dry = mod.recently_repaired_issues(runs, cooldown_min=360, now_ts=now)
+            disabled = mod.recently_repaired_issues(
+                runs, cooldown_min=0, now_ts=now)
+
+        self.assertEqual(expired, set())
+        self.assertEqual(dry, set())
+        self.assertEqual(disabled, set())
 
     def test_recycled_shell_in_window_is_pruned(self) -> None:
         # The exact ghost: a recycled cmd.exe whose create time lands inside the
@@ -1386,6 +1675,84 @@ class EvaluateTest(unittest.TestCase):
         self.assertIn("guard result livelock", p["reason"])
         self.assertIn("launch gate: BLOCKED", mod.render(p))
 
+    def test_guard_livelock_on_other_lane_does_not_block_disjoint_lane(self) -> None:
+        """A guard livelock on lane A must NOT idle dispatch to lane B (#5861).
+
+        Same shape #5858 fixed for ACTIVE_COMPACT_RUNAWAY: one worker stuck on
+        the same quarantined tool_result is a local tool-loop condition, and
+        scoping the hold to the colliding lane is what makes it a proportionate
+        response instead of a fleet-wide stop.
+        """
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": ("live worker #2720 on lane 'quality' is already in a "
+                       "guard result livelock"),
+            "candidates": [{"issue": 2720, "lane": "quality", "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertNotEqual(p.get("verdict"), "ACTIVE_GUARD_LIVELOCK")
+        self.assertNotEqual(p.get("action"), "active_guard_livelock")
+        # Never a silent drop: the disjoint livelock is still REPORTED, with the
+        # lane it was scoped against and the explicit no-collision finding.
+        self.assertEqual(p["active_guard_livelock"]["scoped_lane"], "tools")
+        self.assertFalse(p["active_guard_livelock"]["collides"])
+
+    def test_guard_livelock_still_blocks_its_own_lane(self) -> None:
+        """Lane-scoping must not disarm the hold on the lane actually spinning."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "quality", "numbers": [2867],
+                          "by_lane_count": {"quality": 1},
+                          "eligible_by_lane": [["quality", [2867]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": ("live worker #2720 on lane 'quality' is already in a "
+                       "guard result livelock"),
+            "candidates": [{"issue": 2720, "lane": "quality", "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_GUARD_LIVELOCK")
+        self.assertTrue(p["active_guard_livelock"]["collides"])
+
+    def test_guard_livelock_with_unknown_lane_fails_closed(self) -> None:
+        """An unreadable spawn header cannot prove disjointness, so the hold keeps
+        its old fleet-wide behaviour rather than guessing."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_guard_livelock_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": [],
+            "lane_unknown": True,
+            "reason": "live worker #2720 is already in a guard result livelock",
+            "candidates": [{"issue": 2720, "lane": None, "count": 50}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_GUARD_LIVELOCK")
+        self.assertTrue(p["active_guard_livelock"]["collides"])
+
     def test_active_compact_runaway_blocks_spawn(self) -> None:
         """A live compact-control runaway pauses new issue spawns before the
         launcher adds more workers to the same failing regime."""
@@ -1410,6 +1777,84 @@ class EvaluateTest(unittest.TestCase):
                          "ACTIVE_COMPACT_RUNAWAY")
         self.assertIn("past compact", p["reason"])
         self.assertIn("launch gate: BLOCKED", mod.render(p))
+
+    def test_compact_runaway_on_other_lane_does_not_block_disjoint_lane(self) -> None:
+        """A runaway on lane A must NOT idle the fleet's dispatch to lane B (#5858).
+
+        The observed stall: one worker on lane `quality` was past compact, and the
+        tick refused to launch #4334 on the DISJOINT lane `tools`, holding 20 free
+        slots fleet-wide. A compact runaway is one worker's local context
+        condition; scoping the hold to the colliding lane is what makes it a
+        proportionate response instead of a fleet-wide stop.
+        """
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": "live worker #4568 on lane 'quality' is already past compact",
+            "candidates": [{"issue": 4568, "lane": "quality", "count": 9,
+                            "max_past_k": 38.1}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertNotEqual(p.get("verdict"), "ACTIVE_COMPACT_RUNAWAY")
+        self.assertNotEqual(p.get("action"), "active_compact_runaway")
+        # Never a silent drop: the disjoint runaway is still REPORTED, with the
+        # lane it was scoped against and the explicit no-collision finding.
+        self.assertEqual(p["active_compact_runaway"]["scoped_lane"], "tools")
+        self.assertFalse(p["active_compact_runaway"]["collides"])
+
+    def test_compact_runaway_still_blocks_its_own_lane(self) -> None:
+        """Lane-scoping must not disarm the hold on the lane actually burning."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "quality", "numbers": [4568],
+                          "by_lane_count": {"quality": 1},
+                          "eligible_by_lane": [["quality", [4568]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": ["quality"],
+            "lane_unknown": False,
+            "reason": "live worker #4568 on lane 'quality' is already past compact",
+            "candidates": [{"issue": 4568, "lane": "quality", "count": 9,
+                            "max_past_k": 38.1}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_COMPACT_RUNAWAY")
+        self.assertTrue(p["active_compact_runaway"]["collides"])
+
+    def test_compact_runaway_with_unknown_lane_fails_closed(self) -> None:
+        """An unreadable spawn header cannot prove disjointness, so the hold keeps
+        its old fleet-wide behaviour rather than guessing."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [4334],
+                          "by_lane_count": {"tools": 1},
+                          "eligible_by_lane": [["tools", [4334]]]})
+        mod.active_compact_runaway_hold = lambda root, runs_dir, **k: {
+            "active": True,
+            "lanes": [],
+            "lane_unknown": True,
+            "reason": "live worker #4568 is already past compact",
+            "candidates": [{"issue": 4568, "lane": None, "count": 9}],
+        }
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ACTIVE_COMPACT_RUNAWAY")
 
     def test_contract_scan_bounded_holds_when_none_ready(self) -> None:
         """When every scanned issue is thin, the tick still HOLDs (the floor is
@@ -1821,6 +2266,14 @@ class EvaluateTest(unittest.TestCase):
             sidecar = Path(td) / ("repair-467-20260702-190000"
                                   + mod.REPAIR_ISSUES_SIDECAR_SUFFIX)
             self.assertEqual(sidecar.read_text(encoding="utf-8"), "467,466")
+            # ...and the DURABLE half: the sidecar above is swept with the corpse,
+            # so the whole batch is also ledgered where the cooldown can still read
+            # it after the groomer dies.
+            ledger = (Path(mod.RUNS_DIRNAME)
+                      / mod._REPAIR_ATTEMPT_LEDGER)
+            rows = [json.loads(x) for x in
+                    ledger.read_text(encoding="utf-8").splitlines() if x.strip()]
+            self.assertEqual(rows[-1]["issues"], [466, 467])
 
     def test_live_repair_worker_blocks_a_second_groomer(self) -> None:
         """Repair admission is serialized: with a groomer already alive, the tick
@@ -2493,25 +2946,62 @@ class BuildWorkerCommandTest(unittest.TestCase):
                 [r"C:\work\fak\fak.exe"])
 
 
-class WinCreationFlagsTest(unittest.TestCase):
-    def test_batch_launcher_gets_hidden_console_not_detached(self) -> None:
-        # Regression: opencode.CMD spawned DETACHED_PROCESS dies at the batch
-        # prompt producing 0 bytes — every glm worker was DOA. A .cmd/.bat needs a
-        # (hidden) console.
-        mod = load()
-        self.assertEqual(mod.win_creationflags(r"C:\npm\opencode.CMD"), mod._CREATE_NO_WINDOW)
-        self.assertEqual(mod.win_creationflags("opencode.cmd"), mod._CREATE_NO_WINDOW)
-        self.assertEqual(mod.win_creationflags("wrap.bat"), mod._CREATE_NO_WINDOW)
+class FakCommandPrefixTest(unittest.TestCase):
+    """#5856: nothing refreshes the repo-root fak.exe, while FakSelfUpdate rebuilds the
+    PATH copy every 20 minutes from a pristine detached origin/main worktree. This prefix
+    used to take the repo-root artifact unconditionally and never consult PATH at all --
+    so a single dispatcher tick ran two different fak builds, the guarded one of them
+    witnessed 34 commits behind HEAD and stamped +dirty."""
 
-    def test_native_launcher_also_gets_hidden_console(self) -> None:
-        # Regression: a native worker (claude.exe) spawned DETACHED_PROCESS has NO
-        # console, so the git/gh/fak/shell tools it spawns each pop a visible window
-        # — the "random popups" during a dispatched run. CREATE_NO_WINDOW gives it one
-        # hidden console the whole subtree inherits, so nothing flashes.
+    def _layout(self, td: Path):
+        exe = "fak.exe" if os.name == "nt" else "fak"
+        root, pathdir = td / "root", td / "bin"
+        root.mkdir(parents=True)
+        pathdir.mkdir(parents=True)
+        rootbin, onpath = root / exe, pathdir / exe
+        for p in (rootbin, onpath):
+            p.write_text("stub", encoding="utf-8")
+            p.chmod(0o755)
+        return root, rootbin, onpath, pathdir
+
+    def test_explicit_fak_bin_still_wins(self) -> None:
         mod = load()
-        self.assertEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._CREATE_NO_WINDOW)
-        self.assertEqual(mod.win_creationflags("/usr/bin/claude"), mod._CREATE_NO_WINDOW)
-        self.assertNotEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._DETACHED_PROCESS)
+        with mock.patch.dict(os.environ, {"FAK_BIN": "C:/pinned/fak.exe"}):
+            self.assertEqual(mod._fak_command_prefix(Path("/nope")), ["C:/pinned/fak.exe"])
+
+    def test_freshest_build_wins_in_both_directions(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root, rootbin, onpath, pathdir = self._layout(Path(td))
+            with mock.patch.dict(os.environ, {"PATH": str(pathdir)}, clear=True):
+                # The refreshed PATH copy is newer -> it wins. The fleet case, and the
+                # assertion the old repo-root-first prefix fails.
+                os.utime(rootbin, (1_000_000, 1_000_000))
+                os.utime(onpath, (2_000_000, 2_000_000))
+                self.assertEqual(mod._fak_command_prefix(root), [str(onpath)])
+                # A just-rebuilt repo-root binary is newer -> it wins. The dev case holds.
+                os.utime(rootbin, (3_000_000, 3_000_000))
+                self.assertEqual(mod._fak_command_prefix(root), [str(rootbin)])
+
+    def test_no_binary_anywhere_falls_back_to_go_run(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            empty = Path(td) / "empty"
+            empty.mkdir()
+            with mock.patch.dict(os.environ, {"PATH": str(empty)}, clear=True):
+                self.assertEqual(
+                    mod._fak_command_prefix(empty), ["go", "run", "./cmd/fak"])
+
+
+class WinCreationFlagsTest(unittest.TestCase):
+    def test_worker_spawn_allocates_no_console_for_native_and_batch_launchers(self) -> None:
+        mod = load()
+        want = mod._DETACHED_PROCESS if os.name == "nt" else 0
+        for exe in (r"C:\npm\opencode.CMD", "opencode.cmd", "wrap.bat",
+                    r"C:\bin\claude.exe", "/usr/bin/claude"):
+            with self.subTest(exe=exe):
+                self.assertEqual(mod.win_creationflags(exe), want)
+                self.assertEqual(mod.win_creationflags(exe) & mod._CREATE_NO_WINDOW, 0)
 
 
 class SpawnProbeTest(unittest.TestCase):
@@ -2598,6 +3088,12 @@ class BackendRoutingTest(unittest.TestCase):
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
         mod.read_dead_backends = lambda runs_dir, **k: []
+        # The active opencode gateway gate (#3866) probes a real HTTP endpoint when
+        # it is left unstubbed, so evaluate() would return GATEWAY_DOWN here purely
+        # because no gateway is listening on this machine — a live dependency this
+        # file forbids. Stub the gate itself (module-local, load() returns a fresh
+        # module) rather than account_probe, which is shared via sys.modules.
+        mod.gate_opencode_gateway = lambda planned, account, **k: (planned, None)
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
@@ -2608,7 +3104,12 @@ class BackendRoutingTest(unittest.TestCase):
                          lane="docs", live=False, backend="opencode")
         self.assertEqual(seen.get("product"), "opencode")       # routed to glm pool
         self.assertEqual(p["backend"], "opencode")
-        self.assertEqual(p["command"][0], "opencode")
+        # argv[0] is the GUARD binary, not the backend: guarded_launch_command wraps
+        # every worker argv, so the backend and its model are pinned INSIDE the wrapped
+        # command rather than at the head of it. Asserting on argv[0] would pin the
+        # wrapper away again the moment guarding is on, which it is by default.
+        self.assertTrue(p["guarded"])
+        self.assertIn("opencode", p["command"])
         self.assertIn("zai-coding-plan/glm-5.2", p["command"])   # model pinned/traced
         self.assertTrue(p["ok"])
 
@@ -3671,6 +4172,103 @@ class WaveMembershipTest(unittest.TestCase):
             self.assertEqual(list(runs.glob("*.wave")), [])
 
 
+class DispatchAccountStampTest(unittest.TestCase):
+    """#5870: the long-``Retry-After`` goal park is account-scoped
+    (``goalpark.Record.Blocks``), and a record whose ``account`` is blank blocks
+    NOBODY. Only the Go spine ever stamped ``DISPATCH_ACCOUNT``; this dispatcher —
+    the live producer of the fleet's ``resolve-*.log`` units — stamped nothing, so
+    every park its workers wrote was unattributed and the park was inert. These
+    assert the stamp AND that its format matches the Go spine's
+    ``dispatchAccountID`` exactly, because ``SameAccount`` is a plain string
+    compare that fails silently on a mismatch."""
+
+    def test_identity_prefers_the_tag_then_the_dir_basename(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.dispatch_account_id({"tag": "aug5-netra",
+                                     "dir": r"C:\Users\u\.claude-aug5-netra"}),
+            "aug5-netra")
+        # No tag: the config dir's BASE NAME, exactly as Go's
+        # filepath.Base(filepath.Clean(dir)) resolves it. A trailing separator must
+        # not shift the answer to "".
+        self.assertEqual(
+            mod.dispatch_account_id({"dir": "/home/u/.claude-july16-netra"}),
+            ".claude-july16-netra")
+        self.assertEqual(
+            mod.dispatch_account_id({"dir": "/home/u/.claude-july16-netra/"}),
+            ".claude-july16-netra")
+        # Genuinely anonymous, and the blank/absent forms of both fields.
+        self.assertEqual(mod.dispatch_account_id({}), "")
+        self.assertEqual(mod.dispatch_account_id(None), "")
+        self.assertEqual(mod.dispatch_account_id({"tag": "  ", "dir": " "}), "")
+
+    def test_stamp_never_mutates_the_caller_env(self) -> None:
+        mod = load()
+        base = {"DISPATCH_LANE": "tools"}
+        out = mod.stamp_dispatch_account(base, {"tag": "seat-a"})
+        self.assertEqual(out["DISPATCH_ACCOUNT"], "seat-a")
+        self.assertEqual(out["DISPATCH_LANE"], "tools")
+        self.assertNotIn("DISPATCH_ACCOUNT", base)
+
+    def test_anonymous_seat_drops_an_inherited_identity(self) -> None:
+        # An unattributable spawn must NOT inherit this dispatcher's own ambient
+        # DISPATCH_ACCOUNT: that would file someone else's wall under our seat.
+        mod = load()
+        out = mod.stamp_dispatch_account(
+            {"DISPATCH_ACCOUNT": "stale-dispatcher-identity"}, None)
+        self.assertNotIn("DISPATCH_ACCOUNT", out)
+
+    def test_spawn_stamps_the_serving_account_into_the_child_env(self) -> None:
+        # End-to-end over the real spawn seam, no live launch: the child env the
+        # dispatcher hands `fak guard` carries a NON-EMPTY account, which is the
+        # exact string guard writes into the park record and reads back through
+        # Blocks. Proven by capturing Popen's env.
+        import tempfile
+        from unittest import mock
+        mod = load()
+        captured: dict[str, object] = {}
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                captured["env"] = kwargs.get("env")
+                kwargs.get("stdout").close()  # the parent's log fh (no real child)
+                self.pid = 4805
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            acct = {"tag": "aug5-netra", "tier": 1, "model": "opus",
+                    "dir": r"C:\Users\u\.claude-aug5-netra"}
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                res = mod.spawn_issue_worker(
+                    ["true"], {"DISPATCH_LANE": "gateway"}, runs, runs,
+                    issue=5870, lane="gateway", backend="claude", account=acct)
+            env = captured["env"]
+            self.assertEqual(env["DISPATCH_ACCOUNT"], "aug5-netra")
+            self.assertEqual(env["DISPATCH_LANE"], "gateway")  # base env preserved
+            # The env stamp and the on-disk account sidecar must name ONE seat.
+            self.assertEqual(res["account"]["tag"], env["DISPATCH_ACCOUNT"])
+
+    def test_spawn_without_an_account_leaves_no_stale_identity(self) -> None:
+        import tempfile
+        from unittest import mock
+        mod = load()
+        captured: dict[str, object] = {}
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                captured["env"] = kwargs.get("env")
+                kwargs.get("stdout").close()
+                self.pid = 11
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                mod.spawn_issue_worker(
+                    ["true"], {"DISPATCH_ACCOUNT": "stale-dispatcher-identity"},
+                    runs, runs, issue=2, lane="tools", backend="claude")
+            self.assertNotIn("DISPATCH_ACCOUNT", captured["env"])
+
+
 class BackendHealthTest(unittest.TestCase):
     """The backend-health reallocation gate: a MAJORITY of stub (banner-only/0-byte,
     dead-pid) logs over the lookback window declares a backend dead — the same signal
@@ -4230,6 +4828,106 @@ class LaneLeaseHelperTest(unittest.TestCase):
         finally:
             sys.modules.pop("issue_lane_router", None)
             mod._LANE_TREE_CACHE.clear()
+
+
+# A stand-in for `fak leaseref live` shelling git: the grandchild INHERITS this
+# process's stdout/stderr pipe (exactly what git.exe gets when fak shells it), so
+# terminating only THIS pid leaves the pipe write handle open and any pipe-reader join
+# blocks until the grandchild itself exits. The #4368 hang in one file.
+_HUNG_GIT_STUB = """\
+import subprocess, sys, time
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+sys.stderr.write("grandchild=%d\\n" % child.pid)
+sys.stderr.flush()
+time.sleep(60)
+"""
+
+
+class LeaseProbeBoundedTest(unittest.TestCase):
+    """#4368: the pre-spawn `fak leaseref` probe terminates on a bounded clock even
+    when a descendant git holds the inherited pipe.
+
+    Witnessed ancestry: `issue_resolve_dispatch.py -> fak.exe leaseref live -> git.exe
+    -> git.exe`, dispatcher alive, no stdout/stderr, no worker — the tick reached
+    neither WOULD_SPAWN/SPAWNED nor a refusal. `subprocess.run(timeout=N)` does NOT
+    bound that on Windows: it kills the DIRECT child, then re-enters communicate() with
+    no timeout to drain reader threads the grandchild is still holding open."""
+
+    HARD_BOUND_S = 30  # probe 2s + drain 5s + reap slack; the un-reaped hang is 60s
+
+    def _stub_path(self) -> Path:
+        tmp = Path(tempfile.mkdtemp(prefix="issue-resolve-test-hunggit-"))
+        atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+        stub = tmp / "hung_git_stub.py"
+        stub.write_text(_HUNG_GIT_STUB, encoding="utf-8")
+        return stub
+
+    def test_hung_git_grandchild_is_reaped_on_a_bounded_clock(self) -> None:
+        mod = load()
+        stub = self._stub_path()
+        mod._fak_bin = lambda root: [sys.executable, str(stub)]
+        started = time.monotonic()
+        res = mod._run_lease(ROOT, ["live"], timeout=2)
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, self.HARD_BOUND_S,
+                        f"lease probe was NOT bounded: {elapsed:.1f}s (the hung git "
+                        "grandchild, not the timeout, decided when it returned)")
+        self.assertEqual(res["rc"], mod.LEASE_TIMEOUT_RC)
+        self.assertTrue(res["timeout"])
+        self.assertEqual(res["timeout_s"], 2)
+        self.assertIsNone(res["verdict"])
+        # Actionable stderr text, not a bare rc: names the verb, the bound, the reap.
+        self.assertIn("LEASE_PROBE_TIMEOUT", res["error"])
+        self.assertIn("leaseref live", res["error"])
+        # No orphan left behind: the tree reap (not Popen.kill) is what closes the
+        # grandchild's INHERITED pipe handle, so a completed drain IS the witness that
+        # the descendant died rather than outliving the dispatcher's probe.
+        self.assertTrue(res["killed"]["ok"], res["killed"])
+        self.assertTrue(res["drained"],
+                        "the post-reap drain lapsed: a descendant still holds the pipe")
+
+    def test_live_read_propagates_the_typed_timeout(self) -> None:
+        # The pre-spawn lane-lease read fails OPEN (advisory visibility must never wedge
+        # a tick) but carries the TYPED row, so the payload distinguishes "probe bounded
+        # and reaped" from a dispatcher that simply never came back.
+        mod = load()
+
+        def timed_out(root, args, **k):
+            return {"rc": mod.LEASE_TIMEOUT_RC, "stdout": "", "verdict": None,
+                    "timeout": True, "timeout_s": 30, "drained": True,
+                    "killed": {"ok": True, "pid": 4321},
+                    "error": "LEASE_PROBE_TIMEOUT: `fak leaseref live` exceeded 30s"}
+
+        out = mod.live_lane_lease_lanes(ROOT, runner=timed_out)
+        self.assertEqual(out["lanes"], [])
+        self.assertTrue(out["fail_open"])
+        self.assertTrue(out["timeout"])
+        self.assertEqual(out["timeout_s"], 30)
+        self.assertTrue(out["drained"])
+        self.assertEqual(out["killed"]["pid"], 4321)
+        self.assertIn("LEASE_PROBE_TIMEOUT", out["detail"])
+
+    def test_probe_never_reverts_to_unbounded_subprocess_run(self) -> None:
+        # The ratchet: `subprocess.run(..., timeout=N)` reads as bounded and is not, so a
+        # future edit that "simplifies" the probe back to it re-opens the hang.
+        mod = load()
+        # Read the CODE, not the prose: _run_lease's own docstring names the trap
+        # ("deliberately does NOT use subprocess.run(timeout=...)"), so asserting over
+        # the raw source would fail on the sentence that documents the fix. Drop the
+        # docstring through the AST rather than by string subtraction — since 3.13 the
+        # compiler dedents __doc__, so it is no longer a literal substring of the source.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(mod._run_lease)))
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)
+                and isinstance(fn.body[0].value.value, str)):
+            fn.body = fn.body[1:]
+        src = ast.unparse(fn)
+        self.assertNotIn("subprocess.run(", src,
+                         "_run_lease must not use subprocess.run: its Windows timeout "
+                         "path re-enters communicate() unbounded (#4368)")
+        self.assertIn("subprocess.Popen(", src)
+        self.assertIn("_terminate_lease_probe(", src)
 
 
 class EvaluateLeaseGateTest(unittest.TestCase):
@@ -4858,7 +5556,10 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         # carries real turns — it must NOT be misread as a banner no-op.
         big = "> build · glm-5.2\n" + ("fak-turn trace=guard ok saved=80k tok\n" * 200)
         p = self._write(big)
-        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+        # No banner no-op, and (#5870) no bare `unknown` either: the tail carries no
+        # guard epilogue, so the run reads as killed mid-turn.
+        self.assertEqual(mod.classify_no_commit_reason(p),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
 
     def test_restart_exhausted_is_typed_with_count_and_cause(self) -> None:
         mod = load()
@@ -4892,10 +5593,16 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         self.assertEqual(mod.classify_no_commit_reason(p),
                          mod.NO_COMMIT_RESTART_EXHAUSTED)
 
-    def test_unknown_when_no_signature(self) -> None:
+    def test_residual_with_no_signature_is_typed_not_unknown(self) -> None:
         mod = load()
+        # #5870: the residual is no longer a bare `unknown`. This log matches no
+        # failure signature AND carries no guard epilogue -> died_before_epilogue.
         p = self._write("the worker ran a few turns and then exited cleanly\n")
-        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+        # Asserted with the PRE-EXISTING constant first, so this fails as a
+        # wrong-behavior assertion on the old sweep, not merely as a missing symbol.
+        self.assertNotEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+        self.assertEqual(mod.classify_no_commit_reason(p),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
 
     def test_missing_log_artifact(self) -> None:
         import tempfile
@@ -4911,6 +5618,86 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         # also present (the guard refusal is the actionable cause).
         p = self._write("> build · glm-5.2\n...\nreason=SELF_MODIFY\n")
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_SELF_MODIFY)
+
+
+class RefineUnknownNoCommitTest(unittest.TestCase):
+    """The residual no-commit bucket is TYPED AT WRITE TIME (#5870), by the same two
+    markers internal/dispatchconservation applies at read time (#5867), so the .witness
+    sidecar the dispatcher routes off is self-describing instead of an opaque blob."""
+
+    # `guardSection` (cmd/fak/guard_format_layout.go) pads the rule to 60 columns.
+    def _section(self, name: str) -> str:
+        head = "── guard · " + name + " "
+        return head + "─" * max(0, 60 - len(head)) + "\n"
+
+    def test_guard_epilogue_means_clean_exit(self) -> None:
+        mod = load()
+        tail = ("fak-turn trace=guard ok\n" + self._section("audit")
+                + "  refused                    0\n")
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_CLEAN_EXIT)
+
+    def test_epilogue_without_a_cache_window_section_still_counts(self) -> None:
+        mod = load()
+        # THE #5867 LESSON, pinned. `guard · cache window` is emitted only when the
+        # session recorded cache turns, so keying on it books a quiet clean exit as a
+        # death. Keying on the SECTION RULE has no such blind spot: an epilogue whose
+        # only section is `audit` is still an epilogue.
+        tail = self._section("audit") + "  refused                    0\n"
+        self.assertNotIn("cache window", tail)
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_CLEAN_EXIT)
+
+    def test_no_epilogue_means_died_before_epilogue(self) -> None:
+        mod = load()
+        tail = "fak-turn trace=e3f9 in-flight saved=12k tok\n"
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
+
+    def test_spawn_failure_wins_over_a_partial_epilogue(self) -> None:
+        mod = load()
+        # A guard that could not exec the agent ALSO prints a partial epilogue, and
+        # "the child never started" is the more specific — and more fixable — claim.
+        tail = (self._section("audit")
+                + 'fak guard: could not run "claude": exec: not found\n')
+        self.assertEqual(mod.refine_unknown_no_commit(tail),
+                         mod.NO_COMMIT_GUARD_SPAWN_FAILED)
+
+    def test_empty_tail_fails_open_to_died_before_epilogue(self) -> None:
+        mod = load()
+        self.assertEqual(mod.refine_unknown_no_commit(""),
+                         mod.NO_COMMIT_DIED_BEFORE_EPILOGUE)
+
+    def test_classifier_never_returns_a_bare_unknown(self) -> None:
+        mod = load()
+        # The writer's vocabulary is now total over the residual: `unknown` survives
+        # only in HISTORIC sidecars, which is what keeps it meaningful as a
+        # vocabulary-drift alarm on the reading side.
+        self.assertNotIn(mod.NO_COMMIT_UNKNOWN, {
+            mod.refine_unknown_no_commit(t) for t in
+            ("", "nothing here\n", self._section("audit"),
+             "fak guard: could not run \"x\": e\n")})
+
+    def test_refined_classes_are_not_added_to_the_reblock_hold_set(self) -> None:
+        mod = load()
+        # MEASURED DECISION, pinned so it is not "fixed" by assumption. #5869 predicted
+        # that typing this bucket would lift its re-block streak hold from 6 runs/1.5h
+        # to 24 runs/7.3h "with no change here". Replaying the same window (2026-08-04
+        # .. 08-07, 293 finished .witness records / 95.3h over 121 issues) against the
+        # typed sidecars: with the hold set UNCHANGED the yield is bit-identical — 6
+        # runs / 1.5h, the same six runs — because a `clean_exit_no_commit` streak is
+        # not a streak of a re-blockable reason. Adding clean_exit_no_commit here DOES
+        # reach 33 runs / 10.9h, but it suppresses SIX runs that landed a witnessed
+        # commit (62b998c75, 9f1558700, 0573fbe1d, b6a80c576, b4d656107, 0d0255ad8),
+        # destroying the zero-witnessed-loss property that is #5869's whole safety
+        # argument. A clean exit that lands nothing is not a refusal to re-block on.
+        for reason in (mod.NO_COMMIT_CLEAN_EXIT, mod.NO_COMMIT_DIED_BEFORE_EPILOGUE,
+                       mod.NO_COMMIT_GUARD_SPAWN_FAILED):
+            self.assertNotIn(reason, mod._HOLD_NO_COMMIT_REASONS)
+        self.assertEqual(mod.held_no_commit_issues({"no_commit": [
+            {"issue": 11, "reason": mod.NO_COMMIT_CLEAN_EXIT},
+            {"issue": 22, "reason": mod.NO_COMMIT_DIED_BEFORE_EPILOGUE},
+            {"issue": 33, "reason": mod.NO_COMMIT_GUARD_SPAWN_FAILED}]}), set())
 
 
 class HeldNoCommitIssuesTest(unittest.TestCase):
@@ -6840,6 +7627,803 @@ class AppendLoopEventArgvTest(unittest.TestCase):
         argv = self._argv({"loop_id": "l", "run_id": "R", "kind": "end",
                            "status": "claimed_done", "reason": "OK", "summary": "s"})
         self.assertNotIn("--evidence", argv)
+
+
+class ReblockStreakHoldTest(unittest.TestCase):
+    """#5869: hold on REPETITION, not on the reason CLASS.
+
+    Measured over the clean current-fleet window (2026-08-04 .. 08-07, 286 finished
+    -worker .witness records / 94.0h over 117 issues), 24 issues hit a re-blockable
+    terminal and drew 54 further worker-units / 16.6h — but 8 of those 54 (15%) went
+    on to land a WITNESSED commit. So the #1396 docstring premise ("re-dispatching it
+    re-blocks identically") is only ~30% true, and a blanket reason-class cooldown
+    would refuse a retry that works one time in seven. These tests pin BOTH
+    directions: the hold fires on a genuine consecutive-identical repeat, and it stays
+    SILENT on the first retry that the measurement says still lands commits.
+    """
+
+    # 2026-08-06T12:00:00Z — the fixture epoch, so a stamped sidecar name and the
+    # ``now_ts`` a tick would pass in are derived from the same instant.
+    EPOCH = 1786363200.0
+
+    @staticmethod
+    def _stamp(ts: float) -> str:
+        import datetime as dt
+        return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime(
+            "%Y%m%d-%H%M%S")
+
+    def _witness(self, runs: Path, issue: int, ts: float, *,
+                 claim: str = "CLAIM_NO_COMMIT", reason: str | None = None) -> Path:
+        """Write one durable ``resolve-<issue>-<UTC>.witness`` record. Note there is
+        no ``os.utime`` here and no ``.pid``/``.log`` sibling: the hold keys off the
+        LAUNCH STAMP IN THE FILENAME plus the record body, which is exactly what
+        survives ``prune_dead_sidecars``."""
+        p = runs / f"resolve-{issue}-{self._stamp(ts)}.witness"
+        body: dict = {"claim": claim, "issue": issue}
+        if reason is not None:
+            body["reason"] = reason
+        p.write_text(json.dumps(body), encoding="utf-8")
+        return p
+
+    def test_first_retry_after_policy_block_is_admitted_second_repeat_is_held(self):
+        """BOTH directions, the load-bearing test.
+
+        One ``policy_block`` is NOT enough: that is the 15%-still-lands case, and
+        holding it is precisely the blanket cooldown #5869 rejects. A SECOND
+        consecutive identical ``policy_block`` is the repetition that proves futility,
+        and only then does the issue leave the candidate stream."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # One re-blockable terminal, 1h ago. The first retry MUST stay admitted.
+            self._witness(runs, 4568, self.EPOCH - 3600, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set(),
+                "a FIRST retry after a policy_block must still be admitted — 15% of "
+                "them land a witnessed commit")
+            # The retry ran and re-blocked IDENTICALLY. Now hold it.
+            self._witness(runs, 4568, self.EPOCH - 1800, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4568})
+            records = mod.reblock_streak_held_records(runs, now_ts=self.EPOCH)
+            self.assertEqual(records[0]["reason"], "policy_block")
+            self.assertEqual(records[0]["streak"], 2)
+
+    def test_two_different_terminals_are_not_a_streak(self):
+        """``policy_block`` then ``self_modify`` is two blocks but NOT the same block,
+        so nothing is proven repeatable and the issue stays free. Same for a
+        re-blockable terminal separated by an untyped ``unknown`` — over the window
+        ``policy_block -> unknown`` (13) actually OUTNUMBERS ``policy_block ->
+        policy_block`` (8), and folding those together is the reason-class hold in
+        disguise."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 3695, self.EPOCH - 3600, reason="policy_block")
+            self._witness(runs, 3695, self.EPOCH - 1800, reason="self_modify")
+            # Different reason interleaved: not identical, not held.
+            self._witness(runs, 3267, self.EPOCH - 5400, reason="policy_block")
+            self._witness(runs, 3267, self.EPOCH - 3600, reason="unknown")
+            self._witness(runs, 3267, self.EPOCH - 1800, reason="policy_block")
+            # A transient wall is not a structural block at all.
+            self._witness(runs, 5103, self.EPOCH - 3600, reason="auth_wall")
+            self._witness(runs, 5103, self.EPOCH - 1800, reason="auth_wall")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set())
+
+    def test_landed_commit_in_the_tail_clears_the_hold(self):
+        """The structural clear. An admitted run that lands a witnessed commit breaks
+        the tail, so the hold evaporates with no reset verb — the property the
+        lane-livelock / repair-cooldown / goal-park defects all lacked."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 5586, self.EPOCH - 7200, reason="policy_block")
+            self._witness(runs, 5586, self.EPOCH - 5400, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {5586})
+            self._witness(runs, 5586, self.EPOCH - 1800, claim="CLAIM_WITNESSED")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set(),
+                "a landed commit must clear the hold")
+
+    def test_ttl_admits_one_probe_and_the_probe_outcome_decides(self):
+        """The TTL does not declare the issue retryable — it admits exactly ONE probe
+        so the streak CAN break. Without it a held issue could never produce the
+        record that frees it (a self-sealing hold). A probe that re-blocks identically
+        re-arms the hold for another window."""
+        mod = load()
+        ttl = mod.DEFAULT_REBLOCK_STREAK_HOLD_TTL_H
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 4518, self.EPOCH - 7200, reason="policy_block")
+            self._witness(runs, 4518, self.EPOCH - 5400, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4518})
+            # Past the TTL (measured from the NEWEST run in the streak) the hold
+            # lapses and one probe is admitted.
+            lapsed = self.EPOCH - 5400 + ttl * 3600 + 60
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=lapsed), set())
+            # That probe re-blocked identically -> the hold RE-ARMS for another window.
+            self._witness(runs, 4518, lapsed, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=lapsed + 60), {4518})
+            # A probe with a DIFFERENT outcome would have cleared it instead.
+            self._witness(runs, 4518, lapsed + 120, reason="restart_exhausted")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=lapsed + 180), set())
+
+    # ---- #5869 follow-up: the TTL margin, re-derived over the whole corpus --------
+    #
+    # The real 10-run trace of #4568 (UTC launch stamps), the ONLY trace in the 2396
+    # -record corpus that sets the zero-witnessed-loss boundary. Its 06:52 win is
+    # f34f02f84; the load-bearing gap is 17:32 -> 00:30 = 6.97h, between a block and
+    # an UNRELATED untyped run.
+    _T4568 = [
+        ("08-06 02:30", "unknown"), ("08-06 04:56", "policy_block"),
+        ("08-06 07:44", "unknown"), ("08-06 11:01", "self_modify"),
+        ("08-06 14:00", "policy_block"), ("08-06 17:32", "policy_block"),
+        ("08-06 20:49", "policy_block"), ("08-07 00:30", "unknown"),
+        ("08-07 04:10", "policy_block"), ("08-07 06:52", None),
+    ]
+
+    @staticmethod
+    def _utc(label: str) -> float:
+        import datetime as dt
+        return dt.datetime.strptime("2026-" + label, "%Y-%m-%d %H:%M").replace(
+            tzinfo=dt.timezone.utc).timestamp()
+
+    def _replay(self, mod, trace, issue: int, ttl_h: float) -> list[str]:
+        """Counterfactual replay of ``trace`` under a ``ttl_h`` hold, driven by the
+        REAL gate rather than a re-implementation of it: at each launch instant the
+        picker sees only the sidecars of the runs that were not suppressed upstream,
+        which is what makes the cascade visible. Returns the SUPPRESSED labels."""
+        suppressed: list[str] = []
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for label, reason in trace:
+                ts = self._utc(label)
+                held = mod.reblock_streak_held_issues(runs, ttl_h=ttl_h, now_ts=ts)
+                if issue in held:
+                    suppressed.append(label)
+                    continue
+                if reason is None:
+                    self._witness(runs, issue, ts, claim="CLAIM_WITNESSED")
+                else:
+                    self._witness(runs, issue, ts, reason=reason)
+        return suppressed
+
+    def test_default_ttl_keeps_a_margin_under_the_measured_first_loss(self):
+        """The shipped TTL must sit a stated distance BELOW the replayed boundary.
+
+        This is the invariant the first cut of the constant lacked: it was justified
+        by a quoted "band", and a band cannot be re-checked when the corpus moves.
+        Naming the boundary and the margin makes the justification executable."""
+        mod = load()
+        self.assertLessEqual(
+            mod.DEFAULT_REBLOCK_STREAK_HOLD_TTL_H
+            + mod.REBLOCK_STREAK_MIN_TTL_MARGIN_H,
+            mod.REBLOCK_STREAK_FIRST_LOSS_TTL_H,
+            "the default TTL must stay at least "
+            f"{mod.REBLOCK_STREAK_MIN_TTL_MARGIN_H}h under the measured "
+            f"{mod.REBLOCK_STREAK_FIRST_LOSS_TTL_H}h first-loss boundary")
+
+    def test_boundary_is_a_suppression_cascade_not_a_late_lander(self):
+        """Pins the mechanism, because the mechanism is what was mis-read.
+
+        At the measured boundary the hold does NOT eat the win by out-waiting it: the
+        win launches 2.7h after that issue's last block, well inside ANY TTL here.
+        It eats an untyped `unknown` 6.97h downstream of an EARLIER block, and only
+        the DELETION of that run re-forms a [policy_block, policy_block] tail that
+        never existed in the real trace. That is why reading the block-to-win
+        distribution alone (nothing between 2.69h and 9.33h) cannot find this."""
+        mod = load()
+        at_boundary = self._replay(
+            mod, self._T4568, 4568, mod.REBLOCK_STREAK_FIRST_LOSS_TTL_H)
+        self.assertIn("08-07 00:30", at_boundary,
+                      "the cascade TRIGGER: the untyped run 6.97h after the 17:32 "
+                      "block is what a 7.0h TTL newly swallows")
+        self.assertIn("08-07 06:52", at_boundary,
+                      "and deleting it costs the f34f02f84 win — the boundary")
+        # The win is NOT a late lander: it launches 2.7h after the last block, so a
+        # hold that ate it by duration alone would have eaten it at every TTL >= 3h.
+        self.assertLess(
+            (self._utc("08-07 06:52") - self._utc("08-07 04:10")) / 3600.0, 3.0)
+
+    def test_shipped_default_loses_nothing_on_the_boundary_trace(self):
+        """Fail-safe direction: at the SHIPPED TTL the same real trace keeps its win,
+        and it keeps the cascade trigger too — the margin is margin in the mechanism,
+        not just in the number."""
+        mod = load()
+        at_default = self._replay(
+            mod, self._T4568, 4568, mod.DEFAULT_REBLOCK_STREAK_HOLD_TTL_H)
+        self.assertNotIn("08-07 06:52", at_default,
+                         "the shipped default must not destroy f34f02f84")
+        self.assertNotIn("08-07 00:30", at_default,
+                         "nor arm the cascade that destroys it")
+        # It is still a HOLD, not a no-op: the repeat 3.3h after the 14:00/17:32
+        # streak is exactly the futile re-dispatch the gate exists to refuse.
+        self.assertIn("08-06 20:49", at_default)
+
+    def test_updated_at_bump_and_kill_switches(self):
+        """A guard refusal is a verdict on what the ISSUE ASKED FOR, so a re-scope
+        (fresh gh ``updatedAt``) genuinely changes it and re-admits early — the same
+        content-keyed escape the contract/multi-lane ledgers take, and why this hold
+        does NOT take ``collision_held_records``' local-tree opt-out. Either knob at 0
+        disables the gate, matching the other holds' kill switch."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 4568, self.EPOCH - 3600, reason="policy_block")
+            self._witness(runs, 4568, self.EPOCH - 1800, reason="policy_block")
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4568})
+            # An updatedAt OLDER than the streak does not void it.
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, now_ts=self.EPOCH, updated_ts={4568: self.EPOCH - 2400}),
+                {4568})
+            # A re-scope AFTER the last block re-admits the issue.
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, now_ts=self.EPOCH, updated_ts={4568: self.EPOCH - 600}), set())
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, streak_n=0, now_ts=self.EPOCH), set())
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, ttl_h=0, now_ts=self.EPOCH), set())
+            # A stricter N than the observed streak does not fire.
+            self.assertEqual(mod.reblock_streak_held_issues(
+                runs, streak_n=3, now_ts=self.EPOCH), set())
+
+    def test_durable_hold_survives_the_process_the_tick_scoped_one_does_not(self):
+        """The DEFECT this closes, stated as a contrast.
+
+        ``held_no_commit_issues`` reads the in-memory result of the witness sweep the
+        CURRENT tick just ran, so a fresh dispatcher process — the next tick — has no
+        memory of the refusal and re-picks the issue. That is the "in-memory tally
+        dies with the process and silently never fires" shape. The durable reader
+        keys off the retained ``.witness`` sidecars instead, so the same evidence
+        still holds after the process that produced it is gone."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._witness(runs, 4568, self.EPOCH - 3600, reason="policy_block")
+            self._witness(runs, 4568, self.EPOCH - 1800, reason="policy_block")
+            # A NEW dispatcher process has no in-memory witness result to read.
+            self.assertEqual(mod.held_no_commit_issues(None), set())
+            self.assertEqual(mod.held_no_commit_issues({"no_commit": []}), set())
+            # The durable reader still holds it off the very same evidence.
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), {4568})
+
+    def test_history_is_launch_ordered_and_fail_open(self):
+        """Ordering comes from the FILENAME stamp, not the mtime the witness sweep
+        rewrites at an arbitrary later tick. Unreadable/odd sidecars are skipped, never
+        raised, so this can only ever ADD a hold — it can never wedge the picker."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            # Written newest-first on disk; history must still come back oldest-first.
+            newer = self._witness(runs, 77, self.EPOCH - 1800, reason="policy_block")
+            older = self._witness(runs, 77, self.EPOCH - 3600, reason="self_modify")
+            os.utime(newer, (self.EPOCH - 9999, self.EPOCH - 9999))
+            os.utime(older, (self.EPOCH, self.EPOCH))
+            hist = mod.issue_witness_history(runs)
+            self.assertEqual([r["reason"] for r in hist[77]],
+                             ["self_modify", "policy_block"])
+            # Garbage in the runs dir is ignored, not raised.
+            (runs / "resolve-nope.witness").write_text("{", encoding="utf-8")
+            (runs / "resolve-88-20260806-120000.witness").write_text(
+                "not json", encoding="utf-8")
+            self.assertNotIn(88, mod.issue_witness_history(runs))
+            self.assertEqual(
+                mod.reblock_streak_held_issues(runs, now_ts=self.EPOCH), set())
+            # A missing runs dir is empty, never an exception.
+            self.assertEqual(mod.issue_witness_history(runs / "gone"), {})
+
+
+class GuardArgvProbeTest(unittest.TestCase):
+    """#5868 done-condition 3: stop a DOA wave BEFORE it spawns.
+
+    A ``--compact-solvency-floor`` flag-parse regression killed every worker at spawn
+    for six days (~350 worker-units) and read as an idle fleet throughout, because a
+    death before the gateway binds classifies as ``unknown``. ``internal/dispatchdoa``
+    detects that shape after the fact; this gate refuses to dispatch into it at all.
+
+    The first test is the load-bearing one: it pins the MEASURED finding that the
+    obvious probe (``fak guard --help``) does not discriminate this regression, so the
+    gate must compare the flag INVENTORY instead of an exit code.
+    """
+
+    # The real `fak guard --help` output, exit 0, 1452 bytes — abridged to the shape
+    # that matters: it is a curated COMMON-flags block using the `--name` form, and it
+    # never mentions --compact-solvency-floor. Measured against the shipped binary.
+    SHORT_HELP = (
+        "usage: fak guard [flags] -- <agent command...>\n"
+        "\ncommon flags:\n"
+        "  --policy         capability-floor manifest to enforce\n"
+        "  --provider       upstream wire: anthropic|openai|gemini|xai\n"
+        "  --audit          change where the decision journal is written\n"
+        "\n76 flags in this build. 'fak guard -h -all' lists every one grouped.\n")
+
+    # The flags dispatch_worker.claude_guard_budget_args + guard_wrap actually pass.
+    PLANNED = ["provider", "precompact-hook", "session-id", "context-budget-tokens",
+               "compact-history-budget", "compact-solvency-floor", "restart-on-budget",
+               "restart-limit", "max-duration", "audit"]
+
+    @staticmethod
+    def _inventory(names) -> str:
+        """`fak guard -h -all` output shape: Go flag.PrintDefaults emits `  -name type`
+        at exactly two spaces, with the description wrapped beneath at four+tab."""
+        return "usage: fak guard [flags] -- <agent command...>\n" + "".join(
+            f"  -{n} string\n    \tdescription of {n}\n" for n in names)
+
+    class _Res:
+        def __init__(self, rc, out="", err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def _runner(self, res, calls: list):
+        def run(argv):
+            calls.append(list(argv))
+            if isinstance(res, Exception):
+                raise res
+            return res
+        return run
+
+    def _bin(self, d: Path, body: str = "x" * 64) -> Path:
+        p = d / "fak.exe"
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def _argv(self, exe: Path, flags=None) -> list[str]:
+        out = [str(exe), "guard"]
+        for f in (flags if flags is not None else self.PLANNED):
+            out += [f"--{f}", "v"]
+        # The AGENT's own command, after the separator. Its flags are parsed by
+        # claude, not by the guard, so they must never be probed.
+        return out + ["--", "claude", "-p", "--dangerously-skip-permissions"]
+
+    def test_guard_help_alone_does_not_discriminate_the_regression(self):
+        """THE finding. `fak guard --help` exits 0 on a binary that is missing the
+        flag — it proves the binary RUNS, which was never in doubt; the binary ran
+        fine, it just did not know one flag. An exit-code probe on --help would have
+        reported HEALTHY through all six days of the outage. So the gate must not
+        refuse on it, and must not be fooled into thinking it has a verdict."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            self.assertNotIn("compact-solvency-floor", self.SHORT_HELP,
+                             "the real short usage does not even name the flag")
+            calls: list = []
+            probe = mod.probe_guard_flags(
+                exe, runner=self._runner(self._Res(0, err=self.SHORT_HELP), calls))
+            self.assertEqual(probe["rc"], 0, "--help succeeds on the broken binary")
+            self.assertLess(len(probe["flags"]), mod._GUARD_PROBE_MIN_FLAGS)
+            # ...and because that reading is not a plausible inventory, the gate
+            # SPAWNS rather than condemning a binary it cannot actually read.
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs,
+                runner=self._runner(self._Res(0, err=self.SHORT_HELP), calls)))
+            self.assertFalse((runs / mod._GUARD_PROBE_LEDGER).exists(),
+                             "an inconclusive reading is never cached")
+
+    def test_healthy_build_id_is_not_held(self):
+        """A binary that registers every planned flag dispatches, and the probe it
+        cost is not re-paid — the whole point of keying on the build id."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            healthy = self._Res(0, err=self._inventory(
+                self.PLANNED + [f"filler-{i}" for i in range(60)]))
+            calls: list = []
+            for _ in range(3):
+                self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                    self._argv(exe), runs, runner=self._runner(healthy, calls)))
+            self.assertEqual(len(calls), 1, "one probe per build-id, not per spawn")
+            self.assertEqual(calls[0][1:], ["guard", "-h", "-all"])
+
+    def test_missing_flag_refuses_the_wave_before_any_spawn(self):
+        """The outage shape itself: the producer passes a flag the binary does not
+        register. Every spawn against it would die at flag-parse before the gateway
+        binds, so the tick plans ZERO spawns instead of ~350 dead worker-units."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            stale = self._Res(0, err=self._inventory(
+                old + [f"filler-{i}" for i in range(60)]))
+            verdict = mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(stale, []))
+            self.assertIsNotNone(verdict)
+            self.assertEqual(verdict["verdict"], "GUARD_ARGV_UNSUPPORTED")
+            self.assertEqual(verdict["missing_flags"], ["compact-solvency-floor"])
+            self.assertIn("rebuild or reinstall", verdict["reason"],
+                          "a refusal that does not name its recovery path is an "
+                          "outage of its own")
+
+    def test_rebuild_clears_the_refusal_with_no_reset_verb(self):
+        """Recovery path #1, and the reason the cache is keyed on the BUILD ID: the
+        operator action that fixes the outage (rebuild/reinstall) is the same one that
+        invalidates the cache. Nothing has to be cleared by hand."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            calls: list = []
+            self.assertIsNotNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(
+                    self._Res(0, err=self._inventory(
+                        old + [f"f{i}" for i in range(60)])), calls)))
+            before = mod.guard_build_id(exe)
+            # Rebuild: a different binary at the same path.
+            self._bin(runs, body="y" * 4096)
+            self.assertNotEqual(mod.guard_build_id(exe), before)
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(
+                    self._Res(0, err=self._inventory(
+                        self.PLANNED + [f"f{i}" for i in range(60)])), calls)))
+            self.assertEqual(len(calls), 2, "the new build id forces exactly one "
+                                            "fresh probe, not a probe per spawn")
+
+    def test_producer_side_fix_clears_against_the_same_cached_inventory(self):
+        """Recovery path #2, and why the cache holds the INVENTORY rather than a
+        verdict: dropping the flag from the dispatcher clears the refusal with no
+        re-exec at all, because the verdict is recomputed every tick."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            stale = self._Res(0, err=self._inventory(
+                old + [f"f{i}" for i in range(60)]))
+            calls: list = []
+            self.assertIsNotNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(stale, calls)))
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe, flags=old), runs, runner=self._runner(stale, calls)))
+            self.assertEqual(len(calls), 1, "no re-probe needed to clear")
+
+    def test_every_ambiguous_reading_fails_open_and_is_never_cached(self):
+        """A probe failure must not wedge the fleet — failing closed forever is its
+        own outage, and this gate refuses to SPAWN, so its fail direction is inverted
+        from every other hold in this file. Only a positive observation refuses."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            argv = self._argv(exe)
+            short = self._inventory([f"f{i}" for i in range(5)])
+            for label, res in (
+                    ("exec error", OSError("binary vanished")),
+                    ("probe timeout", subprocess.TimeoutExpired("fak", 20)),
+                    ("non-zero exit (an older binary rejects -all)",
+                     self._Res(2, err="flag provided but not defined: -all\n")),
+                    ("implausibly short inventory", self._Res(0, err=short))):
+                with self.subTest(label):
+                    self.assertIsNone(
+                        mod.gate_spawn_on_guard_argv(
+                            argv, runs, runner=self._runner(res, [])),
+                        f"{label} must SPAWN, not wedge the fleet")
+                    self.assertFalse((runs / mod._GUARD_PROBE_LEDGER).exists())
+            # An unstattable binary is ambiguous too, not a condemnation.
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(runs / "gone.exe"), runs,
+                runner=self._runner(self._Res(0, err=short), [])))
+
+    def test_agent_argv_and_peeled_flags_are_not_probed(self):
+        """Two false-positive sources that would refuse a perfectly good binary: the
+        agent's own flags after the ``--`` separator (parsed by claude, not the
+        guard), and the postures cmd/fak/guard.go PEELS before fs.Parse — which are
+        therefore absent from the FlagSet's own inventory by design."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            planned = mod.planned_guard_flags(
+                [str(exe), "guard", "--provider", "anthropic", "--core-lock-all",
+                 "--", "claude", "-p", "--dangerously-skip-permissions"])
+            self.assertEqual(planned, {"provider"})
+            # Not a guard wrap at all -> nothing to skew against.
+            self.assertEqual(mod.planned_guard_flags(
+                [str(exe), "--verbose", "--", "claude"]), set())
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                [str(exe), "claude", "-p"], runs,
+                runner=self._runner(self._Res(0, err=""), [])))
+
+    def test_ttl_expiry_and_kill_switch(self):
+        """Recovery paths #3 and #4: a cached inventory cannot outlive its evidence
+        even when neither side moved, and the gate has the same 0-disables kill switch
+        as every other hold in this file."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            exe = self._bin(runs)
+            full = self._Res(0, err=self._inventory(
+                self.PLANNED + [f"f{i}" for i in range(60)]))
+            calls: list = []
+            now = 1786363200.0
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(full, calls), now_ts=now))
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(full, calls),
+                now_ts=now + mod.DEFAULT_GUARD_PROBE_TTL_H * 3600 - 60))
+            self.assertEqual(len(calls), 1, "inside the TTL the cache answers")
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, runner=self._runner(full, calls),
+                now_ts=now + mod.DEFAULT_GUARD_PROBE_TTL_H * 3600 + 60))
+            self.assertEqual(len(calls), 2, "past the TTL it re-probes")
+            # Kill switch: never probes, never refuses.
+            off: list = []
+            old = [f for f in self.PLANNED if f != "compact-solvency-floor"]
+            self.assertIsNone(mod.gate_spawn_on_guard_argv(
+                self._argv(exe), runs, ttl_h=0, runner=self._runner(
+                    self._Res(0, err=self._inventory(
+                        old + [f"f{i}" for i in range(60)])), off)))
+            self.assertEqual(off, [])
+
+    def test_probe_argv_is_the_help_form_and_never_launches_an_agent(self):
+        """The probe must stay a probe: `-h` short-circuits inside flag.Parse, so it
+        binds no gateway and hands off no task. Asserted on the captured argv, because
+        a probe that could launch is not one probe per build-id, it is an outage."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            exe = self._bin(Path(d))
+            calls: list = []
+            mod.probe_guard_flags(exe, runner=self._runner(self._Res(0), calls))
+            self.assertEqual(calls, [[str(exe), "guard", "-h", "-all"]])
+            self.assertNotIn("--", calls[0], "no agent-command separator")
+            self.assertNotIn("--probe", calls[0],
+                             "`fak guard --probe` is a SMOKE mode that still brings "
+                             "up the gateway — not a cheap argv probe")
+
+    def test_default_runner_suppresses_the_console_window(self):
+        """The DEFAULT runner (the one that actually ships — every other test injects
+        a fake) must spawn with CREATE_NO_WINDOW. This is not cosmetic: the probe runs
+        once per dispatcher process under headless automation, and the pre-push
+        DESKTOP_POPUP_REGRESSION gate refuses a console-tool spawn that would flash a
+        window. It refused this function's first cut, which omitted the flag."""
+        mod = load()
+        seen: dict = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"], seen["kwargs"] = list(argv), kwargs
+            return self._Res(0, err=self._inventory(["provider"]))
+
+        with tempfile.TemporaryDirectory() as d:
+            exe = self._bin(Path(d))
+            with mock.patch.object(mod.subprocess, "run", fake_run):
+                mod.probe_guard_flags(exe)
+        self.assertEqual(seen["argv"][1:], ["guard", "-h", "-all"])
+        self.assertEqual(seen["kwargs"].get("creationflags"),
+                         mod.no_window_creationflags())
+        self.assertTrue(seen["kwargs"].get("timeout"),
+                        "an unbounded probe could hang the dispatcher")
+
+
+# --- Cap-KIND corpus (#5890) ----------------------------------------------------
+# One row per cap banner Claude actually emits, asserted at the two seams that decide
+# fleet behavior: ``_cap_hit_from_text`` (is it seen, and what kind is it?) and
+# ``_write_cap_hold`` (how long is the seat held?). The regression pinned: the detector
+# matched "hit your WEEKLY limit" but not "hit your 5-HOUR limit" (a ``[\w\s]``-only
+# class stops at the hyphen), saw neither of Claude's "…limit reached." phrasings at
+# all, read only "resets <when>" and not the modern "will reset at/on <when>", and filed
+# every unqualified cap under a `session` kind whose 90-minute ceiling truncates a real
+# 5-hour window. Every assertion is pure over an injected clock.
+#
+# Lives here rather than in its own tools/*_capkind_test.py because internal/pythongate
+# refuses any NEW tracked tools/*.py: a fixture corpus for a grandfathered tool is not
+# one of the narrow widening cases, so it folds into the grandfathered test module.
+# A fixed instant with room on both sides: 2026-05-28 20:26:40 UTC == 13:26 PT, so a "5pm"
+# PT reset is ~3.5h out (inside a real 5-hour window, well past the 90-minute session clamp)
+# and a "6:10am" PT reset already passed today (the gem8 stale-time-of-day case).
+NOW_TS = 1_780_000_000.0
+NOW_UTC = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=NOW_TS)
+
+
+class CapKindClassificationTest(unittest.TestCase):
+    """Every banner is SEEN, and is filed under the cap kind it actually names."""
+
+    # (label, banner, expected kind). The first four were undetected outright before #5890.
+    CASES = [
+        ("5h modern",
+         "Claude usage limit reached. Your limit will reset at 5pm (America/Los_Angeles).",
+         "rolling_5h"),
+        ("5h hit-your-hyphen",
+         "You've hit your 5-hour limit. Your limit will reset at 5pm (America/Los_Angeles).",
+         "rolling_5h"),
+        ("weekly modern",
+         "Claude usage limit reached. Your weekly limit will reset on Jun 2 at 9am "
+         "(America/Los_Angeles).",
+         "weekly"),
+        ("weekly for-the-week",
+         "You've hit your limit for the week. Try again Jun 2.",
+         "weekly"),
+        # These three were already detected; they must not regress.
+        ("5h resets-form",
+         "You've hit your usage limit; resets 5pm (America/Los_Angeles)",
+         "rolling_5h"),
+        ("weekly hit-your",
+         "You've hit your weekly limit. Your limit will reset at Jun 2, 9am "
+         "(America/Los_Angeles).",
+         "weekly"),
+        ("session legacy",
+         "You've hit your session limit · resets 6:10am (America/Los_Angeles)",
+         "session"),
+    ]
+
+    def test_every_banner_is_detected_and_correctly_kinded(self) -> None:
+        mod = load()
+        for label, banner, want_kind in self.CASES:
+            with self.subTest(label):
+                hit = mod._cap_hit_from_text(banner)
+                self.assertIsNotNone(hit, f"{label}: banner not detected at all")
+                self.assertEqual(hit["kind"], want_kind, label)
+
+    def test_hyphen_does_not_hide_the_five_hour_banner(self) -> None:
+        """The exact asymmetry that made the fleet see weekly caps and miss 5-hour caps:
+        `hit your[\\w\\s]*limit` stops at the hyphen in "5-hour"."""
+        mod = load()
+        for phrase in ("hit your 5-hour limit", "hit your 5 hour limit",
+                       "hit your weekly limit", "hit your usage limit"):
+            with self.subTest(phrase):
+                self.assertIsNotNone(mod._CAP_BANNER_RE.search(phrase), phrase)
+
+    def test_spawn_header_is_still_not_a_cap_banner(self) -> None:
+        """The widened detector must stay phrase-anchored: a worker's spawn header and
+        ordinary agent prose that merely mention a limit are NOT cap banners."""
+        mod = load()
+        for benign in (
+            "# fak-spawn issue=42 lane=docs backend=claude",
+            "considering the rate limit design for the gateway",
+            "the limit of this approach is that it needs a fixture",
+        ):
+            with self.subTest(benign):
+                self.assertIsNone(mod._CAP_BANNER_RE.search(benign), benign)
+
+
+class CapResetClauseTest(unittest.TestCase):
+    """Claude's modern "will reset at/on <when>" clause is read, not dropped."""
+
+    def test_will_reset_clause_is_captured(self) -> None:
+        mod = load()
+        cases = [
+            ("Your limit will reset at 5pm (America/Los_Angeles).", "5pm"),
+            ("Your weekly limit will reset on Jun 2 at 9am (America/Los_Angeles).",
+             "Jun 2 at 9am"),
+            ("Your limit will reset on Jun 2, 9am (America/Los_Angeles).", "Jun 2, 9am"),
+        ]
+        for text, want in cases:
+            with self.subTest(text):
+                hit = mod._cap_hit_from_text("You've hit your usage limit. " + text)
+                self.assertIsNotNone(hit)
+                self.assertEqual(hit["reset_text"], want)
+
+    def test_legacy_resets_clause_still_wins(self) -> None:
+        """The pre-existing "resets <when> (America/Los_Angeles)" form is unchanged."""
+        mod = load()
+        hit = mod._cap_hit_from_text(
+            "You've hit your session limit · resets 6:10am (America/Los_Angeles)")
+        self.assertEqual(hit["reset_text"], "6:10am")
+
+    def test_announced_wait_still_wins_over_the_reset_clause(self) -> None:
+        """#2610's gateway path is untouched: a relative announced_wait is still honored."""
+        mod = load()
+        hit = mod._cap_hit_from_text(
+            "fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages "
+            "kind=weekly_limit announced_wait=1h7m0s")
+        self.assertEqual(hit["kind"], "weekly")
+        self.assertEqual(hit["reset_text"], "1h7m0s")
+
+
+class CapWeekdayResetTest(unittest.TestCase):
+    """A weekly cap names its reset by WEEKDAY far more often than by date, and the weekday
+    word used to be ignored outright — the bare time-of-day branch resolved it to today or
+    tomorrow. NOW_UTC is Thu 2026-05-28 20:26 UTC == Thu 13:26 PT, so the arithmetic below is
+    checkable by hand."""
+
+    def test_weekday_resolves_to_the_next_such_day(self) -> None:
+        mod = load()
+        # Thu 13:26 PT -> next Monday 09:00 PT is 4 days out (Jun 1), not tomorrow.
+        got = mod._parse_reset_to_utc("Monday at 9am", NOW_UTC)
+        self.assertEqual(got, dt.datetime(2026, 6, 1, 16, 0))
+
+    def test_same_weekday_earlier_in_the_day_rolls_a_full_week(self) -> None:
+        """Thursday 9am seen at Thursday 13:26 PT is NEXT Thursday, not four minutes ago
+        and not "today" — a past instant would be dropped and fall to the blind fallback."""
+        mod = load()
+        got = mod._parse_reset_to_utc("Thursday at 9am", NOW_UTC)
+        self.assertEqual(got, dt.datetime(2026, 6, 4, 16, 0))
+
+    def test_weekday_under_hold_is_the_one_that_bit(self) -> None:
+        """The regression in one number: "Wednesday at 3pm" read on a Thursday used to be
+        parsed as TODAY 3pm — a 1.6-hour hold on a cap that has six days left to run."""
+        mod = load()
+        hit = mod._cap_hit_from_text(
+            "You've hit your weekly limit. Your limit will reset on Wednesday at 3pm "
+            "(America/Los_Angeles).")
+        self.assertEqual(hit["kind"], "weekly")
+        until = mod._parse_reset_to_utc(hit["reset_text"], NOW_UTC)
+        self.assertGreater((until - NOW_UTC).total_seconds() / 3600.0, 24.0)
+
+    def test_an_explicit_date_still_outranks_a_weekday(self) -> None:
+        mod = load()
+        # Jun 3 2026 is a WEDNESDAY, so a leading "Mon" token must lose to the date.
+        self.assertEqual(mod._parse_reset_to_utc("Mon Jun 3 at 9am", NOW_UTC),
+                         dt.datetime(2026, 6, 3, 16, 0))
+
+    def test_a_day_lookalike_word_cannot_manufacture_a_reset(self) -> None:
+        """The weekday branch only runs once a time-of-day is present, and the pattern is
+        anchored to whole day words — "monitoring" and "summary" are not Monday/Sunday."""
+        mod = load()
+        self.assertIsNone(mod._parse_reset_to_utc("monitoring the summary", NOW_UTC))
+        # A bare time-of-day beside a lookalike word keeps the today/tomorrow branch.
+        self.assertEqual(mod._parse_reset_to_utc("monitoring resumes 5pm", NOW_UTC),
+                         dt.datetime(2026, 5, 29, 0, 0))
+
+
+class CapHoldLengthTest(unittest.TestCase):
+    """Each cap kind is held for ITS OWN window, not one bucket's ceiling."""
+
+    def _hold_hours(self, mod, hit) -> float:
+        with tempfile.TemporaryDirectory() as d:
+            out = mod._write_cap_hold(Path(d), product="claude", account_tag="a",
+                                      hit=hit, now_ts=NOW_TS, fallback_min=60,
+                                      source="test")
+        until = dt.datetime.fromisoformat(out["until"].replace("Z", ""))
+        return (until - NOW_UTC).total_seconds() / 3600.0
+
+    def test_five_hour_cap_is_not_truncated_to_the_session_clamp(self) -> None:
+        """A 5-hour cap naming a reset ~3.5h out is held ~3.5h. Before #5890 the
+        `session` bucket's 90-minute ceiling cut it to 1.5h and the dispatcher respawned
+        into the same wall two hours early."""
+        mod = load()
+        hit = mod._cap_hit_from_text(
+            "You've hit your 5-hour limit. Your limit will reset at 5pm (America/Los_Angeles).")
+        held = self._hold_hours(mod, hit)
+        self.assertGreater(held, mod._SESSION_HOLD_MAX_MIN / 60.0,
+                           "a real 5-hour reset must outlive the session clamp")
+        self.assertLessEqual(held, mod._ROLLING_HOLD_MAX_MIN / 60.0)
+
+    def test_rolling_cap_ceiling_still_bounds_a_stale_time_of_day(self) -> None:
+        """The clamp's original motive survives: a bare time-of-day that already passed
+        today must not become a ~24h wall, only a ~5h one."""
+        mod = load()
+        hit = {"kind": "rolling_5h", "reset_text": "6:10am"}
+        self.assertLessEqual(self._hold_hours(mod, hit),
+                             mod._ROLLING_HOLD_MAX_MIN / 60.0 + 0.01)
+
+    def test_session_limit_hold_is_still_bounded_to_ninety_minutes(self) -> None:
+        """The gem8 false-cap guard is untouched for the kind it was written for."""
+        mod = load()
+        hit = mod._cap_hit_from_text(
+            "You've hit your session limit · resets 6:10am (America/Los_Angeles)")
+        self.assertEqual(hit["kind"], "session")
+        self.assertLessEqual(self._hold_hours(mod, hit),
+                             mod._SESSION_HOLD_MAX_MIN / 60.0 + 0.02)
+
+    def test_unannounced_weekly_cap_outlasts_the_rolling_fallback(self) -> None:
+        """A weekly cap whose banner names no parseable reset must not take the short
+        fallback: its real window is days, so a 1-hour hold re-admits the seat ~168 times
+        before it can serve."""
+        mod = load()
+        hit = mod._cap_hit_from_text("You've hit your limit for the week.")
+        self.assertEqual(hit["kind"], "weekly")
+        self.assertAlmostEqual(self._hold_hours(mod, hit),
+                               mod._WEEKLY_FALLBACK_MIN / 60.0, places=2)
+
+    def test_dated_weekly_cap_keeps_its_full_reset(self) -> None:
+        """A weekly cap naming a real dated reset is held to that reset — no kind ceiling
+        applies to weekly."""
+        mod = load()
+        hit = mod._cap_hit_from_text(
+            "You've hit your weekly limit. Your limit will reset at Jun 2, 9am "
+            "(America/Los_Angeles).")
+        self.assertEqual(hit["kind"], "weekly")
+        # Jun 2 09:00 PDT == Jun 2 16:00 UTC, ~4.8 days past NOW_UTC (May 28 20:26 UTC).
+        self.assertGreater(self._hold_hours(mod, hit), 24.0)
 
 
 if __name__ == "__main__":

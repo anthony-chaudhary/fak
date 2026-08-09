@@ -76,11 +76,7 @@ func (r *v4ExpertRuntime) Close() error {
 	}
 	r.closed = true
 	if r.ring != nil {
-		for name, tensor := range r.ring.resident {
-			r.ring.be.Free(tensor)
-			delete(r.ring.resident, name)
-			r.ring.pool.Evict(name)
-		}
+		r.ring.freeAll()
 		r.stats.ResidentBytes = 0
 	}
 	var errs []error

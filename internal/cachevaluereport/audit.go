@@ -506,6 +506,68 @@ type GateReport struct {
 	NextAction             string          `json:"next_action,omitempty"`
 }
 
+// QualityFloor configures the opt-in Track-2 lossless-or-better SLO gate.
+// MinRows prevents a thin corpus from being mistaken for evidence.
+type QualityFloor struct {
+	Floor   float64 `json:"floor"`
+	MinRows int     `json:"min_rows"`
+}
+
+// QualityObservation is the minimal Track-2 evidence consumed by the gate.
+// Callers project their audit rows into this stable, opt-in gate boundary.
+type QualityObservation struct {
+	ManagedDollarKnown  bool `json:"managed_cost_known"`
+	BaselineDollarKnown bool `json:"baseline_dollar_known"`
+	Lossless            bool `json:"lossless"`
+}
+
+// QualityFloorResult is the independently inspectable Track-2 judgment.
+type QualityFloorResult struct {
+	Passed       bool    `json:"passed"`
+	Code         string  `json:"code,omitempty"`
+	Message      string  `json:"message,omitempty"`
+	EligibleRows int     `json:"eligible_rows"`
+	LosslessRows int     `json:"lossless_rows"`
+	Fidelity     float64 `json:"fidelity"`
+	Floor        float64 `json:"floor"`
+	MinRows      int     `json:"min_rows"`
+}
+
+// CheckTrack2Quality applies an opt-in lossless-or-better floor. Only rows with
+// known gate and baseline dollars are judgment-grade, keeping the fidelity SLO
+// bound to the same provider-dollar evidence as the Track-2 economics audit.
+func CheckTrack2Quality(rows []QualityObservation, gate QualityFloor) QualityFloorResult {
+	result := QualityFloorResult{Floor: gate.Floor, MinRows: gate.MinRows}
+	if gate.Floor < 0 || gate.Floor > 1 || gate.MinRows < 1 {
+		result.Code = "invalid_quality_floor"
+		result.Message = "quality floor check requires floor in [0,1] and min_rows >= 1"
+		return result
+	}
+	for _, row := range rows {
+		if !row.ManagedDollarKnown || !row.BaselineDollarKnown {
+			continue
+		}
+		result.EligibleRows++
+		if row.Lossless {
+			result.LosslessRows++
+		}
+	}
+	if result.EligibleRows < gate.MinRows {
+		result.Code = "fidelity_corpus_too_thin"
+		result.Message = fmt.Sprintf("quality floor check has %d eligible rows; requires at least %d", result.EligibleRows, gate.MinRows)
+		return result
+	}
+	result.Fidelity = float64(result.LosslessRows) / float64(result.EligibleRows)
+	if result.Fidelity < gate.Floor {
+		result.Code = "fidelity_below_floor"
+		result.Message = fmt.Sprintf("Track-2 fidelity %.4f is below floor %.4f", result.Fidelity, gate.Floor)
+		return result
+	}
+	result.Passed = true
+	result.Message = "Track-2 fidelity meets the configured floor"
+	return result
+}
+
 // GateSavings enforces the fidelity SLO over a window of rows: it fails when a row's
 // fidelity is worse than the floor (anything but lossless or bounded), or when the
 // bounded-lossy compaction shedding in the window exceeds compactionBudgetTokens. A

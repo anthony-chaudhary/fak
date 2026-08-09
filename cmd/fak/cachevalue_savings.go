@@ -57,7 +57,11 @@ func appendObservedCacheSavingsTo(path, sessionType, provider, context string, s
 		CompactionBailed:          sum.CompactionBailed,
 		CompactionAnchorStarved:   sum.CompactionAnchorStarved,
 		CompactionBudget:          sum.CompactionBudget,
-		Pricing:                   cachevalueSavingsPricing(provider, context),
+		// The seat these list-priced dollars were billed to (#3664), resolved once at
+		// startup from the same credential fields the managed-cache posture reads. Blank
+		// on a front door that never classified one, which folds NOTIONAL.
+		BillingMode: resolvedBillingMode(),
+		Pricing:     cachevalueSavingsPricing(provider, context),
 	}, now)
 	res := cacheValueAppendResult{RowsPlanned: len(rows)}
 	for _, row := range rows {

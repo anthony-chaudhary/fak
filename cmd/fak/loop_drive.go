@@ -234,7 +234,10 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 		// A witnessed collision refuses (exit 3); an infra error fails open
 		// with a warning, the dispatch tick's posture.
 		if regionHold == nil {
-			regionHold = newLoopDriveRegionHold(opt, spec)
+			// announceOn is nil-safe: an undeclared region yields no hold at all,
+			// and a hold that has one announces its nonfatal lease-ref sync
+			// degradations on this drive's stderr (#5571).
+			regionHold = newLoopDriveRegionHold(opt, spec).announceOn(stderr)
 		}
 		if refuse, err := regionHold.ensure(clock()); err != nil {
 			fmt.Fprintf(stderr, "fak loop drive: region admission unavailable (fail-open): %v\n", err)
@@ -913,6 +916,15 @@ func parseSharedGateCriterion(fields []string, msgPrefix string) (loopgate.Crite
 
 func runDOSLoopGateWitness(ctx context.Context, req loopgate.Request) (loopgate.WitnessResult, error) {
 	cmd := exec.CommandContext(ctx, "dos", req.Argv()...)
+	// ⛔ Pin the workspace (#5933). The kernel finds its lease journal by an
+	// UPWARD POSITIONAL WALK for a `.dos` directory, and there are `.dos` roots
+	// nested inside this repository — so an unpinned child inherits whatever cwd
+	// the loop happens to run from and can resolve a SHADOW journal without ever
+	// leaving the tree. This verdict gates whether a loop may proceed, so a read
+	// against the wrong workspace grants a witness this repository never
+	// produced. repoRoot() resolves the go.mod module root, which is the
+	// repository root by construction and is not confusable with a shadow `.dos`.
+	cmd.Dir = repoRoot()
 	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out

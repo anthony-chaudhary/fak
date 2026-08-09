@@ -155,6 +155,29 @@ func (p *Partial) Annotate() string {
 	return fmt.Sprintf("⧗ forming: %d of %d expected commits landed (%d outstanding)%s — still cheap to steer", p.Landed, *p.Expected, remaining, src)
 }
 
+// FanoutMarker is the marker-key prefix a fanout child carries in its body, and
+// the ONE place this package spells that contract. issuefanout mints the key
+// (`fanout-<leaf>-<slug>`) and stamps it into every filed body; steerpr can not
+// import issuefanout to ask — the overlay fold is fenced to stdlib-only so it can
+// never grow a gate (architest OVERLAY_WOULD_GATE) — so the format is necessarily
+// re-spelled on this side.
+//
+// Two independent spellings of one contract drift silently, and the drift lands
+// exactly on this issue's acceptance gate. If the minted key stops matching this
+// prefix, DeriveExpected still finds the spine but counts ZERO children, returns
+// a confident M = 1, and a one-commit unit renders COMPLETE — the M = N inversion
+// #5027 exists to prevent, arriving with no error anywhere. Exporting the prefix
+// makes the consumer's expectation an assertable value, which is what lets
+// TestPartialDenominatorMatchesTheRealFanoutMarkerContract tie it to the key
+// issuefanout actually mints.
+func FanoutMarker(leaf string) string {
+	leaf = strings.TrimSpace(leaf)
+	if leaf == "" {
+		return ""
+	}
+	return "fanout-" + leaf + "-"
+}
+
 // DeriveExpected counts the declared membership of a bound intent: the spine
 // issue itself plus every fanout child carrying its `fanout-<leaf>-` marker key.
 // That marker is the fanout contract's own dedupe key (issuefanout.LiveBody
@@ -178,7 +201,7 @@ func DeriveExpected(leaf, spine string, issues []IntentIssue) (Expectation, bool
 	if leaf == "" || spineNum == "" || len(issues) == 0 {
 		return Expectation{}, false
 	}
-	marker := "fanout-" + leaf + "-"
+	marker := FanoutMarker(leaf)
 	spineFound := false
 	children := 0
 	for _, issue := range issues {

@@ -149,7 +149,18 @@ while ($true) {
     $level = $obj.verdict.level; $cause = $obj.verdict.cause
     # Mirror into the shared rolling log (fak stallscan --watch would do this too;
     # here we drive the snapshot ourselves so we can react).
-    Add-Content -Path $Log -Value ($raw -replace "`r?`n",' ') -ErrorAction SilentlyContinue
+    #
+    # ONE LINE PER RECORD IS LOAD-BEARING. `fak stallscan --json` pretty-prints, and
+    # PowerShell captures a native command's stdout as an ARRAY OF LINES -- so the
+    # obvious `$raw -replace "\r?\n",' '` runs ELEMENT-WISE over lines that each
+    # already contain no newline (a no-op), and Add-Content then writes every element
+    # on its own line. That silently turns this "JSONL" ledger into pretty-printed
+    # multi-line JSON, and the admission-path reader (dispatchPreflightChurn ->
+    # dispatchLastLine) parses only the LAST line -- a bare `}` -- fails, and abstains.
+    # The churn gate then reads as "calm host" forever instead of "not measured".
+    # Join FIRST, then collapse: JSON is whitespace-insensitive, so the joined record
+    # stays valid on a single line.
+    Add-Content -Path $Log -Value (((@($raw) -join ' ') -replace "`r?`n", ' ')) -ErrorAction SilentlyContinue
   } catch {
     # rc==3 from snapshot mode also signals a stall even if JSON parse hiccups.
     if ($rc -eq 3) { $level = 'stall' }

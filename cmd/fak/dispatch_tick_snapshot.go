@@ -82,11 +82,7 @@ func scanRunsSnapshot(runsDir string, now time.Time) *runsSnapshot {
 		if statErr == nil {
 			// Cooldown fold over the .log side (cooldownIssueRowsAt parity): key via the
 			// extension-agnostic attempt regex, keep the newest mtime per issue.
-			if issue, ok := issueFromResolveAttempt(base); ok {
-				if prev, exists := s.latest[issue]; !exists || st.ModTime().After(prev) {
-					s.latest[issue] = st.ModTime()
-				}
-			}
+			s.touchResolveAttempt(base, st.ModTime())
 		}
 
 		entry := runsLogEntry{log: log, worker: filepath.Base(stem)}
@@ -114,13 +110,23 @@ func scanRunsSnapshot(runsDir string, now time.Time) *runsSnapshot {
 		if err != nil {
 			continue
 		}
-		if issue, ok := issueFromResolveAttempt(filepath.Base(wit)); ok {
-			if prev, exists := s.latest[issue]; !exists || st.ModTime().After(prev) {
-				s.latest[issue] = st.ModTime()
-			}
-		}
+		s.touchResolveAttempt(filepath.Base(wit), st.ModTime())
 	}
 	return s
+}
+
+// touchResolveAttempt folds one resolve-attempt artifact into the cooldown map, keeping the
+// NEWEST touch per issue. name is the artifact's basename -- a .log or a .witness -- and an
+// artifact that names no issue is ignored. Both sides of the scan cool an issue through this
+// one rule, so a witness and a log that touch the same issue cannot fold differently.
+func (s *runsSnapshot) touchResolveAttempt(name string, mod time.Time) {
+	issue, ok := issueFromResolveAttempt(name)
+	if !ok {
+		return
+	}
+	if prev, exists := s.latest[issue]; !exists || mod.After(prev) {
+		s.latest[issue] = mod
+	}
 }
 
 // liveScopes returns the live resolution scopes in sorted-log order -- the projection

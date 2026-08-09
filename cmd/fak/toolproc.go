@@ -113,6 +113,75 @@ func toolprocHookOnce(stdin io.Reader, kind, journalPath string, env toolproc.Ho
 // a background launch or poll appends the bridge event too (the pulse source
 // for streamed output — see toolproc.HookEvents).
 func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool string) toolproc.HookEnvelope, nowMS int64) error {
+	// The firing's own work runs first and its fault is CARRIED rather than
+	// returned, so that the journal bound below is reachable on EVERY path —
+	// including the ones that fail. See the compaction note for why a fault must
+	// not be able to skip it.
+	hookErr := toolprocHookAppend(stdin, kind, journalPath, envFor, nowMS)
+	// Bound the shared journal on EVERY firing, not only at a clean stop (#3557).
+	// It is append-only across every guarded session and grows without limit, so a
+	// long-lived box would eventually parse (and store) an unbounded file — the
+	// O(journal) soft-fault storm the tail-read window (ParseTailFile) only
+	// half-solves, since a live spawn older than the window falls out of every
+	// firing's view. Compaction reclaims fully-terminal history while preserving
+	// every still-live spawn (CompactJournal's invariant), folding the whole journal
+	// back inside one tail read.
+	//
+	// Triggering on GROWTH rather than on the session boundary is what makes the
+	// bound hold on a crash-heavy box. A stop-gated compaction only ever runs for a
+	// session that ends cleanly: a hard crash, an OOM-kill, a host reboot, or a
+	// harness that skips SessionEnd leaves that session's contribution for some
+	// *other* session's stop to reclaim incidentally, and a workspace where no
+	// session ever stops cleanly never bounds the file at all. Every firing — pre,
+	// post, and stop alike, degraded ones included (a payload that yielded no events
+	// or whose HookEvents errored) — now attempts it, so the reclaim is driven by the
+	// growth that causes the problem instead of by an exit that may never come.
+	//
+	// "Degraded" has to include the firing that FAULTED, which is why the work above
+	// is a carried error and not an early return (#3557). The same kill that skips
+	// Stop also tears the journal — nothing in the append path fsyncs, so an
+	// OOM-kill, a host reboot, or a power loss mid-write leaves a truncated final
+	// row. The strict fold reader is fail-closed by design, so that one row makes
+	// every later firing's ParseTailFile refuse; when that refusal returned early it
+	// skipped the compaction, and the file stayed pinned above the window with no
+	// firing of any kind able to reclaim it. That is the identical hazard
+	// CompactJournalFile already answers one level down — #3556's lenient read
+	// exists so a bad row is EXPELLED instead of leaving the file un-boundable
+	// forever ("the one pass that could shrink it is exactly the pass that errored")
+	// — and it is only reachable if the firing actually gets here. Compaction then
+	// expels the torn row, so the journal comes back fold-clean and the next firing
+	// parses normally: the wedge self-heals in one firing rather than being
+	// permanent.
+	//
+	// The economy is CompactJournalFile's own stat gate: below the threshold this is
+	// one stat and a return, so the common case stays free. Above it the firing pays
+	// a full-file read plus a rewrite — but only in a regime where it is ALREADY
+	// reading JournalTailWindowBytes of tail per firing (the threshold is that same
+	// window), and the rewrite drops the file well back under it, so the next several
+	// thousand firings are stat-only again. Concurrent sessions may attempt the same
+	// compaction; the swap is an atomic same-directory rename, so a loser of that
+	// race wastes a rewrite but never tears the file (see CompactJournalFile).
+	//
+	// The fault, if any, propagates to runToolprocHook, which renders it fail-open (a
+	// logged stderr note, exit 0) — the "never blocks the harness" guarantee lives
+	// there, not here. A compaction fault never MASKS the hook's own fault: hookErr is
+	// the more informative one and wins. replaceFileAtomic owns the Windows
+	// rename-under-contention retry; a swap still contended after that is simply left
+	// for the next firing.
+	if _, err := toolproc.CompactJournalFile(journalPath, toolproc.JournalCompactThresholdBytes, toolproc.JournalCompactTailKeep); err != nil {
+		if hookErr != nil {
+			return hookErr
+		}
+		return fmt.Errorf("journal compaction: %w", err)
+	}
+	return hookErr
+}
+
+// toolprocHookAppend is the firing's own observation work: parse the payload,
+// correlate against the journal tail, append this firing's events, and (at a clean
+// stop) reap the step-advice sidecar. Its faults are returned to toolprocHookRun,
+// which carries them PAST the journal bound rather than letting one skip it.
+func toolprocHookAppend(stdin io.Reader, kind, journalPath string, envFor func(tool string) toolproc.HookEnvelope, nowMS int64) error {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
 	if err != nil {
 		return err
@@ -168,46 +237,6 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 		adviceDir := stepAdviceDirFromJournal(journalPath)
 		_ = stepbatoncapture.ReapClosedAdvice(adviceDir, payload.SessionID)
 		_, _ = stepbatoncapture.SweepStaleAdvice(adviceDir, stepbatoncapture.DefaultStaleFloor, time.Now())
-	}
-	// Bound the shared journal on EVERY firing, not only at a clean stop (#3557).
-	// It is append-only across every guarded session and grows without limit, so a
-	// long-lived box would eventually parse (and store) an unbounded file — the
-	// O(journal) soft-fault storm the tail-read window (ParseTailFile) only
-	// half-solves, since a live spawn older than the window falls out of every
-	// firing's view. Compaction reclaims fully-terminal history while preserving
-	// every still-live spawn (CompactJournal's invariant), folding the whole journal
-	// back inside one tail read.
-	//
-	// Triggering on GROWTH rather than on the session boundary is what makes the
-	// bound hold on a crash-heavy box. A stop-gated compaction only ever runs for a
-	// session that ends cleanly: a hard crash, an OOM-kill, a host reboot, or a
-	// harness that skips SessionEnd leaves that session's contribution for some
-	// *other* session's stop to reclaim incidentally, and a workspace where no
-	// session ever stops cleanly never bounds the file at all. Every firing — pre,
-	// post, and stop alike, degraded ones included (a payload that yielded no events
-	// or whose HookEvents errored) — now attempts it, so the reclaim is driven by the
-	// growth that causes the problem instead of by an exit that may never come.
-	//
-	// The economy is CompactJournalFile's own stat gate: below the threshold this is
-	// one stat and a return, so the common case stays free. Above it the firing pays
-	// a full-file read plus a rewrite — but only in a regime where it is ALREADY
-	// reading JournalTailWindowBytes of tail per firing (the threshold is that same
-	// window), and the rewrite drops the file well back under it, so the next several
-	// thousand firings are stat-only again. Concurrent sessions may attempt the same
-	// compaction; the swap is an atomic same-directory rename, so a loser of that
-	// race wastes a rewrite but never tears the file (see CompactJournalFile).
-	//
-	// The fault, if any, propagates to runToolprocHook, which renders it fail-open (a
-	// logged stderr note, exit 0) — the "never blocks the harness" guarantee lives
-	// there, not here. A compaction fault never MASKS the hook's own fault: evErr is
-	// the more informative one and wins. replaceFileAtomic owns the Windows
-	// rename-under-contention retry; a swap still contended after that is simply left
-	// for the next firing.
-	if _, err := toolproc.CompactJournalFile(journalPath, toolproc.JournalCompactThresholdBytes, toolproc.JournalCompactTailKeep); err != nil {
-		if evErr != nil {
-			return evErr
-		}
-		return fmt.Errorf("journal compaction: %w", err)
 	}
 	return evErr
 }
@@ -598,9 +627,11 @@ grant); a resolved row wins, the flag pair fills when no row matches, and an
 unreadable manifest falls open to the flags.
 
 hook also bridges BACKGROUND jobs (the pulse source for streamed output): a
-launch post announcing a background id spawns a second proc "bg:<id>" (tool
-"<tool>[bg]", envelope resolved for that tag), each output poll naming that id
-pulses it (Via = the poll call), and a poll reporting completion exits it — so
+launch post announcing a background id spawns a second proc "bg:<session>:<id>"
+(tool "<tool>[bg]", envelope resolved for that tag; the harness's background id
+is per-session and this journal is workspace-shared, so the identity names the
+owning session), each output poll naming that id in that same session pulses it
+(Via = the poll call), and a poll reporting completion exits it — so
 a healthy polled job reads LIVE, a silent one STALLED, instead of both hiding
 behind the launch call's instant exit.
 

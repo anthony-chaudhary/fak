@@ -18,7 +18,7 @@ param(
   [string]$CaptureTaskName = 'FakLogvaultCapture',
   [string]$VerifyTaskName  = "FakLogvaultVerify",
   [string]$EmptyTaskName = '',
-  [string]$TemplatedTaskName = "FleetWorktreeDoctor-$repoSlug"
+  [string]$TemplatedTaskName = "FleetSomething-$repoSlug"
 )
 schtasks /Delete /TN $TaskName /F
 `

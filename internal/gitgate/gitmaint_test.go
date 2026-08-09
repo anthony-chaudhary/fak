@@ -24,8 +24,12 @@ type fakeMaint struct {
 	// backlog only a prune can reclaim (#5079). A `git prune --expire=…` call drops
 	// them from `loose` without adding to `in-pack` (removed, not folded).
 	unreachable int
-	calls       [][]string
-	onGrace     func(args []string)
+	// prunePackable models loose copies already present in a pack. Git's
+	// loose-objects task prunes the previous set before packing today's loose objects;
+	// the explicit following prune-packed step clears the new set in the same run.
+	prunePackable int
+	calls         [][]string
+	onGrace       func(args []string)
 	// fsmon is the text `git fsmonitor--daemon status` returns (classified by readPosture);
 	// fsmonErr models git being unable to run the probe at all (→ unknown).
 	fsmon    string
@@ -55,9 +59,17 @@ func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, 
 			f.onGrace(args)
 		}
 		if reachable := f.loose - f.unreachable; hasArg(args, "--task=loose-objects") && reachable > 10 {
-			f.inPack += reachable - 10 // reachable loose folded into a pack — moved, not deleted
-			f.loose -= reachable - 10  // unreachable loose is unfoldable: only a prune reclaims it
+			packed := reachable - 10
+			f.inPack += packed // packed first; the loose duplicate still exists until prune-packed
+			f.prunePackable += packed
 		}
+		return "", 0, nil
+	case len(args) >= 1 && args[0] == "prune-packed":
+		if f.onGrace != nil {
+			f.onGrace(args)
+		}
+		f.loose -= f.prunePackable
+		f.prunePackable = 0
 		return "", 0, nil
 	case len(args) >= 1 && args[0] == "prune":
 		if f.onGrace != nil {
@@ -98,8 +110,8 @@ func (f *fakeMaint) run(_ context.Context, dir string, args ...string) (string, 
 }
 
 func (f *fakeMaint) countText() string {
-	return fmt.Sprintf("count: %d\nsize: 1.00 MiB\nin-pack: %d\npacks: %d\nprune-packable: 0\ngarbage: 0\nsize-garbage: 0 bytes\n",
-		f.loose, f.inPack, f.packs)
+	return fmt.Sprintf("count: %d\nsize: 1.00 MiB\nin-pack: %d\npacks: %d\nprune-packable: %d\ngarbage: 0\nsize-garbage: 0 bytes\n",
+		f.loose, f.inPack, f.packs, f.prunePackable)
 }
 
 func hasArg(args []string, want string) bool {
@@ -155,7 +167,7 @@ func mutatingCalls(calls [][]string) []string {
 			continue
 		}
 		switch c[1] { // c[0] is the dir
-		case "multi-pack-index", "commit-graph", "maintenance", "prune":
+		case "multi-pack-index", "commit-graph", "maintenance", "prune-packed", "prune":
 			out = append(out, strings.Join(c[1:], " "))
 		}
 	}
@@ -177,10 +189,10 @@ func TestRunMaintCleanSafeRunsBothTiers(t *testing.T) {
 		t.Fatalf("clean+safe must not be an incident")
 	}
 	muts := mutatingCalls(f.calls)
-	// 2 always-safe + 2 grace verbs must have hit git.
+	// 2 always-safe + 3 grace verbs must have hit git.
 	for _, want := range []string{
 		"multi-pack-index write", "commit-graph write --reachable",
-		"maintenance run --task=loose-objects", "maintenance run --task=incremental-repack",
+		"maintenance run --task=loose-objects", "prune-packed", "maintenance run --task=incremental-repack",
 	} {
 		if !containsStr(muts, want) {
 			t.Fatalf("expected git step %q to run; got %v", want, muts)
@@ -214,7 +226,7 @@ func TestRunMaintAlwaysSafeRunsWhenLocked(t *testing.T) {
 	if !containsStr(muts, "multi-pack-index write") || !containsStr(muts, "commit-graph write --reachable") {
 		t.Fatalf("always-safe tier must still run when locked; got %v", muts)
 	}
-	for _, mustNot := range []string{"maintenance run --task=loose-objects", "maintenance run --task=incremental-repack"} {
+	for _, mustNot := range []string{"maintenance run --task=loose-objects", "prune-packed", "maintenance run --task=incremental-repack"} {
 		if containsStr(muts, mustNot) {
 			t.Fatalf("grace step %q must NOT run under a lock; got %v", mustNot, muts)
 		}
@@ -309,7 +321,7 @@ func TestRunMaintTOCTOURechecksLocks(t *testing.T) {
 	f := &fakeMaint{posture: safePosture(), loose: 100, inPack: 500, packs: 11}
 	f.onGrace = func(args []string) {
 		// A peer starts committing right after the loose-objects fold: fabricate its
-		// lock so the pre-step re-probe for incremental-repack sees it.
+		// lock so the pre-step re-probe for prune-packed and incremental-repack sees it.
 		if hasArg(args, "--task=loose-objects") {
 			writeLock(t, gitDir, "index.lock")
 		}
@@ -322,6 +334,9 @@ func TestRunMaintTOCTOURechecksLocks(t *testing.T) {
 	muts := mutatingCalls(f.calls)
 	if !containsStr(muts, "maintenance run --task=loose-objects") {
 		t.Fatalf("the first grace step should have run before the lock appeared; got %v", muts)
+	}
+	if containsStr(muts, "prune-packed") {
+		t.Fatalf("prune-packed must be deferred after the mid-run lock; got %v", muts)
 	}
 	if containsStr(muts, "maintenance run --task=incremental-repack") {
 		t.Fatalf("the second grace step must be deferred after the mid-run lock; got %v", muts)

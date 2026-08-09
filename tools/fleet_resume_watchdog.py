@@ -54,6 +54,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET_DIR = os.path.dirname(HERE)
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+import fleet_regdir  # noqa: E402  -- the host's one registry dir (never a second one)
 import fleet_session_signals  # noqa: E402  -- shared limit/auth banner detection
 import memory_cotravel  # noqa: E402  -- carry the slug-scoped memory store on re-home
 
@@ -133,13 +134,14 @@ FAK_EXE = (
     or shutil.which("fak.exe")
 )
 LOG_DIR = os.environ.get("FAK_WATCHDOG_LOG_DIR", os.path.join(HERE, "_watchdog"))
-# Honor FLEET_REG_DIR exactly as fleet_sessions.py does (same tools/_registry default),
-# so the watchdog reads the plan/ledger/sessions from the dir the refresh child WRITES.
-# The .ps1 pins this with `$env:FLEET_REG_DIR = $regDir`; without it an ambient
+# Resolve FLEET_REG_DIR exactly as fleet_sessions.py does (now the shared fleet_regdir
+# ladder), so the watchdog reads the plan/ledger/sessions from the dir the refresh child
+# WRITES. The .ps1 pins this with `$env:FLEET_REG_DIR = $regDir`; without it an ambient
 # FLEET_REG_DIR (set by fleet_control_pane.py or an operator) makes fleet_sessions.py
-# write to $FLEET_REG_DIR while this watchdog reads HERE/_registry -> stale/empty plan
-# (silent no-op) and a split resume-once ledger (latent double-resume).
-REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(HERE, "_registry"))
+# write to $FLEET_REG_DIR while this watchdog reads elsewhere -> stale/empty plan
+# (silent no-op) and a split resume-once ledger (latent double-resume). Sharing ONE
+# resolver is what closes the unpinned half of that: both sides now walk the same rungs.
+REG_DIR = fleet_regdir.reg_dir()
 # Active-probe parity with the .ps1 (-Probe auto): on a live tick, re-probe STALE
 # accounts (blocked OR idle with no live-session evidence) so a silently-recovered one
 # re-enters the pool — and an idle seat that quietly hit its limit leaves it — instead

@@ -60,8 +60,18 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$PointerFile = ".claude/goal-prompts/resolve-tickets-witnessed.md",
-  [string]$Workspace   = "C:\work\fleet",
+  # Both defaults were wrong in the same direction (#5895) and are coupled: the pointer is
+  # Test-Path'd AFTER `Set-Location $Workspace` below, so a relative pointer path is read
+  # against the workspace. The old pair named a file that is not in the tree AND a sibling
+  # checkout, so a bare invocation threw `pointer file not found` before reaching the gate.
+  # Keep this name pointing at a file that exists; the guard test pins both its existence
+  # and the /goal char cap, since a rename is what deleted the previous default.
+  [string]$PointerFile = ".claude/goal-prompts/resolve-top-issue-witnessed.md",
+  # Self-locating: tools/ -> repo root, i.e. the checkout this script was invoked from —
+  # the same derivation $repoRoot uses below. The old literal named a sibling clone missing
+  # tools/proc_resource_guard.py, so dispatch_preflight fail-safed to REFUSE_INSPECT
+  # (cap=4, granted=0) and refused the spawn. An explicit -Workspace still overrides.
+  [string]$Workspace   = (Split-Path -Parent $PSScriptRoot),
   # Where the worker's logs + pid breadcrumb land. Empty derives <Workspace>\.goal-runs
   # — the SAME dir dispatch_preflight.py scans for live /goal pid breadcrumbs (#2226).
   # Point it elsewhere only if you accept that the spawn gate then cannot see these
@@ -87,13 +97,31 @@ param(
   # the worker runs under its OWN `fak guard` gateway, so it inherits fak's default-on
   # token savers AND a hard context/wall budget that self-terminates a runaway worker.
   #   -ContextBudgetTokens : prompt/context-token budget handed to `fak guard
-  #     --context-budget-tokens`. MUST stay well above the ~62K turn-1 prompt floor: a
-  #     worker's first turn is ~62K tokens, so a budget below that makes the worker born
-  #     over-budget and it dies on turn 1 (the known dispatch-worker-context-budget-trap,
-  #     #2972). 200000 leaves ~3x headroom over that floor while still bounding a wedged
-  #     worker. Also satisfies guard's rule that --restart-on-budget needs a positive
-  #     budget (guard.go), so --restart-on-budget below is always valid.
-  [int]$ContextBudgetTokens = 200000,
+  #     --context-budget-tokens`. It is a CUMULATIVE allowance, NOT a per-turn ceiling
+  #     (internal/session/usage.go DebitUsage): every turn subtracts that turn's ENTIRE
+  #     resident window (prompt + cache_read + cache_creation), so a cached prefix is
+  #     re-charged in full on every turn and the session drains with
+  #     BUDGET_CONTEXT_EXHAUSTED when the running total hits <=0. Therefore
+  #
+  #         turns funded per epoch ~= budget / (mean resident tokens per turn)
+  #
+  #     and since the resident is never below the launch baseline, a budget of
+  #     baseline x k funds AT MOST k turns. "Headroom over the turn-1 floor" IS the turn
+  #     count -- being born safe (> baseline) says nothing about surviving turn 3.
+  #     The old flat 200000 made exactly that dimensional error: it read as "~3x headroom
+  #     over the ~62K floor" but bought ~2 turns, and with --restart-limit those hops are
+  #     spent in minutes -> 409 -> child exit 1. Witnessed 2026-08-08 on wave fw08081943:
+  #     all 9 workers died BUDGET_CONTEXT_EXHAUSTED 6-8 min into a 45m runway (~15%),
+  #     residents 73k-294k, compaction healthy (0 anchor_starved, 0 solvency_forced, all
+  #     65 bails correct-by-design). Now mirrors the derivation the Go and Python launch
+  #     paths already shared -- max(hardCap - outputReserve, baseline) x turnsPerEpoch =
+  #     max(200000 - 32000, 62000) x 12 = 2016000 -- so the budget funds a full epoch
+  #     instead of two turns. Keep in sync with
+  #     cmd/dispatchworker/guard.go:claudeGuardContextBudgetTokens and
+  #     tools/dispatch_worker.py:claude_guard_context_budget_tokens; drift is pinned by
+  #     TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker. Also satisfies guard's
+  #     rule that --restart-on-budget needs a positive budget (guard.go).
+  [int]$ContextBudgetTokens = 2016000,
   #   -MaxDuration : wall-clock budget handed to `fak guard --max-duration`. An INDEPENDENT
   #     axis from the token budget — a stuck worker that isn't burning tokens still self-
   #     terminates gracefully at this deadline instead of occupying a seat forever.
@@ -316,16 +344,22 @@ if ($Guarded) {
   # #3296: hand guard an explicit per-worker seed dir so budget-restart hops REUSE one
   # directory instead of minting a fresh %TEMP%\fak-guard-reset-* per hop (unbounded and
   # unreaped -- 2260 orphans witnessed live in the fleet). It lands under .goal-runs so it
-  # is reaped alongside this worker's logs. --restart-limit 3 bounds a wedged worker: after
-  # 3 budget-exhaustion relaunches it is thrashing, not producing, so let it die and free the
-  # seat for fresh churn rather than restart-loop a seat forever (guard default is 0=unlimited).
+  # is reaped alongside this worker's logs. --restart-limit bounds a wedged worker: past it
+  # the worker is thrashing, not producing, so let it die and free the seat for fresh churn
+  # rather than restart-loop a seat forever (guard default is 0=unlimited). 16, mirroring
+  # cmd/dispatchworker/guard.go:claudeGuardRestartLimit and dispatch_worker.py's
+  # CLAUDE_GUARD_RESTART_LIMIT -- NOT the 3 this used to pass. With a full-epoch budget a
+  # relaunch happens every ~12+ turns, so 16 x ~2min comfortably exceeds the -MaxDuration
+  # wall clock: wall-clock is the real bound for a healthy-but-slow worker, while a
+  # degenerate sub-2-min reset storm still trips here. A low limit is not a safety margin --
+  # it is a second, tighter deadline that reaps healthy workers at ~15% of their runway.
   $seedDir = Join-Path $LogDir "seed-$tag-$stamp"
   New-Item -ItemType Directory -Force -Path $seedDir | Out-Null
   $spawnArgs = @(
     "guard",
     "--context-budget-tokens", "$ContextBudgetTokens",
     "--restart-on-budget",
-    "--restart-limit", "3",
+    "--restart-limit", "16",
     "--restart-seed-dir", $seedDir,
     "--max-duration", "$MaxDuration",
     # A detached /goal worker IS a headless dispatch worker: mark it so, exactly as the

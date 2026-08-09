@@ -119,7 +119,37 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("preserve your working-tree edits", p)
         self.assertIn("refresh from the current trunk witness", p)
         self.assertIn("recommit by the same explicit paths", p)
-        self.assertIn("Do NOT recover by sweeping the tree", p)
+        self.assertIn("never recover by sweeping the tree", p)
+
+    def test_guidance_blocks_are_witnessed_rules_not_prose(self) -> None:
+        # #3220: the `how to work it` / `git laws` blocks render FROM the structured
+        # rule table, so EVERY bullet in them is `- <id>: <imperative> - witness `<w>``.
+        # A bullet with no witness is the unobservable prose this replaced — it could
+        # name a retired gate and nothing would notice.
+        mod = load()
+        p = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak")
+        bullet = re.compile(r"^- (?P<id>[a-z][a-z0-9-]*): .+ - witness `(?P<w>[^`]+)`$")
+        for header in ("how to work it (each rule:", "git laws (enforced below"):
+            start = p.index(header)
+            block = p[start:p.index("\n\n", start)].split("\n")
+            rules = block[1:]
+            self.assertTrue(rules, f"{header!r} rendered no rules")
+            for line in rules:
+                self.assertRegex(line, bullet, f"unwitnessed bullet under {header!r}")
+
+    def test_guidance_rules_mirror_the_go_spec(self) -> None:
+        # internal/dispatchtick/promptrules.go is the SPEC; this renderer mirrors it.
+        # Assert the ids and witnesses match so the two renderers cannot drift apart
+        # silently (the Go side asserts the same pairing from its own direction).
+        mod = load()
+        go_src = (ROOT / "internal" / "dispatchtick" / "promptrules.go").read_text(
+            encoding="utf-8")
+        rules = mod._work_rules(465, "docs") + mod._git_law_rules(465, "docs")
+        for rid, _imperative, witness in rules:
+            self.assertIn(f'ID: "{rid}"', go_src,
+                          f"rule id {rid!r} is not in the Go spec")
+            self.assertIn(witness.split(" --")[0], go_src,
+                          f"witness {witness!r} for {rid!r} is not in the Go spec")
 
     def test_has_an_honest_block_clause(self) -> None:
         mod = load()
@@ -173,7 +203,10 @@ class OriginQualityChecksTest(unittest.TestCase):
         mod = load()
         p = mod.render_prompt(self.PLAIN, "tools", workspace="C:/work/fak")
         self.assertIn("python tools/<touched>_test.py", p)
-        self.assertIn("REASON_NEW_PYTHON_TOOL", p)  # the tools-lane refusal mode
+        # NEW_PYTHON_TOOL is the token pythongate stamps; REASON_NEW_PYTHON_TOOL was
+        # only its Go constant name, which no reason registry declares (#3220).
+        self.assertIn("NEW_PYTHON_TOOL", p)         # the tools-lane refusal mode
+        self.assertNotIn("REASON_NEW_PYTHON_TOOL", p)
 
     def test_docs_lane_names_the_claims_lint_refusal(self) -> None:
         mod = load()

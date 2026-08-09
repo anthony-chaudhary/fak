@@ -12,7 +12,17 @@ import (
 // "Mon Jun 25 at 1pm"; without this strip the weekday makes the whole string unparseable,
 // which resetIsFuture reports as nil (unknown) and throttleIsActive then treats fail-closed
 // as a still-active weekly cap — walling a healthy seat indefinitely.
-var weekdayPrefixRE = regexp.MustCompile(`^(mon|tue|wed|thu|fri|sat|sun)\s+`)
+var weekdayPrefixRE = regexp.MustCompile(`^(?i:(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?))\s+(?:at\s+)?`)
+
+var weekdayNumbers = map[string]time.Weekday{
+	"mon": time.Monday, "monday": time.Monday,
+	"tue": time.Tuesday, "tuesday": time.Tuesday,
+	"wed": time.Wednesday, "wednesday": time.Wednesday,
+	"thu": time.Thursday, "thursday": time.Thursday,
+	"fri": time.Friday, "friday": time.Friday,
+	"sat": time.Saturday, "saturday": time.Saturday,
+	"sun": time.Sunday, "sunday": time.Sunday,
+}
 
 // soonness.go — the shared reset-time core behind resetIsFuture, plus the ResetSoonness
 // signal the config-plane rotation uses to break ties AMONG walled buckets (order the
@@ -49,7 +59,31 @@ func resetTime(reset string, now time.Time) (time.Time, bool) {
 	raw = parenAll.ReplaceAllString(raw, "")
 	raw = strings.TrimSpace(raw)
 	raw = strings.ToLower(wsRun.ReplaceAllString(raw, " "))
-	raw = weekdayPrefixRE.ReplaceAllString(raw, "")
+
+	// A weekday plus only a time names the next occurrence of that weekday.
+	// Resolve it before the historical weekday scrub so "Monday at 9am" does
+	// not become today's 09:00. Explicit dates still win: "Mon Jun 3 at 9am"
+	// falls through to the dated layouts after its weekday is removed.
+	if match := weekdayPrefixRE.FindStringSubmatch(raw); match != nil {
+		rest := strings.TrimSpace(raw[len(match[0]):])
+		if tod, ok := parseResetClock(rest, loc); ok {
+			weekday := weekdayNumbers[strings.ToLower(match[1])]
+			candidate := time.Date(nowInLoc.Year(), nowInLoc.Month(), nowInLoc.Day(), tod.Hour(), tod.Minute(), 0, 0, loc)
+			days := (int(weekday) - int(nowInLoc.Weekday()) + 7) % 7
+			candidate = candidate.AddDate(0, 0, days)
+			if !candidate.After(nowInLoc) {
+				candidate = candidate.AddDate(0, 0, 7)
+			}
+			if candidate.Sub(nowInLoc) <= 8*24*time.Hour {
+				return candidate, true
+			}
+			return time.Time{}, false
+		}
+		raw = strings.TrimSpace(raw[len(match[0]):])
+		if raw == "" {
+			return time.Time{}, false
+		}
+	}
 
 	type fmtSpec struct {
 		layout string
@@ -92,6 +126,15 @@ func resetTime(reset string, now time.Time) (time.Time, bool) {
 			}
 		}
 		return cand, true
+	}
+	return time.Time{}, false
+}
+
+func parseResetClock(raw string, loc *time.Location) (time.Time, bool) {
+	for _, layout := range []string{"3:04pm", "3pm"} {
+		if parsed, err := time.ParseInLocation(layout, strings.TrimSpace(raw), loc); err == nil {
+			return parsed, true
+		}
 	}
 	return time.Time{}, false
 }

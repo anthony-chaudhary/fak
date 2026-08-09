@@ -1,0 +1,79 @@
+{
+  "schema": "fak-microcontext-prefix-ab/1",
+  "verdict": "PASS",
+  "observed_at": "2026-08-06T18:51:58Z",
+  "provider": "fak-native-openai-compatible",
+  "model": "qwen2.5-0.5b-cpu",
+  "hardware": "GCP sanctioned fak-realmodel CPU path on L4 node",
+  "base_fingerprint": "microcontext-base-v1",
+  "canonicalization": "fixed system bytes; stable message/tool ordering; task delta is the only shared-arm mutation",
+  "contexts_per_arm": 12,
+  "provider_native_batch": {
+    "supported": false,
+    "http_status": 404,
+    "reason": "endpoint exposes no provider-native chat batch API"
+  },
+  "arms": [
+    {
+      "name": "concurrent-unique-full-prompts",
+      "prefix_mode": "unique",
+      "logical_contexts": 12,
+      "physical_workers": 4,
+      "completed": 12,
+      "failed": 0,
+      "wall_ms": 75478,
+      "ttft_p50_ms": 24662.449,
+      "ttft_p95_ms": 26598.74,
+      "prompt_tokens": 8418,
+      "completion_tokens": 90,
+      "cached_prompt_tokens": 0,
+      "contexts_per_second": 0.15898596483428926,
+      "prompt_tokens_per_wall_second": 111.52865433125392,
+      "decode_tokens_per_wall_second": 1.1923947362571694
+    },
+    {
+      "name": "concurrent-byte-identical-base",
+      "prefix_mode": "shared",
+      "logical_contexts": 12,
+      "physical_workers": 4,
+      "completed": 12,
+      "failed": 0,
+      "wall_ms": 76343,
+      "ttft_p50_ms": 25001.587,
+      "ttft_p95_ms": 26967.94,
+      "prompt_tokens": 8426,
+      "completion_tokens": 84,
+      "cached_prompt_tokens": 0,
+      "contexts_per_second": 0.15718488020246701,
+      "prompt_tokens_per_wall_second": 110.36998338216559,
+      "decode_tokens_per_wall_second": 1.100294161417269
+    },
+    {
+      "name": "tuned-sequential-byte-identical-base",
+      "prefix_mode": "shared",
+      "logical_contexts": 12,
+      "physical_workers": 1,
+      "completed": 12,
+      "failed": 0,
+      "wall_ms": 104170,
+      "ttft_p50_ms": 8608.992,
+      "ttft_p95_ms": 9551.243,
+      "prompt_tokens": 8426,
+      "completion_tokens": 84,
+      "cached_prompt_tokens": 0,
+      "contexts_per_second": 0.11519529756207228,
+      "prompt_tokens_per_wall_second": 80.88629810483509,
+      "decode_tokens_per_wall_second": 0.806367082934506
+    }
+  ],
+  "shared_vs_unique_throughput_ratio": 0.9886714237090078,
+  "shared_vs_unique_ttft_ratio": 1.013751189105348,
+  "cache_evidence": "no provider cache-hit evidence; shared-prefix benefit is falsified/not-yet on this endpoint",
+  "cache_miss_reasons": [
+    "endpoint returned zero cached_prompt_tokens",
+    "endpoint metrics expose no prompt-prefix cache hit/miss counter",
+    "provider-native /v1/batches API unavailable"
+  ],
+  "claim_verdict": "not-yet",
+  "scope": "observed endpoint A/B; ratios are descriptive, not a cache-gain claim without cache provenance or replicated significance"
+}

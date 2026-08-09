@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"net/http"
+	"time"
 )
 
 // session_subscribe.go — the per-session subscribe / re-attach op (#2767, epic
@@ -24,6 +25,16 @@ import (
 // ring is bounded, so a lapsed client whose cursor predates the oldest retained
 // event gets complete=false (some events fell off before it re-attached) and
 // re-syncs to head, exactly like the global feed's Seq-gap contract.
+//
+// #4310 adds the HELD form of that same drain: with ?wait=<duration> the request
+// parks until a revision for this session lands past the cursor, so a controller
+// is PUSHED the next revision instead of re-polling for it. It is additive, not a
+// second protocol — same route, same cursor grammar, same reply shape, and the
+// one-shot drain (no ?wait=) stays the resume primitive. The two invariants that
+// make it safe: the hold arms in the SAME lock hold as its drain (armTrace), so
+// no revision can slip through the gap between "nothing yet" and "now waiting";
+// and the hold is bounded, so an elapsed wait answers an empty tail at the head
+// cursor rather than occupying a connection forever.
 
 // SessionSubscribeResponse is the wire result of the subscribe/re-attach drain:
 // the one session's revision events after the cursor, the client's next cursor
@@ -51,6 +62,12 @@ type SessionSubscribeResponse struct {
 func (f *sessionFeed) drainTrace(trace string, sinceSeq uint64) (events []SessionChangeEvent, cursor uint64, complete bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.drainTraceLocked(trace, sinceSeq)
+}
+
+// drainTraceLocked is drainTrace's body with f.mu already held, so the held
+// attach can drain and arm inside ONE critical section (see armTrace).
+func (f *sessionFeed) drainTraceLocked(trace string, sinceSeq uint64) (events []SessionChangeEvent, cursor uint64, complete bool) {
 	cursor = sinceSeq
 	// oldestRetained is the Seq of the oldest event still in the ring; an empty
 	// ring retains nothing, so the window is intact only for a client already at
@@ -71,29 +88,143 @@ func (f *sessionFeed) drainTrace(trace string, sinceSeq uint64) (events []Sessio
 	return events, cursor, complete
 }
 
+// armTrace is the held-attach primitive (#4310): it drains the trace and, ONLY
+// when that drain is empty, hands back the feed's broadcast channel — created
+// under the SAME lock hold as the drain. That single critical section is what
+// closes the race a poll loop cannot close: no revision can land between "I saw
+// nothing" and "I am waiting", because a publisher must take this same mutex
+// both to append and to swap the broadcast out. A non-empty drain returns a nil
+// channel — there is already something to answer with, so there is nothing to
+// wait for.
+func (f *sessionFeed) armTrace(trace string, sinceSeq uint64) (events []SessionChangeEvent, cursor uint64, complete bool, wake <-chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	events, cursor, complete = f.drainTraceLocked(trace, sinceSeq)
+	if len(events) > 0 {
+		return events, cursor, complete, nil
+	}
+	if f.wake == nil {
+		f.wake = make(chan struct{})
+	}
+	return nil, cursor, complete, f.wake
+}
+
+// maxSubscribeWait caps how long a held attach parks the request. The hold is
+// BOUNDED on purpose: the reply's cursor makes the follow loop trivially
+// resumable, so answering an empty tail early costs a client nothing, while an
+// unbounded hold would outlive the proxies and load balancers in front of
+// `fak serve`.
+const maxSubscribeWait = 55 * time.Second
+
 // handleFakSessionSubscribe serves GET /v1/fak/session/{trace_id}/subscribe — the
-// re-attach drain (#2767). ?since= is the Seq of the last event the client saw
-// (0 = the whole retained tail), the same cursor grammar as /session/changes.
-// A server built without the feed 404s (fail-closed, like an un-injected
-// observe), never an empty clean-looking tail.
+// re-attach drain (#2767) and its held/streaming form (#4310). ?since= is the Seq
+// of the last event the client saw (0 = the whole retained tail), the same cursor
+// grammar as /session/changes; ?wait= optionally HOLDS the request until a
+// revision for this session lands, so a controller is pushed the next revision
+// instead of re-polling for it. A server built without the feed 404s
+// (fail-closed, like an un-injected observe), never an empty clean-looking tail.
 func (s *Server) handleFakSessionSubscribe(w http.ResponseWriter, r *http.Request, traceID string) {
 	if s.sessionFeed == nil {
 		writeErr(w, http.StatusNotFound, "session change feed is not configured")
 		return
 	}
-	var since uint64
-	if v := r.URL.Query().Get("since"); v != "" {
-		var n uint64
-		for _, c := range v {
-			if c < '0' || c > '9' {
-				writeErr(w, http.StatusBadRequest, "since must be a non-negative integer")
-				return
-			}
-			n = n*10 + uint64(c-'0')
-		}
-		since = n
+	since, ok := subscribeSince(w, r)
+	if !ok {
+		return
 	}
-	events, cursor, complete := s.sessionFeed.drainTrace(traceID, since)
+	wait, ok := subscribeWait(w, r)
+	if !ok {
+		return
+	}
+	if wait <= 0 {
+		// The one-shot drain: byte-identical to the pre-#4310 wire shape. It stays
+		// the resume primitive; the hold is strictly additive on the same cursor.
+		events, cursor, complete := s.sessionFeed.drainTrace(traceID, since)
+		writeSessionSubscribe(w, traceID, events, cursor, complete)
+		return
+	}
+	s.holdSessionSubscribe(w, r, traceID, since, wait)
+}
+
+// holdSessionSubscribe serves the held (long-poll) attach: park until a revision
+// for THIS trace lands past the cursor, the wait budget elapses, or the client
+// hangs up. The reply shape is the drain's, unchanged — an elapsed hold answers
+// an empty tail at the head cursor — so a follow loop is exactly "call again
+// with the cursor you were handed", and a client that cannot hold keeps working
+// against the same endpoint by omitting ?wait=.
+func (s *Server) holdSessionSubscribe(w http.ResponseWriter, r *http.Request, traceID string, since uint64, wait time.Duration) {
+	budget := time.NewTimer(wait)
+	defer budget.Stop()
+	for {
+		events, cursor, complete, wake := s.sessionFeed.armTrace(traceID, since)
+		if wake == nil {
+			writeSessionSubscribe(w, traceID, events, cursor, complete)
+			return
+		}
+		select {
+		case <-wake:
+			// A revision landed — but the broadcast is feed-global, so it may have
+			// been another session's. Re-drain and, if it was not ours, re-arm and
+			// keep holding until the budget runs out.
+		case <-budget.C:
+			// Nothing for this trace within the budget. Drain once more so a
+			// revision that raced the timer is still delivered rather than
+			// deferred to the client's next attach, then answer the tail.
+			events, cursor, complete = s.sessionFeed.drainTrace(traceID, since)
+			writeSessionSubscribe(w, traceID, events, cursor, complete)
+			return
+		case <-r.Context().Done():
+			// The controller hung up mid-hold. Write nothing: its cursor never
+			// advanced, so its next attach resumes from exactly where it was —
+			// the disconnect costs no events.
+			return
+		}
+	}
+}
+
+// subscribeSince reads the ?since= cursor: the Seq of the last event the client
+// saw, 0 (or absent) meaning the whole retained tail. Digits only — a non-numeric
+// cursor is a client bug, not a silent 0, so it 400s.
+func subscribeSince(w http.ResponseWriter, r *http.Request) (uint64, bool) {
+	v := r.URL.Query().Get("since")
+	if v == "" {
+		return 0, true
+	}
+	var n uint64
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			writeErr(w, http.StatusBadRequest, "since must be a non-negative integer")
+			return 0, false
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n, true
+}
+
+// subscribeWait reads the optional ?wait= hold budget as a Go duration ("30s",
+// "250ms"). Absent, empty, or zero is the one-shot drain. A budget past
+// maxSubscribeWait is CAPPED rather than refused — the client still gets a
+// resumable answer — but an unparseable one 400s, because silently treating it
+// as "no hold" would look like a server that never pushes.
+func subscribeWait(w http.ResponseWriter, r *http.Request) (time.Duration, bool) {
+	v := r.URL.Query().Get("wait")
+	if v == "" {
+		return 0, true
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		writeErr(w, http.StatusBadRequest, "wait must be a non-negative Go duration, e.g. 30s")
+		return 0, false
+	}
+	if d > maxSubscribeWait {
+		d = maxSubscribeWait
+	}
+	return d, true
+}
+
+// writeSessionSubscribe answers one subscribe reply. Both the one-shot drain and
+// the held attach go through it, which is what keeps their wire shapes identical.
+func writeSessionSubscribe(w http.ResponseWriter, traceID string, events []SessionChangeEvent, cursor uint64, complete bool) {
 	writeJSON(w, http.StatusOK, SessionSubscribeResponse{
 		TraceID:  traceID,
 		Events:   events,

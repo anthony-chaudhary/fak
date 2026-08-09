@@ -31,7 +31,16 @@ package toolproc
 // The tallies (BodyHits/BodyMisses/ServedBytes) are the net-true numbers a dogfood
 // witness reads: served repeats are avoided spawns, ServedBytes the tool-result
 // bytes not re-fetched. The gateway wiring that feeds live calls through Admit and
-// deposits fresh fetches via Offer arms at the gateway leaf — the labeled next step.
+// deposits fresh fetches via Offer has LANDED at the gateway leaf (#5119,
+// internal/gateway/toolproc_reuse.go): the serve half runs in
+// adjudicateProposedServed before dispatch and the deposit half in
+// admitInboundResults on every ADMITTED tool_result, so this cache is a live seam
+// and no longer a labeled next step. What that seam adds on top of the admission
+// rules here is a STRICTER read gate — it refuses an immutable read whose current
+// content digest it cannot witness, because Normalize's path-only fallback is right
+// for offline analytics of a finished rollout and wrong on a wire where the file may
+// have changed since. Arming stays the operator's (Server.SetToolprocReuse, default
+// unarmed ⇒ inert).
 
 // Armed-cache defaults: an 8 MiB total body budget and a 1 MiB per-entry cap. A
 // payload over the entry cap is simply never retained (fail-open to a fresh fetch);

@@ -21,6 +21,8 @@ int  mg_q2_0_upload(const unsigned char* codes, const float* scales, int out, in
 void mg_q2_0_gemv(int wid, const float* x, float* y);
 void mg_q2_0_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q2_0_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
+void mg_q2_0_gemm(int wid, const float* X, int p, float* Y);
+int  mg_q2_0_mlp(int gate, int up, int down, const float* x, float* y);
 void mg_q2_0_reset(void);
 */
 import "C"
@@ -77,6 +79,25 @@ func (w *Q2_0Weight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
 	}
 	C.mg_q2_0_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n),
 		(*C.float)(unsafe.Pointer(&Ycat[0])))
+}
+
+// GEMM runs ternary prefill Y[P,Out] = X[P,In] * W^T. X and Y are token-major.
+func (w *Q2_0Weight) GEMM(X []float32, P int, Y []float32) {
+	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
+		return
+	}
+	C.mg_q2_0_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+}
+
+// FusedMLPQ2_0 evaluates y = down(silu(gate*x) * (up*x)) in one Metal command buffer.
+// Intermediate activations remain device-resident. False reports a shape/backend failure.
+func FusedMLPQ2_0(gate, up, down *Q2_0Weight, x, y []float32) bool {
+	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 ||
+		gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || len(x) < gate.In || len(y) < down.Out {
+		return false
+	}
+	return C.mg_q2_0_mlp(gate.id, up.id, down.id,
+		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0]))) != 0
 }
 
 // GEMVGroupQ2_0 runs one decode GEMV per weight in ws — all reading the SAME f32 activation x

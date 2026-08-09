@@ -851,6 +851,204 @@ class WaveLaunchCacheTest(unittest.TestCase):
         self.assertEqual(warm[-1], dw.WARM_FLOOR_PROMPT)
 
 
+class WaveFloorCacheMeterTest(unittest.TestCase):
+    """#3610 box 3: the per-wave cache read/write meter and its warm-vs-cold A/B.
+
+    Two on-disk planes are planted and folded — the durable wave sidecars and the
+    gateway-usage ledger `fak guard` appends one row per session to. The join key is
+    the guard pid (internal/gatewayusageledger.NewRow stamps os.Getpid()). The fold is
+    pure, so nothing live is invoked.
+    """
+
+    SPAWN_OK = WaveTest.SPAWN_OK
+    _wire = WaveTest._wire
+
+    def _usage(self, path: Path, *rows: tuple) -> None:
+        """Plant gateway-usage rows: (pid, unix_millis, read, write, uncached)."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps({
+            "schema": "fak-gateway-usage-ledger/1", "kind": "exit",
+            "session_type": "guard", "pid": pid, "unix_millis": ms,
+            "counters": {"cached_prompt_tokens": read, "cache_creation_tokens": write,
+                         "input_tokens": uncached, "observed_turns": 4},
+        }) for pid, ms, read, write, uncached in rows) + "\n", encoding="utf-8")
+
+    def _wave(self, runs: Path, wave_id: str, *, warm: bool, at: int,
+              members: list[tuple]) -> None:
+        """Plant one durable wave sidecar: members are (rank, pid)."""
+        runs.mkdir(parents=True, exist_ok=True)
+        (runs / f"dispatch-wave-{wave_id}.json").write_text(json.dumps({
+            "wave_id": wave_id, "size": len(members), "launched_at_ms": at,
+            "launch_cache": {"warm_floor": warm, "stagger_s": 3.0 if warm else 0.0,
+                             "staggered_spawns": len(members) - 1 if warm else 0},
+            "members": [{"lane": f"lane{r}", "rank": r, "pid": pid}
+                        for r, pid in members],
+        }), encoding="utf-8")
+
+    def test_live_wave_sidecar_carries_the_join_key_and_posture(self) -> None:
+        """The sidecar is what makes the A/B possible at all: last-wave.json is
+        overwritten every tick, so without a durable per-wave record carrying the
+        posture AND the pids there is no second arm to compare against."""
+        mod = load()
+        mod.warm_floor_prefix = lambda root, **kw: {"warmed": True}
+        mod._sleep = lambda s: None
+        cands = [{"lane": f"lane{i}", "issues": 9 - i, "tree": [f"lane{i}/**"]}
+                 for i in range(2)]
+        self._wire(mod, seats=[_seat(i) for i in range(2)], candidates=cands,
+                   no_spawn=False)
+        pids = iter([4101, 4102])
+        mod._spawn_wave_member = lambda root, lane, *a, **k: {
+            "pid": next(pids), "log": f"{lane}.log"}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            p = mod.evaluate_wave(root, max_workers=2, work_kind="engineering",
+                                  live=True, warm_floor=True, stagger_s=3.0)
+            sidecar = json.loads(
+                (root / mod.RUNS_DIRNAME /
+                 f"dispatch-wave-{p['wave_id']}.json").read_text(encoding="utf-8"))
+        self.assertTrue(sidecar["launch_cache"]["warm_floor"])
+        self.assertEqual(sidecar["launch_cache"]["stagger_s"], 3.0)
+        self.assertEqual([m["pid"] for m in sidecar["members"]], [4101, 4102])
+        self.assertEqual([m["rank"] for m in sidecar["members"]], [0, 1])
+        self.assertIsInstance(sidecar["launched_at_ms"], int)
+
+    def test_followers_reading_a_warm_prefix_beat_the_cold_arm(self) -> None:
+        """The acceptance claim: with a warm prefix the followers READ where the cold
+        arm WRITES. Rank 0 writes in BOTH arms — someone always pays the first write."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs, usage = Path(d) / "runs", Path(d) / "usage.jsonl"
+            self._wave(runs, "warm1", warm=True, at=1000, members=[(0, 11), (1, 12), (2, 13)])
+            self._wave(runs, "cold1", warm=False, at=2000, members=[(0, 21), (1, 22), (2, 23)])
+            self._usage(usage,
+                        # warm: leader writes the floor, followers re-enter it.
+                        (11, 1100, 1_000, 35_800, 500),
+                        (12, 1100, 36_000, 1_200, 500),
+                        (13, 1100, 36_000, 1_100, 500),
+                        # cold: every member pays its own floor write.
+                        (21, 2100, 1_000, 35_800, 500),
+                        (22, 2100, 1_000, 35_800, 500),
+                        (23, 2100, 1_000, 35_800, 500))
+            doc = mod.wave_floor_cache(Path(d), runs_dir=runs, usage_path=usage)
+        self.assertEqual(doc["verdict"], "WARM_READS_MORE")
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["ab"]["warm"]["reading"], 2)
+        self.assertEqual(doc["ab"]["cold"]["reading"], 0)
+        # Rank 0 is excluded from BOTH arms: it is never evidence either way.
+        self.assertEqual(doc["ab"]["warm"]["followers"], 2)
+        self.assertEqual(doc["ab"]["cold"]["followers"], 2)
+        self.assertGreater(doc["ab"]["warm"]["mean_read_share"],
+                           doc["ab"]["cold"]["mean_read_share"])
+        self.assertLess(doc["ab"]["warm"]["mean_cache_write"],
+                        doc["ab"]["cold"]["mean_cache_write"])
+
+    def test_a_warm_wave_that_did_not_move_the_needle_reports_no_effect(self) -> None:
+        """Demotion evidence must be reportable: if warm followers still write, the
+        meter has to say so rather than rationalize the knob it is measuring."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs, usage = Path(d) / "runs", Path(d) / "usage.jsonl"
+            self._wave(runs, "warm1", warm=True, at=1000, members=[(0, 11), (1, 12)])
+            self._wave(runs, "cold1", warm=False, at=2000, members=[(0, 21), (1, 22)])
+            self._usage(usage, (11, 1100, 1_000, 35_800, 500),
+                        (12, 1100, 1_000, 35_800, 500),
+                        (21, 2100, 1_000, 35_800, 500),
+                        (22, 2100, 1_000, 35_800, 500))
+            doc = mod.wave_floor_cache(Path(d), runs_dir=runs, usage_path=usage)
+        self.assertEqual(doc["verdict"], "NO_MEASURED_EFFECT")
+        self.assertFalse(doc["ok"])
+
+    def test_a_missing_arm_refuses_to_grade_instead_of_reporting_a_blank_pass(self):
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs, usage = Path(d) / "runs", Path(d) / "usage.jsonl"
+            self._wave(runs, "cold1", warm=False, at=2000, members=[(0, 21), (1, 22)])
+            self._usage(usage, (21, 2100, 1_000, 35_800, 500),
+                        (22, 2100, 1_000, 35_800, 500))
+            doc = mod.wave_floor_cache(Path(d), runs_dir=runs, usage_path=usage)
+        self.assertEqual(doc["verdict"], "INSUFFICIENT_EVIDENCE")
+        self.assertFalse(doc["ok"], "an ungraded A/B must exit non-zero")
+        self.assertIn("warm", doc["reason"])
+
+    def test_a_usage_row_older_than_the_launch_never_joins(self) -> None:
+        """PID-REUSE GUARD: the OS recycles pids and the ledger spans days, so a row
+        written before the wave launched belongs to a different process entirely.
+        Without this the meter would happily credit a stranger's cache counters."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs, usage = Path(d) / "runs", Path(d) / "usage.jsonl"
+            self._wave(runs, "warm1", warm=True, at=5_000, members=[(0, 11), (1, 12)])
+            # Same pid, but stamped LONG before this wave launched.
+            self._usage(usage, (12, 40, 36_000, 1_000, 500))
+            doc = mod.wave_floor_cache(Path(d), runs_dir=runs, usage_path=usage)
+        follower = doc["waves"][0]["members"][1]
+        self.assertFalse(follower["matched"])
+        self.assertIn("no gateway-usage row", follower["reason"])
+        self.assertEqual(doc["ab"]["warm"]["followers"], 0)
+
+    def test_an_unmatched_member_is_named_not_silently_dropped(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs, usage = Path(d) / "runs", Path(d) / "usage.jsonl"
+            self._wave(runs, "warm1", warm=True, at=1000, members=[(0, 11), (1, 12)])
+            self._usage(usage, (11, 1100, 1_000, 35_800, 500))   # follower still live
+            doc = mod.wave_floor_cache(Path(d), runs_dir=runs, usage_path=usage)
+        members = doc["waves"][0]["members"]
+        self.assertTrue(members[0]["matched"])
+        self.assertFalse(members[1]["matched"])
+        self.assertEqual(len(members), 2, "the unmatched member stays in the readout")
+
+    def test_legacy_sidecars_are_counted_apart_not_folded_into_the_cold_arm(self):
+        """A pre-#3610 sidecar records NO posture and NO pids. Folding it into the
+        cold arm would show dozens of 'cold waves' contributing zero followers, which
+        reads as evidence when it is silence. It is reported as its own count."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs, usage = Path(d) / "runs", Path(d) / "usage.jsonl"
+            runs.mkdir(parents=True)
+            (runs / "dispatch-wave-old1.json").write_text(json.dumps(
+                {"wave_id": "old1", "size": 2, "lanes": ["a", "b"],
+                 "seats": ["s1", "s2"]}), encoding="utf-8")
+            self._wave(runs, "cold1", warm=False, at=2000, members=[(0, 21), (1, 22)])
+            self._usage(usage, (21, 2100, 1_000, 35_800, 500),
+                        (22, 2100, 1_000, 35_800, 500))
+            doc = mod.wave_floor_cache(Path(d), runs_dir=runs, usage_path=usage)
+        self.assertEqual(doc["legacy_waves"], 1)
+        self.assertEqual(doc["ab"]["cold"]["waves"], 1, "only the posture-bearing wave")
+        self.assertEqual([w["wave_id"] for w in doc["waves"]], ["cold1"])
+        self.assertIn("legacy", mod.render_floor_cache(doc))
+
+    def test_a_missing_ledger_is_a_clean_first_run_not_an_error(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            doc = mod.wave_floor_cache(Path(d), runs_dir=Path(d) / "runs",
+                                       usage_path=Path(d) / "absent.jsonl")
+        self.assertEqual(doc["usage_rows"], 0)
+        self.assertEqual(doc["verdict"], "INSUFFICIENT_EVIDENCE")
+        self.assertEqual(doc["waves"], [])
+
+    def test_corrupt_ledger_lines_are_skipped_not_fatal(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            usage = Path(d) / "usage.jsonl"
+            usage.write_text('{"nope\nnot json at all\n'
+                             '{"schema":"fak-gateway-usage-ledger/1","pid":7,'
+                             '"unix_millis":9,"counters":{}}\n', encoding="utf-8")
+            rows = mod.read_usage_rows(usage)
+        self.assertEqual([r["pid"] for r in rows], [7])
+
+    def test_the_readout_states_its_aggregate_basis(self) -> None:
+        """The counters are whole-session aggregates, so the meter cannot isolate the
+        ~35.8k floor from in-session writes. That limit must travel WITH the number."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            doc = mod.wave_floor_cache(Path(d), runs_dir=Path(d) / "runs",
+                                       usage_path=Path(d) / "absent.jsonl")
+        self.assertIn("session-aggregate", doc["basis"])
+        self.assertIn("NOT separated", doc["basis"])
+        self.assertIn("basis", mod.render_floor_cache(doc))
+
+
 class BusyLanesTest(unittest.TestCase):
     """busy_lanes folds the inflight markers spawn_detached writes into the set of
     lanes with a LIVE worker, pruning dead / stale / garbage markers in one pass so

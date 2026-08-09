@@ -64,6 +64,8 @@ type CacheAttributionVars struct {
 
 	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
 	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"` // negative until reads repay writes
+	CacheCreationTokensHeadOnly               uint64  `json:"cache_creation_tokens_head_only,omitempty"`
+	CacheCreationTokensMessagePrefix          uint64  `json:"cache_creation_tokens_message_prefix,omitempty"`
 	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
 	// FakCompactionCacheReadTokens is the OBSERVED provider cache_read at this session's compaction
 	// fires — the warm witness FakTokenEquiv prices the shed on (min(shed, this) prices at the read
@@ -148,4 +150,72 @@ const FindingUpgradeNeverFired = "UPGRADE_NEVER_FIRED"
 // (the historical default) returns false, preserving Anthropic-wire behavior.
 func (m ManagedCacheVars) WireHasNo1hTTLLever() bool {
 	return m.Wire == WireOpenAIResponses
+}
+
+// The stable tokens for the three largest prompt-shrink levers (#5493). They are named here,
+// beside the wire shapes, because TWO surfaces must agree on them byte-for-byte or a log scrape
+// silently matches one and misses the other: the `fak serve` / `fak guard` startup admission
+// (cmd/fak/shrink_lever_wire.go) and the live /debug/vars block below. A literal in each place
+// would let them drift with nothing to catch it.
+const (
+	// ShrinkLeverCompactHistoryBudget — --compact-history-budget, stood down off the
+	// passthrough by gateway.compactAnthropicRawWithReason.
+	ShrinkLeverCompactHistoryBudget = "compact_history_budget"
+	// ShrinkLeverElideStaleReads — --elide-stale-reads, stood down off the passthrough by
+	// gateway.maybeElideStaleReads.
+	ShrinkLeverElideStaleReads = "elide_stale_reads"
+	// ShrinkLeverDeferColdTools — --defer-cold-tools, stood down off the passthrough by
+	// gateway.maybeDeferColdTools.
+	ShrinkLeverDeferColdTools = "defer_cold_tools"
+)
+
+// FindingShrinkLeverInertOnWire is the ShrinkLeverVars.Finding value — and the token the
+// startup admission prints — for the #5493 condition: a prompt-shrink lever is configured ON
+// and the wire this gateway actually built cannot run it, so the prompt forwards UNSHRUNK.
+const FindingShrinkLeverInertOnWire = "SHRINK_LEVER_INERT_ON_WIRE"
+
+// ShrinkLeverVars is the /debug/vars prompt-shrink-lever posture block (#5493): which of the
+// three levers are configured ON, and which of those the LIVE wire can actually run.
+//
+// It exists because "configured" and "live" are different facts that every other surface
+// conflates. The three levers are each gated, inside the gateway, on the Anthropic passthrough
+// decision, so on any other wire all three stand down to identity — and all three ship
+// default-ON. The per-turn counters next door in CacheAttributionVars cannot express that:
+// FakDeferColdTurns and its DEFER_ENABLED_BUT_INERT watchdog only ever accrue PAST the
+// eligibility gate, so on a wire the transform never runs they are flat zero, which reads
+// exactly like a lever that was left off. This block is the missing denominator at the wire
+// level: it names the levers whose absence would otherwise be invisible.
+//
+// The startup admission already refuses an EXPLICITLY enabled inert lever and prints a notice
+// for a default-on one. This is the surface a long-running process, an A/B harness, or a
+// scraped `/debug/vars` can read AFTER boot, when the startup line has scrolled away.
+type ShrinkLeverVars struct {
+	// WireRunsLevers is the gateway's own passthrough predicate (Server.anthropicPassthrough):
+	// true only when this process fronts a single Anthropic-provider HTTP upstream, which is
+	// the one wire on which req.Raw is forwarded verbatim and the three transforms can bite.
+	WireRunsLevers bool `json:"wire_runs_levers"`
+	// Wire is the resolved upstream provider (gateway.Config.Provider) this posture formed on.
+	// The PROVIDER only, never the base URL — an operator-supplied upstream URL can carry an
+	// embedded credential and can name a host that has no business on a debug surface.
+	Wire string `json:"wire,omitempty"`
+	// LiveOnWire lists the tokens of levers configured ON that this wire can run; InertOnWire
+	// lists those configured ON that it cannot. Together they are the whole configured-ON set,
+	// so a reader never has to guess whether an absent lever was off or merely unreported.
+	//
+	// "Live" here means REACHABLE — configured on, on a wire whose gate admits it. Whether a
+	// reachable lever actually FIRED on a given turn is a separate, finer fact carried by the
+	// CacheAttributionVars counters; this block deliberately does not claim it.
+	LiveOnWire  []string `json:"live_on_wire,omitempty"`
+	InertOnWire []string `json:"inert_on_wire,omitempty"`
+	// DualLocalRouting warns that WireRunsLevers is a per-PROCESS answer to a per-TURN
+	// question. In dual mode (an Anthropic upstream alongside in-kernel weights) a request
+	// naming a locally-served model is not a passthrough, so it gets none of the three even
+	// though this block reports the wire as running them. Present only when such a planner is
+	// wired, so the caveat appears exactly where it applies — and that is also the deployment
+	// most likely to be A/B'd local-vs-remote, where mistaking the two is most expensive.
+	DualLocalRouting bool `json:"dual_local_routing,omitempty"`
+	// Finding is FindingShrinkLeverInertOnWire when InertOnWire is non-empty, and empty
+	// otherwise, so the field's PRESENCE is itself the alarm — the same convention
+	// ManagedCacheVars.Finding and CacheAttributionVars.FakDeferFinding follow.
+	Finding string `json:"finding,omitempty"`
 }
