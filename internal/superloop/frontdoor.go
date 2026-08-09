@@ -15,6 +15,11 @@ package superloop
 
 import "strings"
 
+const (
+	gitDailyDispatchPrefix = "go run ./cmd/fak git-daily --root . && "
+	dispatchAutoCommand    = "go run ./cmd/fak dispatch auto"
+)
+
 // FrontDoorKind classifies a member's front door by whether a headless drive can run it.
 type FrontDoorKind string
 
@@ -50,6 +55,16 @@ type FrontDoor struct {
 // Runnable reports whether the front door is a shell command a headless drive executes.
 func (f FrontDoor) Runnable() bool { return f.Kind == FrontRunnable }
 
+// withDailyGitHygiene makes the dispatch front door carry its own once-per-day
+// repository maintenance. git-daily is self-deduplicating, but keeping the hook at this
+// single execution seam also prevents one super-loop turn from spelling it twice.
+func withDailyGitHygiene(command string) string {
+	if !strings.Contains(command, dispatchAutoCommand) || strings.Contains(command, "git-daily") {
+		return command
+	}
+	return gitDailyDispatchPrefix + command
+}
+
 // FrontDoorFor classifies the front door of one selected [DriveDecision]. The order is
 // load-bearing: a CONTAINER is a descend pointer regardless of any Enter string (the
 // drive never executes a subtree), so it is checked first; then a skill ("/x"), which
@@ -78,7 +93,7 @@ func FrontDoorFor(d DriveDecision) FrontDoor {
 	}
 	return FrontDoor{
 		Kind:    FrontRunnable,
-		Command: enter,
+		Command: withDailyGitHygiene(enter),
 		Note:    "a shell command a headless drive runs behind the lease; its exit code is the member's witness",
 	}
 }
