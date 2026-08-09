@@ -74,6 +74,7 @@ type Finding struct {
 	Detail   string `json:"detail"`             // the human message
 	Advisory bool   `json:"advisory,omitempty"` // visible but non-blocking in this push
 	Severity int    `json:"severity,omitempty"` // 0 = ungraded; DUPLICATION: copied-coverage percent (0-100)
+	View     string `json:"view,omitempty"`     // WORKTREE, LANDS_TREE, or WORKTREE_FALLBACK
 }
 
 // Gate is one commit-boundary check. ModeEnv/EscapeEnv name the env vars that soften or skip
@@ -95,7 +96,7 @@ type Gate struct {
 // invoked them, with their mode/escape env vars. Order is preserved so operator output and any
 // first-failure behavior match the Python path.
 func PreCommitGates() []Gate {
-	return []Gate{
+	return scopeGates([]Gate{
 		{Name: "PUBLIC_LEAK", ModeEnv: "FLEET_SCRUB_GUARD", EscapeEnv: "FLEET_ALLOW_LEAK", Check: gatePublicLeak},
 		{Name: "SECRET_SHAPE", ModeEnv: "FLEET_SHAPE_GUARD", EscapeEnv: "ALLOW_SECRET_SHAPE", Check: gateSecretShape},
 		{Name: "DOC_PLACEMENT", ModeEnv: "FLEET_DOC_GUARD", EscapeEnv: "ALLOW_ROOT_DOC", Check: gateDocPlacement},
@@ -148,7 +149,7 @@ func PreCommitGates() []Gate {
 		// flag ("call the sibling helper"). Cross-package clones stay the whole-tree scorecard's job.
 		// Set FLEET_DUP_GUARD=block to hard-enforce it, ALLOW_DUP=1 to skip it once. It runs LAST.
 		{Name: "DUPLICATION", ModeEnv: "FLEET_DUP_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_DUP", Check: gateDuplication},
-	}
+	})
 }
 
 // realRunner runs the real git binary. Like witness.gitRunner: non-zero exit => code (not err);
@@ -204,6 +205,13 @@ type StagedDiff struct {
 	// next one for exactly the reason cacheMu exists. See candidates.go.
 	candMu     sync.Mutex
 	candidates map[string]candidateNote // gate name -> what that gate judged over
+
+	// probe replaces working-tree file reads for a scoped view. landsView memoizes the one
+	// HEAD-plus-index sibling shared by all LANDS_TREE gates in a run.
+	probe      fileReader
+	viewMu     sync.Mutex
+	landsView  *StagedDiff
+	landsTried bool
 }
 
 type fileEntry struct {
@@ -394,6 +402,9 @@ func (d *StagedDiff) sortedFiles() []string {
 // FileBytes reads a repo-relative file once and caches it. Missing file => (nil, false), never
 // an error — the gates treat an absent target as "does not resolve", matching os.path.exists.
 func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
+	if d.probe != nil {
+		return d.probe.FileBytes(rel)
+	}
 	if e, ok := d.cachedFile(rel); ok {
 		return e.data, e.exists
 	}
@@ -441,6 +452,9 @@ func (d *StagedDiff) storeFile(rel string, e fileEntry) {
 // Exists reports whether a repo-relative path exists on disk (file or dir), mirroring
 // os.path.exists used by the link/index resolvers.
 func (d *StagedDiff) Exists(rel string) bool {
+	if d.probe != nil {
+		return d.probe.Exists(rel)
+	}
 	full := filepath.Join(d.Root, filepath.FromSlash(rel))
 	_, err := os.Stat(full)
 	return err == nil
@@ -449,6 +463,9 @@ func (d *StagedDiff) Exists(rel string) bool {
 // Size returns the byte size of a repo-relative file, or (0,false) on error — the size cap
 // gate's os.path.getsize twin.
 func (d *StagedDiff) Size(rel string) (int64, bool) {
+	if d.probe != nil {
+		return d.probe.Size(rel)
+	}
 	fi, err := os.Stat(filepath.Join(d.Root, filepath.FromSlash(rel)))
 	if err != nil {
 		return 0, false

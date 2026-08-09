@@ -411,7 +411,12 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		if len(findings) == 0 {
 			continue
 		}
-		allFindings = append(allFindings, findings...)
+		for _, finding := range findings {
+			// The gate mode is the disposition contract for this run: warn findings remain
+			// visible but must trail every binding repair in the model-facing hand-off.
+			finding.Advisory = mode != "block"
+			allFindings = append(allFindings, finding)
+		}
 		if mode == "block" {
 			blocked = true
 			if !*asJSON {
@@ -440,6 +445,7 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
+		orderFindingsForRepair(allFindings)
 		emitFindingsJSON(stdout, stderr, allFindings, skipped, reports, scope)
 	}
 	if blocked {
@@ -679,6 +685,14 @@ func cleanRunSummary(reports []gateReport, stagedFiles int, scope runScope) stri
 	// (#5603). The scope clause closes that: which population the staged file count came from,
 	// and which gates operator intent left out of the numbers entirely.
 	return msg + " — " + scope.note()
+}
+
+// orderFindingsForRepair puts binding work before advisory work without disturbing the
+// registry/file/line order inside either disposition.
+func orderFindingsForRepair(findings []hooks.Finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		return !findings[i].Advisory && findings[j].Advisory
+	})
 }
 
 // emitFindingsJSON writes the --json report: the findings, and the ledger of gates that never
