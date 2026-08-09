@@ -130,6 +130,7 @@ func TestAccountsDoctorProbeLedgerOverlay(t *testing.T) {
 
 	rd := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", rd)
+	t.Setenv("FLEET_STATE_DIR", t.TempDir()) // keep the persist fold off the real store
 	line := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `","account":".claude-ready-seat","status":"LIMIT","reset":"3pm"}`
 	if err := os.WriteFile(filepath.Join(rd, "probe_ledger.jsonl"), []byte(line+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -163,6 +164,7 @@ func TestAccountsDoctorAccessWallIsNotRelogin(t *testing.T) {
 
 	rd := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", rd)
+	t.Setenv("FLEET_STATE_DIR", t.TempDir()) // keep the persist fold off the real store
 	line := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `","account":".claude-ready-seat","status":"ACCESS","block_reason":"organization has disabled Claude subscription access"}`
 	if err := os.WriteFile(filepath.Join(rd, "probe_ledger.jsonl"), []byte(line+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -225,6 +227,7 @@ func TestAccountsDoctorRecoveryWorklistClassifies(t *testing.T) {
 	// Wire a fresh weekly usage LIMIT probe for the ready seat so it folds to wait_reset (hard).
 	rd := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", rd)
+	t.Setenv("FLEET_STATE_DIR", t.TempDir()) // keep the persist fold off the real store
 	line := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `","account":".claude-capped-seat","status":"LIMIT","reset":"3pm"}`
 	if err := os.WriteFile(filepath.Join(rd, "probe_ledger.jsonl"), []byte(line+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -405,5 +408,80 @@ func TestAccountsDoctorDurableOrgWallOutranksNeedsLogin(t *testing.T) {
 	}
 	if strings.Contains(got, "relogin") || strings.Contains(got, "CLAUDE_CONFIG_DIR=") {
 		t.Fatalf("doctor must never propose re-login for a durable org wall:\n%s", got)
+	}
+}
+
+// TestAccountsDoctorPersistsFreshAccessWallDurably is the production WRITE seam of #4998:
+// doctor folds the prober's fresh ACCESS canary verdict into the durable store, so the
+// typed wall outlives the ledger's freshness window — and a later fresh OK canary (the
+// witnessed upstream repair) clears it and returns the seat to service.
+func TestAccountsDoctorPersistsFreshAccessWallDurably(t *testing.T) {
+	home := t.TempDir()
+	walled := mkHome(t, home, ".claude-wall-seat", "wall@example.test", true)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"wall-seat","dir":"` + jsonPath(walled) + `"}` +
+		`],"roles":{"active":"wall-seat","anchor":"wall-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd := t.TempDir()
+	t.Setenv("FLEET_STATE_DIR", sd)
+
+	// Run 1: the prober witnessed the org-disable banner ten minutes ago.
+	rd := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", rd)
+	access := `{"ts":"` + time.Now().UTC().Add(-10*time.Minute).Format(time.RFC3339) +
+		`","account":".claude-wall-seat","status":"ACCESS","block_reason":"organization has disabled Claude subscription access"}`
+	if err := os.WriteFile(filepath.Join(rd, "probe_ledger.jsonl"), []byte(access+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"doctor", "--registry", regPath, "--home", home}); rc != 1 {
+		t.Fatalf("doctor over a fresh ACCESS wall rc=%d, want 1; out=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	store, err := accounts.LoadCooldownStore(filepath.Join(sd, "account-cooldown.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.OrgAuthWall(accounts.UUIDBucketKey("u-wall@example.test"), time.Now().UTC()); !ok {
+		t.Fatal("doctor did not persist the fresh ACCESS verdict as a durable org wall")
+	}
+
+	// Run 2: the prober is gone (a fresh empty registry dir — no fresh verdict at all).
+	// The wall must render from the DURABLE store, not from ledger freshness.
+	t.Setenv("FLEET_REG_DIR", t.TempDir())
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"doctor", "--registry", regPath, "--home", home}); rc != 1 {
+		t.Fatalf("doctor with the prober gone rc=%d, want 1; out=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "org_auth_wall") || !strings.Contains(got, "access_blocked") {
+		t.Fatalf("the persisted wall did not survive the ledger going stale:\n%s", got)
+	}
+	if strings.Contains(got, "relogin") {
+		t.Fatalf("a persisted wall must never degrade to relogin:\n%s", got)
+	}
+
+	// Run 3: the upstream was repaired — a NEWER fresh OK canary clears the wall and
+	// the credentialed seat returns to full service.
+	rd3 := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", rd3)
+	okLine := `{"ts":"` + time.Now().UTC().Format(time.RFC3339) + `","account":".claude-wall-seat","status":"OK"}`
+	if err := os.WriteFile(filepath.Join(rd3, "probe_ledger.jsonl"), []byte(okLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"doctor", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("doctor after the witnessed repair rc=%d, want 0; out=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	store, err = accounts.LoadCooldownStore(filepath.Join(sd, "account-cooldown.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.OrgAuthWall(accounts.UUIDBucketKey("u-wall@example.test"), time.Now().UTC()); ok {
+		t.Fatal("a fresh OK canary newer than the wall must clear it")
 	}
 }

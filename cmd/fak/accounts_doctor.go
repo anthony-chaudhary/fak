@@ -211,6 +211,11 @@ func buildAccountsDoctorReport(registryPath string, reg accounts.Registry) acctD
 		Registry:    registryPath,
 		ProbeLedger: strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != "",
 	}
+	// Fold fresh canary evidence into the durable store BEFORE the login fold, so the
+	// same doctor run renders the wall (or the repair) it just witnessed.
+	if report.ProbeLedger {
+		persistFreshProbeHealth(reg, time.Now().UTC())
+	}
 	// The cooldown overlay is load-bearing here (#4998): the durable org-auth-wall
 	// evidence lives in the fleet-shared cooldown store, and only LoginReportAt folds
 	// it over the config-plane statuses. A plain LoginReport would re-collapse a
@@ -224,6 +229,48 @@ func buildAccountsDoctorReport(registryPath string, reg accounts.Registry) acctD
 	markHydrateRepairs(&report, login.Seats)
 	foldDoctorReportCounts(&report)
 	return report
+}
+
+// persistFreshProbeHealth folds each seat's FRESH probe-ledger verdict into the durable
+// cooldown store (#4998) — the production write seam between the prober's bounded live
+// canary and the typed org-auth-wall record. A fresh ACCESS verdict (the org-disable
+// banner class) records/extends the wall under the seat's canonical account key; a fresh
+// OK newer than the wall's witness clears it (the witnessed upstream repair). Every
+// other kind is left alone — a usage cap or a credential auth block is not evidence
+// about the org either way. Without this fold the wall lives only as long as the
+// ledger's entitlement freshness window (fleetaccounts.ProbeLedgerEntitlementFreshMin):
+// past it the headroom allocator re-admits the dead seat and routes straight back into
+// the same terminal 403. Fail-open: an unreadable store or ledger never blocks doctor.
+func persistFreshProbeHealth(reg accounts.Registry, now time.Time) {
+	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		return
+	}
+	changed := false
+	for _, h := range reg.Homes {
+		key := h.Identity.AccountKey()
+		if key == "" || h.Dir == "" {
+			continue
+		}
+		fp := fleetaccounts.FreshProbeFromLedger(filepath.Base(h.Dir), "", now, 0)
+		if fp == nil {
+			continue
+		}
+		probedAt := now.Add(-time.Duration(fp.AgeMin * float64(time.Minute)))
+		switch {
+		case !fp.Available && fp.BlockKind == "access":
+			changed = store.ObserveSeatHealth(key, accounts.SeatHealthOrgAuthWall, probedAt) || changed
+		case fp.Available:
+			// Only an OK probed AFTER the wall was witnessed may clear it: a stale OK
+			// from before the 403 is not evidence the org was repaired.
+			if e, ok := store.OrgAuthWall(key, now); ok && probedAt.After(e.CooledAt) {
+				changed = store.ObserveSeatHealth(key, accounts.SeatHealthReady, probedAt) || changed
+			}
+		}
+	}
+	if changed {
+		_ = store.Save()
+	}
 }
 
 func foldDoctorReportCounts(report *acctDoctorReport) {
