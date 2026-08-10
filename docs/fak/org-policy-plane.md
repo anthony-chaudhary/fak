@@ -1,3 +1,8 @@
+---
+title: "Centralized fak Policy Configuration for Teams"
+description: "Configure one signed fak capability-floor policy for a team, enroll developer machines, verify effective policy, and preserve local tightening without allowing weaker overrides."
+---
+
 # Centralized policy for a team
 
 `fak guard` gives one developer a capability floor on one machine. This page is about

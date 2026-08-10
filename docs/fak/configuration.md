@@ -117,7 +117,49 @@ These concise answers cover the decisions people most often make when configurin
     },
     {
       "@type": "Question",
-      "name": "Where do client and editor configuration examples live?",
+      "name": "How do I configure which tools an agent may call?",
+      "keywords": [
+        "fak policy configuration",
+        "capability floor manifest",
+        "agent tool permissions"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak guard --policy.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I configure fak guard for a local coding agent?",
+      "keywords": [
+        "fak guard config",
+        "configure coding agent",
+        "local agent guard"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Start with fak guard followed by the agent command. fak guard discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/README.md#manage-one-local-agent-fak-guard"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I configure fak as an MCP server?",
+      "keywords": [
+        "fak MCP config",
+        ".mcp.json",
+        "fak serve stdio"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Add fak serve --stdio to the MCP server configuration used by Claude Code, Cursor, VS Code, or another MCP client. The MCP integration guide contains the complete .mcp.json example and a deterministic stdio verification command.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/mcp.md"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I configure a client or editor to use fak?",
       "keywords": [
         "fak client config",
         "fak editor setup",
@@ -125,8 +167,36 @@ These concise answers cover the decisions people most often make when configurin
       ],
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Use the integration guide for the client or editor you run. The integrations index links setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.",
+        "text": "Use the integration guide for the client or editor you run. The integrations index links exact setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.",
         "citation": "https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I configure model providers and API credentials?",
+      "keywords": [
+        "fak provider config",
+        "fak model configuration",
+        "fak API credentials"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Choose the integration guide for the provider wire, point the client or fak serve at the documented base URL, and keep credentials in environment variables rather than manifests. The server configuration reference lists supported provider, model, endpoint, and credential-variable settings.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#upstream-model-configuration-proxy-mode"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I configure one policy for an organization?",
+      "keywords": [
+        "fak organization policy",
+        "centralized agent policy",
+        "team capability floor"
+      ],
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Use the centralized policy plane: sign an organization manifest, enroll each machine with the organization trust material, and verify the effective policy. Local operators may tighten the organization floor but cannot weaken it.",
+        "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/org-policy-plane.md"
       }
     }
   ]
@@ -175,11 +245,41 @@ Use fak serve --print-effective-config to parse the manifest, reject unsupported
 
 [Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#inspect-the-effective-configuration)
 
-## Where do client and editor configuration examples live?
+## How do I configure which tools an agent may call?
 
-Use the integration guide for the client or editor you run. The integrations index links setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.
+Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak guard --policy.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md)
+
+## How do I configure fak guard for a local coding agent?
+
+Start with fak guard followed by the agent command. fak guard discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/README.md#manage-one-local-agent-fak-guard)
+
+## How do I configure fak as an MCP server?
+
+Add fak serve --stdio to the MCP server configuration used by Claude Code, Cursor, VS Code, or another MCP client. The MCP integration guide contains the complete .mcp.json example and a deterministic stdio verification command.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/mcp.md)
+
+## How do I configure a client or editor to use fak?
+
+Use the integration guide for the client or editor you run. The integrations index links exact setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.
 
 [Authoritative details](https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations)
+
+## How do I configure model providers and API credentials?
+
+Choose the integration guide for the provider wire, point the client or fak serve at the documented base URL, and keep credentials in environment variables rather than manifests. The server configuration reference lists supported provider, model, endpoint, and credential-variable settings.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#upstream-model-configuration-proxy-mode)
+
+## How do I configure one policy for an organization?
+
+Use the centralized policy plane: sign an organization manifest, enroll each machine with the organization trust material, and verify the effective policy. Local operators may tighten the organization floor but cannot weaken it.
+
+[Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/org-policy-plane.md)
 
 ## Complete configuration reference
 

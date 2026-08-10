@@ -397,8 +397,8 @@ func TestDisambiguationTermsIncludeGlobalWorkspace(t *testing.T) {
 func TestConfigAnswerFeedsStayEquivalentAndCiteAuthorities(t *testing.T) {
 	when := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	answers := AEOConfigAnswers()
-	if len(answers) < 8 {
-		t.Fatalf("config answers = %d, want at least 8", len(answers))
+	if len(answers) < 13 {
+		t.Fatalf("config answers = %d, want at least 13", len(answers))
 	}
 
 	b, err := ConfigFAQFeed(when)
@@ -446,7 +446,7 @@ func TestConfigAnswerFeedsStayEquivalentAndCiteAuthorities(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"How do I configure fak?", "Does fak require a config file?", "--print-effective-config", "flags win over declared fak.toml values", "Keep secret values out"} {
+	for _, want := range []string{"How do I configure fak?", "Does fak require a config file?", "--print-effective-config", "flags win over declared fak.toml values", "Keep secret values out", "capability-floor policy manifest", "fak guard", ".mcp.json", "model providers", "one policy for an organization"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("plain config feed missing discoverability phrase %q", want)
 		}
