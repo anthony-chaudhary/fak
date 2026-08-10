@@ -77,10 +77,15 @@ type Report struct {
 }
 
 var leafClassifications = []LeafClassification{{
-	Leaf: "internal/launchlatency", Disposition: DispositionMultiCapability,
-	Capabilities: []string{"worker_launch_latency_summary"},
-	Reason:       "native dispatch-to-heartbeat histogram, percentile, and negative-clock-skew fold",
+	Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
+	Capabilities: []string{"compute_region_admission"},
+	Reason:       "native compute-region taxonomy and live-lease collision admission",
 },
+	{
+		Leaf: "internal/launchlatency", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"worker_launch_latency_summary"},
+		Reason:       "native dispatch-to-heartbeat histogram, percentile, and negative-clock-skew fold",
+	},
 	{
 		Leaf: "internal/mutationbudget", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"github_mutation_budgeting"},
@@ -222,18 +227,32 @@ var leafClassifications = []LeafClassification{{
 }
 
 var contracts = []Contract{{
-	Capability: "worker_launch_latency_summary",
-	NativePath: "internal/launchlatency/launchlatency.go",
-	Workload:   "same six dispatch-to-heartbeat observations, bucket edges, percentile convention, negative-clock-skew sample, and independent summary oracle across every arm",
-	Metrics:    []string{"bucket_accuracy", "quantile_error", "dropped_observations", "ingestion_latency_ms", "query_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+	Capability: "compute_region_admission",
+	NativePath: "internal/computeadmit/computeadmit.go",
+	Workload:   "same overlapping, disjoint, out-of-taxonomy, and different-class compute claims, live lease, class address space, exclusivity, and independent admission oracle across every arm",
+	Metrics:    []string{"admission_precision", "admission_recall", "constraint_violations", "scheduling_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "control_plane_bytes", "accelerator_idle_seconds", "total_cost"},
 	Alternatives: []Alternative{
-		{Name: "raw launch events without summary", Class: TunedBaseline, Source: "internal/launchlatency/compare.go"},
-		{Name: "Prometheus histogram", Class: NextBest, Source: "https://prometheus.io/docs/practices/histograms/"},
-		{Name: "OpenTelemetry metrics", Class: NextBest, Source: "https://opentelemetry.io/docs/concepts/signals/metrics/"},
-		{Name: "Datadog distribution metric", Class: NextBest, Source: "https://docs.datadoghq.com/metrics/distributions/"},
+		{Name: "dispatch without region admission", Class: TunedBaseline, Source: "internal/computeadmit/compare.go"},
+		{Name: "Kubernetes scheduler", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/"},
+		{Name: "Slurm scheduler", Class: NextBest, Source: "https://slurm.schedmd.com/"},
+		{Name: "Ray scheduler", Class: NextBest, Source: "https://docs.ray.io/en/latest/ray-core/scheduling/"},
+		{Name: "AWS Batch", Class: NextBest, Source: "https://docs.aws.amazon.com/batch/"},
 	},
-	Witness: "../../docs/benchmarks/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
+	Witness: "../../docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
 },
+	{
+		Capability: "worker_launch_latency_summary",
+		NativePath: "internal/launchlatency/launchlatency.go",
+		Workload:   "same six dispatch-to-heartbeat observations, bucket edges, percentile convention, negative-clock-skew sample, and independent summary oracle across every arm",
+		Metrics:    []string{"bucket_accuracy", "quantile_error", "dropped_observations", "ingestion_latency_ms", "query_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "raw launch events without summary", Class: TunedBaseline, Source: "internal/launchlatency/compare.go"},
+			{Name: "Prometheus histogram", Class: NextBest, Source: "https://prometheus.io/docs/practices/histograms/"},
+			{Name: "OpenTelemetry metrics", Class: NextBest, Source: "https://opentelemetry.io/docs/concepts/signals/metrics/"},
+			{Name: "Datadog distribution metric", Class: NextBest, Source: "https://docs.datadoghq.com/metrics/distributions/"},
+		},
+		Witness: "../../docs/benchmarks/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
+	},
 	{
 		Capability: "github_mutation_budgeting",
 		NativePath: "internal/mutationbudget/mutationbudget.go",
