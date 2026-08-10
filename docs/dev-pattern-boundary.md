@@ -86,8 +86,21 @@ moving a command to `fak-dev` does not make it suitable for users.
 
 Validation rejects a dev command with `not-applicable`, a runtime command with a
 dev reuse class, an unknown class, or a missing rationale. New commands must be
-classified as part of the same change. Representative classifications are
-pinned by tests in `internal/devindex/ownership_test.go`.
+classified as part of the same change.
+
+There is intentionally **no fallback class**. When adding a top-level development
+command, its dispatch/tier registration must be accompanied by exactly one edit
+in `internal/devindex/devreuse.go`:
+
+- `portableDevPatterns` with a command-specific repository-neutral rationale;
+- `maintainerDevCommands` for an explicitly fak-bound command; or
+- `labDevCommands` with a command-specific infrastructure rationale.
+
+An absent or duplicate entry fails the exhaustive ownership test and names this
+edit point. This is the default-enforcement seam for new commands, including
+commands dispatched only by `fak-dev`; `OwnershipVerbs` joins extracted TierDev
+rows back into the source-derived inventory. Representative and negative
+classifications are pinned by tests in `internal/devindex/ownership_test.go`.
 
 The inventory is the audit mechanism; this note is the interpretation contract.
 Neither replaces the extraction and packaging work tracked by #6021–#6026.

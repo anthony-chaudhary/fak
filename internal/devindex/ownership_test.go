@@ -143,3 +143,25 @@ func TestValidateCommandOwnershipRejectsInvalidDevReuse(t *testing.T) {
 		}
 	}
 }
+
+func TestNewDevCommandMustChooseReuseClass(t *testing.T) {
+	verbs := []Verb{{Name: "brand-new-dev-command", Tier: TierDev}}
+	inventory := CommandOwnerships(verbs)
+	got := strings.Join(ValidateCommandOwnership(verbs, inventory), "\n")
+	for _, want := range []string{"brand-new-dev-command", "portableDevPatterns", "maintainerDevCommands", "labDevCommands"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing actionable classification diagnostic %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDevReuseRegistryRejectsDuplicateClassification(t *testing.T) {
+	got := strings.Join(validateDevReuseRegistry(
+		map[string]string{"duplicate": "portable rationale"},
+		[]string{"duplicate"},
+		map[string]string{},
+	), "\n")
+	if !strings.Contains(got, `classifies "duplicate" more than once`) {
+		t.Fatalf("duplicate classification was accepted: %s", got)
+	}
+}

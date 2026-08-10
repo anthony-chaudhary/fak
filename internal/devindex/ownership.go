@@ -46,6 +46,19 @@ func SupplementalDevVerbs() []Verb {
 func OwnershipVerbs(verbs []Verb) []Verb {
 	out := append([]Verb(nil), verbs...)
 	out = append(out, SupplementalDevVerbs()...)
+	seen := make(map[string]bool, len(out))
+	for _, verb := range out {
+		seen[verb.Name] = true
+	}
+	// Extracted fak-dev commands no longer appear in cmd/fak's switch-derived
+	// catalog. The explicit tier registry remains their creation/admission seam,
+	// so include every live TierDev row in the ownership boundary. This also
+	// ensures a newly registered dev command cannot bypass reuse classification.
+	for name, tier := range verbTiers {
+		if tier == TierDev && !seen[name] {
+			out = append(out, Verb{Name: name, Tier: TierDev})
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
@@ -84,12 +97,12 @@ func CommandOwnerships(verbs []Verb) []CommandOwnership {
 // catalog command names. It returns deterministic diagnostics for tests and CLI
 // callers rather than failing on the first defect.
 func ValidateCommandOwnership(verbs []Verb, inventory []CommandOwnership) []string {
+	problems := ValidateDevReuseRegistry()
 	known := make(map[string]bool, len(verbs))
 	for _, verb := range verbs {
 		known[verb.Name] = true
 	}
 	seen := make(map[string]int, len(inventory))
-	var problems []string
 	for _, item := range inventory {
 		seen[item.Name]++
 		if !known[item.Name] {
@@ -110,7 +123,9 @@ func ValidateCommandOwnership(verbs []Verb, inventory []CommandOwnership) []stri
 		if item.DevReuseRationale == "" {
 			problems = append(problems, "empty dev reuse rationale: "+item.Name)
 		}
-		if !item.DevReuse.valid() {
+		if item.DevReuse == DevReuseUnclassified {
+			problems = append(problems, fmt.Sprintf("new dev command %q is unclassified; add it to exactly one of portableDevPatterns, maintainerDevCommands, or labDevCommands in internal/devindex/devreuse.go", item.Name))
+		} else if !item.DevReuse.valid() {
 			problems = append(problems, fmt.Sprintf("command %q has invalid dev reuse %q", item.Name, item.DevReuse))
 		} else if item.Owner == OwnerDev && item.DevReuse == DevReuseNA {
 			problems = append(problems, fmt.Sprintf("dev command %q has not-applicable dev reuse", item.Name))
