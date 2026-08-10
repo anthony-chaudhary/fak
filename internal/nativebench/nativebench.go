@@ -97,6 +97,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native rate-limit-aware warm-cache budget planning and value-ranked candidate scheduling; governor, proof, and secret-policy functions remain separate capability debt",
 	},
 	{
+		Leaf: "internal/cachewitness", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"cache_reuse_divergence_detection"},
+		Reason:       "native cross-provenance cache-reuse divergence fold is covered; metrics parsing and managed-cache self-check remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -319,6 +324,21 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/WARM-CACHE-BUDGET-SCHEDULING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"lmcache", "mooncake", "nixl"},
+	},
+	{
+		Capability: "cache_reuse_divergence_detection",
+		NativePath: "internal/cachewitness/divergence.go",
+		Workload:   "same three stable, divergent, and single-provenance cache records, tolerance, and independent alert oracle across every arm",
+		Metrics:    []string{"true_alerts", "false_alerts", "missed_divergences", "alert_latency_ms", "ingest_latency_ms", "throughput_records_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "raw reuse counters without divergence detection", Class: TunedBaseline, Source: "internal/cachewitness/compare.go"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "Prometheus recording and alerting rules", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"},
+			{Name: "Datadog anomaly monitor", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/types/anomaly/"},
+		},
+		Witness:      "../../docs/benchmarks/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
