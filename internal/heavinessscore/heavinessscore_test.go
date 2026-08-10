@@ -309,3 +309,36 @@ func repoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+func TestConfigSurfaceContributesHardDebtAndPressure(t *testing.T) {
+	base := Surface{ConfigKeys: 13, ConfigPostures: 4, ConfigMaxKeys: 32, ConfigMaxPostures: 8, ConfigDefaultCoverage: 1, ConfigDescriptionCoverage: 1}
+	if k := kpiConfigSurface(base); len(k.Defects) != 0 {
+		t.Fatalf("healthy config surface defects=%v", k.Defects)
+	}
+	over := base
+	over.ConfigKeys = 35
+	over.ConfigPostures = 10
+	if got := pressureByTerm(over)["config_key_budget"]; got != 3 {
+		t.Fatalf("key pressure=%d, want 3", got)
+	}
+	if got := pressureByTerm(over)["config_posture_budget"]; got != 2 {
+		t.Fatalf("posture pressure=%d, want 2", got)
+	}
+	if k := kpiConfigSurface(over); len(k.Defects) != 2 || k.Score != 0 {
+		t.Fatalf("over-budget KPI=%+v", k)
+	}
+	missing := base
+	missing.ConfigDescriptionCoverage = .9
+	if k := kpiConfigSurface(missing); len(k.Defects) != 1 {
+		t.Fatalf("missing-description KPI=%+v", k)
+	}
+}
+
+func TestBuildPublishesConfigSurfaceMeters(t *testing.T) {
+	p := Build(repoRoot(t))
+	for _, key := range []string{"config_keys", "config_postures", "config_max_keys", "config_max_postures", "config_default_coverage", "config_description_coverage"} {
+		if _, ok := p.Corpus[key]; !ok {
+			t.Errorf("corpus missing %s", key)
+		}
+	}
+}

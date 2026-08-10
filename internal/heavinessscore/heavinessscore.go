@@ -64,6 +64,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/configsurface"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -126,13 +127,19 @@ var requiredDocMapSurfaces = []requiredDocMapSurface{
 // Surface is the parsed operator-facing surface every KPI reads. Holding it as plain data is what
 // lets the KPIs be pure functions tested against fixtures with no tree.
 type Surface struct {
-	Verbs          []string // distinct public top-level verbs (sorted)
-	MetaVerbs      []string // the subset that are meta-scorecards / RSI verbs (sorted)
-	FrontdoorVerbs int      // the subset classified frontdoor tier (devindex.TierFrontdoor) -- the product front door
-	FrontDoorFlags int      // flags defined on the front-door verb (`fak guard`)
-	RefusalReasons int      // [reasons.*] blocks declared in dos.toml
-	AppealWired    bool     // the dispatch table routes the in-product appeal verb (`complain`)
-	DocMap         string   // llms.txt, lowercased (the doc-map coverage oracle)
+	Verbs                     []string // distinct public top-level verbs (sorted)
+	MetaVerbs                 []string // the subset that are meta-scorecards / RSI verbs (sorted)
+	FrontdoorVerbs            int      // the subset classified frontdoor tier (devindex.TierFrontdoor) -- the product front door
+	FrontDoorFlags            int      // flags defined on the front-door verb (`fak guard`)
+	RefusalReasons            int      // [reasons.*] blocks declared in dos.toml
+	AppealWired               bool     // the dispatch table routes the in-product appeal verb (`complain`)
+	DocMap                    string   // llms.txt, lowercased (the doc-map coverage oracle)
+	ConfigKeys                int
+	ConfigPostures            int
+	ConfigMaxKeys             int
+	ConfigMaxPostures         int
+	ConfigDefaultCoverage     float64
+	ConfigDescriptionCoverage float64
 }
 
 // DevVerbs is the dev-tier meter: the verb surface that is NOT the product front door. It is
@@ -246,6 +253,7 @@ func ParseSurface(root string) Surface {
 	dosToml := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(dosTomlRel)))
 	docMap := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(docMapRel)))
 
+	config := configsurface.Audit()
 	verbs := ParsePublicVerbs(usageGo, cliDoc)
 	if len(verbs) == 0 {
 		verbs = ParseVerbs(mainGo)
@@ -266,6 +274,10 @@ func ParseSurface(root string) Surface {
 		// buried in an inner switch can't satisfy the recovery gate (self-audit, M2-adjacent).
 		AppealWired: strings.Contains(dispatchBlock(mainGo), `case "complain":`),
 		DocMap:      strings.ToLower(docMap),
+		ConfigKeys:  config.Keys, ConfigPostures: config.Postures,
+		ConfigMaxKeys: config.MaxKeys, ConfigMaxPostures: config.MaxPostures,
+		ConfigDefaultCoverage:     config.DefaultCoverage,
+		ConfigDescriptionCoverage: config.DescriptionCoverage,
 	}
 }
 
@@ -428,6 +440,26 @@ func kpiRefusalVocabSize(s Surface) scorecard.KPI {
 	return k
 }
 
+func kpiConfigSurface(s Surface) scorecard.KPI {
+	k := scorecard.KPI{Key: "config_surface", Group: "operator-surface", Score: 100, Value: float64(s.ConfigKeys), Detail: fmt.Sprintf("%d/%d keys; %d/%d postures", s.ConfigKeys, s.ConfigMaxKeys, s.ConfigPostures, s.ConfigMaxPostures)}
+	if s.ConfigKeys > s.ConfigMaxKeys {
+		k.Defects = append(k.Defects, fmt.Sprintf("%d config keys exceed %d budget", s.ConfigKeys, s.ConfigMaxKeys))
+	}
+	if s.ConfigPostures > s.ConfigMaxPostures {
+		k.Defects = append(k.Defects, fmt.Sprintf("%d postures exceed %d budget", s.ConfigPostures, s.ConfigMaxPostures))
+	}
+	if s.ConfigDefaultCoverage != 1 {
+		k.Defects = append(k.Defects, "configuration defaults are incomplete")
+	}
+	if s.ConfigDescriptionCoverage != 1 {
+		k.Defects = append(k.Defects, "configuration descriptions are incomplete")
+	}
+	if len(k.Defects) != 0 {
+		k.Score = 0
+	}
+	return k
+}
+
 // pressureByTerm returns the per-magnitude-KPI headroom-consumed contributions, keyed for the
 // corpus breakdown so a reader sees WHERE the pressure concentrates (H1 of the self-audit).
 func pressureByTerm(s Surface) map[string]int {
@@ -436,6 +468,8 @@ func pressureByTerm(s Surface) map[string]int {
 		"front_door_flag_burden": headroomConsumed(float64(s.FrontDoorFlags), flagSoftLine, flagHardCeiling),
 		"refusal_vocab_size":     headroomConsumed(float64(s.RefusalReasons), reasonSoftLine, reasonRef),
 		"meta_verb_share":        headroomConsumed(s.metaShare(), metaShareSoftLine, metaShareRef),
+		"config_key_budget":      max(0, s.ConfigKeys-s.ConfigMaxKeys),
+		"config_posture_budget":  max(0, s.ConfigPostures-s.ConfigMaxPostures),
 	}
 }
 
@@ -461,6 +495,7 @@ func Build(root string) scorecard.Payload {
 		kpiMetaVerbShare(s),
 		kpiFrontDoorFlagBurden(s),
 		kpiRefusalVocabSize(s),
+		kpiConfigSurface(s),
 	}
 	debt := 0
 	for _, k := range kpis {
@@ -498,7 +533,11 @@ func Build(root string) scorecard.Payload {
 			"meta_verbs":            len(s.MetaVerbs),
 			"front_door_flags":      s.FrontDoorFlags,
 			"refusal_reasons":       s.RefusalReasons,
-			"appeal_wired":          s.AppealWired,
+			"config_keys":           s.ConfigKeys, "config_postures": s.ConfigPostures,
+			"config_max_keys": s.ConfigMaxKeys, "config_max_postures": s.ConfigMaxPostures,
+			"config_default_coverage":     s.ConfigDefaultCoverage,
+			"config_description_coverage": s.ConfigDescriptionCoverage,
+			"appeal_wired":                s.AppealWired,
 		},
 	})
 	p.Workspace = root

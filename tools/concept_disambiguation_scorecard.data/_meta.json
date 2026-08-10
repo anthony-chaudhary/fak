@@ -1467,10 +1467,16 @@
           "category": "incidental",
           "reason": "benchmark JSON schema constant, not a runtime session concept",
           "token": "HeldScheduleReportSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "offline benchmark report DTO, not a session runtime",
+          "token": "HeldScheduleReport"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
         "ModelSlotsDuringToolWait",
@@ -3020,6 +3026,16 @@
           "category": "incidental",
           "reason": "Intent-guide key coverage ratio, not a support maturity level",
           "token": "GuideCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a support maturity capability",
+          "token": "ConfigDefaultCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a support maturity capability",
+          "token": "ConfigDescriptionCoverage"
         }
       ],
       "id": "support-maturity",
@@ -3027,6 +3043,8 @@
         "BAD_ACHIEVED_MATURITY",
         "CONFIG_OPINION_UNSUPPORTED",
         "ClaudeKeychainSupported",
+        "ConfigDefaultCoverage",
+        "ConfigDescriptionCoverage",
         "CorrectnessGate",
         "DecodeInterleaveUnsupported",
         "DefaultSetupParityPairs",
@@ -3268,17 +3286,34 @@
           "category": "incidental",
           "reason": "benchmark JSON timing field, not a product decision",
           "token": "decision_ms_per_request"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark sample-count field, not a product decision",
+          "token": "DecisionSamples"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark aggregate timing field, not a product decision",
+          "token": "TotalDecisionOverhead"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark aggregate timing field, not a product decision",
+          "token": "total_decision_overhead_ms"
         }
       ],
       "id": "decision",
       "ignore": [
         "DecisionMS",
+        "DecisionSamples",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
         "MeasureHeldDecisionOverhead",
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
         "ReuseDecision",
+        "TotalDecisionOverhead",
         "appendsteerdecisions",
         "decisionStderr",
         "decision_ms_per_request",
@@ -3291,7 +3326,8 @@
         "predictHeld",
         "scheduleOutcome",
         "selectorDecision",
-        "selectorOracle"
+        "selectorOracle",
+        "total_decision_overhead_ms"
       ],
       "min_files": 3,
       "name": "Decision family",
