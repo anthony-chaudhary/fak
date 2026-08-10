@@ -172,6 +172,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native OpenAI, Anthropic, and local token-usage normalization with reconciled classes, refusal checks, and raw provenance is covered; secret/injection scanning, redaction, PII, and scoring remain separate capability debt",
 	},
 	{
+		Leaf: "internal/conformance", Disposition: DispositionCapability,
+		Capabilities: []string{"compiled_abi_adjudication_conformance"},
+		Reason:       "native self-contained compiled ABI freeze and real adjudicator verdict-matrix conformance suite",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -640,6 +645,21 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/TOKEN-USAGE-NORMALIZATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"openai", "anthropic", "local", "opentelemetry"},
+	},
+	{
+		Capability: "compiled_abi_adjudication_conformance",
+		NativePath: "internal/conformance/conformance.go",
+		Workload:   "same embedded ABI enum contract and dogfood policy verdict matrix, requiring both exact compiled enum equality and execution of every real adjudicator case",
+		Metrics:    []string{"passed_checks", "missed_checks", "false_failures", "mutation_cases", "mutations_caught", "reason_errors", "latency_ms", "throughput_cases_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "embedded JSON and schema equality only", Class: TunedBaseline, Source: "internal/conformance/compare.go"},
+			{Name: "OPA test", Class: NextBest, Source: "https://www.openpolicyagent.org/docs/latest/policy-testing/"},
+			{Name: "Conftest", Class: NextBest, Source: "https://www.conftest.dev/"},
+			{Name: "OpenAPI and JSON Schema contract tests", Class: NextBest, Source: "https://json-schema.org/"},
+			{Name: "Pact", Class: NextBest, Source: "https://docs.pact.io/"},
+			{Name: "Cedar policy validator and tests", Class: NextBest, Source: "https://docs.cedarpolicy.com/"},
+		},
+		Witness: "../../docs/benchmarks/COMPILED-CONFORMANCE-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "worker_launch_latency_summary",
