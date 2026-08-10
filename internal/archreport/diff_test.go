@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+func TestDiffFanOutChangesExposeDirectDependencyGrowth(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "a", Dependencies: []string{"x"}}, {Name: "b", Dependencies: []string{"x", "y", "z"}}}}
+	after := Report{Leaves: []Leaf{{Name: "a", Dependencies: []string{"x", "y", "z"}}, {Name: "b", Dependencies: []string{"x"}}}}
+	diff := Diff(before, after)
+	want := []FanOutChange{{Leaf: "a", Before: 1, After: 3, Delta: 2}, {Leaf: "b", Before: 3, After: 1, Delta: -2}}
+	if !reflect.DeepEqual(diff.FanOutChanges, want) || diff.Verdict != "regression" {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffFanOutContractionRemainsClean(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "a", Dependencies: []string{"x", "y"}}}}
+	after := Report{Leaves: []Leaf{{Name: "a", Dependencies: []string{"x"}}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.FanOutChanges) != 1 || diff.FanOutChanges[0].Delta != -1 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffDependencyReachChangesExposeFootprintGrowth(t *testing.T) {
 	before := Report{Leaves: []Leaf{{Name: "a", DependencyReach: 2}, {Name: "b", DependencyReach: 5}}}
 	after := Report{Leaves: []Leaf{{Name: "a", DependencyReach: 5}, {Name: "b", DependencyReach: 3}}}

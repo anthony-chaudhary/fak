@@ -42,6 +42,13 @@ type ViolationDistanceChange struct {
 	Delta          int    `json:"delta"`
 }
 
+type FanOutChange struct {
+	Leaf   string `json:"leaf"`
+	Before int    `json:"before"`
+	After  int    `json:"after"`
+	Delta  int    `json:"delta"`
+}
+
 type FanInChange struct {
 	Leaf   string `json:"leaf"`
 	Before int    `json:"before"`
@@ -190,6 +197,7 @@ type ReportDiff struct {
 	LateralEdgeConnectivityChanges      []LateralEdgeConnectivityChange   `json:"lateral_edge_connectivity_changes,omitempty"`
 	LateralVertexConnectivityChanges    []LateralVertexConnectivityChange `json:"lateral_vertex_connectivity_changes,omitempty"`
 	LateralVertexPairCutChanges         []LateralVertexPairCutChange      `json:"lateral_vertex_pair_cut_changes,omitempty"`
+	FanOutChanges                       []FanOutChange                    `json:"fan_out_changes,omitempty"`
 	FanInChanges                        []FanInChange                     `json:"fan_in_changes,omitempty"`
 	DependencyReachChanges              []DependencyReachChange           `json:"dependency_reach_changes,omitempty"`
 	DependencyDepthChanges              []DependencyDepthChange           `json:"dependency_depth_changes,omitempty"`
@@ -350,6 +358,9 @@ func Diff(before, after Report) ReportDiff {
 			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: beforeFanIn, After: afterFanIn, Delta: afterFanIn - beforeFanIn})
 		}
 		if b, ok := beforeLeaves[name]; ok {
+			if len(b.Dependencies) != len(a.Dependencies) {
+				out.FanOutChanges = append(out.FanOutChanges, FanOutChange{Leaf: name, Before: len(b.Dependencies), After: len(a.Dependencies), Delta: len(a.Dependencies) - len(b.Dependencies)})
+			}
 			if b.DependencyReach != a.DependencyReach {
 				out.DependencyReachChanges = append(out.DependencyReachChanges, DependencyReachChange{Leaf: name, Before: b.DependencyReach, After: a.DependencyReach, Delta: a.DependencyReach - b.DependencyReach})
 			}
@@ -435,6 +446,7 @@ func Diff(before, after Report) ReportDiff {
 	sortLateralEdgeConnectivityChanges(out.LateralEdgeConnectivityChanges)
 	sortLateralVertexConnectivityChanges(out.LateralVertexConnectivityChanges)
 	sortLateralVertexPairCutChanges(out.LateralVertexPairCutChanges)
+	sortFanOutChanges(out.FanOutChanges)
 	sortFanInChanges(out.FanInChanges)
 	sortDependencyReachChanges(out.DependencyReachChanges)
 	sortDependencyDepthChanges(out.DependencyDepthChanges)
@@ -445,7 +457,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedFanOut(out.FanOutChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -934,6 +946,20 @@ func sortBlastRadiusChanges(changes []BlastRadiusChange) {
 		}
 		return changes[i].Leaf < changes[j].Leaf
 	})
+}
+
+func sortFanOutChanges(changes []FanOutChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		return metricGrowthLess(changes[i].Delta, changes[j].Delta, changes[i].Leaf, changes[j].Leaf)
+	})
+}
+func hasIncreasedFanOut(changes []FanOutChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func sortFanInChanges(changes []FanInChange) {
