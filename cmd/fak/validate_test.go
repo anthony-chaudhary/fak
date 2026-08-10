@@ -37,7 +37,7 @@ func TestValidateCommittedTipPlusOnlyMine(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")
 	}
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "clean", map[string]string{
 		"go.mod": cleanGoMod,
 		"p/p.go": cleanGoFile,
@@ -77,7 +77,7 @@ func TestValidateIgnoresUnformattedPeerWIP(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")
 	}
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "clean", map[string]string{"go.mod": cleanGoMod, "p/p.go": cleanGoFile, "peer/peer.go": "package peer\n\nfunc OK() {}\n"})
 	if err := os.WriteFile(filepath.Join(repo, "p", "p.go"), []byte(cleanGoFile), 0o644); err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestValidateReportsMineFailure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")
 	}
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "clean", map[string]string{"go.mod": cleanGoMod, "p/p.go": cleanGoFile})
 	if err := os.WriteFile(filepath.Join(repo, "p", "p.go"), []byte("package p\n\nfunc Broken( {\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestValidateIncludesReverseDependencyTests(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")
 	}
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "clean", map[string]string{
 		"go.mod":                    "module validate.test\n\ngo 1.26\n",
 		"lib/lib.go":                "package lib\n\nfunc Value() int { return 1 }\n",

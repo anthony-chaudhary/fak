@@ -46,8 +46,10 @@ func cmdGoShim(argv []string) { os.Exit(runGoShim(os.Stdout, os.Stderr, argv)) }
 // goShimRun is the exec seam (stubbed in tests); it defaults to the same runner
 // `fak buildcheck` uses so a real invocation execs the real `go`.
 var (
-	buildCheckLoadBearing = buildoverlay.LoadBearingUntrackedFiles
-	goShimRun             = runGoShimCommand
+	buildCheckUntracked    = buildoverlay.UntrackedGoFiles
+	buildCheckModifiedDirs = buildoverlay.ModifiedDirs
+	buildCheckLoadBearing  = buildoverlay.LoadBearingUntrackedFiles
+	goShimRun              = runGoShimCommand
 )
 
 func runGoShimCommand(root string, args []string, stdout, stderr io.Writer) (int, error) {
@@ -164,12 +166,12 @@ func runGoShim(stdout, stderr io.Writer, argv []string) int {
 // failure the caller should return. It fails OPEN on a missing in-flight-edit answer
 // (mask all, as buildcheck does) but hard-fails if it cannot list untracked files at all.
 func goShimOverlay(root string, mine []string, scratch string, stderr io.Writer) (masked []string, overlayPath string, code int) {
-	untracked, uerr := buildoverlay.UntrackedGoFiles(root)
+	untracked, uerr := buildCheckUntracked(root)
 	if uerr != nil {
 		fmt.Fprintf(stderr, "fak go: listing untracked files: %v\n", uerr)
 		return nil, "", 1
 	}
-	modifiedDirs, merr := buildoverlay.ModifiedDirs(root)
+	modifiedDirs, merr := buildCheckModifiedDirs(root)
 	if merr != nil {
 		fmt.Fprintf(stderr, "fak go: cannot read in-flight edits (%v); masking all untracked siblings\n", merr)
 		modifiedDirs = nil

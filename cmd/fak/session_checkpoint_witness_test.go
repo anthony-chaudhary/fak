@@ -26,7 +26,7 @@ func runCheckpointWitness(t *testing.T, argv ...string) (stdout, stderr string, 
 }
 
 func TestSessionCheckpointWitnessPrintsBothHashes(t *testing.T) {
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "seed", map[string]string{"a.txt": "one\n"})
 	head, err := git("rev-parse", "HEAD")
 	if err != nil {
@@ -68,7 +68,7 @@ func TestSessionCheckpointWitnessPrintsBothHashes(t *testing.T) {
 }
 
 func TestSessionCheckpointWitnessVerifyNamesTheTreeAxis(t *testing.T) {
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "seed", map[string]string{"a.txt": "one\n"})
 	ledgerDir := t.TempDir()
 	args := []string{"trace-tree", "--repo", repo, "--ledger-dir", ledgerDir}
@@ -119,7 +119,7 @@ func TestSessionCheckpointWitnessVerifyNamesTheTreeAxis(t *testing.T) {
 }
 
 func TestSessionCheckpointWitnessVerifyNamesTheTranscriptAxis(t *testing.T) {
-	repo, git := seedCIPreflightRepo(t)
+	repo, git := seedGitFixtureRepo(t)
 	commitFiles(t, repo, git, "seed", map[string]string{"a.txt": "one\n"})
 	ledgerDir := t.TempDir()
 	const trace = "trace-transcript"

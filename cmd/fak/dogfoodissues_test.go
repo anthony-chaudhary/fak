@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 )
 
 func TestDogfoodIssuesDryRunSkipsUnscopedAggregateRows(t *testing.T) {
@@ -60,13 +62,7 @@ func TestDogfoodIssuesDryRunSkipsUnscopedAggregateRows(t *testing.T) {
 }
 
 func TestDogfoodIssuesStrictScopeRefusesLiveSkippedRows(t *testing.T) {
-	report := writeDogfoodIssuesReport(t, `{
-  "schema": "fak.recent-feature-dogfood.v1",
-  "code_slop_scorecard": {
-    "score": "P1", "grade": "P1", "action": "ACTION",
-    "code_slop": 1, "next_action": "clean everything"
-  }
-}`)
+	report := writeDogfoodIssuesReport(t, 0)
 	existing := filepath.Join(t.TempDir(), "existing.json")
 	if err := os.WriteFile(existing, []byte("[]\n"), 0o644); err != nil {
 		t.Fatal(err)
