@@ -427,6 +427,9 @@ func TestConfigAnswerFeedsStayEquivalentAndCiteAuthorities(t *testing.T) {
 	}
 
 	plain := ConfigAnswersText(when)
+	if strings.HasSuffix(plain, "\n\n") {
+		t.Error("plain config feed has an extra blank line at EOF")
+	}
 	for i, answer := range answers {
 		if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Answer) == "" || strings.TrimSpace(answer.Authority) == "" {
 			t.Fatalf("answer %d has an empty required field: %+v", i, answer)

@@ -892,12 +892,14 @@ func ConfigAnswersMarkdown(when time.Time) (string, error) {
 func ConfigAnswersText(when time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# fak configuration answers\n\nUpdated: %s\nAuthority: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md\n\n", when.UTC().Format("2006-01-02"))
-	for _, a := range AEOConfigAnswers() {
+	for i, a := range AEOConfigAnswers() {
 		fmt.Fprintf(&b, "## %s\n%s\nSource: %s\n", a.Question, a.Answer, a.Authority)
 		if len(a.Keywords) > 0 {
 			fmt.Fprintf(&b, "Search terms: %s\n", strings.Join(a.Keywords, ", "))
 		}
-		b.WriteString("\n")
+		if i < len(AEOConfigAnswers())-1 {
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }

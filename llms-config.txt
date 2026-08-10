@@ -42,4 +42,3 @@ Search terms: validate fak config, fak config errors, fak readiness
 Use the integration guide for the client or editor you run. The integrations index links setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.
 Source: https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations
 Search terms: fak client config, fak editor setup, fak integrations
-
