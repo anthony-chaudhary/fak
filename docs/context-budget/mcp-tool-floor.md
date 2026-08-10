@@ -29,34 +29,35 @@ fak footprint --top 8    # just the heaviest N
 ## Baseline (measured)
 
 ```
-mcp-footprint: 26 tools · floor 5888 est. tokens (23554 bytes, ESTIMATED)
+mcp-footprint: 19 tools · floor 4507 est. tokens (20283 bytes, ESTIMATED)
 ```
 
-Trimming description prose reduced the measured whole-schema floor by the same 888
-estimated tokens, from 6776 to 5888 (13.1%), without changing tool names or parameter
-schemas.
+Re-pinned for #6011: #6022 retired the repository index MCP tools, taking the registry
+from 26 tools to 19 and the measured whole-schema floor from 5464 to 4507 estimated
+tokens (957 banked). The reduction was won by removing tools, not by relaxing the
+ratchet — the slack it opened is banked into the constant rather than left as headroom.
 
 Heaviest contributors (the cold-schema deferral targets for #3231/#3232):
 
 | rank | est. tokens | bytes | tool |
 |-----:|------------:|------:|------|
-| 1 | 566 | 2264 | fak_trajquery |
-| 2 | 558 | 2234 | fak_memory_run |
-| 3 | 508 | 2033 | fak_memory_explain |
-| 4 | 305 | 1222 | fak_context_change |
-| 5 | 257 | 1028 | fak_admit |
-| 6 | 249 | 999 | fak_adjudicate |
-| 7 | 236 | 946 | fak_feature_query |
-| 8 | 230 | 921 | fak_context_restore |
+| 1 | 503 | 2264 | fak_trajquery |
+| 2 | 496 | 2234 | fak_memory_run |
+| 3 | 451 | 2033 | fak_memory_explain |
+| 4 | 348 | 1566 | fak_admit |
+| 5 | 271 | 1222 | fak_context_change |
+| 6 | 261 | 1175 | fak_read |
+| 7 | 244 | 1101 | fak_feature_query |
+| 8 | 222 | 999 | fak_adjudicate |
 
-The full 26-tool breakdown is what `fak footprint` prints; only the head is
+The full 19-tool breakdown is what `fak footprint` prints; only the head is
 pinned here so a drift is legible in review.
 
 ## The gate (#2924)
 
 Measuring the floor does not keep the core narrow — a number that cannot refuse a
 change is still just taste. `internal/mcpfootprint.CheckFloor` gates the measured
-floor against a committed ceiling, `FloorBudgetTokens` (currently **5888**), as a
+floor against a committed ceiling, `FloorBudgetTokens` (currently **4507**), as a
 one-way ratchet:
 
 | Direction | Reason | What it means |
@@ -91,24 +92,25 @@ through the same estimator (a description-only `ToolDef` carries no name or para
 bytes, so the number never drifts from `EstimateAnthropicTokens`).
 
 ```
-always-sent fak_* description floor: 1966 est. tokens across 26 tools
+always-sent fak_* description floor: 1552 est. tokens across 19 tools
 ```
 
-This measured floor is 888 estimated tokens (31.1%) below the previous 2854-token
-baseline, with the same 26 tool names and parameter schemas. The values are
-estimator-derived, not provider-billed token counts.
+Re-pinned for #6011 alongside the whole-schema floor: retiring the repository index
+tools (#6022) took the description slice from 1966 to 1552 estimated tokens across
+19 rather than 26 tools. The values are estimator-derived, not provider-billed token
+counts.
 
 Heaviest description bodies (the trim targets — `fak footprint` ranks the full schema;
 `PerToolDescription` ranks the prose slice):
 
 | rank | est. tokens | tool |
 |-----:|------------:|------|
-| 1 | 130 | fak_memory_run |
-| 2 | 120 | fak_admit |
-| 3 | 106 | fak_tools_search |
-| 4 | 104 | fak_session_reset |
-| 5 | 96 | fak_context_change |
-| 6 | 90 | fak_memory_drivers |
+| 1 | 156 | fak_admit |
+| 2 | 115 | fak_memory_run |
+| 3 | 101 | fak_read |
+| 4 | 94 | fak_tools_search |
+| 5 | 92 | fak_session_reset |
+| 6 | 85 | fak_context_change |
 
 | Direction | Reason | What it means |
 |---|---|---|
