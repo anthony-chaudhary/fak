@@ -705,10 +705,6 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdBenchLoop(args)
 	case "bench-ingest":
 		cmdBenchIngest(args)
-	case "amd-gpu-facts":
-		cmdAMDGPUFacts(args)
-	case "commit-subject-coverage":
-		cmdCommitSubjectCoverage(args)
 	case "ablate":
 		cmdAblate(args)
 	case "ablate-arm":

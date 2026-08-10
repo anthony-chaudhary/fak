@@ -1,35 +1,32 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/commitsubject"
 )
 
-func cmdCommitSubjectCoverage(argv []string) {
-	os.Exit(runCommitSubjectCoverage(os.Stdout, os.Stderr, argv))
-}
-
-func runCommitSubjectCoverage(stdout, stderr io.Writer, argv []string) int {
+func RunCommitSubjectCoverage(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("commit-subject-coverage", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	last := fs.Int("last", commitsubject.DefaultLast, "commits to scan")
 	minCoverage := fs.Float64("min-coverage", -1, "advisory floor pct")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
-		return code
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "commit-subject-coverage: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return 2
 	}
 	root := *workspace
 	if root == "" {
-		root = resolveRoot("")
-		if root == "" {
-			root = "."
-		}
+		root = repoRoot()
 	}
 	var floor *float64
 	if *minCoverage >= 0 {

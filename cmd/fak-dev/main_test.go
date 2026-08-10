@@ -139,6 +139,21 @@ func TestRunDispatchesBoundaryUsage(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesDevelopmentDiagnosticsUsage(t *testing.T) {
+	for _, verb := range []string{"amd-gpu-facts", "commit-subject-coverage"} {
+		t.Run(verb, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := run(&out, &errOut, []string{verb, "--help"})
+			if code != 2 {
+				t.Fatalf("code=%d stderr=%s", code, errOut.String())
+			}
+			if !strings.Contains(errOut.String(), "Usage of "+verb) {
+				t.Fatalf("stderr=%s", errOut.String())
+			}
+		})
+	}
+}
+
 func TestRunDispatchesBlastUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"blast"})
@@ -166,6 +181,18 @@ func TestRunDispatchesCIPreflightUsage(t *testing.T) {
 	code := run(&out, &errOut, []string{"ci-preflight", "--repo", t.TempDir(), "--ref", "missing", "--json"})
 	if code != 2 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchDevelopmentDiagnostics(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "fak", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, verb := range []string{"amd-gpu-facts", "commit-subject-coverage"} {
+		if bytes.Contains(src, []byte(`case "`+verb+`":`)) {
+			t.Fatalf("runtime fak still dispatches dev-owned %s", verb)
+		}
 	}
 }
 

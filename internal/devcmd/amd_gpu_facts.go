@@ -1,25 +1,27 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
 
-func cmdAMDGPUFacts(argv []string) { os.Exit(runAMDGPUFacts(os.Stdout, os.Stderr, argv)) }
-
-func runAMDGPUFacts(stdout, stderr io.Writer, argv []string) int {
+func RunAMDGPUFacts(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("amd-gpu-facts", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	name := fs.String("name", "", "only report a device whose name matches this substring")
 	watch := fs.Float64("watch", 0, "sample every SEC seconds until interrupted")
-	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
-		return code
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak amd-gpu-facts: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return 2
 	}
 	if *watch <= 0 {
 		facts := amdgpu.Facts(*name, nil)
