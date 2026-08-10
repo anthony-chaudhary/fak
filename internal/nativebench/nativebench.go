@@ -102,6 +102,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native cross-provenance cache-reuse divergence fold is covered; metrics parsing and managed-cache self-check remain separate capability debt",
 	},
 	{
+		Leaf: "internal/cachevalueledger", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"cache_reuse_trend_gate"},
+		Reason:       "native trailing-window cache-reuse regression gate is covered; ledger I/O and aggregate cache-value scoring remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -338,6 +343,21 @@ var contracts = []Contract{{
 			{Name: "Datadog anomaly monitor", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/types/anomaly/"},
 		},
 		Witness:      "../../docs/benchmarks/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "cache_reuse_trend_gate",
+		NativePath: "internal/cachevalueledger/ledger.go",
+		Workload:   "same five chronological stable/degraded/single-turn cache ledger rows, minimum-window threshold, tolerance, and independent regression oracle across every arm",
+		Metrics:    []string{"true_alerts", "false_alerts", "missed_regressions", "alert_latency_ms", "query_latency_ms", "throughput_rows_per_second", "prompt_tokens_represented", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "raw JSONL ledger without trend gate", Class: TunedBaseline, Source: "internal/cachevalueledger/compare.go"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "Prometheus recording and alerting rules", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/"},
+			{Name: "Datadog change and anomaly monitor", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/types/change-alert/"},
+		},
+		Witness:      "../../docs/benchmarks/CACHE-REUSE-TREND-GATE-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
