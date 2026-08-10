@@ -387,6 +387,7 @@ func main() {
 	var corpusInputPath, corpusPublicPath, corpusAnswersPath, corpusReportPath string
 	var corpusSource, verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport string
 	var gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput string
+	var tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput, verifyTunedBaselinesPath string
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
@@ -461,6 +462,10 @@ func main() {
 	flag.StringVar(&gradeCorpusAnswers, "grade-corpus-answers", "", "hidden answer bundle for independent grading")
 	flag.StringVar(&gradeCorpusSubmission, "grade-corpus-submission", "", "candidate submission to grade")
 	flag.StringVar(&gradeCorpusOutput, "grade-corpus-output", "", "write independent grade report")
+	flag.StringVar(&tunedBaselinesPublic, "tuned-baselines-public", "", "public corpus for tuned baseline dry-run")
+	flag.StringVar(&tunedBaselinesAnswers, "tuned-baselines-answers", "", "answer bundle for tuning/grading")
+	flag.StringVar(&tunedBaselinesOutput, "tuned-baselines-output", "", "write tuned baseline report")
+	flag.StringVar(&verifyTunedBaselinesPath, "verify-tuned-baselines", "", "verify a tuned baseline report")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -501,6 +506,18 @@ func main() {
 		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
 		return
 	}
+	if tunedBaselinesPublic != "" {
+		if err := runTunedBaselines(tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: tuned baselines: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS tuned baselines %s\n", tunedBaselinesOutput)
+		return
+	}
+	if verifyTunedBaselinesPath != "" {
+		runVerify("verify-tuned-baselines", verifyTunedBaselinesPath, verifyTunedBaselines)
+		return
+	}
 	if gradeCorpusSubmission != "" {
 		if err := gradeSubmissionFiles(gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus grade: %v\n", err)
@@ -509,12 +526,19 @@ func main() {
 		fmt.Printf("PASS corpus grade %s\n", gradeCorpusOutput)
 		return
 	}
-	if verifyCorpusPublic != "" {
-		if err := verifyCorpusArtifacts(verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport); err != nil {
-			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus verify: %v\n", err)
-			os.Exit(1)
+	if verifyCorpusPublic != "" || verifyCorpusAnswers != "" || verifyCorpusReport != "" {
+		verifyCorpusSet := func(string) error {
+			return verifyCorpusArtifacts(verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport)
 		}
-		fmt.Printf("PASS corpus artifact %s\n", verifyCorpusPublic)
+		if verifyCorpusPublic != "" {
+			runVerify("verify-corpus-public", verifyCorpusPublic, verifyCorpusSet)
+		}
+		if verifyCorpusAnswers != "" {
+			runVerify("verify-corpus-answers", verifyCorpusAnswers, verifyCorpusSet)
+		}
+		if verifyCorpusReport != "" {
+			runVerify("verify-corpus-report", verifyCorpusReport, verifyCorpusSet)
+		}
 		return
 	}
 	if verifyEffectBatchPath != "" {

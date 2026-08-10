@@ -1494,6 +1494,11 @@
           "category": "incidental",
           "reason": "Thin per-session accessor over FoldShellChoice for the #3227 shell-choice KPI distribution; carries no governed concept beyond ShellChoice itself.",
           "token": "SessionShellErrorRate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Observed operation-count field in one benchmark report, not a new session runtime abstraction.",
+          "token": "SchedulerEvents"
         }
       ],
       "id": "session-runtime",
@@ -1503,6 +1508,7 @@
         "ITERM_SESSION_ID",
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
+        "SchedulerEvents",
         "SchedulerOverhead",
         "SessionAutonomous",
         "SessionClass",
@@ -2117,6 +2123,11 @@
           "category": "incidental",
           "reason": "Local refusal reason, not an engine or gateway concept",
           "token": "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported one-line predicate in internal/agent: reports whether the model has a model.EPDecodeCoordinator installed, so the decode seam can withdraw KV prefix reuse (#5553). Carries no governed distinction of its own -- it forwards model.Model.EPDecodeCoordinated.",
+          "token": "inKernelPlannerEPCoordinated"
         }
       ],
       "id": "gateway-engine",
@@ -2131,6 +2142,7 @@
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",
+        "inKernelPlannerEPCoordinated",
         "kernel32",
         "kernelSession",
         "kernels",
@@ -2336,6 +2348,11 @@
           "category": "incidental",
           "reason": "heaviness-score metric field, not a new policy capability",
           "token": "config_posture_budget"
+        },
+        {
+          "category": "incidental",
+          "reason": "Result-schema field recording a baseline retry setting, not a new policy capability.",
+          "token": "RetryPolicy"
         }
       ],
       "exclude": [
@@ -2359,6 +2376,7 @@
         "OrgPolicyURLEnv",
         "PolicyRevision",
         "ProgressCallAdjudicated",
+        "RetryPolicy",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
         "SpawnPlacementPolicy",
@@ -3765,6 +3783,11 @@
           "category": "incidental",
           "reason": "Plural report field for tier-gap advisory rows; not a new planning concept.",
           "token": "SinkCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported one-line predicate in internal/agent: reports whether the model has a model.EPDecodeCoordinator installed, so the decode seam can withdraw KV prefix reuse (#5553). Carries no governed distinction of its own -- it forwards model.Model.EPDecodeCoordinated.",
+          "token": "inKernelPlannerEPCoordinated"
         }
       ],
       "exclude": [
@@ -3808,6 +3831,7 @@
         "fitandplanserveggufexpertparallelpathondevice",
         "foldCandidate",
         "hostPlan",
+        "inKernelPlannerEPCoordinated",
         "indexPlanSteps",
         "indexedPlanStep",
         "notplanned",

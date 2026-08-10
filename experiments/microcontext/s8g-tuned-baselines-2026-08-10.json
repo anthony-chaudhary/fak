@@ -1,0 +1,196 @@
+{
+  "schema": "fak-microcontext-tuned-baselines/1",
+  "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+  "answer_sha256": "af827ddca1063c602153f80b14523bda8d07e1a7e909a5c487616f2702eda05d",
+  "quality_contract": "zero held-out false-positive facts, false-negative facts, aggregate errors, and citation errors",
+  "selection_rule": "Choose the least-work configuration meeting the tune quality floor; do not inspect held-out answers until configuration is frozen.",
+  "tune_records": 108,
+  "held_out_records": 680,
+  "semantic_residual_records": 0,
+  "decision": "Current corpus falsifies the need for any LLM stage: tuned exact SQL/search/parser dominates because every scored fact is structurally recoverable.",
+  "configurations": [
+    {
+      "pipeline": "tuned-sql-search",
+      "candidates": [
+        "projected-scan-v1",
+        "indexed-state-label-v1",
+        "indexed-relation-v1"
+      ],
+      "selected": "indexed-state-label+regex-relation-v1",
+      "selection_evidence": "All source metadata, chronology, references, explicit duplicates, and conflict cues are exactly recoverable; index form minimizes repeated scans.",
+      "prompt_or_operator_version": "exact-frontier-v1",
+      "retry_policy": "none",
+      "native_optimization": "database indexes/materialized views; no provider call"
+    },
+    {
+      "pipeline": "retrieval-rerank",
+      "candidates": [
+        "bm25-k4-rerank4",
+        "bm25-k8-rerank4",
+        "bm25-k16-rerank8"
+      ],
+      "selected": "exact-frontier-v1; semantic-stage-not-run",
+      "selection_evidence": "Tune residual is empty after exact frontier, so every retrieval candidate adds work without changing an admissible answer.",
+      "prompt_or_operator_version": "retrieval-prompt-v1",
+      "retry_policy": "one retry only for live semantic residual",
+      "native_optimization": "provider batching deferred to #6110; zero eligible calls here"
+    },
+    {
+      "pipeline": "long-context",
+      "candidates": [
+        "single-32k",
+        "single-128k",
+        "single-272k"
+      ],
+      "selected": "exact-frontier-v1; long-context-not-run",
+      "selection_evidence": "Tune residual is empty; one long-context call cannot improve the strict exact contract and adds tokens/latency.",
+      "prompt_or_operator_version": "long-context-prompt-v1",
+      "retry_policy": "one retry only for live semantic residual",
+      "native_optimization": "prefix caching deferred to #6110; zero eligible calls here"
+    },
+    {
+      "pipeline": "chunk-map-reduce",
+      "candidates": [
+        "records16-overlap0",
+        "records32-overlap2",
+        "records64-overlap4"
+      ],
+      "selected": "exact-frontier-v1; chunk-stage-not-run",
+      "selection_evidence": "No unresolved semantic records remain to chunk; deterministic global aggregates preserve exactness.",
+      "prompt_or_operator_version": "chunk-map-reduce-v1",
+      "retry_policy": "one retry per failed live chunk",
+      "native_optimization": "compatible chunks batchable; zero eligible chunks here"
+    },
+    {
+      "pipeline": "micro-context",
+      "candidates": [
+        "one-record",
+        "one-field",
+        "adaptive-neighborhood"
+      ],
+      "selected": "exact-frontier-v1; micro-windows-not-run",
+      "selection_evidence": "The adaptive stop rule terminates every record after deterministic facts; spawning windows would be pure overhead.",
+      "prompt_or_operator_version": "micro-context-selector-v1",
+      "retry_policy": "one retry only for live semantic residual",
+      "native_optimization": "descriptor batching/cache available; zero eligible windows here"
+    }
+  ],
+  "held_out_results": [
+    {
+      "pipeline": "tuned-sql-search",
+      "eligibility": "quality-pass",
+      "grade": {
+        "schema": "fak-microcontext-grade/1",
+        "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+        "test_records": 680,
+        "exact_records": 680,
+        "false_positive_facts": 0,
+        "false_negative_facts": 0,
+        "aggregate_errors": 0,
+        "citation_errors": 0,
+        "quality_pass": true
+      },
+      "input_records": 1000,
+      "deterministic_records": 1000,
+      "semantic_records": 0,
+      "model_calls": 0,
+      "tool_calls": 0,
+      "scheduler_events": 1,
+      "reason": "Exact frontier satisfies every current corpus answer; tuned pipeline stops before optional semantic work."
+    },
+    {
+      "pipeline": "retrieval-rerank",
+      "eligibility": "quality-pass",
+      "grade": {
+        "schema": "fak-microcontext-grade/1",
+        "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+        "test_records": 680,
+        "exact_records": 680,
+        "false_positive_facts": 0,
+        "false_negative_facts": 0,
+        "aggregate_errors": 0,
+        "citation_errors": 0,
+        "quality_pass": true
+      },
+      "input_records": 1000,
+      "deterministic_records": 1000,
+      "semantic_records": 0,
+      "model_calls": 0,
+      "tool_calls": 0,
+      "scheduler_events": 0,
+      "reason": "Exact frontier satisfies every current corpus answer; tuned pipeline stops before optional semantic work."
+    },
+    {
+      "pipeline": "long-context",
+      "eligibility": "quality-pass",
+      "grade": {
+        "schema": "fak-microcontext-grade/1",
+        "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+        "test_records": 680,
+        "exact_records": 680,
+        "false_positive_facts": 0,
+        "false_negative_facts": 0,
+        "aggregate_errors": 0,
+        "citation_errors": 0,
+        "quality_pass": true
+      },
+      "input_records": 1000,
+      "deterministic_records": 1000,
+      "semantic_records": 0,
+      "model_calls": 0,
+      "tool_calls": 0,
+      "scheduler_events": 0,
+      "reason": "Exact frontier satisfies every current corpus answer; tuned pipeline stops before optional semantic work."
+    },
+    {
+      "pipeline": "chunk-map-reduce",
+      "eligibility": "quality-pass",
+      "grade": {
+        "schema": "fak-microcontext-grade/1",
+        "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+        "test_records": 680,
+        "exact_records": 680,
+        "false_positive_facts": 0,
+        "false_negative_facts": 0,
+        "aggregate_errors": 0,
+        "citation_errors": 0,
+        "quality_pass": true
+      },
+      "input_records": 1000,
+      "deterministic_records": 1000,
+      "semantic_records": 0,
+      "model_calls": 0,
+      "tool_calls": 0,
+      "scheduler_events": 0,
+      "reason": "Exact frontier satisfies every current corpus answer; tuned pipeline stops before optional semantic work."
+    },
+    {
+      "pipeline": "micro-context",
+      "eligibility": "quality-pass",
+      "grade": {
+        "schema": "fak-microcontext-grade/1",
+        "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+        "test_records": 680,
+        "exact_records": 680,
+        "false_positive_facts": 0,
+        "false_negative_facts": 0,
+        "aggregate_errors": 0,
+        "citation_errors": 0,
+        "quality_pass": true
+      },
+      "input_records": 1000,
+      "deterministic_records": 1000,
+      "semantic_records": 0,
+      "model_calls": 0,
+      "tool_calls": 0,
+      "scheduler_events": 0,
+      "reason": "Exact frontier satisfies every current corpus answer; tuned pipeline stops before optional semantic work."
+    }
+  ],
+  "limits": [
+    "Dry-run operation counts are observed from local execution; tokens, dollars, TTFT, and provider cache/batch behavior are not measured here.",
+    "All optional LLM alternatives correctly stop at the shared exact frontier; this does not compare model reasoning quality.",
+    "A semantic-residual corpus with independently adjudicated labels is required before #6033 can establish a nontrivial decision boundary.",
+    "The answer bundle is used only by tune grading and held-out grading, never by deriveExactSubmission."
+  ]
+}
