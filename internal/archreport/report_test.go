@@ -10,6 +10,66 @@ import (
 	"testing"
 )
 
+func TestAnalyzeDerivesLateralBiconnectedBlocks(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2,"d":2,"e":2,"x":3,"y":3,"z":3}
+var tierName=[]string{"zero","primitive","foundation-composite","mechanism"}
+`)
+	write("internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/c")
+`)
+	write("internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/c"
+`)
+	write("internal/c/c.go", `package c
+import (_ "github.com/anthony-chaudhary/fak/internal/d"; _ "github.com/anthony-chaudhary/fak/internal/e")
+`)
+	write("internal/d/d.go", `package d
+import _ "github.com/anthony-chaudhary/fak/internal/e"
+`)
+	write("internal/e/e.go", "package e\n")
+	write("internal/x/x.go", `package x
+import _ "github.com/anthony-chaudhary/fak/internal/y"
+`)
+	write("internal/y/y.go", `package y
+import _ "github.com/anthony-chaudhary/fak/internal/z"
+`)
+	write("internal/z/z.go", "package z\n")
+	r, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3}, {Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3}}
+	if !reflect.DeepEqual(r.LateralBiconnectedBlocks, want) {
+		t.Fatalf("blocks=%+v want=%+v", r.LateralBiconnectedBlocks, want)
+	}
+	scoped, err := Analyze(root, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scoped.LateralBiconnectedBlocks, want) {
+		t.Fatalf("scoped=%+v", scoped.LateralBiconnectedBlocks)
+	}
+	chain, err := Analyze(root, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain.LateralBiconnectedBlocks) != 0 {
+		t.Fatalf("chain=%+v", chain.LateralBiconnectedBlocks)
+	}
+}
+
 func TestAnalyzeIdentifiesLateralArticulationPoints(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

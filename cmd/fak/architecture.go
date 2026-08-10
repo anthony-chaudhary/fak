@@ -151,6 +151,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %s tier=%s fragments=%v coupling-pairs=%d\n", point.Name, point.TierName, sizes, point.CouplingPairs)
 		}
 	}
+	if len(report.LateralBiconnectedBlocks) > 0 {
+		fmt.Fprintln(stdout, "  lateral biconnected blocks (single-package resilient):")
+		for _, block := range report.LateralBiconnectedBlocks {
+			fmt.Fprintf(stdout, "    tier=%s members=%v edges=%d\n", block.TierName, block.Members, block.EdgeCount)
+		}
+	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {
 		fmt.Fprintln(stdout, "  sink candidates (declared tier above import floor):")
 		for _, candidate := range report.SinkCandidates {

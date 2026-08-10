@@ -55,6 +55,14 @@ type BlastHotspot struct {
 	MaxHops     int    `json:"max_hops"`
 }
 
+type LateralBiconnectedBlock struct {
+	Tier        int      `json:"tier"`
+	TierName    string   `json:"tier_name"`
+	Members     []string `json:"members"`
+	MemberCount int      `json:"member_count"`
+	EdgeCount   int      `json:"edge_count"`
+}
+
 type LateralArticulationPoint struct {
 	Tier          int        `json:"tier"`
 	TierName      string     `json:"tier_name"`
@@ -133,6 +141,7 @@ type Report struct {
 	LateralComponents         []LateralComponent         `json:"lateral_components,omitempty"`
 	LateralBridges            []LateralBridge            `json:"lateral_bridges,omitempty"`
 	LateralArticulationPoints []LateralArticulationPoint `json:"lateral_articulation_points,omitempty"`
+	LateralBiconnectedBlocks  []LateralBiconnectedBlock  `json:"lateral_biconnected_blocks,omitempty"`
 	Diagnostics               []Diagnostic               `json:"diagnostics,omitempty"`
 	SinkCandidates            []SinkCandidate            `json:"sink_candidates,omitempty"`
 	Violations                int                        `json:"violations"`
@@ -232,6 +241,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	report.LateralComponents = lateralComponents(report.Edges, tiers, names)
 	report.LateralBridges = lateralBridges(report.Edges, report.LateralComponents)
 	report.LateralArticulationPoints = lateralArticulationPoints(report.Edges, report.LateralComponents)
+	report.LateralBiconnectedBlocks = lateralBiconnectedBlocks(report.Edges, report.LateralComponents)
 	for i := range allLeaves {
 		liveViolations := allLeaves[i].ViolationEdges[:0]
 		for _, edge := range allLeaves[i].ViolationEdges {
@@ -311,6 +321,13 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 		}
 		report.Edges = edges
+		blocks := report.LateralBiconnectedBlocks[:0]
+		for _, block := range report.LateralBiconnectedBlocks {
+			if slices.Contains(block.Members, onlyLeaf) {
+				blocks = append(blocks, block)
+			}
+		}
+		report.LateralBiconnectedBlocks = blocks
 		points := report.LateralArticulationPoints[:0]
 		for _, point := range report.LateralArticulationPoints {
 			keep := point.Name == onlyLeaf
@@ -354,6 +371,127 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 	}
 	return report, nil
+}
+
+func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComponent) []LateralBiconnectedBlock {
+	adjacency := map[string][]string{}
+	undirected := map[string][2]string{}
+	for _, edge := range edges {
+		if edge.Direction != "lateral" {
+			continue
+		}
+		left, right := edge.From, edge.To
+		if right < left {
+			left, right = right, left
+		}
+		key := left + "\x00" + right
+		if _, ok := undirected[key]; ok {
+			continue
+		}
+		undirected[key] = [2]string{left, right}
+		adjacency[left] = append(adjacency[left], right)
+		adjacency[right] = append(adjacency[right], left)
+	}
+	for name := range adjacency {
+		sort.Strings(adjacency[name])
+	}
+	disc, low, parent := map[string]int{}, map[string]int{}, map[string]string{}
+	time := 0
+	var stack [][2]string
+	var memberSets []map[string]struct{}
+	var visit func(string)
+	visit = func(u string) {
+		time++
+		disc[u], low[u] = time, time
+		for _, v := range adjacency[u] {
+			left, right := u, v
+			if right < left {
+				left, right = right, left
+			}
+			e := [2]string{left, right}
+			if disc[v] == 0 {
+				parent[v] = u
+				stack = append(stack, e)
+				visit(v)
+				if low[v] < low[u] {
+					low[u] = low[v]
+				}
+				if low[v] >= disc[u] {
+					members := map[string]struct{}{}
+					for len(stack) > 0 {
+						last := stack[len(stack)-1]
+						stack = stack[:len(stack)-1]
+						members[last[0]] = struct{}{}
+						members[last[1]] = struct{}{}
+						if last == e {
+							break
+						}
+					}
+					if len(members) >= 3 {
+						memberSets = append(memberSets, members)
+					}
+				}
+			} else if parent[u] != v && disc[v] < disc[u] {
+				stack = append(stack, e)
+				if disc[v] < low[u] {
+					low[u] = disc[v]
+				}
+			}
+		}
+	}
+	starts := make([]string, 0, len(adjacency))
+	for name := range adjacency {
+		starts = append(starts, name)
+	}
+	sort.Strings(starts)
+	for _, start := range starts {
+		if disc[start] == 0 {
+			visit(start)
+		}
+	}
+	tierByMember := map[string]struct {
+		level int
+		name  string
+	}{}
+	for _, component := range components {
+		for _, member := range component.Members {
+			tierByMember[member] = struct {
+				level int
+				name  string
+			}{component.Tier, component.TierName}
+		}
+	}
+	var out []LateralBiconnectedBlock
+	for _, set := range memberSets {
+		members := make([]string, 0, len(set))
+		for member := range set {
+			members = append(members, member)
+		}
+		sort.Strings(members)
+		edgeCount := 0
+		for _, e := range undirected {
+			_, a := set[e[0]]
+			_, b := set[e[1]]
+			if a && b {
+				edgeCount++
+			}
+		}
+		tier := tierByMember[members[0]]
+		out = append(out, LateralBiconnectedBlock{Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MemberCount != out[j].MemberCount {
+			return out[i].MemberCount > out[j].MemberCount
+		}
+		if out[i].EdgeCount != out[j].EdgeCount {
+			return out[i].EdgeCount > out[j].EdgeCount
+		}
+		if out[i].Tier != out[j].Tier {
+			return out[i].Tier < out[j].Tier
+		}
+		return strings.Join(out[i].Members, "\x00") < strings.Join(out[j].Members, "\x00")
+	})
+	return out
 }
 
 func lateralArticulationPoints(edges []ArchitectureEdge, components []LateralComponent) []LateralArticulationPoint {
