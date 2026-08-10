@@ -1756,6 +1756,11 @@
           "category": "incidental",
           "reason": "JSON drill-down field containing source trajectory IDs; not a new session lifecycle concept",
           "token": "member_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported command entry point required only for cmd/fak-dev dispatch; it preserves the existing session diagnostic and introduces no new session-runtime concept.",
+          "token": "RunSessionDiag"
         }
       ],
       "id": "session-runtime",
@@ -1765,6 +1770,7 @@
         "ITERM_SESSION_ID",
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
+        "RunSessionDiag",
         "SchedulerEvents",
         "SchedulerMS",
         "SchedulerOverhead",
@@ -3739,6 +3745,41 @@
           "category": "incidental",
           "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
           "token": "ErrUnsupportedFormat"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local provenance verdict; not the repository-wide support maturity concept.",
+          "token": "ConfidenceUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed quantprov reason code scoped to one artifact contract, not support maturity.",
+          "token": "ReasonUnsupportedQuantizer"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed quantprov reason code scoped to one artifact contract, not support maturity.",
+          "token": "ReasonUnsupportedVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed quantprov reason code scoped to one artifact contract, not support maturity.",
+          "token": "ReasonUnsupportedFormat"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire reason code scoped to quantprov support adjudication.",
+          "token": "QUANTPROV_UNSUPPORTED_QUANTIZER"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire reason code scoped to quantprov support adjudication.",
+          "token": "QUANTPROV_UNSUPPORTED_VERSION"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire reason code scoped to quantprov support adjudication.",
+          "token": "QUANTPROV_UNSUPPORTED_FORMAT"
         }
       ],
       "id": "support-maturity",
@@ -3746,6 +3787,7 @@
         "BAD_ACHIEVED_MATURITY",
         "CONFIG_OPINION_UNSUPPORTED",
         "ClaudeKeychainSupported",
+        "ConfidenceUnsupported",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
         "CorrectnessGate",
@@ -3781,6 +3823,12 @@
         "ParitySample",
         "ParityUnknown",
         "ParityUnpublished",
+        "QUANTPROV_UNSUPPORTED_FORMAT",
+        "QUANTPROV_UNSUPPORTED_QUANTIZER",
+        "QUANTPROV_UNSUPPORTED_VERSION",
+        "ReasonUnsupportedFormat",
+        "ReasonUnsupportedQuantizer",
+        "ReasonUnsupportedVersion",
         "RunCommitSubjectCoverage",
         "SetupParityBlocks",
         "SetupParityReport",

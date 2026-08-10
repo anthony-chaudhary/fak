@@ -3,7 +3,8 @@
 // the "when do tools run, and in what order" view over a trajectory corpus.
 //
 // It is a pure, deterministic, stdlib-only leaf: sessions in, a sorted edge
-// graph and ranked n-grams out. Transitions never span a session boundary, so
+// graph, ranked n-grams, and explainable workflow concepts out. Concepts bridge
+// fleet aggregates to exemplar sessions for operator inspection and steering. Transitions never span a session boundary, so
 // unrelated sessions cannot manufacture an adjacency. It imports nothing
 // internal and sits off the hot path, so a report — or the `fak traj` front
 // door (#2827) — can fold a corpus without pulling in trajectory machinery.

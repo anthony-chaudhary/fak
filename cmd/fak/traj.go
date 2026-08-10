@@ -24,7 +24,8 @@ import (
 //	score    --corpus C [--json]             — run the registered scorers, list findings worst-first
 //	gc       --corpus C [--threshold T]      — propose prune candidates (later near-duplicates)
 //	export   --corpus C                      — re-emit the corpus as JSONL (validate/normalize)
-//	report   --corpus C [--json]             — session-analytics: per-tool rollup, transitions, mix trend
+//	report   --corpus C [--json]             — session analytics: rollup, transitions, mix trend
+//	concepts --corpus C [--json]             — drillable workflow concepts for operator steering
 //
 // Every verb reads a corpus file; none mutates it (gc PROPOSES, it never deletes) —
 // the prune decision belongs to the skill/operator, not the kernel.
@@ -46,6 +47,8 @@ func cmdTraj(args []string) {
 		cmdTrajExport(args[1:])
 	case "report":
 		cmdTrajReport(args[1:])
+	case "concepts":
+		cmdTrajConcepts(args[1:])
 	case "-h", "--help", "help":
 		trajUsage()
 	default:
@@ -62,6 +65,7 @@ func trajUsage() {
 	fmt.Fprintln(os.Stderr, "       fak traj gc      --corpus <turns.jsonl> [--threshold 0.92]        (propose prune candidates)")
 	fmt.Fprintln(os.Stderr, "       fak traj export  --corpus <turns.jsonl> [--format jsonl|atif]      (re-emit; atif = portable trajectory.json)")
 	fmt.Fprintln(os.Stderr, "       fak traj report  --corpus <turns.jsonl> [--json] [--top N] [--ngram 3]  (session analytics: rollup + transitions + mix trend)")
+	fmt.Fprintln(os.Stderr, "       fak traj concepts --corpus <turns.jsonl> [--json] [--concept ID] (workflow concepts between aggregates and calls)")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "A corpus is the JSONL a trajectory.Recorder exports. fak ships the data + similarity +")
 	fmt.Fprintln(os.Stderr, "scorer seam; build your own trajectory analysis on top (see docs/observability/trajectory.md).")
