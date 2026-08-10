@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/resumebackoff", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"failure_signature_resume_backoff"},
+		Reason:       "native same-signature exponential resume backoff and cross-session signature parking",
+	},
+	{
 		Leaf: "internal/attemptbudget", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"retry_attempt_budgeting"},
 		Reason:       "native failure-class-aware attempt ceilings, cooldowns, transient headroom, and typed block routing",
@@ -193,6 +198,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "failure_signature_resume_backoff",
+		NativePath: "internal/resumebackoff/resumebackoff.go",
+		Workload:   "same repeated-failure restart trace, delay and ceiling policy, process lifecycle, concurrency, and independent schedule oracle across every arm",
+		Metrics:    []string{"schedule_equivalence", "restart_storm_prevention", "recovery_time_ms", "restart_count", "cpu_seconds", "peak_rss_bytes", "network_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "immediate resume", Class: TunedBaseline, Source: "internal/resumebackoff/compare.go"},
+			{Name: "Kubernetes CrashLoopBackOff", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"},
+			{Name: "systemd RestartSec", Class: NextBest, Source: "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html"},
+			{Name: "AWS Step Functions retry", Class: NextBest, Source: "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"},
+		},
+	},
 	{
 		Capability: "retry_attempt_budgeting",
 		NativePath: "internal/attemptbudget/attemptbudget.go",
