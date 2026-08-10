@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/ctxmmu", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"context_memory_management"},
+		Reason:       "ctxmmu implements result quarantine, context paging, tool-schema residency, and durable-memory write admission; context-memory management is contracted separately",
+	},
+	{
 		Leaf: "internal/adjudicator", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"policy_adjudication"},
 		Reason:       "adjudicator contains the native capability-floor decision engine plus several specialized security rungs; policy adjudication is contracted separately",
@@ -158,6 +163,21 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "context_memory_management",
+		NativePath: "internal/ctxmmu/mmu.go",
+		Workload:   "same long-horizon tasks, candidate memory writes, read-back queries, model, token budget, process lifetime, and independent grader across every arm",
+		Metrics:    []string{"task_success", "write_precision", "retained_fact_recall", "input_tokens", "latency_ms", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "retain full history without memory management", Class: TunedBaseline, Source: "internal/ctxmmu/compare.go"},
+			{Name: "Letta", Class: NextBest, Source: "https://docs.letta.com/"},
+			{Name: "fak + mem0", Class: FirstClassIntegration, Integration: "mem0", Source: "docs/integrations/agent-memory.md"},
+			{Name: "fak + Letta", Class: FirstClassIntegration, Integration: "letta", Source: "docs/integrations/agent-memory.md"},
+			{Name: "fak + Zep/Graphiti", Class: FirstClassIntegration, Integration: "zep/graphiti", Source: "docs/integrations/agent-memory.md"},
+			{Name: "fak + LangMem/LangGraph memory", Class: FirstClassIntegration, Integration: "langmem", Source: "docs/integrations/agent-memory.md"},
+		},
+		Integrations: []string{"mem0", "letta", "zep/graphiti", "langmem"},
+	},
 	{
 		Capability: "policy_adjudication",
 		NativePath: "internal/adjudicator/decide.go",
