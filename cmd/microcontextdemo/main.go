@@ -390,6 +390,7 @@ func main() {
 	var tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput, verifyTunedBaselinesPath string
 	var routingVOIOutput, verifyRoutingVOIPath string
 	var filterToolSchedulerFold, filterToolSchedulerOutput, verifyFilterToolSchedulerPath string
+	var liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, verifyLiveFilterToolPath string
 	var filterToolSchedulerTrials int
 	var routingVOISeed int64
 	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
@@ -496,6 +497,10 @@ func main() {
 	flag.StringVar(&filterToolSchedulerOutput, "filter-tool-scheduler-output", "", "write filter/tool scheduler matrix")
 	flag.IntVar(&filterToolSchedulerTrials, "filter-tool-scheduler-trials", 5, "controlled trials per scheduler policy")
 	flag.StringVar(&verifyFilterToolSchedulerPath, "verify-filter-tool-scheduler", "", "verify filter/tool scheduler matrix")
+	flag.StringVar(&liveFilterToolPacket, "live-filter-tool-packet", "", "frozen semantic packet for live filter/tool matrix")
+	flag.StringVar(&liveFilterToolFold, "live-filter-tool-fold", "", "stabilized fold for live filter/tool matrix")
+	flag.StringVar(&liveFilterToolOutput, "live-filter-tool-output", "", "write live filter/tool scheduler matrix")
+	flag.StringVar(&verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
 	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
 	flag.IntVar(&routingVOIRecords, "routing-voi-records", 200, "records per mixture and trial")
@@ -698,6 +703,29 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS semantic adjudicator %s\n", semanticJudgmentOutput)
+		return
+	}
+	if verifyLiveFilterToolPath != "" {
+		runVerify("verify-live-filter-tool", verifyLiveFilterToolPath, verifyLiveFilterToolMatrix)
+		return
+	}
+	if liveFilterToolOutput != "" {
+		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+		if endpoint == "" {
+			endpoint = os.Getenv("OPENAI_BASE_URL")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if liveFilterToolPacket == "" || liveFilterToolFold == "" {
+			fmt.Fprintln(os.Stderr, "microcontextdemo: live filter/tool packet and fold required")
+			os.Exit(2)
+		}
+		if err := runLiveFilterToolMatrix(context.Background(), liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, endpoint, apiKey, liveMatrixModel); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: live filter/tool: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS live filter/tool %s\n", liveFilterToolOutput)
 		return
 	}
 	if verifyFilterToolSchedulerPath != "" {

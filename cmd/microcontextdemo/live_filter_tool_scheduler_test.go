@@ -1,0 +1,58 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLiveToolPromptHasClosedReadOnlyClasses(t *testing.T) {
+	p := liveToolPrompt(semanticRecord{Title: "x", Body: "y"}, `{"state":"open"}`)
+	if strings.Contains(p, "write") || strings.Contains(p, "effect") {
+		t.Fatal("effect authority leaked into prompt")
+	}
+	for _, x := range []string{"read_only|current_state", "TOOL_RECEIPT"} {
+		if !strings.Contains(p, x) {
+			t.Fatalf("missing %s", x)
+		}
+	}
+}
+func TestFetchIssueReceiptIsBoundedRead(t *testing.T) { // Exercise response shape without depending on GitHub rate state.
+	old := http.DefaultClient
+	defer func() { http.DefaultClient = old }()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"state":"open","updated_at":"2026-08-10T00:00:00Z","locked":false,"body":"secret large body"}`))
+	}))
+	defer srv.Close()
+	// Transport rewrites only the authority, retaining the requested canonical path.
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r.URL.Scheme = "http"
+		r.URL.Host = strings.TrimPrefix(srv.URL, "http://")
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	out, _, err := fetchIssueReceipt(context.Background(), semanticRecord{Number: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "body") || !strings.Contains(out, "state") {
+		t.Fatalf("unbounded receipt %s", out)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestVerifyLiveFilterToolArtifact(t *testing.T) {
+	p := filepath.Join("..", "..", "experiments", "microcontext", "s8o-live-filter-tool-2026-08-10.json")
+	if _, e := os.Stat(p); e != nil {
+		t.Fatal(e)
+	}
+	if e := verifyLiveFilterToolMatrix(p); e != nil {
+		t.Fatal(e)
+	}
+}
