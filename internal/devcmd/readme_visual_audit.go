@@ -1,32 +1,29 @@
-package main
+package devcmd
 
 import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/readmevisualaudit"
 )
 
-func cmdReadmeVisualAudit(argv []string) {
-	os.Exit(runReadmeVisualAudit(os.Stdout, os.Stderr, argv))
-}
-
-func runReadmeVisualAudit(stdout, stderr io.Writer, argv []string) int {
+func RunReadmeVisualAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("readme-visual-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
-		return code
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "readme-visual-audit: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return 2
 	}
 	root := *workspace
 	if root == "" {
-		root = resolveRoot("")
-		if root == "" {
-			root = "."
-		}
+		root = repoRoot()
 	}
 	report := readmevisualaudit.Collect(root)
 	if *asJSON {

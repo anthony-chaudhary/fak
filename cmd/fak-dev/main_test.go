@@ -254,6 +254,27 @@ func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesReadmeVisualAuditUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"readme-visual-audit", "--help"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Usage of readme-visual-audit") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchReadmeVisualAudit(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "readme-visual-audit":`) || strings.Contains(string(body), "cmdReadmeVisualAudit(") {
+		t.Fatal("runtime fak still dispatches the dev-only readme-visual-audit command")
+	}
+}
 func TestRuntimeSourceDoesNotDispatchOrient(t *testing.T) {
 	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
 	body, err := os.ReadFile(mainPath)

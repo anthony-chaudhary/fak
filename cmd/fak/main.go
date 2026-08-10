@@ -604,8 +604,6 @@ func main() {
 		cmdFleetTrend(os.Args[2:])
 	case "popularization-tickets":
 		cmdPopularizationTickets(os.Args[2:])
-	case "readme-visual-audit":
-		cmdReadmeVisualAudit(os.Args[2:])
 	case "codex-memory":
 		cmdCodexMemory(os.Args[2:])
 	case "dormancy":

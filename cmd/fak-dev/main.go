@@ -39,6 +39,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunAMDGPUFacts(stdout, stderr, argv[1:])
 	case "commit-subject-coverage":
 		return devcmd.RunCommitSubjectCoverage(stdout, stderr, argv[1:])
+	case "readme-visual-audit":
+		return devcmd.RunReadmeVisualAudit(stdout, stderr, argv[1:])
 	case "catchup":
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
 	case "whats-changed":
@@ -80,6 +82,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  blast estimate PATH [flags]           estimate dependency blast radius")
 	fmt.Fprintln(w, "  amd-gpu-facts [flags]                 inspect AMD GPU development-host counters")
 	fmt.Fprintln(w, "  commit-subject-coverage [flags]       audit repository commit subject grammar")
+	fmt.Fprintln(w, "  readme-visual-audit [flags]           audit repository README visual health")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")
