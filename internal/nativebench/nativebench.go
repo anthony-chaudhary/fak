@@ -77,10 +77,15 @@ type Report struct {
 }
 
 var leafClassifications = []LeafClassification{{
-	Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
-	Capabilities: []string{"compute_region_admission"},
-	Reason:       "native compute-region taxonomy and live-lease collision admission",
+	Leaf: "internal/laneadmit", Disposition: DispositionMultiCapability,
+	Capabilities: []string{"lane_tree_collision_admission"},
+	Reason:       "native shared lane/tree collision, exclusivity, ancestry, read-only, and self-renewal admission",
 },
+	{
+		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"compute_region_admission"},
+		Reason:       "native compute-region taxonomy and live-lease collision admission",
+	},
 	{
 		Leaf: "internal/launchlatency", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"worker_launch_latency_summary"},
@@ -227,19 +232,34 @@ var leafClassifications = []LeafClassification{{
 }
 
 var contracts = []Contract{{
-	Capability: "compute_region_admission",
-	NativePath: "internal/computeadmit/computeadmit.go",
-	Workload:   "same overlapping, disjoint, out-of-taxonomy, and different-class compute claims, live lease, class address space, exclusivity, and independent admission oracle across every arm",
-	Metrics:    []string{"admission_precision", "admission_recall", "constraint_violations", "scheduling_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "control_plane_bytes", "accelerator_idle_seconds", "total_cost"},
+	Capability: "lane_tree_collision_admission",
+	NativePath: "internal/laneadmit/laneadmit.go",
+	Workload:   "same same-lane-disjoint, cross-lane-overlap, exclusive-lane, read-only, and self-renewal requests, live leases, taxonomy trees, and independent admission oracle across every arm",
+	Metrics:    []string{"admission_precision", "admission_recall", "false_denies", "false_allows", "decision_latency_ms", "acquisition_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
 	Alternatives: []Alternative{
-		{Name: "dispatch without region admission", Class: TunedBaseline, Source: "internal/computeadmit/compare.go"},
-		{Name: "Kubernetes scheduler", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/"},
-		{Name: "Slurm scheduler", Class: NextBest, Source: "https://slurm.schedmd.com/"},
-		{Name: "Ray scheduler", Class: NextBest, Source: "https://docs.ray.io/en/latest/ray-core/scheduling/"},
-		{Name: "AWS Batch", Class: NextBest, Source: "https://docs.aws.amazon.com/batch/"},
+		{Name: "geometry-only tree overlap", Class: TunedBaseline, Source: "internal/laneadmit/compare.go"},
+		{Name: "DOS arbitrate", Class: FirstClassIntegration, Integration: "dos", Source: "dos arbitrate"},
+		{Name: "GitHub Actions concurrency groups", Class: NextBest, Source: "https://docs.github.com/actions/using-jobs/using-concurrency"},
+		{Name: "Kubernetes Lease coordination", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"},
+		{Name: "etcd concurrency mutex", Class: NextBest, Source: "https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency"},
 	},
-	Witness: "../../docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+	Witness:      "../../docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+	Integrations: []string{"dos"},
 },
+	{
+		Capability: "compute_region_admission",
+		NativePath: "internal/computeadmit/computeadmit.go",
+		Workload:   "same overlapping, disjoint, out-of-taxonomy, and different-class compute claims, live lease, class address space, exclusivity, and independent admission oracle across every arm",
+		Metrics:    []string{"admission_precision", "admission_recall", "constraint_violations", "scheduling_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "control_plane_bytes", "accelerator_idle_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "dispatch without region admission", Class: TunedBaseline, Source: "internal/computeadmit/compare.go"},
+			{Name: "Kubernetes scheduler", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/"},
+			{Name: "Slurm scheduler", Class: NextBest, Source: "https://slurm.schedmd.com/"},
+			{Name: "Ray scheduler", Class: NextBest, Source: "https://docs.ray.io/en/latest/ray-core/scheduling/"},
+			{Name: "AWS Batch", Class: NextBest, Source: "https://docs.aws.amazon.com/batch/"},
+		},
+		Witness: "../../docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+	},
 	{
 		Capability: "worker_launch_latency_summary",
 		NativePath: "internal/launchlatency/launchlatency.go",

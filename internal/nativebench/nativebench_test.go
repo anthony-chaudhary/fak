@@ -79,10 +79,10 @@ func TestAuditRepositoryDiscoversNativeCoverageDebt(t *testing.T) {
 	if !report.Coverage.DiscoveryComplete || report.Coverage.NativeLeaves < 100 {
 		t.Fatalf("repository discovery did not cover the native leaf inventory: %+v", report.Coverage)
 	}
-	if report.Coverage.CoveredLeaves != 32 {
-		t.Fatalf("covered leaves=%d, want twenty capability leaves plus twelve benchmark-governance infrastructure leaves", report.Coverage.CoveredLeaves)
+	if report.Coverage.CoveredLeaves != 33 {
+		t.Fatalf("covered leaves=%d, want twenty-one capability leaves plus twelve benchmark-governance infrastructure leaves", report.Coverage.CoveredLeaves)
 	}
-	if report.Coverage.ClassifiedLeaves != 32 || report.Coverage.UnclassifiedLeaves == 0 {
+	if report.Coverage.ClassifiedLeaves != 33 || report.Coverage.UnclassifiedLeaves == 0 {
 		t.Fatalf("classification debt is not explicit: %+v", report.Coverage)
 	}
 	if len(report.Coverage.MissingLeaves) == 0 || report.Complete {
