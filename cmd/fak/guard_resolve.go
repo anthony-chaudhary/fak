@@ -18,14 +18,14 @@ func compressActivates(flag bool, env string) bool {
 }
 
 // guardHeadlessExposeTools is the curated in-kernel fak_* allowlist a single-issue dispatch worker
-// actually uses — the SessionStart affordance set (pull ranked work, gate/execute a tool call,
-// durable memory) plus fak_tools_search so every PRUNED tool stays reachable on demand (the search
-// view sees the full exposed surface). It trims the ~9.9k-token full-registry schema floor a
-// headless worker otherwise pays on every turn (#3607). Each name must be a real registered tool —
-// compileToolExposeAllow fails loud on a zero-match glob, so a typo reds the guard at startup rather
-// than silently hiding the surface (pinned by TestGuardHeadlessExposeProfileNamesAreReal).
+// actually uses — the SessionStart affordance set (discover the task-scoped toolbelt, gate/execute
+// a tool call, durable memory) plus fak_tools_search so every PRUNED tool stays reachable on demand
+// (the search view sees the full exposed surface). It trims the ~9.9k-token full-registry schema
+// floor a headless worker otherwise pays on every turn (#3607). Each name must be a real registered
+// tool — compileToolExposeAllow fails loud on a zero-match glob, so a typo reds the guard at startup
+// rather than silently hiding the surface (pinned by TestGuardHeadlessExposeProfileNamesAreReal).
 var guardHeadlessExposeTools = []string{
-	"fak_index_work", "fak_admit", "fak_adjudicate", "fak_memory_run", "fak_tools_search",
+	"fak_capabilities", "fak_admit", "fak_adjudicate", "fak_memory_run", "fak_tools_search",
 }
 
 // resolveGuardExposeTools maps the --expose-profile value (with the FAK_GUARD_EXPOSE_PROFILE env

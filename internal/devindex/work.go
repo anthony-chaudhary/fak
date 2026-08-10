@@ -12,13 +12,12 @@ package devindex
 // and never reaches the network itself.
 //
 // #1291 closure binding: the ask above ("ongoing work has no single live view") is
-// met by IssueViews/SearchViews here plus the `fak index work` CLI shell
-// (cmd/fak/index.go's indexWork) and the fak_index_work MCP tool
-// (internal/gateway/mcp.go), covered by work_test.go and
-// internal/gateway/mcp_index_test.go's TestMCPIndexToolsMirrorDevIndex. The
-// shipping commits (ac2ca4f8, 30c577a7) cited #1291 in prose but never carried a
-// `Fixes` trailer, so the issue stayed open past the work landing. No behavior
-// change here.
+// met by IssueViews/SearchViews here plus the `fak-dev index work` CLI shell
+// (internal/devcmd/index.go's indexWork). Runtime MCP clients discover that
+// command through `fak_capabilities`; repository-index MCP handlers were removed
+// from the runtime gateway by #6022. The shipping commits (ac2ca4f8, 30c577a7)
+// cited #1291 in prose but never carried a `Fixes` trailer, so the issue stayed
+// open past the work landing. No behavior change here.
 
 import (
 	"encoding/json"

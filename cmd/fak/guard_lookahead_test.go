@@ -127,7 +127,7 @@ func TestSessionStartCompactInjectsLesson(t *testing.T) {
 	if !strings.Contains(compact, "reset-with-lesson canary") {
 		t.Fatalf("source=compact did not inject the fresh lesson: %s", compact)
 	}
-	if !strings.Contains(compact, "fak_index_work") {
+	if !strings.Contains(compact, "fak_capabilities") {
 		t.Fatalf("source=compact dropped the base affordance: %s", compact)
 	}
 
@@ -135,7 +135,7 @@ func TestSessionStartCompactInjectsLesson(t *testing.T) {
 	if strings.Contains(startup, "reset-with-lesson canary") {
 		t.Fatalf("source=startup must NOT inject the look-ahead lesson: %s", startup)
 	}
-	if !strings.Contains(startup, "fak_index_work") {
+	if !strings.Contains(startup, "fak_capabilities") {
 		t.Fatalf("source=startup dropped the base affordance: %s", startup)
 	}
 }
@@ -147,7 +147,7 @@ func TestSessionStartNilStdinUnchanged(t *testing.T) {
 	if code := runGuardSessionStart(&out, &errb, []string{"--mode", "on"}); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	if !strings.Contains(out.String(), "fak_index_work") {
+	if !strings.Contains(out.String(), "fak_capabilities") {
 		t.Fatalf("nil-stdin start dropped the base affordance: %s", out.String())
 	}
 }

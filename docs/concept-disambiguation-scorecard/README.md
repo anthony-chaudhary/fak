@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **186** (clarity 15 + coverage 171) |
+| **Disambiguation-debt (drive to 0)** | **192** (clarity 15 + coverage 177) |
 | **Crystal-clear concepts (and climbing)** | **439** crystal of 2152 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2307 / 2478** (93.1% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2307 / 2484** (92.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2830 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.1/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2152 concepts - score 89.1/100 (grade B) - disambiguation-debt 186
+concept-disambiguation chart - 2152 concepts - score 89.0/100 (grade B) - disambiguation-debt 192
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 439
@@ -63,12 +63,12 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   guard-gate       ##########################.. 388/425
-  plan             ##########################.. 319/343
+  plan             ##########################.. 319/344
   policy-capability #########################... 153/174
   session-runtime  #########################... 213/234
+  render-materialize #########################... 177/195
   cache            ###########################. 261/275
   context-ctx      ##########################.. 202/216
-  render-materialize ##########################.. 177/190
   witness-proof    ##########################.. 140/148
   gateway-engine   ###########################. 169/176
   loop             ##########################.. 77/84
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 93.1%  (2307/2478 confusable tokens positioned)
+namespace coverage  [##############################..] 92.9%  (2307/2484 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -283,7 +283,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | gateway-engine | **fak_gateway_kv_prefix_prompt_tokens_by_source_total** - The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled. |
 | * | crystal | symbol | guard-gate | **INSUFFICIENT_AGGREGATE_HBM** - The bench.AdmissionVerdict wire value a sanctioned node earns when its AGGREGATE device HBM across every rank is below the pinned artifact size: a physical-ceiling placement refusal that no reservation, scheduler change or peer eviction can lift. Only a smaller artifact (quantization) or more nodes close the ShortfallBytes it records, and admitNode derives it before any transfer begins. |
 | * | crystal | symbol | guard-gate | **AggregateHBMBytes** - A NodeCapacity accessor returning the node's total device memory across every rank (GPUCount x HBMBytesPerGPU) — the hard physical ceiling, reachable only by evicting peers. |
-| * | crystal | symbol | guard-gate | **guardSessionStart (fak guard-sessionstart hook)** - guard_sessionstart.go is the `fak guard-sessionstart` command: a Claude Code SessionStart hook whose stdout is injected into the FIRST turn. It emits guardSessionStartHint, the one-line affordance naming the fak substrate MCP verbs (fak_index_work, fak_admit/fak_adjudicate, fak_memory_run, fak_tools_search), and is toggled by FAK_GUARD_AFFORDANCE_MODE (on/off). |
+| * | crystal | symbol | guard-gate | **guardSessionStart (fak guard-sessionstart hook)** - guard_sessionstart.go is the `fak guard-sessionstart` command: a Claude Code SessionStart hook whose stdout is injected into the FIRST turn. It emits guardSessionStartHint, the one-line affordance naming the fak substrate MCP verbs (fak_capabilities, fak_admit/fak_adjudicate, fak_memory_run, fak_tools_search), and is toggled by FAK_GUARD_AFFORDANCE_MODE (on/off). |
 | * | crystal | config | guard-gate | **FAK_SECRETGATE** - The env opt-in (FAK_SECRETGATE) that arms internal/secretgate Admit; when off, Admit is a no-op and only the normgate secret check runs. |
 | * | crystal | config | guard-gate | **FLEET_CODEX_LOOP_GATE** - The env gate (FLEET_CODEX_LOOP_GATE) controlling whether the fleet dispatch tick admits the codex-loop step (dispatch_tick_codex_gate). |
 | * | crystal | config | guard-gate | **FLEET_DOGFOOD_GUARD** - The dispatch guard (FLEET_DOGFOOD_GUARD) gating the fleet's self-dogfooding path in dispatch_tick/worker. |
@@ -2442,12 +2442,12 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | guard-gate | 388 | 425 | 37 |
-| plan | 319 | 343 | 24 |
+| plan | 319 | 344 | 25 |
 | policy-capability | 153 | 174 | 21 |
 | session-runtime | 213 | 234 | 21 |
+| render-materialize | 177 | 195 | 18 |
 | cache | 261 | 275 | 14 |
 | context-ctx | 202 | 216 | 14 |
-| render-materialize | 177 | 190 | 13 |
 | witness-proof | 140 | 148 | 8 |
 | gateway-engine | 169 | 176 | 7 |
 | loop | 77 | 84 | 7 |

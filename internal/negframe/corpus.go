@@ -218,7 +218,7 @@ func GuardRuntimeCorpus() []HotPathString {
 		{
 			Name: "sessionstart-affordance",
 			Tier: TierPerSession,
-			Text: "fak substrate available (MCP server `fak`): before working as a generic coder, reach for the fak verbs. Call `mcp__fak__fak_index_work` to pull ranked open work for this repo; `mcp__fak__fak_admit` / `mcp__fak__fak_adjudicate` to gate/execute a tool call through the kernel; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. These are deferred tools — you must invoke them explicitly, they will not auto-load.",
+			Text: "fak substrate available (MCP server `fak`): before working as a generic coder, reach for the fak verbs. Call `mcp__fak__fak_capabilities` to discover the task-scoped toolbelt; `mcp__fak__fak_admit` / `mcp__fak__fak_adjudicate` to gate/execute a tool call through the kernel; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. These are deferred tools — you must invoke them explicitly, they will not auto-load.",
 		},
 		{
 			// A resume-recovery prompt whose interpolated per-reason fix carries a mechanical idiom

@@ -41,8 +41,9 @@ const (
 
 // guardSessionStartHint is the one-line affordance injected into the first turn. It names the
 // entry verbs (in their mcp__fak__ wire form, the names the agent actually calls) and the
-// two situations where fak most earns its keep: pulling ranked work, and gating a write.
-const guardSessionStartHint = "Reach for the fak substrate verbs (MCP server `fak`) to select ranked repo work and gate tool calls through the kernel. Call `mcp__fak__fak_index_work` to pull ranked open work for this repo; `mcp__fak__fak_admit` / `mcp__fak__fak_adjudicate` to gate/execute a tool call through the kernel; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. Invoke these deferred tools explicitly to page them in."
+// two situations where fak most earns its keep: discovering the task-scoped toolbelt, and
+// gating a write.
+const guardSessionStartHint = "Reach for the fak substrate verbs (MCP server `fak`) to discover the task-scoped toolbelt and gate tool calls through the kernel. Call `mcp__fak__fak_capabilities` to find the right fak surface for this task; `mcp__fak__fak_admit` / `mcp__fak__fak_adjudicate` to gate/execute a tool call through the kernel; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. Invoke these deferred tools explicitly to page them in."
 
 func cmdGuardSessionStart(argv []string) {
 	os.Exit(runGuardSessionStartHook(os.Stdout, os.Stderr, os.Stdin, argv))

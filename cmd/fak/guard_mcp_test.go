@@ -102,8 +102,8 @@ func TestGuardMCPURLFromGatewayBase(t *testing.T) {
 // a real *gateway.Server, served exactly as cmdGuard serves it (Handler() behind an
 // httptest listener standing in for the loopback listener guard.go binds), answers
 // tools/list over the SAME /mcp endpoint the written --mcp-config file points at —
-// proving the wired-up config reaches a live fak_index_*/fak_memory_* surface, not
-// just a config file with the right shape.
+// proving the wired-up config reaches the live runtime self-query/memory surface,
+// not just a config file with the right shape.
 func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 	srv, err := gateway.New(gateway.Config{
 		EngineID:     "inkernel",
@@ -155,7 +155,7 @@ func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 	for _, tool := range rpc.Result.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"fak_memory_run", "fak_index_verbs", "fak_tools_search"} {
+	for _, want := range []string{"fak_memory_run", "fak_capabilities", "fak_tools_search"} {
 		if !names[want] {
 			t.Fatalf("tools/list at %s missing %s: got %+v", install.URL, want, names)
 		}

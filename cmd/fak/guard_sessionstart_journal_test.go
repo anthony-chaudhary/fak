@@ -172,7 +172,7 @@ func TestGuardSessionStartRegisterOptOut(t *testing.T) {
 	if code := runGuardSessionStart(&out, &errb, []string{"--mode", "on", "--trace", "guard"}); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	if !strings.Contains(out.String(), "fak_index_work") {
+	if !strings.Contains(out.String(), "fak_capabilities") {
 		t.Fatalf("the register opt-out also suppressed the affordance: %s", out.String())
 	}
 	if _, err := os.Stat(journal); !os.IsNotExist(err) {

@@ -33,8 +33,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/demoui"
-	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/issuefanout"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // demoSpine is the fixed, self-referential input the demo fans out: the issue

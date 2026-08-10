@@ -11,8 +11,8 @@ import (
 
 // affordanceVerbRe extracts fak_-prefixed verb tokens from an affordance's prose. The
 // mcp__fak__ tool prefix is stripped to a space BEFORE matching (see extractFakVerbs) so
-// a "mcp__fak__fak_index_work" mention yields the bare verb "fak_index_work", not a
-// mangled "fak__fak_index_work". A verb name is [a-z_]+ after the fak_ stem.
+// a "mcp__fak__fak_capabilities" mention yields the bare verb "fak_capabilities", not a
+// mangled "fak__fak_capabilities". A verb name is [a-z_]+ after the fak_ stem.
 var affordanceVerbRe = regexp.MustCompile(`fak_[a-z_]+`)
 
 // affordanceNonVerbTokens are fak_-prefixed tokens that legitimately appear in affordance

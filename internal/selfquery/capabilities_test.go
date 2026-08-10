@@ -1,6 +1,9 @@
 package selfquery
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCapabilitiesEmptyQueryListsStableToolbelt(t *testing.T) {
 	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
@@ -14,7 +17,7 @@ func TestCapabilitiesEmptyQueryListsStableToolbelt(t *testing.T) {
 	names := namesOf(resp.Cards)
 	for _, want := range []string{
 		"memory-driver:recall", "memory-driver:clean", "memory-driver:compact",
-		"fak-dev index lane", "fak-dev index docs", "fak-dev index claims", "fak-dev index verbs",
+		"fak-dev index lane", "fak-dev index docs", "fak-dev index claims", "fak-dev index verbs", "fak-dev index work",
 		"fak_changes", "dos_arbitrate",
 	} {
 		if !names[want] {
@@ -27,6 +30,24 @@ func TestCapabilitiesEmptyQueryListsStableToolbelt(t *testing.T) {
 		if names[unwanted] {
 			t.Fatalf("capabilities query should stay narrower than fak feature query; unexpectedly found %s", unwanted)
 		}
+	}
+}
+
+func TestCapabilitiesRepoWorkIntentReturnsDevIndexCommand(t *testing.T) {
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cat.Capabilities(CapabilitiesRequest{Query: "pick ready issue backlog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Cards) == 0 || resp.Cards[0].Name != "fak-dev index work" {
+		t.Fatalf("repo-work intent top card = %v, want fak-dev index work", sortedNames(resp.Cards))
+	}
+	req := resp.Cards[0].Request
+	if got := strings.Join(req.Command, " "); got != "fak-dev index work <query>" || req.Executed {
+		t.Fatalf("repo-work request = %+v, want unexecuted fak-dev index work <query>", req)
 	}
 }
 

@@ -156,15 +156,8 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{"mcp__dos__dos_arbitrate", `{"lane":"x"}`},
 				{"dos_dos_arbitrate", `{"lane":"x"}`},
 				{"mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`},
-				{"mcp__fak__fak_index_lane", `{"path":"README.md"}`},
-				{"mcp__fak__fak_index_leaves", `{"query":"gateway"}`},
-				{"mcp__fak__fak_index_docs", `{"query":"guard"}`},
-				{"mcp__fak__fak_index_claims", `{"query":"guard"}`},
-				{"mcp__fak__fak_index_verbs", `{"query":"guard"}`},
-				{"mcp__fak__fak_index_work", `{"query":"guard"}`},
-				{"mcp__fak__fak_index_freshness", `{}`},
 				{"mcp__fak__fak_feature_query", `{"query":"memory","detail":"name"}`},
-				{"mcp__fak__fak_capabilities", `{"intent":"inspect guard loop"}`},
+				{"mcp__fak__fak_capabilities", `{"query":"inspect guard loop"}`},
 				{"mcp__fak__fak_context_value", `{}`},
 				// The context-recovery pair (#3061): read-only enumeration + trust-gated
 				// restore of compaction-dropped spans. Off the floor, a compaction-confused

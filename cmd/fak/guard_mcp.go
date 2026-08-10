@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// guard_mcp.go wires fak's own MCP self-query surface (fak_index_*, fak_memory_*,
-// fak_tools_search — internal/gateway/mcp.go:597-668) into the wrapped Claude Code
+// guard_mcp.go wires fak's own runtime MCP self-query surface (fak_capabilities,
+// fak_feature_query, fak_memory_*, fak_tools_search) into the wrapped Claude Code
 // child BY DEFAULT (#1499, the C1 child of the #1494 "fak can answer 'what can I do?'"
 // epic). Without this, the gateway already speaks MCP over JSON-RPC at POST /mcp, but
 // a default `fak guard -- claude` session has no way to discover it: the child never
@@ -130,5 +130,5 @@ func printGuardMCPNote(w io.Writer, in guardMCPInstall) {
 	if !in.Applied {
 		return
 	}
-	fmt.Fprintf(w, "fak guard: Claude MCP self-query surface registered — fak_index_*/fak_memory_*/fak_tools_search reachable at %s (config %s; every call is still re-adjudicated by the guard floor)\n", in.URL, in.ConfigPath)
+	fmt.Fprintf(w, "fak guard: Claude MCP self-query surface registered — fak_capabilities/fak_feature_query/fak_memory_*/fak_tools_search reachable at %s (config %s; every call is still re-adjudicated by the guard floor)\n", in.URL, in.ConfigPath)
 }

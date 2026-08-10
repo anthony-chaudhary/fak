@@ -46,7 +46,7 @@ func TestGuardSessionStartEmitsAffordance(t *testing.T) {
 		t.Fatalf("hookEventName = %q, want SessionStart", env.HookSpecificOutput.HookEventName)
 	}
 	ctx := env.HookSpecificOutput.AdditionalContext
-	for _, verb := range []string{"fak_index_work", "fak_admit", "fak_tools_search"} {
+	for _, verb := range []string{"fak_capabilities", "fak_admit", "fak_tools_search"} {
 		if !strings.Contains(ctx, verb) {
 			t.Fatalf("affordance did not name entry verb %q: %s", verb, ctx)
 		}
@@ -445,14 +445,14 @@ func TestGuardSessionStartManagedInjectsRule(t *testing.T) {
 	}
 
 	managed := readCtx([]string{"--mode", "on", "--managed"})
-	for _, want := range []string{"fak_index_work", "managed context is ON", "CHECKPOINT", "REBUILD", "TOOL_WIDTH_HINT", "independent", "dependent calls sequential"} {
+	for _, want := range []string{"fak_capabilities", "managed context is ON", "CHECKPOINT", "REBUILD", "TOOL_WIDTH_HINT", "independent", "dependent calls sequential"} {
 		if !strings.Contains(managed, want) {
 			t.Fatalf("managed injection missing %q: %s", want, managed)
 		}
 	}
 
 	plain := readCtx([]string{"--mode", "on"})
-	if !strings.Contains(plain, "fak_index_work") {
+	if !strings.Contains(plain, "fak_capabilities") {
 		t.Fatalf("plain injection dropped the base affordance: %s", plain)
 	}
 	if strings.Contains(plain, "managed context is ON") {
@@ -484,7 +484,7 @@ func TestSessionStartRulePositiveVoice(t *testing.T) {
 		t.Fatalf("injected context is not a positive-voice fixed point:\n have: %q\n want: %q", ctx, reframed)
 	}
 	// The reframe preserved the load-bearing structure it must never mangle.
-	for _, tok := range []string{"fak_index_work", "managed context is ON", "CHECKPOINT", "REBUILD"} {
+	for _, tok := range []string{"fak_capabilities", "managed context is ON", "CHECKPOINT", "REBUILD"} {
 		if !strings.Contains(ctx, tok) {
 			t.Fatalf("reframe dropped load-bearing token %q:\n%s", tok, ctx)
 		}
@@ -701,7 +701,7 @@ func TestGuardSessionStartHintPositiveFirst(t *testing.T) {
 			t.Fatalf("hint retains negation-first clause %q: %q", forbidden, guardSessionStartHint)
 		}
 	}
-	for _, token := range []string{"`mcp__fak__fak_index_work`", "`mcp__fak__fak_admit`", "`mcp__fak__fak_adjudicate`", "`mcp__fak__fak_memory_run`", "`mcp__fak__fak_tools_search`"} {
+	for _, token := range []string{"`mcp__fak__fak_capabilities`", "`mcp__fak__fak_admit`", "`mcp__fak__fak_adjudicate`", "`mcp__fak__fak_memory_run`", "`mcp__fak__fak_tools_search`"} {
 		if !strings.Contains(guardSessionStartHint, token) {
 			t.Fatalf("hint dropped %s", token)
 		}
@@ -751,7 +751,7 @@ func TestGuardSessionStartWritesNegframeJournal(t *testing.T) {
 		if !strings.Contains(summary, "reframe on") {
 			t.Fatalf("row did not record the treatment arm:\n%s", summary)
 		}
-		if !strings.Contains(ctx, "fak_index_work") {
+		if !strings.Contains(ctx, "fak_capabilities") {
 			t.Fatalf("routing through the lever dropped the affordance:\n%s", ctx)
 		}
 	})

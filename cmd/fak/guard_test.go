@@ -164,8 +164,8 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"read-only DOS verb dos_arbitrate allowed", "mcp__dos__dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
 		{"opencode DOS arbitrate spelling allowed", "dos_dos_arbitrate", `{"lane":"x"}`, abi.VerdictAllow},
 		{"fak MCP tool search allowed", "mcp__fak__fak_tools_search", `{"query":"tool","detail_level":"name"}`, abi.VerdictAllow},
-		{"fak MCP index lane allowed", "mcp__fak__fak_index_lane", `{"path":"README.md"}`, abi.VerdictAllow},
-		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"intent":"inspect guard loop"}`, abi.VerdictAllow},
+		{"fak MCP capabilities allowed", "mcp__fak__fak_capabilities", `{"query":"README ownership"}`, abi.VerdictAllow},
+		{"fak MCP capabilities task query allowed", "mcp__fak__fak_capabilities", `{"query":"inspect guard loop"}`, abi.VerdictAllow},
 		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
 		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
 		// ...but the READ-ONLY form is the one the kernel's own capability catalog hands

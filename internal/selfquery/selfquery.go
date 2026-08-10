@@ -405,6 +405,10 @@ func (c *Catalog) devSurfaceCards() []FeatureCard {
 			[]string{"dev", "index", "verbs", "cli", "command"},
 			"fak-dev index verbs <query>", EffectRead, "", "devindex", digestOf("index-verbs"),
 			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "verbs", "<query>"}, Executed: false}),
+		card("dev-query", "fak-dev index work", "list or search the repo's declared issue views and default dispatchable backlog",
+			[]string{"dev", "index", "work", "issue", "issues", "backlog", "dispatch", "ready"},
+			"fak-dev index work [<query>]", EffectRead, "", "devindex", digestOf("index-work"),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "work", "<query>"}, Executed: false}),
 	}
 }
 
@@ -600,7 +604,6 @@ func toolEffect(name string) (Effect, string) {
 	case "fak_memory_run":
 		return EffectPropose, "memq.apply"
 	case "fak_adjudicate", "fak_read", "fak_memory_drivers", "fak_memory_explain", "fak_tools_search",
-		"fak_index_lane", "fak_index_leaves", "fak_index_docs", "fak_index_claims", "fak_index_verbs", "fak_index_work",
 		"fak_feature_query", "fak_capabilities":
 		return EffectRead, ""
 	default:

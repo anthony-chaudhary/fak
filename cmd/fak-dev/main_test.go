@@ -363,6 +363,7 @@ func TestRuntimeSourceDoesNotDispatchReadmeVisualAudit(t *testing.T) {
 		t.Fatal("runtime fak still dispatches the dev-only readme-visual-audit command")
 	}
 }
+
 // TestRunDispatchesFleetcapPlanner proves the capacity planner answers from the
 // development artifact now that the runtime arm is gone (#6022 DoD row 4).
 func TestRunDispatchesFleetcapPlanner(t *testing.T) {

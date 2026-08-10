@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/issuefanout"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // TestSelfcheckPasses is the demo's own gate: the -selfcheck path must return 0 on

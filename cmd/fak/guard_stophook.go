@@ -710,9 +710,9 @@ func emitUnusedSubstrateAdvisory(stderr io.Writer, signals guardStopHookSignals)
 	fmt.Fprintln(stderr,
 		"fak guard Stop: heads-up — this session is ending clean having called ZERO fak verbs "+
 			"(fak_mcp_verb_calls_total=0). fak was present as a guard but never used as a substrate: "+
-			"no fak_index_work / fak_admit / fak_adjudicate / fak_memory_run. If this run was meant to "+
+			"no fak_capabilities / fak_admit / fak_adjudicate / fak_memory_run. If this run was meant to "+
 			"leverage fak, check the MCP server is wired to THIS workspace and reach for the fak verbs "+
-			"(fak_index_work to pull ranked open work; fak_admit before a write). Advisory only — the stop is allowed.")
+			"(fak_capabilities to discover task-scoped tools; fak_admit before a write). Advisory only — the stop is allowed.")
 }
 
 // runGuardTaskHandoffGate is the task-handoff Stop rung. It returns (exit, disposition): the
