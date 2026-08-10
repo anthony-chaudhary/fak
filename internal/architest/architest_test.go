@@ -462,6 +462,7 @@ var tier = map[string]int{
 	"modedebt":              4, // #4416 (epic #4397, permission regimes #2389/#2405): the CONSUMER half of the mode-debt scorer/dispatcher pair. Reads the sibling scorer's scorecard JSON, selects HARD un-lifted permission dials, and maps each onto dogfoodissues(3).ActionItem with a content-stable dedup key, capped at the family --cap. Composer twin of qaprocessscore: imports dogfoodissues(3)+stdlib only, off the hot path.
 	"deploymanifest":        1, // unified fak.toml all-in-one deployment manifest (#3421, epic #3256): typed schema for the eight deployment sections + a fail-closed loader (unknown/typo'd key refuses at load with a closed-vocabulary reason) + the `fak init` minimal-emit bytes; stdlib-only, imports nothing internal, off the hot path.
 	"configguide":           2, // intent-level posture composer over deploymanifest: emits explained minimal fak.toml deltas and validates them through the foundation parser; no runtime side effects.
+	"toolplugin":            2, // typed monotone tool-call plugin host + layered preference resolver (#6045): stdlib-only contract/composer, no direct execution authority beyond its injected Executor, off the hot path.
 	"systemservice":         2, // pure service-manager definition renderer; stdlib-only and off the hot path.
 	"guardcompile":          4,
 	"operatorquestion":      3,

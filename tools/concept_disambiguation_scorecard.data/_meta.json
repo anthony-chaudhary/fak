@@ -1051,6 +1051,16 @@
           "category": "incidental",
           "reason": "private fixture planner adapter; not a product guard or gate",
           "token": "selectorGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Trace stage label for transform loop protection; not a product guard gate",
+          "token": "transform_guard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Trace label recording ignored observer authority; not a product guard gate",
+          "token": "observer_guard"
         }
       ],
       "exclude": [
@@ -1181,6 +1191,7 @@
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
+        "observer_guard",
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
         "readGuardCompactionWitnesses",
@@ -1195,6 +1206,7 @@
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
         "summarizeguardstops",
+        "transform_guard",
         "ungated",
         "unguarded"
       ],
@@ -1843,6 +1855,21 @@
           "category": "incidental",
           "reason": "Data field carrying plugin-produced evidence, not a newly defined witness mechanism",
           "token": "Attestation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire spelling of the typed witness-request stage; not a new witness concept",
+          "token": "witness_request"
+        },
+        {
+          "category": "incidental",
+          "reason": "Preference field naming the selected witness adapter; not a witness proof",
+          "token": "WitnessRoute"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local host outcome corresponding to existing witness requirement; not a new proof",
+          "token": "WITNESS_REQUIRED"
         }
       ],
       "id": "witness-proof",
@@ -1866,10 +1893,12 @@
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
         "WITNESSLESS",
+        "WITNESS_REQUIRED",
         "WithCoreLockWitness",
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
         "WitnessMove",
+        "WitnessRoute",
         "appendGuardCompactionWitnessTo",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
@@ -1928,6 +1957,7 @@
         "witnessOutcomeID",
         "witnessScriptedFold",
         "witnessStrandedArchiveSuffix",
+        "witness_request",
         "witnessable",
         "witnessed",
         "witnesses",
@@ -2127,6 +2157,16 @@
           "category": "incidental",
           "reason": "Typed plugin pipeline stage name, not a policy capability",
           "token": "StageAdjudicate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum member describing benchmark inventory classification, not a runtime capability policy.",
+          "token": "DispositionCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum member marking a package with several benchmark contracts, not a runtime capability policy.",
+          "token": "DispositionMultiCapability"
         }
       ],
       "exclude": [
@@ -2135,6 +2175,8 @@
       "id": "policy-capability",
       "ignore": [
         "CapabilitySnapshot",
+        "DispositionCapability",
+        "DispositionMultiCapability",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "OrgPolicyCachePath",
@@ -2373,6 +2415,11 @@
           "category": "incidental",
           "reason": "private benchmark metric constant, not a new context capability or public concept",
           "token": "MetricFactRecall"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local context with plugin timeout; not a context-management capability",
+          "token": "callCtx"
         }
       ],
       "id": "context-ctx",
@@ -2383,6 +2430,7 @@
         "MechanismStaleContext",
         "MetricFactRecall",
         "appendGuardCompactionWitnessTo",
+        "callCtx",
         "cctx",
         "compactionContractFrom",
         "compactionContractInstruction",
@@ -3019,10 +3067,16 @@
           "category": "incidental",
           "reason": "independent fixture expectation helper; not a production oracle concept",
           "token": "selectorOracle"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local audit reason proving observers cannot decide; not a decision framework",
+          "token": "OBSERVER_DECISION_IGNORED"
         }
       ],
       "id": "decision",
       "ignore": [
+        "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
         "ReuseDecision",
         "appendsteerdecisions",
@@ -3753,6 +3807,11 @@
           "category": "incidental",
           "reason": "Read-only projection type, not a loop lifecycle concept",
           "token": "LoopView"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local refusal reason for repeated plugin transforms; not a loop subsystem",
+          "token": "TRANSFORM_LOOP"
         }
       ],
       "id": "loop",
@@ -3765,6 +3824,7 @@
         "LoopView",
         "OldestLoopID",
         "POLLING_LOOP",
+        "TRANSFORM_LOOP",
         "appendlooprunevent",
         "buildtuiloopreport",
         "defaultloopledger",
