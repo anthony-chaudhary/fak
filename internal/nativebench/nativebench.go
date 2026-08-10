@@ -147,6 +147,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native default-cache readiness gate over cold-path correctness, versioned usefulness, separated evidence provenance, and unsupported active paths is covered; aggregate scoring, economics, activation, and index planning remain separate debt",
 	},
 	{
+		Leaf: "internal/claimcheck", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"net_true_claim_grading"},
+		Reason:       "native six-question net-true/strawman/not-yet claim grading is covered; witness planning, fixture fingerprinting, and reuse remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -531,6 +536,24 @@ var contracts = []Contract{{
 			{Name: "LangSmith evaluations", Class: NextBest, Source: "https://docs.smith.langchain.com/evaluation"},
 		},
 		Witness:      "../../docs/benchmarks/DEFAULT-CACHE-READINESS-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "net_true_claim_grading",
+		NativePath: "internal/claimcheck/claimcheck.go",
+		Workload:   "same nine labeled claims spanning honest net-true, gated realized, strawman baseline, missing baseline/witness/provenance/net/scope, and unrealized seam with exact verdict and failing-question oracle",
+		Metrics:    []string{"exact_verdicts", "wrong_net_true", "wrong_strawman", "wrong_not_yet", "reason_mismatches", "latency_ns", "throughput_claims_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "model_tokens", "network_bytes", "storage_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "accept claim when any witness exists", Class: TunedBaseline, Source: "internal/claimcheck/compare.go"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "OPA/Rego", Class: NextBest, Source: "https://www.openpolicyagent.org/docs/latest/policy-language/"},
+			{Name: "OpenAI Evals graders", Class: NextBest, Source: "https://platform.openai.com/docs/guides/evals"},
+			{Name: "LangSmith evaluators", Class: NextBest, Source: "https://docs.smith.langchain.com/evaluation"},
+			{Name: "Braintrust scorers", Class: NextBest, Source: "https://www.braintrust.dev/docs/guides/scores"},
+			{Name: "DeepEval metrics", Class: NextBest, Source: "https://deepeval.com/docs/metrics-introduction"},
+		},
+		Witness:      "../../docs/benchmarks/NET-TRUE-CLAIM-GRADING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
