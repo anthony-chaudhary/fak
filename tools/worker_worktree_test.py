@@ -184,6 +184,15 @@ class WorktreeEnvTest(unittest.TestCase):
             self.assertNotIn("/compile", result.stderr.replace("\\", "/"))
             self.assertNotIn("compile.exe", result.stderr.lower())
 
+    def test_default_cache_probe_suppresses_windows_console(self) -> None:
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+            mod.subprocess, "run",
+            return_value=mock.Mock(stdout=str(Path(td) / "shared") + "\n"),
+        ) as run:
+            with mock.patch.object(mod, "no_window_creationflags", return_value=0x08000000):
+                mod.worktree_env({mod.WARM_GOCACHE_ENV: "1"}, Path(td) / "worker")
+            self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
+
     def test_warm_seed_failure_is_fail_open(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             wt = Path(td) / "worker"

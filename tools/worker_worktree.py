@@ -92,6 +92,8 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+
+
 from typing import Any, Callable, Sequence
 
 # Where per-worker worktrees live by default: a sibling scratch root OUTSIDE the
@@ -102,6 +104,12 @@ from typing import Any, Callable, Sequence
 # leaked worker worktree too.
 WORKTREE_ROOT_ENV = "FLEET_WORKER_WORKTREE_ROOT"
 WARM_GOCACHE_ENV = "FAK_DISPATCH_WORKTREE_WARM_GOCACHE"
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def no_window_creationflags() -> int:
+    """Suppress helper console windows on Windows; creationflags must be zero on POSIX."""
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
 WORKTREE_MARKER = "fak-worker-wt"
 # The gate that turns per-worker worktree isolation ON, shared verbatim with the Go
 # spine: cmd/fak/dispatch_tick_worker.go:workerWorktreeEnabled reads the SAME env var
@@ -260,6 +268,7 @@ def worktree_env(base_env: dict[str, str], wt_dir: Path) -> dict[str, str]:
                 source = subprocess.run(
                     ["go", "env", "GOCACHE"], cwd=wt_dir.parent,
                     env=env, capture_output=True, text=True, check=True,
+                    creationflags=no_window_creationflags(),
                 ).stdout.strip()
             except (OSError, subprocess.SubprocessError):
                 source = ""
