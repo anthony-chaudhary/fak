@@ -19,6 +19,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 - [Micro-context operators for general large-input LLM work](micro-context-large-input-operators.md) — partition record/field/group inputs, adaptively select filters or tools, emit typed facts, fold with provenance, and stop only under an answer-safe contract.
 - [Micro-context S8 large-input operator witness](micro-context-s8-large-input-operator.md) - fixture-backed 1,000-record partition, deterministic prefilter, semantic map, exact reuse/invalidation, bounded fold, and oracle proof.
 - [Micro-context S8a adaptive filter-selector witness](micro-context-s8a-filter-selector.md) — allowlisted per-record routing across exact exclusion, semantic filtering, group widening, and escalation with confusion/cost/replay telemetry.
+- [Micro-context S8b read-only tool-enrichment witness](micro-context-s8b-tool-enrichment.md) — typed allowlisted reads with cross-record dedupe, quotas, timeout/retry, cancellation, restart cache, recursive output bounds, and independently read-back citations.
 - [Micro-context S1 real-endpoint witness](micro-context-s1-real-endpoint.md) — 100/100 contexts through four bounded workers, with TTFT/usage telemetry and a retained 16-worker overload finding.
 - [Micro-context S2 shared-prefix A/B](micro-context-s2-prefix-ab.md) — no cache benefit observed on the first real endpoint; scoped concurrency improved aggregate work while worsening TTFT.
 ## Read research by maturity

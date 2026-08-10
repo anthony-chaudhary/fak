@@ -377,6 +377,8 @@ func main() {
 	var largeInputSelfcheck bool
 	var selectorOutput, verifySelectorPath string
 	var selectorSelfcheck bool
+	var toolEnrichmentOutput, verifyToolEnrichmentPath string
+	var toolEnrichmentSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
@@ -427,6 +429,9 @@ func main() {
 	flag.BoolVar(&selectorSelfcheck, "filter-selector-selfcheck", false, "run the adaptive filter-selector proof")
 	flag.StringVar(&selectorOutput, "filter-selector-output", "", "write the adaptive filter-selector proof artifact")
 	flag.StringVar(&verifySelectorPath, "verify-filter-selector", "", "verify a captured filter-selector artifact")
+	flag.BoolVar(&toolEnrichmentSelfcheck, "tool-enrichment-selfcheck", false, "run the read-only tool-enrichment fan-out proof")
+	flag.StringVar(&toolEnrichmentOutput, "tool-enrichment-output", "", "write the read-only tool-enrichment proof artifact")
+	flag.StringVar(&verifyToolEnrichmentPath, "verify-tool-enrichment", "", "verify a captured tool-enrichment artifact")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -455,6 +460,17 @@ func main() {
 	if gradeOutput != "" {
 		if err := writeHealthGrade(gradeInput, gradeOutput); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifyToolEnrichmentPath != "" {
+		runVerify("verify-tool-enrichment", verifyToolEnrichmentPath, verifyToolEnrichmentArtifact)
+		return
+	}
+	if toolEnrichmentSelfcheck {
+		if err := runToolEnrichmentSelfcheck(context.Background(), toolEnrichmentOutput, cfg.Workers); err != nil {
+			fmt.Fprintf(os.Stderr, "tool-enrichment selfcheck: %v\n", err)
 			os.Exit(1)
 		}
 		return

@@ -1,0 +1,581 @@
+{
+  "schema": "fak-microcontext-tool-enrichment/1",
+  "mode": "fixture-backed read-only tool fan-out",
+  "records": 1000,
+  "selector_windows": 28,
+  "logical_requests": 33,
+  "unique_requests": 26,
+  "tool_invocations": 27,
+  "dedupe_hits": 4,
+  "cache_hits": 4,
+  "restart_cache_hits": 26,
+  "restart_tool_invocations": 0,
+  "cancelled_unopened": 2,
+  "cancelled_unopened_dispatches": 0,
+  "timeouts": 1,
+  "retries": 1,
+  "quota_denials": 1,
+  "global_quota": 26,
+  "per_resource_quota": 1,
+  "peak_tool_concurrency": 16,
+  "peak_model_concurrency": 16,
+  "model_slots_during_tool_wait": 0,
+  "max_output_depth": 1,
+  "depth_cap": 2,
+  "max_amplification": 4,
+  "amplification_cap": 4,
+  "observed": 25,
+  "not_run": 3,
+  "readback_verified": 25,
+  "fold_citations": [
+    "fixture://github/10000/comments#sha256=5a0bbc13070ef5eae273bc686eaf1b2a520b66e13076d747c4c7af506f75bdc6",
+    "fixture://github/10001/comments#sha256=89123ed9975120db5a03551e0fd14849de6adfaf00719654340040241781e678",
+    "fixture://github/10002/comments#sha256=8ec7d4c91b617aa70779d32a90060148591a53bbe1f803b6cb2eeccb1409ecdf",
+    "fixture://github/10003/comments#sha256=2ddfe0d63b7c41ecaf3091d1a5f736683acdab4d3004768dcf7d1aa2b9b28135",
+    "fixture://github/10004/comments#sha256=a626fdfad7cad1a5fa89fc5fac421f7eb22de75b5f4ec86ff031f2fa46cc6ca1",
+    "fixture://github/10005/comments#sha256=5747a5e6a4394f3a5df51d2d268635c5497588c9a11fe90d9faf9d750c60181b",
+    "fixture://github/10006/comments#sha256=1c6d5c21b965eb2dfbfe59093f22fcf18621d9c6ebe351e9c20750db28bde651",
+    "fixture://github/10007/comments#sha256=b6a98110b0ee5b6628738fc394f052533f14833b9482be6f1faf41d0ffd5ad09",
+    "fixture://github/10008/comments#sha256=696806248486894ded9b9bf7f6c30c83ae76870aa7b63c33887050d7ee9fe085",
+    "fixture://github/10009/comments#sha256=c27d07e669d8d080c02d40221407265db6bdc0414b2fc5d5b2f1a9a7b39bc173",
+    "fixture://github/10010/comments#sha256=bfea73a4ac9cb94e7591dec4690bfc36031c10655abb15038b21006044484983",
+    "fixture://github/10011/comments#sha256=4baab781139a3159000b87bea090c747d245f9ca8c715a200273991ff915d7a6",
+    "fixture://github/10012/comments#sha256=7fb8d75607489099c478f69b622f45575400771020adfd4316891bf8a1dd84e8",
+    "fixture://github/10013/comments#sha256=3d4bc5c84068a2934852e0d7971bf95d5cc62bb586ef26fa24b8dc6993d2eff2",
+    "fixture://github/10014/comments#sha256=938e92d7c15061e60f30874b0fe393238c40eb7f80d012d5d982c34a80a40b50",
+    "fixture://github/10015/comments#sha256=252904a6fc62354cbf34b5de8683ae3807cadd9900a14c8dcea0b39085d7a821",
+    "fixture://github/10016/comments#sha256=f1c0622a0cae0e8c74f83384b7c38813df42d0f96096926cc3a268a378fb391c",
+    "fixture://github/10018/comments#sha256=123322349b8742cbe197f6b786a9306516b0b6866e9edcca998ae23854657779",
+    "fixture://github/10019/comments#sha256=219e7e4aa11deae07db1868a945efb68d8201b6753c446afc2655df986d65885",
+    "fixture://github/10020/comments#sha256=cd3664ba5409f2adae377cc4e6ad19427cbae38c4031ade05c458745a44e1ecb",
+    "fixture://github/10021/comments#sha256=5cb5797114514689893b56e369011613dc4c2a0d00df3899403f23fe8f11286e",
+    "fixture://github/10022/comments#sha256=84dd981c5325fb0eee46c07fca92758b64d1690ddfba231338178c41704eea5b",
+    "fixture://github/10023/comments#sha256=25efc7b75412993ee8b50bd0bee11de9b2c87f660f8df3a5a7f25ee4e85e301a",
+    "fixture://github/10024/comments#sha256=abad08b61c14c297a0e161460fc5abf0af77d16ec184cd3a6ee18a6c73291567",
+    "fixture://github/10025/comments#sha256=2a86961908f3255e05ae3b626ce2b22cc89cc589997d38fb063a7fad8c85cdd8"
+  ],
+  "observations": [
+    {
+      "request_id": "read-12",
+      "resource": "issue:10012",
+      "status": "observed",
+      "source_uri": "fixture://github/10012/comments",
+      "source_hash": "7fb8d75607489099c478f69b622f45575400771020adfd4316891bf8a1dd84e8",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10012"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-15",
+      "resource": "issue:10015",
+      "status": "observed",
+      "source_uri": "fixture://github/10015/comments",
+      "source_hash": "252904a6fc62354cbf34b5de8683ae3807cadd9900a14c8dcea0b39085d7a821",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10015"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-14",
+      "resource": "issue:10014",
+      "status": "observed",
+      "source_uri": "fixture://github/10014/comments",
+      "source_hash": "938e92d7c15061e60f30874b0fe393238c40eb7f80d012d5d982c34a80a40b50",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10014"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-01",
+      "resource": "issue:10001",
+      "status": "observed",
+      "source_uri": "fixture://github/10001/comments",
+      "source_hash": "89123ed9975120db5a03551e0fd14849de6adfaf00719654340040241781e678",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10001"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-07",
+      "resource": "issue:10007",
+      "status": "observed",
+      "source_uri": "fixture://github/10007/comments",
+      "source_hash": "b6a98110b0ee5b6628738fc394f052533f14833b9482be6f1faf41d0ffd5ad09",
+      "chunks": [
+        "comment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition",
+        "comment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition",
+        "comment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition",
+        "comment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition\ncomment evidence for bounded recursive partition"
+      ],
+      "depth": 1,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-05",
+      "resource": "issue:10005",
+      "status": "observed",
+      "source_uri": "fixture://github/10005/comments",
+      "source_hash": "5747a5e6a4394f3a5df51d2d268635c5497588c9a11fe90d9faf9d750c60181b",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10005"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-04",
+      "resource": "issue:10004",
+      "status": "observed",
+      "source_uri": "fixture://github/10004/comments",
+      "source_hash": "a626fdfad7cad1a5fa89fc5fac421f7eb22de75b5f4ec86ff031f2fa46cc6ca1",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10004"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-13",
+      "resource": "issue:10013",
+      "status": "observed",
+      "source_uri": "fixture://github/10013/comments",
+      "source_hash": "3d4bc5c84068a2934852e0d7971bf95d5cc62bb586ef26fa24b8dc6993d2eff2",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10013"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-11",
+      "resource": "issue:10011",
+      "status": "observed",
+      "source_uri": "fixture://github/10011/comments",
+      "source_hash": "4baab781139a3159000b87bea090c747d245f9ca8c715a200273991ff915d7a6",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10011"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-06",
+      "resource": "issue:10006",
+      "status": "observed",
+      "source_uri": "fixture://github/10006/comments",
+      "source_hash": "1c6d5c21b965eb2dfbfe59093f22fcf18621d9c6ebe351e9c20750db28bde651",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10006"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-03",
+      "resource": "issue:10003",
+      "status": "observed",
+      "source_uri": "fixture://github/10003/comments",
+      "source_hash": "2ddfe0d63b7c41ecaf3091d1a5f736683acdab4d3004768dcf7d1aa2b9b28135",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10003"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-00",
+      "resource": "issue:10000",
+      "status": "observed",
+      "source_uri": "fixture://github/10000/comments",
+      "source_hash": "5a0bbc13070ef5eae273bc686eaf1b2a520b66e13076d747c4c7af506f75bdc6",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10000"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-10",
+      "resource": "issue:10010",
+      "status": "observed",
+      "source_uri": "fixture://github/10010/comments",
+      "source_hash": "bfea73a4ac9cb94e7591dec4690bfc36031c10655abb15038b21006044484983",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10010"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-02",
+      "resource": "issue:10002",
+      "status": "observed",
+      "source_uri": "fixture://github/10002/comments",
+      "source_hash": "8ec7d4c91b617aa70779d32a90060148591a53bbe1f803b6cb2eeccb1409ecdf",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10002"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-09",
+      "resource": "issue:10009",
+      "status": "observed",
+      "source_uri": "fixture://github/10009/comments",
+      "source_hash": "c27d07e669d8d080c02d40221407265db6bdc0414b2fc5d5b2f1a9a7b39bc173",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10009"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-08",
+      "resource": "issue:10008",
+      "status": "observed",
+      "source_uri": "fixture://github/10008/comments",
+      "source_hash": "696806248486894ded9b9bf7f6c30c83ae76870aa7b63c33887050d7ee9fe085",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10008"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-22",
+      "resource": "issue:10022",
+      "status": "observed",
+      "source_uri": "fixture://github/10022/comments",
+      "source_hash": "84dd981c5325fb0eee46c07fca92758b64d1690ddfba231338178c41704eea5b",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10022"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-16",
+      "resource": "issue:10016",
+      "status": "observed",
+      "source_uri": "fixture://github/10016/comments",
+      "source_hash": "f1c0622a0cae0e8c74f83384b7c38813df42d0f96096926cc3a268a378fb391c",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10016"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-20",
+      "resource": "issue:10020",
+      "status": "observed",
+      "source_uri": "fixture://github/10020/comments",
+      "source_hash": "cd3664ba5409f2adae377cc4e6ad19427cbae38c4031ade05c458745a44e1ecb",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10020"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-25",
+      "resource": "issue:10025",
+      "status": "observed",
+      "source_uri": "fixture://github/10025/comments",
+      "source_hash": "2a86961908f3255e05ae3b626ce2b22cc89cc589997d38fb063a7fad8c85cdd8",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10025"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-21",
+      "resource": "issue:10021",
+      "status": "observed",
+      "source_uri": "fixture://github/10021/comments",
+      "source_hash": "5cb5797114514689893b56e369011613dc4c2a0d00df3899403f23fe8f11286e",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10021"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-19",
+      "resource": "issue:10019",
+      "status": "observed",
+      "source_uri": "fixture://github/10019/comments",
+      "source_hash": "219e7e4aa11deae07db1868a945efb68d8201b6753c446afc2655df986d65885",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10019"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-18",
+      "resource": "issue:10018",
+      "status": "observed",
+      "source_uri": "fixture://github/10018/comments",
+      "source_hash": "123322349b8742cbe197f6b786a9306516b0b6866e9edcca998ae23854657779",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10018"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-23",
+      "resource": "issue:10023",
+      "status": "observed",
+      "source_uri": "fixture://github/10023/comments",
+      "source_hash": "25efc7b75412993ee8b50bd0bee11de9b2c87f660f8df3a5a7f25ee4e85e301a",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10023"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-24",
+      "resource": "issue:10024",
+      "status": "observed",
+      "source_uri": "fixture://github/10024/comments",
+      "source_hash": "abad08b61c14c297a0e161460fc5abf0af77d16ec184cd3a6ee18a6c73291567",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10024"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "read-17",
+      "resource": "issue:10017",
+      "status": "timeout",
+      "depth": 0,
+      "attempts": 2,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": true,
+      "readback_verified": false,
+      "reason": "retry_budget_exhausted"
+    },
+    {
+      "request_id": "read-26",
+      "resource": "issue:10026",
+      "status": "not_run",
+      "depth": 0,
+      "attempts": 0,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": false,
+      "readback_verified": false,
+      "reason": "cancelled_before_dispatch"
+    },
+    {
+      "request_id": "read-27",
+      "resource": "issue:10027",
+      "status": "not_run",
+      "depth": 0,
+      "attempts": 0,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": false,
+      "readback_verified": false,
+      "reason": "cancelled_before_dispatch"
+    },
+    {
+      "request_id": "duplicate-00",
+      "resource": "issue:10000",
+      "status": "observed",
+      "source_uri": "fixture://github/10000/comments",
+      "source_hash": "5a0bbc13070ef5eae273bc686eaf1b2a520b66e13076d747c4c7af506f75bdc6",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10000"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": true,
+      "deduped": true,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "duplicate-01",
+      "resource": "issue:10001",
+      "status": "observed",
+      "source_uri": "fixture://github/10001/comments",
+      "source_hash": "89123ed9975120db5a03551e0fd14849de6adfaf00719654340040241781e678",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10001"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": true,
+      "deduped": true,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "duplicate-02",
+      "resource": "issue:10002",
+      "status": "observed",
+      "source_uri": "fixture://github/10002/comments",
+      "source_hash": "8ec7d4c91b617aa70779d32a90060148591a53bbe1f803b6cb2eeccb1409ecdf",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10002"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": true,
+      "deduped": true,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "duplicate-03",
+      "resource": "issue:10003",
+      "status": "observed",
+      "source_uri": "fixture://github/10003/comments",
+      "source_hash": "2ddfe0d63b7c41ecaf3091d1a5f736683acdab4d3004768dcf7d1aa2b9b28135",
+      "chunks": [
+        "maintainer: authentication behavior is relevant; source=issue:10003"
+      ],
+      "depth": 0,
+      "attempts": 1,
+      "cache_hit": true,
+      "deduped": true,
+      "dispatched": true,
+      "readback_verified": true
+    },
+    {
+      "request_id": "quota-probe",
+      "resource": "issue:10028",
+      "status": "not_run",
+      "depth": 0,
+      "attempts": 0,
+      "cache_hit": false,
+      "deduped": false,
+      "dispatched": false,
+      "readback_verified": false,
+      "reason": "quota_denied"
+    }
+  ],
+  "notes": [
+    "selector/model phase releases its slots before read dispatch",
+    "tool authority is a versioned read-only catalog; arbitrary writes are denied",
+    "timeout is cached as typed uncertainty rather than folded as negative",
+    "large outputs are recursively partitioned under depth and amplification caps",
+    "only independently read-back observations enter the citation fold"
+  ]
+}
