@@ -75,7 +75,7 @@ Use this when a provider or agent framework already moderates prompts and genera
 
 ```text
 user -> framework prompt guard -> agent -> fak -> model provider output guard
-                                      |  
+                                      |
                                       +-> tool policy -> tool -> result admission
 ```
 
@@ -138,4 +138,3 @@ none is a blanket witness for the others.
 
 For client-specific wiring, continue to the [integration chooser](../integrations/README.md). For
 the exact support label and wire limitations, use the [compatibility matrix](../integrations/compatibility-matrix.md).
-
