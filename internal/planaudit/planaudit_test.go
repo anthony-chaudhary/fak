@@ -1,6 +1,11 @@
 package planaudit
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestCountUnits(t *testing.T) {
 	lines := []string{
@@ -27,3 +32,41 @@ func TestBuildReportTaskWeightedFloor(t *testing.T) {
 		t.Fatalf("task weighted=%+v", task)
 	}
 }
+
+func TestAuditPlanUsesHeaderMarkerOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "PLAN-example.md")
+	lines := make([]string, HeaderLines+2)
+	lines[0] = "# Example plan"
+	lines[1] = "## 1. first unit"
+	lines[HeaderLines] = "This work shipped later."
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := AuditPlan(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Name != "Example plan" || plan.TotalUnits != 1 {
+		t.Fatalf("plan=%+v", plan)
+	}
+	if plan.Signal != "none" || plan.PercentComplete != 0 || plan.Status != "not_started" {
+		t.Fatalf("marker outside header changed completion: %+v", plan)
+	}
+}
+
+func TestAuditPlanRecognizesHeaderMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "BUILD-example.md")
+	if err := os.WriteFile(path, []byte("# Build example\n\nStatus: completed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := AuditPlan(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Signal != "shipped-marker" || plan.PercentComplete != 100 || plan.Status != "complete" {
+		t.Fatalf("plan=%+v", plan)
+	}
+}
+
