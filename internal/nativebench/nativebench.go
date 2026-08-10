@@ -162,6 +162,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native trigram-postings literal search with exact line verification and short-query fallback is covered; regex candidate extraction and lexical similarity remain separate capability debt",
 	},
 	{
+		Leaf: "internal/codelint", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"go_syntax_validation"},
+		Reason:       "native standalone Go syntax validation with all-errors locations and no semantic false positives is covered; JSON, external language packs, registry routing, summaries, and LSP framing remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -594,6 +599,22 @@ var contracts = []Contract{{
 			{Name: "Sourcegraph Search", Class: NextBest, Source: "https://sourcegraph.com/docs/code-search"},
 		},
 		Witness: "../../docs/benchmarks/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "go_syntax_validation",
+		NativePath: "internal/codelint/packs.go",
+		Workload:   "same four standalone Go files covering valid source, single syntax error, multiple recoverable syntax errors, and syntax-valid unresolved identifier with exact syntax-only classification and location oracle",
+		Metrics:    []string{"correct_files", "false_syntax_errors", "missed_syntax_errors", "reported_errors", "location_errors", "latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "go/parser first-error-only", Class: TunedBaseline, Source: "internal/codelint/compare.go"},
+			{Name: "go test compile", Class: NextBest, Source: "https://pkg.go.dev/cmd/go#hdr-Test_packages"},
+			{Name: "gofmt", Class: NextBest, Source: "https://pkg.go.dev/cmd/gofmt"},
+			{Name: "go vet", Class: NextBest, Source: "https://pkg.go.dev/cmd/vet"},
+			{Name: "staticcheck", Class: NextBest, Source: "https://staticcheck.dev/docs/"},
+			{Name: "golangci-lint", Class: NextBest, Source: "https://golangci-lint.run/"},
+			{Name: "gopls diagnostics", Class: NextBest, Source: "https://go.dev/gopls/"},
+		},
+		Witness: "../../docs/benchmarks/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "worker_launch_latency_summary",
