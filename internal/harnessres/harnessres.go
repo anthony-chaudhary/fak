@@ -79,6 +79,12 @@ type Snapshot struct {
 	GoHeapSysBytes       uint64
 	NumCPU               int
 	GOMAXPROCS           int
+	// Host is the box this harness ran on (total/available RAM, best-effort load),
+	// sampled alongside the harness slice so the report can render harness-as-fraction-
+	// of-host instead of a bare byte count that means nothing without the machine
+	// behind it. Pulled from the caller's provider (SetHostProvider); absent axes stay
+	// behind Host's own presence bits. See host.go and #2053.
+	Host Host
 	// GPU/accelerator (present only when the harness runs a model in-kernel via
 	// --gguf/--backend; the default proxy path uses no local GPU, so HaveGPU is false).
 	GPUVRAMUsedBytes  uint64
@@ -155,13 +161,20 @@ type Sampler struct {
 	gpuUtil     float64
 	haveGPUUtil bool
 
+	// host is the latest host-context reading (from hostProvider), snapshot-scoped.
+	host Host
+
 	// netProvider pulls the kernel half's cumulative (rx, tx) upstream network bytes
 	// each sample; gpuProvider pulls (used, total) accelerator VRAM; gpuUtilProvider pulls
 	// the busiest device's utilization percent. All nil by default (the leaf reads no
-	// network/GPU itself — the host wires them). Set before Start.
+	// network/GPU itself — the host wires them). Set before Start. hostProvider pulls
+	// the host-context block (RAM/load) the harness slice is reported as a fraction of;
+	// it is nil by default for the same reason (this leaf reads no host state itself —
+	// fak guard wires it to the existing compute host readers, #2053).
 	netProvider     func() (rx, tx uint64, ok bool)
 	gpuProvider     func() (used, total uint64, ok bool)
 	gpuUtilProvider func() (pct float64, ok bool)
+	hostProvider    func() (Host, bool)
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -316,6 +329,11 @@ func (s *Sampler) foldProc(ps procSample, now time.Time, goroutines int, heapSys
 			s.gpuUtil, s.haveGPUUtil = pct, true
 		}
 	}
+	if s.hostProvider != nil {
+		if h, ok := s.hostProvider(); ok {
+			s.host = h
+		}
+	}
 }
 
 // FoldChildExit records the wrapped agent child's final resource use from its exit
@@ -355,6 +373,7 @@ func (s *Sampler) Snapshot() Snapshot {
 		HaveGPU:              s.haveGPU,
 		GPUUtilPercent:       s.gpuUtil,
 		HaveGPUUtil:          s.haveGPUUtil,
+		Host:                 s.host,
 	}
 }
 
@@ -366,10 +385,10 @@ func (s Snapshot) Report() string {
 	writeHalf(&b, s.Kernel, s.Elapsed, s.KernelCPUPercentPeak, s.HaveKernelCPUPeak)
 	b.WriteString("; agent(child) ")
 	writeHalf(&b, s.Agent, s.Elapsed, 0, false)
-	fmt.Fprintf(&b, "; %d goroutines peak, Go heap %s; %d cores", s.GoroutinesPeak, humanBytes(s.GoHeapSysBytes), s.NumCPU)
-	if s.GOMAXPROCS > 0 && s.GOMAXPROCS != s.NumCPU {
-		fmt.Fprintf(&b, " (GOMAXPROCS %d)", s.GOMAXPROCS)
-	}
+	fmt.Fprintf(&b, "; %d goroutines peak, Go heap %s", s.GoroutinesPeak, humanBytes(s.GoHeapSysBytes))
+	// Host context: what the box offered, and the harness's slice of it as a fraction.
+	// A bare "4.2 GiB rss" is unreadable without the machine behind it (#2053).
+	writeHostSection(&b, s)
 	if s.HaveGPU || s.HaveGPUUtil {
 		b.WriteString("; gpu")
 		if s.HaveGPU {
@@ -474,6 +493,9 @@ func (s Snapshot) PrometheusText() string {
 	fmt.Fprintf(&b, "fak_harness_go_heap_sys_bytes %s\n", promFloat(float64(s.GoHeapSysBytes)))
 	writeHelp(&b, "fak_harness_num_cpu", "Logical CPU count of the host running the fak guard harness.", "gauge")
 	fmt.Fprintf(&b, "fak_harness_num_cpu %d\n", s.NumCPU)
+	// Host capacity the harness gauges above are a fraction OF (#2053). Absent axes
+	// emit nothing rather than a fake 0; the scraper divides.
+	writeHostGauges(&b, s)
 	writeHelp(&b, "fak_harness_elapsed_seconds", "Wall-clock seconds the fak guard harness was sampled this session.", "gauge")
 	fmt.Fprintf(&b, "fak_harness_elapsed_seconds %s\n", promFloat(s.Elapsed.Seconds()))
 	// Operator-question guard-stop tallies observed at this tick. Always emitted (zero
@@ -519,6 +541,11 @@ type ledgerRow struct {
 	GPUVRAMUsed      *uint64  `json:"gpu_vram_used_bytes,omitempty"`
 	GPUVRAMTotal     *uint64  `json:"gpu_vram_total_bytes,omitempty"`
 	GPUUtilPct       *float64 `json:"gpu_utilization_percent,omitempty"`
+	// Host is the box context (RAM/cores/load) plus the harness-as-fraction-of-host
+	// numbers, so a banked row stays interpretable without knowing which machine wrote
+	// it. Always present — Cores is always known — with per-axis omitempty inside
+	// (#2053).
+	Host hostJSON `json:"host"`
 	// Operator-question guard-stop tallies observed at this tick. NOT omitempty — a
 	// zero is a meaningful, honest reading (no such stops), so it is always present so
 	// a missing field can never be misread as "no stops recorded" (#4348).
@@ -578,6 +605,7 @@ func (s Snapshot) MarshalLedgerRow(mode, provider, agent string, now time.Time) 
 		GoHeapSysBytes: s.GoHeapSysBytes,
 		NumCPU:         s.NumCPU,
 		GOMAXPROCS:     s.GOMAXPROCS,
+		Host:           s.hostToJSON(),
 
 		OperatorDirectedStops: s.GuardStops.OperatorDirected,
 		FailOpenStops:         s.GuardStops.FailOpen,
