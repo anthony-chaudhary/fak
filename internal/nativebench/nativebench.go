@@ -176,6 +176,7 @@ var leafClassifications = []LeafClassification{{
 		Capabilities: []string{"syntactic_go_call_graph_traversal"},
 		Reason:       "codegraph also exposes generic graph construction and BFS; syntactic multi-file function/method call graph construction plus forward/reverse path traversal is contracted together",
 	},
+	{Leaf: "internal/closebatch", Disposition: DispositionCapability, Capabilities: []string{"budgeted_issue_close_batch_planning"}, Reason: "deterministic issue-close batching with mutation-budget holds and rollback commands"},
 	{
 		Leaf: "internal/codelint", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"go_syntax_validation"},
@@ -660,6 +661,7 @@ var contracts = []Contract{{
 		},
 		Witness: "../../docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
 	},
+	{Capability: "budgeted_issue_close_batch_planning", NativePath: "internal/closebatch/closebatch.go", Workload: "same seven issues, batch size three, five-call mutation budget, one-call reserve, exact allowed/held batches, costs, and rollback commands", Metrics: []string{"plan_accuracy", "false_plans", "allowed_batches", "held_batches", "request_cost_accuracy", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "fixed-size chunking only", Class: TunedBaseline, Source: "internal/closebatch/compare.go"}, {Name: "GitHub Issues", Class: FirstClassIntegration, Integration: "github", Source: "internal/closebatch/compare.go"}, {Name: "GitHub CLI issue close loop", Class: NextBest, Source: "https://cli.github.com/manual/gh_issue_close"}, {Name: "GitHub GraphQL mutation batching", Class: NextBest, Source: "https://docs.github.com/graphql"}, {Name: "Jira bulk transition", Class: NextBest, Source: "https://www.atlassian.com/software/jira"}, {Name: "Linear bulk issue update", Class: NextBest, Source: "https://linear.app"}}, Witness: "../../docs/benchmarks/ISSUE-CLOSE-BATCH-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"}},
 	{
 		Capability: "go_syntax_validation",
 		NativePath: "internal/codelint/packs.go",
