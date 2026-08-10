@@ -127,6 +127,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native bounded fsynced JSONL provider-cache snapshot persistence and tolerant replay",
 	},
 	{
+		Leaf: "internal/vcacheextract", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"codex_token_telemetry_sanitization"},
+		Reason:       "native Codex JSONL token-counter extraction, allowlist sanitization, and observed-turn conversion are covered; session discovery remains separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -446,6 +451,22 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "codex_token_telemetry_sanitization",
+		NativePath: "internal/vcacheextract/codex.go",
+		Workload:   "same four ordered mixed Codex JSONL records, exact two-row input/cached-token oracle, and forbidden prompt/tool/response field and byte-leak oracle across every arm",
+		Metrics:    []string{"eligible_rows", "missed_rows", "extra_rows", "counter_mismatches", "forbidden_fields", "forbidden_bytes", "parse_failures", "malformed_tail_rows", "latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "output_bytes", "network_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "raw JSONL pass-through", Class: TunedBaseline, Source: "internal/vcacheextract/compare.go"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "jq streaming projection", Class: NextBest, Source: "https://jqlang.org/manual/"},
+			{Name: "Vector VRL remap", Class: NextBest, Source: "https://vector.dev/docs/reference/vrl/"},
+			{Name: "Fluent Bit filter pipeline", Class: NextBest, Source: "https://docs.fluentbit.io/manual/pipeline/filters"},
+		},
+		Witness:      "../../docs/benchmarks/CODEX-TOKEN-SANITIZATION-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"opentelemetry", "prometheus"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
