@@ -37,19 +37,19 @@ import (
 
 // FloorBudgetTokens is the committed ceiling on fak's always-sent MCP tool-schema
 // floor, in ESTIMATED tokens. It is the measured baseline pinned in
-// docs/context-budget/mcp-tool-floor.md (26 tools · 5888 est. tokens · 23554 bytes).
+// docs/context-budget/mcp-tool-floor.md (19 tools · 4507 est. tokens · 20283 bytes).
 //
 // Changing this number is the whole point: it is the reviewable justification for a
 // change to the per-call floor. Raise it only alongside the tool that grew it; lower
-// it whenever a deferral banks a win. Re-pinned 24→26 tools (#3608 pass): tools had
-// landed in the registry without banking the grown floor, leaving the ratchet stale —
-// the same-commit re-pin the gate demands so the measured floor greens again.
-const FloorBudgetTokens = 5464
+// it whenever a deferral banks a win. Re-pinned 26→19 tools (#6011): #6022 retired the
+// repository index MCP tools, winning a 957-token reduction that was never banked and
+// left the ratchet stale — the same-commit re-pin the gate demands so it greens again.
+const FloorBudgetTokens = 4507
 
 // FloorRatchetSlackTokens is how far the measured floor may sit BELOW the budget
 // before the gate demands the ceiling be re-pinned. It absorbs incidental churn (a
 // reworded description) without nagging, while still forcing a real reduction to be
-// banked into the constant. ~4.6% of the current floor.
+// banked into the constant. ~5.5% of the current floor.
 const FloorRatchetSlackTokens = 250
 
 // Gate refusal reasons. These are the closed-vocabulary tokens the gate names, in the

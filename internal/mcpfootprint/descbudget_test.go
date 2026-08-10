@@ -92,9 +92,11 @@ func TestDescriptionBudgetDemandsBankedWin(t *testing.T) {
 // still admits, one past the slack refuses as stale.
 func TestDescriptionBudgetBandBoundaries(t *testing.T) {
 	// bytes -> tokens uses the shared 4.5-char JSON-schema divisor, so drive the band with a single description of
-	// known length: a description of tokens*4.5 bytes prices to exactly tokens.
+	// known length: a description of ceil(tokens*4.5) bytes prices to exactly tokens. The ceiling matters — an ODD
+	// token count needs the half-byte rounded UP, or the description prices one token short and the edge under test
+	// silently moves (a description-only ToolDef carries no name bytes to absorb the shortfall).
 	defsAt := func(tokens int) []agent.ToolDef {
-		return []agent.ToolDef{td("t", strings.Repeat("x", tokens*9/2), ``)}
+		return []agent.ToolDef{td("t", strings.Repeat("x", (tokens*9+1)/2), ``)}
 	}
 	const budget, slack = 100, 10
 	for _, tc := range []struct {
