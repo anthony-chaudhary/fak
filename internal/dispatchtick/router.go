@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
-
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 )
 
 const RouterSchema = "fleet-issue-lane-router/1"
@@ -16,6 +14,34 @@ const RouterSchema = "fleet-issue-lane-router/1"
 const BlockedByHumanLabel = "blocked-by-human"
 const MaxDispatchExpectedSteps = 8
 const ReasonDuplicateRisk = "ISSUE_DUPLICATE_RISK"
+
+type dispatchContractReview struct {
+	OK      bool
+	Reasons []string
+}
+
+const (
+	reasonScopeIncomplete = "ISSUE_SCOPE_INCOMPLETE"
+	reasonUnrouted        = "ISSUE_UNROUTED"
+	reasonPrivateBoundary = "ISSUE_PRIVATE_BOUNDARY"
+	reasonNotDispatchLeaf = "ISSUE_NOT_DISPATCH_LEAF"
+	reasonOversizedSteps  = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+)
+
+var dispatchPrivateCues = []string{
+	"fak-private", "private control bridge", "docs/private-comms-channel.md",
+	"oauth token", "api key", "secret key", "private key", "bearer token",
+}
+
+func dispatchPrivateBoundary(body string) bool {
+	body = strings.ToLower(body)
+	for _, cue := range dispatchPrivateCues {
+		if strings.Contains(body, cue) {
+			return true
+		}
+	}
+	return false
+}
 
 // ReasonBlockedByHuman is the skip reason a SkippedIssue carries when it was held back from
 // dispatch because it wears the blocked-by-human label — the subset a human must unblock. It
@@ -902,7 +928,7 @@ func IsTriageOnly(issue Issue) bool {
 func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 	workUnit := issueWorkUnit(issue)
 	expectedSteps := issueExpectedSteps(issue)
-	review := issueContractReview(issue)
+	review := reviewDispatchContract(issue)
 	reason := "ISSUE_NOT_DISPATCHABLE"
 	next := "add dispatch scope or remove the skip condition before sending this issue to a worker"
 	triageLabel := triageOnlyLabel(issue)
@@ -1141,23 +1167,36 @@ func IsDispatchable(issue Issue, blockedLabel string) bool {
 	return !IsBlockedByHuman(issue, blockedLabel) &&
 		!IsEpic(issue) &&
 		!IsTriageOnly(issue) &&
-		issueContractReview(issue).OK
+		reviewDispatchContract(issue).OK
 }
 
-func issueContractReview(issue Issue) issuecontract.Review {
-	labels := make([]issuecontract.IssueLabel, 0, len(issue.Labels))
-	for _, label := range issue.Labels {
-		labels = append(labels, issuecontract.IssueLabel{Name: label.Name})
+func reviewDispatchContract(issue Issue) dispatchContractReview {
+	sections := promptMarkdownSections(issue.Body)
+	has := func(names ...string) bool {
+		return strings.TrimSpace(firstPromptSection(sections, names...)) != ""
 	}
-	return issuecontract.ReviewIssueDraft(issuecontract.IssueDraft{
-		Number: issue.Number,
-		Title:  issue.Title,
-		Body:   issue.Body,
-		Labels: labels,
-	}, issuecontract.Options{})
+	missing := !has("current state") ||
+		!(has("scope") || (has("in scope") && has("out of scope"))) ||
+		!has("done condition", "done condition / witness") ||
+		!has("witness", "done condition / witness") ||
+		!has("likely files", "path hints", "paths", "files") ||
+		!has("parent context", "parent ref") ||
+		!has("why this is next", "why now") ||
+		!has("working spine") ||
+		!has("acceptance gate") ||
+		!has("closure binding")
+	if missing {
+		return dispatchContractReview{Reasons: []string{reasonScopeIncomplete}}
+	}
+	if !has("lane") && !has("likely files", "path hints", "paths", "files") {
+		return dispatchContractReview{Reasons: []string{reasonUnrouted}}
+	}
+	if dispatchPrivateBoundary(issue.Body) {
+		return dispatchContractReview{Reasons: []string{reasonPrivateBoundary}}
+	}
+	return dispatchContractReview{OK: true}
 }
-
-func firstIssueContractReason(review issuecontract.Review) string {
+func firstIssueContractReason(review dispatchContractReview) string {
 	if len(review.Reasons) == 0 {
 		return "ISSUE_NOT_DISPATCHABLE"
 	}
@@ -1166,15 +1205,15 @@ func firstIssueContractReason(review issuecontract.Review) string {
 
 func issueContractNextAction(reason string) string {
 	switch reason {
-	case issuecontract.ReasonScopeIncomplete:
+	case reasonScopeIncomplete:
 		return "add current state, scope, done condition, witness, likely files, and acceptance gate before dispatch"
-	case issuecontract.ReasonUnrouted:
+	case reasonUnrouted:
 		return "add a lane or path hints section that maps to a dispatch lane"
-	case issuecontract.ReasonPrivateBoundary:
+	case reasonPrivateBoundary:
 		return "remove or redact private/operator-only evidence before public worker dispatch"
-	case issuecontract.ReasonNotDispatchLeaf:
+	case reasonNotDispatchLeaf:
 		return "split the non-leaf work unit into worker-ready leaf issues"
-	case issuecontract.ReasonOversizedSteps:
+	case reasonOversizedSteps:
 		return fmt.Sprintf("split into child issues with <= %d expected steps each", MaxDispatchExpectedSteps)
 	default:
 		return "scope the issue until the shared issue contract marks it dispatchable"
