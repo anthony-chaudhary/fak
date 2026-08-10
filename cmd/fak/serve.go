@@ -278,6 +278,11 @@ func cmdServe(argv []string) {
 	parseDur := time.Since(tParse)
 
 	explicit := explicitFlagNames(fs)
+	toolPlugins, toolPreferences, err := compileToolPluginConfig(manifest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
+		os.Exit(2)
+	}
 	if *sf.printEffectiveConfig {
 		if err := json.NewEncoder(os.Stdout).Encode(effectiveServeConfig(sf, manifest, manifestPresent, explicit)); err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: print effective config: %v\n", err)
@@ -344,7 +349,7 @@ func cmdServe(argv []string) {
 	// startup phase.
 	tPolicy := time.Now()
 	applyPolicy(*sf.policyPath)
-	rt := &serveRuntime{t0: t0, startupPhases: []gateway.StartupPhase{
+	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, startupPhases: []gateway.StartupPhase{
 		{Name: "flag-parse", Dur: parseDur},
 		{Name: "policy-load", Dur: time.Since(tPolicy)},
 	}}
@@ -511,6 +516,8 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		RequireKey:                   rt.requireKey,
 		KeyPrincipals:                keyPrincipals,
 		VDSO:                         *sf.vdso,
+		ToolPlugins:                  rt.toolPlugins,
+		ToolPreferences:              rt.toolPreferences,
 		Invalidation:                 *sf.invalidation,
 		Version:                      appversion.Current(),
 		ReloadPolicy:                 policyReloader(*sf.policyPath),

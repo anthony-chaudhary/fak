@@ -30,6 +30,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
 // serveRuntime carries the state the serve boot stages resolve on the way to a
@@ -57,7 +58,9 @@ type serveRuntime struct {
 	transObs  session.TransitionObserver
 	budgetObs session.BudgetObserver
 
-	srv *gateway.Server
+	toolPlugins     []toolplugin.Plugin
+	toolPreferences toolplugin.PreferenceLayers
+	srv             *gateway.Server
 }
 
 // resolveServeModelSources normalizes the --gguf/--tokenizer sources before any

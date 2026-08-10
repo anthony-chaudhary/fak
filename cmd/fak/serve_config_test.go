@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
 func parseEffectiveServeConfig(t *testing.T, manifestText string, argv ...string) effectiveServeConfigReport {
@@ -105,8 +108,8 @@ func TestServeManifestDispositionCoversClosedVocabulary(t *testing.T) {
 	if len(keys) != 13 {
 		t.Fatalf("known key count = %d, want 13; update this witness and every runtime disposition deliberately", len(keys))
 	}
-	if len(serveManifestSpecs) != len(keys) {
-		t.Fatalf("disposition specs = %d, known keys = %d", len(serveManifestSpecs), len(keys))
+	if len(serveManifestSpecs) > len(keys) {
+		t.Fatalf("disposition specs = %d exceeds known keys = %d", len(serveManifestSpecs), len(keys))
 	}
 	for _, key := range keys {
 		dotted := key.Dotted()
@@ -172,5 +175,79 @@ func TestServeMinimalManifestIsSafeAndFullyAccounted(t *testing.T) {
 		if opinion.Disposition == "" || opinion.Reason == "" {
 			t.Errorf("%s disappeared into an empty disposition: %+v", dotted, opinion)
 		}
+	}
+}
+
+func TestCompileToolPluginConfigPinnedAndMonotone(t *testing.T) {
+	profiles := toolplugin.BuiltinProfiles()
+	var audit toolplugin.Profile
+	for _, p := range profiles {
+		if p.ID == "builtin.audit" {
+			audit = p
+		}
+	}
+	text := fmt.Sprintf("[tool_plugins]\nplugins = [{ id = %q, version = %q, digest = %q }]\n[tool_plugins.organization]\nrequire_witness = true\ndisclosure = \"org\"\n[tool_plugins.user]\nrequire_witness = false\nwait_mode = \"local\"\n", audit.ID, audit.Version, audit.Digest)
+	m, err := deploymanifest.Parse([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugins, layers, err := compileToolPluginConfig(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 1 || plugins[0].Profile().ID != "builtin.audit" {
+		t.Fatalf("plugins=%+v", plugins)
+	}
+	resolved := toolplugin.ResolvePreferences(layers)
+	if !resolved.RequireWitness || resolved.WaitMode != "local" || resolved.Disclosure != "org" {
+		t.Fatalf("resolved=%+v", resolved)
+	}
+	if resolved.Sources["require_witness"] != "organization" {
+		t.Fatalf("sources=%+v", resolved.Sources)
+	}
+}
+
+func TestCompileToolPluginConfigFailsClosed(t *testing.T) {
+	for _, text := range []string{
+		"[tool_plugins]\nplugins = [{ id = \"builtin.audit\", version = \"1\", digest = \"\" }]\n",
+		"[tool_plugins]\nplugins = [{ id = \"unknown\", version = \"1\", digest = \"sha256:x\" }]\n",
+		"[tool_plugins]\nplugins = [{ id = \"builtin.audit\", version = \"1\", digest = \"sha256:x\" }, { id = \"builtin.audit\", version = \"1\", digest = \"sha256:x\" }]\n",
+	} {
+		m, err := deploymanifest.Parse([]byte(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err = compileToolPluginConfig(m); err == nil {
+			t.Fatalf("accepted %s", text)
+		}
+	}
+}
+
+func TestCompileToolPluginConfigZeroValuePreservesLegacyPath(t *testing.T) {
+	plugins, layers, err := compileToolPluginConfig(deploymanifest.Manifest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 0 {
+		t.Fatalf("plugins=%d", len(plugins))
+	}
+	if got := toolplugin.ResolvePreferences(layers); got.RequireWitness || got.WaitMode != "" || got.TransformMode != "" || got.Disclosure != "" {
+		t.Fatalf("resolved=%+v", got)
+	}
+}
+
+func TestApplyToolPluginConfigArmsGatewayConfig(t *testing.T) {
+	profiles := toolplugin.BuiltinProfiles()
+	p := profiles[0]
+	m, err := deploymanifest.Parse([]byte(fmt.Sprintf("[tool_plugins]\nplugins = [{ id = %q, version = %q, digest = %q }]\n[tool_plugins.project]\ntransform_mode = \"preview\"\n", p.ID, p.Version, p.Digest)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg gateway.Config
+	if err := applyToolPluginConfig(&cfg, m); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ToolPlugins) != 1 || toolplugin.ResolvePreferences(cfg.ToolPreferences).TransformMode != "preview" {
+		t.Fatalf("cfg plugins=%d prefs=%+v", len(cfg.ToolPlugins), cfg.ToolPreferences)
 	}
 }

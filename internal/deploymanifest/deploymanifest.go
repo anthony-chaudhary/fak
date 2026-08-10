@@ -132,6 +132,27 @@ type Observability struct {
 	Bind    string // host:port the metrics endpoint binds
 }
 
+type PluginSelection struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Digest  string `json:"digest"`
+}
+type PreferenceLayer struct {
+	RequireWitness     bool   `json:"require_witness"`
+	WitnessRoute       string `json:"witness_route"`
+	WaitMode           string `json:"wait_mode"`
+	TransformMode      string `json:"transform_mode"`
+	Disclosure         string `json:"disclosure"`
+	Timeout            string `json:"timeout"`
+	ResumeNotification string `json:"resume_notification"`
+}
+type ToolPlugins struct {
+	Plugins      []PluginSelection `json:"plugins"`
+	Organization PreferenceLayer   `json:"organization"`
+	Project      PreferenceLayer   `json:"project"`
+	User         PreferenceLayer   `json:"user"`
+}
+
 // Manifest is the parsed, defaulted `fak.toml`. Every field is typed so a
 // consumer reads a value, never re-parses text.
 type Manifest struct {
@@ -143,6 +164,7 @@ type Manifest struct {
 	Tenants        Tenants
 	AgentTemplates AgentTemplates
 	Observability  Observability
+	ToolPlugins    ToolPlugins
 	present        map[string]bool
 }
 
@@ -203,6 +225,26 @@ var keyDescriptions = map[string]string{
 	"runtimes.gateway":       "whether the all-in-one topology starts the gateway",
 	"runtimes.model":         "completion source: upstream or in-kernel",
 	"tenants.enabled":        "whether the all-in-one topology enables tenant isolation",
+
+	"tool_plugins.plugins":                      "pinned built-in tool-plugin profiles selected for the monotone gateway host",
+	"tool_plugins.organization.wait_mode":       "organization preference for local execution within the capability floor",
+	"tool_plugins.organization.transform_mode":  "organization preference for admitted cached results",
+	"tool_plugins.organization.require_witness": "organization witness requirement; lower layers cannot remove it",
+	"tool_plugins.organization.disclosure":      "organization-selected model route within deployment policy",
+	"tool_plugins.organization.witness_route":   "organization-selected witness route",
+	"tool_plugins.organization.timeout":         "organization-selected cost class",
+	"tool_plugins.project.wait_mode":            "project preference for local execution within the capability floor",
+	"tool_plugins.project.transform_mode":       "project preference for admitted cached results",
+	"tool_plugins.project.require_witness":      "project witness requirement; the user layer cannot remove it",
+	"tool_plugins.project.disclosure":           "project-selected model route within deployment policy",
+	"tool_plugins.project.witness_route":        "project-selected witness route",
+	"tool_plugins.project.timeout":              "project-selected cost class",
+	"tool_plugins.user.wait_mode":               "user preference for local execution within higher-authority policy",
+	"tool_plugins.user.transform_mode":          "user preference for admitted cached results",
+	"tool_plugins.user.require_witness":         "user-requested witness requirement",
+	"tool_plugins.user.disclosure":              "user-selected model route within higher-authority policy",
+	"tool_plugins.user.witness_route":           "user-selected witness route",
+	"tool_plugins.user.timeout":                 "user-selected cost class",
 }
 
 // Descriptors returns the complete configuration vocabulary with witnessed
@@ -239,6 +281,8 @@ func (m Manifest) Value(key Key) any {
 		return m.Audit.RetentionDays
 	case "tenants.enabled":
 		return m.Tenants.Enabled
+	case "tool_plugins.plugins":
+		return append([]PluginSelection(nil), m.ToolPlugins.Plugins...)
 	case "agent_templates.dir":
 		return m.AgentTemplates.Dir
 	case "observability.metrics":
@@ -246,8 +290,40 @@ func (m Manifest) Value(key Key) any {
 	case "observability.bind":
 		return m.Observability.Bind
 	default:
+		if strings.HasPrefix(key.Section, "tool_plugins.") {
+			return preferenceValue(m, key.Section, key.Name)
+		}
 		panic("unknown fak.toml key: " + key.Dotted())
 	}
+}
+
+func preferenceValue(m Manifest, section, key string) any {
+	var p PreferenceLayer
+	switch section {
+	case "tool_plugins.organization":
+		p = m.ToolPlugins.Organization
+	case "tool_plugins.project":
+		p = m.ToolPlugins.Project
+	case "tool_plugins.user":
+		p = m.ToolPlugins.User
+	}
+	switch key {
+	case "wait_mode":
+		return p.WaitMode
+	case "transform_mode":
+		return p.TransformMode
+	case "require_witness":
+		return p.RequireWitness
+	case "disclosure":
+		return p.Disclosure
+	case "witness_route":
+		return p.WitnessRoute
+	case "timeout":
+		return p.Timeout
+	case "resume_notification":
+		return p.ResumeNotification
+	}
+	return nil
 }
 
 // KnownKeys returns the complete closed vocabulary in stable dotted order.
@@ -278,14 +354,18 @@ func (m Manifest) DeclaredKeys() []Key {
 // The parser refuses any section or key not in this table — the fail-closed
 // contract that kills silent drift.
 var knownSections = map[string]map[string]bool{
-	"runtimes":        {"gateway": true, "agent_runtime": true, "model": true},
-	"policy":          {"floor": true, "inline": true},
-	"auth":            {"require_key_env": true},
-	"budgets":         {"default_tokens": true},
-	"audit":           {"journal": true, "retention_days": true},
-	"tenants":         {"enabled": true},
-	"agent_templates": {"dir": true},
-	"observability":   {"metrics": true, "bind": true},
+	"runtimes":                  {"gateway": true, "agent_runtime": true, "model": true},
+	"policy":                    {"floor": true, "inline": true},
+	"auth":                      {"require_key_env": true},
+	"budgets":                   {"default_tokens": true},
+	"audit":                     {"journal": true, "retention_days": true},
+	"tenants":                   {"enabled": true},
+	"agent_templates":           {"dir": true},
+	"observability":             {"metrics": true, "bind": true},
+	"tool_plugins":              {"plugins": true},
+	"tool_plugins.organization": {"wait_mode": true, "transform_mode": true, "require_witness": true, "disclosure": true, "witness_route": true, "timeout": true},
+	"tool_plugins.project":      {"wait_mode": true, "transform_mode": true, "require_witness": true, "disclosure": true, "witness_route": true, "timeout": true},
+	"tool_plugins.user":         {"wait_mode": true, "transform_mode": true, "require_witness": true, "disclosure": true, "witness_route": true, "timeout": true},
 }
 
 // validModel is the closed set of runtime model sources.
@@ -468,6 +548,25 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 			return err
 		}
 		m.AgentTemplates.Dir = v
+	case "tool_plugins":
+		v, err := parsePluginSelections(rawVal, lineNo)
+		if err != nil {
+			return err
+		}
+		m.ToolPlugins.Plugins = v
+	case "tool_plugins.organization", "tool_plugins.project", "tool_plugins.user":
+		var v any
+		var err error
+		switch key {
+		case "require_witness":
+			v, err = boolVal()
+		default:
+			v, err = stringVal(key)
+		}
+		if err != nil {
+			return err
+		}
+		setPreferenceValue(m, section, key, v)
 	case "observability":
 		if key == "metrics" {
 			v, err := boolVal()
@@ -551,6 +650,37 @@ func (m Manifest) WithOverrides(o Overrides) Manifest {
 // `fak init` emits. It is intentionally the smallest reviewable starting point:
 // it declares the runtimes and auth an operator will almost always edit, with
 // the rest carried by Defaults. It round-trips: Parse(Minimal()) succeeds.
+func setPreferenceValue(m *Manifest, section, key string, value any) {
+	var p *PreferenceLayer
+	switch section {
+	case "tool_plugins.organization":
+		p = &m.ToolPlugins.Organization
+	case "tool_plugins.project":
+		p = &m.ToolPlugins.Project
+	case "tool_plugins.user":
+		p = &m.ToolPlugins.User
+	}
+	if p == nil {
+		return
+	}
+	switch key {
+	case "wait_mode":
+		p.WaitMode = value.(string)
+	case "transform_mode":
+		p.TransformMode = value.(string)
+	case "require_witness":
+		p.RequireWitness = value.(bool)
+	case "disclosure":
+		p.Disclosure = value.(string)
+	case "witness_route":
+		p.WitnessRoute = value.(string)
+	case "timeout":
+		p.Timeout = value.(string)
+	case "resume_notification":
+		p.ResumeNotification = value.(string)
+	}
+}
+
 func Minimal() []byte {
 	return []byte(`# fak.toml — unified all-in-one deployment manifest (#3421).
 # One declarative file for the whole deployment: the same reviewable artifact
@@ -595,6 +725,106 @@ func stripComment(s string) string {
 }
 
 // parseString accepts a double-quoted string and returns its contents.
+func parsePluginSelections(raw string, line int) ([]PluginSelection, error) {
+	bad := func(reason Reason, key, msg string) error {
+		return &LoadError{Reason: reason, Section: "tool_plugins", Key: key, Line: line, Message: msg}
+	}
+	var out []PluginSelection
+	raw = strings.TrimSpace(raw)
+	if raw == "[]" {
+		return out, nil
+	}
+	if !strings.HasPrefix(raw, "[") || !strings.HasSuffix(raw, "]") {
+		return nil, bad(ReasonBadValue, "plugins", "expected array of inline tables")
+	}
+	body := strings.TrimSpace(raw[1 : len(raw)-1])
+	depth, inString, escaped, start := 0, false, false, -1
+	var entries []string
+	for i, r := range body {
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inString = true
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			depth--
+			if depth < 0 {
+				return nil, bad(ReasonBadValue, "plugins", "unbalanced inline table")
+			}
+			if depth == 0 && start >= 0 {
+				entries = append(entries, body[start:i+1])
+				start = -1
+			}
+		}
+	}
+	if depth != 0 || inString {
+		return nil, bad(ReasonBadValue, "plugins", "unterminated inline table")
+	}
+	for _, entry := range entries {
+		fields := map[string]string{}
+		for _, part := range splitInlineFields(strings.TrimSpace(entry[1 : len(entry)-1])) {
+			k, v, ok := strings.Cut(part, "=")
+			if !ok {
+				return nil, bad(ReasonBadValue, "plugins", "invalid inline field")
+			}
+			key := strings.TrimSpace(k)
+			if key != "id" && key != "version" && key != "digest" {
+				return nil, bad(ReasonUnknownKey, "plugins."+key, "unknown plugin field")
+			}
+			decoded, ok := parseString(strings.TrimSpace(v))
+			if !ok {
+				return nil, bad(ReasonBadValue, "plugins."+key, "must be a quoted string")
+			}
+			fields[key] = decoded
+		}
+		out = append(out, PluginSelection{ID: fields["id"], Version: fields["version"], Digest: fields["digest"]})
+	}
+	return out, nil
+}
+func splitInlineFields(s string) []string {
+	var out []string
+	inString, escaped, start := false, false, 0
+	for i, r := range s {
+		if inString {
+			if escaped {
+				escaped = false
+			} else if r == '\\' {
+				escaped = true
+			} else if r == '"' {
+				inString = false
+			}
+			continue
+		}
+		if r == '"' {
+			inString = true
+		} else if r == ',' {
+			out = append(out, strings.TrimSpace(s[start:i]))
+			start = i + 1
+		}
+	}
+	if strings.TrimSpace(s[start:]) != "" {
+		out = append(out, strings.TrimSpace(s[start:]))
+	}
+	return out
+}
+
 func parseString(s string) (string, bool) {
 	if len(s) >= 2 && strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
 		return s[1 : len(s)-1], true

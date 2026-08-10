@@ -1942,6 +1942,11 @@
           "category": "incidental",
           "reason": "Local host outcome corresponding to existing witness requirement; not a new proof",
           "token": "WITNESS_REQUIRED"
+        },
+        {
+          "category": "incidental",
+          "reason": "built-in plugin trace reason, not a distinct witness proof concept",
+          "token": "PROFILE_REQUIRES_WITNESS"
         }
       ],
       "id": "witness-proof",
@@ -1957,6 +1962,7 @@
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
         "NewTreeWitness",
+        "PROFILE_REQUIRES_WITNESS",
         "QualityWitness",
         "REVOCABLE",
         "StageAttest",

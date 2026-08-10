@@ -62,10 +62,10 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 52 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########################.. 388/425
+  guard-gate       ##########################.. 388/424
   plan             ##########################.. 319/341
   session-runtime  #########################... 213/234
-  policy-capability #########################... 153/170
+  policy-capability #########################... 153/171
   context-ctx      ##########################.. 202/216
   render-materialize ##########################.. 177/190
   cache            ###########################. 261/270
@@ -2440,10 +2440,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 388 | 425 | 37 |
+| guard-gate | 388 | 424 | 36 |
 | plan | 319 | 341 | 22 |
 | session-runtime | 213 | 234 | 21 |
-| policy-capability | 153 | 170 | 17 |
+| policy-capability | 153 | 171 | 18 |
 | context-ctx | 202 | 216 | 14 |
 | render-materialize | 177 | 190 | 13 |
 | cache | 261 | 270 | 9 |

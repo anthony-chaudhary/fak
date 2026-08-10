@@ -9,8 +9,8 @@ func TestCurrentConfigSurfaceIsBoundedDefaultedAndDescribed(t *testing.T) {
 	if err := report.Check(); err != nil {
 		t.Fatalf("%v: %+v", err, report.Findings)
 	}
-	if report.Keys != 13 {
-		t.Fatalf("keys=%d, want witnessed vocabulary of 13", report.Keys)
+	if report.Keys != 32 {
+		t.Fatalf("keys=%d, want witnessed vocabulary of 32", report.Keys)
 	}
 	if report.Postures != 4 {
 		t.Fatalf("postures=%d, want 4", report.Postures)

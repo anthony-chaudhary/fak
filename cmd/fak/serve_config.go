@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
 // serveConfigPath finds the bootstrap flag that must be known before the full
@@ -80,10 +82,12 @@ type manifestOpinion struct {
 }
 
 type effectiveServeConfigReport struct {
-	Schema   string                          `json:"schema"`
-	Config   string                          `json:"config,omitempty"`
-	Values   map[string]effectiveConfigValue `json:"values"`
-	Opinions map[string]manifestOpinion      `json:"opinions"`
+	Schema          string                          `json:"schema"`
+	Config          string                          `json:"config,omitempty"`
+	Values          map[string]effectiveConfigValue `json:"values"`
+	Opinions        map[string]manifestOpinion      `json:"opinions"`
+	ToolPlugins     []toolplugin.Profile            `json:"tool_plugins,omitempty"`
+	ToolPreferences toolplugin.ResolvedPreference   `json:"tool_preferences"`
 }
 
 type serveManifestSpec struct {
@@ -113,7 +117,35 @@ var serveManifestSpecs = map[string]serveManifestSpec{
 	"tenants.enabled":        {reason: "tenant lifecycle belongs to the all-in-one orchestrator", nextAction: "leave tenants disabled until fak up owns tenant provisioning"},
 }
 
+func compileToolPluginConfig(m deploymanifest.Manifest) ([]toolplugin.Plugin, toolplugin.PreferenceLayers, error) {
+	plugins := make([]toolplugin.Plugin, 0, len(m.ToolPlugins.Plugins))
+	seen := map[string]bool{}
+	for _, sel := range m.ToolPlugins.Plugins {
+		if seen[sel.ID] {
+			return nil, toolplugin.PreferenceLayers{}, fmt.Errorf("PLUGIN_DUPLICATE: %s", sel.ID)
+		}
+		seen[sel.ID] = true
+		p, err := toolplugin.ResolvePinned(sel.ID, sel.Version, sel.Digest)
+		if err != nil {
+			return nil, toolplugin.PreferenceLayers{}, err
+		}
+		plugins = append(plugins, p)
+	}
+	toPref := func(p deploymanifest.PreferenceLayer) toolplugin.Preference {
+		return toolplugin.Preference{RequireWitness: p.RequireWitness, WitnessRoute: p.WitnessRoute, WaitMode: p.WaitMode, TransformMode: p.TransformMode, Disclosure: p.Disclosure, Timeout: p.Timeout, ResumeNotification: p.ResumeNotification}
+	}
+	return plugins, toolplugin.PreferenceLayers{Organization: toPref(m.ToolPlugins.Organization), Project: toPref(m.ToolPlugins.Project), User: toPref(m.ToolPlugins.User)}, nil
+}
+func toolPluginProfiles(ps []toolplugin.Plugin) []toolplugin.Profile {
+	out := make([]toolplugin.Profile, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, p.Profile())
+	}
+	return out
+}
+
 func effectiveServeConfig(sf *serveFlags, m deploymanifest.Manifest, hasManifest bool, explicit map[string]bool) effectiveServeConfigReport {
+	plugins, prefs, _ := compileToolPluginConfig(m)
 	source := func(flagName, section, key string) string {
 		if explicit[flagName] {
 			return "flag"
@@ -132,7 +164,9 @@ func effectiveServeConfig(sf *serveFlags, m deploymanifest.Manifest, hasManifest
 			"require_key_env":       {Value: *sf.requireKeyEnv, Source: source("require-key-env", "auth", "require_key_env")},
 			"context_budget_tokens": {Value: *sf.contextBudgetTokens, Source: source("context-budget-tokens", "budgets", "default_tokens")},
 		},
-		Opinions: serveManifestOpinions(m),
+		Opinions:        serveManifestOpinions(m),
+		ToolPlugins:     toolPluginProfiles(plugins),
+		ToolPreferences: toolplugin.ResolvePreferences(prefs),
 	}
 }
 
@@ -141,7 +175,13 @@ func serveManifestOpinions(m deploymanifest.Manifest) map[string]manifestOpinion
 	opinions := make(map[string]manifestOpinion, len(serveManifestSpecs))
 	for _, key := range deploymanifest.KnownKeys() {
 		dotted := key.Dotted()
-		spec := serveManifestSpecs[dotted]
+		spec, ok := serveManifestSpecs[dotted]
+		if !ok {
+			if strings.HasPrefix(dotted, "tool_plugins.") {
+				continue
+			}
+			panic("missing serve manifest disposition: " + dotted)
+		}
 		value := manifestValue(m, dotted)
 		opinion := manifestOpinion{
 			Value:      value,
@@ -214,4 +254,14 @@ func manifestValue(m deploymanifest.Manifest, dotted string) any {
 	default:
 		panic("unaccounted fak.toml key: " + dotted)
 	}
+}
+
+func applyToolPluginConfig(cfg *gateway.Config, m deploymanifest.Manifest) error {
+	plugins, prefs, err := compileToolPluginConfig(m)
+	if err != nil {
+		return err
+	}
+	cfg.ToolPlugins = plugins
+	cfg.ToolPreferences = prefs
+	return nil
 }
