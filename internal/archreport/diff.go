@@ -89,13 +89,15 @@ type LateralBridgeChange struct {
 }
 
 type LateralEdgeConnectivityChange struct {
-	Tier      int    `json:"tier"`
-	TierName  string `json:"tier_name"`
-	Left      string `json:"left"`
-	Right     string `json:"right"`
-	BeforeCut int    `json:"before_cut"`
-	AfterCut  int    `json:"after_cut"`
-	Delta     int    `json:"delta"`
+	Tier           int              `json:"tier"`
+	TierName       string           `json:"tier_name"`
+	Left           string           `json:"left"`
+	Right          string           `json:"right"`
+	BeforeCut      int              `json:"before_cut"`
+	AfterCut       int              `json:"after_cut"`
+	Delta          int              `json:"delta"`
+	BeforeCutEdges []LateralCutEdge `json:"before_cut_edges"`
+	AfterCutEdges  []LateralCutEdge `json:"after_cut_edges"`
 }
 
 type LateralResilientPair struct {
@@ -252,7 +254,12 @@ func Diff(before, after Report) ReportDiff {
 	beforeCuts, afterCuts := lateralPairCutSet(before), lateralPairCutSet(after)
 	for key, afterCut := range afterCuts {
 		if beforeCut, ok := beforeCuts[key]; ok && beforeCut.Cut != afterCut.Cut {
-			out.LateralEdgeConnectivityChanges = append(out.LateralEdgeConnectivityChanges, LateralEdgeConnectivityChange{Tier: afterCut.Tier, TierName: afterCut.TierName, Left: afterCut.Left, Right: afterCut.Right, BeforeCut: beforeCut.Cut, AfterCut: afterCut.Cut, Delta: afterCut.Cut - beforeCut.Cut})
+			out.LateralEdgeConnectivityChanges = append(out.LateralEdgeConnectivityChanges, LateralEdgeConnectivityChange{
+				Tier: afterCut.Tier, TierName: afterCut.TierName, Left: afterCut.Left, Right: afterCut.Right,
+				BeforeCut: beforeCut.Cut, AfterCut: afterCut.Cut, Delta: afterCut.Cut - beforeCut.Cut,
+				BeforeCutEdges: append([]LateralCutEdge(nil), beforeCut.CutEdges...),
+				AfterCutEdges:  append([]LateralCutEdge(nil), afterCut.CutEdges...),
+			})
 		}
 	}
 	for name, a := range afterLeaves {
@@ -380,6 +387,7 @@ type lateralPairCut struct {
 	Tier                  int
 	TierName, Left, Right string
 	Cut                   int
+	CutEdges              []LateralCutEdge
 }
 
 func lateralPairCutSet(r Report) map[string]lateralPairCut {
@@ -388,7 +396,7 @@ func lateralPairCutSet(r Report) map[string]lateralPairCut {
 		for _, pair := range block.PairCuts {
 			key := fmt.Sprintf("%d\x00%s\x00%s", block.Tier, pair.Left, pair.Right)
 			if old, ok := out[key]; !ok || pair.Cut > old.Cut {
-				out[key] = lateralPairCut{block.Tier, block.TierName, pair.Left, pair.Right, pair.Cut}
+				out[key] = lateralPairCut{Tier: block.Tier, TierName: block.TierName, Left: pair.Left, Right: pair.Right, Cut: pair.Cut, CutEdges: append([]LateralCutEdge(nil), pair.CutEdges...)}
 			}
 		}
 	}

@@ -311,7 +311,7 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 		fmt.Fprintf(stdout, "  ! resolved lateral-resilient-pair tier=%s(%d) %s <=> %s\n", pair.TierName, pair.Tier, pair.Left, pair.Right)
 	}
 	for _, change := range diff.LateralEdgeConnectivityChanges {
-		fmt.Fprintf(stdout, "  ~ lateral-edge-connectivity tier=%s(%d) %s <=> %s cut %d -> %d (%+d)\n", change.TierName, change.Tier, change.Left, change.Right, change.BeforeCut, change.AfterCut, change.Delta)
+		fmt.Fprintf(stdout, "  ~ lateral-edge-connectivity tier=%s(%d) %s <=> %s cut %d -> %d (%+d) witnesses %s -> %s\n", change.TierName, change.Tier, change.Left, change.Right, change.BeforeCut, change.AfterCut, change.Delta, architectureCutEdges(change.BeforeCutEdges), architectureCutEdges(change.AfterCutEdges))
 	}
 	for _, change := range diff.TierGapChanges {
 		fmt.Fprintf(stdout, "  ~ tier-gap %s floor %d -> %d, gap %d -> %d (%+d)\n", change.Leaf, change.BeforeFloor, change.AfterFloor, change.BeforeGap, change.AfterGap, change.Delta)
@@ -377,6 +377,14 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 		return 3
 	}
 	return 0
+}
+
+func architectureCutEdges(edges []archreport.LateralCutEdge) []string {
+	out := make([]string, 0, len(edges))
+	for _, edge := range edges {
+		out = append(out, edge.Left+"--"+edge.Right)
+	}
+	return out
 }
 
 func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
