@@ -123,6 +123,18 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %-22s %d\n", hotspot.Name, hotspot.FanIn)
 		}
 	}
+	if *leaf == "" && len(report.FanOutHotspots) > 0 {
+		fmt.Fprintln(stdout, "  fan-out hotspots (direct dependency burden):")
+		for _, hotspot := range report.FanOutHotspots {
+			fmt.Fprintf(stdout, "    %-22s %d\n", hotspot.Name, hotspot.FanOut)
+		}
+	}
+	if *leaf == "" && len(report.DependencyHotspots) > 0 {
+		fmt.Fprintln(stdout, "  dependency hotspots (transitive forward burden):")
+		for _, hotspot := range report.DependencyHotspots {
+			fmt.Fprintf(stdout, "    %-22s reach=%d depth=%d fan-out=%d\n", hotspot.Name, hotspot.DependencyReach, hotspot.DependencyDepth, hotspot.FanOut)
+		}
+	}
 	if *leaf == "" && len(report.BlastHotspots) > 0 {
 		fmt.Fprintln(stdout, "  blast hotspots (transitive impact):")
 		for _, hotspot := range report.BlastHotspots {

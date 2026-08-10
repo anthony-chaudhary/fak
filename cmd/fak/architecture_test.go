@@ -51,6 +51,43 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 	}
 }
 
+func TestArchitectureTextRendersDependencyAndFanOutHotspots(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"broad":2,"deep":2,"mid":1,"x":0,"y":0,"z":0}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/broad/broad.go", `package broad
+import (_ "github.com/anthony-chaudhary/fak/internal/x"; _ "github.com/anthony-chaudhary/fak/internal/y"; _ "github.com/anthony-chaudhary/fak/internal/z")
+`)
+	mustWriteArchitectureFile(t, root, "internal/deep/deep.go", `package deep
+import _ "github.com/anthony-chaudhary/fak/internal/mid"
+`)
+	mustWriteArchitectureFile(t, root, "internal/mid/mid.go", `package mid
+import _ "github.com/anthony-chaudhary/fak/internal/x"
+`)
+	for _, leaf := range []string{"x", "y", "z"} {
+		mustWriteArchitectureFile(t, root, "internal/"+leaf+"/"+leaf+".go", "package "+leaf+"\n")
+	}
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"fan-out hotspots (direct dependency burden):", "broad                  3", "dependency hotspots (transitive forward burden):", "broad                  reach=3 depth=1 fan-out=3", "deep                   reach=2 depth=2 fan-out=1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "deep"}); code != 0 {
+		t.Fatalf("scoped code=%d stderr=%s", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "dependency hotspots") || strings.Contains(out.String(), "fan-out hotspots") {
+		t.Fatalf("scoped output leaked whole-graph tables: %s", out.String())
+	}
+}
+
 func TestArchitectureTextRendersDependencyReachAndPaths(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

@@ -58,6 +58,18 @@ type Hotspot struct {
 	FanIn int    `json:"fan_in"`
 }
 
+type FanOutHotspot struct {
+	Name   string `json:"name"`
+	FanOut int    `json:"fan_out"`
+}
+
+type DependencyHotspot struct {
+	Name            string `json:"name"`
+	FanOut          int    `json:"fan_out"`
+	DependencyReach int    `json:"dependency_reach"`
+	DependencyDepth int    `json:"dependency_depth"`
+}
+
 type BlastHotspot struct {
 	Name        string `json:"name"`
 	BlastRadius int    `json:"blast_radius"`
@@ -172,6 +184,8 @@ type Report struct {
 	Tiers                     []Tier                     `json:"tiers"`
 	Leaves                    []Leaf                     `json:"leaves"`
 	Hotspots                  []Hotspot                  `json:"hotspots,omitempty"`
+	FanOutHotspots            []FanOutHotspot            `json:"fan_out_hotspots,omitempty"`
+	DependencyHotspots        []DependencyHotspot        `json:"dependency_hotspots,omitempty"`
 	BlastHotspots             []BlastHotspot             `json:"blast_hotspots,omitempty"`
 	Edges                     []ArchitectureEdge         `json:"edges,omitempty"`
 	LateralComponents         []LateralComponent         `json:"lateral_components,omitempty"`
@@ -312,6 +326,12 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			allLeaves[i].TransitiveDependents[j] = path.Dependent
 		}
 		allLeaves[i].BlastRadius = len(allLeaves[i].BlastPaths)
+		if len(allLeaves[i].Dependencies) > 0 {
+			report.FanOutHotspots = append(report.FanOutHotspots, FanOutHotspot{Name: allLeaves[i].Name, FanOut: len(allLeaves[i].Dependencies)})
+		}
+		if allLeaves[i].DependencyReach > 0 {
+			report.DependencyHotspots = append(report.DependencyHotspots, DependencyHotspot{Name: allLeaves[i].Name, FanOut: len(allLeaves[i].Dependencies), DependencyReach: allLeaves[i].DependencyReach, DependencyDepth: allLeaves[i].DependencyDepth})
+		}
 		if allLeaves[i].BlastRadius > 0 {
 			maxHops := 0
 			for _, path := range allLeaves[i].BlastPaths {
@@ -342,6 +362,24 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 		return report.Hotspots[i].Name < report.Hotspots[j].Name
 	})
+	sort.Slice(report.FanOutHotspots, func(i, j int) bool {
+		if report.FanOutHotspots[i].FanOut != report.FanOutHotspots[j].FanOut {
+			return report.FanOutHotspots[i].FanOut > report.FanOutHotspots[j].FanOut
+		}
+		return report.FanOutHotspots[i].Name < report.FanOutHotspots[j].Name
+	})
+	sort.Slice(report.DependencyHotspots, func(i, j int) bool {
+		if report.DependencyHotspots[i].DependencyReach != report.DependencyHotspots[j].DependencyReach {
+			return report.DependencyHotspots[i].DependencyReach > report.DependencyHotspots[j].DependencyReach
+		}
+		if report.DependencyHotspots[i].DependencyDepth != report.DependencyHotspots[j].DependencyDepth {
+			return report.DependencyHotspots[i].DependencyDepth > report.DependencyHotspots[j].DependencyDepth
+		}
+		if report.DependencyHotspots[i].FanOut != report.DependencyHotspots[j].FanOut {
+			return report.DependencyHotspots[i].FanOut > report.DependencyHotspots[j].FanOut
+		}
+		return report.DependencyHotspots[i].Name < report.DependencyHotspots[j].Name
+	})
 	sort.Slice(report.BlastHotspots, func(i, j int) bool {
 		if report.BlastHotspots[i].BlastRadius != report.BlastHotspots[j].BlastRadius {
 			return report.BlastHotspots[i].BlastRadius > report.BlastHotspots[j].BlastRadius
@@ -358,6 +396,8 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			report.Leaves = []Leaf{allLeaves[i]}
 		}
 		report.Hotspots = nil
+		report.FanOutHotspots = nil
+		report.DependencyHotspots = nil
 		report.BlastHotspots = nil
 		edges := report.Edges[:0]
 		for _, edge := range report.Edges {

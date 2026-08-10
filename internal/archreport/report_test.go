@@ -10,6 +10,56 @@ import (
 	"testing"
 )
 
+func TestDependencyHotspotsRankForwardBurdenAndOmitScopedTables(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"broad":2,"deep":2,"mid":1,"x":0,"y":0,"z":0,"idle":0}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	write("internal/broad/broad.go", `package broad
+import (_ "github.com/anthony-chaudhary/fak/internal/x"; _ "github.com/anthony-chaudhary/fak/internal/y"; _ "github.com/anthony-chaudhary/fak/internal/z")
+`)
+	write("internal/deep/deep.go", `package deep
+import _ "github.com/anthony-chaudhary/fak/internal/mid"
+`)
+	write("internal/mid/mid.go", `package mid
+import _ "github.com/anthony-chaudhary/fak/internal/x"
+`)
+	for _, leaf := range []string{"x", "y", "z", "idle"} {
+		write("internal/"+leaf+"/"+leaf+".go", "package "+leaf+"\n")
+	}
+	report, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFanOut := []FanOutHotspot{{Name: "broad", FanOut: 3}, {Name: "deep", FanOut: 1}, {Name: "mid", FanOut: 1}}
+	wantDependency := []DependencyHotspot{
+		{Name: "broad", FanOut: 3, DependencyReach: 3, DependencyDepth: 1},
+		{Name: "deep", FanOut: 1, DependencyReach: 2, DependencyDepth: 2},
+		{Name: "mid", FanOut: 1, DependencyReach: 1, DependencyDepth: 1},
+	}
+	if !reflect.DeepEqual(report.FanOutHotspots, wantFanOut) || !reflect.DeepEqual(report.DependencyHotspots, wantDependency) {
+		t.Fatalf("fan-out=%+v dependency=%+v", report.FanOutHotspots, report.DependencyHotspots)
+	}
+	scoped, err := Analyze(root, "deep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped.FanOutHotspots != nil || scoped.DependencyHotspots != nil || scoped.Leaves[0].DependencyReach != 2 {
+		t.Fatalf("scoped=%+v", scoped)
+	}
+}
+
 func TestDependencyReachUsesCanonicalShortestPathsAndTerminatesCycles(t *testing.T) {
 	leaves := []Leaf{
 		{Name: "a", Dependencies: []string{"c", "b"}},
