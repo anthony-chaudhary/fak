@@ -592,8 +592,6 @@ func main() {
 		cmdNode(os.Args[2:])
 	case "node-compare":
 		cmdNodeCompare(os.Args[2:])
-	case "plan-audit":
-		cmdPlanAudit(os.Args[2:])
 	case "qwen36-node-reports":
 		cmdQwen36NodeReports(os.Args[2:])
 	case "qwen36-parity-witness-gate":

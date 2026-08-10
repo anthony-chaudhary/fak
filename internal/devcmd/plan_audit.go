@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -6,14 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/planaudit"
 )
 
-func cmdPlanAudit(argv []string) { os.Exit(runPlanAudit(os.Stdout, os.Stderr, argv)) }
-
-func runPlanAudit(stdout, stderr io.Writer, argv []string) int {
+func RunPlanAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("plan-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	pattern := fs.String("glob", planaudit.DefaultGlob, "plan-doc glob (brace ok)")
@@ -23,15 +22,16 @@ func runPlanAudit(stdout, stderr io.Writer, argv []string) int {
 	check := fs.Bool("check", false, "exit 1 on drift")
 	asOf := fs.String("as-of", "", "date stamp for report (default: today UTC)")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
-	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
-		return code
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "plan-audit: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return 2
 	}
 	root := *workspace
 	if root == "" {
-		root = resolveRoot("")
-		if root == "" {
-			root = "."
-		}
+		root = repoRoot()
 	}
 	report, err := planaudit.Collect(root, *pattern)
 	if err != nil {

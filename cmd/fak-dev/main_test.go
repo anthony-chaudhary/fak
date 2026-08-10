@@ -254,6 +254,28 @@ func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesPlanAuditUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"plan-audit", "--help"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Usage of plan-audit") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchPlanAudit(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "plan-audit":`) || strings.Contains(string(body), "cmdPlanAudit(") {
+		t.Fatal("runtime fak still dispatches the dev-only plan-audit command")
+	}
+}
+
 func TestRunDispatchesReadmeVisualAuditUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"readme-visual-audit", "--help"})
