@@ -2353,6 +2353,16 @@
           "category": "incidental",
           "reason": "Result-schema field recording a baseline retry setting, not a new policy capability.",
           "token": "RetryPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private benchmark result row, not a production authorization or routing-policy capability.",
+          "token": "routingPolicyStat"
+        },
+        {
+          "category": "incidental",
+          "reason": "Controlled experiment simulator function, not a production policy evaluator or authority boundary.",
+          "token": "runRoutingPolicy"
         }
       ],
       "exclude": [
@@ -2409,6 +2419,8 @@
         "postures",
         "printGuardLaunchPostures",
         "referencePolicyForCorpusCell",
+        "routingPolicyStat",
+        "runRoutingPolicy",
         "tool_policy_grammar"
       ],
       "min_files": 3,

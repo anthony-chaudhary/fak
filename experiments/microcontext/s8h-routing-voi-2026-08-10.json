@@ -1,0 +1,451 @@
+{
+  "schema": "fak-microcontext-routing-voi/1",
+  "mode": "controlled executable value-of-information routing experiment",
+  "seed": 6105,
+  "trials": 48,
+  "records_per_trial": 500,
+  "calibration": {
+    "source": "controlled deterministic stage fixture; latency and cost are calibrated workload units, not provider billing",
+    "utility": "100*correct - 100*wrong - 15*abstain - latency_ms - 8*cost_units",
+    "quality_reward": 100,
+    "stages": {
+      "exact_filter": {
+        "latency_ms": 0.05,
+        "cost_units": 0.001
+      },
+      "expensive_filter": {
+        "latency_ms": 1.5,
+        "cost_units": 0.05
+      },
+      "model": {
+        "latency_ms": 8,
+        "cost_units": 0.8
+      },
+      "selector": {
+        "latency_ms": 0.8,
+        "cost_units": 0.04
+      },
+      "tool": {
+        "latency_ms": 5,
+        "cost_units": 0.3
+      }
+    }
+  },
+  "mixtures": [
+    {
+      "name": "exact-heavy",
+      "weights_percent": {
+        "boundary": 0,
+        "exact": 98,
+        "fresh": 1,
+        "semantic": 1
+      },
+      "policies": [
+        {
+          "policy": "always-model",
+          "quality": 0.9950416666666667,
+          "mean_latency_ms": 0.21133333333343024,
+          "p95_latency_ms": 0.05,
+          "mean_cost_units": 0.017133333333326856,
+          "mean_utility": 98.74493333333419,
+          "wrong": 95,
+          "abstained": 24,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "model": 484
+          },
+          "cancelled_stages": 71516
+        },
+        {
+          "policy": "always-filter-tool",
+          "quality": 0.9965,
+          "mean_latency_ms": 0.18108333333341387,
+          "p95_latency_ms": 0.05,
+          "mean_cost_units": 0.008058333333336144,
+          "mean_utility": 99.11465833333455,
+          "wrong": 67,
+          "abstained": 17,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 484,
+            "tool": 484
+          },
+          "cancelled_stages": 71032
+        },
+        {
+          "policy": "adaptive",
+          "quality": 0.99925,
+          "mean_latency_ms": 0.981083333333072,
+          "p95_latency_ms": 0.8500000000000001,
+          "mean_cost_units": 0.05209166666667629,
+          "mean_utility": 98.46989166665963,
+          "wrong": 13,
+          "abstained": 5,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "model": 242,
+            "selector": 24000,
+            "tool": 242
+          },
+          "cancelled_stages": 71516
+        },
+        {
+          "policy": "oracle",
+          "quality": 0.9999583333333333,
+          "mean_latency_ms": 0.1793000000000788,
+          "p95_latency_ms": 0.05,
+          "mean_cost_units": 0.009465000000003082,
+          "mean_utility": 99.73664666666637,
+          "wrong": 1,
+          "abstained": 0,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 168,
+            "model": 80,
+            "selector": 239,
+            "tool": 404
+          },
+          "cancelled_stages": 71348
+        }
+      ],
+      "winner": "always-filter-tool",
+      "adaptive_regret_vs_oracle": 1.2667550000067394,
+      "adaptive_quality": 0.99925
+    },
+    {
+      "name": "semantic-heavy",
+      "weights_percent": {
+        "boundary": 10,
+        "exact": 10,
+        "fresh": 5,
+        "semantic": 75
+      },
+      "policies": [
+        {
+          "policy": "always-model",
+          "quality": 0.916,
+          "mean_latency_ms": 7.248999999998675,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.7208999999998413,
+          "mean_utility": 71.582758333306,
+          "wrong": 1621,
+          "abstained": 395,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "model": 21597
+          },
+          "cancelled_stages": 50403
+        },
+        {
+          "policy": "always-filter-tool",
+          "quality": 0.7431666666666666,
+          "mean_latency_ms": 5.8991875000010525,
+          "p95_latency_ms": 6.55,
+          "mean_cost_units": 0.31595624999991384,
+          "mean_utility": 44.59107916666273,
+          "wrong": 4926,
+          "abstained": 1238,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 21597,
+            "tool": 21597
+          },
+          "cancelled_stages": 28806
+        },
+        {
+          "policy": "adaptive",
+          "quality": 0.9645416666666666,
+          "mean_latency_ms": 7.90656250000346,
+          "p95_latency_ms": 10.35,
+          "mean_cost_units": 0.7171520833334784,
+          "mean_utility": 79.82767916668327,
+          "wrong": 692,
+          "abstained": 159,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 2401,
+            "model": 19257,
+            "selector": 24000,
+            "tool": 2340
+          },
+          "cancelled_stages": 48002
+        },
+        {
+          "policy": "oracle",
+          "quality": 0.999375,
+          "mean_latency_ms": 6.257550000000476,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.428556666666708,
+          "mean_utility": 90.22795499998782,
+          "wrong": 4,
+          "abstained": 11,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 14506,
+            "model": 5986,
+            "selector": 1599,
+            "tool": 15611
+          },
+          "cancelled_stages": 35897
+        }
+      ],
+      "winner": "adaptive",
+      "adaptive_regret_vs_oracle": 10.400275833304548,
+      "adaptive_quality": 0.9645416666666666
+    },
+    {
+      "name": "fresh-tool-heavy",
+      "weights_percent": {
+        "boundary": 10,
+        "exact": 10,
+        "fresh": 75,
+        "semantic": 5
+      },
+      "policies": [
+        {
+          "policy": "always-model",
+          "quality": 0.604875,
+          "mean_latency_ms": 7.248999999998675,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.7208999999998413,
+          "mean_utility": 14.549841666665506,
+          "wrong": 7622,
+          "abstained": 1861,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "model": 21597
+          },
+          "cancelled_stages": 50403
+        },
+        {
+          "policy": "always-filter-tool",
+          "quality": 0.9644583333333333,
+          "mean_latency_ms": 5.8991875000010525,
+          "p95_latency_ms": 6.55,
+          "mean_cost_units": 0.31595624999991384,
+          "mean_utility": 85.08107916666332,
+          "wrong": 679,
+          "abstained": 174,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 21597,
+            "tool": 21597
+          },
+          "cancelled_stages": 28806
+        },
+        {
+          "policy": "adaptive",
+          "quality": 0.9772916666666667,
+          "mean_latency_ms": 5.801562500002593,
+          "p95_latency_ms": 10.35,
+          "mean_cost_units": 0.36631875000010883,
+          "mean_utility": 87.14767916668357,
+          "wrong": 426,
+          "abstained": 119,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 2401,
+            "model": 2417,
+            "selector": 24000,
+            "tool": 19180
+          },
+          "cancelled_stages": 48002
+        },
+        {
+          "policy": "oracle",
+          "quality": 0.999625,
+          "mean_latency_ms": 5.4276791666689475,
+          "p95_latency_ms": 6.55,
+          "mean_cost_units": 0.31900375000008874,
+          "mean_utility": 91.96654083333804,
+          "wrong": 3,
+          "abstained": 6,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 3473,
+            "model": 531,
+            "selector": 17846,
+            "tool": 21066
+          },
+          "cancelled_stages": 46930
+        }
+      ],
+      "winner": "adaptive",
+      "adaptive_regret_vs_oracle": 4.81886166665447,
+      "adaptive_quality": 0.9772916666666667
+    },
+    {
+      "name": "mixed",
+      "weights_percent": {
+        "boundary": 15,
+        "exact": 25,
+        "fresh": 30,
+        "semantic": 30
+      },
+      "policies": [
+        {
+          "policy": "always-model",
+          "quality": 0.7969166666666667,
+          "mean_latency_ms": 6.0500000000007335,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.6009999999999452,
+          "mean_utility": 51.90762499999925,
+          "wrong": 3919,
+          "abstained": 955,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "model": 18000
+          },
+          "cancelled_stages": 54000
+        },
+        {
+          "policy": "always-filter-tool",
+          "quality": 0.881,
+          "mean_latency_ms": 4.925000000001956,
+          "p95_latency_ms": 6.55,
+          "mean_cost_units": 0.2634999999999833,
+          "mean_utility": 71.2636666666679,
+          "wrong": 2264,
+          "abstained": 592,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 18000,
+            "tool": 18000
+          },
+          "cancelled_stages": 36000
+        },
+        {
+          "policy": "adaptive",
+          "quality": 0.9731666666666666,
+          "mean_latency_ms": 5.956437500002667,
+          "p95_latency_ms": 10.35,
+          "mean_cost_units": 0.4622312500000573,
+          "mean_utility": 85.48550416667862,
+          "wrong": 501,
+          "abstained": 143,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 3581,
+            "model": 9061,
+            "selector": 24000,
+            "tool": 8939
+          },
+          "cancelled_stages": 50419
+        },
+        {
+          "policy": "oracle",
+          "quality": 0.9994166666666666,
+          "mean_latency_ms": 4.8962833333352975,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.309260000000045,
+          "mean_utility": 92.55192833333166,
+          "wrong": 3,
+          "abstained": 11,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 8476,
+            "model": 2556,
+            "selector": 7411,
+            "tool": 15444
+          },
+          "cancelled_stages": 45524
+        }
+      ],
+      "winner": "adaptive",
+      "adaptive_regret_vs_oracle": 7.066424166653036,
+      "adaptive_quality": 0.9731666666666666
+    },
+    {
+      "name": "boundary-heavy",
+      "weights_percent": {
+        "boundary": 60,
+        "exact": 10,
+        "fresh": 15,
+        "semantic": 15
+      },
+      "policies": [
+        {
+          "policy": "always-model",
+          "quality": 0.749875,
+          "mean_latency_ms": 7.248999999998675,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.7208999999998413,
+          "mean_utility": 41.006925000010405,
+          "wrong": 4860,
+          "abstained": 1143,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "model": 21597
+          },
+          "cancelled_stages": 50403
+        },
+        {
+          "policy": "always-filter-tool",
+          "quality": 0.8766666666666667,
+          "mean_latency_ms": 5.8991875000010525,
+          "p95_latency_ms": 6.55,
+          "mean_cost_units": 0.31595624999991384,
+          "mean_utility": 68.96774583332987,
+          "wrong": 2378,
+          "abstained": 582,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 21597,
+            "tool": 21597
+          },
+          "cancelled_stages": 28806
+        },
+        {
+          "policy": "adaptive",
+          "quality": 0.96275,
+          "mean_latency_ms": 7.6015625000033635,
+          "p95_latency_ms": 10.35,
+          "mean_cost_units": 0.5665520833332285,
+          "mean_utility": 81.02872916669989,
+          "wrong": 721,
+          "abstained": 173,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 14373,
+            "model": 10831,
+            "selector": 24000,
+            "tool": 10766
+          },
+          "cancelled_stages": 36030
+        },
+        {
+          "policy": "oracle",
+          "quality": 0.9986666666666667,
+          "mean_latency_ms": 5.977229166667932,
+          "p95_latency_ms": 8.05,
+          "mean_cost_units": 0.35519374999997644,
+          "mean_utility": 90.9783041666647,
+          "wrong": 14,
+          "abstained": 18,
+          "stage_calls": {
+            "exact_filter": 24000,
+            "expensive_filter": 16249,
+            "model": 2041,
+            "selector": 4715,
+            "tool": 19556
+          },
+          "cancelled_stages": 34154
+        }
+      ],
+      "winner": "adaptive",
+      "adaptive_regret_vs_oracle": 9.94957499996481,
+      "adaptive_quality": 0.96275
+    }
+  ],
+  "findings": [
+    "Exact-heavy inputs reward deterministic early stop; adaptive routing is not universally best.",
+    "Semantic-heavy and fresh-evidence-heavy mixtures expose opposite static-policy advantages.",
+    "Mixed and boundary-heavy workloads test whether selector cost is repaid by avoiding wrong expensive stages.",
+    "Cancellation counts unopened expensive stages, making negative work observable rather than inferred."
+  ],
+  "limits": [
+    "Stage latency and cost are controlled calibrated units, not live provider tokens, dollars, or billing.",
+    "Fixture outcomes test routing policy and regret accounting, not general model intelligence.",
+    "Live endpoint measurement remains #6110; a non-zero independently adjudicated semantic corpus remains #6124."
+  ]
+}

@@ -388,6 +388,9 @@ func main() {
 	var corpusSource, verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport string
 	var gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput string
 	var tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput, verifyTunedBaselinesPath string
+	var routingVOIOutput, verifyRoutingVOIPath string
+	var routingVOISeed int64
+	var routingVOITrials, routingVOIRecords int
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
@@ -466,6 +469,11 @@ func main() {
 	flag.StringVar(&tunedBaselinesAnswers, "tuned-baselines-answers", "", "answer bundle for tuning/grading")
 	flag.StringVar(&tunedBaselinesOutput, "tuned-baselines-output", "", "write tuned baseline report")
 	flag.StringVar(&verifyTunedBaselinesPath, "verify-tuned-baselines", "", "verify a tuned baseline report")
+	flag.StringVar(&routingVOIOutput, "routing-voi-output", "", "run adaptive filter/tool routing experiment")
+	flag.StringVar(&verifyRoutingVOIPath, "verify-routing-voi", "", "verify an adaptive routing experiment")
+	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
+	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
+	flag.IntVar(&routingVOIRecords, "routing-voi-records", 200, "records per mixture and trial")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -504,6 +512,18 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
+		return
+	}
+	if routingVOIOutput != "" {
+		if err := runRoutingVOI(routingVOIOutput, routingVOISeed, routingVOITrials, routingVOIRecords); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: routing VOI: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS routing VOI %s\n", routingVOIOutput)
+		return
+	}
+	if verifyRoutingVOIPath != "" {
+		runVerify("verify-routing-voi", verifyRoutingVOIPath, verifyRoutingVOI)
 		return
 	}
 	if tunedBaselinesPublic != "" {
