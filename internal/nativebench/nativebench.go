@@ -167,6 +167,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native standalone Go syntax validation with all-errors locations and no semantic false positives is covered; JSON, external language packs, registry routing, summaries, and LSP framing remain separate capability debt",
 	},
 	{
+		Leaf: "internal/canon", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"multi_provider_token_usage_normalization"},
+		Reason:       "native OpenAI, Anthropic, and local token-usage normalization with reconciled classes, refusal checks, and raw provenance is covered; secret/injection scanning, redaction, PII, and scoring remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -615,6 +620,26 @@ var contracts = []Contract{{
 			{Name: "gopls diagnostics", Class: NextBest, Source: "https://go.dev/gopls/"},
 		},
 		Witness: "../../docs/benchmarks/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "multi_provider_token_usage_normalization",
+		NativePath: "internal/canon/token_usage.go",
+		Workload:   "same seven OpenAI current/legacy, Anthropic cache, local, invalid JSON, negative counter, and detail-overflow usage cases with exact class/total, refusal, and lossless raw-provenance oracle",
+		Metrics:    []string{"correct_cases", "rejection_errors", "class_errors", "raw_losses", "represented_tokens", "latency_ns", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "network_bytes", "model_tokens", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "provider total fields only", Class: TunedBaseline, Source: "internal/canon/compare.go"},
+			{Name: "fak + OpenAI", Class: FirstClassIntegration, Integration: "openai", Source: "internal/provider"},
+			{Name: "fak + Anthropic", Class: FirstClassIntegration, Integration: "anthropic", Source: "internal/provider"},
+			{Name: "fak + local provider", Class: FirstClassIntegration, Integration: "local", Source: "internal/provider"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "OpenAI SDK usage models", Class: NextBest, Source: "https://github.com/openai/openai-go"},
+			{Name: "Anthropic SDK usage models", Class: NextBest, Source: "https://github.com/anthropics/anthropic-sdk-go"},
+			{Name: "LiteLLM usage normalization", Class: NextBest, Source: "https://docs.litellm.ai/docs/completion/token_usage"},
+			{Name: "OpenTelemetry GenAI semantic conventions", Class: NextBest, Source: "https://opentelemetry.io/docs/specs/semconv/gen-ai/"},
+			{Name: "LangSmith token and cost tracking", Class: NextBest, Source: "https://docs.smith.langchain.com/observability/how_to_guides/log_llm_trace"},
+		},
+		Witness:      "../../docs/benchmarks/TOKEN-USAGE-NORMALIZATION-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"openai", "anthropic", "local", "opentelemetry"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
