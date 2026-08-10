@@ -152,8 +152,6 @@ var grandfathered = []string{
 	"tools/ctxwin.py",
 	"tools/cuda_abi_parity_test.py",
 	"tools/cuda_abi_parity.py",
-	"tools/cuda_arch_matrix_test.py",
-	"tools/cuda_arch_matrix.py",
 	"tools/cuda_arch_targets_test.py",
 	"tools/cuda_dev_scorecard_test.py",
 	"tools/cuda_dev_scorecard.py",
