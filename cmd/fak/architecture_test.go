@@ -321,9 +321,30 @@ func TestArchitectureBlastImpactPolicyIgnoresResolutions(t *testing.T) {
 	}
 }
 
+func TestArchitectureFailOnIncreasedBlastPathLength(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", BlastPathChanges: []archreport.BlastPathChange{{Source: "shared", Dependent: "target", BeforePath: []string{"shared", "target"}, AfterPath: []string{"shared", "middle", "target"}, BeforeHops: 1, AfterHops: 2, Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-blast-path-length"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"blast-path shared -> target hops 1 -> 2 (+1)", "before=shared -> target", "after=shared -> middle -> target", "restore the shorter dependency path"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureBlastPathLengthPolicyIgnoresEqualRerouteAndContraction(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", BlastPathChanges: []archreport.BlastPathChange{{Source: "same", Dependent: "target", Delta: 0}, {Source: "shorter", Dependent: "target", Delta: -1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-blast-path-length"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, or introduced-blast-impacts") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, or increased-blast-path-length") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

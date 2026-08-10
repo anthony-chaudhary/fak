@@ -2,6 +2,7 @@ package archreport
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 )
 
@@ -58,6 +59,16 @@ type BlastImpact struct {
 	Path      []string `json:"path"`
 }
 
+type BlastPathChange struct {
+	Source     string   `json:"source"`
+	Dependent  string   `json:"dependent"`
+	BeforePath []string `json:"before_path"`
+	AfterPath  []string `json:"after_path"`
+	BeforeHops int      `json:"before_hops"`
+	AfterHops  int      `json:"after_hops"`
+	Delta      int      `json:"delta"`
+}
+
 type ReportDiff struct {
 	Schema                   string                    `json:"schema"`
 	Verdict                  string                    `json:"verdict"`
@@ -70,6 +81,7 @@ type ReportDiff struct {
 	BlastRadiusChanges       []BlastRadiusChange       `json:"blast_radius_changes,omitempty"`
 	IntroducedBlastImpacts   []BlastImpact             `json:"introduced_blast_impacts,omitempty"`
 	ResolvedBlastImpacts     []BlastImpact             `json:"resolved_blast_impacts,omitempty"`
+	BlastPathChanges         []BlastPathChange         `json:"blast_path_changes,omitempty"`
 	TierGapChanges           []TierGapChange           `json:"tier_gap_changes,omitempty"`
 	IntroducedViolationEdges []ViolationEdge           `json:"introduced_violation_edges,omitempty"`
 	ResolvedViolationEdges   []ViolationEdge           `json:"resolved_violation_edges,omitempty"`
@@ -136,6 +148,12 @@ func Diff(before, after Report) ReportDiff {
 					out.ResolvedBlastImpacts = append(out.ResolvedBlastImpacts, impact)
 				}
 			}
+			for key, afterImpact := range afterImpacts {
+				if beforeImpact, ok := beforeImpacts[key]; ok && !slices.Equal(beforeImpact.Path, afterImpact.Path) {
+					beforeHops, afterHops := len(beforeImpact.Path)-1, len(afterImpact.Path)-1
+					out.BlastPathChanges = append(out.BlastPathChanges, BlastPathChange{Source: name, Dependent: afterImpact.Dependent, BeforePath: beforeImpact.Path, AfterPath: afterImpact.Path, BeforeHops: beforeHops, AfterHops: afterHops, Delta: afterHops - beforeHops})
+				}
+			}
 		}
 	}
 	for name, b := range beforeLeaves {
@@ -184,10 +202,11 @@ func Diff(before, after Report) ReportDiff {
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
 	sortBlastImpacts(out.ResolvedBlastImpacts)
+	sortBlastPathChanges(out.BlastPathChanges)
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -256,6 +275,28 @@ func sortDiagnostics(diagnostics []Diagnostic) {
 			return diagnostics[i].Kind < diagnostics[j].Kind
 		}
 		return diagnostics[i].Leaf < diagnostics[j].Leaf
+	})
+}
+
+func sortBlastPathChanges(changes []BlastPathChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if (changes[i].Delta > 0) != (changes[j].Delta > 0) {
+			return changes[i].Delta > 0
+		}
+		iMagnitude, jMagnitude := changes[i].Delta, changes[j].Delta
+		if iMagnitude < 0 {
+			iMagnitude = -iMagnitude
+		}
+		if jMagnitude < 0 {
+			jMagnitude = -jMagnitude
+		}
+		if iMagnitude != jMagnitude {
+			return iMagnitude > jMagnitude
+		}
+		if changes[i].Source != changes[j].Source {
+			return changes[i].Source < changes[j].Source
+		}
+		return changes[i].Dependent < changes[j].Dependent
 	})
 }
 
@@ -328,6 +369,15 @@ func sortTierGapChanges(changes []TierGapChange) {
 }
 
 func hasIncreasedTierGap(changes []TierGapChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasIncreasedBlastPathLength(changes []BlastPathChange) bool {
 	for _, change := range changes {
 		if change.Delta > 0 {
 			return true

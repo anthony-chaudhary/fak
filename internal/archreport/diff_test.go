@@ -6,6 +6,40 @@ import (
 	"testing"
 )
 
+func TestDiffBlastPathChangesExposeStableImpactReroutes(t *testing.T) {
+	before := Report{Leaves: []Leaf{
+		{Name: "deep", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"deep", "target"}}}},
+		{Name: "same", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"same", "alpha", "target"}}}},
+		{Name: "shorter", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"shorter", "one", "two", "target"}}}},
+	}}
+	after := Report{Leaves: []Leaf{
+		{Name: "deep", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"deep", "one", "two", "target"}}}},
+		{Name: "same", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"same", "beta", "target"}}}},
+		{Name: "shorter", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"shorter", "target"}}}},
+	}}
+	diff := Diff(before, after)
+	want := []BlastPathChange{
+		{Source: "deep", Dependent: "target", BeforePath: []string{"deep", "target"}, AfterPath: []string{"deep", "one", "two", "target"}, BeforeHops: 1, AfterHops: 3, Delta: 2},
+		{Source: "shorter", Dependent: "target", BeforePath: []string{"shorter", "one", "two", "target"}, AfterPath: []string{"shorter", "target"}, BeforeHops: 3, AfterHops: 1, Delta: -2},
+		{Source: "same", Dependent: "target", BeforePath: []string{"same", "alpha", "target"}, AfterPath: []string{"same", "beta", "target"}, BeforeHops: 2, AfterHops: 2, Delta: 0},
+	}
+	if !reflect.DeepEqual(diff.BlastPathChanges, want) {
+		t.Fatalf("blast path changes=%+v want=%+v", diff.BlastPathChanges, want)
+	}
+	if diff.Verdict != "regression" || diff.Changes() != 0 || len(diff.IntroducedBlastImpacts) != 0 || len(diff.ResolvedBlastImpacts) != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffEqualAndShorterBlastPathChangesRemainClean(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "same", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"same", "alpha", "target"}}}}, {Name: "shorter", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"shorter", "one", "target"}}}}}}
+	after := Report{Leaves: []Leaf{{Name: "same", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"same", "beta", "target"}}}}, {Name: "shorter", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"shorter", "target"}}}}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.BlastPathChanges) != 2 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffBlastImpactIdentitySurvivesEqualCountReplacement(t *testing.T) {
 	before := Report{Leaves: []Leaf{{Name: "source", BlastRadius: 1, BlastPaths: []BlastPath{{Dependent: "old", Path: []string{"source", "old"}}}}}}
 	after := Report{Leaves: []Leaf{{Name: "source", BlastRadius: 1, BlastPaths: []BlastPath{{Dependent: "new", Path: []string{"source", "middle", "new"}}}}}}

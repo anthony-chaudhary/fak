@@ -22,7 +22,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
-	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -30,8 +30,8 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
 		return 2
 	}
-	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" {
-		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, or introduced-blast-impacts)\n", *failOn)
+	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, or increased-blast-path-length)\n", *failOn)
 		return 2
 	}
 	if *failOn != "" && *baseline == "" {
@@ -236,6 +236,9 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, impact := range diff.ResolvedBlastImpacts {
 		fmt.Fprintf(stdout, "  resolved blast-impact %s -> %s path=%s\n", impact.Source, impact.Dependent, strings.Join(impact.Path, " -> "))
 	}
+	for _, change := range diff.BlastPathChanges {
+		fmt.Fprintf(stdout, "  ~ blast-path %s -> %s hops %d -> %d (%+d) before=%s after=%s\n", change.Source, change.Dependent, change.BeforeHops, change.AfterHops, change.Delta, strings.Join(change.BeforePath, " -> "), strings.Join(change.AfterPath, " -> "))
+	}
 	for _, edge := range diff.IntroducedViolationEdges {
 		fmt.Fprintf(stdout, "  ! introduced violation %s(%s) -> %s(%s), distance=%d\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName, edge.TierDistance)
 	}
@@ -262,6 +265,8 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 			fmt.Fprintln(stdout, "  remediation: remove/invert the new dependency path or move the shared seam down; comparison is baseline -> workspace")
 		} else if failOn == "introduced-blast-impacts" {
 			fmt.Fprintln(stdout, "  remediation: remove/invert each introduced path or move the shared seam down; comparison is baseline -> workspace")
+		} else if failOn == "increased-blast-path-length" {
+			fmt.Fprintln(stdout, "  remediation: restore the shorter dependency path or remove/invert the added intermediary edges; comparison is baseline -> workspace")
 		} else {
 			fmt.Fprintln(stdout, "  remediation: restore the prior endpoint tiers or remove/invert the upward edge; comparison is baseline -> workspace")
 		}
@@ -299,6 +304,13 @@ func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 		return false
 	case "introduced-blast-impacts":
 		return len(diff.IntroducedBlastImpacts) > 0
+	case "increased-blast-path-length":
+		for _, change := range diff.BlastPathChanges {
+			if change.Delta > 0 {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
