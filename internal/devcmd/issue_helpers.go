@@ -17,15 +17,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+// parseFlagsRejectArgs parses argv into fs and refuses any positional argument —
+// these commands are all flags-only front doors, so a stray positional is a typo
+// worth failing on, never a silently ignored word.
+//
+// It returns (exitCode, done) in CALLER order: done=true means "stop now and
+// return exitCode" — a parse error, a `-h` usage request, or an unexpected
+// positional. done=false means parsing succeeded and the command should proceed.
+// The bool was previously the opposite (ok-shaped) while both call sites read it
+// as done-shaped, which inverted every front door that used it: valid flags
+// returned 0 immediately having done nothing, and a positional argument fell
+// through into the command body instead of being rejected. Nothing pinned it, so
+// the contract is stated here and pinned by TestParseFlagsRejectArgs.
 func parseFlagsRejectArgs(fs *flag.FlagSet, argv []string, stderr io.Writer) (int, bool) {
 	if err := fs.Parse(argv); err != nil {
-		return 2, false
+		return 2, true
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "%s: unexpected positional arguments: %s\n", fs.Name(), strings.Join(fs.Args(), " "))
-		return 2, false
+		return 2, true
 	}
-	return 0, true
+	return 0, false
 }
 
 func writeIndentedJSON(w io.Writer, v any) error {
