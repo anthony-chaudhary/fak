@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/kvbudget", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"kv_memory_budget_modeling"},
+		Reason:       "native MHA/MLA/DSA KV bytes-per-token, stream-fit, and context-budget closed forms",
+	},
+	{
 		Leaf: "internal/resumebackoff", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"failure_signature_resume_backoff"},
 		Reason:       "native same-signature exponential resume backoff and cross-session signature parking",
@@ -198,6 +203,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "kv_memory_budget_modeling",
+		NativePath: "internal/kvbudget/kvbudget.go",
+		Workload:   "same model shape, precision, context lengths, batch and concurrency, serving lifecycle, and independent GPU allocation oracle across every arm",
+		Metrics:    []string{"kv_bytes_per_token_error", "peak_allocation_error", "fit_concurrency_equivalence", "latency_ms", "throughput_tokens_per_second", "gpu_memory_bytes", "host_memory_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "full-MHA closed form", Class: TunedBaseline, Source: "internal/kvbudget/compare.go"},
+			{Name: "vLLM memory profiler", Class: NextBest, Source: "https://docs.vllm.ai/"},
+			{Name: "SGLang memory pool", Class: NextBest, Source: "https://docs.sglang.ai/"},
+			{Name: "NVIDIA GenAI-Perf", Class: NextBest, Source: "https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/perf_analyzer/genai-perf/README.html"},
+		},
+	},
 	{
 		Capability: "failure_signature_resume_backoff",
 		NativePath: "internal/resumebackoff/resumebackoff.go",
