@@ -1,0 +1,15 @@
+{
+  "schema": "fak-lightgap-portability/1",
+  "instrument": "exit-path-ci-witnesses",
+  "rule": "A swap is witnessed only when a committed test exercises it; an empty alternative witness is CLAIMED, not measured.",
+  "swaps": [
+    {"id":"agent","fak":{"path":"cmd/fak/guard_harness_profiles_test.go","test":"TestHarnessProfileFloorCoverage"},"alternatives":{"claude-code-bare":{},"raw-sglang":{},"formal-isolation":{},"llm-tracing":{}}},
+    {"id":"provider","fak":{"path":"internal/accounts/seat_endpoint_test.go","test":"TestEnvOverlayCarriesEndpointAlone"},"alternatives":{"claude-code-bare":{},"raw-sglang":{},"formal-isolation":{},"llm-tracing":{}}},
+    {"id":"model","fak":{"path":"internal/engine/sglang_test.go","test":"TestSGLangGovernanceResolvesToEngineSGLang"},"alternatives":{"claude-code-bare":{},"raw-sglang":{},"formal-isolation":{},"llm-tracing":{}}},
+    {"id":"host","fak":{"path":"internal/covmatrix/precision_test.go","test":"TestCPUReferencePrecisionsMatchSource"},"alternatives":{"claude-code-bare":{},"raw-sglang":{},"formal-isolation":{},"llm-tracing":{}}},
+    {"id":"policy","fak":{"path":"internal/policy/hotreload_test.go","test":"TestHotReloadSwapsLiveFloorWithoutRestart"},"alternatives":{"claude-code-bare":{},"raw-sglang":{},"formal-isolation":{},"llm-tracing":{}}}
+  ],
+  "score_rule": "value = witnessed swap points / 5",
+  "fak_value": 1.0,
+  "fence": "This measures CI-witnessed exit paths only. It does not claim behavioral parity after a swap, and it does not turn an alternative's undocumented swap into zero; missing alternative witnesses keep the corresponding comparison UNCOVERED."
+}
