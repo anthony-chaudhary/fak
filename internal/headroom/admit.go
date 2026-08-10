@@ -3,6 +3,7 @@ package headroom
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -102,7 +103,7 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 	// carry the exact model-callable restore handle inline; the generic metadata
 	// remains authoritative for every compressor.
 	origin := preserveOriginal(ctx, body)
-	if origin != "" && out.Codec == "go-test-distill" {
+	if origin != "" && strings.HasSuffix(out.Codec, "-distill") {
 		out.Bytes = appendRestoreHint(out.Bytes, origin)
 		out.NewLen = len(out.Bytes)
 		if len(out.Bytes) >= len(body) {

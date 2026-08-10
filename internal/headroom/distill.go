@@ -19,19 +19,19 @@ type distillCompressor struct {
 func (distillCompressor) Name() string { return DistillName }
 
 func (c distillCompressor) Compress(ctx context.Context, in Input) (Output, error) {
-	if body, dropped, ok := applyDistillFilter(in); ok {
-		hint := fmt.Sprintf("[fak distill: %d routine go test line(s) dropped]", dropped)
+	if body, dropped, filter, ok := applyDistillFilter(in); ok {
+		hint := fmt.Sprintf("[fak distill: %d %s dropped]", dropped, filter.dropLabel)
 		body = append(body, '\n')
 		body = append(body, hint...)
 		if len(body) < len(in.Bytes) { // never-worse invariant
 			return Output{
 				Bytes:      body,
 				Compressed: true,
-				Codec:      "go-test-distill",
+				Codec:      filter.codec,
 				OrigLen:    len(in.Bytes),
 				NewLen:     len(body),
 				Status:     "saved",
-				Reason:     "built-in go test filter removed routine passing output and preserved errors",
+				Reason:     filter.reason,
 			}, nil
 		}
 	}
@@ -46,21 +46,26 @@ func (c distillCompressor) Compress(ctx context.Context, in Input) (Output, erro
 // detected content kind. Keeping this registry internal prevents project output
 // from supplying the rules that decide which of its own bytes the model sees.
 type distillFilter struct {
-	matches func(Input) bool
-	apply   func([]byte) ([]byte, int, bool)
+	codec     string
+	dropLabel string
+	reason    string
+	matches   func(Input) bool
+	apply     func([]byte) ([]byte, int, bool)
 }
 
 var distillFilters = []distillFilter{
-	{matches: matchesGoTest, apply: applyGoTestFilter},
+	{codec: "go-test-distill", dropLabel: "routine go test line(s)", reason: "built-in go test filter removed routine passing output and preserved errors", matches: matchesGoTest, apply: applyGoTestFilter},
+	{codec: "golangci-lint-distill", dropLabel: "routine golangci-lint line(s)", reason: "built-in golangci-lint filter removed routine info output and preserved diagnostics", matches: matchesGolangCILint, apply: applyGolangCILintFilter},
 }
 
-func applyDistillFilter(in Input) ([]byte, int, bool) {
+func applyDistillFilter(in Input) ([]byte, int, distillFilter, bool) {
 	for _, filter := range distillFilters {
 		if filter.matches(in) {
-			return filter.apply(in.Bytes)
+			body, dropped, ok := filter.apply(in.Bytes)
+			return body, dropped, filter, ok
 		}
 	}
-	return nil, 0, false
+	return nil, 0, distillFilter{}, false
 }
 
 func matchesGoTest(in Input) bool {

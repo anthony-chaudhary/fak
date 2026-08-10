@@ -69,7 +69,7 @@ func TestDistillRegistryDispatchesByToolAndKind(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, got := applyDistillFilter(tt.in)
+			_, _, _, got := applyDistillFilter(tt.in)
 			if got != tt.want {
 				t.Fatalf("matched = %v, want %v", got, tt.want)
 			}
