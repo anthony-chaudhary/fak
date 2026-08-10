@@ -30,6 +30,9 @@ func TestDiffNamesEveryArchitectureChangeDeterministically(t *testing.T) {
 	if !reflect.DeepEqual(got.IntroducedViolations, []string{"alpha -> new"}) || !reflect.DeepEqual(got.ResolvedViolations, []string{"alpha -> old"}) {
 		t.Fatalf("violations=%+v", got)
 	}
+	if got.Verdict != "regression" {
+		t.Fatalf("verdict=%q", got.Verdict)
+	}
 	if got.Changes() != 7 {
 		t.Fatalf("changes=%d", got.Changes())
 	}
@@ -43,7 +46,7 @@ func TestDiffNamesEveryArchitectureChangeDeterministically(t *testing.T) {
 func TestDiffEmpty(t *testing.T) {
 	r := Report{Leaves: []Leaf{{Name: "abi", DeclaredTier: 0}}}
 	got := Diff(r, r)
-	if got.Schema != DiffSchema || got.Changes() != 0 {
+	if got.Schema != DiffSchema || got.Verdict != "clean" || got.Changes() != 0 {
 		t.Fatalf("%+v", got)
 	}
 }

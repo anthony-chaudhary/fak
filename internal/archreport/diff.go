@@ -22,6 +22,7 @@ type EdgeChange struct {
 
 type ReportDiff struct {
 	Schema               string       `json:"schema"`
+	Verdict              string       `json:"verdict"`
 	AddedLeaves          []string     `json:"added_leaves,omitempty"`
 	RemovedLeaves        []string     `json:"removed_leaves,omitempty"`
 	TierChanges          []TierChange `json:"tier_changes,omitempty"`
@@ -32,7 +33,7 @@ type ReportDiff struct {
 }
 
 func Diff(before, after Report) ReportDiff {
-	out := ReportDiff{Schema: DiffSchema}
+	out := ReportDiff{Schema: DiffSchema, Verdict: "clean"}
 	beforeLeaves, afterLeaves := leafIndex(before), leafIndex(after)
 	for name, a := range afterLeaves {
 		b, ok := beforeLeaves[name]
@@ -78,6 +79,9 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.RemovedEdges)
 	sort.Strings(out.IntroducedViolations)
 	sort.Strings(out.ResolvedViolations)
+	if len(out.IntroducedViolations) > 0 {
+		out.Verdict = "regression"
+	}
 	return out
 }
 

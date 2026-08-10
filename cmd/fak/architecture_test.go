@@ -140,10 +140,34 @@ import _ "github.com/anthony-chaudhary/fak/internal/added"
 
 func TestWriteArchitectureDiffEmpty(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := writeArchitectureDiff(&out, &errOut, archreport.ReportDiff{Schema: archreport.DiffSchema}, false); code != 0 {
+	if code := writeArchitectureDiff(&out, &errOut, archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean"}, false, ""); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	if out.String() != "architecture diff: 0 change(s)\n" {
+	if out.String() != "architecture diff: 0 change(s), verdict=clean\n" {
 		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestArchitectureFailOnIntroducedViolations(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolations: []string{"primitive -> composite"}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-violations"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"verdict=regression", "introduced violation primitive -> composite", "remediation:", "baseline -> workspace"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+	out.Reset()
+	if code := writeArchitectureDiff(&out, &errOut, archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", AddedEdges: []archreport.EdgeChange{{From: "a", To: "b"}}}, false, "introduced-violations"); code != 0 {
+		t.Fatalf("clean code=%d", code)
+	}
+}
+
+func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations") {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

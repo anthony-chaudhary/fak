@@ -200,6 +200,7 @@ fak architecture --leaf archreport --json
 # Compare two supplied workspace snapshots (no implicit Git execution).
 fak architecture --baseline-workspace /path/to/before --workspace /path/to/after
 fak architecture --baseline-workspace /path/to/before --workspace /path/to/after --json
+fak architecture --baseline-workspace /path/to/before --workspace /path/to/after --fail-on introduced-violations
 
 # Privacy-safe adoption fold (ISO-week counts; no paths, hostnames, or leaf names).
 fak architecture --usage
@@ -208,13 +209,13 @@ fak architecture --usage --json
 
 The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly). Hotspots are sorted by direct fan-in descending, then leaf name.
 
-With `--baseline-workspace`, the command emits `fak-architecture-diff/1`: added/removed leaves, old→new tier changes, added/removed direct edges, and introduced/resolved upward violations. The caller supplies both snapshots; an empty diff is `0 change(s)` and exits successfully.
+With `--baseline-workspace`, the command emits `fak-architecture-diff/1`: added/removed leaves, old→new tier changes, added/removed direct edges, introduced/resolved upward violations, and a typed `clean`/`regression` verdict. The caller supplies both snapshots; an empty diff is `0 change(s)` and exits successfully. Add `--fail-on introduced-violations` for CI/pre-push use: a newly introduced upward edge exits `3` and names the remediation, while resolved violations and non-violating architecture changes remain exit `0`.
 
 The command does not run Git, execute package code, or mutate the workspace. It parses `internal/architest/architest_test.go` plus non-test Go import blocks. Malformed contracts or source files refuse with a recovery action. A stale tier declaration is a diagnostic—not a global outage—so healthy full and scoped queries remain usable.
 
 Each report invocation appends a `fak-architecture-usage/1` row under the user cache (`$XDG_CACHE_HOME/fak/architecture-usage.jsonl`, or the platform equivalent). Rows contain only timestamp, full/scoped mode, text/JSON format, outcome, and aggregate diagnostic/violation counts—never workspace paths, hostnames, usernames, leaf names, or error text. `FAK_ARCHITECTURE_USAGE_FILE=PATH` overrides the location; `off` disables recording. `--usage` folds rows into ISO-week counts, with JSON schema `fak-architecture-usage-summary/1`.
 
-Exit codes: `0` report or usage fold emitted; `1` workspace/contract/source/ledger inspection failed; `2` flag or positional-argument misuse.
+Exit codes: `0` report/fold or clean comparison emitted; `1` workspace/contract/source/ledger inspection failed; `2` flag or positional-argument misuse; `3` comparison gate found an introduced upward violation.
 
 The `session`, `signal`, and `ps` verbs are the front door to out-of-band control
 of a session that is **already running** — steer, redirect, pause, resume, cancel,

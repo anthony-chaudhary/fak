@@ -21,11 +21,20 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
+		return 2
+	}
+	if *failOn != "" && *failOn != "introduced-violations" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations)\n", *failOn)
+		return 2
+	}
+	if *failOn != "" && *baseline == "" {
+		fmt.Fprintln(stderr, "fak architecture: --fail-on requires --baseline-workspace")
 		return 2
 	}
 	if *usage && *baseline != "" {
@@ -62,7 +71,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak architecture: workspace: %v\n", err)
 			return 1
 		}
-		return writeArchitectureDiff(stdout, stderr, archreport.Diff(before, after), *jsonOut)
+		return writeArchitectureDiff(stdout, stderr, archreport.Diff(before, after), *jsonOut, *failOn)
 	}
 	usagePath, usagePathErr := archreport.UsagePath()
 	mode, format := "full", "text"
@@ -163,7 +172,7 @@ func runArchitectureUsage(stdout, stderr io.Writer, jsonOut bool) int {
 	return 0
 }
 
-func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff, jsonOut bool) int {
+func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff, jsonOut bool, failOn string) int {
 	if jsonOut {
 		raw, err := diff.JSON()
 		if err != nil {
@@ -171,9 +180,12 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 			return 1
 		}
 		fmt.Fprintln(stdout, string(raw))
+		if failOn == "introduced-violations" && diff.Verdict == "regression" {
+			return 3
+		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "architecture diff: %d change(s)\n", diff.Changes())
+	fmt.Fprintf(stdout, "architecture diff: %d change(s), verdict=%s\n", diff.Changes(), diff.Verdict)
 	for _, leaf := range diff.AddedLeaves {
 		fmt.Fprintf(stdout, "  + leaf %s\n", leaf)
 	}
@@ -194,6 +206,10 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	}
 	for _, edge := range diff.ResolvedViolations {
 		fmt.Fprintf(stdout, "  resolved violation %s\n", edge)
+	}
+	if failOn == "introduced-violations" && diff.Verdict == "regression" {
+		fmt.Fprintln(stdout, "  remediation: remove/invert introduced upward edges or move the shared seam down; comparison is baseline -> workspace")
+		return 3
 	}
 	return 0
 }
