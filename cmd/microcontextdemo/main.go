@@ -393,6 +393,7 @@ func main() {
 	var liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, verifyLiveFilterToolPath string
 	var disagreementPacket, disagreementFold, disagreementLive, disagreementOutput, verifyDisagreementPath string
 	var counterfactualSource, counterfactualCorpusOut, counterfactualCorpusIn, counterfactualJudgmentOut, counterfactualAdjudicator, counterfactualFoldA, counterfactualFoldB, counterfactualFoldOut, verifyCounterfactualCorpus, verifyCounterfactualFold, trueAdmissionOut, verifyTrueAdmissionPath string
+	var naturalCorpusOut, naturalCorpusIn, naturalJudgeOut, naturalAdjudicator, naturalFoldA, naturalFoldB, naturalFoldOut, verifyNaturalCorpus, verifyNaturalFold, naturalSurfaceOut, verifyNaturalSurfacePath string
 	var filterToolSchedulerTrials int
 	var routingVOISeed int64
 	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
@@ -519,6 +520,17 @@ func main() {
 	flag.StringVar(&verifyCounterfactualFold, "verify-counterfactual-fold", "", "counterfactual fold to verify")
 	flag.StringVar(&trueAdmissionOut, "true-admission-output", "", "write true pre-answer admission matrix")
 	flag.StringVar(&verifyTrueAdmissionPath, "verify-true-admission", "", "verify true pre-answer admission matrix")
+	flag.StringVar(&naturalCorpusOut, "natural-multitool-corpus-output", "", "write natural multi-tool corpus")
+	flag.StringVar(&naturalCorpusIn, "natural-multitool-corpus", "", "natural multi-tool corpus")
+	flag.StringVar(&naturalJudgeOut, "natural-multitool-judgment-output", "", "write natural multi-tool judgments")
+	flag.StringVar(&naturalAdjudicator, "natural-multitool-adjudicator", "", "natural multi-tool adjudicator identity")
+	flag.StringVar(&naturalFoldA, "natural-multitool-fold-a", "", "first natural judgment bundle")
+	flag.StringVar(&naturalFoldB, "natural-multitool-fold-b", "", "second natural judgment bundle")
+	flag.StringVar(&naturalFoldOut, "natural-multitool-fold-output", "", "write natural consensus fold")
+	flag.StringVar(&verifyNaturalCorpus, "verify-natural-multitool-corpus", "", "natural corpus to verify")
+	flag.StringVar(&verifyNaturalFold, "verify-natural-multitool-fold", "", "natural fold to verify")
+	flag.StringVar(&naturalSurfaceOut, "natural-multitool-surface-output", "", "write natural decision surface")
+	flag.StringVar(&verifyNaturalSurfacePath, "verify-natural-multitool-surface", "", "verify natural decision surface")
 	flag.StringVar(&verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
 	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
@@ -726,6 +738,68 @@ func main() {
 	}
 	if verifyLiveFilterToolPath != "" {
 		runVerify("verify-live-filter-tool", verifyLiveFilterToolPath, verifyLiveFilterToolMatrix)
+		return
+	}
+	if naturalCorpusOut != "" {
+		if err := buildNaturalCorpus(naturalCorpusOut); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural corpus %s\n", naturalCorpusOut)
+		return
+	}
+	if naturalJudgeOut != "" {
+		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+		if endpoint == "" {
+			endpoint = os.Getenv("OPENAI_BASE_URL")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if err := runNaturalJudge(context.Background(), naturalCorpusIn, naturalJudgeOut, endpoint, apiKey, semanticModel, naturalAdjudicator); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural judgments %s\n", naturalJudgeOut)
+		return
+	}
+	if naturalFoldOut != "" {
+		if err := foldNatural(naturalCorpusIn, naturalFoldA, naturalFoldB, naturalFoldOut); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural fold %s\n", naturalFoldOut)
+		return
+	}
+	if naturalSurfaceOut != "" {
+		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+		if endpoint == "" {
+			endpoint = os.Getenv("OPENAI_BASE_URL")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if err := runNaturalSurface(context.Background(), naturalCorpusIn, verifyNaturalFold, naturalSurfaceOut, endpoint, apiKey, liveMatrixModel); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural surface %s\n", naturalSurfaceOut)
+		return
+	}
+	if verifyNaturalFold != "" {
+		if err := verifyNatural(verifyNaturalCorpus, verifyNaturalFold); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural verified %s\n", verifyNaturalFold)
+		return
+	}
+	if verifyNaturalSurfacePath != "" {
+		if err := verifyNaturalSurface(verifyNaturalSurfacePath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural surface verified %s\n", verifyNaturalSurfacePath)
 		return
 	}
 	if counterfactualCorpusOut != "" {

@@ -2940,6 +2940,16 @@
           "category": "incidental",
           "reason": "CLI flag variable naming an experiment grader identity, not a policy capability.",
           "token": "counterfactualAdjudicator"
+        },
+        {
+          "category": "incidental",
+          "reason": "experiment flag name, not a reusable policy capability",
+          "token": "naturalAdjudicator"
+        },
+        {
+          "category": "incidental",
+          "reason": "experiment report row type, not a reusable policy capability",
+          "token": "naturalPolicySummary"
         }
       ],
       "exclude": [
@@ -2996,6 +3006,8 @@
         "guardWindowsArgvPreflight",
         "liveToolPolicy",
         "multi_capability",
+        "naturalAdjudicator",
+        "naturalPolicySummary",
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "orgPostureGloss",
@@ -4127,6 +4139,16 @@
           "category": "incidental",
           "reason": "benchmark timing delta field, not a product decision",
           "token": "AddedDecisionOverheadMS"
+        },
+        {
+          "category": "incidental",
+          "reason": "experiment JSON record type, not a distinct decision concept",
+          "token": "naturalDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "report artifact field value for the documented multi-tool surface",
+          "token": "decision_surface"
         }
       ],
       "id": "decision",
@@ -4145,10 +4167,12 @@
         "appendsteerdecisions",
         "decisionStderr",
         "decision_ms_per_request",
+        "decision_surface",
         "deterministicSelectorDecision",
         "fixtureSelectStage",
         "gooddecisionratio",
         "kinddecisionsabout",
+        "naturalDecision",
         "partialretrydecision",
         "pluginDecisionFromVerdict",
         "predictHeld",

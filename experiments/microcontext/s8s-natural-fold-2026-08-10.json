@@ -1,0 +1,238 @@
+{
+  "Schema": "fak-microcontext-natural-multitool-fold/1",
+  "CorpusSHA256": "b8b67a860286c18288ef1fdb0e9087d671824855a238ec23baff84e40c60f0b9",
+  "CreatedAt": "2026-08-10T22:00:47Z",
+  "Policy": "two model-distinct votes and construction contract must agree; otherwise disputed",
+  "Records": [
+    {
+      "ID": "n01",
+      "Split": "tune",
+      "Tool": "none",
+      "Unanimous": false,
+      "Votes": {
+        "construction": "none",
+        "independent-groq": "none",
+        "independent-openai": "issue_state"
+      }
+    },
+    {
+      "ID": "n02",
+      "Split": "test",
+      "Tool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "none",
+        "independent-groq": "none",
+        "independent-openai": "none"
+      }
+    },
+    {
+      "ID": "n03",
+      "Split": "tune",
+      "Tool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "none",
+        "independent-groq": "none",
+        "independent-openai": "none"
+      }
+    },
+    {
+      "ID": "n04",
+      "Split": "test",
+      "Tool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "none",
+        "independent-groq": "none",
+        "independent-openai": "none"
+      }
+    },
+    {
+      "ID": "r01",
+      "Split": "tune",
+      "Tool": "repo_search",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "repo_search",
+        "independent-groq": "repo_search",
+        "independent-openai": "repo_search"
+      }
+    },
+    {
+      "ID": "r02",
+      "Split": "test",
+      "Tool": "repo_search",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "repo_search",
+        "independent-groq": "repo_search",
+        "independent-openai": "repo_search"
+      }
+    },
+    {
+      "ID": "r03",
+      "Split": "tune",
+      "Tool": "repo_search",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "repo_search",
+        "independent-groq": "repo_search",
+        "independent-openai": "repo_search"
+      }
+    },
+    {
+      "ID": "r04",
+      "Split": "test",
+      "Tool": "repo_search",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "repo_search",
+        "independent-groq": "repo_search",
+        "independent-openai": "repo_search"
+      }
+    },
+    {
+      "ID": "i01",
+      "Split": "tune",
+      "Tool": "issue_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "issue_state",
+        "independent-groq": "issue_state",
+        "independent-openai": "issue_state"
+      }
+    },
+    {
+      "ID": "i02",
+      "Split": "test",
+      "Tool": "issue_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "issue_state",
+        "independent-groq": "issue_state",
+        "independent-openai": "issue_state"
+      }
+    },
+    {
+      "ID": "i03",
+      "Split": "tune",
+      "Tool": "issue_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "issue_state",
+        "independent-groq": "issue_state",
+        "independent-openai": "issue_state"
+      }
+    },
+    {
+      "ID": "i04",
+      "Split": "test",
+      "Tool": "issue_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "issue_state",
+        "independent-groq": "issue_state",
+        "independent-openai": "issue_state"
+      }
+    },
+    {
+      "ID": "c01",
+      "Split": "tune",
+      "Tool": "commit_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "commit_state",
+        "independent-groq": "commit_state",
+        "independent-openai": "commit_state"
+      }
+    },
+    {
+      "ID": "c02",
+      "Split": "test",
+      "Tool": "commit_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "commit_state",
+        "independent-groq": "commit_state",
+        "independent-openai": "commit_state"
+      }
+    },
+    {
+      "ID": "c03",
+      "Split": "tune",
+      "Tool": "commit_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "commit_state",
+        "independent-groq": "commit_state",
+        "independent-openai": "commit_state"
+      }
+    },
+    {
+      "ID": "c04",
+      "Split": "test",
+      "Tool": "commit_state",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "commit_state",
+        "independent-groq": "commit_state",
+        "independent-openai": "commit_state"
+      }
+    },
+    {
+      "ID": "d01",
+      "Split": "tune",
+      "Tool": "docs_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "docs_read",
+        "independent-groq": "docs_read",
+        "independent-openai": "docs_read"
+      }
+    },
+    {
+      "ID": "d02",
+      "Split": "test",
+      "Tool": "docs_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "docs_read",
+        "independent-groq": "docs_read",
+        "independent-openai": "docs_read"
+      }
+    },
+    {
+      "ID": "d03",
+      "Split": "tune",
+      "Tool": "docs_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "docs_read",
+        "independent-groq": "docs_read",
+        "independent-openai": "docs_read"
+      }
+    },
+    {
+      "ID": "d04",
+      "Split": "test",
+      "Tool": "docs_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction": "docs_read",
+        "independent-groq": "docs_read",
+        "independent-openai": "docs_read"
+      }
+    }
+  ],
+  "Counts": {
+    "disputed": 1,
+    "unanimous": 19,
+    "unanimous_commit_state": 4,
+    "unanimous_docs_read": 4,
+    "unanimous_issue_state": 4,
+    "unanimous_none": 3,
+    "unanimous_repo_search": 4
+  },
+  "Agreement": 0.95
+}

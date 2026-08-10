@@ -99,3 +99,5 @@ The repository's studies and dated investigations currently live under [`docs/no
 Use `fak workpattern list|source|trajectory|report` to consume the canonical seed catalog and evidence miners. The report is bounded to explicit detectors and scrubbed/local inputs; it does not claim universal taxonomy consensus or infer private-chat intent.
 
 - [S8q/S8r true pre-answer tool admission](micro-context-s8qr-true-tool-admission.md) — paired model-distinct consensus gold; two-stage admission matches quality while opening 50% fewer reads on the scoped envelope.
+
+- [S8s/S8t natural multi-tool decision surface](micro-context-s8st-natural-multitool-surface.md) — five evidence classes show fixed/adaptive/parallel crossover by tool cost, with quality gated first.

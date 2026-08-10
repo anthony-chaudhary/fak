@@ -1,0 +1,353 @@
+{
+  "Schema": "fak-microcontext-natural-multitool-surface/1",
+  "CorpusSHA256": "b8b67a860286c18288ef1fdb0e9087d671824855a238ec23baff84e40c60f0b9",
+  "FoldSHA256": "701386d7dacb4fba4e21fa16a09520c1c6bfc6582aae442c93a3f4b9c5fbedc1",
+  "Model": "gpt-5.6-sol",
+  "CreatedAt": "2026-08-10T22:08:16Z",
+  "Verdict": "decision_surface",
+  "Observations": [
+    {
+      "ID": "n02",
+      "Tool": "none",
+      "Status": "completed",
+      "WallMS": 0,
+      "receipt": "packet"
+    },
+    {
+      "ID": "n04",
+      "Tool": "none",
+      "Status": "completed",
+      "WallMS": 0,
+      "receipt": "packet"
+    },
+    {
+      "ID": "r02",
+      "Tool": "repo_search",
+      "Status": "completed",
+      "WallMS": 163.945,
+      "receipt": "cmd/agentdojoredteam/main.go:494:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/dojorsi/main.go:348:\twindowgate.ConfigureBackgroundCommand(add)\ncmd/fak/affected.go:406:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/antipatternscore.go:159:\twindowgate.ConfigureBackgroundCommand(cmd) // windowless on Windows: no console flash from a background parent\ncmd/fak/benchmarks.go:188:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/breath.go:158:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/brittlenessscore.go:107:\twindowgate.ConfigureBackgroundCommand(cmd) // windowless on Windows: no console flash from a background parent\ncmd/fak/commit.go:486:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/commit_buildcheck.go:207:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/commit_lifecycle.go:112:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/commit_poison_audit.go:509:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/concept.go:74:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/dojo.go:1099:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/done.go:298:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/dup.go:230:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/git_maint.go:111:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/gitspawnbench.go:306:\t\twindowgate.ConfigureBackgroundCommand(c)\ncmd/fak/go_shim.go:57:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/guard_child.go:835:// windowgate.ConfigureBackgroundCommand only sets Windows creation flags\ncmd/fak/guard_child_windowless_test.go:18:// where the underlying ConfigureBackgroundCommand is a no-op.\ncmd/fak/harness_debt_dispatch.go:572:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/hooks.go:754:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/hooks_popup_scan_test.go:68:// .Output() without windowgate.ConfigureBackgroundCommand — a hard UNSUPPRESSED_GO_EXEC.\ncmd/fak/hygiene_push_scope.go:24:\twindowgate.ConfigureBackgroundCommand(mergeBaseCmd)\ncmd/fak/importwitness.go:152:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/llms_full.go:144:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/loop_drive.go:76:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/microbench.go:373:\t\twindowgate.ConfigureBackgroundCommand(cmd) // windowless on Windows: no console flash from a background parent\ncmd/fak/negframescore.go:179:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/node_install.go:717:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/prepush_build.go:564:\twindowgate.ConfigureBackgroundCommand(ar)\ncmd/fak/profile.go:163:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/release_status.go:432:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/resume_plan.go:116:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/resume_watchdog_runtime.go:293:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/schedscan.go:362:// inherits windowgate.ConfigureBackgroundCommand (no popped console window).\ncmd/fak/session_durable.go:201:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/sessions.go:501:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/slack_fleet_process_windows.go:26:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/steering.go:217:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/taskmgr.go:372:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/testduration.go:340:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/treedoctor.go:295:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/validate.go:278:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/validate_test.go:250:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/watchdog_autoheal.go:900:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/windowgate.go:168:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/fak/windowgate_test.go:44:\tif !strings.Contains(p.NextAction, \"ConfigureBackgroundCommand\") {\ncmd/fak/worktree_worker.go:547:\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/microcontextdemo/live_filter_tool_scheduler.go:111:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ncmd/microcontextdemo/live_filter_tool_scheduler_test.go:57:\tconfigure := strings.Index(s, \"windowgate.ConfigureBackgroundCommand(cmd)\")\ndocs/glossary.md:364:### `ConfigureBackgroundCommand` — the windowgate rule\ndocs/notes/WINDOWS-SHELL-TUI-FAULT-BOUNDARY-TRIAGE-2026-07-04.md:76:- `internal/windowgate/*.go` — `ConfigureBackgroundCommand` (CREATE_NO_WINDOW),\nexperiments/microcontext/s8f-github-issues-public-2026-08-09.json:11:      \"body\": \"## Parent context\\n\\nParent: #4968. Witnessed while pushing the `model`-lane commit for #4968; the wedge is not\\nowned by that leaf (`internal/tokencache` is a different lane), so it is filed separately\\nhere and routes to the owning lane. #4968 is the discovery context this refusal was\\nobserved against, not the implementer.\\n\\n## Symptom\\n\\n`git push` is refused tree-wide for every worker on the shared trunk:\\n\\n```\\nDESKTOP_POPUP_REGRESSION (blocked): a tracked console-tool spawn would flash a window under background automation.\\n  popup spawn: internal/tokencache/cache.go:112: exec.Command reaches out, err := cmd.Output()\\n  before configureDispatchHelperCommand(cmd) / configureDispatchSpawn(cmd) — a windowless\\n  Windows parent can flash a console child (UNSUPPRESSED_GO_EXEC)\\n```\\n\\n## Why this is a fleet wedge, not one worker's problem\\n\\n`internal/tokencache/cache.go` + `cache_test.go` are **staged in the index but never\\ncommitted** (`git status` shows `A `, and the path has no trunk history). The pre-push\\naudit scans the *tracked* tree, so this staged-but-uncommitted leaf refuses the push of\\n**unrelated** commits in **other** lanes. Witnessed while pushing `eb9a99055` (lane\\n`model`, issue #4968), whose diff does not touch `internal/tokencache` at all.\\n\\nThe staging session appears to be gone: a concurrent `fak commit` reported\\n`LOCK_BROKEN holder_dead pid=22764 age=300s`, so this WIP looks orphaned rather than\\nin-flight — it will not clear on its own.\\n\\n## Offending spawn\\n\\n`commonDir()` resolves the git common dir with a bare spawn:\\n\\n```go\\ncmd := exec.Command(\\\"git\\\", \\\"rev-parse\\\", \\\"--git-common-dir\\\")\\nif strings.TrimSpace(root) != \\\"\\\" {\\n    cmd.Dir = root\\n}\\nout, err := cmd.Output()\\n```\\n\\n## Definition of Done\\n\\n- [ ] The `internal/tokencache` git spawn is suppressed via the sanctioned seam\\n      (`windowgate.ConfigureBackgroundCommand` / `configureDispatchHelperCommand`), so no\\n      console window can flash under a windowless parent.\\n- [ ] `fak hooks pre-push` passes on the shared tree with the leaf present.\\n- [ ] The leaf either lands committed (with its tier declared) or is unstaged, so an\\n      orphaned index entry cannot refuse unrelated lanes' pushes.\\n\\n## Target operating envelope\\n\\n- unsuppressed console spawns in internal/tokencache: \\u003e= 0 count\\n- pre-push refusals attributable to internal/tokencache: \\u003e= 0 count\\n\\n## Witnessed operating envelope\\n\\n- unsuppressed console spawns in internal/tokencache: \\u003e= 1 count\\n- pre-push refusals attributable to internal/tokencache: \\u003e= 1 count\\n\\n## Explicit non-claims\\n\\nNot a fix for the popup gate itself — the gate is behaving correctly by refusing an\\nunsuppressed spawn. This issue is about an orphaned, uncommitted leaf holding the whole\\nfleet's push path hostage. No latency/throughput/memory claim is made; this is a\\ngate-correctness leaf. Filed from the `model` lane, which does not own\\n`internal/tokencache`.\\n\\n## Work estimate\\nEstimate: 2 points. Uncertainty: the suppression call is one line; the judgement call is\\nwhether to land or unstage the orphaned leaf.\\n\\n## Overall completion contribution\\nContribution: 2/2 points.\\n\\n## Completion standard\\nproduction\\n\",\ninternal/agentreadinessscore/agentreadinessscore.go:1222:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/amdgpu/facts.go:62:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/assumecheck/drivers.go:20:// windowgate.ConfigureBackgroundCommand (no console-window flash), and the\ninternal/auditpane/auditpane.go:399:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/benchcli/benchcli.go:231:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/benchlineagegate/benchlineagegate.go:142:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/benchloop/reuse_cross.go:164:\t\t\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/branchrole/refaudit.go:127:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/buildoverlay/buildoverlay.go:82:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/cadencereport/collect.go:261:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/codexmcphealth/health.go:311:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/commitlane/status.go:329:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/commitsubject/coverage.go:106:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/committedtree/committedtree.go:23:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/conceptbench/task.go:491:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/conceptcatalog/author.go:322:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/conceptcatalog/freshness.go:255:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/conceptcatalog/freshness_test.go:124:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/conceptusage/conceptusage.go:180:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/corelockaudit/changed.go:32:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/blast.go:218:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/buildcheck.go:305:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/ci_preflight.go:124:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/index_refs.go:83:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/issue_audit.go:318:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/issue_fanout_coverage.go:47:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/issue_helpers.go:102:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devcmd/wiki.go:403:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devindex/execaudit.go:343:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devindex/execaudit_reach.go:191:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/devindex/freshness_head.go:47:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/dispatchpost/witness.go:54:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/dogfoodissues/dogfoodissues.go:804:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/dojocal/worktree.go:352:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/envconfiglint/envconfiglint.go:177:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/epicprogress/epicprogress.go:117:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/fleetpane/fleetpane.go:93:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/gardenbundle/gardenbundle.go:525:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/ghexec/ghexec.go:32:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/gitbroker/batch.go:147:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/gitbroker/gitbroker.go:147:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/gitbroker/runner.go:392:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/gitbroker/treestate.go:151:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/glm52prefillsweep/glm52prefillsweep.go:82:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/godfileceiling/godfileceiling.go:178:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/hooks/hooks.go:170:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/issuecatalog/issuecatalog.go:385:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/issuecontractrepair/issuecontractrepair.go:340:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/learningdebt/learningdebt.go:410:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/leaseref/runner.go:44:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/marketing/highwater.go:37:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/marketing/recentchanges.go:672:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/marketing/ship.go:87:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/maturity/issues.go:276:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/memgate/memgate.go:240:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/mergepreview/mergepreview.go:48:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/milestonereport/collect.go:93:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/mlpscore/snapshot.go:78:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/modver/modver.go:97:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/mutationefficacy/mutationefficacy.go:261:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/nightrun/prebuild.go:199:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/patchcommit/patchcommit.go:50:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/programreport/collect.go:190:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/pythongate/pythongate.go:59:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/readmevisualaudit/readmevisualaudit.go:132:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/recall/reverify.go:271:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/refactorverify/refactorverify.go:308:\twindowgate.ConfigureBackgroundCommand(cmd) // windowless git child on Windows: no console flash\ninternal/relay/resolve.go:97:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/relay/wiptree.go:193:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/release/lock.go:461:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/rsiloop/worktree.go:188:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/safecommit/runner.go:41:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/safesync/safesync.go:327:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/scdiff/scdiff.go:212:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/scorecardpane/collect.go:46:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/scorecardpane/hygienegather.go:181:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/selfinstall/runner.go:54:// windowgate.ConfigureBackgroundCommand sets HideWindow + CREATE_NO_WINDOW (a no-op off\ninternal/shadowgit/shadowgit.go:69:\twindowgate.ConfigureBackgroundCommand(cmd) // no console flash when a windowless Windows parent runs git\ninternal/shipgate/shipgate.go:202:\twindowgate.ConfigureBackgroundCommand(add)\ninternal/sotacoverage/sotacoverage.go:123:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/swebench/fleet.go:405:\twindowgate.ConfigureBackgroundCommand(c)\ninternal/taskvc/taskvc.go:350:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/testquality/scan.go:33:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/tokencache/cache.go:122:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/tokencache/dogfood_test.go:179:\twindowgate.ConfigureBackgroundCommand(top)\ninternal/trajctlhook/phasecommits.go:91:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/trajctlhook/trajctlhook.go:80:\t\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/trunkbuildprobe/trunkbuildprobe.go:298:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/whatschanged/whatschanged.go:56:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/windowgate/doc.go:41:// windowgate.ConfigureBackgroundCommand(cmd), and it surfaces every other literal\ninternal/windowgate/exec_other.go:11:// ConfigureBackgroundCommand is a no-op off Windows. POSIX helpers do not create\ninternal/windowgate/exec_windows.go:148:// ConfigureBackgroundCommand marks cmd as a background/helper process. It must\ninternal/windowgate/exec_windows_test.go:28:func TestConfigureBackgroundCommandSetsWindowsNoWindow(t *testing.T) {\ninternal/windowgate/windowgate.go:1150:// background helpers use ConfigureBackgroundCommand.\ninternal/windowgate/windowgate_test.go:414:\t\t\t\"package gardenbundle\\nimport (\\n \\\"os/exec\\\"\\n \\\"github.com/anthony-chaudhary/fak/internal/windowgate\\\"\\n)\\nfunc f(){\\n cmd := exec.Command(\\\"git\\\", \\\"rev-parse\\\", \\\"HEAD\\\")\\n windowgate.ConfigureBackgroundCommand(cmd)\\n _, _ = cmd.Output()\\n}\\n\",\ninternal/witness/witness.go:92:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/workerworktree/disambiguation.go:89:\twindowgate.ConfigureBackgroundCommand(cmd)\ninternal/workerworktree/workerworktree.go:187:\twindowgate.ConfigureBackgroundCommand(cmd)\ntools/concept_disambiguation_scorecard.data/_meta.json:816:          \"reason\": \"test-injection indirection: a package-level var aliasing windowgate.ConfigureBackgroundCommand so the headless-vs-attended launch gate is unit-observable; carries no new guard-gate semantics beyond the existing windowless-background configuration it forwards to (#3597)\",\ntools/githooks/pre-push:247:# Fix a hit by wrapping the Go exec with windowgate.ConfigureBackgroundCommand (or"
+    },
+    {
+      "ID": "r04",
+      "Tool": "repo_search",
+      "Status": "completed",
+      "WallMS": 163.678,
+      "receipt": "cmd/microcontextdemo/live_filter_tool_scheduler.go:20:const liveFilterToolSchema = \"fak-microcontext-live-filter-tool-scheduler/1\""
+    },
+    {
+      "ID": "i02",
+      "Tool": "issue_state",
+      "Status": "completed",
+      "WallMS": 1390.214,
+      "receipt": "{\"state\":\"open\",\"updated_at\":\"2026-08-10T21:48:48Z\",\"locked\":false} https://api.github.com/repos/anthony-chaudhary/fak/issues/6111"
+    },
+    {
+      "ID": "i04",
+      "Tool": "issue_state",
+      "Status": "completed",
+      "WallMS": 253.268,
+      "receipt": "{\"state\":\"open\",\"updated_at\":\"2026-08-10T21:49:15Z\",\"locked\":false} https://api.github.com/repos/anthony-chaudhary/fak/issues/6360"
+    },
+    {
+      "ID": "c02",
+      "Tool": "commit_state",
+      "Status": "completed",
+      "WallMS": 42.472,
+      "receipt": "ancestor=true"
+    },
+    {
+      "ID": "c04",
+      "Tool": "commit_state",
+      "Status": "completed",
+      "WallMS": 42.854,
+      "receipt": "ancestor=true"
+    },
+    {
+      "ID": "d02",
+      "Tool": "docs_read",
+      "Status": "completed",
+      "WallMS": 0.518,
+      "receipt": "---\r\ntitle: \"Research route: hypotheses, evidence, and promotion\"\r\ndescription: \"Index of fak research notes and captured stage witnesses, with the lifecycle rule that keeps a hypothesis out of the maintained authority set.\"\r\n---\r\n\r\n# Research: hypotheses, evidence, and promotion\r\n\r\n**Primary audience:** research readers evaluating an idea's provenance, evidence, and maturity before using it to guide implementation.\r\n**Lifecycle:** research; conclusions here remain hypotheses or scoped observations until a maintained authority adopts them.\r\n**Generation:** usually `gen/second-next` or `gen/future`, with some research performed to validate `gen/next` work; the route itself is `gen/now` documentation.\r\n**Authority:** current behavior comes from maintained guides, contracts, tests, and shipped implementation linked by the [documentation index](../index.md).\r\n**Support:** use the [contributor route](../../CONTRIBUTING.md) for implementation help and the [operator guides](../operator/) for supported operation.\r\n\r\n"
+    },
+    {
+      "ID": "d04",
+      "Tool": "docs_read",
+      "Status": "completed",
+      "WallMS": 0,
+      "receipt": "# AGENTS.md — orientation for coding agents\n\n\u003e **Not the human contributor guide.** This file is operating instructions for *automated*\n\u003e contributors working inside the maintainers' shared checkout — trunk guards, lane leases,\n\u003e commit trailers, and shared-tree rules that have no meaning outside it. If you are a human\n\u003e evaluating or contributing to fak, read [`README.md`](README.md) for what fak is and\n\u003e [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute; nothing below is required of you.\n\n\u003e You are an autonomous agent working in this repo. This file is the machine-read entry\n\u003e point (the [agents.md](https://agents.md) convention). It is intentionally\n\u003e command-dense and free of philosophy. For the *why*, read [`README.md`](README.md);\n\u003e for a curated doc map, read [`llms.txt`](llms.txt). Humans: see [`START-HERE.md`](START-HERE.md).\n\n## What this project is\n\n**fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools\nit calls, and handles every tool call before it ru"
+    }
+  ],
+  "Decisions": [
+    {
+      "ID": "n02",
+      "Tool": "none",
+      "MissingFact": "",
+      "Rationale": "The context explicitly states the done condition: the verifier passes and the artifact hash is recorded.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 1,
+      "PromptTokens": 167,
+      "OutputTokens": 40,
+      "WallMS": 7973.772
+    },
+    {
+      "ID": "n04",
+      "Tool": "none",
+      "MissingFact": "",
+      "Rationale": "The supplied context directly states the requested work: add a typed fold and preserve provenance in each receipt.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 0.99,
+      "PromptTokens": 165,
+      "OutputTokens": 73,
+      "WallMS": 8183.521
+    },
+    {
+      "ID": "r02",
+      "Tool": "repo_search",
+      "MissingFact": "",
+      "Rationale": "The question requires locating and citing an implementation detail in committed source code.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 0.99,
+      "PromptTokens": 164,
+      "OutputTokens": 77,
+      "WallMS": 6636.308
+    },
+    {
+      "ID": "r04",
+      "Tool": "repo_search",
+      "MissingFact": "",
+      "Rationale": "Locating a schema constant requires searching committed source symbols or content.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 0.99,
+      "PromptTokens": 160,
+      "OutputTokens": 78,
+      "WallMS": 4198.275
+    },
+    {
+      "ID": "i02",
+      "Tool": "issue_state",
+      "MissingFact": "",
+      "Rationale": "The question requires mutable, up-to-date GitHub issue status.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 1,
+      "PromptTokens": 163,
+      "OutputTokens": 49,
+      "WallMS": 5462.352
+    },
+    {
+      "ID": "i04",
+      "Tool": "issue_state",
+      "MissingFact": "",
+      "Rationale": "The question asks for mutable GitHub issue status.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 1,
+      "PromptTokens": 161,
+      "OutputTokens": 44,
+      "WallMS": 6324.189
+    },
+    {
+      "ID": "c02",
+      "Tool": "commit_state",
+      "MissingFact": "",
+      "Rationale": "This requires checking current remote branch ancestry, which is mutable git state.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 0.99,
+      "PromptTokens": 164,
+      "OutputTokens": 54,
+      "WallMS": 4550.569
+    },
+    {
+      "ID": "c04",
+      "Tool": "commit_state",
+      "MissingFact": "",
+      "Rationale": "The question requires current git reachability/ancestry state.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 1,
+      "PromptTokens": 160,
+      "OutputTokens": 49,
+      "WallMS": 3339.358
+    },
+    {
+      "ID": "d02",
+      "Tool": "docs_read",
+      "MissingFact": "",
+      "Rationale": "The question explicitly requires reading the current entry in a named committed document.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 0.99,
+      "PromptTokens": 161,
+      "OutputTokens": 80,
+      "WallMS": 5418.383
+    },
+    {
+      "ID": "d04",
+      "Tool": "docs_read",
+      "MissingFact": "",
+      "Rationale": "The operator explicitly directs reading a named committed document, and the answer depends on its current instructions.",
+      "Status": "completed",
+      "Error": "",
+      "Confidence": 0.99,
+      "PromptTokens": 161,
+      "OutputTokens": 100,
+      "WallMS": 3959.273
+    }
+  ],
+  "Summaries": [
+    {
+      "Policy": "deterministic",
+      "Regime": "cheap-tools",
+      "Exact": 8,
+      "Total": 10,
+      "ToolsOpened": 6,
+      "Quality": 0.8,
+      "MeanWallMS": 20.140270000000005,
+      "MeanWorkMS": 20.140270000000005,
+      "PromptTokens": 0,
+      "OutputTokens": 0
+    },
+    {
+      "Policy": "fixed-cascade",
+      "Regime": "cheap-tools",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 40,
+      "Quality": 1,
+      "MeanWallMS": 102.84745000000001,
+      "MeanWorkMS": 102.84745000000001,
+      "PromptTokens": 0,
+      "OutputTokens": 0
+    },
+    {
+      "Policy": "selective-parallel",
+      "Regime": "cheap-tools",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 40,
+      "Quality": 1,
+      "MeanWallMS": 5604.6,
+      "MeanWorkMS": 5707.447450000001,
+      "PromptTokens": 1626,
+      "OutputTokens": 644
+    },
+    {
+      "Policy": "semantic-two-stage",
+      "Regime": "cheap-tools",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 8,
+      "Quality": 1,
+      "MeanWallMS": 5625.16949,
+      "MeanWorkMS": 5625.16949,
+      "PromptTokens": 1626,
+      "OutputTokens": 644
+    },
+    {
+      "Policy": "deterministic",
+      "Regime": "expensive-tools",
+      "Exact": 8,
+      "Total": 10,
+      "ToolsOpened": 6,
+      "Quality": 0.8,
+      "MeanWallMS": 2014.027,
+      "MeanWorkMS": 2014.027,
+      "PromptTokens": 0,
+      "OutputTokens": 0
+    },
+    {
+      "Policy": "fixed-cascade",
+      "Regime": "expensive-tools",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 40,
+      "Quality": 1,
+      "MeanWallMS": 10284.744999999999,
+      "MeanWorkMS": 10284.744999999999,
+      "PromptTokens": 0,
+      "OutputTokens": 0
+    },
+    {
+      "Policy": "selective-parallel",
+      "Regime": "expensive-tools",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 40,
+      "Quality": 1,
+      "MeanWallMS": 8217.410000000002,
+      "MeanWorkMS": 15889.345000000005,
+      "PromptTokens": 1626,
+      "OutputTokens": 644
+    },
+    {
+      "Policy": "semantic-two-stage",
+      "Regime": "expensive-tools",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 8,
+      "Quality": 1,
+      "MeanWallMS": 7661.549000000001,
+      "MeanWorkMS": 7661.549000000001,
+      "PromptTokens": 1626,
+      "OutputTokens": 644
+    },
+    {
+      "Policy": "deterministic",
+      "Regime": "observed",
+      "Exact": 8,
+      "Total": 10,
+      "ToolsOpened": 6,
+      "Quality": 0.8,
+      "MeanWallMS": 201.4027,
+      "MeanWorkMS": 201.4027,
+      "PromptTokens": 0,
+      "OutputTokens": 0
+    },
+    {
+      "Policy": "fixed-cascade",
+      "Regime": "observed",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 40,
+      "Quality": 1,
+      "MeanWallMS": 1028.4745,
+      "MeanWorkMS": 1028.4745,
+      "PromptTokens": 0,
+      "OutputTokens": 0
+    },
+    {
+      "Policy": "selective-parallel",
+      "Regime": "observed",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 40,
+      "Quality": 1,
+      "MeanWallMS": 5604.6,
+      "MeanWorkMS": 6633.0745,
+      "PromptTokens": 1626,
+      "OutputTokens": 644
+    },
+    {
+      "Policy": "semantic-two-stage",
+      "Regime": "observed",
+      "Exact": 10,
+      "Total": 10,
+      "ToolsOpened": 8,
+      "Quality": 1,
+      "MeanWallMS": 5810.2949,
+      "MeanWorkMS": 5810.2949,
+      "PromptTokens": 1626,
+      "OutputTokens": 644
+    }
+  ],
+  "Limits": [
+    "Cost regimes scale witnessed tool latency while preserving labels; cheap/expensive values are modeled, observed is witnessed.",
+    "Admission quality means the minimum required evidence source was selected/opened, not full natural-language answer correctness.",
+    "Fixed and parallel arms model four read capabilities per record from the witnessed tool-latency pool; provider billing after cancellation is not inferred."
+  ]
+}

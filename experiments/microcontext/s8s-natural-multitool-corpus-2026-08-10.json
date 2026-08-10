@@ -1,0 +1,187 @@
+{
+  "Schema": "fak-microcontext-natural-multitool/1",
+  "Selection": "20 naturally phrased operator questions over five evidence classes; alternating opaque IDs freeze 10 tune and 10 test records",
+  "CreatedAt": "2026-08-10T21:56:31Z",
+  "Records": [
+    {
+      "ID": "n01",
+      "Split": "tune",
+      "Question": "Summarize the acceptance witness already stated in this packet.",
+      "Context": "The issue requests a render witness and names the test command.",
+      "RequiredTool": "none",
+      "ToolArg": "",
+      "Source": "issue packet"
+    },
+    {
+      "ID": "n02",
+      "Split": "test",
+      "Question": "From this bounded packet, what concrete done condition is requested?",
+      "Context": "Done means the verifier passes and the artifact hash is recorded.",
+      "RequiredTool": "none",
+      "ToolArg": "",
+      "Source": "issue packet"
+    },
+    {
+      "ID": "n03",
+      "Split": "tune",
+      "Question": "Explain the risk described here without checking external state.",
+      "Context": "A stale lease can block a lane; this packet asks for a dead-owner reap.",
+      "RequiredTool": "none",
+      "ToolArg": "",
+      "Source": "issue packet"
+    },
+    {
+      "ID": "n04",
+      "Split": "test",
+      "Question": "What work does this record ask a contributor to implement?",
+      "Context": "Add a typed fold and preserve provenance in each receipt.",
+      "RequiredTool": "none",
+      "ToolArg": "",
+      "Source": "issue packet"
+    },
+    {
+      "ID": "r01",
+      "Split": "tune",
+      "Question": "Does the committed tree define runTrueAdmission?",
+      "Context": "Confirm the symbol exists in source, not merely in this prompt.",
+      "RequiredTool": "repo_search",
+      "ToolArg": "runTrueAdmission",
+      "Source": "repository task"
+    },
+    {
+      "ID": "r02",
+      "Split": "test",
+      "Question": "Find where the code configures a background command before Output.",
+      "Context": "The answer must cite the committed source location.",
+      "RequiredTool": "repo_search",
+      "ToolArg": "ConfigureBackgroundCommand",
+      "Source": "repository task"
+    },
+    {
+      "ID": "r03",
+      "Split": "tune",
+      "Question": "Can the implementation currently verify a disagreement audit artifact?",
+      "Context": "Inspect source for the verifier entry point.",
+      "RequiredTool": "repo_search",
+      "ToolArg": "verifyDisagreementAudit",
+      "Source": "repository task"
+    },
+    {
+      "ID": "r04",
+      "Split": "test",
+      "Question": "Locate the schema constant for the live filter/tool scheduler.",
+      "Context": "Return a committed source location.",
+      "RequiredTool": "repo_search",
+      "ToolArg": "liveFilterToolSchema",
+      "Source": "repository task"
+    },
+    {
+      "ID": "i01",
+      "Split": "tune",
+      "Question": "Is GitHub issue 6033 open right now?",
+      "Context": "The packet cannot establish mutable issue state.",
+      "RequiredTool": "issue_state",
+      "ToolArg": "6033",
+      "Source": "operator issue query"
+    },
+    {
+      "ID": "i02",
+      "Split": "test",
+      "Question": "Has issue 6111 been closed yet?",
+      "Context": "Answer from current GitHub state, not remembered context.",
+      "RequiredTool": "issue_state",
+      "ToolArg": "6111",
+      "Source": "operator issue query"
+    },
+    {
+      "ID": "i03",
+      "Split": "tune",
+      "Question": "What is the current state of issue 6185?",
+      "Context": "A live read is required.",
+      "RequiredTool": "issue_state",
+      "ToolArg": "6185",
+      "Source": "operator issue query"
+    },
+    {
+      "ID": "i04",
+      "Split": "test",
+      "Question": "Is the follow-up tracked as issue 6360 still open?",
+      "Context": "Check mutable issue state.",
+      "RequiredTool": "issue_state",
+      "ToolArg": "6360",
+      "Source": "operator issue query"
+    },
+    {
+      "ID": "c01",
+      "Split": "tune",
+      "Question": "Is commit 56f5d70ac4 an ancestor of origin/main?",
+      "Context": "Use current git ancestry.",
+      "RequiredTool": "commit_state",
+      "ToolArg": "56f5d70ac4",
+      "Source": "operator ancestry query"
+    },
+    {
+      "ID": "c02",
+      "Split": "test",
+      "Question": "Has dfb9a2b573 reached the remote main history?",
+      "Context": "Establish current origin/main ancestry.",
+      "RequiredTool": "commit_state",
+      "ToolArg": "dfb9a2b573",
+      "Source": "operator ancestry query"
+    },
+    {
+      "ID": "c03",
+      "Split": "tune",
+      "Question": "Does origin/main currently contain 8ba81749a1?",
+      "Context": "Use the repository graph rather than prose.",
+      "RequiredTool": "commit_state",
+      "ToolArg": "8ba81749a1",
+      "Source": "operator ancestry query"
+    },
+    {
+      "ID": "c04",
+      "Split": "test",
+      "Question": "Can origin/main reach commit bfbcff3e86?",
+      "Context": "Read current git ancestry.",
+      "RequiredTool": "commit_state",
+      "ToolArg": "bfbcff3e86",
+      "Source": "operator ancestry query"
+    },
+    {
+      "ID": "d01",
+      "Split": "tune",
+      "Question": "What warning does the private comms channel page give?",
+      "Context": "Read the named committed document.",
+      "RequiredTool": "docs_read",
+      "ToolArg": "docs/private-comms-channel.md",
+      "Source": "documentation query"
+    },
+    {
+      "ID": "d02",
+      "Split": "test",
+      "Question": "What does the research index say about S8p?",
+      "Context": "Read the current research index entry.",
+      "RequiredTool": "docs_read",
+      "ToolArg": "docs/research/README.md",
+      "Source": "documentation query"
+    },
+    {
+      "ID": "d03",
+      "Split": "tune",
+      "Question": "State the net-true standard's baseline requirement.",
+      "Context": "Use the committed standard rather than memory.",
+      "RequiredTool": "docs_read",
+      "ToolArg": "docs/standards/net-true-value.md",
+      "Source": "documentation query"
+    },
+    {
+      "ID": "d04",
+      "Split": "test",
+      "Question": "Which build question does fak buildcheck answer?",
+      "Context": "Read the operating instructions in AGENTS.md.",
+      "RequiredTool": "docs_read",
+      "ToolArg": "AGENTS.md",
+      "Source": "documentation query"
+    }
+  ]
+}
