@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 )
 
 const DiffSchema = "fak-architecture-diff/1"
@@ -104,6 +105,17 @@ type LateralEdgeConnectivityChange struct {
 	AfterSinkSide    []string         `json:"after_sink_side"`
 }
 
+type LateralVertexConnectivityChange struct {
+	Tier            int      `json:"tier"`
+	TierName        string   `json:"tier_name"`
+	Members         []string `json:"members"`
+	BeforeCut       int      `json:"before_cut"`
+	AfterCut        int      `json:"after_cut"`
+	Delta           int      `json:"delta"`
+	BeforeSeparator []string `json:"before_separator"`
+	AfterSeparator  []string `json:"after_separator"`
+}
+
 type LateralResilientPair struct {
 	Tier     int    `json:"tier"`
 	TierName string `json:"tier_name"`
@@ -129,39 +141,40 @@ type BlastPathChange struct {
 }
 
 type ReportDiff struct {
-	Schema                              string                           `json:"schema"`
-	Verdict                             string                           `json:"verdict"`
-	AddedLeaves                         []string                         `json:"added_leaves,omitempty"`
-	RemovedLeaves                       []string                         `json:"removed_leaves,omitempty"`
-	TierChanges                         []TierChange                     `json:"tier_changes,omitempty"`
-	AddedEdges                          []EdgeChange                     `json:"added_edges,omitempty"`
-	RemovedEdges                        []EdgeChange                     `json:"removed_edges,omitempty"`
-	IntroducedTypedEdges                []ArchitectureEdge               `json:"introduced_typed_edges,omitempty"`
-	ResolvedTypedEdges                  []ArchitectureEdge               `json:"resolved_typed_edges,omitempty"`
-	IntroducedLateralCouplings          []LateralCoupling                `json:"introduced_lateral_couplings,omitempty"`
-	ResolvedLateralCouplings            []LateralCoupling                `json:"resolved_lateral_couplings,omitempty"`
-	IntroducedLateralBridges            []LateralBridge                  `json:"introduced_lateral_bridges,omitempty"`
-	ResolvedLateralBridges              []LateralBridge                  `json:"resolved_lateral_bridges,omitempty"`
-	LateralBridgeChanges                []LateralBridgeChange            `json:"lateral_bridge_changes,omitempty"`
-	IntroducedLateralArticulationPoints []LateralArticulationPoint       `json:"introduced_lateral_articulation_points,omitempty"`
-	ResolvedLateralArticulationPoints   []LateralArticulationPoint       `json:"resolved_lateral_articulation_points,omitempty"`
-	LateralArticulationPointChanges     []LateralArticulationPointChange `json:"lateral_articulation_point_changes,omitempty"`
-	IntroducedLateralResilientPairs     []LateralResilientPair           `json:"introduced_lateral_resilient_pairs,omitempty"`
-	ResolvedLateralResilientPairs       []LateralResilientPair           `json:"resolved_lateral_resilient_pairs,omitempty"`
-	LateralEdgeConnectivityChanges      []LateralEdgeConnectivityChange  `json:"lateral_edge_connectivity_changes,omitempty"`
-	FanInChanges                        []FanInChange                    `json:"fan_in_changes,omitempty"`
-	BlastRadiusChanges                  []BlastRadiusChange              `json:"blast_radius_changes,omitempty"`
-	IntroducedBlastImpacts              []BlastImpact                    `json:"introduced_blast_impacts,omitempty"`
-	ResolvedBlastImpacts                []BlastImpact                    `json:"resolved_blast_impacts,omitempty"`
-	BlastPathChanges                    []BlastPathChange                `json:"blast_path_changes,omitempty"`
-	TierGapChanges                      []TierGapChange                  `json:"tier_gap_changes,omitempty"`
-	IntroducedViolationEdges            []ViolationEdge                  `json:"introduced_violation_edges,omitempty"`
-	ResolvedViolationEdges              []ViolationEdge                  `json:"resolved_violation_edges,omitempty"`
-	ViolationDistanceChanges            []ViolationDistanceChange        `json:"violation_distance_changes,omitempty"`
-	IntroducedViolations                []string                         `json:"introduced_violations,omitempty"` // Compatibility projection.
-	ResolvedViolations                  []string                         `json:"resolved_violations,omitempty"`   // Compatibility projection.
-	IntroducedDiagnostics               []Diagnostic                     `json:"introduced_diagnostics,omitempty"`
-	ResolvedDiagnostics                 []Diagnostic                     `json:"resolved_diagnostics,omitempty"`
+	Schema                              string                            `json:"schema"`
+	Verdict                             string                            `json:"verdict"`
+	AddedLeaves                         []string                          `json:"added_leaves,omitempty"`
+	RemovedLeaves                       []string                          `json:"removed_leaves,omitempty"`
+	TierChanges                         []TierChange                      `json:"tier_changes,omitempty"`
+	AddedEdges                          []EdgeChange                      `json:"added_edges,omitempty"`
+	RemovedEdges                        []EdgeChange                      `json:"removed_edges,omitempty"`
+	IntroducedTypedEdges                []ArchitectureEdge                `json:"introduced_typed_edges,omitempty"`
+	ResolvedTypedEdges                  []ArchitectureEdge                `json:"resolved_typed_edges,omitempty"`
+	IntroducedLateralCouplings          []LateralCoupling                 `json:"introduced_lateral_couplings,omitempty"`
+	ResolvedLateralCouplings            []LateralCoupling                 `json:"resolved_lateral_couplings,omitempty"`
+	IntroducedLateralBridges            []LateralBridge                   `json:"introduced_lateral_bridges,omitempty"`
+	ResolvedLateralBridges              []LateralBridge                   `json:"resolved_lateral_bridges,omitempty"`
+	LateralBridgeChanges                []LateralBridgeChange             `json:"lateral_bridge_changes,omitempty"`
+	IntroducedLateralArticulationPoints []LateralArticulationPoint        `json:"introduced_lateral_articulation_points,omitempty"`
+	ResolvedLateralArticulationPoints   []LateralArticulationPoint        `json:"resolved_lateral_articulation_points,omitempty"`
+	LateralArticulationPointChanges     []LateralArticulationPointChange  `json:"lateral_articulation_point_changes,omitempty"`
+	IntroducedLateralResilientPairs     []LateralResilientPair            `json:"introduced_lateral_resilient_pairs,omitempty"`
+	ResolvedLateralResilientPairs       []LateralResilientPair            `json:"resolved_lateral_resilient_pairs,omitempty"`
+	LateralEdgeConnectivityChanges      []LateralEdgeConnectivityChange   `json:"lateral_edge_connectivity_changes,omitempty"`
+	LateralVertexConnectivityChanges    []LateralVertexConnectivityChange `json:"lateral_vertex_connectivity_changes,omitempty"`
+	FanInChanges                        []FanInChange                     `json:"fan_in_changes,omitempty"`
+	BlastRadiusChanges                  []BlastRadiusChange               `json:"blast_radius_changes,omitempty"`
+	IntroducedBlastImpacts              []BlastImpact                     `json:"introduced_blast_impacts,omitempty"`
+	ResolvedBlastImpacts                []BlastImpact                     `json:"resolved_blast_impacts,omitempty"`
+	BlastPathChanges                    []BlastPathChange                 `json:"blast_path_changes,omitempty"`
+	TierGapChanges                      []TierGapChange                   `json:"tier_gap_changes,omitempty"`
+	IntroducedViolationEdges            []ViolationEdge                   `json:"introduced_violation_edges,omitempty"`
+	ResolvedViolationEdges              []ViolationEdge                   `json:"resolved_violation_edges,omitempty"`
+	ViolationDistanceChanges            []ViolationDistanceChange         `json:"violation_distance_changes,omitempty"`
+	IntroducedViolations                []string                          `json:"introduced_violations,omitempty"` // Compatibility projection.
+	ResolvedViolations                  []string                          `json:"resolved_violations,omitempty"`   // Compatibility projection.
+	IntroducedDiagnostics               []Diagnostic                      `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics                 []Diagnostic                      `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -253,6 +266,18 @@ func Diff(before, after Report) ReportDiff {
 	for key, pair := range beforeResilience {
 		if _, ok := afterResilience[key]; !ok {
 			out.ResolvedLateralResilientPairs = append(out.ResolvedLateralResilientPairs, pair)
+		}
+	}
+	beforeBlocks, afterBlocks := lateralBlockSet(before), lateralBlockSet(after)
+	for key, afterBlock := range afterBlocks {
+		if beforeBlock, ok := beforeBlocks[key]; ok && beforeBlock.MinVertexCut != afterBlock.MinVertexCut {
+			members := append([]string(nil), afterBlock.Members...)
+			sort.Strings(members)
+			out.LateralVertexConnectivityChanges = append(out.LateralVertexConnectivityChanges, LateralVertexConnectivityChange{
+				Tier: afterBlock.Tier, TierName: afterBlock.TierName, Members: members,
+				BeforeCut: beforeBlock.MinVertexCut, AfterCut: afterBlock.MinVertexCut, Delta: afterBlock.MinVertexCut - beforeBlock.MinVertexCut,
+				BeforeSeparator: append([]string(nil), beforeBlock.CriticalSeparator...), AfterSeparator: append([]string(nil), afterBlock.CriticalSeparator...),
+			})
 		}
 	}
 	beforeCuts, afterCuts := lateralPairCutSet(before), lateralPairCutSet(after)
@@ -357,6 +382,7 @@ func Diff(before, after Report) ReportDiff {
 	sortLateralResilientPairs(out.IntroducedLateralResilientPairs)
 	sortLateralResilientPairs(out.ResolvedLateralResilientPairs)
 	sortLateralEdgeConnectivityChanges(out.LateralEdgeConnectivityChanges)
+	sortLateralVertexConnectivityChanges(out.LateralVertexConnectivityChanges)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
@@ -365,7 +391,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -389,6 +415,47 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+func lateralBlockSet(r Report) map[string]LateralBiconnectedBlock {
+	out := map[string]LateralBiconnectedBlock{}
+	for _, block := range r.LateralBiconnectedBlocks {
+		members := append([]string(nil), block.Members...)
+		sort.Strings(members)
+		out[fmt.Sprintf("%d\x00%s", block.Tier, strings.Join(members, "\x00"))] = block
+	}
+	return out
+}
+
+func sortLateralVertexConnectivityChanges(changes []LateralVertexConnectivityChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if (changes[i].Delta < 0) != (changes[j].Delta < 0) {
+			return changes[i].Delta < 0
+		}
+		leftMagnitude, rightMagnitude := changes[i].Delta, changes[j].Delta
+		if leftMagnitude < 0 {
+			leftMagnitude = -leftMagnitude
+		}
+		if rightMagnitude < 0 {
+			rightMagnitude = -rightMagnitude
+		}
+		if leftMagnitude != rightMagnitude {
+			return leftMagnitude > rightMagnitude
+		}
+		if changes[i].Tier != changes[j].Tier {
+			return changes[i].Tier < changes[j].Tier
+		}
+		return strings.Join(changes[i].Members, "\x00") < strings.Join(changes[j].Members, "\x00")
+	})
+}
+
+func hasDecreasedLateralVertexConnectivity(changes []LateralVertexConnectivityChange) bool {
+	for _, change := range changes {
+		if change.Delta < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type lateralPairCut struct {

@@ -6,6 +6,39 @@ import (
 	"testing"
 )
 
+func TestDiffLateralVertexConnectivityChangesExposeStableBlockDrift(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, MinVertexCut: 3, CriticalSeparator: []string{"a", "b", "c"}},
+		{Tier: 3, TierName: "mechanism", Members: []string{"w", "x", "y", "z"}, MinVertexCut: 2, CriticalSeparator: []string{"w", "x"}},
+	}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"d", "c", "b", "a"}, MinVertexCut: 2, CriticalSeparator: []string{"b", "c"}},
+		{Tier: 3, TierName: "mechanism", Members: []string{"w", "x", "y", "z"}, MinVertexCut: 3, CriticalSeparator: []string{"w", "x", "y"}},
+	}}
+	diff := Diff(before, after)
+	want := []LateralVertexConnectivityChange{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, BeforeCut: 3, AfterCut: 2, Delta: -1, BeforeSeparator: []string{"a", "b", "c"}, AfterSeparator: []string{"b", "c"}},
+		{Tier: 3, TierName: "mechanism", Members: []string{"w", "x", "y", "z"}, BeforeCut: 2, AfterCut: 3, Delta: 1, BeforeSeparator: []string{"w", "x"}, AfterSeparator: []string{"w", "x", "y"}},
+	}
+	if !reflect.DeepEqual(diff.LateralVertexConnectivityChanges, want) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+	after.LateralBiconnectedBlocks[0].Members[0] = "mutated"
+	after.LateralBiconnectedBlocks[0].CriticalSeparator[0] = "mutated"
+	if got := diff.LateralVertexConnectivityChanges[0]; got.Members[0] != "a" || got.AfterSeparator[0] != "b" {
+		t.Fatalf("diff aliases input: %+v", got)
+	}
+}
+
+func TestDiffLateralVertexConnectivityIncreaseRemainsClean(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, Members: []string{"a", "b", "c"}, MinVertexCut: 1}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, Members: []string{"a", "b", "c"}, MinVertexCut: 2}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.LateralVertexConnectivityChanges) != 1 || diff.LateralVertexConnectivityChanges[0].Delta != 1 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralEdgeConnectivityPartitionsExposeStablePairCutDrift(t *testing.T) {
 	oldAB := []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}, {Left: "a", Right: "d"}}
 	newAB := []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}}

@@ -656,7 +656,7 @@ func TestArchitectureLateralEdgeConnectivityPartitionPolicy(t *testing.T) {
 		AfterSourceSide: []string{"a", "c"}, AfterSinkSide: []string{"b", "d"},
 	}}}
 	var out, errOut bytes.Buffer
-	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity"); code != 3 {
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity, or decreased-lateral-vertex-connectivity"); code != 3 {
 		t.Fatalf("code=%d output=%s", code, out.String())
 	}
 	for _, want := range []string{"lateral-edge-connectivity tier=foundation-composite(2) a <=> b cut 3 -> 2 (-1)", "witnesses [a--b a--c a--d] -> [a--b a--c]", "partitions [a]|[b c d] -> [a c]|[b d]", "edge-disjoint same-tier path"} {
@@ -665,6 +665,30 @@ func TestArchitectureLateralEdgeConnectivityPartitionPolicy(t *testing.T) {
 		}
 	}
 }
+func TestArchitectureDecreasedLateralVertexConnectivityPolicy(t *testing.T) {
+	diff := archreport.ReportDiff{LateralVertexConnectivityChanges: []archreport.LateralVertexConnectivityChange{{
+		Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"},
+		BeforeCut: 3, AfterCut: 2, Delta: -1, BeforeSeparator: []string{"a", "b", "c"}, AfterSeparator: []string{"b", "c"},
+	}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-vertex-connectivity"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"lateral-vertex-connectivity tier=foundation-composite(2) members=[a b c d] cut 3 -> 2 (-1)", "separators [a b c] -> [b c]", "package-failure bottleneck"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureDecreasedLateralVertexConnectivityPolicyIgnoresGain(t *testing.T) {
+	diff := archreport.ReportDiff{LateralVertexConnectivityChanges: []archreport.LateralVertexConnectivityChange{{Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-vertex-connectivity"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureDecreasedLateralEdgeConnectivityPolicyIgnoresGain(t *testing.T) {
 	diff := archreport.ReportDiff{LateralEdgeConnectivityChanges: []archreport.LateralEdgeConnectivityChange{{Delta: 1}}}
 	var out, errOut bytes.Buffer
