@@ -6,6 +6,41 @@ import (
 	"testing"
 )
 
+func TestDiffLateralCouplingPairsRepresentMergeAndSplit(t *testing.T) {
+	before := Report{LateralComponents: []LateralComponent{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b"}},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d"}},
+		{Tier: 3, TierName: "mechanism", Members: []string{"x", "y", "z"}},
+	}}
+	after := Report{LateralComponents: []LateralComponent{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}},
+		{Tier: 3, TierName: "mechanism", Members: []string{"x", "y"}},
+	}}
+	diff := Diff(before, after)
+	wantIntroduced := []LateralCoupling{
+		{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "c"},
+		{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "d"},
+		{Tier: 2, TierName: "foundation-composite", Left: "b", Right: "c"},
+		{Tier: 2, TierName: "foundation-composite", Left: "b", Right: "d"},
+	}
+	wantResolved := []LateralCoupling{{Tier: 3, TierName: "mechanism", Left: "x", Right: "z"}, {Tier: 3, TierName: "mechanism", Left: "y", Right: "z"}}
+	if !reflect.DeepEqual(diff.IntroducedLateralCouplings, wantIntroduced) || !reflect.DeepEqual(diff.ResolvedLateralCouplings, wantResolved) {
+		t.Fatalf("introduced=%+v resolved=%+v", diff.IntroducedLateralCouplings, diff.ResolvedLateralCouplings)
+	}
+	if diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffResolvedLateralCouplingsRemainClean(t *testing.T) {
+	before := Report{LateralComponents: []LateralComponent{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}}}}
+	after := Report{LateralComponents: []LateralComponent{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b"}}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.IntroducedLateralCouplings) != 0 || len(diff.ResolvedLateralCouplings) != 2 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestTypedEdgeDiffKeepsCompatibilityProjection(t *testing.T) {
 	rootward := ArchitectureEdge{From: "high", FromTier: 3, FromTierName: "mechanism", To: "low", ToTier: 1, ToTierName: "primitive", TierDelta: -2, Direction: "rootward"}
 	lateral := ArchitectureEdge{From: "peer", FromTier: 2, FromTierName: "foundation-composite", To: "side", ToTier: 2, ToTierName: "foundation-composite", TierDelta: 0, Direction: "lateral"}

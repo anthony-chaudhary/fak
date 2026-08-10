@@ -436,9 +436,30 @@ func TestArchitectureIntroducedLateralPolicyIgnoresRootwardAndUpward(t *testing.
 	}
 }
 
+func TestArchitectureFailOnIntroducedLateralCouplings(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedLateralCouplings: []archreport.LateralCoupling{{Tier: 2, TierName: "foundation-composite", Left: "left", Right: "right"}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-lateral-couplings"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"introduced lateral-coupling tier=foundation-composite(2) left <-> right", "remove the lateral bridge", "extract their shared seam downward"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureLateralCouplingPolicyIgnoresResolutions(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", ResolvedLateralCouplings: []archreport.LateralCoupling{{Tier: 2, Left: "left", Right: "right"}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-lateral-couplings"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, or introduced-lateral-edges") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, or introduced-lateral-couplings") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
