@@ -117,6 +117,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native dedicated cache-warm planning and provider-readback accounting are covered; fanout concurrency and formula helpers remain separate capability debt",
 	},
 	{
+		Leaf: "internal/vcacheobserve", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"provider_cache_economics_fold"},
+		Reason:       "native provider-cache economics/value fold is covered; provider action planning/application and context joins remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -403,6 +408,23 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"anthropic", "gemini", "openai", "lmcache", "mooncake"},
+	},
+	{
+		Capability: "provider_cache_economics_fold",
+		NativePath: "internal/vcacheobserve/vcacheobserve.go",
+		Workload:   "same four cold/write/read/context provider-cache turns, two families, multipliers, and independent counter/value oracle across every arm",
+		Metrics:    []string{"counter_accuracy", "saved_token_equiv", "hit_rate", "fold_latency_ms", "query_latency_ms", "input_tokens", "cache_write_tokens", "cache_read_tokens", "context_shed_tokens", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "raw provider usage without economics fold", Class: TunedBaseline, Source: "internal/vcacheobserve/compare.go"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "Anthropic usage and cost reporting", Class: NextBest, Source: "https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching"},
+			{Name: "OpenAI usage and cost reporting", Class: NextBest, Source: "https://platform.openai.com/docs/guides/prompt-caching"},
+			{Name: "Datadog LLM Observability", Class: NextBest, Source: "https://docs.datadoghq.com/llm_observability/"},
+			{Name: "LangSmith", Class: NextBest, Source: "https://docs.smith.langchain.com/observability/how_to_guides/monitor_costs"},
+		},
+		Witness:      "../../docs/benchmarks/PROVIDER-CACHE-ECONOMICS-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
