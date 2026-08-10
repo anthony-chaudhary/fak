@@ -37,7 +37,7 @@ func runNativeBenchmarks(stdout, stderr io.Writer, args []string) int {
 		if report.Complete {
 			verdict = "COMPLETE"
 		}
-		fmt.Fprintf(stdout, "%s: %d/%d native leaves covered by %d comparison contracts; %d findings\n", verdict, report.Coverage.CoveredLeaves, report.Coverage.NativeLeaves, len(report.Contracts), len(report.Findings))
+		fmt.Fprintf(stdout, "%s: %d/%d native leaves covered by %d comparison contracts; %d classified, %d unclassified, %d findings\n", verdict, report.Coverage.CoveredLeaves, report.Coverage.NativeLeaves, len(report.Contracts), report.Coverage.ClassifiedLeaves, report.Coverage.UnclassifiedLeaves, len(report.Findings))
 		for _, f := range report.Findings {
 			fmt.Fprintf(stdout, "- %s: %s\n", f.Capability, f.Reason)
 		}

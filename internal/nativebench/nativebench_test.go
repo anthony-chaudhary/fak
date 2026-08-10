@@ -10,13 +10,13 @@ import (
 func TestRegistryHasComparisonContractsForInitialNativeCapabilities(t *testing.T) {
 	got := All()
 	if len(got) < 2 {
-		t.Fatalf("contracts=%d, want initial tool-filtering and compression contracts", len(got))
+		t.Fatalf("contracts=%d, want tool-filtering, compression, and prefix-reuse contracts", len(got))
 	}
 	names := map[string]bool{}
 	for _, c := range got {
 		names[c.Capability] = true
 	}
-	for _, name := range []string{"tool_filtering", "context_compression"} {
+	for _, name := range []string{"tool_filtering", "context_compression", "prefix_kv_reuse"} {
 		if !names[name] {
 			t.Errorf("missing %s", name)
 		}
@@ -67,7 +67,7 @@ func TestDiscoverNativeLeavesAndCoverage(t *testing.T) {
 	}
 	report := AuditRoot(root)
 	t.Logf("repository native benchmark coverage: %d/%d leaves, %d missing, %d findings", report.Coverage.CoveredLeaves, report.Coverage.NativeLeaves, len(report.Coverage.MissingLeaves), len(report.Findings))
-	if report.Coverage.NativeLeaves != 1 || len(report.Coverage.MissingLeaves) != 1 || report.Coverage.MissingLeaves[0] != "alpha" {
+	if report.Coverage.NativeLeaves != 1 || len(report.Coverage.MissingLeaves) != 1 || report.Coverage.MissingLeaves[0] != "internal/alpha" {
 		t.Fatalf("coverage=%+v", report.Coverage)
 	}
 }
@@ -79,11 +79,46 @@ func TestAuditRepositoryDiscoversNativeCoverageDebt(t *testing.T) {
 	if !report.Coverage.DiscoveryComplete || report.Coverage.NativeLeaves < 100 {
 		t.Fatalf("repository discovery did not cover the native leaf inventory: %+v", report.Coverage)
 	}
-	if report.Coverage.CoveredLeaves != 2 {
-		t.Fatalf("covered leaves=%d, want the two initial gateway and ctxmmu leaves", report.Coverage.CoveredLeaves)
+	if report.Coverage.CoveredLeaves != 4 {
+		t.Fatalf("covered leaves=%d, want gateway + headroom + radixkv contracts and nativebench infrastructure", report.Coverage.CoveredLeaves)
+	}
+	if report.Coverage.ClassifiedLeaves != 4 || report.Coverage.UnclassifiedLeaves == 0 {
+		t.Fatalf("classification debt is not explicit: %+v", report.Coverage)
 	}
 	if len(report.Coverage.MissingLeaves) == 0 || report.Complete {
 		t.Fatalf("repository-wide debt must remain explicit: %+v", report)
+	}
+}
+
+func TestValidateClassificationsRejectsUnknownAndMalformedEntries(t *testing.T) {
+	contracts := []Contract{{Capability: "known"}}
+	classifications := []LeafClassification{
+		{Leaf: "internal/x", Disposition: DispositionCapability, Capabilities: []string{"missing"}, Reason: "x"},
+		{Leaf: "internal/x", Disposition: DispositionInfrastructure, Capabilities: []string{"known"}},
+		{Leaf: "outside", Disposition: "mystery", Reason: "x"},
+	}
+	findings := validateClassifications(classifications, contracts)
+	if len(findings) < 5 {
+		t.Fatalf("findings=%+v", findings)
+	}
+}
+
+func TestClassifiedInfrastructureDoesNotNeedAComparisonContract(t *testing.T) {
+	root := t.TempDir()
+	for _, leaf := range []string{"gateway", "headroom", "nativebench", "radixkv"} {
+		if err := os.MkdirAll(filepath.Join(root, "internal", leaf), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "internal", leaf, leaf+".go"), []byte("package "+leaf+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := AuditRoot(root)
+	if report.Coverage.CoveredLeaves != 4 || report.Coverage.UnclassifiedLeaves != 0 {
+		t.Fatalf("coverage=%+v", report.Coverage)
+	}
+	if got := report.Coverage.DispositionCounts[DispositionInfrastructure]; got != 1 {
+		t.Fatalf("infrastructure dispositions=%d", got)
 	}
 }
 
@@ -109,6 +144,24 @@ func TestValidateRequiresEveryEquivalentIntegrationArm(t *testing.T) {
 			t.Fatalf("unexpected integration finding: %+v", f)
 		}
 	}
+}
+
+func TestPrefixReuseRequiresLLMDIntegrationArm(t *testing.T) {
+	for _, contract := range All() {
+		if contract.Capability != "prefix_kv_reuse" {
+			continue
+		}
+		if len(contract.Integrations) != 1 || contract.Integrations[0] != "llm-d" {
+			t.Fatalf("prefix reuse integrations=%v", contract.Integrations)
+		}
+		for _, arm := range contract.Alternatives {
+			if arm.Class == FirstClassIntegration && arm.Integration == "llm-d" {
+				return
+			}
+		}
+		t.Fatal("prefix reuse contract lacks fak + llm-d integration arm")
+	}
+	t.Fatal("prefix_kv_reuse contract missing")
 }
 
 func TestContextCompressionRequiresLLMLinguaIntegrationArm(t *testing.T) {

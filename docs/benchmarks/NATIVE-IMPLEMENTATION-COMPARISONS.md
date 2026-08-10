@@ -23,17 +23,18 @@ Each native capability must declare one shared-workload contract with:
 
 An integration arm is additive to the next-best arm, not a substitute for it. If the best external implementation is also a first-class integration, one arm may carry both facts in its provenance, but the report must still name the integration explicitly.
 
-The command now discovers every production Go leaf directly beneath `internal/` and reports uncovered leaves. This makes the gap exhaustive against the repository-native leaf inventory rather than silently treating two hand-picked examples as complete. The registry starts with the two examples called out by the operator:
+The command discovers every production Go leaf directly beneath `internal/` and requires an explicit disposition for each one: `capability`, `multi_capability`, or `infrastructure`. Unclassified leaves remain missing; discovery never promotes a package to covered by inference. Capability and multi-capability leaves name every benchmark contract they contain, while infrastructure leaves carry a reason and need no performance comparison. This makes classification debt machine-visible without pretending that one package equals one capability. The registry starts with the two examples called out by the operator:
 
 | Native capability | Native location | tuned baseline | next-best comparison | required outcomes |
 |---|---|---|---|---|
 | tool filtering | `internal/gateway/mcp_defer.go` | all schemas, provider cache enabled | retrieval-based selection (ToolRAG class) | task success, tool recall, input tokens, TTFT, total cost |
-| context compression | `internal/ctxmmu` | full history, provider cache enabled | LongLLMLingua | task success, retained-fact recall, input tokens, latency, total cost |
+| context compression | `internal/headroom/native.go` | full history, provider cache enabled | LongLLMLingua | task success, retained-fact recall, input tokens, latency, total cost |
+| prefix KV reuse | `internal/radixkv/radixkv.go` | prefix caching disabled | SGLang RadixAttention, plus `fak + llm-d` | output equivalence, prefix hit rate, TTFT, throughput, KV bytes, total cost |
 
-Both currently have missing witnesses, which is why `--check` fails. The registry is in `internal/nativebench`; new native capabilities must be added there with their alternatives before their benchmark obligation can be considered covered.
+All currently have missing witnesses, which is why `--check` fails. The registry is in `internal/nativebench`; new native capabilities must be added there with their alternatives before their benchmark obligation can be considered covered.
 
 ## Scope still to enumerate
 
-This spine does **not** yet prove repository-wide coverage. Leaf discovery is exhaustive at the package boundary, but a package can contain multiple benchmarkable capabilities and not every leaf is necessarily performance-bearing. The authoritative completion work is to classify the discovered leaves, split multi-capability leaves, map equivalent first-class integrations, and attach benchmark witnesses. Until that inventory is complete and every contract passes, the broad claim “all native implementations are benchmarked against next best alternatives” remains **not yet**.
+This spine does **not** yet prove repository-wide coverage. Leaf discovery is exhaustive at the package boundary and the disposition schema is now enforced, but most leaves are still explicitly unclassified. The authoritative completion work is to classify every discovered leaf, split every multi-capability leaf into contracts, map equivalent first-class integrations, and attach benchmark witnesses. Until the unclassified count reaches zero and every contract passes, the broad claim “all native implementations are benchmarked against next best alternatives” remains **not yet**.
 
 
