@@ -351,6 +351,10 @@ class EvaluateTest(unittest.TestCase):
         # would trip that stub on a local read, not on the `gh issue close` the
         # stub exists to catch.
         mod.disclaimer_binds_closure = lambda root, row: (True, None)
+        # Neutralize the incomplete-evidence gate too (own behavior in
+        # IncompleteEvidenceGateTest) -- it is the other COMMIT-reading gate, so it
+        # would likewise reach the raising run_capture stub on a local git read.
+        mod.evidence_binds_closure = lambda root, row: (True, None)
 
         def fake_reverify(root, sha):
             return reverify_map[sha]
@@ -445,6 +449,7 @@ class PushedGateTest(unittest.TestCase):
         mod.origin_main_resolvable = lambda root: gate_active
         mod.coverage_binds_closure = lambda root, row: (True, None)  # #3870 inert here
         mod.reopen_blocks_close = lambda root, row: (True, None)     # #4374 inert here
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         # only "onmain" is an ancestor of origin/main; "localonly" is not.
         mod.reachable_from_origin = lambda root, sha: sha == "onmain"
 
@@ -531,6 +536,7 @@ class StateReadbackTest(unittest.TestCase):
         mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
         mod.reopen_blocks_close = lambda root, row: (True, None)     # inert #4374 gate
         mod.observed_effect_binds_closure = lambda root, row: (True, None)  # inert #4747
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
         run, calls = self._fake_gh(view_states)
         mod.run_capture = run
@@ -600,6 +606,7 @@ class StateReadbackTest(unittest.TestCase):
         mod.origin_main_resolvable = lambda root: False
         mod.coverage_binds_closure = lambda root, row: (True, None)  # inert #3870 gate
         mod.observed_effect_binds_closure = lambda root, row: (True, None)  # inert #4747
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         mod.reverify = lambda root, sha: dict(self.RESOLVING_RV)
 
         def run(cmd, cwd, timeout):
@@ -714,6 +721,7 @@ class CoverageGateTest(unittest.TestCase):
         mod.origin_main_resolvable = lambda root: False
         mod.reopen_blocks_close = lambda root, row: (True, None)  # inert #4374 gate
         mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -908,6 +916,7 @@ class ReopenGateTest(unittest.TestCase):
         mod.origin_main_resolvable = lambda root: False
         mod.coverage_binds_closure = lambda root, row: (True, None)
         mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -1086,6 +1095,7 @@ class ObservedEffectGateTest(unittest.TestCase):
         mod.origin_main_resolvable = lambda root: False
         mod.reopen_blocks_close = lambda root, row: (True, None)
         mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         mod.reverify = lambda root, sha: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -1310,6 +1320,7 @@ class DisclaimedResolutionGateTest(unittest.TestCase):
         mod.coverage_binds_closure = lambda root, row: (True, None)
         mod.reopen_blocks_close = lambda root, row: (True, None)
         mod.observed_effect_binds_closure = lambda root, row: (True, None)
+        mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         mod.reverify = lambda root, sha_: {
             "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
             "claim_kind": "code_effect", "touches_code": True, "reason": None}
@@ -1385,6 +1396,292 @@ class DisclaimedResolutionGateTest(unittest.TestCase):
         self.assertEqual(r["action"], "closed")
         self.assertEqual(p["counts"]["skipped_disclaimed"], 0)
         self.assertTrue(any(mod.DISCLAIM_UNREADABLE_NOTE in n
+                            for n in r.get("gate_notes", [])))
+
+
+class IncompleteEvidenceGateTest(unittest.TestCase):
+    """The incomplete-evidence gate: a commit whose own ARTIFACT declares itself
+    unfinished cannot witness a resolution. #5865 reads the commit MESSAGE; a
+    benchmark-shaped resolution states its scope in the packet it adds instead.
+
+    The witnessed harm: on 2026-08-10 the arm closed 31 issues (#6122 .. #6205) on
+    commits that each added a `docs/benchmarks/` comparison packet headed
+    `Status: **INCOMPLETE**`, with only a native arm and a tuned baseline executing
+    and every external arm a zero-measurement placeholder. Every upstream gate passed
+    honestly, so nothing refused.
+
+    The packet fixtures below are verbatim excerpts of the real committed files."""
+
+    # verbatim line 3 of docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md,
+    # added by 8595070f42 -- the commit that closed #6205.
+    PACKET_6205 = (
+        "# Go call-graph alternatives — 2026-08-10\n\n"
+        "Status: **INCOMPLETE**. Issue "
+        "[#6205](https://github.com/anthony-chaudhary/fak/issues/6205) tracks real "
+        "type-aware and code-intelligence tool runs with independent resource and "
+        "cost witnesses.\n")
+    # verbatim line 5 of docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md
+    # (#6165): the SAME status, written in the other packet dialect this corpus uses.
+    PACKET_6165 = (
+        "# Bounded cache-snapshot alternatives — 2026-08-10\n\n## Verdict\n\n"
+        "**INCOMPLETE.** The local packet executes fak's bounded fsynced JSONL "
+        "snapshot/replay and an unbounded append-only JSONL baseline. Prometheus, "
+        "OpenTelemetry, SQLite, Prometheus TSDB, and ClickHouse retain zero "
+        "measurements until their real stores execute the common retention workload; "
+        "[#6165](https://github.com/anthony-chaudhary/fak/issues/6165) tracks those "
+        "witnesses.\n")
+    # verbatim tail of docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md
+    # (#6122): a third dialect that never uppercases the token and states the hold as
+    # an author disclaimer instead.
+    PACKET_6122 = (
+        "# Cache-observability alternatives — 2026-08-10\n\n"
+        "Issue: [#6122](https://github.com/anthony-chaudhary/fak/issues/6122)\n\n"
+        "## Honest status\n\nThe contract and local fixture are present, but the "
+        "comparison is incomplete. Issue #6122 remains open until all five same-trace "
+        "arms have independent correctness, latency, resource, and total-cost "
+        "witnesses.\n")
+    # The shared registry every packet commit also touches. It carries its own
+    # INCOMPLETE spine header and an INCOMPLETE row for dozens of OTHER capabilities --
+    # the exact shape a file-global "INCOMPLETE in text" check would false-refuse on.
+    REGISTRY = (
+        "# Native implementation benchmark contracts\n\n"
+        "Status: **INCOMPLETE**. This is the machine-readable starting spine for "
+        "requiring every fak-native implementation to be compared with the strongest "
+        "practical alternatives.\n\n"
+        "| Capability | Package | Issue | Status |\n|---|---|---|---:|\n"
+        "| Deadline-aware EDF admission | `internal/deadlineadmit` | "
+        "[#6135](https://github.com/anthony-chaudhary/fak/issues/6135) | INCOMPLETE |\n"
+        "| Syntactic multi-file Go call graph | `internal/codegraph` | "
+        "[#6205](https://github.com/anthony-chaudhary/fak/issues/6205) | COMPLETE |\n")
+
+    # ---- the pure classifier ---------------------------------------------
+
+    def test_status_marker_on_the_issues_own_line_holds(self) -> None:
+        mod = load()
+        binds, reason = mod.evidence_declares_incomplete(
+            6205, "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+            self.PACKET_6205)
+        self.assertFalse(binds)
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
+        self.assertIn("GO-CALL-GRAPH", reason)
+        self.assertIn("INCOMPLETE", reason)
+
+    def test_verdict_dialect_holds_too(self) -> None:
+        mod = load()
+        binds, reason = mod.evidence_declares_incomplete(
+            6165, "docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
+            self.PACKET_6165)
+        self.assertFalse(binds)
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
+
+    def test_stays_open_disclaimer_dialect_holds(self) -> None:
+        mod = load()
+        binds, reason = mod.evidence_declares_incomplete(
+            6122, "docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md",
+            self.PACKET_6122)
+        self.assertFalse(binds)
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
+        self.assertIn("stays open", reason)
+
+    def test_marker_for_another_issue_does_not_bind_this_one(self) -> None:
+        # OVER-REFUSAL GUARD: #6205's registry row says COMPLETE. The file is full of
+        # INCOMPLETE -- its own spine header and #6135's row -- and none of it is
+        # evidence about #6205. A file-global check would wrongly hold here.
+        mod = load()
+        self.assertEqual(
+            mod.evidence_declares_incomplete(
+                6205, "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md",
+                self.REGISTRY),
+            (True, None))
+        # ...and the same file DOES bind #6135, whose row still says INCOMPLETE.
+        binds, reason = mod.evidence_declares_incomplete(
+            6135, "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md", self.REGISTRY)
+        self.assertFalse(binds)
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
+
+    def test_complete_packet_binds(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.evidence_declares_incomplete(
+                6205, "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+                self.PACKET_6205.replace("**INCOMPLETE**", "**COMPLETE**")),
+            (True, None))
+
+    # ---- the git-reading seam --------------------------------------------
+
+    def _packet_reader(self, touched, blobs):
+        """A ``run_capture`` replacement serving one commit's file list and blobs."""
+        seen = []
+
+        def run(cmd, cwd, timeout):
+            seen.append(cmd)
+            if cmd[:2] == ["git", "diff-tree"]:
+                return 0, "\n".join(touched) + "\n", ""
+            if cmd[:2] == ["git", "show"]:
+                path = cmd[2].split(":", 1)[1]
+                if path not in blobs:
+                    return 128, "", "fatal: path does not exist"
+                return 0, blobs[path], ""
+            raise AssertionError(f"unexpected command {cmd}")
+
+        return run, seen
+
+    def test_reads_the_witness_shas_touched_packets_and_holds(self) -> None:
+        mod = load()
+        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        run, seen = self._packet_reader(
+            [packet, "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md",
+             "internal/codegraph/compare.go"],
+            {packet: self.PACKET_6205,
+             "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md": self.REGISTRY})
+        mod.run_capture = run
+        binds, reason = mod.evidence_binds_closure(
+            ROOT, {"number": 6205, "sha": "8595070f42"})
+        self.assertFalse(binds)
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
+        self.assertEqual(seen[0], ["git", "diff-tree", "--no-commit-id",
+                                   "--name-only", "-r", "8595070f42"])
+        # only the docs/benchmarks/ markdown is read back; the .go file is never opened.
+        self.assertEqual(seen[1], ["git", "show", f"8595070f42:{packet}"])
+        self.assertNotIn(["git", "show", "8595070f42:internal/codegraph/compare.go"],
+                         seen)
+
+    def test_commit_touching_no_packet_binds_without_reading_blobs(self) -> None:
+        mod = load()
+        run, seen = self._packet_reader(["internal/gateway/http.go"], {})
+        mod.run_capture = run
+        self.assertEqual(
+            mod.evidence_binds_closure(ROOT, {"number": 42, "sha": "abc1234567"}),
+            (True, None))
+        self.assertEqual(len(seen), 1)  # the file list only
+
+    def test_unreadable_file_list_allows_with_a_note(self) -> None:
+        # ASYMMETRY ON PURPOSE, matching disclaimer_binds_closure: this gate refuses on
+        # POSITIVE evidence only, so an unreadable commit ALLOWS with an audit note
+        # rather than failing closed. Absent evidence is not evidence of incompleteness.
+        mod = load()
+        mod.run_capture = lambda cmd, cwd, timeout: (128, "", "fatal: bad object")
+        binds, note = mod.evidence_binds_closure(ROOT, {"number": 1, "sha": "deadbeef"})
+        self.assertTrue(binds)
+        self.assertIn(mod.EVIDENCE_UNREADABLE_NOTE, note)
+        self.assertNotIn(mod.EVIDENCE_INCOMPLETE_HOLD, note)
+
+    def test_missing_sha_allows_with_a_note_and_never_shells_out(self) -> None:
+        mod = load()
+
+        def boom(cmd, cwd, timeout):
+            raise AssertionError("an empty sha must not reach git")
+
+        mod.run_capture = boom
+        binds, note = mod.evidence_binds_closure(ROOT, {"number": 1, "sha": ""})
+        self.assertTrue(binds)
+        self.assertIn(mod.EVIDENCE_UNREADABLE_NOTE, note)
+
+    def test_unreadable_packet_does_not_mask_a_readable_incomplete_one(self) -> None:
+        mod = load()
+        gone = "docs/benchmarks/DELETED.md"
+        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        run, _ = self._packet_reader([gone, packet], {packet: self.PACKET_6205})
+        mod.run_capture = run
+        binds, reason = mod.evidence_binds_closure(
+            ROOT, {"number": 6205, "sha": "8595070f42"})
+        self.assertFalse(binds)
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
+
+    # ---- evaluate-level wiring -------------------------------------------
+
+    def _patch_through_to_evidence(self, mod, number, sha, subject) -> None:
+        """Witness + claim-bind all PASS, so the evidence gate decides. It runs beside
+        the #5865 message gate, ahead of every gh probe -- both are local git reads."""
+        mod.load_audit = lambda root, audit_json, max_commits: {
+            "closure_rate": 0.5, "issues": [
+                {"number": number, "title": "Benchmark against alternatives",
+                 "bucket": "OPEN_WITNESSED",
+                 "witnessed_commits": [{"sha": sha, "subject": subject}]}]}
+        mod.origin_main_resolvable = lambda root: False
+        mod.coverage_binds_closure = lambda root, row: (True, None)
+        mod.reopen_blocks_close = lambda root, row: (True, None)
+        mod.observed_effect_binds_closure = lambda root, row: (True, None)
+        mod.disclaimer_binds_closure = lambda root, row: (True, None)  # inert #5865
+        mod.reverify = lambda root, sha_: {
+            "witness_ok": True, "verdict": "OK", "witness": "diff-witnessed",
+            "claim_kind": "code_effect", "touches_code": True, "reason": None}
+
+    def test_evaluate_holds_incomplete_packet_and_never_calls_gh(self) -> None:
+        mod = load()
+        self._patch_through_to_evidence(
+            mod, 6205, "8595070f42",
+            "feat(codegraph): add call graph alternatives comparison #6205")
+        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        run, seen = self._packet_reader([packet], {packet: self.PACKET_6205})
+
+        def guarded(cmd, cwd, timeout):
+            if cmd[:1] == ["gh"]:
+                raise AssertionError(
+                    "an issue whose own packet says INCOMPLETE must never reach "
+                    "gh issue close")
+            return run(cmd, cwd, timeout)
+
+        mod.run_capture = guarded
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "skip_incomplete_evidence")
+        self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, r["reason"])
+        self.assertEqual(p["counts"]["skipped_incomplete_evidence"], 1)
+        self.assertEqual(p["counts"]["closed"], 0)
+        self.assertEqual(mod.close_decision("skip_incomplete_evidence"), "hold")
+        self.assertIn("incomplete_evidence=1", mod.render(p))
+
+    def test_evaluate_complete_evidence_still_closes(self) -> None:
+        mod = load()
+        self._patch_through_to_evidence(
+            mod, 6205, "8595070f42",
+            "feat(codegraph): add call graph alternatives comparison #6205")
+        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        complete = self.PACKET_6205.replace("**INCOMPLETE**", "**COMPLETE**")
+        run, _ = self._packet_reader([packet], {packet: complete})
+        base = gh_close_then_state()  # readback confirms CLOSED
+
+        def either(cmd, cwd, timeout):
+            return base(cmd, cwd, timeout) if cmd[:1] == ["gh"] else run(cmd, cwd, timeout)
+
+        mod.run_capture = either
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "closed")
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["skipped_incomplete_evidence"], 0)
+
+    def test_evaluate_dry_run_reflects_the_evidence_hold(self) -> None:
+        mod = load()
+        self._patch_through_to_evidence(
+            mod, 6122, "1ba26ad4f7",
+            "feat(cacheobs): add telemetry alternatives comparison #6122")
+        packet = "docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md"
+        run, _ = self._packet_reader([packet], {packet: self.PACKET_6122})
+        mod.run_capture = run
+        p = mod.evaluate(ROOT, limit=10, live=False, audit_json=None, max_commits=600)
+        self.assertEqual(p["results"][0]["action"], "skip_incomplete_evidence")
+        self.assertEqual(p["counts"]["would_close"], 0)
+        self.assertEqual(p["counts"]["skipped_incomplete_evidence"], 1)
+
+    def test_evaluate_unreadable_evidence_notes_the_gate_and_still_closes(self) -> None:
+        # the abstention is VISIBLE on the row, matching every other abstaining gate.
+        mod = load()
+        self._patch_through_to_evidence(
+            mod, 6205, "8595070f42", "feat(codegraph): add call graph comparison #6205")
+        base = gh_close_then_state()
+
+        def run(cmd, cwd, timeout):
+            if cmd[:2] == ["git", "diff-tree"]:
+                return 128, "", "fatal: bad object"
+            return base(cmd, cwd, timeout)
+
+        mod.run_capture = run
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        r = p["results"][0]
+        self.assertEqual(r["action"], "closed")
+        self.assertEqual(p["counts"]["skipped_incomplete_evidence"], 0)
+        self.assertTrue(any(mod.EVIDENCE_UNREADABLE_NOTE in n
                             for n in r.get("gate_notes", [])))
 
 

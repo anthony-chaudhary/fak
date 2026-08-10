@@ -206,6 +206,44 @@ _SPINE_FIRST_RE = re.compile(
     r"spine[-\s]?first|first[-\s]?spine|required first(?:[-\s]spine)?\s+artifact",
     re.IGNORECASE)
 _KEEP_OPEN_LABELS = {"epic"}
+# Incomplete-evidence gate: the #5865 disclaimer gate reads the commit MESSAGE, but a
+# benchmark-shaped resolution states its scope in the ARTIFACT the commit adds, not in
+# the subject line. The witnessed harm: on 2026-08-10 this arm closed 31 benchmark
+# issues (#6122 .. #6205) on commits that each added a `docs/benchmarks/` comparison
+# packet whose own header reads `Status: **INCOMPLETE**` -- only the native arm and a
+# tuned baseline execute, and every external/integration arm is still a zero-measurement
+# placeholder. Every gate upstream passed honestly: the commit is diff-witnessed, the
+# claim is `code_effect` over real source paths, the message disclaims nothing, and the
+# issue body carries no epic label or unchecked box. The evidence itself was the only
+# thing that said "not done", and nothing read it. The owner had already hand-reopened
+# #6097 / #6102 / #6107 for exactly this before the mass close repeated it.
+#
+# The gate reads only files the commit touched under `docs/benchmarks/`, and it refuses
+# only on a marker BOUND TO THE ISSUE BEING CLOSED -- never on a file-global mention.
+# That scoping is load-bearing: `docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md`
+# is the shared registry, is touched by every packet commit, and carries an INCOMPLETE
+# row for dozens of OTHER capabilities plus its own INCOMPLETE spine header. A file-level
+# `"INCOMPLETE" in text` test would therefore hold every benchmark close forever,
+# including a genuinely finished one. Two binding forms, both measured against the live
+# corpus (they cover all 31 closes with no third heuristic):
+#   1. the uppercase status token on the SAME LINE as a reference to this issue --
+#      `Status: **INCOMPLETE**. Issue [#6205](...)`, `**INCOMPLETE.** ... [#6165](...)
+#      tracks those witnesses`, and the registry row `| ... /issues/6135) | INCOMPLETE |`;
+#   2. the packet writing `#<n> remains/stays open` -- the same author-disclaimer form
+#      #5865 already trusts in a commit message, reused verbatim here.
+# Lowercase prose ("the comparison is incomplete") is deliberately NOT a marker on its
+# own: it is narration, and form 2 already binds the packets that use it.
+EVIDENCE_INCOMPLETE_HOLD = "EVIDENCE_INCOMPLETE"
+# The commit's file list or a packet blob could not be read. Commit-side, so this is an
+# ALLOW with an audit note rather than a hold -- same asymmetry, and for the same reason,
+# as ``disclaimer_binds_closure``.
+EVIDENCE_UNREADABLE_NOTE = "EVIDENCE_STATUS_UNREADABLE"
+_EVIDENCE_PREFIX = "docs/benchmarks/"
+_EVIDENCE_SUFFIX = ".md"
+# Uppercase, word-bounded: a status TOKEN. Packet prose says "incomplete" in lower case.
+_INCOMPLETE_TOKEN_RE = re.compile(r"\bINCOMPLETE\b")
+# `#6205` or the URL form `.../issues/6205`, scoped to the candidate's own number.
+_EVIDENCE_ISSUE_REF_TMPL = r"(?:#|/issues/){n}\b"
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -410,6 +448,98 @@ def disclaimer_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str
                       f"message for {str(row.get('sha') or '?')[:10]}, so there is no "
                       "disclaimer evidence either way")
     return commit_disclaims_resolution(row.get("number"), body)
+
+
+def commit_touched_paths(root: Path, sha: str) -> list[str] | None:
+    """Repo-relative paths the witness commit changed, or None if unreadable."""
+    if not sha:
+        return None
+    # diff-tree lists one commit's changed paths without the `--name-only` / `-s`
+    # option clash `git show` trips on (same plumbing tools/dispatch_parity_canary.py
+    # settled on). Slashes are normalized so the Windows checkouts this loop runs in
+    # compare against `docs/benchmarks/` the same way a POSIX one does.
+    rc, out, _ = run_capture(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha],
+        root, timeout=15)
+    if rc != 0:
+        return None
+    return [ln.strip().replace("\\", "/") for ln in (out or "").splitlines() if ln.strip()]
+
+
+def file_at_commit(root: Path, sha: str, path: str) -> str | None:
+    """One file's blob AS OF the witness commit, or None if unreadable.
+
+    Read at the sha, never from the worktree: the loop runs in a shared checkout where
+    HEAD moves under it, and the question is what evidence THIS commit pointed at."""
+    if not sha or not path:
+        return None
+    rc, out, _ = run_capture(["git", "show", f"{sha}:{path}"], root, timeout=15)
+    return None if rc != 0 else (out or "")
+
+
+def evidence_declares_incomplete(number: Any, path: str,
+                                 text: str) -> tuple[bool, str | None]:
+    """Pure packet-body -> (binds, hold_reason) evidence-status decision.
+
+    Holds (returns False) only when the packet marks ITS OWN status incomplete FOR THIS
+    ISSUE -- an `INCOMPLETE` status token on the same line as a `#<n>` / `/issues/<n>`
+    reference, or the packet writing `#<n> remains open`. A marker naming some other
+    capability's issue, or the shared registry's own spine header, never binds: see the
+    `_EVIDENCE_PREFIX` note for why file-global matching would hold every close."""
+    body = text or ""
+    if number is None:
+        return True, None
+    ref = re.compile(_EVIDENCE_ISSUE_REF_TMPL.format(n=re.escape(str(number))))
+    for line in body.splitlines():
+        token = _INCOMPLETE_TOKEN_RE.search(line)
+        if token and ref.search(line):
+            return False, (
+                f"{EVIDENCE_INCOMPLETE_HOLD}: the evidence this commit points at, "
+                f"`{path}`, marks its own status INCOMPLETE for #{number} -- "
+                f"\"{_excerpt(line, token)}\"; a packet that says it is not finished "
+                f"cannot witness that #{number} is")
+    stays_open = re.compile(_DISCLAIM_THIS_ISSUE_TMPL.format(n=re.escape(str(number))),
+                            re.IGNORECASE).search(body)
+    if stays_open:
+        return False, (
+            f"{EVIDENCE_INCOMPLETE_HOLD}: the evidence this commit points at, "
+            f"`{path}`, says #{number} stays open -- \"{_excerpt(body, stays_open)}\"")
+    return True, None
+
+
+def evidence_binds_closure(root: Path, row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Does the evidence the witness commit added permit closing this issue?
+
+    A commit that touches no `docs/benchmarks/` packet binds immediately -- this gate
+    adds a refusal on POSITIVE evidence only (a packet that declares itself unfinished)
+    and never converts an ordinary commit into a hold. For the same reason, and matching
+    ``disclaimer_binds_closure``, an unreadable file list or blob ALLOWS with an audit
+    note rather than failing closed: absent evidence is not evidence of incompleteness,
+    and every other gate still applies to the row."""
+    sha = str(row.get("sha") or "")
+    paths = commit_touched_paths(root, sha)
+    if paths is None:
+        return True, (f"{EVIDENCE_UNREADABLE_NOTE}: could not list the files changed by "
+                      f"{sha[:10] or '?'}, so there is no evidence-status reading "
+                      "either way")
+    packets = [p for p in paths
+               if p.startswith(_EVIDENCE_PREFIX) and p.endswith(_EVIDENCE_SUFFIX)]
+    unreadable: list[str] = []
+    for path in packets:
+        text = file_at_commit(root, sha, path)
+        if text is None:
+            # Deleted-by-this-commit or otherwise unresolvable: note it, keep checking
+            # the rest -- one unreadable packet must not mask a readable INCOMPLETE one.
+            unreadable.append(path)
+            continue
+        binds, hold = evidence_declares_incomplete(row.get("number"), path, text)
+        if not binds:
+            return False, hold
+    if unreadable:
+        return True, (f"{EVIDENCE_UNREADABLE_NOTE}: could not read "
+                      f"{', '.join(unreadable[:3])} at {sha[:10]}, so their declared "
+                      "status was not checked")
+    return True, None
 
 
 def classify_coverage(number: Any, body: str,
@@ -749,7 +879,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
-    skipped_disclaimed = 0
+    skipped_disclaimed = skipped_incomplete_evidence = 0
     close_not_persistent = already_counted = 0
     skipped_partial = skipped_coverage_unknown = 0
     skipped_reopened = skipped_reopen_unknown = 0
@@ -788,6 +918,21 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             results.append(item)
             continue
         note_gate(item, disclaim_hold)  # gate abstained (commit message unreadable)
+        # A commit whose own EVIDENCE declares itself unfinished cannot witness a
+        # resolution either. Runs beside the #5865 message gate -- both are local git
+        # reads over the commit, both refuse only on positive author-written evidence,
+        # and both belong ahead of every gh probe. This is the gate the 2026-08-10 mass
+        # close of #6122 .. #6205 needed: 31 `docs/benchmarks/` packets headed
+        # `Status: **INCOMPLETE**` closed their own issues. An unreadable packet ALLOWS
+        # with an audit note (see evidence_binds_closure); silence is never a hold.
+        evidence_ok, evidence_hold = evidence_binds_closure(root, row)
+        if not evidence_ok:
+            item["action"] = "skip_incomplete_evidence"
+            item["reason"] = evidence_hold
+            skipped_incomplete_evidence += 1
+            results.append(item)
+            continue
+        note_gate(item, evidence_hold)  # gate abstained (evidence unreadable)
         if gate_active and not reachable_from_origin(root, row["sha"]):
             item["action"] = "skip_unpushed"
             item["reason"] = "resolving commit not on origin/main yet (not durable)"
@@ -905,6 +1050,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             "skipped_unwitnessed": skipped,
             "skipped_nonresolving": skipped_nonresolving,
             "skipped_disclaimed": skipped_disclaimed,
+            "skipped_incomplete_evidence": skipped_incomplete_evidence,
             "skipped_partial": skipped_partial,
             "skipped_coverage_unknown": skipped_coverage_unknown,
             "skipped_reopened": skipped_reopened,
@@ -941,6 +1087,7 @@ def render(p: dict[str, Any]) -> str:
                  f"skipped={c.get('skipped_unwitnessed')} "
                  f"nonresolving={c.get('skipped_nonresolving')} "
                  f"disclaimed={c.get('skipped_disclaimed')} "
+                 f"incomplete_evidence={c.get('skipped_incomplete_evidence')} "
                  f"partial={c.get('skipped_partial')} "
                  f"coverage_unknown={c.get('skipped_coverage_unknown')} "
                  f"reopened={c.get('skipped_reopened')} "
@@ -961,7 +1108,7 @@ def close_decision(action: str) -> str:
     if action in {"closed", "would_close"}:
         return "close"
     if action in {"skip_unwitnessed", "skip_nonresolving", "skip_disclaimed",
-                  "skip_partial",
+                  "skip_incomplete_evidence", "skip_partial",
                   "skip_coverage_unknown", "skip_reopened", "skip_reopen_unknown",
                   "skip_effect_unobserved", "skip_effect_unknown",
                   "skip_unpushed", CLOSE_ALREADY_COUNTED}:
