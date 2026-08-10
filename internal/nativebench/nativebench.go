@@ -76,7 +76,11 @@ type Report struct {
 	Complete  bool       `json:"complete"`
 }
 
-var leafClassifications = []LeafClassification{
+var leafClassifications = []LeafClassification{{
+	Leaf: "internal/deadlineadmit", Disposition: DispositionMultiCapability,
+	Capabilities: []string{"deadline_aware_admission"},
+	Reason:       "native EDF ordering plus predicted-miss shedding while retaining non-degradable requests",
+},
 	{
 		Leaf: "internal/timeoutphase", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"timeout_phase_attribution"},
@@ -207,7 +211,22 @@ var leafClassifications = []LeafClassification{
 	},
 }
 
-var contracts = []Contract{
+var contracts = []Contract{{
+	Capability: "deadline_aware_admission",
+	NativePath: "internal/deadlineadmit/deadlineadmit.go",
+	Workload:   "same four-request queue with tied deadlines, one degradable predicted miss, one non-degradable miss, fixed now and threshold, and independent admission oracle across every arm",
+	Metrics:    []string{"admission_precision", "admission_recall", "deadline_miss_rate", "queue_latency_ms", "throughput_requests_per_second", "cpu_seconds", "peak_rss_bytes", "accelerator_seconds", "total_cost"},
+	Alternatives: []Alternative{
+		{Name: "FIFO without predicted-miss shedding", Class: TunedBaseline, Source: "internal/deadlineadmit/compare.go"},
+		{Name: "Mooncake deadline-aware admission", Class: NextBest, Source: "https://github.com/kvcache-ai/Mooncake"},
+		{Name: "vLLM priority scheduling", Class: NextBest, Source: "https://docs.vllm.ai/"},
+		{Name: "SGLang priority scheduling", Class: NextBest, Source: "https://docs.sglang.ai/"},
+		{Name: "fak + vLLM priority scheduling", Class: FirstClassIntegration, Integration: "vllm", Source: "internal/engine/vllm.go"},
+		{Name: "fak + SGLang priority scheduling", Class: FirstClassIntegration, Integration: "sglang", Source: "internal/engine/sglang.go"},
+	},
+	Witness:      "../../docs/benchmarks/DEADLINE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+	Integrations: []string{"vllm", "sglang"},
+},
 	{
 		Capability: "timeout_phase_attribution",
 		NativePath: "internal/timeoutphase/timeoutphase.go",
