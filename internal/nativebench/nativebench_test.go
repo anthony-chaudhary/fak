@@ -10,13 +10,13 @@ import (
 func TestRegistryHasComparisonContractsForInitialNativeCapabilities(t *testing.T) {
 	got := All()
 	if len(got) < 2 {
-		t.Fatalf("contracts=%d, want routing, tool-filtering, compression, prefix-reuse, and tokenization contracts", len(got))
+		t.Fatalf("contracts=%d, want adjudication, routing, tool-filtering, compression, prefix-reuse, and tokenization contracts", len(got))
 	}
 	names := map[string]bool{}
 	for _, c := range got {
 		names[c.Capability] = true
 	}
-	for _, name := range []string{"model_routing", "tool_filtering", "context_compression", "prefix_kv_reuse", "tokenization"} {
+	for _, name := range []string{"policy_adjudication", "model_routing", "tool_filtering", "context_compression", "prefix_kv_reuse", "tokenization"} {
 		if !names[name] {
 			t.Errorf("missing %s", name)
 		}
@@ -79,10 +79,10 @@ func TestAuditRepositoryDiscoversNativeCoverageDebt(t *testing.T) {
 	if !report.Coverage.DiscoveryComplete || report.Coverage.NativeLeaves < 100 {
 		t.Fatalf("repository discovery did not cover the native leaf inventory: %+v", report.Coverage)
 	}
-	if report.Coverage.CoveredLeaves != 17 {
-		t.Fatalf("covered leaves=%d, want five capability leaves plus twelve benchmark-governance infrastructure leaves", report.Coverage.CoveredLeaves)
+	if report.Coverage.CoveredLeaves != 18 {
+		t.Fatalf("covered leaves=%d, want six capability leaves plus twelve benchmark-governance infrastructure leaves", report.Coverage.CoveredLeaves)
 	}
-	if report.Coverage.ClassifiedLeaves != 17 || report.Coverage.UnclassifiedLeaves == 0 {
+	if report.Coverage.ClassifiedLeaves != 18 || report.Coverage.UnclassifiedLeaves == 0 {
 		t.Fatalf("classification debt is not explicit: %+v", report.Coverage)
 	}
 	if len(report.Coverage.MissingLeaves) == 0 || report.Complete {

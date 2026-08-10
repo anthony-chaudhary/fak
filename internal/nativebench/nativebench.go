@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/adjudicator", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"policy_adjudication"},
+		Reason:       "adjudicator contains the native capability-floor decision engine plus several specialized security rungs; policy adjudication is contracted separately",
+	},
+	{
 		Leaf: "internal/modelroute", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"model_routing"},
 		Reason:       "modelroute implements per-aspect selection and ensembles plus manifest validation and live reload; routing is contracted separately",
@@ -153,6 +158,17 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "policy_adjudication",
+		NativePath: "internal/adjudicator/decide.go",
+		Workload:   "same structural policy semantics, tool-call corpus, process lifetime, warmup, concurrency, and correctness oracle across every arm",
+		Metrics:    []string{"verdict_equivalence", "policy_coverage", "latency_ms", "throughput_calls_per_second", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "direct allow/deny lookup (tuned no-engine baseline)", Class: TunedBaseline, Source: "internal/adjudicator/compare.go"},
+			{Name: "OPA/Rego", Class: NextBest, Source: "https://www.openpolicyagent.org/"},
+			{Name: "Cedar", Class: NextBest, Source: "https://www.cedarpolicy.com/"},
+		},
+	},
 	{
 		Capability: "model_routing",
 		NativePath: "internal/modelroute/modelroute.go",
