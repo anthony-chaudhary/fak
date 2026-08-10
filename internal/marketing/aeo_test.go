@@ -449,3 +449,30 @@ func TestConfigAnswerFeedsStayEquivalentAndCiteAuthorities(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigAnswersMarkdownKeepsVisibleAnswersWithJSONLD(t *testing.T) {
+	when := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	page, err := ConfigAnswersMarkdown(when)
+	if err != nil {
+		t.Fatalf("ConfigAnswersMarkdown: %v", err)
+	}
+	for _, want := range []string{
+		"permalink: /configuration/",
+		"<script type=\"application/ld+json\">",
+		"\"@type\": \"FAQPage\"",
+		"# How to configure fak",
+		"complete server configuration reference",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("configuration page missing %q", want)
+		}
+	}
+	for _, answer := range AEOConfigAnswers() {
+		if strings.Count(page, answer.Question) < 2 {
+			t.Errorf("question %q should appear in visible text and JSON-LD", answer.Question)
+		}
+		if strings.Count(page, answer.Answer) < 2 {
+			t.Errorf("answer for %q should appear in visible text and JSON-LD", answer.Question)
+		}
+	}
+}

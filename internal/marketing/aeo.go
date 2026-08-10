@@ -859,6 +859,35 @@ func ConfigFAQFeed(when time.Time) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
+// ConfigAnswersMarkdown renders a crawlable page where the visible answers and
+// inline FAQPage JSON-LD come from the same canonical roster. Keeping structured
+// data on the page it describes lets search engines verify it against human text.
+func ConfigAnswersMarkdown(when time.Time) (string, error) {
+	jsonLD, err := ConfigFAQFeed(when)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("title: \"How to Configure fak: Flags, TOML, Environment Variables, and Precedence\"\n")
+	b.WriteString("description: \"Direct answers for configuring fak, including config-file requirements, precedence, validation, secrets, and client setup.\"\n")
+	b.WriteString("permalink: /configuration/\n")
+	b.WriteString("---\n\n")
+	b.WriteString("# How to configure fak\n\n")
+	b.WriteString("These concise answers cover the decisions people most often make when configuring fak. ")
+	b.WriteString("For every `fak serve` flag, environment variable, and manifest field, use the ")
+	b.WriteString("[complete server configuration reference](server-config.md).\n\n")
+	b.WriteString("<script type=\"application/ld+json\">\n")
+	b.Write(jsonLD)
+	b.WriteString("</script>\n\n")
+	for _, a := range AEOConfigAnswers() {
+		fmt.Fprintf(&b, "## %s\n\n%s\n\n[Authoritative details](%s)\n\n", a.Question, a.Answer, a.Authority)
+	}
+	b.WriteString("## Complete configuration reference\n\n")
+	b.WriteString("Continue to [fak Server Configuration Reference](server-config.md) for the exhaustive option tables and deployment details.\n")
+	return b.String(), nil
+}
+
 // ConfigAnswersText renders the human- and agent-readable sibling of ConfigFAQFeed.
 func ConfigAnswersText(when time.Time) string {
 	var b strings.Builder

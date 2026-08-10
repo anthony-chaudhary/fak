@@ -29,7 +29,8 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 |---|---|
 | Fast path to a running gateway | [server-quickstart.md](server-quickstart.md) |
 | Set up and connect to a node (install/use/run/status/forget) | [node-setup.md](node-setup.md) |
-| Every flag and env var | [server-config.md](server-config.md) |
+| Configure fak (quick answers) | [configuration.md](configuration.md) |
+| Every flag, manifest field, and env var | [server-config.md](server-config.md) |
 | Batching multi-request inference (dynamic batch size, padding) | [batching-config.md](batching-config.md) |
 | Every endpoint, request, and response | [api-reference.md](api-reference.md) |
 | When something breaks | [server-troubleshooting.md](server-troubleshooting.md) |
@@ -72,6 +73,7 @@ are wired, measured, and kept honest. The doctrine behind all of them is
 | Topic | Doc |
 |---|---|
 | Build a capability floor (worked examples) | [policy-guide.md](policy-guide.md) |
+| Set one policy for a whole team — signed org manifests, enrollment, per-knob provenance | [org-policy-plane.md](org-policy-plane.md) |
 | The manifest schema + refusal vocabulary | [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) |
 | Hardening a deployment (auth, network, threat model) | [security.md](security.md) |
 

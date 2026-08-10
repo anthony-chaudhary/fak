@@ -172,17 +172,23 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	configTxt := marketing.ConfigAnswersText(now)
+	configPage, err := marketing.ConfigAnswersMarkdown(now)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing aeo: render config page: %v\n", err)
+		return 1
+	}
 
 	feedPath := filepath.Join(*root, "docs", "marketing", "updates.json")
 	termsPath := filepath.Join(*root, "docs", "marketing", "disambiguation-terms.json")
 	configPath := filepath.Join(*root, "docs", "marketing", "config-answers.json")
+	configPagePath := filepath.Join(*root, "docs", "fak", "configuration.md")
 	txtPath := filepath.Join(*root, "llms-updates.txt")
 	termsTxtPath := filepath.Join(*root, "llms-terms.txt")
 	configTxtPath := filepath.Join(*root, "llms-config.txt")
 
 	if *dryRun || !*refresh {
-		fmt.Fprintf(stdout, "would write %s (%d witnessed ships), %s (%d terms), %s (%d answers), %s, %s, and %s\n",
-			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), configPath, len(marketing.AEOConfigAnswers()), txtPath, termsTxtPath, configTxtPath)
+		fmt.Fprintf(stdout, "would write %s (%d witnessed ships), %s (%d terms), %s (%d answers), %s, %s, %s, and %s\n",
+			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), configPath, len(marketing.AEOConfigAnswers()), configPagePath, txtPath, termsTxtPath, configTxtPath)
 		if *dryRun {
 			fmt.Fprintln(stdout, string(feed))
 			fmt.Fprintln(stdout, string(termsFeed))
@@ -207,6 +213,10 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak marketing aeo: write config answer feed: %v\n", err)
 			return 1
 		}
+		if err := os.WriteFile(configPagePath, []byte(configPage), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write config answer page: %v\n", err)
+			return 1
+		}
 		if err := os.WriteFile(txtPath, []byte(updatesTxt), 0o644); err != nil {
 			fmt.Fprintf(stderr, "fak marketing aeo: write llms-updates.txt: %v\n", err)
 			return 1
@@ -219,8 +229,8 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak marketing aeo: write llms-config.txt: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s (%d terms)\nwrote %s (%d answers)\nwrote %s\nwrote %s\nwrote %s\n",
-			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), configPath, len(marketing.AEOConfigAnswers()), txtPath, termsTxtPath, configTxtPath)
+		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s (%d terms)\nwrote %s (%d answers)\nwrote %s\nwrote %s\nwrote %s\nwrote %s\n",
+			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), configPath, len(marketing.AEOConfigAnswers()), configPagePath, txtPath, termsTxtPath, configTxtPath)
 	}
 
 	if *inject {
