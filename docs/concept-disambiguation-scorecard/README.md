@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **192** (clarity 15 + coverage 177) |
+| **Disambiguation-debt (drive to 0)** | **186** (clarity 15 + coverage 171) |
 | **Crystal-clear concepts (and climbing)** | **439** crystal of 2152 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2307 / 2484** (92.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2307 / 2478** (93.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2830 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.1/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2152 concepts - score 89.0/100 (grade B) - disambiguation-debt 192
+concept-disambiguation chart - 2152 concepts - score 89.1/100 (grade B) - disambiguation-debt 186
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 439
@@ -66,17 +66,17 @@ coverage by family (positioned / discovered):
   plan             ##########################.. 319/344
   policy-capability #########################... 153/174
   session-runtime  #########################... 213/234
-  render-materialize #########################... 177/195
   cache            ###########################. 261/275
   context-ctx      ##########################.. 202/216
+  render-materialize ##########################.. 177/190
   witness-proof    ##########################.. 140/148
   gateway-engine   ###########################. 169/176
   loop             ##########################.. 77/84
   evict            ##########################.. 49/53
   support-maturity ##########################.. 45/49
-  score-debt       ###########################. 85/88
   attention        ###########################. 74/76
   decision         ###########################. 52/54
+  score-debt       ###########################. 85/87
   layout           ##########################.. 14/15
   pool             ###########################. 39/40
   cross-cluster    ............................ 0/0
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 92.9%  (2307/2484 confusable tokens positioned)
+namespace coverage  [##############################..] 93.1%  (2307/2478 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -2445,17 +2445,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | plan | 319 | 344 | 25 |
 | policy-capability | 153 | 174 | 21 |
 | session-runtime | 213 | 234 | 21 |
-| render-materialize | 177 | 195 | 18 |
 | cache | 261 | 275 | 14 |
 | context-ctx | 202 | 216 | 14 |
+| render-materialize | 177 | 190 | 13 |
 | witness-proof | 140 | 148 | 8 |
 | gateway-engine | 169 | 176 | 7 |
 | loop | 77 | 84 | 7 |
 | evict | 49 | 53 | 4 |
 | support-maturity | 45 | 49 | 4 |
-| score-debt | 85 | 88 | 3 |
 | attention | 74 | 76 | 2 |
 | decision | 52 | 54 | 2 |
+| score-debt | 85 | 87 | 2 |
 | layout | 14 | 15 | 1 |
 | pool | 39 | 40 | 1 |
 | cross-cluster | 0 | 0 | 0 |

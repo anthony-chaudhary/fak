@@ -2321,6 +2321,11 @@
           "category": "incidental",
           "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
           "token": "motifDetectReproduceFixWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "private file-existence helper, not a new witness-proof concept",
+          "token": "checkWitness"
         }
       ],
       "id": "witness-proof",
@@ -2356,6 +2361,7 @@
         "WitnessRoute",
         "WitnessedProgressFloor",
         "appendGuardCompactionWitnessTo",
+        "checkWitness",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
         "closeProxyFillWitnesses",
@@ -3372,6 +3378,16 @@
           "category": "incidental",
           "reason": "The corpus key under which the flow scorecard reports its defect count, following the repo-wide scorecard envelope convention corpus{<x>_debt, grade}. It is an enum-member-shaped string literal identical in role to every other package's <x>_debt key, not a distinct notion of debt.",
           "token": "flow_debt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "lightgap_debt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "lightgap_scorecard"
         }
       ],
       "id": "score-debt",
@@ -3385,6 +3401,8 @@
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "flow_debt",
+        "lightgap_debt",
+        "lightgap_scorecard",
         "negation_operator_debt",
         "scorecardPath",
         "scorecard_since",
@@ -3780,6 +3798,41 @@
           "category": "incidental",
           "reason": "Wire reason code scoped to quantprov support adjudication.",
           "token": "QUANTPROV_UNSUPPORTED_FORMAT"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "ErrUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local KV-cache adjudication result, not repository support maturity.",
+          "token": "ReasonSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire reason for one KV-cache descriptor decision, not support maturity.",
+          "token": "KVQUANT_SUPPORTED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local unknown KV-cache scheme outcome, not support maturity.",
+          "token": "ReasonUnknownScheme"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire reason for one KV-cache descriptor decision, not support maturity.",
+          "token": "KVQUANT_UNKNOWN_SCHEME"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local KV-cache tier-edge outcome, not repository support maturity.",
+          "token": "ReasonUnsupportedTransition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire reason for one KV-cache tier-edge decision, not support maturity.",
+          "token": "KVQUANT_UNSUPPORTED_TRANSITION"
         }
       ],
       "id": "support-maturity",
@@ -3796,10 +3849,14 @@
         "DefaultSetupParityReport",
         "DescriptionCoverage",
         "DomainCoverage",
+        "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
         "FormatUnsupported",
         "GuideCoverage",
+        "KVQUANT_SUPPORTED",
+        "KVQUANT_UNKNOWN_SCHEME",
+        "KVQUANT_UNSUPPORTED_TRANSITION",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "NonCacheParity",
@@ -3826,8 +3883,11 @@
         "QUANTPROV_UNSUPPORTED_FORMAT",
         "QUANTPROV_UNSUPPORTED_QUANTIZER",
         "QUANTPROV_UNSUPPORTED_VERSION",
+        "ReasonSupported",
+        "ReasonUnknownScheme",
         "ReasonUnsupportedFormat",
         "ReasonUnsupportedQuantizer",
+        "ReasonUnsupportedTransition",
         "ReasonUnsupportedVersion",
         "RunCommitSubjectCoverage",
         "SetupParityBlocks",
@@ -4245,6 +4305,31 @@
           "category": "incidental",
           "reason": "Human renderer for the workpattern report; incidental presentation helper.",
           "token": "renderWorkpattern"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "RenderSegment"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "RenderFacet"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "RenderDents"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "RenderUnrun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
+          "token": "RenderCeilings"
         }
       ],
       "id": "render-materialize",
@@ -4252,12 +4337,17 @@
         "AllowsRender",
         "DefaultRender",
         "RenderAuditClusterReport",
+        "RenderCeilings",
         "RenderCompactTrajectoryRanking",
+        "RenderDents",
+        "RenderFacet",
         "RenderFidelity",
         "RenderKind",
         "RenderReopen",
+        "RenderSegment",
         "RenderStop",
         "RenderSystemDirective",
+        "RenderUnrun",
         "RenderUserSplice",
         "indexrenderhits",
         "materialized",
