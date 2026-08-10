@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -62,11 +62,11 @@ func TestIssueFindingDryRunCandidatesAreDispatchable(t *testing.T) {
 		t.Fatalf("want 1 generated candidate, got %d", len(result.Candidates))
 	}
 	// The generated candidate must be admitted by the strict, armed contract.
-	review := issuecontract.ReviewCandidate(result.Candidates[0], issuecontract.Options{
+	review := issuepolicy.ReviewCandidate(result.Candidates[0], issuepolicy.Options{
 		Live: true, DedupeChecked: true, DedupeCap: 50,
 		StrictModelTier: true, StrictScale: true, StrictBornRouted: true,
 	})
-	if !review.OK || review.Dispatchability != issuecontract.Dispatchable {
+	if !review.OK || review.Dispatchability != issuepolicy.Dispatchable {
 		t.Fatalf("generated candidate not dispatchable: verdict=%s reasons=%v", review.Dispatchability, review.Reasons)
 	}
 	if result.Items[0].ContractOK == nil || !*result.Items[0].ContractOK {
@@ -310,17 +310,17 @@ func TestIssueFindingRenderedBodyReparsesDispatchable(t *testing.T) {
 	plan := modelroute.PlanCrossAuditFindings([]modelroute.IssueAuditReceipt{receipt}, nil)
 	body := renderFindingIssueBody(plan.Items[0])
 
-	draft := issuecontract.IssueDraft{
+	draft := issuepolicy.IssueDraft{
 		Number: 7100,
 		Title:  findingIssueTitle(4700),
 		Body:   body,
-		Labels: []issuecontract.IssueLabel{{Name: "crossaudit-finding"}, {Name: "class:bug"}, {Name: "priority/p2"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "crossaudit-finding"}, {Name: "class:bug"}, {Name: "priority/p2"}},
 	}
-	review := issuecontract.ReviewIssueDraft(draft, issuecontract.Options{
+	review := issuepolicy.ReviewIssueDraft(draft, issuepolicy.Options{
 		Live: true, DedupeChecked: true, DedupeCap: 50,
 		StrictModelTier: true, StrictScale: true, StrictBornRouted: true,
 	})
-	if !review.OK || review.Dispatchability != issuecontract.Dispatchable {
+	if !review.OK || review.Dispatchability != issuepolicy.Dispatchable {
 		t.Fatalf("filed finding body not dispatchable on re-parse: verdict=%s reasons=%v missing=%v sections=%v",
 			review.Dispatchability, review.Reasons, review.MissingFields, review.MissingSections)
 	}

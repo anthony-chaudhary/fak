@@ -4,15 +4,15 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // cohortLeaf returns a candidate that passes the (non-live) issuecontract review
 // as a dispatchable leaf, scoped to the given paths. Mirrors the fixture used in
 // internal/issuecohort so the parity check runs on realistic dispatch leaves.
-func cohortLeaf(key string, paths ...string) issuecontract.Candidate {
-	return issuecontract.Candidate{
-		Schema:         issuecontract.Schema,
+func cohortLeaf(key string, paths ...string) issuepolicy.Candidate {
+	return issuepolicy.Candidate{
+		Schema:         issuepolicy.Schema,
 		Key:            key,
 		Title:          "leaf " + key,
 		ParentRef:      "epic #1",
@@ -38,12 +38,12 @@ func TestCohortWaveParityAgreesOnFixture(t *testing.T) {
 	// alpha owns internal/foo/**; beta lives inside it (collides -> next wave);
 	// gamma is disjoint (shares alpha's wave); delta/epsilon are whole-lane docs
 	// takers (collide with each other -> serialized).
-	candidates := []issuecontract.Candidate{
+	candidates := []issuepolicy.Candidate{
 		cohortLeaf("alpha", "internal/foo/**"),
 		cohortLeaf("beta", "internal/foo/bar.go"),
 		cohortLeaf("gamma", "internal/baz/x.go"),
-		func() issuecontract.Candidate { c := cohortLeaf("delta"); c.Lane = "docs"; return c }(),
-		func() issuecontract.Candidate { c := cohortLeaf("epsilon"); c.Lane = "docs"; return c }(),
+		func() issuepolicy.Candidate { c := cohortLeaf("delta"); c.Lane = "docs"; return c }(),
+		func() issuepolicy.Candidate { c := cohortLeaf("epsilon"); c.Lane = "docs"; return c }(),
 	}
 
 	plan := issuecohort.Build(candidates, issuecohort.Options{})

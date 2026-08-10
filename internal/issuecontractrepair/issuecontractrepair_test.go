@@ -4,22 +4,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
-func issue(number int, title string) issuecontract.IssueDraft {
-	return issuecontract.IssueDraft{Number: number, Title: title}
+func issue(number int, title string) issuepolicy.IssueDraft {
+	return issuepolicy.IssueDraft{Number: number, Title: title}
 }
 
-func review(ok bool, score int, reasons []string, missing []string) issuecontract.Review {
-	return issuecontract.Review{OK: ok, Score: issuecontract.Score{Total: score}, Reasons: reasons, MissingFields: missing}
+func review(ok bool, score int, reasons []string, missing []string) issuepolicy.Review {
+	return issuepolicy.Review{OK: ok, Score: issuepolicy.Score{Total: score}, Reasons: reasons, MissingFields: missing}
 }
 
 func TestRepairKinds(t *testing.T) {
-	if got := RepairKinds([]string{issuecontract.ReasonNotDispatchLeaf}); strings.Join(got, ",") != "split" {
+	if got := RepairKinds([]string{issuepolicy.ReasonNotDispatchLeaf}); strings.Join(got, ",") != "split" {
 		t.Fatalf("split = %+v", got)
 	}
-	reasons := []string{issuecontract.ReasonAgentIncomplete, issuecontract.ReasonNoiseIncomplete, issuecontract.ReasonScopeIncomplete, issuecontract.ReasonUnrouted}
+	reasons := []string{issuepolicy.ReasonAgentIncomplete, issuepolicy.ReasonNoiseIncomplete, issuepolicy.ReasonScopeIncomplete, issuepolicy.ReasonUnrouted}
 	if got := RepairKinds(reasons); strings.Join(got, ",") != "noise,scope,route" {
 		t.Fatalf("dedup = %+v", got)
 	}
@@ -29,7 +29,7 @@ func TestRepairKinds(t *testing.T) {
 	if got := RepairKinds(nil); strings.Join(got, ",") != "other" {
 		t.Fatalf("empty = %+v", got)
 	}
-	if got := RepairKinds([]string{issuecontract.ReasonUnexpandedTemplate}); strings.Join(got, ",") != "template" {
+	if got := RepairKinds([]string{issuepolicy.ReasonUnexpandedTemplate}); strings.Join(got, ",") != "template" {
 		t.Fatalf("template = %+v", got)
 	}
 	if got := PrimaryKind([]string{"route", "split"}); got != "split" {
@@ -49,42 +49,42 @@ func TestFieldScaffold(t *testing.T) {
 }
 
 func TestBuildRepairRow(t *testing.T) {
-	if row := BuildRepairRow(issue(1, "done"), review(true, 100, nil, nil), RouteProposal{}, issuecontract.TemplateRepairPlan{}, false, MinScore); row != nil {
+	if row := BuildRepairRow(issue(1, "done"), review(true, 100, nil, nil), RouteProposal{}, issuepolicy.TemplateRepairPlan{}, false, MinScore); row != nil {
 		t.Fatalf("passing row = %+v", row)
 	}
-	row := BuildRepairRow(issue(1207, "fix thing"), review(false, 8, []string{issuecontract.ReasonScopeIncomplete}, []string{"done_condition", "witness"}), RouteProposal{}, issuecontract.TemplateRepairPlan{}, false, MinScore)
+	row := BuildRepairRow(issue(1207, "fix thing"), review(false, 8, []string{issuepolicy.ReasonScopeIncomplete}, []string{"done_condition", "witness"}), RouteProposal{}, issuepolicy.TemplateRepairPlan{}, false, MinScore)
 	if row == nil || row.Kind != "scope" || row.Ready || len(row.MissingFields) != 2 || row.ProposedLane != nil || row.ProposedHeader != nil {
 		t.Fatalf("scope row = %+v", row)
 	}
-	row = BuildRepairRow(issue(1496, "docs: fix typo"), review(false, 0, []string{issuecontract.ReasonUnrouted}, nil), RouteProposal{Lane: "docs", Confidence: "exact-scope"}, issuecontract.TemplateRepairPlan{}, false, MinScore)
+	row = BuildRepairRow(issue(1496, "docs: fix typo"), review(false, 0, []string{issuepolicy.ReasonUnrouted}, nil), RouteProposal{Lane: "docs", Confidence: "exact-scope"}, issuepolicy.TemplateRepairPlan{}, false, MinScore)
 	if row.Kind != "route" || row.ProposedLane == nil || *row.ProposedLane != "docs" || row.RouteConfidence == nil || *row.RouteConfidence != "exact-scope" {
 		t.Fatalf("route row = %+v", row)
 	}
-	row = BuildRepairRow(issue(1612, "unrouted"), review(false, 0, []string{issuecontract.ReasonUnrouted}, nil), RouteProposal{Confidence: "none"}, issuecontract.TemplateRepairPlan{}, false, MinScore)
+	row = BuildRepairRow(issue(1612, "unrouted"), review(false, 0, []string{issuepolicy.ReasonUnrouted}, nil), RouteProposal{Confidence: "none"}, issuepolicy.TemplateRepairPlan{}, false, MinScore)
 	if row.Kind != "route" || row.ProposedLane != nil {
 		t.Fatalf("unset route = %+v", row)
 	}
-	plan := issuecontract.TemplateRepairPlan{IssueNumber: 1545, ProposedNormalizedHeader: "N=27 Lane=api/provider"}
-	row = BuildRepairRow(issue(1545, "template"), review(false, 25, []string{issuecontract.ReasonUnexpandedTemplate}, nil), RouteProposal{}, plan, true, MinScore)
+	plan := issuepolicy.TemplateRepairPlan{IssueNumber: 1545, ProposedNormalizedHeader: "N=27 Lane=api/provider"}
+	row = BuildRepairRow(issue(1545, "template"), review(false, 25, []string{issuepolicy.ReasonUnexpandedTemplate}, nil), RouteProposal{}, plan, true, MinScore)
 	if row.Kind != "template" || !row.Ready || row.ProposedHeader == nil || *row.ProposedHeader != "N=27 Lane=api/provider" {
 		t.Fatalf("template row = %+v", row)
 	}
-	row = BuildRepairRow(issue(1545, "template"), review(false, 25, []string{issuecontract.ReasonUnexpandedTemplate}, nil), RouteProposal{}, issuecontract.TemplateRepairPlan{}, false, MinScore)
+	row = BuildRepairRow(issue(1545, "template"), review(false, 25, []string{issuepolicy.ReasonUnexpandedTemplate}, nil), RouteProposal{}, issuepolicy.TemplateRepairPlan{}, false, MinScore)
 	if row.Kind != "template" || row.Ready || row.ProposedHeader != nil {
 		t.Fatalf("template without plan = %+v", row)
 	}
 }
 
 func TestManifestSchemaCountsAndLaneFilter(t *testing.T) {
-	issues := []issuecontract.IssueDraft{issue(1207, "a"), issue(1852, "b"), issue(2000, "c")}
-	reviews := map[int]issuecontract.Review{
-		1207: review(false, 8, []string{issuecontract.ReasonScopeIncomplete}, []string{"done_condition"}),
-		1852: review(false, 8, []string{issuecontract.ReasonScopeIncomplete}, []string{"done_condition"}),
+	issues := []issuepolicy.IssueDraft{issue(1207, "a"), issue(1852, "b"), issue(2000, "c")}
+	reviews := map[int]issuepolicy.Review{
+		1207: review(false, 8, []string{issuepolicy.ReasonScopeIncomplete}, []string{"done_condition"}),
+		1852: review(false, 8, []string{issuepolicy.ReasonScopeIncomplete}, []string{"done_condition"}),
 		2000: review(true, 100, nil, nil),
 	}
 	manifest := BuildManifest("/repo", issues, Options{
 		AsOf: "2026-07-01",
-		Review: func(i issuecontract.IssueDraft) issuecontract.Review {
+		Review: func(i issuepolicy.IssueDraft) issuepolicy.Review {
 			return reviews[i.Number]
 		},
 	})
@@ -92,12 +92,12 @@ func TestManifestSchemaCountsAndLaneFilter(t *testing.T) {
 		t.Fatalf("manifest = %+v", manifest)
 	}
 
-	filtered := BuildManifest("/repo", []issuecontract.IssueDraft{issue(1, "a"), issue(2, "b"), issue(3, "c")}, Options{
+	filtered := BuildManifest("/repo", []issuepolicy.IssueDraft{issue(1, "a"), issue(2, "b"), issue(3, "c")}, Options{
 		Lane: "docs", AsOf: "2026-07-01",
-		Review: func(i issuecontract.IssueDraft) issuecontract.Review {
-			return review(false, 0, []string{issuecontract.ReasonScopeIncomplete}, []string{"done_condition"})
+		Review: func(i issuepolicy.IssueDraft) issuepolicy.Review {
+			return review(false, 0, []string{issuepolicy.ReasonScopeIncomplete}, []string{"done_condition"})
 		},
-		Route: func(i issuecontract.IssueDraft, _ issuecontract.Review) RouteProposal {
+		Route: func(i issuepolicy.IssueDraft, _ issuepolicy.Review) RouteProposal {
 			switch i.Number {
 			case 1:
 				return RouteProposal{Lane: "docs"}
@@ -115,10 +115,10 @@ func TestManifestSchemaCountsAndLaneFilter(t *testing.T) {
 
 func TestActionsAndRender(t *testing.T) {
 	manifest := Manifest{AsOf: "2026-07-01", Counts: Counts{CandidatesExamined: 2, NeedsRepair: 1, ByKind: map[string]int{"scope": 1}}, Issues: []RepairRow{
-		{Number: 1207, Kind: "scope", Ready: false, Score: 8, Title: "fix thing", Reasons: []string{issuecontract.ReasonScopeIncomplete}, NextAction: "do x"},
+		{Number: 1207, Kind: "scope", Ready: false, Score: 8, Title: "fix thing", Reasons: []string{issuepolicy.ReasonScopeIncomplete}, NextAction: "do x"},
 	}}
 	actions := BuildActions(manifest)
-	if len(actions) != 1 || actions[0].Cmd != nil || actions[0].Reason != issuecontract.ReasonScopeIncomplete {
+	if len(actions) != 1 || actions[0].Cmd != nil || actions[0].Reason != issuepolicy.ReasonScopeIncomplete {
 		t.Fatalf("actions = %+v", actions)
 	}
 	md := RenderMarkdown(manifest)

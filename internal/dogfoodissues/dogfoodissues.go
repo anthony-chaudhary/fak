@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -155,33 +155,33 @@ type ActionItem struct {
 
 // PlanRow is one create/update decision for a single ActionItem.
 type PlanRow struct {
-	Action       string               `json:"action"`
-	Key          string               `json:"key"`
-	Number       *int                 `json:"number"`
-	State        string               `json:"state"`
-	Title        string               `json:"title"`
-	Milestone    string               `json:"milestone,omitempty"`
-	Body         string               `json:"-"`
-	Score        string               `json:"score"`
-	Grade        string               `json:"grade"`
-	DebtCount    int                  `json:"debt_count"`
-	EvidencePath string               `json:"evidence_path"`
-	NextAction   string               `json:"next_action"`
-	Lane         string               `json:"lane,omitempty"`
-	Paths        []string             `json:"paths,omitempty"`
-	Labels       []string             `json:"labels,omitempty"`
-	Review       issuecontract.Review `json:"review,omitempty"`
+	Action       string             `json:"action"`
+	Key          string             `json:"key"`
+	Number       *int               `json:"number"`
+	State        string             `json:"state"`
+	Title        string             `json:"title"`
+	Milestone    string             `json:"milestone,omitempty"`
+	Body         string             `json:"-"`
+	Score        string             `json:"score"`
+	Grade        string             `json:"grade"`
+	DebtCount    int                `json:"debt_count"`
+	EvidencePath string             `json:"evidence_path"`
+	NextAction   string             `json:"next_action"`
+	Lane         string             `json:"lane,omitempty"`
+	Paths        []string           `json:"paths,omitempty"`
+	Labels       []string           `json:"labels,omitempty"`
+	Review       issuepolicy.Review `json:"review,omitempty"`
 }
 
 // SkippedRow records a scorecard ACTION item that remains visible in the
 // dogfood report, but is not scoped enough to create/update a dispatchable
 // public GitHub issue.
 type SkippedRow struct {
-	Key             string               `json:"key"`
-	Title           string               `json:"title"`
-	Reason          string               `json:"reason"`
-	Dispatchability string               `json:"dispatchability"`
-	Review          issuecontract.Review `json:"review,omitempty"`
+	Key             string             `json:"key"`
+	Title           string             `json:"title"`
+	Reason          string             `json:"reason"`
+	Dispatchability string             `json:"dispatchability"`
+	Review          issuepolicy.Review `json:"review,omitempty"`
 }
 
 // SyncRow is one gh create/edit outcome on a --live run.
@@ -551,17 +551,17 @@ func IssueBodyWithOptions(item ActionItem, opt BuildOptions) string {
 
 // ReviewActionItem grades one ACTION item against the shared machine-created
 // issue contract.
-func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
+func ReviewActionItem(item ActionItem, opt BuildOptions) issuepolicy.Review {
 	c := actionCandidate(item, opt)
-	review := issuecontract.ReviewCandidate(c, strictScopeOptions(opt))
+	review := issuepolicy.ReviewCandidate(c, strictScopeOptions(opt))
 	return applyStrictScopeHold(review, strictScopeHold(item, opt))
 }
 
-func actionCandidate(item ActionItem, opt BuildOptions) issuecontract.Candidate {
+func actionCandidate(item ActionItem, opt BuildOptions) issuepolicy.Candidate {
 	scoreState := fmt.Sprintf("Source probe `%s` reported finding `%s`, grade `%s`, and %s `%d`.",
 		item.SourceProbe, item.Finding, item.Grade, item.DebtName, item.DebtCount)
-	c := issuecontract.Candidate{
-		Schema:          issuecontract.Schema,
+	c := issuepolicy.Candidate{
+		Schema:          issuepolicy.Schema,
 		Key:             item.Key,
 		Title:           item.Title,
 		ParentRef:       strmatch.FirstTrimmed(item.ParentRef, "fak dogfood-issues"),
@@ -747,7 +747,7 @@ func planRow(item ActionItem) PlanRow {
 // dispatch-scope overlaps a --live sync would otherwise discover only at
 // wave-launch time.
 func CohortPlan(items []ActionItem, opt BuildOptions) issuecohort.Plan {
-	candidates := make([]issuecontract.Candidate, 0, len(items))
+	candidates := make([]issuepolicy.Candidate, 0, len(items))
 	for _, item := range items {
 		candidate := actionCandidate(item, opt)
 		if len(strictScopeHold(item, opt)) > 0 {

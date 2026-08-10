@@ -10,14 +10,14 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // oversizedEpic is a routeable issue whose declared step budget exceeds the
 // dispatch-leaf cap, so issuecontract flags ReasonOversizedSteps → decompose
 // target. budget = ceil(20/8) = 3.
-func oversizedEpic(number int) issuecontract.IssueDraft {
-	return issuecontract.IssueDraft{
+func oversizedEpic(number int) issuepolicy.IssueDraft {
+	return issuepolicy.IssueDraft{
 		Number: number,
 		Title:  "Rework the launcher",
 		Body: "## In scope\nEverything about the launcher.\n\n" +
@@ -28,19 +28,19 @@ func oversizedEpic(number int) issuecontract.IssueDraft {
 
 // labelledEpic is flagged non-leaf purely by its `epic` label (isDispatchLeaf),
 // with no step budget → scaffold budget floors at 2.
-func labelledEpic(number int) issuecontract.IssueDraft {
-	return issuecontract.IssueDraft{
+func labelledEpic(number int) issuepolicy.IssueDraft {
+	return issuepolicy.IssueDraft{
 		Number: number,
 		Title:  "Auth epic",
 		Body:   "## In scope\nAuth.\n",
-		Labels: []issuecontract.IssueLabel{{Name: "epic"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "epic"}},
 	}
 }
 
 // leafIssue is a small, complete, unlabelled unit: a dispatch leaf, never a
 // decompose target.
-func leafIssue(number int) issuecontract.IssueDraft {
-	return issuecontract.IssueDraft{
+func leafIssue(number int) issuepolicy.IssueDraft {
+	return issuepolicy.IssueDraft{
 		Number: number,
 		Title:  "Fix typo in header",
 		Body: "## In scope\nFix one typo.\n\n## Lane\ndocs\n\n" +
@@ -112,7 +112,7 @@ func decodeDecomposeResult(t *testing.T, out []byte) decomposeResult {
 func TestDecomposeDryRunScaffoldsEpicsAndIgnoresLeaves(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rr := &decomposeGHRunner{}
-	issues := []issuecontract.IssueDraft{oversizedEpic(10), leafIssue(11), labelledEpic(12)}
+	issues := []issuepolicy.IssueDraft{oversizedEpic(10), leafIssue(11), labelledEpic(12)}
 
 	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--json"}, issues, rr.run)
 	if code != 0 {
@@ -169,7 +169,7 @@ func TestDecomposeLiveFromPlanFilesChildrenAndLinksParent(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	rr := &decomposeGHRunner{}
-	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
+	issues := []issuepolicy.IssueDraft{oversizedEpic(10)}
 
 	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--from-plan", planPath, "--json"}, issues, rr.run)
 	if code != 0 {
@@ -220,7 +220,7 @@ func TestDecomposeMaxCreateFuseRefusesBeforeGH(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	rr := &decomposeGHRunner{}
-	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
+	issues := []issuepolicy.IssueDraft{oversizedEpic(10)}
 
 	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--from-plan", planPath, "--max-create", "2"}, issues, rr.run)
 	if code != 2 {
@@ -237,7 +237,7 @@ func TestDecomposeMaxCreateFuseRefusesBeforeGH(t *testing.T) {
 func TestDecomposeLiveScaffoldNeedsAllowStubs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rr := &decomposeGHRunner{}
-	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
+	issues := []issuepolicy.IssueDraft{oversizedEpic(10)}
 
 	// --live without --from-plan and without --allow-stubs: scaffolds are not
 	// filed; run succeeds but touches no gh and warns.
@@ -283,7 +283,7 @@ func TestDecomposeChildCreateFailureSkipsParentLink(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	rr := &decomposeGHRunner{failOnce: true}
-	issues := []issuecontract.IssueDraft{oversizedEpic(10)}
+	issues := []issuepolicy.IssueDraft{oversizedEpic(10)}
 
 	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--live", "--parent-baseline-points", "13", "--target-envelope", "- generated children passing strict review: = 100 percent", "--witnessed-envelope", "- generated children passing strict review: = 100 percent", "--from-plan", planPath, "--json"}, issues, rr.run)
 	if code != 1 {
@@ -308,7 +308,7 @@ func TestDecomposePlanOverrideOfNonEpicAndOrphanParent(t *testing.T) {
 	writeDecomposePlanFile(t, planPath, plan)
 
 	var stdout, stderr bytes.Buffer
-	issues := []issuecontract.IssueDraft{leafIssue(11)}
+	issues := []issuepolicy.IssueDraft{leafIssue(11)}
 
 	code := runIssueDecomposeWith(&stdout, &stderr, []string{"--from-plan", planPath, "--json"}, issues, nil)
 	// Dry-run, but the orphan row is a failure → exit 1.

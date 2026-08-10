@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func completeRow() Row {
@@ -46,8 +46,8 @@ func TestIssueBodyRoundTripsToDispatchable(t *testing.T) {
 	row := completeRow()
 	body := IssueBody(row)
 
-	draft := issuecontract.IssueDraft{Number: 42, Title: row.Title, Body: body}
-	rev := issuecontract.ReviewIssueDraft(draft, issuecontract.Options{})
+	draft := issuepolicy.IssueDraft{Number: 42, Title: row.Title, Body: body}
+	rev := issuepolicy.ReviewIssueDraft(draft, issuepolicy.Options{})
 	if !rev.OK {
 		t.Fatalf("round-tripped body should be dispatchable, got verdict=%q reasons=%v missing=%v",
 			rev.Verdict, rev.Reasons, rev.MissingFields)
@@ -80,8 +80,8 @@ func TestReviewRejectsUnrouted(t *testing.T) {
 	if rev.OK {
 		t.Fatalf("row with no lane and no paths must not be OK")
 	}
-	if !containsStr(rev.Reasons, issuecontract.ReasonUnrouted) {
-		t.Errorf("reasons should include %s, got %v", issuecontract.ReasonUnrouted, rev.Reasons)
+	if !containsStr(rev.Reasons, issuepolicy.ReasonUnrouted) {
+		t.Errorf("reasons should include %s, got %v", issuepolicy.ReasonUnrouted, rev.Reasons)
 	}
 }
 

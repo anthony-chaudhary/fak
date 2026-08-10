@@ -26,7 +26,7 @@
 //   - class_coverage:        a dispatchable issue with no class:* label.
 //   - priority_coverage:     a dispatchable issue with no priority/P? label.
 //   - contract_completeness: a dispatchable issue whose body is missing the
-//     worker-ready sections (mirrors issuecontract.missingRequiredIssueSections).
+//     worker-ready sections (mirrors issuepolicy.missingRequiredIssueSections).
 //   - dedupe_integrity:      a dispatchable issue that is a near-duplicate of a
 //     lower-numbered open issue (via internal/issuededup).
 //   - leaf_shape:            an epic with no linked children (nothing to
@@ -188,7 +188,7 @@ func (is Issue) isDispatchable() bool {
 
 func (is Issue) assigned() bool { return len(is.Assignees) > 0 }
 
-// requiredSections mirrors issuecontract.missingRequiredIssueSections's heading
+// requiredSections mirrors issuepolicy.missingRequiredIssueSections's heading
 // half: the worker-ready body a fresh-context agent needs. We can only see the
 // rendered body (not the contract's parsed scope fields), so we grade heading
 // PRESENCE -- the structural signal the create path leaves ungated.

@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 const (
@@ -38,8 +38,8 @@ const (
 // live run additionally demands a strong (non-forgeable) witness grade: the
 // issue's done condition must be provable by an independent oracle rather than
 // by the worker's own report.
-func strictScopeOptions(opt BuildOptions) issuecontract.Options {
-	return issuecontract.Options{
+func strictScopeOptions(opt BuildOptions) issuepolicy.Options {
+	return issuepolicy.Options{
 		Live:              opt.Live,
 		DedupeChecked:     opt.DedupeChecked,
 		DedupeCap:         opt.DedupeCap,
@@ -78,7 +78,7 @@ func hasPathHint(paths []string) bool {
 // deduplicated the way issuecontract emits it. A held row can never stay
 // dispatchable; it degrades to triage_only unless the contract already refused it
 // outright, in which case the stronger refusal verdict is preserved.
-func applyStrictScopeHold(review issuecontract.Review, hold []string) issuecontract.Review {
+func applyStrictScopeHold(review issuepolicy.Review, hold []string) issuepolicy.Review {
 	if len(hold) == 0 {
 		return review
 	}
@@ -96,9 +96,9 @@ func applyStrictScopeHold(review issuecontract.Review, hold []string) issuecontr
 	sort.Strings(reasons)
 	review.Reasons = reasons
 	review.OK = false
-	if review.Dispatchability == issuecontract.Dispatchable {
+	if review.Dispatchability == issuepolicy.Dispatchable {
 		review.Verdict = "needs_scope"
-		review.Dispatchability = issuecontract.TriageOnly
+		review.Dispatchability = issuepolicy.TriageOnly
 	}
 	return review
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func TestBuildProjectWorkMetadataPassesStrictReview(t *testing.T) {
@@ -13,8 +13,8 @@ func TestBuildProjectWorkMetadataPassesStrictReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range p.Candidates {
-		r := issuecontract.ReviewCandidate(c, issuecontract.Options{StrictProjectWork: true})
-		if r.ProjectWork.Status != issuecontract.ProjectWorkValid {
+		r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{StrictProjectWork: true})
+		if r.ProjectWork.Status != issuepolicy.ProjectWorkValid {
 			t.Fatalf("%s project work = %+v", c.Key, r.ProjectWork)
 		}
 		if !r.ProjectWork.ProductionCredit {

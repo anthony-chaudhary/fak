@@ -28,7 +28,7 @@ func TestRunOwnershipText(t *testing.T) {
 	if code := RunOwnership(&out, &errOut, devindex.FindRoot("."), false); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"command ownership: runtime=", "runtime graph: packages=", "LEAK "} {
+	for _, want := range []string{"command ownership: runtime=", "runtime graph: packages=", "dev-leaks=0"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}

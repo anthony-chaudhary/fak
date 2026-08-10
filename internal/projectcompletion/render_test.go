@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // Operator status never renders a bare "complete" for a non-production leaf
@@ -64,7 +64,7 @@ func TestRenderTextToyBringupStaysBelowProductionComplete(t *testing.T) {
 // unknown in the render — visible, and never counted or labeled complete.
 func TestRenderTextKeepsUndeclaredWorkVisible(t *testing.T) {
 	report := Summarize([]Issue{
-		{Number: 1, Title: "legacy close", State: "closed", ProjectWork: issuecontract.ProjectWorkReadout{Status: issuecontract.ProjectWorkUndeclared}},
+		{Number: 1, Title: "legacy close", State: "closed", ProjectWork: issuepolicy.ProjectWorkReadout{Status: issuepolicy.ProjectWorkUndeclared}},
 		{Number: 2, Title: "production serving path", State: "open", ProjectWork: work("production", 20)},
 	})
 	got := RenderText(report)

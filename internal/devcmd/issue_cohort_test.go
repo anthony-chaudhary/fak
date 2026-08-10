@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
-func cohortTestCandidate(key string, paths []string) issuecontract.Candidate {
-	return issuecontract.Candidate{
-		Schema:             issuecontract.Schema,
+func cohortTestCandidate(key string, paths []string) issuepolicy.Candidate {
+	return issuepolicy.Candidate{
+		Schema:             issuepolicy.Schema,
 		Key:                key,
 		Title:              "leaf " + key,
 		ParentRef:          "epic #1",
@@ -36,7 +36,7 @@ func cohortTestCandidate(key string, paths []string) issuecontract.Candidate {
 	}
 }
 
-func writeCohortPlan(t *testing.T, cands []issuecontract.Candidate) string {
+func writeCohortPlan(t *testing.T, cands []issuepolicy.Candidate) string {
 	t.Helper()
 	b, err := json.Marshal(cands)
 	if err != nil {
@@ -50,7 +50,7 @@ func writeCohortPlan(t *testing.T, cands []issuecontract.Candidate) string {
 }
 
 func TestRunIssueCohortJSON(t *testing.T) {
-	cands := []issuecontract.Candidate{
+	cands := []issuepolicy.Candidate{
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
 		cohortTestCandidate("b", []string{"internal/foo/bar.go"}), // overlaps a
 		cohortTestCandidate("c", []string{"internal/baz/**"}),     // disjoint
@@ -88,7 +88,7 @@ func TestRunIssueCohortJSON(t *testing.T) {
 }
 
 func TestRunIssueCohortText(t *testing.T) {
-	path := writeCohortPlan(t, []issuecontract.Candidate{
+	path := writeCohortPlan(t, []issuepolicy.Candidate{
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
 	})
 	var stdout, stderr bytes.Buffer
@@ -108,7 +108,7 @@ func TestRunIssueCohortMissingArg(t *testing.T) {
 }
 
 func TestRunIssueCohortBothSourcesRejected(t *testing.T) {
-	path := writeCohortPlan(t, []issuecontract.Candidate{
+	path := writeCohortPlan(t, []issuepolicy.Candidate{
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
 	})
 	var stdout, stderr bytes.Buffer
@@ -132,7 +132,7 @@ func TestRunIssueCohortFromIssues(t *testing.T) {
 			"## Completion standard\n\nproduction\n\n## Target operating envelope\n\n- acceptance pass rate: = 100 percent\n\n" +
 			"## Witnessed operating envelope\n\n- acceptance pass rate: = 100 percent\n\n## Likely files\n\n" + paths + "\n"
 	}
-	issues := []issuecontract.IssueDraft{
+	issues := []issuepolicy.IssueDraft{
 		{Number: 10, Title: "leaf ten", Body: body("- `internal/foo/**`")},
 		{Number: 11, Title: "leaf eleven", Body: body("- `internal/foo/bar.go`")}, // overlaps #10
 		{Number: 12, Title: "leaf twelve", Body: body("- `internal/baz/**`")},     // disjoint
@@ -163,7 +163,7 @@ func TestRunIssueCohortFromIssues(t *testing.T) {
 }
 
 func TestRunIssueCohortRoutedViaRunIssue(t *testing.T) {
-	path := writeCohortPlan(t, []issuecontract.Candidate{
+	path := writeCohortPlan(t, []issuepolicy.Candidate{
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
 	})
 	var stdout, stderr bytes.Buffer

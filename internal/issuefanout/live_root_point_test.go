@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func TestLiveBodyRendersRootPointFields(t *testing.T) {
-	body := LiveBody(issuecontract.Candidate{
+	body := LiveBody(issuepolicy.Candidate{
 		RootPoint: "candidate creation", OriginSignal: "contract review",
 		PreventsRecurrence: "strict mode refuses omissions",
 	})

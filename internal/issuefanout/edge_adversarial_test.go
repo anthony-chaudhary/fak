@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // TestBuildEdgeRefusalTable drives every refusal path Build declares, and pins
@@ -121,8 +121,8 @@ func TestBuildAdversarialContractHolds(t *testing.T) {
 				return
 			}
 			for _, c := range plan.Candidates {
-				r := issuecontract.ReviewCandidate(c, issuecontract.Options{})
-				if r.Dispatchability != issuecontract.Dispatchable {
+				r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{})
+				if r.Dispatchability != issuepolicy.Dispatchable {
 					t.Errorf("candidate %s not dispatchable (reasons %v, missing %v): the planner emitted a broken contract instead of refusing",
 						c.Key, r.Reasons, r.MissingFields)
 				}

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 const Schema = "fak.project-completion.v1"
@@ -14,7 +14,7 @@ type Issue struct {
 	Number      int
 	Title       string
 	State       string
-	ProjectWork issuecontract.ProjectWorkReadout
+	ProjectWork issuepolicy.ProjectWorkReadout
 }
 type Bucket struct {
 	Standard string  `json:"standard"`
@@ -53,7 +53,7 @@ func Summarize(issues []Issue) Report {
 	parents := map[string]float64{}
 	for _, issue := range issues {
 		pw := issue.ProjectWork
-		if pw.Status != issuecontract.ProjectWorkValid {
+		if pw.Status != issuepolicy.ProjectWorkValid {
 			r.Unknown = append(r.Unknown, UnknownIssue{issue.Number, issue.Title, pw.Status, append([]string(nil), pw.Invalid...)})
 			continue
 		}

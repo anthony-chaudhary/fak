@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
@@ -99,14 +99,14 @@ type HandoffNextStep struct {
 // HandoffReview is the pure verdict. OK means the handoff has enough witnessed
 // completion evidence and next-step state for an automated loop to act on it.
 type HandoffReview struct {
-	Schema       string                 `json:"schema"`
-	OK           bool                   `json:"ok"`
-	Verdict      string                 `json:"verdict"`
-	Reasons      []string               `json:"reasons,omitempty"`
-	TaskID       string                 `json:"task_id,omitempty"`
-	NextStepKeys []string               `json:"next_step_keys,omitempty"`
-	IssueCount   int                    `json:"issue_count"`
-	IssueReviews []issuecontract.Review `json:"issue_reviews,omitempty"`
+	Schema       string               `json:"schema"`
+	OK           bool                 `json:"ok"`
+	Verdict      string               `json:"verdict"`
+	Reasons      []string             `json:"reasons,omitempty"`
+	TaskID       string               `json:"task_id,omitempty"`
+	NextStepKeys []string             `json:"next_step_keys,omitempty"`
+	IssueCount   int                  `json:"issue_count"`
+	IssueReviews []issuepolicy.Review `json:"issue_reviews,omitempty"`
 	// AchievedMaturity is the normalized maturity the handoff names for the
 	// completed task — a stable JSON field for downstream status consumers
 	// (#4640). Empty means the handoff did not declare one.
@@ -120,7 +120,7 @@ type HandoffReview struct {
 // Closure binding: StrictScope plus the typed next-step fields on HandoffNextStep
 // (InScope, OutOfScope, DoneCondition, Witness, AcceptanceGate, Lane, Paths,
 // BoundaryNotes, ClosureBinding, ...), the ReviewHandoffWithOptions gate below that
-// refuses a vague next step via issuecontract.ReviewCandidate before live issue
+// refuses a vague next step via issuepolicy.ReviewCandidate before live issue
 // sync, and HandoffIssueBody's stable-section rendering together satisfy #1460's
 // ask in full, covered by handoff_test.go's TestReviewHandoffStrictScopeRejectsVagueNextStep,
 // TestReviewHandoffStrictScopeAcceptsDispatchableNextStep, and
@@ -246,9 +246,9 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 		}
 	}
 
-	var issueReviews []issuecontract.Review
+	var issueReviews []issuepolicy.Review
 	if opt.StrictScope && nextCount > 0 {
-		issueReviews = make([]issuecontract.Review, 0, nextCount)
+		issueReviews = make([]issuepolicy.Review, 0, nextCount)
 		for i, step := range h.NextSteps {
 			prefix := "NEXT_STEP_" + strconv.Itoa(i+1) + "_"
 			c := handoffIssueCandidate(h, step)
@@ -263,7 +263,7 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 				c.TargetEnvelope = opt.TargetEnvelope
 				c.WitnessedEnvelope = opt.WitnessedEnvelope
 			}
-			ir := issuecontract.ReviewCandidate(c, issuecontract.Options{
+			ir := issuepolicy.ReviewCandidate(c, issuepolicy.Options{
 				Live:              opt.Live,
 				DedupeChecked:     opt.DedupeChecked,
 				DedupeCap:         opt.DedupeCap,
@@ -297,9 +297,9 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 	return review
 }
 
-func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuecontract.Candidate {
-	return issuecontract.Candidate{
-		Schema:          issuecontract.Schema,
+func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuepolicy.Candidate {
+	return issuepolicy.Candidate{
+		Schema:          issuepolicy.Schema,
 		Key:             strings.TrimSpace(step.Key),
 		Title:           strings.TrimSpace(step.Title),
 		ParentRef:       strings.TrimSpace(h.Task.TaskID),
@@ -521,7 +521,7 @@ func evidenceRefStrings(refs []EvidenceRef) []string {
 }
 
 // normalizeAchievedMaturity maps a declared achieved maturity onto the closed
-// completion-standard vocabulary shared with internal/issuecontract. Unknown
+// completion-standard vocabulary shared with internal/issuepolicy. Unknown
 // wording returns "" so the review gate can refuse rather than guess — a bare
 // or novel "complete" claim never silently becomes production (#4640).
 func normalizeAchievedMaturity(raw string) string {

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -34,7 +34,7 @@ const MarkerName = "fak-issue-catalog-key"
 
 var markerRE = regexp.MustCompile(`<!--\s*` + MarkerName + `:\s*([^>\s]+)\s*-->`)
 
-// Row is one catalog entry: an issuecontract.Candidate's spine-first fields plus
+// Row is one catalog entry: an issuepolicy.Candidate's spine-first fields plus
 // the producer metadata the contract does not model (milestone, lens, priority).
 // The JSON tags match the recon-agent gap-row schema exactly, and unknown fields
 // (e.g. expected_steps) decode away harmlessly.
@@ -68,28 +68,28 @@ type Row struct {
 
 // PlanRow is one create/update decision for a single Row.
 type PlanRow struct {
-	Action    string               `json:"action"`
-	Key       string               `json:"key"`
-	Number    *int                 `json:"number"`
-	State     string               `json:"state"`
-	Title     string               `json:"title"`
-	Body      string               `json:"-"`
-	Milestone string               `json:"milestone,omitempty"`
-	Labels    []string             `json:"labels,omitempty"`
-	Lane      string               `json:"lane,omitempty"`
-	Paths     []string             `json:"paths,omitempty"`
-	Review    issuecontract.Review `json:"review,omitempty"`
+	Action    string             `json:"action"`
+	Key       string             `json:"key"`
+	Number    *int               `json:"number"`
+	State     string             `json:"state"`
+	Title     string             `json:"title"`
+	Body      string             `json:"-"`
+	Milestone string             `json:"milestone,omitempty"`
+	Labels    []string           `json:"labels,omitempty"`
+	Lane      string             `json:"lane,omitempty"`
+	Paths     []string           `json:"paths,omitempty"`
+	Review    issuepolicy.Review `json:"review,omitempty"`
 }
 
 // SkippedRow records a catalog entry that does not meet the issue contract and so
 // is not synced as a dispatchable public issue.
 type SkippedRow struct {
-	Key             string               `json:"key"`
-	Title           string               `json:"title"`
-	Reason          string               `json:"reason"`
-	Dispatchability string               `json:"dispatchability"`
-	MissingFields   []string             `json:"missing_fields,omitempty"`
-	Review          issuecontract.Review `json:"review,omitempty"`
+	Key             string             `json:"key"`
+	Title           string             `json:"title"`
+	Reason          string             `json:"reason"`
+	Dispatchability string             `json:"dispatchability"`
+	MissingFields   []string           `json:"missing_fields,omitempty"`
+	Review          issuepolicy.Review `json:"review,omitempty"`
 }
 
 // SyncRow is one gh create/edit outcome on a --live run.
@@ -152,9 +152,9 @@ func ParseCatalog(b []byte) ([]Row, error) {
 }
 
 // Candidate projects a Row onto the shared issue-candidate contract.
-func (r Row) Candidate() issuecontract.Candidate {
-	return issuecontract.Candidate{
-		Schema:         issuecontract.Schema,
+func (r Row) Candidate() issuepolicy.Candidate {
+	return issuepolicy.Candidate{
+		Schema:         issuepolicy.Schema,
 		Key:            r.Key,
 		Title:          r.Title,
 		ParentRef:      r.ParentRef,
@@ -182,8 +182,8 @@ func (r Row) Candidate() issuecontract.Candidate {
 }
 
 // Review grades one Row against the shared machine-created issue contract.
-func Review(r Row, opt Options) issuecontract.Review {
-	return issuecontract.ReviewCandidate(r.Candidate(), issuecontract.Options{
+func Review(r Row, opt Options) issuepolicy.Review {
+	return issuepolicy.ReviewCandidate(r.Candidate(), issuepolicy.Options{
 		Live:          opt.Live,
 		DedupeChecked: opt.DedupeChecked,
 		DedupeCap:     opt.DedupeCap,
@@ -361,12 +361,12 @@ func BuildPlan(rows []Row, existing []Issue, opt Options) ([]PlanRow, []SkippedR
 // dispatch-scope overlaps a --live sync would otherwise discover only at
 // wave-launch time.
 func CohortPlan(rows []Row, opt Options) issuecohort.Plan {
-	candidates := make([]issuecontract.Candidate, 0, len(rows))
+	candidates := make([]issuepolicy.Candidate, 0, len(rows))
 	for _, row := range rows {
 		candidates = append(candidates, row.Candidate())
 	}
 	return issuecohort.Build(candidates, issuecohort.Options{
-		Options: issuecontract.Options{
+		Options: issuepolicy.Options{
 			Live:          opt.Live,
 			DedupeChecked: opt.DedupeChecked,
 			DedupeCap:     opt.DedupeCap,

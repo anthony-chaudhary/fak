@@ -23,7 +23,6 @@ type PackageOwnership struct {
 var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "devcmd", Owner: OwnerDev, Rationale: "hosts repository-development command implementations for fak-dev"},
 	{Path: moduleInternalPrefix + "devindex", Owner: OwnerDev, Rationale: "indexes and audits the fak repository command surface"},
-	{Path: moduleInternalPrefix + "issuecontract", Owner: OwnerDev, Rationale: "validates GitHub project-work issue contracts"},
 	{Path: moduleInternalPrefix + "issuesync", Owner: OwnerDev, Rationale: "synchronizes fak repository GitHub issues"},
 	{Path: moduleInternalPrefix + "wiki", Owner: OwnerDev, Rationale: "audits repository documentation structure, citations, freshness, and coverage"},
 	{Path: moduleInternalPrefix + "sweep", Owner: OwnerDev, Rationale: "groups and commits shared-checkout development work"},

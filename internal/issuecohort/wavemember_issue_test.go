@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // TestWaveMemberCarriesIssueNumber: a cohort planned over EXISTING issues
@@ -24,7 +24,7 @@ func TestWaveMemberCarriesIssueNumber(t *testing.T) {
 	b.IssueNumber = 702
 	b.Paths = []string{"internal/model/**"}
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.NumWaves != 1 || len(plan.Waves[0].Members) != 2 {
 		t.Fatalf("waves = %+v, want one wave of 2 disjoint members", plan.Waves)
 	}
@@ -51,7 +51,7 @@ func TestWaveMemberCarriesIssueNumber(t *testing.T) {
 // inventing a placeholder. A downstream reader must be able to tell "this plan
 // cannot bind to commits yet" from "this member is issue 0".
 func TestWaveMemberOmitsUnfiledIssueNumber(t *testing.T) {
-	plan := Build([]issuecontract.Candidate{fullCandidate("alpha")}, Options{})
+	plan := Build([]issuepolicy.Candidate{fullCandidate("alpha")}, Options{})
 	if len(plan.Waves) != 1 || len(plan.Waves[0].Members) != 1 {
 		t.Fatalf("waves = %+v, want one wave of 1", plan.Waves)
 	}

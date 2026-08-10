@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func RunIssue(stdout, stderr io.Writer, argv []string) int {
@@ -56,19 +56,19 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 }
 
 type issueContractResult struct {
-	Schema              string                             `json:"schema"`
-	Mode                string                             `json:"mode"`
-	File                string                             `json:"file"`
-	OK                  bool                               `json:"ok"`
-	Counts              issueContractCounts                `json:"counts"`
-	RepairQueues        []issueContractRepairQueue         `json:"repair_queues,omitempty"`
-	BatchGroups         []issueContractBatchGroup          `json:"batch_groups,omitempty"`
-	DuplicateKeyGroups  []issueContractDuplicateGroup      `json:"duplicate_key_groups,omitempty"`
-	AssumptionGroups    []issueContractAgentNoteGroup      `json:"assumption_groups,omitempty"`
-	ConfusionGroups     []issueContractAgentNoteGroup      `json:"confusion_groups,omitempty"`
-	CoordinationGroups  []issueContractAgentNoteGroup      `json:"coordination_groups,omitempty"`
-	TemplateRepairPlans []issuecontract.TemplateRepairPlan `json:"template_repair_plans,omitempty"`
-	Reviews             []issuecontract.Review             `json:"reviews"`
+	Schema              string                           `json:"schema"`
+	Mode                string                           `json:"mode"`
+	File                string                           `json:"file"`
+	OK                  bool                             `json:"ok"`
+	Counts              issueContractCounts              `json:"counts"`
+	RepairQueues        []issueContractRepairQueue       `json:"repair_queues,omitempty"`
+	BatchGroups         []issueContractBatchGroup        `json:"batch_groups,omitempty"`
+	DuplicateKeyGroups  []issueContractDuplicateGroup    `json:"duplicate_key_groups,omitempty"`
+	AssumptionGroups    []issueContractAgentNoteGroup    `json:"assumption_groups,omitempty"`
+	ConfusionGroups     []issueContractAgentNoteGroup    `json:"confusion_groups,omitempty"`
+	CoordinationGroups  []issueContractAgentNoteGroup    `json:"coordination_groups,omitempty"`
+	TemplateRepairPlans []issuepolicy.TemplateRepairPlan `json:"template_repair_plans,omitempty"`
+	Reviews             []issuepolicy.Review             `json:"reviews"`
 }
 
 type issueContractCounts struct {
@@ -210,7 +210,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		File:   path,
 		OK:     true,
 	}
-	opts := issuecontract.Options{
+	opts := issuepolicy.Options{
 		Live:              *live,
 		DedupeChecked:     *dedupeChecked,
 		DedupeCap:         *dedupeCap,
@@ -225,14 +225,14 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		if err != nil {
 			return issueContractDecodeRefusal(stderr, err)
 		}
-		result.Reviews = make([]issuecontract.Review, 0, len(issues))
+		result.Reviews = make([]issuepolicy.Review, 0, len(issues))
 		for _, issue := range issues {
-			review := issuecontract.ReviewIssueDraft(issue, opts)
+			review := issuepolicy.ReviewIssueDraft(issue, opts)
 			if !review.OK {
 				result.OK = false
 			}
 			result.Reviews = append(result.Reviews, review)
-			if plan, ok := issuecontract.BuildTemplateRepairPlan(issue); ok {
+			if plan, ok := issuepolicy.BuildTemplateRepairPlan(issue); ok {
 				result.TemplateRepairPlans = append(result.TemplateRepairPlans, plan)
 			}
 		}
@@ -241,9 +241,9 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		if err != nil {
 			return issueContractDecodeRefusal(stderr, err)
 		}
-		result.Reviews = make([]issuecontract.Review, 0, len(candidates))
+		result.Reviews = make([]issuepolicy.Review, 0, len(candidates))
 		for _, c := range candidates {
-			review := issuecontract.ReviewCandidate(c, opts)
+			review := issuepolicy.ReviewCandidate(c, opts)
 			if !review.OK {
 				result.OK = false
 			}
@@ -276,7 +276,7 @@ func issueContractDecodeRefusal(stderr io.Writer, err error) int {
 	return 2
 }
 
-func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup, []issueContractDuplicateGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup) {
+func summarizeIssueContractReviews(reviews []issuepolicy.Review) (issueContractCounts, []issueContractBatchGroup, []issueContractDuplicateGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup, []issueContractAgentNoteGroup) {
 	counts := issueContractCounts{
 		Total:                len(reviews),
 		ByReason:             map[string]int{},
@@ -296,11 +296,11 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 	generationFitSum := 0
 	for _, review := range reviews {
 		switch review.Dispatchability {
-		case issuecontract.Dispatchable:
+		case issuepolicy.Dispatchable:
 			counts.Dispatchable++
-		case issuecontract.TriageOnly:
+		case issuepolicy.TriageOnly:
 			counts.TriageOnly++
-		case issuecontract.Refused:
+		case issuepolicy.Refused:
 			counts.Refused++
 		}
 		if review.AgentContext.Total >= 100 {
@@ -369,11 +369,11 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 			group.OverCap = group.Count - group.DeclaredCap
 		}
 		switch review.Dispatchability {
-		case issuecontract.Dispatchable:
+		case issuepolicy.Dispatchable:
 			group.Dispatchable++
-		case issuecontract.TriageOnly:
+		case issuepolicy.TriageOnly:
 			group.TriageOnly++
-		case issuecontract.Refused:
+		case issuepolicy.Refused:
 			group.Refused++
 		}
 		for _, reason := range review.Reasons {
@@ -430,14 +430,14 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 	return counts, groups, duplicates, assumptions, confusions, coordination
 }
 
-func issueContractReviewStepBudget(review issuecontract.Review) int {
+func issueContractReviewStepBudget(review issuepolicy.Review) int {
 	if review.ExpectedSteps > 0 {
 		return review.ExpectedSteps
 	}
 	return 1
 }
 
-func issueContractReviewHasGenerationFit(review issuecontract.Review) bool {
+func issueContractReviewHasGenerationFit(review issuepolicy.Review) bool {
 	return strings.TrimSpace(review.GenerationFit.Stream) != "" ||
 		strings.TrimSpace(review.GenerationFit.LabelStream) != "" ||
 		strings.TrimSpace(review.GenerationFit.BodyStream) != "" ||
@@ -447,12 +447,12 @@ func issueContractReviewHasGenerationFit(review issuecontract.Review) bool {
 // issueContractReviewHasModelTier reports whether the review resolved at least
 // one model tier (required or optimal). A review that only carries missing-tier
 // flags is NOT counted as tagged — the flag count is the separate signal.
-func issueContractReviewHasModelTier(review issuecontract.Review) bool {
+func issueContractReviewHasModelTier(review issuepolicy.Review) bool {
 	return strings.TrimSpace(review.ModelTier.Required) != "" ||
 		strings.TrimSpace(review.ModelTier.Optimal) != ""
 }
 
-func issueContractAddDuplicateGroup(groups map[string]*issueContractDuplicateGroup, review issuecontract.Review, stepBudget int) {
+func issueContractAddDuplicateGroup(groups map[string]*issueContractDuplicateGroup, review issuepolicy.Review, stepBudget int) {
 	key := strings.TrimSpace(review.Key)
 	if key == "" {
 		return
@@ -470,11 +470,11 @@ func issueContractAddDuplicateGroup(groups map[string]*issueContractDuplicateGro
 	group.StepBudget += stepBudget
 	group.ChildIssueBudget += issueContractReviewSplitChildIssueBudget(review)
 	switch review.Dispatchability {
-	case issuecontract.Dispatchable:
+	case issuepolicy.Dispatchable:
 		group.Dispatchable++
-	case issuecontract.TriageOnly:
+	case issuepolicy.TriageOnly:
 		group.TriageOnly++
-	case issuecontract.Refused:
+	case issuepolicy.Refused:
 		group.Refused++
 	}
 	group.ByLane[issueContractBucketValue(review.Lane, "(unrouted)")]++
@@ -513,7 +513,7 @@ func issueContractSortedDuplicateGroups(groups map[string]*issueContractDuplicat
 	return out
 }
 
-func issueContractAddAgentNoteGroups(groups map[string]*issueContractAgentNoteGroup, notes []string, review issuecontract.Review, stepBudget int) {
+func issueContractAddAgentNoteGroups(groups map[string]*issueContractAgentNoteGroup, notes []string, review issuepolicy.Review, stepBudget int) {
 	for _, key := range issueContractAgentNoteKeys(notes) {
 		group := groups[key]
 		if group == nil {
@@ -529,11 +529,11 @@ func issueContractAddAgentNoteGroups(groups map[string]*issueContractAgentNoteGr
 		group.StepBudget += stepBudget
 		group.ChildIssueBudget += issueContractReviewSplitChildIssueBudget(review)
 		switch review.Dispatchability {
-		case issuecontract.Dispatchable:
+		case issuepolicy.Dispatchable:
 			group.Dispatchable++
-		case issuecontract.TriageOnly:
+		case issuepolicy.TriageOnly:
 			group.TriageOnly++
-		case issuecontract.Refused:
+		case issuepolicy.Refused:
 			group.Refused++
 		}
 		group.ByLane[issueContractBucketValue(review.Lane, "(unrouted)")]++
@@ -607,7 +607,7 @@ func issueContractStepBucket(steps int) string {
 		return "1"
 	case steps <= 3:
 		return "2-3"
-	case steps <= issuecontract.MaxDispatchExpectedSteps:
+	case steps <= issuepolicy.MaxDispatchExpectedSteps:
 		return "4-8"
 	default:
 		return "over-8"
@@ -697,7 +697,7 @@ func issueContractPolicyNumber(token string) int {
 	}
 }
 
-func issueContractBatchKey(review issuecontract.Review) string {
+func issueContractBatchKey(review issuepolicy.Review) string {
 	lane := issueContractBucketValue(review.Lane, "unrouted")
 	workUnit := issueContractBucketValue(review.WorkUnit, "missing-work-unit")
 	trigger := issueContractBucketValue(review.Trigger, "missing-trigger")
@@ -705,7 +705,7 @@ func issueContractBatchKey(review issuecontract.Review) string {
 	return lane + "|" + workUnit + "|" + trigger + "|" + batchPolicy
 }
 
-func issueContractBatchMissingMetadata(review issuecontract.Review) []string {
+func issueContractBatchMissingMetadata(review issuepolicy.Review) []string {
 	var missing []string
 	if strings.TrimSpace(review.Lane) == "" {
 		missing = append(missing, "lane")
@@ -725,7 +725,7 @@ func issueContractBatchMissingMetadata(review issuecontract.Review) []string {
 	return missing
 }
 
-func issueContractRepairQueues(reviews []issuecontract.Review) []issueContractRepairQueue {
+func issueContractRepairQueues(reviews []issuepolicy.Review) []issueContractRepairQueue {
 	queues := map[string]*issueContractRepairQueue{}
 	for _, review := range reviews {
 		kinds := issueContractRepairKinds(review)
@@ -777,17 +777,17 @@ func issueContractRepairQueues(reviews []issuecontract.Review) []issueContractRe
 	return out
 }
 
-func issueContractReviewChildIssueBudget(review issuecontract.Review, kind string) int {
+func issueContractReviewChildIssueBudget(review issuepolicy.Review, kind string) int {
 	if kind != "split" {
 		return 0
 	}
 	if review.ExpectedSteps <= 0 {
 		return 1
 	}
-	return (review.ExpectedSteps + issuecontract.MaxDispatchExpectedSteps - 1) / issuecontract.MaxDispatchExpectedSteps
+	return (review.ExpectedSteps + issuepolicy.MaxDispatchExpectedSteps - 1) / issuepolicy.MaxDispatchExpectedSteps
 }
 
-func issueContractReviewSplitChildIssueBudget(review issuecontract.Review) int {
+func issueContractReviewSplitChildIssueBudget(review issuepolicy.Review) int {
 	for _, kind := range issueContractRepairKinds(review) {
 		if kind == "split" {
 			return issueContractReviewChildIssueBudget(review, kind)
@@ -796,8 +796,8 @@ func issueContractReviewSplitChildIssueBudget(review issuecontract.Review) int {
 	return 0
 }
 
-func issueContractRepairKinds(review issuecontract.Review) []string {
-	if review.OK && review.Dispatchability == issuecontract.Dispatchable {
+func issueContractRepairKinds(review issuepolicy.Review) []string {
+	if review.OK && review.Dispatchability == issuepolicy.Dispatchable {
 		return []string{"dispatch"}
 	}
 	var kinds []string
@@ -811,17 +811,17 @@ func issueContractRepairKinds(review issuecontract.Review) []string {
 	}
 	for _, reason := range review.Reasons {
 		switch reason {
-		case issuecontract.ReasonNotDispatchLeaf, issuecontract.ReasonOversizedSteps:
+		case issuepolicy.ReasonNotDispatchLeaf, issuepolicy.ReasonOversizedSteps:
 			add("split")
-		case issuecontract.ReasonScopeIncomplete:
+		case issuepolicy.ReasonScopeIncomplete:
 			add("scope")
-		case issuecontract.ReasonUnrouted:
+		case issuepolicy.ReasonUnrouted:
 			add("route")
-		case issuecontract.ReasonLiveUnarmored, issuecontract.ReasonNoiseIncomplete, issuecontract.ReasonAgentIncomplete:
+		case issuepolicy.ReasonLiveUnarmored, issuepolicy.ReasonNoiseIncomplete, issuepolicy.ReasonAgentIncomplete:
 			add("noise")
-		case issuecontract.ReasonPrivateBoundary:
+		case issuepolicy.ReasonPrivateBoundary:
 			add("private")
-		case issuecontract.ReasonUnexpandedTemplate:
+		case issuepolicy.ReasonUnexpandedTemplate:
 			add("template")
 		default:
 			add("other")
@@ -859,7 +859,7 @@ func issueContractRepairAction(kind string) string {
 	case "dispatch":
 		return "send these scoped leaves to dispatch lanes, oldest/highest-priority first"
 	case "split":
-		return fmt.Sprintf("decompose each non-leaf or oversized row into child issues with <= %d expected steps", issuecontract.MaxDispatchExpectedSteps)
+		return fmt.Sprintf("decompose each non-leaf or oversized row into child issues with <= %d expected steps", issuepolicy.MaxDispatchExpectedSteps)
 	case "scope":
 		return "add the missing parent/current-state/scope/done/witness/closure fields before dispatch"
 	case "route":
@@ -889,8 +889,8 @@ func decodeIssueContractJSONArray[T any](b []byte, emptyErr string, invalidErr f
 	return arr, true, nil
 }
 
-func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) {
-	if arr, decoded, err := decodeIssueContractJSONArray[issuecontract.Candidate](b, "candidate list is empty", nil); decoded || err != nil {
+func decodeIssueContractCandidates(b []byte) ([]issuepolicy.Candidate, error) {
+	if arr, decoded, err := decodeIssueContractJSONArray[issuepolicy.Candidate](b, "candidate list is empty", nil); decoded || err != nil {
 		return arr, err
 	}
 
@@ -900,7 +900,7 @@ func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) 
 	}
 	for _, key := range []string{"candidates", "items"} {
 		if raw, ok := obj[key]; ok {
-			arr, _, err := decodeIssueContractJSONArray[issuecontract.Candidate](raw, key+" is empty", func(err error) error {
+			arr, _, err := decodeIssueContractJSONArray[issuepolicy.Candidate](raw, key+" is empty", func(err error) error {
 				return fmt.Errorf("%s must be an issue-candidate array: %w", key, err)
 			})
 			if err != nil {
@@ -910,21 +910,21 @@ func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) 
 		}
 	}
 	if raw, ok := obj["candidate"]; ok {
-		var c issuecontract.Candidate
+		var c issuepolicy.Candidate
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("candidate must be an issue-candidate object: %w", err)
 		}
-		return []issuecontract.Candidate{c}, nil
+		return []issuepolicy.Candidate{c}, nil
 	}
-	var c issuecontract.Candidate
+	var c issuepolicy.Candidate
 	if err := json.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("candidate must be an issue-candidate object: %w", err)
 	}
-	return []issuecontract.Candidate{c}, nil
+	return []issuepolicy.Candidate{c}, nil
 }
 
-func decodeIssueContractIssues(b []byte) ([]issuecontract.IssueDraft, error) {
-	if arr, decoded, err := decodeIssueContractJSONArray[issuecontract.IssueDraft](b, "issue list is empty", nil); decoded || err != nil {
+func decodeIssueContractIssues(b []byte) ([]issuepolicy.IssueDraft, error) {
+	if arr, decoded, err := decodeIssueContractJSONArray[issuepolicy.IssueDraft](b, "issue list is empty", nil); decoded || err != nil {
 		return arr, err
 	}
 
@@ -934,7 +934,7 @@ func decodeIssueContractIssues(b []byte) ([]issuecontract.IssueDraft, error) {
 	}
 	for _, key := range []string{"issues", "items"} {
 		if raw, ok := obj[key]; ok {
-			arr, _, err := decodeIssueContractJSONArray[issuecontract.IssueDraft](raw, key+" is empty", func(err error) error {
+			arr, _, err := decodeIssueContractJSONArray[issuepolicy.IssueDraft](raw, key+" is empty", func(err error) error {
 				return fmt.Errorf("%s must be a GitHub issue array: %w", key, err)
 			})
 			if err != nil {
@@ -943,11 +943,11 @@ func decodeIssueContractIssues(b []byte) ([]issuecontract.IssueDraft, error) {
 			return arr, nil
 		}
 	}
-	var issue issuecontract.IssueDraft
+	var issue issuepolicy.IssueDraft
 	if err := json.Unmarshal(b, &issue); err != nil {
 		return nil, fmt.Errorf("issue must be a GitHub issue object: %w", err)
 	}
-	return []issuecontract.IssueDraft{issue}, nil
+	return []issuepolicy.IssueDraft{issue}, nil
 }
 
 func renderIssueContract(r issueContractResult) string {
@@ -1108,7 +1108,7 @@ func renderIssueContract(r issueContractResult) string {
 			line += fmt.Sprintf(" scale=%s(%s)",
 				string(review.Scale.Effective), issueContractBucketValue(review.Scale.Source, "?"))
 		}
-		if review.OperatingEnvelope.Status != "" && review.OperatingEnvelope.Status != issuecontract.EnvelopeUndeclared {
+		if review.OperatingEnvelope.Status != "" && review.OperatingEnvelope.Status != issuepolicy.EnvelopeUndeclared {
 			line += fmt.Sprintf(" envelope=%s target=%d witnessed=%d gaps=%d",
 				review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Target),
 				len(review.OperatingEnvelope.Witnessed), len(review.OperatingEnvelope.Gaps))
@@ -1117,12 +1117,12 @@ func renderIssueContract(r issueContractResult) string {
 			line += fmt.Sprintf(" scale_evidence=%d required_stages=%d missing_stages=%d",
 				len(review.ScaleEvidence.Records), len(review.ScaleEvidence.RequiredStages), len(review.ScaleEvidence.MissingStages))
 		}
-		if review.ProjectWork.Status != issuecontract.ProjectWorkUndeclared {
+		if review.ProjectWork.Status != issuepolicy.ProjectWorkUndeclared {
 			line += fmt.Sprintf(" project_work=%s estimate=%g contribution=%g/%g completion=%s",
 				review.ProjectWork.Status, review.ProjectWork.EstimatePoints, review.ProjectWork.Contribution,
 				review.ProjectWork.ParentBaseline, issueContractBucketValue(review.ProjectWork.CompletionStandard, "?"))
 		}
-		if review.Closure.Status != issuecontract.ClosureNotRequested {
+		if review.Closure.Status != issuepolicy.ClosureNotRequested {
 			line += fmt.Sprintf(" closure=%s claim=%s witnessed=%s production_credit=%t",
 				review.Closure.Status, issueContractBucketValue(review.Closure.ClaimedStandard, "?"),
 				issueContractBucketValue(review.Closure.WitnessedStandard, "?"), review.Closure.ProductionCredit)

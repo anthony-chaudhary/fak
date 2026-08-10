@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // runIssueCohort plans a whole batch of issue candidates at creation time:
@@ -61,16 +61,16 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	var candidates []issuecontract.Candidate
+	var candidates []issuepolicy.Candidate
 	if *fromIssues != "" {
 		issues, derr := decodeIssueContractIssues(b)
 		if derr != nil {
 			fmt.Fprintf(stderr, "fak-dev issue cohort: %v\n", derr)
 			return 2
 		}
-		candidates = make([]issuecontract.Candidate, 0, len(issues))
+		candidates = make([]issuepolicy.Candidate, 0, len(issues))
 		for _, d := range issues {
-			candidates = append(candidates, issuecontract.CandidateFromIssueDraft(d))
+			candidates = append(candidates, issuepolicy.CandidateFromIssueDraft(d))
 		}
 	} else {
 		candidates, err = decodeIssueContractCandidates(b)
@@ -81,7 +81,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	plan := issuecohort.Build(candidates, issuecohort.Options{
-		Options: issuecontract.Options{
+		Options: issuepolicy.Options{
 			Live:              *live,
 			DedupeChecked:     *dedupeChecked,
 			DedupeCap:         *dedupeCap,

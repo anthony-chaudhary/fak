@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
-func safeTemplateDraft(num int) issuecontract.IssueDraft {
+func safeTemplateDraft(num int) issuepolicy.IssueDraft {
 	body := strings.Join([]string{
 		"## Generation stream",
 		"- Generation: $(@{gen=second-next; title=...}.gen)",
@@ -23,15 +23,15 @@ func safeTemplateDraft(num int) issuecontract.IssueDraft {
 		"## Initial scope",
 		"Repair only the generated metadata header.",
 	}, "\n")
-	return issuecontract.IssueDraft{
+	return issuepolicy.IssueDraft{
 		Number: num,
 		Title:  "generation(second-next): build the optimizer",
 		Body:   body,
-		Labels: []issuecontract.IssueLabel{{Name: "generation"}, {Name: "gen/second-next"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "generation"}, {Name: "gen/second-next"}},
 	}
 }
 
-func unsafeTemplateProseDraft(num int) issuecontract.IssueDraft {
+func unsafeTemplateProseDraft(num int) issuepolicy.IssueDraft {
 	body := strings.Join([]string{
 		"## Generation stream",
 		"- Generation: $(@{gen=x}.gen)",
@@ -41,9 +41,9 @@ func unsafeTemplateProseDraft(num int) issuecontract.IssueDraft {
 		"## Why",
 		"Intact body.",
 	}, "\n")
-	return issuecontract.IssueDraft{
+	return issuepolicy.IssueDraft{
 		Number: num, Title: "generation(x): thing", Body: body,
-		Labels: []issuecontract.IssueLabel{{Name: "generation"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "generation"}},
 	}
 }
 
@@ -84,7 +84,7 @@ func recordingRunner(calls *[][]string, bodies *[]string, url string, ok bool) i
 }
 
 func TestIssueRepairDryRunPlanClassifiesWithoutWriting(t *testing.T) {
-	issues := []issuecontract.IssueDraft{
+	issues := []issuepolicy.IssueDraft{
 		safeTemplateDraft(1727),
 		unsafeTemplateProseDraft(9),
 		{Number: 1207, Title: "a bare issue with no scope fields"},
@@ -140,7 +140,7 @@ func TestIssueRepairDryRunPlanClassifiesWithoutWriting(t *testing.T) {
 }
 
 func TestIssueRepairLiveAppliesSafeTemplateBody(t *testing.T) {
-	issues := []issuecontract.IssueDraft{safeTemplateDraft(1727)}
+	issues := []issuepolicy.IssueDraft{safeTemplateDraft(1727)}
 	var calls [][]string
 	var bodies []string
 	var out, errb bytes.Buffer
@@ -170,7 +170,7 @@ func TestIssueRepairLiveAppliesSafeTemplateBody(t *testing.T) {
 }
 
 func TestIssueRepairLiveRefusesOverMaxApply(t *testing.T) {
-	issues := []issuecontract.IssueDraft{safeTemplateDraft(1727), safeTemplateDraft(1728)}
+	issues := []issuepolicy.IssueDraft{safeTemplateDraft(1727), safeTemplateDraft(1728)}
 	var calls [][]string
 	var bodies []string
 	var out, errb bytes.Buffer
@@ -189,7 +189,7 @@ func TestIssueRepairLiveRefusesOverMaxApply(t *testing.T) {
 }
 
 func TestIssueRepairKindFilter(t *testing.T) {
-	issues := []issuecontract.IssueDraft{safeTemplateDraft(1727)}
+	issues := []issuepolicy.IssueDraft{safeTemplateDraft(1727)}
 	// Filtering to a kind the row does NOT carry excludes it entirely (the row's
 	// kinds are scope/route/template, so "noise" matches none of them).
 	var out, errb bytes.Buffer

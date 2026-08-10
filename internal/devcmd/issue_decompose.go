@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/issuecontractrepair"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // decomposeSchema is the stable tag stamped on the machine-readable plan/result.
@@ -51,7 +51,7 @@ func runIssueDecompose(stdout, stderr io.Writer, argv []string) int {
 // directly (nil = load from --from-issues or, failing that, fetch live via gh),
 // so a test asserts on the built gh argv without a network round-trip. The
 // runner is the same injectable seam runIssueCreateWith/runIssueEditWith use.
-func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []issuecontract.IssueDraft, runner issueCreateRunner) int {
+func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []issuepolicy.IssueDraft, runner issueCreateRunner) int {
 	fs := flag.NewFlagSet("issue decompose", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fromIssues := fs.String("from-issues", "", "GitHub issue JSON (gh issue list --json number,title,body,labels); default: fetch open issues live")
@@ -144,7 +144,7 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 
 // --- input loading ---------------------------------------------------------
 
-func loadDecomposeIssues(fromIssues, root string) ([]issuecontract.IssueDraft, error) {
+func loadDecomposeIssues(fromIssues, root string) ([]issuepolicy.IssueDraft, error) {
 	if strings.TrimSpace(fromIssues) != "" {
 		b, err := os.ReadFile(fromIssues)
 		if err != nil {
@@ -254,8 +254,8 @@ const (
 // issues are walked in input order for determinism; plan-only parents that are
 // not in the loaded set become error rows (sorted) because we cannot fetch their
 // current body to link against.
-func buildDecomposeRows(loaded []issuecontract.IssueDraft, planByParent map[int][]decomposeChildSpec, sel map[int]bool) ([]decomposeRow, map[int]issuecontract.IssueDraft) {
-	byNumber := make(map[int]issuecontract.IssueDraft, len(loaded))
+func buildDecomposeRows(loaded []issuepolicy.IssueDraft, planByParent map[int][]decomposeChildSpec, sel map[int]bool) ([]decomposeRow, map[int]issuepolicy.IssueDraft) {
+	byNumber := make(map[int]issuepolicy.IssueDraft, len(loaded))
 	for _, d := range loaded {
 		if d.Number > 0 {
 			byNumber[d.Number] = d
@@ -271,7 +271,7 @@ func buildDecomposeRows(loaded []issuecontract.IssueDraft, planByParent map[int]
 		if len(sel) > 0 && !sel[d.Number] {
 			continue
 		}
-		review := issuecontract.ReviewCandidate(issuecontract.CandidateFromIssueDraft(d), issuecontract.Options{})
+		review := issuepolicy.ReviewCandidate(issuepolicy.CandidateFromIssueDraft(d), issuepolicy.Options{})
 		children, planned := planByParent[d.Number]
 		if !isDecomposeTarget(review) && !planned {
 			continue
@@ -304,7 +304,7 @@ func buildDecomposeRows(loaded []issuecontract.IssueDraft, planByParent map[int]
 	return rows, byNumber
 }
 
-func buildDecomposeRow(d issuecontract.IssueDraft, review issuecontract.Review, plan []decomposeChildSpec) decomposeRow {
+func buildDecomposeRow(d issuepolicy.IssueDraft, review issuepolicy.Review, plan []decomposeChildSpec) decomposeRow {
 	row := decomposeRow{
 		Parent:      d.Number,
 		Title:       strings.TrimSpace(d.Title),
@@ -332,12 +332,12 @@ func buildDecomposeRow(d issuecontract.IssueDraft, review issuecontract.Review, 
 // an epic to split when it is flagged non-leaf or oversized, the two always-on structural
 // gates issuecontract raises for a unit that must decompose before dispatch; a mirrored
 // copy could have drifted a reason apart from the cohort planner that routes on it.
-func isDecomposeTarget(review issuecontract.Review) bool { return issuecohort.IsSplitTarget(review) }
+func isDecomposeTarget(review issuepolicy.Review) bool { return issuecohort.IsSplitTarget(review) }
 
-func decomposeReasons(review issuecontract.Review) []string {
+func decomposeReasons(review issuepolicy.Review) []string {
 	var out []string
 	for _, r := range review.Reasons {
-		if r == issuecontract.ReasonNotDispatchLeaf || r == issuecontract.ReasonOversizedSteps {
+		if r == issuepolicy.ReasonNotDispatchLeaf || r == issuepolicy.ReasonOversizedSteps {
 			out = append(out, r)
 		}
 	}
@@ -356,7 +356,7 @@ func decomposeChildBudget(steps int) int {
 	if steps <= 0 {
 		return 2
 	}
-	n := (steps + issuecontract.MaxDispatchExpectedSteps - 1) / issuecontract.MaxDispatchExpectedSteps
+	n := (steps + issuepolicy.MaxDispatchExpectedSteps - 1) / issuepolicy.MaxDispatchExpectedSteps
 	if n < 2 {
 		n = 2
 	}
@@ -366,7 +366,7 @@ func decomposeChildBudget(steps int) int {
 // scaffoldChildren emits budget stub leaves for an epic with no supplied plan.
 // Each carries the contract field skeleton so a filled version is dispatch-shaped,
 // plus a Parent context pointer so provenance survives.
-func scaffoldChildren(d issuecontract.IssueDraft, budget int) []decomposeChildSpec {
+func scaffoldChildren(d issuepolicy.IssueDraft, budget int) []decomposeChildSpec {
 	title := strings.TrimSpace(d.Title)
 	specs := make([]decomposeChildSpec, 0, budget)
 	for k := 1; k <= budget; k++ {
@@ -423,7 +423,7 @@ func decomposeRowFileable(r decomposeRow, allowStubs bool) bool {
 // that parent was created and numbered, so a partially-filed epic is never left
 // with a misleading dependency edge — the created children are reported so a
 // rerun can be narrowed with --issue.
-func applyDecompose(result *decomposeResult, byNumber map[int]issuecontract.IssueDraft, live, allowStubs bool, repo string, runner issueCreateRunner, stderr io.Writer, parentBaseline float64, standard, targetEnvelope, witnessedEnvelope string) bool {
+func applyDecompose(result *decomposeResult, byNumber map[int]issuepolicy.IssueDraft, live, allowStubs bool, repo string, runner issueCreateRunner, stderr io.Writer, parentBaseline float64, standard, targetEnvelope, witnessedEnvelope string) bool {
 	run := runner
 	if run == nil {
 		run = runTaskHandoffGH
@@ -481,11 +481,11 @@ func decomposeArgValue(args []string, name string) string {
 func authorDecomposeChildren(r *decomposeRow, baseline float64, standard, target, witnessed string) error {
 	for i := range r.Children {
 		body := decomposeArgValue(r.Children[i].Args, "--body")
-		points := float64(issuecontract.MaxDispatchExpectedSteps)
+		points := float64(issuepolicy.MaxDispatchExpectedSteps)
 		if points > baseline {
 			points = baseline
 		}
-		authored, err := issuecontract.AuthorBatchProjectWork(body, issuecontract.BatchProjectWork{ParentIssue: r.Parent, EstimatePoints: points, ParentBaseline: baseline, CompletionStandard: standard, TargetEnvelope: target, WitnessedEnvelope: witnessed})
+		authored, err := issuepolicy.AuthorBatchProjectWork(body, issuepolicy.BatchProjectWork{ParentIssue: r.Parent, EstimatePoints: points, ParentBaseline: baseline, CompletionStandard: standard, TargetEnvelope: target, WitnessedEnvelope: witnessed})
 		if err != nil {
 			return err
 		}

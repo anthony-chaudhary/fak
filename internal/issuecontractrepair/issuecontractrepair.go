@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -26,15 +26,15 @@ const (
 )
 
 var reasonKind = map[string]string{
-	issuecontract.ReasonNotDispatchLeaf:    "split",
-	issuecontract.ReasonOversizedSteps:     "split",
-	issuecontract.ReasonScopeIncomplete:    "scope",
-	issuecontract.ReasonUnrouted:           "route",
-	issuecontract.ReasonLiveUnarmored:      "noise",
-	issuecontract.ReasonNoiseIncomplete:    "noise",
-	issuecontract.ReasonAgentIncomplete:    "noise",
-	issuecontract.ReasonPrivateBoundary:    "private",
-	issuecontract.ReasonUnexpandedTemplate: "template",
+	issuepolicy.ReasonNotDispatchLeaf:    "split",
+	issuepolicy.ReasonOversizedSteps:     "split",
+	issuepolicy.ReasonScopeIncomplete:    "scope",
+	issuepolicy.ReasonUnrouted:           "route",
+	issuepolicy.ReasonLiveUnarmored:      "noise",
+	issuepolicy.ReasonNoiseIncomplete:    "noise",
+	issuepolicy.ReasonAgentIncomplete:    "noise",
+	issuepolicy.ReasonPrivateBoundary:    "private",
+	issuepolicy.ReasonUnexpandedTemplate: "template",
 }
 
 var kindRank = map[string]int{"split": 1, "scope": 2, "route": 3, "noise": 4, "private": 5, "template": 6, "other": 9}
@@ -126,9 +126,9 @@ type Options struct {
 	Limit    int
 	AsOf     string
 	MinScore int
-	Review   func(issuecontract.IssueDraft) issuecontract.Review
-	Route    func(issuecontract.IssueDraft, issuecontract.Review) RouteProposal
-	Template func(issuecontract.IssueDraft) (issuecontract.TemplateRepairPlan, bool)
+	Review   func(issuepolicy.IssueDraft) issuepolicy.Review
+	Route    func(issuepolicy.IssueDraft, issuepolicy.Review) RouteProposal
+	Template func(issuepolicy.IssueDraft) (issuepolicy.TemplateRepairPlan, bool)
 }
 
 func RepairKinds(reasons []string) []string {
@@ -182,7 +182,7 @@ func FieldScaffold(missing []string) []FieldPrompt {
 	return out
 }
 
-func BuildRepairRow(issue issuecontract.IssueDraft, review issuecontract.Review, route RouteProposal, template issuecontract.TemplateRepairPlan, hasTemplate bool, minScore int) *RepairRow {
+func BuildRepairRow(issue issuepolicy.IssueDraft, review issuepolicy.Review, route RouteProposal, template issuepolicy.TemplateRepairPlan, hasTemplate bool, minScore int) *RepairRow {
 	if minScore <= 0 {
 		minScore = MinScore
 	}
@@ -223,20 +223,20 @@ func BuildRepairRow(issue issuecontract.IssueDraft, review issuecontract.Review,
 	return row
 }
 
-func BuildManifest(workspace string, issues []issuecontract.IssueDraft, opts Options) Manifest {
+func BuildManifest(workspace string, issues []issuepolicy.IssueDraft, opts Options) Manifest {
 	if opts.MinScore <= 0 {
 		opts.MinScore = MinScore
 	}
 	if opts.Review == nil {
-		opts.Review = func(issue issuecontract.IssueDraft) issuecontract.Review {
-			return issuecontract.ReviewIssueDraft(issue, issuecontract.Options{})
+		opts.Review = func(issue issuepolicy.IssueDraft) issuepolicy.Review {
+			return issuepolicy.ReviewIssueDraft(issue, issuepolicy.Options{})
 		}
 	}
 	if opts.Route == nil {
 		opts.Route = DefaultRoute
 	}
 	if opts.Template == nil {
-		opts.Template = issuecontract.BuildTemplateRepairPlan
+		opts.Template = issuepolicy.BuildTemplateRepairPlan
 	}
 	limit := opts.Limit
 	if limit <= 0 {
@@ -330,7 +330,7 @@ func RenderMarkdown(manifest Manifest) string {
 	return b.String()
 }
 
-func FetchOpenIssues(workspace string, cap int) ([]issuecontract.IssueDraft, error) {
+func FetchOpenIssues(workspace string, cap int) ([]issuepolicy.IssueDraft, error) {
 	if cap <= 0 {
 		cap = DefaultCap
 	}
@@ -350,7 +350,7 @@ func FetchOpenIssues(workspace string, cap int) ([]issuecontract.IssueDraft, err
 		}
 		return nil, err
 	}
-	var issues []issuecontract.IssueDraft
+	var issues []issuepolicy.IssueDraft
 	if err := json.Unmarshal(out, &issues); err != nil {
 		return nil, err
 	}
@@ -358,7 +358,7 @@ func FetchOpenIssues(workspace string, cap int) ([]issuecontract.IssueDraft, err
 	return issues, nil
 }
 
-func DefaultRoute(_ issuecontract.IssueDraft, review issuecontract.Review) RouteProposal {
+func DefaultRoute(_ issuepolicy.IssueDraft, review issuepolicy.Review) RouteProposal {
 	if strings.TrimSpace(review.Lane) != "" {
 		return RouteProposal{Lane: strings.TrimSpace(review.Lane), Confidence: "issue-contract"}
 	}

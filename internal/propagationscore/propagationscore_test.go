@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func probe(verb string, exists bool, adopted map[string]bool) Probe {
@@ -176,8 +176,8 @@ func TestGapActionItemsAreDispatchable(t *testing.T) {
 	}
 	for _, g := range gaps {
 		item := g.ToActionItem("fak propagation-scorecard --json")
-		c := issuecontract.Candidate{
-			Schema: issuecontract.Schema, Key: item.Key, Title: item.Title,
+		c := issuepolicy.Candidate{
+			Schema: issuepolicy.Schema, Key: item.Key, Title: item.Title,
 			ParentRef: item.ParentRef, CurrentState: item.CurrentState, WhyNow: item.WhyNow,
 			WorkingSpine: item.WorkingSpine, WorkUnit: item.WorkUnit, ExpectedSteps: item.ExpectedSteps,
 			Assumptions: item.Assumptions, ConfusionRisks: item.ConfusionRisks, Coordination: item.Coordination,
@@ -187,7 +187,7 @@ func TestGapActionItemsAreDispatchable(t *testing.T) {
 			Lane: item.Lane, Paths: item.Paths, Labels: item.Labels, BoundaryNotes: item.BoundaryNotes,
 			ClosureBinding: item.ClosureBinding,
 		}
-		rv := issuecontract.ReviewCandidate(c, issuecontract.Options{Live: true, DedupeChecked: true, DedupeCap: 10})
+		rv := issuepolicy.ReviewCandidate(c, issuepolicy.Options{Live: true, DedupeChecked: true, DedupeCap: 10})
 		if !rv.OK {
 			t.Fatalf("gap %s -> non-dispatchable issue: verdict=%s reasons=%v missing=%v", g.Key(), rv.Verdict, rv.Reasons, rv.MissingFields)
 		}

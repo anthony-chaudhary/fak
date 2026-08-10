@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func spineInput() Input {
@@ -28,8 +28,8 @@ func TestBuildEveryCandidateDispatchable(t *testing.T) {
 		t.Fatalf("fan-out floor: got %d candidates, want >= %d", len(plan.Candidates), MinFanout)
 	}
 	for _, c := range plan.Candidates {
-		r := issuecontract.ReviewCandidate(c, issuecontract.Options{})
-		if r.Dispatchability != issuecontract.Dispatchable {
+		r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{})
+		if r.Dispatchability != issuepolicy.Dispatchable {
 			t.Errorf("candidate %s not dispatchable: verdict=%s reasons=%v missing=%v",
 				c.Key, r.Verdict, r.Reasons, r.MissingFields)
 		}

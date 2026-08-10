@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // issueCreateRunner is the injectable gh-argv executor behind runIssueCreateWith — same
@@ -88,7 +88,7 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	}
 	if !*rawBody {
 		var err error
-		resolvedBody, err = issuecontract.AppendProjectWorkDefaults(resolvedBody, issuecontract.ProjectWorkAuthoring{
+		resolvedBody, err = issuepolicy.AppendProjectWorkDefaults(resolvedBody, issuepolicy.ProjectWorkAuthoring{
 			EstimatePoints: *estimatePoints, ParentBaseline: *parentBaselinePoints,
 			ContributionPoints: *contributionPoints, CompletionStandard: *completionStandard,
 			TargetEnvelope: *targetEnvelope, WitnessedEnvelope: *witnessedEnvelope,
@@ -97,12 +97,12 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 			fmt.Fprintf(stderr, "fak-dev issue create: %v\n", err)
 			return 2
 		}
-		review := issuecontract.ReviewIssueDraft(issuecontract.IssueDraft{Title: strings.TrimSpace(*title), Body: resolvedBody}, issuecontract.Options{StrictProjectWork: true})
-		if review.ProjectWork.Status != issuecontract.ProjectWorkValid {
+		review := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: strings.TrimSpace(*title), Body: resolvedBody}, issuepolicy.Options{StrictProjectWork: true})
+		if review.ProjectWork.Status != issuepolicy.ProjectWorkValid {
 			fmt.Fprintf(stderr, "fak-dev issue create: generated project-work contract is %s: %s\n", review.ProjectWork.Status, strings.Join(review.ProjectWork.Invalid, "; "))
 			return 2
 		}
-		if review.OperatingEnvelope.Required && review.OperatingEnvelope.Status != issuecontract.EnvelopeMet {
+		if review.OperatingEnvelope.Required && review.OperatingEnvelope.Status != issuepolicy.EnvelopeMet {
 			fmt.Fprintf(stderr, "fak-dev issue create: generated production operating envelope is %s; gaps=%d invalid=%s\n", review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Gaps), strings.Join(review.OperatingEnvelope.Invalid, "; "))
 			return 2
 		}

@@ -82,7 +82,7 @@ func QADogfoodCorpus() []QADogfoodCorpusRow {
 		{
 			Key:            "qa-dogfood-corpus/dogfood-issue-scope",
 			LateFailure:    "A scorecard ACTION row produced a vague GitHub issue that could not be dispatched safely.",
-			OriginControl:  "dogfoodissues.BuildPlanWithOptions + issuecontract.ReviewCandidate",
+			OriginControl:  "dogfoodissues.BuildPlanWithOptions + issuepolicy.ReviewCandidate",
 			WitnessCommand: "go test ./internal/dogfoodissues -run ReviewedPlan",
 			Item: qaCorpusItem(ActionItem{
 				Key:          "qa-dogfood-corpus/dogfood-issue-scope",
@@ -98,7 +98,7 @@ func QADogfoodCorpus() []QADogfoodCorpusRow {
 				Finding:      "vague_dogfood_issue",
 				Lane:         "dogfoodissues",
 				Paths:        []string{"internal/dogfoodissues/**", "cmd/fak/dogfoodissues.go"},
-			}, "A scorecard ACTION row produced a vague GitHub issue that could not be dispatched safely.", "dogfoodissues.BuildPlanWithOptions + issuecontract.ReviewCandidate", "go test ./internal/dogfoodissues -run ReviewedPlan"),
+			}, "A scorecard ACTION row produced a vague GitHub issue that could not be dispatched safely.", "dogfoodissues.BuildPlanWithOptions + issuepolicy.ReviewCandidate", "go test ./internal/dogfoodissues -run ReviewedPlan"),
 		},
 	}
 	return rows

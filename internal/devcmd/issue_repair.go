@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/issuecontractrepair"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // issue-repair dispositions: the closed set of what the consumer will do with a
@@ -92,7 +92,7 @@ func runIssueRepair(stdout, stderr io.Writer, argv []string) int {
 // The issues param injects a fixed draft set (tests, or a pre-fetched cache);
 // nil means fetch open issues via gh. The runner param injects the gh executor
 // (tests), nil means the real runTaskHandoffGH — the same seam as issue edit.
-func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuecontract.IssueDraft, runner issueCreateRunner) int {
+func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuepolicy.IssueDraft, runner issueCreateRunner) int {
 	fs := flag.NewFlagSet("issue repair", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	live := fs.Bool("live", false, "arm writes: apply safe template repairs (default: dry-run plan only)")
@@ -152,7 +152,7 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 		}
 		issues = filtered
 	}
-	draftByNumber := make(map[int]issuecontract.IssueDraft, len(issues))
+	draftByNumber := make(map[int]issuepolicy.IssueDraft, len(issues))
 	for _, d := range issues {
 		draftByNumber[d.Number] = d
 	}
@@ -194,7 +194,7 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 			rr.MissingField = row.MissingFields
 		}
 		if repairHasKind(row.Kinds, "template") {
-			apply, ok := issuecontract.ApplyTemplateRepair(draftByNumber[row.Number])
+			apply, ok := issuepolicy.ApplyTemplateRepair(draftByNumber[row.Number])
 			switch {
 			case ok && apply.Safe:
 				rr.Disposition = repairDispAutoApply
@@ -205,7 +205,7 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 				rr.Unsafe = apply.Unsafe
 			default:
 				rr.Disposition = repairDispProposeOnly
-				rr.Unsafe = issuecontract.TemplateUnsafeNoHeaderBlock
+				rr.Unsafe = issuepolicy.TemplateUnsafeNoHeaderBlock
 			}
 		} else {
 			rr.Disposition = repairKindDisposition[row.Kind]

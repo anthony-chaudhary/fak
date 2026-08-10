@@ -8,17 +8,17 @@ import (
 	"os"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/projectcompletion"
 )
 
 type projectCompletionIssue struct {
-	Number int                        `json:"number"`
-	Title  string                     `json:"title"`
-	Body   string                     `json:"body"`
-	State  string                     `json:"state"`
-	Labels []issuecontract.IssueLabel `json:"labels,omitempty"`
-	URL    string                     `json:"url,omitempty"`
+	Number int                      `json:"number"`
+	Title  string                   `json:"title"`
+	Body   string                   `json:"body"`
+	State  string                   `json:"state"`
+	Labels []issuepolicy.IssueLabel `json:"labels,omitempty"`
+	URL    string                   `json:"url,omitempty"`
 }
 
 func RunProjectCompletion(stdout, stderr io.Writer, argv []string) int {
@@ -51,7 +51,7 @@ func RunProjectCompletion(stdout, stderr io.Writer, argv []string) int {
 	}
 	issues := make([]projectcompletion.Issue, 0, len(rows))
 	for _, row := range rows {
-		review := issuecontract.ReviewIssueDraft(issuecontract.IssueDraft{Number: row.Number, Title: row.Title, Body: row.Body, Labels: row.Labels, URL: row.URL}, issuecontract.Options{})
+		review := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Number: row.Number, Title: row.Title, Body: row.Body, Labels: row.Labels, URL: row.URL}, issuepolicy.Options{})
 		issues = append(issues, projectcompletion.Issue{Number: row.Number, Title: row.Title, State: row.State, ProjectWork: review.ProjectWork})
 	}
 	report := projectcompletion.Summarize(issues)

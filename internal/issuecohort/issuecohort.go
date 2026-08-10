@@ -10,7 +10,7 @@
 // at wave-launch time. Discovering that only at dispatch time is late; the fix
 // is to see the collision structure of the batch when it is CREATED.
 //
-// issuecohort folds a []issuecontract.Candidate into a Plan that:
+// issuecohort folds a []issuepolicy.Candidate into a Plan that:
 //
 //   - reviews each candidate through the shared contract;
 //   - partitions the dispatchable leaves into concurrency-safe WAVES using the
@@ -34,7 +34,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
@@ -43,9 +43,9 @@ import (
 const Schema = "fak.issue-cohort-plan.v1"
 
 // Options carries the batch-level knobs plus the per-candidate contract options
-// (Live / DedupeChecked / DedupeCap) forwarded to issuecontract.
+// (Live / DedupeChecked / DedupeCap) forwarded to issuepolicy.
 type Options struct {
-	issuecontract.Options
+	issuepolicy.Options
 
 	// MaxWave caps how many leaves a single concurrency-safe wave may hold, e.g.
 	// the serving-seat pool or an operator concurrency ceiling. 0 means the wave
@@ -144,7 +144,7 @@ type leaf struct {
 
 // Build folds candidates into a cohort Plan. Input order is preserved for stable
 // wave assignment; the derived queues are sorted for determinism.
-func Build(candidates []issuecontract.Candidate, opt Options) Plan {
+func Build(candidates []issuepolicy.Candidate, opt Options) Plan {
 	plan := Plan{Schema: Schema, Total: len(candidates)}
 
 	keyCounts := map[string]int{}
@@ -164,9 +164,9 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 			}
 			seen[key] = true
 		}
-		review := issuecontract.ReviewCandidate(c, opt.Options)
+		review := issuepolicy.ReviewCandidate(c, opt.Options)
 		switch {
-		case review.OK && review.Dispatchability == issuecontract.Dispatchable:
+		case review.OK && review.Dispatchability == issuepolicy.Dispatchable:
 			plan.Dispatchable++
 			leaves = append(leaves, leaf{
 				member: WaveMember{
@@ -193,7 +193,7 @@ func Build(candidates []issuecontract.Candidate, opt Options) Plan {
 				Paths:            append([]string(nil), review.Paths...),
 			})
 		default:
-			if review.Dispatchability == issuecontract.Refused {
+			if review.Dispatchability == issuepolicy.Refused {
 				plan.Refused++
 			} else {
 				plan.TriageOnly++
@@ -407,9 +407,9 @@ func normPath(p string) string {
 // here and `fak issue decompose` both route on it, and the cmd side carried a
 // byte-identical private copy openly labelled a mirror. A reason added to one list and
 // not the other would have made the planner and the verb disagree about the same issue.
-func IsSplitTarget(review issuecontract.Review) bool {
+func IsSplitTarget(review issuepolicy.Review) bool {
 	for _, r := range review.Reasons {
-		if r == issuecontract.ReasonNotDispatchLeaf || r == issuecontract.ReasonOversizedSteps {
+		if r == issuepolicy.ReasonNotDispatchLeaf || r == issuepolicy.ReasonOversizedSteps {
 			return true
 		}
 	}
@@ -419,12 +419,12 @@ func IsSplitTarget(review issuecontract.Review) bool {
 func splitReasons(reasons []string) []string {
 	out := make([]string, 0, len(reasons))
 	for _, r := range reasons {
-		if r == issuecontract.ReasonNotDispatchLeaf || r == issuecontract.ReasonOversizedSteps {
+		if r == issuepolicy.ReasonNotDispatchLeaf || r == issuepolicy.ReasonOversizedSteps {
 			out = append(out, r)
 		}
 	}
 	if len(out) == 0 {
-		out = append(out, issuecontract.ReasonNotDispatchLeaf)
+		out = append(out, issuepolicy.ReasonNotDispatchLeaf)
 	}
 	return out
 }
@@ -435,7 +435,7 @@ func childIssueBudget(steps int) int {
 	if steps <= 0 {
 		return 1
 	}
-	return (steps + issuecontract.MaxDispatchExpectedSteps - 1) / issuecontract.MaxDispatchExpectedSteps
+	return (steps + issuepolicy.MaxDispatchExpectedSteps - 1) / issuepolicy.MaxDispatchExpectedSteps
 }
 
 func stepUnits(steps int) int {

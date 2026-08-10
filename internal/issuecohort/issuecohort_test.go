@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // fullCandidate returns a candidate that passes the (non-live) issuecontract
 // review as a dispatchable leaf. Tests mutate the returned value to exercise one
 // axis at a time.
-func fullCandidate(key string) issuecontract.Candidate {
-	return issuecontract.Candidate{
-		Schema:         issuecontract.Schema,
+func fullCandidate(key string) issuepolicy.Candidate {
+	return issuepolicy.Candidate{
+		Schema:         issuepolicy.Schema,
 		Key:            key,
 		Title:          "leaf " + key,
 		ParentRef:      "epic #1",
@@ -35,7 +35,7 @@ func TestBuildDisjointPathsShareWave(t *testing.T) {
 	b := fullCandidate("beta")
 	b.Paths = []string{"internal/foo/y.go"}
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.Dispatchable != 2 {
 		t.Fatalf("dispatchable = %d, want 2", plan.Dispatchable)
 	}
@@ -53,7 +53,7 @@ func TestBuildOverlappingPathsSplitWaves(t *testing.T) {
 	b := fullCandidate("beta")
 	b.Paths = []string{"internal/foo/bar.go"} // inside a's tree
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.CollisionPairs != 1 {
 		t.Fatalf("collision pairs = %d, want 1", plan.CollisionPairs)
 	}
@@ -70,7 +70,7 @@ func TestBuildSameLaneNoPathsCollide(t *testing.T) {
 	b.Paths = nil
 	b.Lane = "docs"
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.Dispatchable != 2 {
 		t.Fatalf("dispatchable = %d, want 2 (lane routes them)", plan.Dispatchable)
 	}
@@ -87,7 +87,7 @@ func TestBuildDifferentLaneNoPathsShareWave(t *testing.T) {
 	b.Paths = nil
 	b.Lane = "gateway"
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.NumWaves != 1 || plan.PeakConcurrency != 2 {
 		t.Fatalf("waves=%d peak=%d, want 1 wave of 2 (distinct lanes)", plan.NumWaves, plan.PeakConcurrency)
 	}
@@ -97,7 +97,7 @@ func TestBuildOversizedSubdivides(t *testing.T) {
 	a := fullCandidate("big")
 	a.ExpectedSteps = 20
 
-	plan := Build([]issuecontract.Candidate{a}, Options{})
+	plan := Build([]issuepolicy.Candidate{a}, Options{})
 	if plan.Dispatchable != 0 || plan.Subdividable != 1 {
 		t.Fatalf("dispatchable=%d subdividable=%d, want 0/1", plan.Dispatchable, plan.Subdividable)
 	}
@@ -110,7 +110,7 @@ func TestBuildOversizedSubdivides(t *testing.T) {
 	if plan.ChildIssueTotal != 3 {
 		t.Fatalf("child issue total = %d, want 3", plan.ChildIssueTotal)
 	}
-	if !hasReason(plan.Subdivide[0].Reasons, issuecontract.ReasonOversizedSteps) {
+	if !hasReason(plan.Subdivide[0].Reasons, issuepolicy.ReasonOversizedSteps) {
 		t.Fatalf("subdivide reasons = %v, want oversized", plan.Subdivide[0].Reasons)
 	}
 }
@@ -119,14 +119,14 @@ func TestBuildEpicSubdivides(t *testing.T) {
 	a := fullCandidate("umbrella")
 	a.WorkUnit = "epic"
 
-	plan := Build([]issuecontract.Candidate{a}, Options{})
+	plan := Build([]issuepolicy.Candidate{a}, Options{})
 	if plan.Subdividable != 1 || len(plan.Subdivide) != 1 {
 		t.Fatalf("subdividable=%d rows=%d, want 1/1", plan.Subdividable, len(plan.Subdivide))
 	}
 	if plan.Subdivide[0].ChildIssueBudget != 1 {
 		t.Fatalf("child budget = %d, want 1 (unknown steps)", plan.Subdivide[0].ChildIssueBudget)
 	}
-	if !hasReason(plan.Subdivide[0].Reasons, issuecontract.ReasonNotDispatchLeaf) {
+	if !hasReason(plan.Subdivide[0].Reasons, issuepolicy.ReasonNotDispatchLeaf) {
 		t.Fatalf("reasons = %v, want not-dispatch-leaf", plan.Subdivide[0].Reasons)
 	}
 }
@@ -136,14 +136,14 @@ func TestBuildScopeGapTriaged(t *testing.T) {
 	a.OutOfScope = ""    // scope incomplete
 	a.DoneCondition = "" // and no done condition
 
-	plan := Build([]issuecontract.Candidate{a}, Options{})
+	plan := Build([]issuepolicy.Candidate{a}, Options{})
 	if plan.TriageOnly != 1 || len(plan.Triage) != 1 {
 		t.Fatalf("triageOnly=%d rows=%d, want 1/1", plan.TriageOnly, len(plan.Triage))
 	}
 	if plan.Subdividable != 0 || plan.Dispatchable != 0 {
 		t.Fatalf("dispatchable=%d subdividable=%d, want 0/0", plan.Dispatchable, plan.Subdividable)
 	}
-	if !hasReason(plan.Triage[0].Reasons, issuecontract.ReasonScopeIncomplete) {
+	if !hasReason(plan.Triage[0].Reasons, issuepolicy.ReasonScopeIncomplete) {
 		t.Fatalf("triage reasons = %v, want scope-incomplete", plan.Triage[0].Reasons)
 	}
 }
@@ -153,7 +153,7 @@ func TestBuildDuplicateKeyDetected(t *testing.T) {
 	b := fullCandidate("dupe") // same key
 	b.Paths = []string{"internal/other/**"}
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.Dispatchable != 1 {
 		t.Fatalf("dispatchable = %d, want 1 (duplicate not planned twice)", plan.Dispatchable)
 	}
@@ -166,7 +166,7 @@ func TestBuildDuplicateKeyDetected(t *testing.T) {
 }
 
 func TestBuildMaxWaveCap(t *testing.T) {
-	var cands []issuecontract.Candidate
+	var cands []issuepolicy.Candidate
 	for _, k := range []string{"a", "b", "c"} {
 		c := fullCandidate(k)
 		c.Paths = []string{"internal/" + k + "/**"} // all disjoint
@@ -188,7 +188,7 @@ func TestBuildStepBudgetCountsUnknownAsOne(t *testing.T) {
 	b.Paths = []string{"internal/foo/y.go"}
 	b.ExpectedSteps = 4
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.NumWaves != 1 {
 		t.Fatalf("waves = %d, want 1", plan.NumWaves)
 	}
@@ -201,7 +201,7 @@ func TestRenderSmoke(t *testing.T) {
 	a := fullCandidate("alpha")
 	b := fullCandidate("big")
 	b.ExpectedSteps = 20
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	out := Render(plan)
 	for _, want := range []string{"issue-cohort:", "concurrency:", "wave 0:", "split-first"} {
 		if !strings.Contains(out, want) {
@@ -216,7 +216,7 @@ func TestWaveLeaseRegionCoversMembersMinimally(t *testing.T) {
 	b := fullCandidate("beta")
 	b.Paths = []string{"internal/baz/x.go"} // disjoint from a
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.NumWaves != 1 {
 		t.Fatalf("waves = %d, want 1 (disjoint)", plan.NumWaves)
 	}
@@ -257,7 +257,7 @@ func TestWaveLeaseLanesForLaneOnlyMembers(t *testing.T) {
 	b.Paths = nil
 	b.Lane = "gateway"
 
-	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	if plan.NumWaves != 1 {
 		t.Fatalf("waves = %d, want 1 (distinct lanes co-wave)", plan.NumWaves)
 	}
@@ -283,15 +283,15 @@ func TestIsSplitTargetCoversBothSplitReasons(t *testing.T) {
 	// BOTH reasons make an issue a split target. `fak issue decompose` used to carry
 	// its own copy of this predicate, so a test that only exercised one reason would
 	// let the two surfaces drift into disagreeing about what "too big" means.
-	for _, reason := range []string{issuecontract.ReasonNotDispatchLeaf, issuecontract.ReasonOversizedSteps} {
-		if !IsSplitTarget(issuecontract.Review{Reasons: []string{reason}}) {
+	for _, reason := range []string{issuepolicy.ReasonNotDispatchLeaf, issuepolicy.ReasonOversizedSteps} {
+		if !IsSplitTarget(issuepolicy.Review{Reasons: []string{reason}}) {
 			t.Fatalf("IsSplitTarget(%q) = false, want true", reason)
 		}
 	}
-	if IsSplitTarget(issuecontract.Review{Reasons: []string{"missing-witness"}}) {
+	if IsSplitTarget(issuepolicy.Review{Reasons: []string{"missing-witness"}}) {
 		t.Fatalf("IsSplitTarget(unrelated reason) = true, want false")
 	}
-	if IsSplitTarget(issuecontract.Review{}) {
+	if IsSplitTarget(issuepolicy.Review{}) {
 		t.Fatalf("IsSplitTarget(no reasons) = true, want false")
 	}
 }

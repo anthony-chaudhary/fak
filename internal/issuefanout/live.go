@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // LiveSchema identifies the machine-readable live-filing result.
@@ -93,7 +93,7 @@ func MilestoneForGeneration(generation string) string {
 // LiveLabels is the label set filed with a candidate: its planned labels
 // (fanout + area) plus its generation and priority streams, deduplicated in
 // order.
-func LiveLabels(c issuecontract.Candidate) []string {
+func LiveLabels(c issuepolicy.Candidate) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, label := range append(append([]string{}, c.Labels...), c.Generation, c.Priority) {
@@ -112,7 +112,7 @@ func LiveLabels(c issuecontract.Candidate) []string {
 // value is the candidate's `fanout-<leaf>-<slug>` key), then the standard
 // contract sections, so the filed issue re-parses as a dispatchable candidate
 // and a rerun's substring scan finds the key.
-func LiveBody(c issuecontract.Candidate) string {
+func LiveBody(c issuepolicy.Candidate) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- fak-issuefanout-key: %s -->\n\n", c.Key)
 	section := func(title, body string) {
@@ -211,7 +211,7 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 		// Build already reviewed the plan offline; a live run re-reviews under the
 		// armed contract (agent-context + noise-control fields required) so a
 		// candidate the strict gate would refuse is reported, never filed.
-		if r := issuecontract.ReviewCandidate(c, issuecontract.Options{Live: true, DedupeChecked: true, DedupeCap: dedupeCap}); !r.OK || r.Dispatchability != issuecontract.Dispatchable {
+		if r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{Live: true, DedupeChecked: true, DedupeCap: dedupeCap}); !r.OK || r.Dispatchability != issuepolicy.Dispatchable {
 			row.Action = "failed"
 			row.Reason = "issue contract (live-armed): " + strings.Join(r.Reasons, ", ")
 			res.Failed++

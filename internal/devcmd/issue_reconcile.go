@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func runIssueReconcile(stdout, stderr io.Writer, argv []string) int {
@@ -29,7 +29,7 @@ func runIssueReconcile(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak-dev issue reconcile: %v\n", err)
 		return 1
 	}
-	var snapshot issuecontract.ScopeSnapshot
+	var snapshot issuepolicy.ScopeSnapshot
 	if err = json.Unmarshal(data, &snapshot); err != nil {
 		fmt.Fprintf(stderr, "fak-dev issue reconcile: decode: %v\n", err)
 		return 2
@@ -42,7 +42,7 @@ func runIssueReconcile(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 	}
-	result := issuecontract.ReconcileScope(snapshot, now)
+	result := issuepolicy.ReconcileScope(snapshot, now)
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")

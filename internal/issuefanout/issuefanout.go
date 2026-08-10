@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // Schema identifies the machine-readable fan-out plan.
@@ -46,10 +46,10 @@ type Input struct {
 
 // Plan is the fan-out: contract-ready candidates in fixed taxonomy order.
 type Plan struct {
-	Schema     string                    `json:"schema"`
-	Input      Input                     `json:"input"`
-	AreaCounts map[string]int            `json:"area_counts"`
-	Candidates []issuecontract.Candidate `json:"candidates"`
+	Schema     string                  `json:"schema"`
+	Input      Input                   `json:"input"`
+	AreaCounts map[string]int          `json:"area_counts"`
+	Candidates []issuepolicy.Candidate `json:"candidates"`
 }
 
 // template is one follow-on shape. Placeholders {title} {leaf} {spine} {paths}
@@ -318,7 +318,7 @@ func Build(in Input) (Plan, error) {
 	// otherwise flow silently into candidates the issue contract refuses after
 	// filing — so Build reviews its own output and refuses the input instead.
 	for _, c := range plan.Candidates {
-		if r := issuecontract.ReviewCandidate(c, issuecontract.Options{}); r.Dispatchability != issuecontract.Dispatchable {
+		if r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{}); r.Dispatchability != issuepolicy.Dispatchable {
 			detail := strings.Join(r.Reasons, ", ")
 			if len(r.MissingFields) > 0 {
 				detail += "; missing/invalid: " + strings.Join(r.MissingFields, ", ")
@@ -450,7 +450,7 @@ func RenderOutcomes(c OutcomeCounts) string {
 }
 
 // expand substitutes one template into a fully-scoped candidate.
-func expand(t template, in Input) issuecontract.Candidate {
+func expand(t template, in Input) issuepolicy.Candidate {
 	paths := in.Paths
 	if len(paths) == 0 {
 		paths = []string{"internal/" + in.Leaf + "/"}
@@ -465,7 +465,7 @@ func expand(t template, in Input) issuecontract.Candidate {
 		"{spine}", in.SpineRef,
 		"{paths}", strings.Join(paths, ", "),
 	)
-	c := issuecontract.Candidate{
+	c := issuepolicy.Candidate{
 		Key:           "fanout-" + in.Leaf + "-" + t.slug,
 		Title:         r.Replace(t.title),
 		Generation:    t.generation,

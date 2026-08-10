@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
@@ -89,7 +89,7 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 		t.Fatalf("repair queues = %+v, want one dispatch queue", got.RepairQueues)
 	}
 	if got.Reviews[0].Key != "task_push_next/strict-scope" ||
-		got.Reviews[0].Dispatchability != issuecontract.Dispatchable ||
+		got.Reviews[0].Dispatchability != issuepolicy.Dispatchable ||
 		got.Reviews[0].WorkUnit != "leaf" ||
 		got.Reviews[0].ExpectedSteps != 3 ||
 		got.Reviews[0].Trigger == "" ||
@@ -143,8 +143,8 @@ func TestIssueContractLiveRequiresDedupeArmor(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("unarmored live exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
-	if !strings.Contains(out.String(), issuecontract.ReasonLiveUnarmored) {
-		t.Fatalf("unarmored live output missing %s:\n%s", issuecontract.ReasonLiveUnarmored, out.String())
+	if !strings.Contains(out.String(), issuepolicy.ReasonLiveUnarmored) {
+		t.Fatalf("unarmored live output missing %s:\n%s", issuepolicy.ReasonLiveUnarmored, out.String())
 	}
 
 	out.Reset()
@@ -159,7 +159,7 @@ func TestIssueContractLiveRequiresDedupeArmor(t *testing.T) {
 
 func TestIssueContractFromPlanReviewsCandidatesArray(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plan.json")
-	body := map[string]any{"candidates": []issuecontract.Candidate{completeIssueCandidate()}}
+	body := map[string]any{"candidates": []issuepolicy.Candidate{completeIssueCandidate()}}
 	b, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -179,11 +179,11 @@ func TestIssueContractFromPlanReviewsCandidatesArray(t *testing.T) {
 
 func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
-	body := []issuecontract.IssueDraft{{
+	body := []issuepolicy.IssueDraft{{
 		Number: 1450,
 		Title:  "guardrsi: require block reasons",
 		Body:   completeIssueDraftBody(),
-		Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "guardrsi"}},
 	}}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -206,11 +206,11 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 
 func TestIssueContractFromIssuesEmitsTemplateRepairPlan(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
-	body := []issuecontract.IssueDraft{{
+	body := []issuepolicy.IssueDraft{{
 		Number: 1727,
 		Title:  "generation(second-next): build the multi-generation portfolio optimizer",
 		Body:   corruptGenerationIssueBody(),
-		Labels: []issuecontract.IssueLabel{{Name: "generation"}, {Name: "gen/second-next"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "generation"}, {Name: "gen/second-next"}},
 	}}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -255,7 +255,7 @@ func TestIssueContractFromIssuesEmitsTemplateRepairPlan(t *testing.T) {
 		strings.Contains(plan.ProposedNormalizedHeader, "$(") {
 		t.Fatalf("proposed header = %q, want normalized generation header", plan.ProposedNormalizedHeader)
 	}
-	assertRepairQueue(t, got.RepairQueues, "template", 1, 1, map[string]int{issuecontract.ReasonUnexpandedTemplate: 1})
+	assertRepairQueue(t, got.RepairQueues, "template", 1, 1, map[string]int{issuepolicy.ReasonUnexpandedTemplate: 1})
 
 	out.Reset()
 	errb.Reset()
@@ -294,7 +294,7 @@ func TestIssueContractReportsGenerationFit(t *testing.T) {
 	mismatch := clean
 	mismatch.Key = "generation/mismatch"
 	mismatch.Labels = []string{"generation", "gen/future"}
-	body := []issuecontract.Candidate{clean, mismatch}
+	body := []issuepolicy.Candidate{clean, mismatch}
 	b, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -337,11 +337,11 @@ func TestIssueContractReportsGenerationFit(t *testing.T) {
 
 func TestIssueContractModelTierReadout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
-	body := []issuecontract.IssueDraft{{
+	body := []issuepolicy.IssueDraft{{
 		Number: 3041,
 		Title:  "modeltier(C4): issue contract parses required and optimal model-tier tags",
 		Body:   completeIssueDraftBody(),
-		Labels: []issuecontract.IssueLabel{
+		Labels: []issuepolicy.IssueLabel{
 			{Name: "guardrsi"},
 			{Name: "tier/T1-required"},
 			{Name: "tier/T1-optimal"},
@@ -392,11 +392,11 @@ func TestIssueContractModelTierReadout(t *testing.T) {
 
 	// Strict mode on an untagged (but otherwise dispatchable) issue holds it
 	// triage-only with the closed reason; default mode leaves it dispatchable.
-	untagged := []issuecontract.IssueDraft{{
+	untagged := []issuepolicy.IssueDraft{{
 		Number: 3042,
 		Title:  "guardrsi: untagged block reasons",
 		Body:   completeIssueDraftBody(),
-		Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+		Labels: []issuepolicy.IssueLabel{{Name: "guardrsi"}},
 	}}
 	ub, err := json.Marshal(untagged)
 	if err != nil {
@@ -417,8 +417,8 @@ func TestIssueContractModelTierReadout(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("strict untagged exit = %d, want 3\nstdout:\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), issuecontract.ReasonModelTierIncomplete) {
-		t.Fatalf("strict untagged output missing %s:\n%s", issuecontract.ReasonModelTierIncomplete, out.String())
+	if !strings.Contains(out.String(), issuepolicy.ReasonModelTierIncomplete) {
+		t.Fatalf("strict untagged output missing %s:\n%s", issuepolicy.ReasonModelTierIncomplete, out.String())
 	}
 }
 
@@ -474,8 +474,8 @@ func TestIssueContractScaleReadout(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("feature default exit = %d, want 3\nstdout:\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), issuecontract.ReasonNotDispatchLeaf) {
-		t.Fatalf("feature output missing %s:\n%s", issuecontract.ReasonNotDispatchLeaf, out.String())
+	if !strings.Contains(out.String(), issuepolicy.ReasonNotDispatchLeaf) {
+		t.Fatalf("feature output missing %s:\n%s", issuepolicy.ReasonNotDispatchLeaf, out.String())
 	}
 	if !strings.Contains(out.String(), "scale=S2") || !strings.Contains(out.String(), "witness_under_scale") {
 		t.Fatalf("feature output missing S2 scale readout / under-scale flag:\n%s", out.String())
@@ -488,14 +488,14 @@ func TestIssueContractScaleReadout(t *testing.T) {
 	if code := RunIssue(&out, &errb, []string{"contract", "--file", fpath, "--strict-scale"}); code != 3 {
 		t.Fatalf("feature strict-scale exit = %d, want 3\nstdout:\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), issuecontract.ReasonWitnessScaleMismatch) {
-		t.Fatalf("strict-scale output missing %s:\n%s", issuecontract.ReasonWitnessScaleMismatch, out.String())
+	if !strings.Contains(out.String(), issuepolicy.ReasonWitnessScaleMismatch) {
+		t.Fatalf("strict-scale output missing %s:\n%s", issuepolicy.ReasonWitnessScaleMismatch, out.String())
 	}
 }
 
 func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "candidates.json")
-	candidates := make([]issuecontract.Candidate, 0, 3)
+	candidates := make([]issuepolicy.Candidate, 0, 3)
 	for _, key := range []string{"cap-batch/one", "cap-batch/two", "cap-batch/three"} {
 		c := completeIssueCandidate()
 		c.Key = key
@@ -536,18 +536,18 @@ func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 
 func TestIssueContractGroupsDuplicateGeneratedMarkers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
-	body := []issuecontract.IssueDraft{
+	body := []issuepolicy.IssueDraft{
 		{
 			Number: 1450,
 			Title:  "taskmgr: follow up",
 			Body:   "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + completeIssueDraftBody(),
-			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+			Labels: []issuepolicy.IssueLabel{{Name: "guardrsi"}},
 		},
 		{
 			Number: 1453,
 			Title:  "taskmgr: duplicate follow up",
 			Body:   "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + completeIssueDraftBody(),
-			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+			Labels: []issuepolicy.IssueLabel{{Name: "guardrsi"}},
 		},
 	}
 	b, err := json.Marshal(body)
@@ -595,12 +595,12 @@ func TestIssueContractGroupsDuplicateGeneratedMarkers(t *testing.T) {
 
 func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
-	body := []issuecontract.IssueDraft{
+	body := []issuepolicy.IssueDraft{
 		{
 			Number: 1450,
 			Title:  "guardrsi: require block reasons",
 			Body:   completeIssueDraftBody(),
-			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+			Labels: []issuepolicy.IssueLabel{{Name: "guardrsi"}},
 		},
 		{
 			Number: 1451,
@@ -611,7 +611,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 			Number: 1452,
 			Title:  "guardrsi: split oversized block-reason work",
 			Body:   completeIssueDraftBodyWithSteps("12"),
-			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+			Labels: []issuepolicy.IssueLabel{{Name: "guardrsi"}},
 		},
 	}
 	b, err := json.Marshal(body)
@@ -694,9 +694,9 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	if got.Counts.AgentContextAvg != 67 || got.Counts.AgentContextFull != 2 || got.Counts.AgentContextMissing != 1 {
 		t.Fatalf("agent context counts = %+v, want two full and one missing", got.Counts)
 	}
-	if got.Counts.ByReason[issuecontract.ReasonScopeIncomplete] != 1 ||
-		got.Counts.ByReason[issuecontract.ReasonUnrouted] != 1 ||
-		got.Counts.ByReason[issuecontract.ReasonOversizedSteps] != 1 {
+	if got.Counts.ByReason[issuepolicy.ReasonScopeIncomplete] != 1 ||
+		got.Counts.ByReason[issuepolicy.ReasonUnrouted] != 1 ||
+		got.Counts.ByReason[issuepolicy.ReasonOversizedSteps] != 1 {
 		t.Fatalf("reason counts = %+v, want scope, unrouted, and oversized refusals", got.Counts.ByReason)
 	}
 	if got.Counts.ByLane["guardrsi"] != 2 || got.Counts.ByLane["(unrouted)"] != 1 {
@@ -719,7 +719,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 		got.AssumptionGroups[0].StepBudget != 15 ||
 		got.AssumptionGroups[0].ChildIssueBudget != 2 ||
 		got.AssumptionGroups[0].ByLane["guardrsi"] != 2 ||
-		got.AssumptionGroups[0].ByReason[issuecontract.ReasonOversizedSteps] != 1 ||
+		got.AssumptionGroups[0].ByReason[issuepolicy.ReasonOversizedSteps] != 1 ||
 		len(got.AssumptionGroups[0].ExampleKeys) != 2 ||
 		!strings.Contains(got.AssumptionGroups[0].Key, "guard journal fixture") {
 		t.Fatalf("assumption groups = %+v, want shared guardrsi assumption group with split budget", got.AssumptionGroups)
@@ -729,7 +729,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 		got.ConfusionGroups[0].StepBudget != 15 ||
 		got.ConfusionGroups[0].ChildIssueBudget != 2 ||
 		got.ConfusionGroups[0].ByLane["guardrsi"] != 2 ||
-		got.ConfusionGroups[0].ByReason[issuecontract.ReasonOversizedSteps] != 1 ||
+		got.ConfusionGroups[0].ByReason[issuepolicy.ReasonOversizedSteps] != 1 ||
 		len(got.ConfusionGroups[0].ExampleKeys) != 2 ||
 		!strings.Contains(got.ConfusionGroups[0].Key, "threshold tuning") {
 		t.Fatalf("confusion groups = %+v, want shared guardrsi confusion group with split budget", got.ConfusionGroups)
@@ -739,15 +739,15 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 		got.CoordinationGroups[0].StepBudget != 15 ||
 		got.CoordinationGroups[0].ChildIssueBudget != 2 ||
 		got.CoordinationGroups[0].ByLane["guardrsi"] != 2 ||
-		got.CoordinationGroups[0].ByReason[issuecontract.ReasonOversizedSteps] != 1 ||
+		got.CoordinationGroups[0].ByReason[issuepolicy.ReasonOversizedSteps] != 1 ||
 		len(got.CoordinationGroups[0].ExampleKeys) != 2 ||
 		!strings.Contains(got.CoordinationGroups[0].Key, "Avoid concurrent edits") {
 		t.Fatalf("coordination groups = %+v, want shared guardrsi coordination group with split budget", got.CoordinationGroups)
 	}
 	assertRepairQueue(t, got.RepairQueues, "dispatch", 1, 3, nil)
-	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuecontract.ReasonOversizedSteps: 1}, 2)
-	assertRepairQueue(t, got.RepairQueues, "scope", 1, 1, map[string]int{issuecontract.ReasonScopeIncomplete: 1})
-	assertRepairQueue(t, got.RepairQueues, "route", 1, 1, map[string]int{issuecontract.ReasonUnrouted: 1})
+	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuepolicy.ReasonOversizedSteps: 1}, 2)
+	assertRepairQueue(t, got.RepairQueues, "scope", 1, 1, map[string]int{issuepolicy.ReasonScopeIncomplete: 1})
+	assertRepairQueue(t, got.RepairQueues, "route", 1, 1, map[string]int{issuepolicy.ReasonUnrouted: 1})
 	scopeQueue := repairQueueByKind(got.RepairQueues, "scope")
 	if scopeQueue.MissingFields["parent_ref"] != 1 || scopeQueue.MissingFields["done_condition"] != 1 {
 		t.Fatalf("scope missing fields = %+v, want parent_ref and done_condition", scopeQueue.MissingFields)
@@ -756,7 +756,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 
 func TestIssueContractFromIssuesRefusesVagueRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.json")
-	body := []issuecontract.IssueDraft{{Number: 1451, Title: "make it better", Body: "### Current state\nExists.\n"}}
+	body := []issuepolicy.IssueDraft{{Number: 1451, Title: "make it better", Body: "### Current state\nExists.\n"}}
 	b, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -769,7 +769,7 @@ func TestIssueContractFromIssuesRefusesVagueRows(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
-	for _, want := range []string{"issue/1451", issuecontract.ReasonScopeIncomplete, issuecontract.ReasonUnrouted} {
+	for _, want := range []string{"issue/1451", issuepolicy.ReasonScopeIncomplete, issuepolicy.ReasonUnrouted} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("rendered review missing %q:\n%s", want, out.String())
 		}
@@ -910,17 +910,17 @@ func TestIssueContractStrictWitnessFlagHoldsForgeableCandidate(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Reviews) != 1 || got.Reviews[0].WitnessGrade.Grade != issuecontract.WitnessGradeForgeable {
+	if len(got.Reviews) != 1 || got.Reviews[0].WitnessGrade.Grade != issuepolicy.WitnessGradeForgeable {
 		t.Fatalf("review = %+v", got.Reviews)
 	}
-	if !containsIssueString(got.Reviews[0].Reasons, issuecontract.ReasonWitnessForgeable) {
+	if !containsIssueString(got.Reviews[0].Reasons, issuepolicy.ReasonWitnessForgeable) {
 		t.Fatalf("reasons = %+v", got.Reviews[0].Reasons)
 	}
 }
 
-func completeIssueCandidate() issuecontract.Candidate {
-	return issuecontract.Candidate{
-		Schema:          issuecontract.Schema,
+func completeIssueCandidate() issuepolicy.Candidate {
+	return issuepolicy.Candidate{
+		Schema:          issuepolicy.Schema,
 		Key:             "task_push_next/strict-scope",
 		Title:           "taskmgr: enforce strict handoff scope",
 		ParentRef:       "task_push_next",
@@ -947,7 +947,7 @@ func completeIssueCandidate() issuecontract.Candidate {
 	}
 }
 
-func writeIssueContractJSON(t *testing.T, c issuecontract.Candidate) string {
+func writeIssueContractJSON(t *testing.T, c issuepolicy.Candidate) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "candidate.json")
 	b, err := json.Marshal(c)
@@ -961,16 +961,16 @@ func writeIssueContractJSON(t *testing.T, c issuecontract.Candidate) string {
 }
 
 func TestRenderIssueContractClosureGate(t *testing.T) {
-	review := issuecontract.ReviewCandidate(issuecontract.Candidate{
-		Schema: issuecontract.Schema, Key: "closure/4641", Title: "demo closure", ParentRef: "#4636",
+	review := issuepolicy.ReviewCandidate(issuepolicy.Candidate{
+		Schema: issuepolicy.Schema, Key: "closure/4641", Title: "demo closure", ParentRef: "#4636",
 		CurrentState: "toy passes", WhyNow: "closure requested", WorkingSpine: "contract -> close gate",
 		WorkUnit: "leaf", ExpectedSteps: 3, InScope: "closure verification", OutOfScope: "load generator",
 		DoneCondition: "demo may close", Witness: "go test ./internal/issuecontract passes", AcceptanceGate: "go test ./internal/issuecontract",
 		Lane: "issuecontract", Paths: []string{"internal/issuecontract/**"}, ClosureBinding: "commit cites #4641",
 		WorkEstimate: "Estimate: 3 points", ScopeContribution: "Contribution: 3/34 points", CompletionStandard: "demo",
 		ClosureClaim: "complete", ClosureWitnessStandard: "demo",
-	}, issuecontract.Options{})
-	got := renderIssueContract(issueContractResult{Schema: "test", Reviews: []issuecontract.Review{review}})
+	}, issuepolicy.Options{})
+	got := renderIssueContract(issueContractResult{Schema: "test", Reviews: []issuepolicy.Review{review}})
 	for _, want := range []string{"closure=refused", "claim=production", "production_credit=false", "closure_refuses: ISSUE_CLOSURE_WITNESS_MISMATCH", "closure_repair:"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("render missing %q:\n%s", want, got)

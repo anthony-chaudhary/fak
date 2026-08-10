@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -45,20 +45,20 @@ type issueFindingDeps struct {
 }
 
 type issueFindingResult struct {
-	Schema      string                    `json:"schema"`
-	Live        bool                      `json:"live"`
-	DryRun      bool                      `json:"dry_run"`
-	Lane        string                    `json:"lane"`
-	DedupeCap   int                       `json:"dedupe_cap"`
-	MaxApply    int                       `json:"max_apply"`
-	OK          bool                      `json:"ok"`
-	Counts      map[string]int            `json:"counts"`
-	Mutations   int                       `json:"mutations"`
-	Items       []issueFindingItem        `json:"items"`
-	Candidates  []issuecontract.Candidate `json:"candidates,omitempty"`
-	Escalations []issueFindingEscalation  `json:"escalations,omitempty"`
-	Applied     []issueFindingApplied     `json:"applied,omitempty"`
-	Refusal     string                    `json:"refusal,omitempty"`
+	Schema      string                   `json:"schema"`
+	Live        bool                     `json:"live"`
+	DryRun      bool                     `json:"dry_run"`
+	Lane        string                   `json:"lane"`
+	DedupeCap   int                      `json:"dedupe_cap"`
+	MaxApply    int                      `json:"max_apply"`
+	OK          bool                     `json:"ok"`
+	Counts      map[string]int           `json:"counts"`
+	Mutations   int                      `json:"mutations"`
+	Items       []issueFindingItem       `json:"items"`
+	Candidates  []issuepolicy.Candidate  `json:"candidates,omitempty"`
+	Escalations []issueFindingEscalation `json:"escalations,omitempty"`
+	Applied     []issueFindingApplied    `json:"applied,omitempty"`
+	Refusal     string                   `json:"refusal,omitempty"`
 }
 
 type issueFindingItem struct {
@@ -184,7 +184,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 	if reviewCap <= 0 {
 		reviewCap = 1
 	}
-	contractOpts := issuecontract.Options{
+	contractOpts := issuepolicy.Options{
 		Live:              true,
 		DedupeChecked:     true,
 		DedupeCap:         reviewCap,
@@ -218,8 +218,8 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 				result.Items = append(result.Items, row)
 				continue
 			}
-			review := issuecontract.ReviewCandidate(candidate, contractOpts)
-			ok := review.OK && review.Dispatchability == issuecontract.Dispatchable
+			review := issuepolicy.ReviewCandidate(candidate, contractOpts)
+			ok := review.OK && review.Dispatchability == issuepolicy.Dispatchable
 			row.Dispatchable = review.Dispatchability
 			row.ContractOK = &ok
 			if !ok {
@@ -416,7 +416,7 @@ type findingProjectWork struct {
 	Standard, TargetEnvelope, WitnessedEnvelope string
 }
 
-func buildFindingCandidateWithProjectWork(item modelroute.FindingPlanItem, lane string, cap int, a findingProjectWork) (issuecontract.Candidate, error) {
+func buildFindingCandidateWithProjectWork(item modelroute.FindingPlanItem, lane string, cap int, a findingProjectWork) (issuepolicy.Candidate, error) {
 	c := buildFindingCandidate(item, lane, cap)
 	if item.AuditedIssue > 0 {
 		c.ParentRef = fmt.Sprintf("#%d", item.AuditedIssue)
@@ -444,7 +444,7 @@ func buildFindingCandidateWithProjectWork(item modelroute.FindingPlanItem, lane 
 // tier, scale, and born-routed labels — is populated so the generated fixture is
 // admitted rather than filed as an unscoped worker prompt. The done-condition
 // binds closure to a witnessed fix PLUS an independent re-audit PASS.
-func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeCap int) issuecontract.Candidate {
+func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeCap int) issuepolicy.Candidate {
 	n := item.AuditedIssue
 	sev := strings.ToUpper(strings.TrimSpace(string(item.Severity)))
 	if sev == "" {
@@ -461,8 +461,8 @@ func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeC
 	if lane == "" {
 		lane = "crossaudit"
 	}
-	return issuecontract.Candidate{
-		Schema:         issuecontract.Schema,
+	return issuepolicy.Candidate{
+		Schema:         issuepolicy.Schema,
 		Key:            item.Key,
 		Title:          findingIssueTitle(n),
 		ParentRef:      ref,
