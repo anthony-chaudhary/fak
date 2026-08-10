@@ -2392,15 +2392,6 @@ fak agent --offline
 This is a functional check, not the main product experience or a model-quality benchmark. A mock planner drives the real managed-agent path so you can see a malformed call repaired, a repeat served locally, a destructive operation denied, and an untrusted result kept out of context. The run writes `agent-report.json` in the current directory (or `--out PATH`) with the underlying kernel events.
 
 The verbatim output and explanation are in [Getting started § Tier 0](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min). For a server-side default-deny example with an audit journal and visible denial, use the [governed-agent quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/governed-agent-quickstart.md). For the full policy, routing, and benchmark sequence, use the [reproduction packet](https://github.com/anthony-chaudhary/fak/blob/main/docs/repro-packet.md).
-## What fak is not
-
-fak is a management plane. It is not a model, not a faster model server, and not a prompt-injection detector. The boundaries, so you can rule it out quickly:
-
-- **Not a faster model server.** vLLM, SGLang, llm-d, and llama.cpp win raw throughput; you run `fak serve` *in front of* one of them. The in-kernel GGUF path makes model state kernel-owned state — it is not a production serving engine. ([serving scope](https://github.com/anthony-chaudhary/fak/blob/main/docs/serving/README.md))
-- **The security floor is structural, not detection.** An active policy limits which tools can run, and quarantine holds classified results out of model context. fak does not claim to *detect* a successful prompt injection; it removes the tools and results an injection would need. Allow-listing a destructive tool is policy authoring, not a gate bypass. ([SECURITY.md](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md))
-- **Tool-calling turns are gated whole-turn, not token-streamed.** A call cannot be allowed, denied, or repaired until its arguments have fully arrived, so `stream:true` is adjudicated in full and then re-serialized as a well-formed SSE sequence. Prose deltas still stream; tool-call bytes do not. Expect full-turn latency when wiring an interactive harness to the gateway — that is the enforcement model, not a missing feature.
-- **Pre-1.0; interfaces still move.** Every capability claim carries exactly one of `[SHIPPED]`, `[SIMULATED]`, or `[STUB]` in [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md), and [product status](https://github.com/anthony-chaudhary/fak/blob/main/docs/PRODUCT-STATUS.md) separates what you can run today from the subsystems that have no command yet. Check a capability's tag before you build on it.
-
 ## Manage one local agent: `fak guard`
 
 Start with the agent you already run. No rewrite, config file, API key, or second terminal:
