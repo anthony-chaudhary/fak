@@ -70,14 +70,16 @@ type LateralCriticalPair struct {
 }
 
 type LateralBiconnectedBlock struct {
-	Tier          int                   `json:"tier"`
-	TierName      string                `json:"tier_name"`
-	Members       []string              `json:"members"`
-	MemberCount   int                   `json:"member_count"`
-	EdgeCount     int                   `json:"edge_count"`
-	MinEdgeCut    int                   `json:"min_edge_cut"`
-	CriticalPairs []LateralCriticalPair `json:"critical_pairs"`
-	PairCuts      []LateralCriticalPair `json:"pair_cuts"`
+	Tier              int                   `json:"tier"`
+	TierName          string                `json:"tier_name"`
+	Members           []string              `json:"members"`
+	MemberCount       int                   `json:"member_count"`
+	EdgeCount         int                   `json:"edge_count"`
+	MinEdgeCut        int                   `json:"min_edge_cut"`
+	MinVertexCut      int                   `json:"min_vertex_cut"`
+	CriticalSeparator []string              `json:"critical_separator"`
+	CriticalPairs     []LateralCriticalPair `json:"critical_pairs"`
+	PairCuts          []LateralCriticalPair `json:"pair_cuts"`
 }
 
 type LateralArticulationPoint struct {
@@ -390,6 +392,160 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	return report, nil
 }
 
+func blockVertexConnectivity(members []string, edges map[string][2]string) (int, []string) {
+	adjacency := map[string]map[string]struct{}{}
+	for _, member := range members {
+		adjacency[member] = map[string]struct{}{}
+	}
+	for _, edge := range edges {
+		left, right := edge[0], edge[1]
+		if _, ok := adjacency[left]; !ok {
+			continue
+		}
+		if _, ok := adjacency[right]; !ok || left == right {
+			continue
+		}
+		adjacency[left][right] = struct{}{}
+		adjacency[right][left] = struct{}{}
+	}
+	minCut := len(members) - 1
+	separator := []string(nil)
+	for _, member := range members {
+		neighbors := make([]string, 0, len(adjacency[member]))
+		for neighbor := range adjacency[member] {
+			neighbors = append(neighbors, neighbor)
+		}
+		sort.Strings(neighbors)
+		if len(neighbors) < minCut || len(neighbors) == minCut && lexicalStringsLess(neighbors, separator) {
+			minCut, separator = len(neighbors), neighbors
+		}
+	}
+	for i, source := range members {
+		for _, sink := range members[i+1:] {
+			if _, adjacent := adjacency[source][sink]; adjacent {
+				continue
+			}
+			cut, candidate := unitVertexMaxFlow(source, sink, members, adjacency)
+			if cut < minCut || cut == minCut && lexicalStringsLess(candidate, separator) {
+				minCut, separator = cut, candidate
+			}
+		}
+	}
+	return minCut, separator
+}
+
+func lexicalStringsLess(left, right []string) bool {
+	if right == nil {
+		return true
+	}
+	return strings.Join(left, "\x00") < strings.Join(right, "\x00")
+}
+
+func unitVertexMaxFlow(source, sink string, members []string, adjacency map[string]map[string]struct{}) (int, []string) {
+	const inSuffix, outSuffix = "\x00in", "\x00out"
+	inNode := func(member string) string { return member + inSuffix }
+	outNode := func(member string) string { return member + outSuffix }
+	capacity := map[string]map[string]int{}
+	addCapacity := func(from, to string, amount int) {
+		if capacity[from] == nil {
+			capacity[from] = map[string]int{}
+		}
+		if capacity[to] == nil {
+			capacity[to] = map[string]int{}
+		}
+		capacity[from][to] += amount
+	}
+	infinity := len(members) + 1
+	for _, member := range members {
+		amount := 1
+		if member == source || member == sink {
+			amount = infinity
+		}
+		addCapacity(inNode(member), outNode(member), amount)
+	}
+	for _, left := range members {
+		neighbors := make([]string, 0, len(adjacency[left]))
+		for right := range adjacency[left] {
+			neighbors = append(neighbors, right)
+		}
+		sort.Strings(neighbors)
+		for _, right := range neighbors {
+			addCapacity(outNode(left), inNode(right), infinity)
+		}
+	}
+	start, target := outNode(source), inNode(sink)
+	flow := 0
+	for {
+		parent := map[string]string{start: ""}
+		queue := []string{start}
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+			neighbors := make([]string, 0, len(capacity[current]))
+			for next, residual := range capacity[current] {
+				if residual > 0 {
+					neighbors = append(neighbors, next)
+				}
+			}
+			sort.Strings(neighbors)
+			for _, next := range neighbors {
+				if _, seen := parent[next]; seen {
+					continue
+				}
+				parent[next] = current
+				queue = append(queue, next)
+			}
+		}
+		if _, found := parent[target]; !found {
+			break
+		}
+		bottleneck := infinity
+		for node := target; node != start; node = parent[node] {
+			if residual := capacity[parent[node]][node]; residual < bottleneck {
+				bottleneck = residual
+			}
+		}
+		for node := target; node != start; node = parent[node] {
+			previous := parent[node]
+			capacity[previous][node] -= bottleneck
+			capacity[node][previous] += bottleneck
+		}
+		flow += bottleneck
+	}
+	reachable := map[string]struct{}{start: {}}
+	queue := []string{start}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		neighbors := make([]string, 0, len(capacity[current]))
+		for next, residual := range capacity[current] {
+			if residual > 0 {
+				neighbors = append(neighbors, next)
+			}
+		}
+		sort.Strings(neighbors)
+		for _, next := range neighbors {
+			if _, seen := reachable[next]; seen {
+				continue
+			}
+			reachable[next] = struct{}{}
+			queue = append(queue, next)
+		}
+	}
+	separator := make([]string, 0, flow)
+	for _, member := range members {
+		if member == source || member == sink {
+			continue
+		}
+		_, inReachable := reachable[inNode(member)]
+		_, outReachable := reachable[outNode(member)]
+		if inReachable && !outReachable {
+			separator = append(separator, member)
+		}
+	}
+	return flow, separator
+}
+
 func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, []LateralCriticalPair, []LateralCriticalPair) {
 	memberSet := map[string]struct{}{}
 	for _, member := range members {
@@ -642,7 +798,12 @@ func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComp
 		}
 		tier := tierByMember[members[0]]
 		minCut, criticalPairs, pairCuts := blockEdgeConnectivity(members, undirected)
-		out = append(out, LateralBiconnectedBlock{Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount, MinEdgeCut: minCut, CriticalPairs: criticalPairs, PairCuts: pairCuts})
+		minVertexCut, separator := blockVertexConnectivity(members, undirected)
+		out = append(out, LateralBiconnectedBlock{
+			Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount,
+			MinEdgeCut: minCut, MinVertexCut: minVertexCut, CriticalSeparator: separator,
+			CriticalPairs: criticalPairs, PairCuts: pairCuts,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].MemberCount != out[j].MemberCount {

@@ -10,6 +10,81 @@ import (
 	"testing"
 )
 
+func TestLateralBlockVertexConnectivityQuantifiesPackageSeparators(t *testing.T) {
+	members := []string{"a", "b", "c", "d"}
+	cycle := map[string][2]string{"ab": {"a", "b"}, "bc": {"b", "c"}, "cd": {"c", "d"}, "ad": {"a", "d"}, "duplicate": {"b", "a"}}
+	for i := 0; i < 50; i++ {
+		cut, separator := blockVertexConnectivity(members, cycle)
+		if cut != 2 || !reflect.DeepEqual(separator, []string{"a", "c"}) {
+			t.Fatalf("cycle run %d cut=%d separator=%v", i, cut, separator)
+		}
+	}
+	clique := map[string][2]string{}
+	for i, left := range members {
+		for _, right := range members[i+1:] {
+			clique[right+left] = [2]string{right, left}
+		}
+	}
+	cut, separator := blockVertexConnectivity(members, clique)
+	if cut != 3 || !reflect.DeepEqual(separator, []string{"a", "b", "c"}) {
+		t.Fatalf("K4 cut=%d separator=%v", cut, separator)
+	}
+
+	asymmetric := map[string][2]string{
+		"ab": {"a", "b"}, "ac": {"a", "c"}, "bc": {"b", "c"},
+		"bd": {"b", "d"}, "cd": {"c", "d"}, "de": {"d", "e"}, "ce": {"c", "e"},
+	}
+	asymmetricMembers := []string{"a", "b", "c", "d", "e"}
+	cut, separator = blockVertexConnectivity(asymmetricMembers, asymmetric)
+	if cut != 2 || !reflect.DeepEqual(separator, []string{"b", "c"}) {
+		t.Fatalf("asymmetric cut=%d separator=%v", cut, separator)
+	}
+	if len(separator) != cut || !separatorDisconnectsOrTrivial(asymmetricMembers, asymmetric, separator) {
+		t.Fatalf("separator does not witness cut: cut=%d separator=%v", cut, separator)
+	}
+}
+
+func separatorDisconnectsOrTrivial(members []string, edges map[string][2]string, separator []string) bool {
+	removed := map[string]struct{}{}
+	for _, member := range separator {
+		removed[member] = struct{}{}
+	}
+	remaining := make([]string, 0, len(members)-len(separator))
+	for _, member := range members {
+		if _, gone := removed[member]; !gone {
+			remaining = append(remaining, member)
+		}
+	}
+	if len(remaining) <= 1 {
+		return true
+	}
+	seen := map[string]struct{}{remaining[0]: {}}
+	queue := []string{remaining[0]}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range edges {
+			next := ""
+			if edge[0] == current {
+				next = edge[1]
+			} else if edge[1] == current {
+				next = edge[0]
+			}
+			if next == "" {
+				continue
+			}
+			if _, gone := removed[next]; gone {
+				continue
+			}
+			if _, ok := seen[next]; !ok {
+				seen[next] = struct{}{}
+				queue = append(queue, next)
+			}
+		}
+	}
+	return len(seen) != len(remaining)
+}
+
 func TestLateralBlockEdgeConnectivityDistinguishesCycleAndClique(t *testing.T) {
 	members := []string{"a", "b", "c", "d"}
 	cycle := map[string][2]string{"ab": {"a", "b"}, "bc": {"b", "c"}, "cd": {"c", "d"}, "ad": {"a", "d"}}
@@ -158,8 +233,8 @@ import _ "github.com/anthony-chaudhary/fak/internal/z"
 	}
 	abc, cde := trianglePairs("a", "b", "c"), trianglePairs("c", "d", "e")
 	want := []LateralBiconnectedBlock{
-		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: abc, PairCuts: abc},
-		{Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: cde, PairCuts: cde},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, MinVertexCut: 2, CriticalSeparator: []string{"a", "b"}, CriticalPairs: abc, PairCuts: abc},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, MinVertexCut: 2, CriticalSeparator: []string{"c", "d"}, CriticalPairs: cde, PairCuts: cde},
 	}
 	if !reflect.DeepEqual(r.LateralBiconnectedBlocks, want) {
 		t.Fatalf("blocks=%+v want=%+v", r.LateralBiconnectedBlocks, want)

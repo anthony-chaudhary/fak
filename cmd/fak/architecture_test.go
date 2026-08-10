@@ -76,7 +76,7 @@ import _ "github.com/anthony-chaudhary/fak/internal/caller"
 	}
 }
 
-func TestArchitectureTextRendersLateralBiconnectedBlocks(t *testing.T) {
+func TestArchitectureTextRendersLateralBlockVertexConnectivity(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
 var tier=map[string]int{"a":2,"b":2,"c":2}
@@ -93,10 +93,22 @@ import _ "github.com/anthony-chaudhary/fak/internal/c"
 	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"lateral biconnected blocks (single-package resilient):", "tier=foundation-composite members=[a b c] edges=3 edge-connectivity=2 critical-pairs=3"} {
+	for _, want := range []string{"lateral biconnected blocks (single-package resilient):", "tier=foundation-composite members=[a b c] edges=3 edge-connectivity=2 vertex-connectivity=2 separator=[a b] critical-pairs=3"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q missing %q", out.String(), want)
 		}
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "b", "--json"}); code != 0 {
+		t.Fatalf("scoped JSON code=%d stderr=%s", code, errOut.String())
+	}
+	var report archreport.Report
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.LateralBiconnectedBlocks) != 1 || report.LateralBiconnectedBlocks[0].MinVertexCut != 2 || !reflect.DeepEqual(report.LateralBiconnectedBlocks[0].CriticalSeparator, []string{"a", "b"}) {
+		t.Fatalf("scoped blocks=%+v", report.LateralBiconnectedBlocks)
 	}
 }
 
