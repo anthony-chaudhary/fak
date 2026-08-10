@@ -465,15 +465,15 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	}
 	switch store {
 	case F16:
-		return c.uploadF16(t, f, hp)
+		return c.uploadF16(t, hb, f, hp)
 	case Q8_0:
-		return c.uploadQ8(t, f, hp)
+		return c.uploadQ8(t, hb, f, hp)
 	}
 	out, buf := c.dev(t.Shape, F32)
 	if len(f) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
 		if hp != 0 {
-			buf.host, buf.hostDt, buf.hostLo = hp, F32, t.Layout
+			buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
 			uploadCache[ucKey{hp, F32, t.Layout}] = out
 		}
 	}
@@ -485,7 +485,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 // (d=amax/127, q8round), and both narrow operands are uploaded — codes to the buffer's ptr, scales
 // to its scale side-channel. The f32 weight never becomes resident, so the VRAM footprint is the
 // int8 size (codes) + a thin per-block scale band, not the f32 size. `in` must be divisible by 32.
-func (c *cudaBackend) uploadQ8(t Tensor, f []float32, hp uintptr) Tensor {
+func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr) Tensor {
 	if len(t.Shape) != 2 {
 		panic("compute: cuda Upload(_, Q8_0) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
 	}
@@ -521,7 +521,7 @@ func (c *cudaBackend) uploadQ8(t Tensor, f []float32, hp uintptr) Tensor {
 	res, buf := c.devQ8(t.Shape, blk, len(scales))
 	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
 	C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
-	buf.host, buf.hostDt, buf.hostLo = hp, Q8_0, t.Layout
+	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
 	uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	return res
 }
@@ -564,7 +564,7 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	if len(codes) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
 		C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
-		buf.host, buf.hostDt, buf.hostLo = hp, Q8_0, t.Layout
+		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
 		uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	}
 	return res
@@ -648,7 +648,7 @@ func (c *cudaBackend) uploadRawKQuant(t Tensor, hb HostBuffer) Tensor {
 	res, buf := c.devRawKQuant(t.Dtype, t.Shape, len(raw))
 	if len(raw) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
-		buf.host, buf.hostDt, buf.hostLo = hp, t.Dtype, t.Layout
+		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, t.Dtype, t.Layout
 		uploadCache[ucKey{hp, t.Dtype, t.Layout}] = res
 	}
 	return res
@@ -682,7 +682,7 @@ func (c *cudaBackend) devRawKQuant(dt Dtype, shape []int, nbytes int) (Tensor, *
 // ColMajor transpose-repacked ([out,in] -> col-major) — and the stage is freed. The narrow runs
 // on device (one conversion implementation, identical numerics to the GEMM's own half cast),
 // never on the host.
-func (c *cudaBackend) uploadF16(t Tensor, f []float32, hp uintptr) Tensor {
+func (c *cudaBackend) uploadF16(t Tensor, hb HostBuffer, f []float32, hp uintptr) Tensor {
 	out, buf := c.devF16(t.Shape, t.Layout)
 	if len(f) == 0 {
 		return out
@@ -695,7 +695,7 @@ func (c *cudaBackend) uploadF16(t Tensor, f []float32, hp uintptr) Tensor {
 		C.fcuda_f32_to_f16(buf.ptr, (*C.float)(stage.ptr), C.int(len(f)))
 	}
 	C.fcuda_free(stage.ptr)
-	buf.host, buf.hostDt, buf.hostLo = hp, F16, t.Layout
+	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F16, t.Layout
 	uploadCache[ucKey{hp, F16, t.Layout}] = out
 	return out
 }
@@ -776,6 +776,7 @@ func (c *cudaBackend) Free(t Tensor) {
 			C.fcuda_free(db.ptr)
 		}
 		db.ptr = nil
+		db.hostKeep = nil
 		if db.budgetedWeightBytes > 0 {
 			c.dlUsed -= db.budgetedWeightBytes
 			if c.dlUsed < 0 {

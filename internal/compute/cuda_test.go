@@ -25,6 +25,30 @@ func cudaOrSkip(t *testing.T) *cudaBackend {
 	return cb
 }
 
+// TestCUDAUploadCacheRetainsHostOwner guards the pointer-keyed weight cache against a
+// same-address false hit. A uintptr is not a GC root: without the retained HostBuffer, Go may
+// recycle a dead same-shaped weight slice at the same address while stale VRAM remains cached.
+func TestCUDAUploadCacheRetainsHostOwner(t *testing.T) {
+	cb := cudaOrSkip(t)
+	host := NewF32(Default(), []int{2, 2}, []float32{1, 2, 3, 4})
+	assertOwner := func(as Dtype) {
+		resident := cb.Upload(host, as)
+		db, ok := resident.buf.(*cudaBuf)
+		if !ok {
+			t.Fatalf("%s cached upload buffer = %T, want *cudaBuf", as, resident.buf)
+		}
+		if db.host == 0 {
+			t.Fatalf("%s cached upload has no host key", as)
+		}
+		if db.hostKeep != host.buf {
+			t.Fatalf("%s pointer-keyed CUDA upload cache did not retain its source HostBuffer", as)
+		}
+		cb.Free(resident)
+	}
+	assertOwner(F32)
+	assertOwner(F16)
+}
+
 func TestCUDADeviceMemoryInfoReportsCurrentFree(t *testing.T) {
 	cb := cudaOrSkip(t)
 	total, free, known := DeviceMemoryInfo(cb)

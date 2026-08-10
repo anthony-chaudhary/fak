@@ -32,16 +32,17 @@ var cudaDev *cudaBackend
 // synchronous on return (weights, whose Upload H2D is a blocking cudaMemcpy; KV views; the
 // argmax scalar) carry be==nil and are always Ready.
 type cudaBuf struct {
-	ptr     unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
-	n       int            // bytes at ptr
-	class   MemoryClass    // allocation purpose retained for strict mutable-state validation
-	device  int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
-	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
-	hostDt  Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
-	hostLo  Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
-	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
-	bornGen uint64         // fence generation in which this async buffer was enqueued
-	managed bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
+	ptr      unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
+	n        int            // bytes at ptr
+	class    MemoryClass    // allocation purpose retained for strict mutable-state validation
+	device   int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
+	host     uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
+	hostKeep HostBuffer     // strong owner: prevents Go from recycling host while pointer-keyed cache entry is live
+	hostDt   Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
+	hostLo   Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
+	be       *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
+	bornGen  uint64         // fence generation in which this async buffer was enqueued
+	managed  bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
 	// invalid is set when an in-place Qwen GDN operation reports a launch or
 	// asynchronous execution failure. Such a buffer may be freed, but never read
 	// or submitted again as a usable state/output.
@@ -105,7 +106,10 @@ func (b *cudaBuf) Ready() bool {
 	return atomic.LoadUint64(&b.be.fenceGen) > b.bornGen
 }
 
-// uploadCache shares one VRAM copy per distinct host weight buffer across all sessions. A model's
+// uploadCache shares one VRAM copy per distinct host weight buffer across all sessions. Each cached
+// cudaBuf retains its HostBuffer owner: the uintptr key alone is not a GC root, and allowing the
+// source slice to die lets Go recycle its address for a different same-shaped weight, which would
+// false-hit stale VRAM. A model's
 // weights are zero-copy views into one blob (m.tensor(name) returns the SAME pointer every
 // call), so without this each NewBackendSession re-uploaded the whole model — N sessions ×
 // the full weight set, which exhausts VRAM in a multi-session bench. Only rank >= 2 tensors enter
