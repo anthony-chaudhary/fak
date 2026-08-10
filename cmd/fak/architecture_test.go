@@ -297,9 +297,33 @@ func TestArchitectureBlastRadiusPolicyIgnoresOtherRegressionsAndContractions(t *
 	}
 }
 
+func TestArchitectureFailOnIntroducedBlastImpacts(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedBlastImpacts: []archreport.BlastImpact{{Source: "shared", Dependent: "new", Path: []string{"shared", "middle", "new"}}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-blast-impacts"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"introduced blast-impact shared -> new path=shared -> middle -> new", "remove/invert each introduced path", "baseline -> workspace"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureBlastImpactPolicyIgnoresResolutions(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", ResolvedBlastImpacts: []archreport.BlastImpact{{Source: "shared", Dependent: "gone", Path: []string{"shared", "gone"}}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-blast-impacts"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "resolved blast-impact shared -> gone") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, or increased-blast-radius") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, or introduced-blast-impacts") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

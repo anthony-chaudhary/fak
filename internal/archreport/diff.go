@@ -52,6 +52,12 @@ type BlastRadiusChange struct {
 	Delta  int    `json:"delta"`
 }
 
+type BlastImpact struct {
+	Source    string   `json:"source"`
+	Dependent string   `json:"dependent"`
+	Path      []string `json:"path"`
+}
+
 type ReportDiff struct {
 	Schema                   string                    `json:"schema"`
 	Verdict                  string                    `json:"verdict"`
@@ -62,6 +68,8 @@ type ReportDiff struct {
 	RemovedEdges             []EdgeChange              `json:"removed_edges,omitempty"`
 	FanInChanges             []FanInChange             `json:"fan_in_changes,omitempty"`
 	BlastRadiusChanges       []BlastRadiusChange       `json:"blast_radius_changes,omitempty"`
+	IntroducedBlastImpacts   []BlastImpact             `json:"introduced_blast_impacts,omitempty"`
+	ResolvedBlastImpacts     []BlastImpact             `json:"resolved_blast_impacts,omitempty"`
 	TierGapChanges           []TierGapChange           `json:"tier_gap_changes,omitempty"`
 	IntroducedViolationEdges []ViolationEdge           `json:"introduced_violation_edges,omitempty"`
 	ResolvedViolationEdges   []ViolationEdge           `json:"resolved_violation_edges,omitempty"`
@@ -113,8 +121,21 @@ func Diff(before, after Report) ReportDiff {
 		if beforeFanIn != afterFanIn {
 			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: beforeFanIn, After: afterFanIn, Delta: afterFanIn - beforeFanIn})
 		}
-		if b, ok := beforeLeaves[name]; ok && b.BlastRadius != a.BlastRadius {
-			out.BlastRadiusChanges = append(out.BlastRadiusChanges, BlastRadiusChange{Leaf: name, Before: b.BlastRadius, After: a.BlastRadius, Delta: a.BlastRadius - b.BlastRadius})
+		if b, ok := beforeLeaves[name]; ok {
+			if b.BlastRadius != a.BlastRadius {
+				out.BlastRadiusChanges = append(out.BlastRadiusChanges, BlastRadiusChange{Leaf: name, Before: b.BlastRadius, After: a.BlastRadius, Delta: a.BlastRadius - b.BlastRadius})
+			}
+			beforeImpacts, afterImpacts := blastImpactSet(name, b), blastImpactSet(name, a)
+			for key, impact := range afterImpacts {
+				if _, ok := beforeImpacts[key]; !ok {
+					out.IntroducedBlastImpacts = append(out.IntroducedBlastImpacts, impact)
+				}
+			}
+			for key, impact := range beforeImpacts {
+				if _, ok := afterImpacts[key]; !ok {
+					out.ResolvedBlastImpacts = append(out.ResolvedBlastImpacts, impact)
+				}
+			}
 		}
 	}
 	for name, b := range beforeLeaves {
@@ -161,10 +182,12 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.RemovedEdges)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
+	sortBlastImpacts(out.IntroducedBlastImpacts)
+	sortBlastImpacts(out.ResolvedBlastImpacts)
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 {
 		out.Verdict = "regression"
 	}
 	return out
@@ -181,6 +204,15 @@ func leafIndex(r Report) map[string]Leaf {
 	}
 	return out
 }
+func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
+	out := make(map[string]BlastImpact, len(leaf.BlastPaths))
+	for _, path := range leaf.BlastPaths {
+		impact := BlastImpact{Source: source, Dependent: path.Dependent, Path: append([]string(nil), path.Path...)}
+		out[source+"\x00"+path.Dependent] = impact
+	}
+	return out
+}
+
 func edgeSet(r Report) map[string]EdgeChange {
 	out := map[string]EdgeChange{}
 	for _, l := range r.Leaves {
@@ -224,6 +256,15 @@ func sortDiagnostics(diagnostics []Diagnostic) {
 			return diagnostics[i].Kind < diagnostics[j].Kind
 		}
 		return diagnostics[i].Leaf < diagnostics[j].Leaf
+	})
+}
+
+func sortBlastImpacts(impacts []BlastImpact) {
+	sort.Slice(impacts, func(i, j int) bool {
+		if impacts[i].Source != impacts[j].Source {
+			return impacts[i].Source < impacts[j].Source
+		}
+		return impacts[i].Dependent < impacts[j].Dependent
 	})
 }
 

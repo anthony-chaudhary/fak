@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func TestDiffBlastImpactIdentitySurvivesEqualCountReplacement(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "source", BlastRadius: 1, BlastPaths: []BlastPath{{Dependent: "old", Path: []string{"source", "old"}}}}}}
+	after := Report{Leaves: []Leaf{{Name: "source", BlastRadius: 1, BlastPaths: []BlastPath{{Dependent: "new", Path: []string{"source", "middle", "new"}}}}}}
+	diff := Diff(before, after)
+	wantIntroduced := []BlastImpact{{Source: "source", Dependent: "new", Path: []string{"source", "middle", "new"}}}
+	wantResolved := []BlastImpact{{Source: "source", Dependent: "old", Path: []string{"source", "old"}}}
+	if !reflect.DeepEqual(diff.IntroducedBlastImpacts, wantIntroduced) || !reflect.DeepEqual(diff.ResolvedBlastImpacts, wantResolved) {
+		t.Fatalf("introduced=%+v resolved=%+v", diff.IntroducedBlastImpacts, diff.ResolvedBlastImpacts)
+	}
+	if len(diff.BlastRadiusChanges) != 0 || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v; typed impact views must not depend on count or double-count edges", diff)
+	}
+}
+
+func TestDiffResolvedBlastImpactRemainsClean(t *testing.T) {
+	diff := Diff(
+		Report{Leaves: []Leaf{{Name: "source", BlastRadius: 1, BlastPaths: []BlastPath{{Dependent: "gone", Path: []string{"source", "gone"}}}}}},
+		Report{Leaves: []Leaf{{Name: "source", BlastPaths: []BlastPath{}}}},
+	)
+	if diff.Verdict != "clean" || len(diff.IntroducedBlastImpacts) != 0 || len(diff.ResolvedBlastImpacts) != 1 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestCompareBlastRadiusChangesRankRegressionsWithoutDoubleCounting(t *testing.T) {
 	before := Report{Leaves: []Leaf{{Name: "deep", BlastRadius: 1}, {Name: "small", BlastRadius: 2}, {Name: "improved", BlastRadius: 5}}}
 	after := Report{Leaves: []Leaf{{Name: "deep", BlastRadius: 5}, {Name: "small", BlastRadius: 3}, {Name: "improved", BlastRadius: 1}}}
