@@ -2295,7 +2295,8 @@ def build_worker_command(backend: str, prompt: str, model: str | None,
                "--skip-git-repo-check"]
         if model:
             cmd += ["-m", model]
-        cmd.append(prompt)
+        # Detached Codex workers receive the prompt on stdin in spawn_issue_worker.
+        # Keeping it out of argv avoids Windows CreateProcess's command-line limit.
         return cmd
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
 
@@ -2708,7 +2709,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
         prompt_file.write_text(prompt_payload, encoding="utf-8")
         command = resolve_opencode_command(
             attach_opencode_prompt_file(command, prompt_file))
-    elif backend == "claude" and prompt_payload is not None:
+    elif backend in ("claude", "codex") and prompt_payload is not None:
         prompt_file = out_log.with_suffix(CLAUDE_PROMPT_FILE_SUFFIX)
         prompt_file.write_text(prompt_payload, encoding="utf-8")
         prompt_stdin = open(prompt_file, "r", encoding="utf-8")
@@ -5539,7 +5540,7 @@ def _maybe_dispatch_contract_repair(
     spawned = spawn_issue_worker(command, env, root, runs_dir, rec["issues"][0],
                                  REPAIR_LANE, backend, account=acct,
                                  spawn_probe_s=spawn_probe_s, log_prefix="repair",
-                                 prompt_payload=rec["prompt"] if backend in ("claude", "opencode") else None)
+                                 prompt_payload=rec["prompt"] if backend in ("claude", "opencode", "codex") else None)
     # Durable first: the .issues sidecar below is swept with the corpse, so the
     # ledger is what actually holds the cooldown open past this worker's death.
     record_repair_attempt(runs_dir, rec["issues"], live=live)
@@ -7211,7 +7212,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
                                  account=acct, lease=lease, base_sha=base_sha,
                                  spawn_probe_s=spawn_probe_s,
-                                 prompt_payload=rec["prompt"] if backend in ("claude", "opencode") else None)
+                                 prompt_payload=rec["prompt"] if backend in ("claude", "opencode", "codex") else None)
     early = spawned.get("early_exit") or {}
     if early.get("checked") and not early.get("alive"):
         if lease.get("acquired"):

@@ -2917,14 +2917,14 @@ class BuildWorkerCommandTest(unittest.TestCase):
         self.assertEqual(
             mod.build_worker_command("codex", "PROMPT", None),
             ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
-             "--skip-git-repo-check", "PROMPT"])
+             "--skip-git-repo-check"])
 
     def test_codex_command_pins_model(self) -> None:
         mod = load()
         self.assertEqual(
             mod.build_worker_command("codex", "PROMPT", "gpt-5.5"),
             ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
-             "--skip-git-repo-check", "-m", "gpt-5.5", "PROMPT"])
+             "--skip-git-repo-check", "-m", "gpt-5.5"])
 
     def test_codex_env_uses_codex_home_not_claude_vars(self) -> None:
         mod = load()
@@ -4126,6 +4126,32 @@ class WaveMembershipTest(unittest.TestCase):
             self.assertNotIn(full_prompt, argv)
             prompt_file = Path(res["prompt_file"])
             self.assertEqual(prompt_file.read_text(encoding="utf-8"), full_prompt)
+
+    def test_codex_long_prompt_is_streamed_via_stdin_file(self) -> None:
+        mod = load()
+        captured = {}
+        full_prompt = "resolve #4779 " + ("x" * 40000)
+
+        class _FakePopen:
+            pid = 1234
+            def __init__(self, argv, **kwargs):
+                captured["argv"] = argv
+                captured["stdin_text"] = kwargs["stdin"].read()
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+            runs = Path(d)
+            command = mod.build_worker_command("codex", full_prompt, None)
+            res = mod.spawn_issue_worker(
+                command, {}, runs, runs, issue=4779, lane="tools",
+                backend="codex", prompt_payload=full_prompt)
+            prompt_copy = Path(res["prompt_file"]).read_text(encoding="utf-8")
+
+        self.assertNotIn(full_prompt, captured["argv"])
+        self.assertEqual(captured["stdin_text"], full_prompt)
+        self.assertEqual(prompt_copy, full_prompt)
 
     def test_claude_long_prompt_is_streamed_via_stdin_file(self) -> None:
         mod = load()
