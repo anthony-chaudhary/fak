@@ -26,5 +26,5 @@ func TestEffectfulPlanBodyCarriesProjectWork(t *testing.T) {
 	}
 }
 func qaActionItem() ActionItem {
-	return ActionItem{Key: "k", Title: "x", ParentRef: "#36", CurrentState: "x", WhyNow: "x", WorkingSpine: "x", WorkUnit: "leaf", ExpectedSteps: 3, Assumptions: []string{"x"}, ConfusionRisks: []string{"x"}, Coordination: []string{"x"}, Trigger: "x", BatchPolicy: "one batch, capped at 10 items, dedupe by key", InScope: "x", OutOfScope: "x", DoneCondition: "x", Witness: "x", AcceptanceGate: "x", Lane: "x", Paths: []string{"internal/x"}, Labels: []string{"gen/now", "priority/P1"}, ClosureBinding: "x"}
+	return ActionItem{Key: "k", Title: "x", ParentRef: "#36", CurrentState: "x", WhyNow: "x", WorkingSpine: "x", WorkUnit: "leaf", ExpectedSteps: 3, Assumptions: []string{"x"}, ConfusionRisks: []string{"x"}, Coordination: []string{"x"}, Trigger: "x", BatchPolicy: "one batch, capped at 10 items, dedupe by key", InScope: "x", OutOfScope: "x", DoneCondition: "x", Witness: "go test ./internal/x", AcceptanceGate: "go test ./internal/x", Lane: "x", Paths: []string{"internal/x"}, Labels: []string{"gen/now", "priority/P1"}, ClosureBinding: "x"}
 }

@@ -59,6 +59,40 @@ func TestDogfoodIssuesDryRunSkipsUnscopedAggregateRows(t *testing.T) {
 	}
 }
 
+func TestDogfoodIssuesStrictScopeRefusesLiveSkippedRows(t *testing.T) {
+	report := writeDogfoodIssuesReport(t, `{
+  "schema": "fak.recent-feature-dogfood.v1",
+  "code_slop_scorecard": {
+    "score": "P1", "grade": "P1", "action": "ACTION",
+    "code_slop": 1, "next_action": "clean everything"
+  }
+}`)
+	existing := filepath.Join(t.TempDir(), "existing.json")
+	if err := os.WriteFile(existing, []byte("[]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runDogfoodIssues(&out, &errb, []string{"--live", "--existing-json", existing, "--json", report})
+	if code == 0 {
+		t.Fatalf("live code = 0, want nonzero strict-scope refusal; stdout=%s", out.String())
+	}
+	var got struct {
+		Refused bool   `json:"refused"`
+		Error   string `json:"error"`
+		Synced  []any  `json:"synced"`
+		Skipped []any  `json:"skipped"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, out.String())
+	}
+	if !got.Refused || got.Error != dogfoodissues.ErrorStrictScope || len(got.Skipped) != 1 || len(got.Synced) != 0 {
+		t.Fatalf("result = %+v, want refused strict_scope with one skipped and no sync", got)
+	}
+	if !strings.Contains(errb.String(), "live issue sync refused") {
+		t.Fatalf("stderr missing strict-scope refusal: %s", errb.String())
+	}
+}
+
 func TestDogfoodIssuesDryRunReportsFreshnessInJSON(t *testing.T) {
 	report := writeDogfoodIssuesReport(t, 5*time.Minute)
 

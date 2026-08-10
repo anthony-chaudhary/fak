@@ -553,12 +553,8 @@ func IssueBodyWithOptions(item ActionItem, opt BuildOptions) string {
 // issue contract.
 func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
 	c := actionCandidate(item, opt)
-	return issuecontract.ReviewCandidate(c, issuecontract.Options{
-		Live:              opt.Live,
-		DedupeChecked:     opt.DedupeChecked,
-		DedupeCap:         opt.DedupeCap,
-		StrictProjectWork: true,
-	})
+	review := issuecontract.ReviewCandidate(c, strictScopeOptions(opt))
+	return applyStrictScopeHold(review, strictScopeHold(item, opt))
 }
 
 func actionCandidate(item ActionItem, opt BuildOptions) issuecontract.Candidate {
@@ -753,15 +749,17 @@ func planRow(item ActionItem) PlanRow {
 func CohortPlan(items []ActionItem, opt BuildOptions) issuecohort.Plan {
 	candidates := make([]issuecontract.Candidate, 0, len(items))
 	for _, item := range items {
-		candidates = append(candidates, actionCandidate(item, opt))
+		candidate := actionCandidate(item, opt)
+		if len(strictScopeHold(item, opt)) > 0 {
+			// issuecohort reviews candidates directly, so make the stricter
+			// lane-and-path hold visible to its shared route check too.
+			candidate.Lane = ""
+			candidate.Paths = nil
+		}
+		candidates = append(candidates, candidate)
 	}
 	return issuecohort.Build(candidates, issuecohort.Options{
-		Options: issuecontract.Options{
-			Live:              opt.Live,
-			DedupeChecked:     opt.DedupeChecked,
-			DedupeCap:         opt.DedupeCap,
-			StrictProjectWork: true,
-		},
+		Options: strictScopeOptions(opt),
 	})
 }
 

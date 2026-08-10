@@ -158,7 +158,10 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		Skipped:         skipped,
 		Cohort:          &cohort,
 	}
-	if *live && len(plan) > 0 {
+	if *live && len(skipped) > 0 {
+		result.Refused = true
+		result.Error = dogfoodissues.ErrorStrictScope
+	} else if *live && len(plan) > 0 {
 		result.Synced = dogfoodissues.Sync(plan, *repo, []string(labels), nil)
 	}
 
@@ -190,6 +193,10 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *live {
+		if result.Refused {
+			fmt.Fprintf(stderr, "dogfood-issues: %s\n", dogfoodissues.StrictScopeRefusalMessage(skipped))
+			return 2
+		}
 		for _, row := range result.Synced {
 			if !row.OK {
 				return 1
