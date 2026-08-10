@@ -340,6 +340,9 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "radixkv implements prefix-indexed KV reuse plus retention and eviction policy; prefix reuse is contracted separately",
 	},
 	{
+		Leaf: "internal/testroute", Disposition: DispositionCapability, Capabilities: []string{"host_test_execution_routing"}, Reason: "pure host-evidence routing across native, WSL, CI, and unavailable test execution",
+	},
+	{
 		Leaf: "internal/tokenizer", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"tokenization"},
 		Reason:       "tokenizer implements model-compatible BPE encoding, decoding, pretokenization, and incremental decode; tokenization is contracted separately",
@@ -919,6 +922,7 @@ var contracts = []Contract{{
 		},
 		Integrations: []string{"litellm", "openrouter", "portkey"},
 	},
+	{Capability: "host_test_execution_routing", NativePath: "internal/testroute/testroute.go", Workload: "same native-allowed, Windows-with-WSL, CI-only, and unavailable probes with exact executable route oracle", Metrics: []string{"route_accuracy", "false_routes", "latency_ms", "throughput_probes_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "GOOS-only native-or-CI rule", Class: TunedBaseline, Source: "internal/testroute/compare.go"}, {Name: "GitHub Actions", Class: FirstClassIntegration, Integration: "github", Source: "internal/testroute/compare.go"}, {Name: "Go toolchain native execution", Class: NextBest, Source: "https://go.dev/cmd/go/"}, {Name: "WSL test wrapper", Class: NextBest, Source: "https://learn.microsoft.com/windows/wsl/"}, {Name: "GitHub Actions workflow routing", Class: NextBest, Source: "https://docs.github.com/actions"}, {Name: "Bazel platform constraints", Class: NextBest, Source: "https://bazel.build/extending/platforms"}}, Witness: "../../docs/benchmarks/TEST-EXECUTION-ROUTING-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"}},
 	{
 		Capability: "tokenization",
 		NativePath: "internal/tokenizer/tokenizer.go",
