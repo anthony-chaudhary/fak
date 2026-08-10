@@ -213,6 +213,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 					fmt.Fprintf(stdout, "      %s: %s\n", path.Dependency, strings.Join(path.Path, " -> "))
 				}
 			}
+			if *leaf != "" && len(l.DependencyDominators) > 0 {
+				fmt.Fprintln(stdout, "    mandatory dependency seams:")
+				for _, seam := range l.DependencyDominators {
+					fmt.Fprintf(stdout, "      %s via=%v path=%s\n", seam.Dependency, seam.Dominators, strings.Join(seam.Path, " -> "))
+				}
+			}
 			if *leaf != "" && len(l.BlastPaths) > 0 {
 				fmt.Fprintln(stdout, "    blast paths:")
 				for _, path := range l.BlastPaths {

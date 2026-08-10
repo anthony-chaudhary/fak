@@ -59,6 +59,81 @@ import _ "github.com/anthony-chaudhary/fak/internal/mid"
 	}
 }
 
+func TestDependencyDominatorsDistinguishMandatoryFromOptionalPathNodes(t *testing.T) {
+	leaves := []Leaf{
+		{Name: "a", Dependencies: []string{"b", "c"}},
+		{Name: "b", Dependencies: []string{"d"}},
+		{Name: "c", Dependencies: []string{"d"}},
+		{Name: "d", Dependencies: []string{"e"}},
+		{Name: "e", Dependencies: []string{"f"}},
+		{Name: "f", Dependencies: []string{"d"}},
+		{Name: "z"},
+	}
+	byName := map[string]int{"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "f": 5, "z": 6}
+	paths := dependencyPaths("a", leaves, byName)
+	want := []DependencyDominator{
+		{Dependency: "e", Dominators: []string{"d"}, Path: []string{"a", "b", "d", "e"}},
+		{Dependency: "f", Dominators: []string{"d", "e"}, Path: []string{"a", "b", "d", "e", "f"}},
+	}
+	for i := 0; i < 100; i++ {
+		if got := dependencyDominators("a", leaves, byName, paths); !reflect.DeepEqual(got, want) {
+			t.Fatalf("run %d got=%+v want=%+v", i, got, want)
+		}
+	}
+}
+
+func TestAnalyzeDependencyDominatorsScopedParity(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":3,"b":2,"c":2,"d":1,"e":0}
+var tierName=[]string{"root","primitive","foundation","mechanism"}
+`)
+	write("internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/c")
+`)
+	write("internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/d/d.go", `package d
+import _ "github.com/anthony-chaudhary/fak/internal/e"
+`)
+	write("internal/e/e.go", "package e\n")
+	whole, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := Analyze(root, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wholeA Leaf
+	for _, leaf := range whole.Leaves {
+		if leaf.Name == "a" {
+			wholeA = leaf
+		}
+	}
+	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0], wholeA) {
+		t.Fatalf("scoped=%+v whole=%+v", scoped.Leaves, wholeA)
+	}
+	want := []DependencyDominator{{Dependency: "e", Dominators: []string{"d"}, Path: []string{"a", "b", "d", "e"}}}
+	if !reflect.DeepEqual(wholeA.DependencyDominators, want) {
+		t.Fatalf("dominators=%+v", wholeA.DependencyDominators)
+	}
+}
+
 func TestDependencyHotspotsRankForwardBurdenAndOmitScopedTables(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

@@ -51,6 +51,36 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 	}
 }
 
+func TestArchitectureTextRendersDependencyDominators(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":3,"b":2,"c":2,"d":1,"e":0}
+var tierName=[]string{"root","primitive","foundation","mechanism"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/c")
+`)
+	mustWriteArchitectureFile(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	mustWriteArchitectureFile(t, root, "internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	mustWriteArchitectureFile(t, root, "internal/d/d.go", `package d
+import _ "github.com/anthony-chaudhary/fak/internal/e"
+`)
+	mustWriteArchitectureFile(t, root, "internal/e/e.go", "package e\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "a"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"mandatory dependency seams:", "e via=[d] path=a -> b -> d -> e"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
 func TestArchitectureTextRendersRootwardLayerSkips(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

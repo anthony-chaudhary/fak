@@ -24,23 +24,30 @@ type Tier struct {
 	Leaves int    `json:"leaves"`
 }
 type Leaf struct {
-	Name                   string           `json:"name"`
-	DeclaredTier           int              `json:"declared_tier"`
-	DeclaredTierName       string           `json:"declared_tier_name"`
-	ImportFloor            int              `json:"import_floor"`
-	ImportFloorName        string           `json:"import_floor_name"`
-	TierGap                int              `json:"tier_gap"`
-	Dependencies           []string         `json:"dependencies"`
-	TransitiveDependencies []string         `json:"transitive_dependencies"`
-	DependencyReach        int              `json:"dependency_reach"`
-	DependencyDepth        int              `json:"dependency_depth"`
-	DependencyPaths        []DependencyPath `json:"dependency_paths"`
-	Dependents             []string         `json:"dependents,omitempty"`
-	TransitiveDependents   []string         `json:"transitive_dependents"`
-	BlastRadius            int              `json:"blast_radius"`
-	BlastPaths             []BlastPath      `json:"blast_paths"`
-	ViolationEdges         []ViolationEdge  `json:"violation_edges,omitempty"`
-	Violations             []string         `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
+	Name                   string                `json:"name"`
+	DeclaredTier           int                   `json:"declared_tier"`
+	DeclaredTierName       string                `json:"declared_tier_name"`
+	ImportFloor            int                   `json:"import_floor"`
+	ImportFloorName        string                `json:"import_floor_name"`
+	TierGap                int                   `json:"tier_gap"`
+	Dependencies           []string              `json:"dependencies"`
+	TransitiveDependencies []string              `json:"transitive_dependencies"`
+	DependencyReach        int                   `json:"dependency_reach"`
+	DependencyDepth        int                   `json:"dependency_depth"`
+	DependencyPaths        []DependencyPath      `json:"dependency_paths"`
+	DependencyDominators   []DependencyDominator `json:"dependency_dominators"`
+	Dependents             []string              `json:"dependents,omitempty"`
+	TransitiveDependents   []string              `json:"transitive_dependents"`
+	BlastRadius            int                   `json:"blast_radius"`
+	BlastPaths             []BlastPath           `json:"blast_paths"`
+	ViolationEdges         []ViolationEdge       `json:"violation_edges,omitempty"`
+	Violations             []string              `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
+}
+
+type DependencyDominator struct {
+	Dependency string   `json:"dependency"`
+	Dominators []string `json:"dominators"`
+	Path       []string `json:"path"`
 }
 
 type DependencyPath struct {
@@ -339,6 +346,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	for i := range allLeaves {
 		sort.Strings(allLeaves[i].Dependents)
 		allLeaves[i].DependencyPaths = dependencyPaths(allLeaves[i].Name, allLeaves, byName)
+		allLeaves[i].DependencyDominators = dependencyDominators(allLeaves[i].Name, allLeaves, byName, allLeaves[i].DependencyPaths)
 		allLeaves[i].TransitiveDependencies = make([]string, len(allLeaves[i].DependencyPaths))
 		for j, path := range allLeaves[i].DependencyPaths {
 			allLeaves[i].TransitiveDependencies[j] = path.Dependency
@@ -1195,6 +1203,111 @@ func lateralComponents(edges []ArchitectureEdge, tiers map[string]int, names []s
 		return strings.Join(out[i].Members, "\x00") < strings.Join(out[j].Members, "\x00")
 	})
 	return out
+}
+
+func dependencyDominators(source string, leaves []Leaf, byName map[string]int, paths []DependencyPath) []DependencyDominator {
+	reachable := map[string]struct{}{source: {}}
+	for _, path := range paths {
+		reachable[path.Dependency] = struct{}{}
+	}
+	predecessors := map[string][]string{}
+	for node := range reachable {
+		for _, dependency := range leaves[byName[node]].Dependencies {
+			if _, ok := reachable[dependency]; ok {
+				predecessors[dependency] = append(predecessors[dependency], node)
+			}
+		}
+	}
+	for node := range predecessors {
+		sort.Strings(predecessors[node])
+	}
+	all := map[string]struct{}{}
+	for node := range reachable {
+		all[node] = struct{}{}
+	}
+	dominators := map[string]map[string]struct{}{source: {source: {}}}
+	nodes := make([]string, 0, len(reachable))
+	for node := range reachable {
+		if node != source {
+			nodes = append(nodes, node)
+		}
+	}
+	sort.Strings(nodes)
+	for _, node := range nodes {
+		dominators[node] = cloneStringSet(all)
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, node := range nodes {
+			preds := predecessors[node]
+			var next map[string]struct{}
+			for _, pred := range preds {
+				if next == nil {
+					next = cloneStringSet(dominators[pred])
+				} else {
+					for candidate := range next {
+						if _, ok := dominators[pred][candidate]; !ok {
+							delete(next, candidate)
+						}
+					}
+				}
+			}
+			if next == nil {
+				next = map[string]struct{}{}
+			}
+			next[node] = struct{}{}
+			if !stringSetsEqual(next, dominators[node]) {
+				dominators[node] = next
+				changed = true
+			}
+		}
+	}
+	pathByDependency := map[string][]string{}
+	for _, path := range paths {
+		pathByDependency[path.Dependency] = path.Path
+	}
+	var out []DependencyDominator
+	for _, dependency := range nodes {
+		var strict []string
+		for candidate := range dominators[dependency] {
+			if candidate != source && candidate != dependency {
+				strict = append(strict, candidate)
+			}
+		}
+		if len(strict) == 0 {
+			continue
+		}
+		sort.Slice(strict, func(i, j int) bool { return dominatorOrder(strict[i], strict[j], dominators) })
+		out = append(out, DependencyDominator{Dependency: dependency, Dominators: strict, Path: append([]string(nil), pathByDependency[dependency]...)})
+	}
+	return out
+}
+func cloneStringSet(source map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(source))
+	for value := range source {
+		out[value] = struct{}{}
+	}
+	return out
+}
+func stringSetsEqual(left, right map[string]struct{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for value := range left {
+		if _, ok := right[value]; !ok {
+			return false
+		}
+	}
+	return true
+}
+func dominatorOrder(left, right string, dominators map[string]map[string]struct{}) bool {
+	_, leftDominatesRight := dominators[right][left]
+	_, rightDominatesLeft := dominators[left][right]
+	if leftDominatesRight != rightDominatesLeft {
+		return leftDominatesRight
+	}
+	return left < right
 }
 
 func dependencyPaths(name string, leaves []Leaf, byName map[string]int) []DependencyPath {
