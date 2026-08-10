@@ -21,7 +21,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
-	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -29,8 +29,8 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
 		return 2
 	}
-	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" {
-		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, or increased-tier-gap)\n", *failOn)
+	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, or increased-violation-distance)\n", *failOn)
 		return 2
 	}
 	if *failOn != "" && *baseline == "" {
@@ -226,6 +226,9 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, edge := range diff.ResolvedViolationEdges {
 		fmt.Fprintf(stdout, "  resolved violation %s(%s) -> %s(%s), distance=%d\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName, edge.TierDistance)
 	}
+	for _, change := range diff.ViolationDistanceChanges {
+		fmt.Fprintf(stdout, "  ~ violation-distance %s -> %s %d -> %d (%+d)\n", change.From, change.To, change.BeforeDistance, change.AfterDistance, change.Delta)
+	}
 	for _, diagnostic := range diff.IntroducedDiagnostics {
 		fmt.Fprintf(stdout, "  ! introduced diagnostic %s leaf=%s: %s; recovery: %s\n", diagnostic.Kind, diagnostic.Leaf, diagnostic.Message, diagnostic.Recovery)
 	}
@@ -237,8 +240,10 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 			fmt.Fprintln(stdout, "  remediation: remove/invert introduced upward edges or move the shared seam down; comparison is baseline -> workspace")
 		} else if failOn == "introduced-diagnostics" {
 			fmt.Fprintln(stdout, "  remediation: apply each introduced diagnostic recovery action; comparison is baseline -> workspace")
-		} else {
+		} else if failOn == "increased-tier-gap" {
 			fmt.Fprintln(stdout, "  remediation: restore the prior import floor or lower the over-declared tier; comparison is baseline -> workspace")
+		} else {
+			fmt.Fprintln(stdout, "  remediation: restore the prior endpoint tiers or remove/invert the upward edge; comparison is baseline -> workspace")
 		}
 		return 3
 	}
@@ -253,6 +258,13 @@ func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 		return len(diff.IntroducedDiagnostics) > 0
 	case "increased-tier-gap":
 		for _, change := range diff.TierGapChanges {
+			if change.Delta > 0 {
+				return true
+			}
+		}
+		return false
+	case "increased-violation-distance":
+		for _, change := range diff.ViolationDistanceChanges {
 			if change.Delta > 0 {
 				return true
 			}

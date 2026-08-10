@@ -203,3 +203,22 @@ func TestDiffRanksTypedViolationsByTierDistance(t *testing.T) {
 		t.Fatalf("diff=%+v", got)
 	}
 }
+
+func TestDiffReportsViolationDistanceChangesDeterministically(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "low", ViolationEdges: []ViolationEdge{{From: "low", To: "far", TierDistance: 1}, {From: "low", To: "near", TierDistance: 3}, {From: "stable", To: "same", TierDistance: 2}}}}}
+	after := Report{Leaves: []Leaf{{Name: "low", ViolationEdges: []ViolationEdge{{From: "low", To: "far", TierDistance: 3}, {From: "low", To: "near", TierDistance: 1}, {From: "stable", To: "same", TierDistance: 2}}}}}
+	got := Diff(before, after)
+	want := []ViolationDistanceChange{{From: "low", To: "far", BeforeDistance: 1, AfterDistance: 3, Delta: 2}, {From: "low", To: "near", BeforeDistance: 3, AfterDistance: 1, Delta: -2}}
+	if !reflect.DeepEqual(got.ViolationDistanceChanges, want) || got.Verdict != "regression" || got.Changes() != 0 || len(got.IntroducedViolationEdges) != 0 || len(got.ResolvedViolationEdges) != 0 {
+		t.Fatalf("diff=%+v", got)
+	}
+}
+
+func TestDiffViolationDistanceImprovementRemainsClean(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "low", ViolationEdges: []ViolationEdge{{From: "low", To: "high", TierDistance: 2}}}}}
+	after := Report{Leaves: []Leaf{{Name: "low", ViolationEdges: []ViolationEdge{{From: "low", To: "high", TierDistance: 1}}}}}
+	got := Diff(before, after)
+	if got.Verdict != "clean" || len(got.ViolationDistanceChanges) != 1 {
+		t.Fatalf("diff=%+v", got)
+	}
+}

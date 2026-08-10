@@ -232,9 +232,30 @@ func TestArchitectureTierGapPolicyIgnoresOtherRegressions(t *testing.T) {
 	}
 }
 
+func TestArchitectureFailOnIncreasedViolationDistance(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", ViolationDistanceChanges: []archreport.ViolationDistanceChange{{From: "low", To: "high", BeforeDistance: 1, AfterDistance: 2, Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-violation-distance"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"violation-distance low -> high 1 -> 2 (+1)", "restore the prior endpoint tiers", "baseline -> workspace"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureViolationDistancePolicyIgnoresOtherRegressions(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "new", To: "edge"}}, ViolationDistanceChanges: []archreport.ViolationDistanceChange{{From: "better", To: "edge", Delta: -1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-violation-distance"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, or increased-tier-gap") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, or increased-violation-distance") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

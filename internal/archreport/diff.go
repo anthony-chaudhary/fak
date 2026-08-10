@@ -30,6 +30,14 @@ type TierGapChange struct {
 	Delta        int    `json:"delta"`
 }
 
+type ViolationDistanceChange struct {
+	From           string `json:"from"`
+	To             string `json:"to"`
+	BeforeDistance int    `json:"before_distance"`
+	AfterDistance  int    `json:"after_distance"`
+	Delta          int    `json:"delta"`
+}
+
 type FanInChange struct {
 	Leaf   string `json:"leaf"`
 	Before int    `json:"before"`
@@ -38,21 +46,22 @@ type FanInChange struct {
 }
 
 type ReportDiff struct {
-	Schema                   string          `json:"schema"`
-	Verdict                  string          `json:"verdict"`
-	AddedLeaves              []string        `json:"added_leaves,omitempty"`
-	RemovedLeaves            []string        `json:"removed_leaves,omitempty"`
-	TierChanges              []TierChange    `json:"tier_changes,omitempty"`
-	AddedEdges               []EdgeChange    `json:"added_edges,omitempty"`
-	RemovedEdges             []EdgeChange    `json:"removed_edges,omitempty"`
-	FanInChanges             []FanInChange   `json:"fan_in_changes,omitempty"`
-	TierGapChanges           []TierGapChange `json:"tier_gap_changes,omitempty"`
-	IntroducedViolationEdges []ViolationEdge `json:"introduced_violation_edges,omitempty"`
-	ResolvedViolationEdges   []ViolationEdge `json:"resolved_violation_edges,omitempty"`
-	IntroducedViolations     []string        `json:"introduced_violations,omitempty"` // Compatibility projection.
-	ResolvedViolations       []string        `json:"resolved_violations,omitempty"`   // Compatibility projection.
-	IntroducedDiagnostics    []Diagnostic    `json:"introduced_diagnostics,omitempty"`
-	ResolvedDiagnostics      []Diagnostic    `json:"resolved_diagnostics,omitempty"`
+	Schema                   string                    `json:"schema"`
+	Verdict                  string                    `json:"verdict"`
+	AddedLeaves              []string                  `json:"added_leaves,omitempty"`
+	RemovedLeaves            []string                  `json:"removed_leaves,omitempty"`
+	TierChanges              []TierChange              `json:"tier_changes,omitempty"`
+	AddedEdges               []EdgeChange              `json:"added_edges,omitempty"`
+	RemovedEdges             []EdgeChange              `json:"removed_edges,omitempty"`
+	FanInChanges             []FanInChange             `json:"fan_in_changes,omitempty"`
+	TierGapChanges           []TierGapChange           `json:"tier_gap_changes,omitempty"`
+	IntroducedViolationEdges []ViolationEdge           `json:"introduced_violation_edges,omitempty"`
+	ResolvedViolationEdges   []ViolationEdge           `json:"resolved_violation_edges,omitempty"`
+	ViolationDistanceChanges []ViolationDistanceChange `json:"violation_distance_changes,omitempty"`
+	IntroducedViolations     []string                  `json:"introduced_violations,omitempty"` // Compatibility projection.
+	ResolvedViolations       []string                  `json:"resolved_violations,omitempty"`   // Compatibility projection.
+	IntroducedDiagnostics    []Diagnostic              `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics      []Diagnostic              `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -124,8 +133,14 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedViolationEdges = append(out.ResolvedViolationEdges, edge)
 		}
 	}
+	for key, afterEdge := range afterViolations {
+		if beforeEdge, ok := beforeViolations[key]; ok && beforeEdge.TierDistance != afterEdge.TierDistance {
+			out.ViolationDistanceChanges = append(out.ViolationDistanceChanges, ViolationDistanceChange{From: afterEdge.From, To: afterEdge.To, BeforeDistance: beforeEdge.TierDistance, AfterDistance: afterEdge.TierDistance, Delta: afterEdge.TierDistance - beforeEdge.TierDistance})
+		}
+	}
 	sortViolationEdges(out.IntroducedViolationEdges)
 	sortViolationEdges(out.ResolvedViolationEdges)
+	sortViolationDistanceChanges(out.ViolationDistanceChanges)
 	out.IntroducedViolations = violationStrings(out.IntroducedViolationEdges)
 	out.ResolvedViolations = violationStrings(out.ResolvedViolationEdges)
 	sort.Strings(out.AddedLeaves)
@@ -137,7 +152,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -247,4 +262,36 @@ func hasIncreasedTierGap(changes []TierGapChange) bool {
 		}
 	}
 	return false
+}
+
+func hasIncreasedViolationDistance(changes []ViolationDistanceChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func sortViolationDistanceChanges(changes []ViolationDistanceChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		iGrowth, jGrowth := changes[i].Delta > 0, changes[j].Delta > 0
+		if iGrowth != jGrowth {
+			return iGrowth
+		}
+		iMagnitude, jMagnitude := changes[i].Delta, changes[j].Delta
+		if iMagnitude < 0 {
+			iMagnitude = -iMagnitude
+		}
+		if jMagnitude < 0 {
+			jMagnitude = -jMagnitude
+		}
+		if iMagnitude != jMagnitude {
+			return iMagnitude > jMagnitude
+		}
+		if changes[i].From != changes[j].From {
+			return changes[i].From < changes[j].From
+		}
+		return changes[i].To < changes[j].To
+	})
 }
