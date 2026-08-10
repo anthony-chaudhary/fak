@@ -55,12 +55,20 @@ type BlastHotspot struct {
 	MaxHops     int    `json:"max_hops"`
 }
 
+type LateralCriticalPair struct {
+	Left  string `json:"left"`
+	Right string `json:"right"`
+	Cut   int    `json:"cut"`
+}
+
 type LateralBiconnectedBlock struct {
-	Tier        int      `json:"tier"`
-	TierName    string   `json:"tier_name"`
-	Members     []string `json:"members"`
-	MemberCount int      `json:"member_count"`
-	EdgeCount   int      `json:"edge_count"`
+	Tier          int                   `json:"tier"`
+	TierName      string                `json:"tier_name"`
+	Members       []string              `json:"members"`
+	MemberCount   int                   `json:"member_count"`
+	EdgeCount     int                   `json:"edge_count"`
+	MinEdgeCut    int                   `json:"min_edge_cut"`
+	CriticalPairs []LateralCriticalPair `json:"critical_pairs"`
 }
 
 type LateralArticulationPoint struct {
@@ -373,6 +381,88 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	return report, nil
 }
 
+func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, []LateralCriticalPair) {
+	memberSet := map[string]struct{}{}
+	for _, member := range members {
+		memberSet[member] = struct{}{}
+	}
+	minCut := -1
+	var pairs []LateralCriticalPair
+	for i := 0; i < len(members); i++ {
+		for j := i + 1; j < len(members); j++ {
+			cut := unitEdgeMaxFlow(members[i], members[j], edges, memberSet)
+			if minCut < 0 || cut < minCut {
+				minCut = cut
+				pairs = nil
+			}
+			if cut == minCut {
+				pairs = append(pairs, LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut})
+			}
+		}
+	}
+	return minCut, pairs
+}
+func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members map[string]struct{}) int {
+	capacity := map[string]map[string]int{}
+	for _, edge := range edges {
+		u, v := edge[0], edge[1]
+		if _, ok := members[u]; !ok {
+			continue
+		}
+		if _, ok := members[v]; !ok {
+			continue
+		}
+		if capacity[u] == nil {
+			capacity[u] = map[string]int{}
+		}
+		if capacity[v] == nil {
+			capacity[v] = map[string]int{}
+		}
+		capacity[u][v] = 1
+		capacity[v][u] = 1
+	}
+	flow := 0
+	for {
+		parent := map[string]string{source: ""}
+		queue := []string{source}
+		for len(queue) > 0 {
+			u := queue[0]
+			queue = queue[1:]
+			neighbors := make([]string, 0, len(capacity[u]))
+			for v, c := range capacity[u] {
+				if c > 0 {
+					neighbors = append(neighbors, v)
+				}
+			}
+			sort.Strings(neighbors)
+			for _, v := range neighbors {
+				if _, ok := parent[v]; ok {
+					continue
+				}
+				parent[v] = u
+				queue = append(queue, v)
+				if v == sink {
+					break
+				}
+			}
+			if _, ok := parent[sink]; ok {
+				break
+			}
+		}
+		if _, ok := parent[sink]; !ok {
+			break
+		}
+		for v := sink; v != source; {
+			u := parent[v]
+			capacity[u][v]--
+			capacity[v][u]++
+			v = u
+		}
+		flow++
+	}
+	return flow
+}
+
 func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComponent) []LateralBiconnectedBlock {
 	adjacency := map[string][]string{}
 	undirected := map[string][2]string{}
@@ -477,7 +567,8 @@ func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComp
 			}
 		}
 		tier := tierByMember[members[0]]
-		out = append(out, LateralBiconnectedBlock{Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount})
+		minCut, criticalPairs := blockEdgeConnectivity(members, undirected)
+		out = append(out, LateralBiconnectedBlock{Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount, MinEdgeCut: minCut, CriticalPairs: criticalPairs})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].MemberCount != out[j].MemberCount {
@@ -485,6 +576,9 @@ func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComp
 		}
 		if out[i].EdgeCount != out[j].EdgeCount {
 			return out[i].EdgeCount > out[j].EdgeCount
+		}
+		if out[i].MinEdgeCut != out[j].MinEdgeCut {
+			return out[i].MinEdgeCut > out[j].MinEdgeCut
 		}
 		if out[i].Tier != out[j].Tier {
 			return out[i].Tier < out[j].Tier

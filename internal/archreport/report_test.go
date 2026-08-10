@@ -10,6 +10,30 @@ import (
 	"testing"
 )
 
+func TestLateralBlockEdgeConnectivityDistinguishesCycleAndClique(t *testing.T) {
+	members := []string{"a", "b", "c", "d"}
+	cycle := map[string][2]string{"ab": {"a", "b"}, "bc": {"b", "c"}, "cd": {"c", "d"}, "ad": {"a", "d"}}
+	cut, pairs := blockEdgeConnectivity(members, cycle)
+	if cut != 2 || len(pairs) != 6 {
+		t.Fatalf("cycle cut=%d pairs=%+v", cut, pairs)
+	}
+	clique := map[string][2]string{}
+	for i := 0; i < len(members); i++ {
+		for j := i + 1; j < len(members); j++ {
+			clique[members[i]+members[j]] = [2]string{members[i], members[j]}
+		}
+	}
+	cut, pairs = blockEdgeConnectivity(members, clique)
+	if cut != 3 || len(pairs) != 6 {
+		t.Fatalf("clique cut=%d pairs=%+v", cut, pairs)
+	}
+	clique["duplicate"] = [2]string{"b", "a"}
+	cut, _ = blockEdgeConnectivity(members, clique)
+	if cut != 3 {
+		t.Fatalf("duplicate orientation inflated cut=%d", cut)
+	}
+}
+
 func TestAnalyzeDerivesLateralBiconnectedBlocks(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {
@@ -50,7 +74,10 @@ import _ "github.com/anthony-chaudhary/fak/internal/z"
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3}, {Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3}}
+	want := []LateralBiconnectedBlock{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2}, {Left: "a", Right: "c", Cut: 2}, {Left: "b", Right: "c", Cut: 2}}},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: []LateralCriticalPair{{Left: "c", Right: "d", Cut: 2}, {Left: "c", Right: "e", Cut: 2}, {Left: "d", Right: "e", Cut: 2}}},
+	}
 	if !reflect.DeepEqual(r.LateralBiconnectedBlocks, want) {
 		t.Fatalf("blocks=%+v want=%+v", r.LateralBiconnectedBlocks, want)
 	}

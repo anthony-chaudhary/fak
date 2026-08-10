@@ -154,7 +154,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	if len(report.LateralBiconnectedBlocks) > 0 {
 		fmt.Fprintln(stdout, "  lateral biconnected blocks (single-package resilient):")
 		for _, block := range report.LateralBiconnectedBlocks {
-			fmt.Fprintf(stdout, "    tier=%s members=%v edges=%d\n", block.TierName, block.Members, block.EdgeCount)
+			fmt.Fprintf(stdout, "    tier=%s members=%v edges=%d edge-connectivity=%d critical-pairs=%d\n", block.TierName, block.Members, block.EdgeCount, block.MinEdgeCut, len(block.CriticalPairs))
 		}
 	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {
