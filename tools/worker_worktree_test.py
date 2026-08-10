@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -104,6 +105,93 @@ class WorktreeEnvTest(unittest.TestCase):
         self.assertEqual(env["FLEET_WORKER_WORKTREE"], str(wt))
         # The base env is preserved, not dropped.
         self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_opt_in_warm_seeds_private_gocache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            shared = root / "shared-cache"
+            entry = shared / "ab" / "content-a"
+            entry.parent.mkdir(parents=True)
+            entry.write_bytes(b"warm")
+            metadata = shared / "trim.txt"
+            metadata.write_bytes(b"shared-metadata")
+            wt = root / "worker"
+
+            env = mod.worktree_env({
+                "GOCACHE": str(shared),
+                mod.WARM_GOCACHE_ENV: "1",
+            }, wt)
+            private_entry = Path(env["GOCACHE"]) / "ab" / "content-a"
+            self.assertEqual(private_entry.read_bytes(), b"warm")
+            self.assertNotEqual(Path(env["GOCACHE"]), shared)
+            private_metadata = Path(env["GOCACHE"]) / "trim.txt"
+            private_metadata.write_bytes(b"worker-metadata")
+            self.assertEqual(metadata.read_bytes(), b"shared-metadata")
+
+            # Go publishes replacements by rename/unlink, rather than mutating a
+            # content-addressed entry.  Prove private publication cannot poison
+            # the warm base even when the seed used a hardlink.
+            private_entry.unlink()
+            private_entry.write_bytes(b"worker-only")
+            self.assertEqual(entry.read_bytes(), b"warm")
+
+    def test_warm_seed_resolves_go_default_when_env_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            shared = root / "go-default-cache"
+            entry = shared / "cd" / "content-b"
+            entry.parent.mkdir(parents=True)
+            entry.write_bytes(b"default-warm")
+            wt = root / "worker"
+            completed = subprocess.CompletedProcess(
+                ["go", "env", "GOCACHE"], 0, stdout=str(shared) + "\n", stderr="")
+            with mock.patch.object(mod.subprocess, "run", return_value=completed) as run:
+                env = mod.worktree_env({mod.WARM_GOCACHE_ENV: "yes"}, wt)
+            self.assertEqual(
+                (Path(env["GOCACHE"]) / "cd" / "content-b").read_bytes(),
+                b"default-warm",
+            )
+            run.assert_called_once()
+
+    @unittest.skipUnless(shutil.which("go"), "Go toolchain required")
+    def test_warm_seed_reuses_compiled_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module = root / "module"
+            package = module / "warm"
+            package.mkdir(parents=True)
+            (module / "go.mod").write_text("module example.com/warm\n\ngo 1.26\n")
+            (package / "warm.go").write_text(
+                "package warm\n\nfunc Answer() int { return 42 }\n")
+            shared = root / "shared-cache"
+            subprocess.run(
+                ["go", "build", "./warm"], cwd=module,
+                env={**os.environ, "GOCACHE": str(shared)},
+                check=True, capture_output=True, text=True,
+            )
+
+            wt = root / "worker"
+            env = mod.worktree_env({
+                **os.environ,
+                "GOCACHE": str(shared),
+                mod.WARM_GOCACHE_ENV: "1",
+            }, wt)
+            Path(env["GOTMPDIR"]).mkdir(parents=True)
+            result = subprocess.run(
+                ["go", "build", "-x", "./warm"], cwd=module, env=env,
+                check=True, capture_output=True, text=True,
+            )
+            self.assertNotIn("/compile", result.stderr.replace("\\", "/"))
+            self.assertNotIn("compile.exe", result.stderr.lower())
+
+    def test_warm_seed_failure_is_fail_open(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            wt = Path(td) / "worker"
+            env = mod.worktree_env({
+                "GOCACHE": str(Path(td) / "missing"),
+                mod.WARM_GOCACHE_ENV: "true",
+            }, wt)
+            self.assertEqual(env["GOCACHE"], str(wt / ".gocache"))
 
     def test_does_not_mutate_base_env(self) -> None:
         base = {"PATH": "/usr/bin"}

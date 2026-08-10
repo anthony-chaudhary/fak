@@ -88,6 +88,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -99,6 +101,7 @@ from typing import Any, Callable, Sequence
 # disposable; we add our own marker segment so its --sweep-disposable reaps a
 # leaked worker worktree too.
 WORKTREE_ROOT_ENV = "FLEET_WORKER_WORKTREE_ROOT"
+WARM_GOCACHE_ENV = "FAK_DISPATCH_WORKTREE_WARM_GOCACHE"
 WORKTREE_MARKER = "fak-worker-wt"
 # The gate that turns per-worker worktree isolation ON, shared verbatim with the Go
 # spine: cmd/fak/dispatch_tick_worker.go:workerWorktreeEnabled reads the SAME env var
@@ -198,6 +201,41 @@ def worktree_path(lane: str, key: str, *, root: Path | None = None) -> Path:
     return Path(base) / worktree_dir_name(lane, key)
 
 
+def _warm_gocache_enabled(env: dict[str, str]) -> bool:
+    return env.get(WARM_GOCACHE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _seed_worker_gocache(source: Path, target: Path) -> None:
+    """Best-effort warm seed: hardlink immutable cache entries, copy if needed.
+
+    Go's build cache publishes content-addressed entries atomically.  Linking those
+    existing entries gives a worker warm reads without sharing its writable cache
+    namespace; later worker misses and cache maintenance stay under ``target``.
+    Any racing/locked entry is skipped so cache warming can never wedge dispatch.
+    """
+    if not source.is_dir() or source.resolve() == target.resolve():
+        return
+
+    def link_or_copy(src: str, dst: str) -> str:
+        # Only two-hex shard entries are immutable cache objects.  Metadata such
+        # as trim.txt remains a private copy because Go may rewrite it in place.
+        immutable_entry = bool(re.fullmatch(r"[0-9a-f]{2}", Path(src).parent.name))
+        if immutable_entry:
+            try:
+                os.link(src, dst)
+                return dst
+            except OSError:
+                pass
+        return shutil.copy2(src, dst)
+
+    try:
+        shutil.copytree(source, target, dirs_exist_ok=True, copy_function=link_or_copy)
+    except OSError:
+        # A live Go cache may trim entries while it is being walked.  A partial seed
+        # is still useful; the worker's ordinary cache miss path fills the rest.
+        pass
+
+
 def worktree_env(base_env: dict[str, str], wt_dir: Path) -> dict[str, str]:
     """The child env that isolates a worker's BUILD to its own worktree, on top of
     whatever ``base_env`` the dispatcher already composed (``child_env`` +
@@ -206,14 +244,31 @@ def worktree_env(base_env: dict[str, str], wt_dir: Path) -> dict[str, str]:
     Pointing ``GOCACHE`` and ``GOTMPDIR`` INSIDE the worktree is what makes "a
     broken build in one worker's worktree does not red another's" true: each
     worker compiles into its own cache, so a half-built package can never poison a
-    sibling's ``go build`` / ``make ci``. ``DISPATCH_WORKSPACE`` is repointed at the
+    sibling's ``go build`` / ``make ci``.  When
+    ``FAK_DISPATCH_WORKTREE_WARM_GOCACHE=1``, immutable entries from the incoming
+    ``GOCACHE`` (or Go's default cache) are best-effort seeded into that private
+    cache before launch; misses and all later writes remain private.
+    ``DISPATCH_WORKSPACE`` is repointed at the
     worktree so a worker that reads it (the self-describing dispatch contract)
     operates on its isolated tree, not the shared trunk."""
     env = dict(base_env)
+    worker_cache = Path(wt_dir) / ".gocache"
+    if _warm_gocache_enabled(env):
+        source = env.get("GOCACHE", "").strip()
+        if not source:
+            try:
+                source = subprocess.run(
+                    ["go", "env", "GOCACHE"], cwd=wt_dir.parent,
+                    env=env, capture_output=True, text=True, check=True,
+                ).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                source = ""
+        if source:
+            _seed_worker_gocache(Path(source), worker_cache)
     wt = str(wt_dir)
     env["DISPATCH_WORKSPACE"] = wt
     env["FLEET_WORKER_WORKTREE"] = wt
-    env["GOCACHE"] = str(Path(wt_dir) / ".gocache")
+    env["GOCACHE"] = str(worker_cache)
     env["GOTMPDIR"] = str(Path(wt_dir) / ".gotmp")
     return env
 
