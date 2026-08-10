@@ -1472,6 +1472,11 @@
           "category": "incidental",
           "reason": "offline benchmark report DTO, not a session runtime",
           "token": "HeldScheduleReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture-modeled benchmark cost field; not a new scheduler runtime concept.",
+          "token": "SchedulerOverhead"
         }
       ],
       "id": "session-runtime",
@@ -1534,7 +1539,8 @@
         "topsessions",
         "totalslots",
         "tuisessionrow",
-        "wipPeerCheckpointSessions"
+        "wipPeerCheckpointSessions",
+        "SchedulerOverhead"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -3301,10 +3307,22 @@
           "category": "incidental",
           "reason": "benchmark aggregate timing field, not a product decision",
           "token": "total_decision_overhead_ms"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark report rows describing modeled winner regions; not a reusable decision primitive.",
+          "token": "DecisionBoundary"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark timing delta field, not a product decision",
+          "token": "AddedDecisionOverheadMS"
         }
       ],
       "id": "decision",
       "ignore": [
+        "AddedDecisionOverheadMS",
+        "DecisionBoundary",
         "DecisionMS",
         "DecisionSamples",
         "EvaluateHeldSchedule",
