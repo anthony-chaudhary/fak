@@ -481,9 +481,33 @@ func TestArchitectureLateralCouplingPolicyIgnoresResolutions(t *testing.T) {
 	}
 }
 
+func TestArchitectureLateralBridgePolicyGatesIntroducedAndIncreased(t *testing.T) {
+	tests := []archreport.ReportDiff{
+		{IntroducedLateralBridges: []archreport.LateralBridge{{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", CouplingPairs: 6}}},
+		{LateralBridgeChanges: []archreport.LateralBridgeChange{{Left: "m", Right: "n", BeforeCouplingPairs: 2, AfterCouplingPairs: 6, Delta: 4}}},
+	}
+	for _, diff := range tests {
+		var out, errOut bytes.Buffer
+		if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-or-increased-lateral-bridges"); code != 3 {
+			t.Fatalf("code=%d output=%s", code, out.String())
+		}
+		if !strings.Contains(out.String(), "remove the articulation bridge") {
+			t.Fatalf("output=%q", out.String())
+		}
+	}
+}
+
+func TestArchitectureLateralBridgePolicyIgnoresResolvedAndDecreased(t *testing.T) {
+	diff := archreport.ReportDiff{ResolvedLateralBridges: []archreport.LateralBridge{{Left: "a", Right: "b"}}, LateralBridgeChanges: []archreport.LateralBridgeChange{{Left: "m", Right: "n", Delta: -2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-or-increased-lateral-bridges"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, or introduced-lateral-couplings") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, or introduced-or-increased-lateral-bridges") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

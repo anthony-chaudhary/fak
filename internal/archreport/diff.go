@@ -60,6 +60,20 @@ type BlastImpact struct {
 	Path      []string `json:"path"`
 }
 
+type LateralBridgeChange struct {
+	Tier                int      `json:"tier"`
+	TierName            string   `json:"tier_name"`
+	Left                string   `json:"left"`
+	Right               string   `json:"right"`
+	BeforeCouplingPairs int      `json:"before_coupling_pairs"`
+	AfterCouplingPairs  int      `json:"after_coupling_pairs"`
+	Delta               int      `json:"delta"`
+	BeforeLeftSide      []string `json:"before_left_side"`
+	BeforeRightSide     []string `json:"before_right_side"`
+	AfterLeftSide       []string `json:"after_left_side"`
+	AfterRightSide      []string `json:"after_right_side"`
+}
+
 type LateralCoupling struct {
 	Tier     int    `json:"tier"`
 	TierName string `json:"tier_name"`
@@ -89,6 +103,9 @@ type ReportDiff struct {
 	ResolvedTypedEdges         []ArchitectureEdge        `json:"resolved_typed_edges,omitempty"`
 	IntroducedLateralCouplings []LateralCoupling         `json:"introduced_lateral_couplings,omitempty"`
 	ResolvedLateralCouplings   []LateralCoupling         `json:"resolved_lateral_couplings,omitempty"`
+	IntroducedLateralBridges   []LateralBridge           `json:"introduced_lateral_bridges,omitempty"`
+	ResolvedLateralBridges     []LateralBridge           `json:"resolved_lateral_bridges,omitempty"`
+	LateralBridgeChanges       []LateralBridgeChange     `json:"lateral_bridge_changes,omitempty"`
 	FanInChanges               []FanInChange             `json:"fan_in_changes,omitempty"`
 	BlastRadiusChanges         []BlastRadiusChange       `json:"blast_radius_changes,omitempty"`
 	IntroducedBlastImpacts     []BlastImpact             `json:"introduced_blast_impacts,omitempty"`
@@ -156,6 +173,19 @@ func Diff(before, after Report) ReportDiff {
 	for key, coupling := range beforeCouplings {
 		if _, ok := afterCouplings[key]; !ok {
 			out.ResolvedLateralCouplings = append(out.ResolvedLateralCouplings, coupling)
+		}
+	}
+	beforeBridges, afterBridges := lateralBridgeSet(before), lateralBridgeSet(after)
+	for key, bridge := range afterBridges {
+		if beforeBridge, ok := beforeBridges[key]; !ok {
+			out.IntroducedLateralBridges = append(out.IntroducedLateralBridges, bridge)
+		} else if beforeBridge.CouplingPairs != bridge.CouplingPairs {
+			out.LateralBridgeChanges = append(out.LateralBridgeChanges, LateralBridgeChange{Tier: bridge.Tier, TierName: bridge.TierName, Left: bridge.Left, Right: bridge.Right, BeforeCouplingPairs: beforeBridge.CouplingPairs, AfterCouplingPairs: bridge.CouplingPairs, Delta: bridge.CouplingPairs - beforeBridge.CouplingPairs, BeforeLeftSide: beforeBridge.LeftSide, BeforeRightSide: beforeBridge.RightSide, AfterLeftSide: bridge.LeftSide, AfterRightSide: bridge.RightSide})
+		}
+	}
+	for key, bridge := range beforeBridges {
+		if _, ok := afterBridges[key]; !ok {
+			out.ResolvedLateralBridges = append(out.ResolvedLateralBridges, bridge)
 		}
 	}
 	for name, a := range afterLeaves {
@@ -236,6 +266,9 @@ func Diff(before, after Report) ReportDiff {
 	sortArchitectureEdges(out.ResolvedTypedEdges)
 	sortLateralCouplings(out.IntroducedLateralCouplings)
 	sortLateralCouplings(out.ResolvedLateralCouplings)
+	sortLateralBridges(out.IntroducedLateralBridges)
+	sortLateralBridges(out.ResolvedLateralBridges)
+	sortLateralBridgeChanges(out.LateralBridgeChanges)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
@@ -244,7 +277,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -268,6 +301,63 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+func lateralBridgeSet(r Report) map[string]LateralBridge {
+	out := make(map[string]LateralBridge, len(r.LateralBridges))
+	for _, bridge := range r.LateralBridges {
+		out[fmt.Sprintf("%d\x00%s\x00%s", bridge.Tier, bridge.Left, bridge.Right)] = bridge
+	}
+	return out
+}
+
+func sortLateralBridges(bridges []LateralBridge) {
+	sort.Slice(bridges, func(i, j int) bool {
+		if bridges[i].CouplingPairs != bridges[j].CouplingPairs {
+			return bridges[i].CouplingPairs > bridges[j].CouplingPairs
+		}
+		if bridges[i].Tier != bridges[j].Tier {
+			return bridges[i].Tier < bridges[j].Tier
+		}
+		if bridges[i].Left != bridges[j].Left {
+			return bridges[i].Left < bridges[j].Left
+		}
+		return bridges[i].Right < bridges[j].Right
+	})
+}
+
+func sortLateralBridgeChanges(changes []LateralBridgeChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if (changes[i].Delta > 0) != (changes[j].Delta > 0) {
+			return changes[i].Delta > 0
+		}
+		iMagnitude, jMagnitude := changes[i].Delta, changes[j].Delta
+		if iMagnitude < 0 {
+			iMagnitude = -iMagnitude
+		}
+		if jMagnitude < 0 {
+			jMagnitude = -jMagnitude
+		}
+		if iMagnitude != jMagnitude {
+			return iMagnitude > jMagnitude
+		}
+		if changes[i].Tier != changes[j].Tier {
+			return changes[i].Tier < changes[j].Tier
+		}
+		if changes[i].Left != changes[j].Left {
+			return changes[i].Left < changes[j].Left
+		}
+		return changes[i].Right < changes[j].Right
+	})
+}
+
+func hasIncreasedLateralBridgeImpact(changes []LateralBridgeChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func lateralCouplingSet(r Report) map[string]LateralCoupling {

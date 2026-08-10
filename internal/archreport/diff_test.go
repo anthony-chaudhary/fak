@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func TestDiffLateralBridgeChangesPreserveIdentityAndImpact(t *testing.T) {
+	introduced := LateralBridge{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", CouplingPairs: 6, LeftSide: []string{"a", "x"}, RightSide: []string{"b", "y", "z"}}
+	resolved := LateralBridge{Tier: 2, TierName: "foundation-composite", Left: "c", Right: "d", CouplingPairs: 2}
+	beforeStable := LateralBridge{Tier: 3, TierName: "mechanism", Left: "m", Right: "n", CouplingPairs: 2, LeftSide: []string{"m"}, RightSide: []string{"n", "o"}}
+	afterStable := LateralBridge{Tier: 3, TierName: "mechanism", Left: "m", Right: "n", CouplingPairs: 6, LeftSide: []string{"m", "p"}, RightSide: []string{"n", "o", "q"}}
+	diff := Diff(Report{LateralBridges: []LateralBridge{resolved, beforeStable}}, Report{LateralBridges: []LateralBridge{introduced, afterStable}})
+	if !reflect.DeepEqual(diff.IntroducedLateralBridges, []LateralBridge{introduced}) || !reflect.DeepEqual(diff.ResolvedLateralBridges, []LateralBridge{resolved}) {
+		t.Fatalf("diff=%+v", diff)
+	}
+	wantChange := LateralBridgeChange{Tier: 3, TierName: "mechanism", Left: "m", Right: "n", BeforeCouplingPairs: 2, AfterCouplingPairs: 6, Delta: 4, BeforeLeftSide: beforeStable.LeftSide, BeforeRightSide: beforeStable.RightSide, AfterLeftSide: afterStable.LeftSide, AfterRightSide: afterStable.RightSide}
+	if !reflect.DeepEqual(diff.LateralBridgeChanges, []LateralBridgeChange{wantChange}) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffResolvedAndDecreasedLateralBridgesRemainClean(t *testing.T) {
+	before := Report{LateralBridges: []LateralBridge{{Tier: 2, Left: "a", Right: "b", CouplingPairs: 6}, {Tier: 2, Left: "c", Right: "d", CouplingPairs: 2}}}
+	after := Report{LateralBridges: []LateralBridge{{Tier: 2, Left: "a", Right: "b", CouplingPairs: 2}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.ResolvedLateralBridges) != 1 || len(diff.LateralBridgeChanges) != 1 || diff.LateralBridgeChanges[0].Delta != -4 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralCouplingPairsRepresentMergeAndSplit(t *testing.T) {
 	before := Report{LateralComponents: []LateralComponent{
 		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b"}},
