@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+func TestDiffLateralEdgeConnectivityChangesExposeStablePairCutDrift(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 3}, {Left: "a", Right: "c", Cut: 2}}}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2}, {Left: "a", Right: "c", Cut: 3}}}}}
+	diff := Diff(before, after)
+	want := []LateralEdgeConnectivityChange{{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", BeforeCut: 3, AfterCut: 2, Delta: -1}, {Tier: 2, TierName: "foundation-composite", Left: "a", Right: "c", BeforeCut: 2, AfterCut: 3, Delta: 1}}
+	if !reflect.DeepEqual(diff.LateralEdgeConnectivityChanges, want) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+func TestDiffLateralEdgeConnectivityIncreaseRemainsClean(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2}}}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 3}}}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.LateralEdgeConnectivityChanges) != 1 || diff.LateralEdgeConnectivityChanges[0].Delta != 1 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralResilientPairsExposeBlockGainAndLoss(t *testing.T) {
 	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}}, {Tier: 3, TierName: "mechanism", Members: []string{"x", "y", "z"}}}}
 	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}}, {Tier: 3, TierName: "mechanism", Members: []string{"x", "y"}}}}

@@ -593,9 +593,29 @@ func TestArchitectureLateralResilientPairPolicyIgnoresGain(t *testing.T) {
 	}
 }
 
+func TestArchitectureDecreasedLateralEdgeConnectivityPolicy(t *testing.T) {
+	diff := archreport.ReportDiff{LateralEdgeConnectivityChanges: []archreport.LateralEdgeConnectivityChange{{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", BeforeCut: 3, AfterCut: 2, Delta: -1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"lateral-edge-connectivity tier=foundation-composite(2) a <=> b cut 3 -> 2 (-1)", "edge-disjoint same-tier path"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+func TestArchitectureDecreasedLateralEdgeConnectivityPolicyIgnoresGain(t *testing.T) {
+	diff := archreport.ReportDiff{LateralEdgeConnectivityChanges: []archreport.LateralEdgeConnectivityChange{{Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity"); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, or resolved-lateral-resilient-pairs") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, or decreased-lateral-edge-connectivity") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

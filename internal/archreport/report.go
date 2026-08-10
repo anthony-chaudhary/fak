@@ -69,6 +69,7 @@ type LateralBiconnectedBlock struct {
 	EdgeCount     int                   `json:"edge_count"`
 	MinEdgeCut    int                   `json:"min_edge_cut"`
 	CriticalPairs []LateralCriticalPair `json:"critical_pairs"`
+	PairCuts      []LateralCriticalPair `json:"pair_cuts"`
 }
 
 type LateralArticulationPoint struct {
@@ -381,16 +382,18 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	return report, nil
 }
 
-func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, []LateralCriticalPair) {
+func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, []LateralCriticalPair, []LateralCriticalPair) {
 	memberSet := map[string]struct{}{}
 	for _, member := range members {
 		memberSet[member] = struct{}{}
 	}
 	minCut := -1
 	var pairs []LateralCriticalPair
+	var allPairs []LateralCriticalPair
 	for i := 0; i < len(members); i++ {
 		for j := i + 1; j < len(members); j++ {
 			cut := unitEdgeMaxFlow(members[i], members[j], edges, memberSet)
+			allPairs = append(allPairs, LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut})
 			if minCut < 0 || cut < minCut {
 				minCut = cut
 				pairs = nil
@@ -400,7 +403,7 @@ func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, [
 			}
 		}
 	}
-	return minCut, pairs
+	return minCut, pairs, allPairs
 }
 func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members map[string]struct{}) int {
 	capacity := map[string]map[string]int{}
@@ -567,8 +570,8 @@ func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComp
 			}
 		}
 		tier := tierByMember[members[0]]
-		minCut, criticalPairs := blockEdgeConnectivity(members, undirected)
-		out = append(out, LateralBiconnectedBlock{Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount, MinEdgeCut: minCut, CriticalPairs: criticalPairs})
+		minCut, criticalPairs, pairCuts := blockEdgeConnectivity(members, undirected)
+		out = append(out, LateralBiconnectedBlock{Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount, MinEdgeCut: minCut, CriticalPairs: criticalPairs, PairCuts: pairCuts})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].MemberCount != out[j].MemberCount {

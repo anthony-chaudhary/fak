@@ -88,6 +88,16 @@ type LateralBridgeChange struct {
 	AfterRightSide      []string `json:"after_right_side"`
 }
 
+type LateralEdgeConnectivityChange struct {
+	Tier      int    `json:"tier"`
+	TierName  string `json:"tier_name"`
+	Left      string `json:"left"`
+	Right     string `json:"right"`
+	BeforeCut int    `json:"before_cut"`
+	AfterCut  int    `json:"after_cut"`
+	Delta     int    `json:"delta"`
+}
+
 type LateralResilientPair struct {
 	Tier     int    `json:"tier"`
 	TierName string `json:"tier_name"`
@@ -132,6 +142,7 @@ type ReportDiff struct {
 	LateralArticulationPointChanges     []LateralArticulationPointChange `json:"lateral_articulation_point_changes,omitempty"`
 	IntroducedLateralResilientPairs     []LateralResilientPair           `json:"introduced_lateral_resilient_pairs,omitempty"`
 	ResolvedLateralResilientPairs       []LateralResilientPair           `json:"resolved_lateral_resilient_pairs,omitempty"`
+	LateralEdgeConnectivityChanges      []LateralEdgeConnectivityChange  `json:"lateral_edge_connectivity_changes,omitempty"`
 	FanInChanges                        []FanInChange                    `json:"fan_in_changes,omitempty"`
 	BlastRadiusChanges                  []BlastRadiusChange              `json:"blast_radius_changes,omitempty"`
 	IntroducedBlastImpacts              []BlastImpact                    `json:"introduced_blast_impacts,omitempty"`
@@ -238,6 +249,12 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedLateralResilientPairs = append(out.ResolvedLateralResilientPairs, pair)
 		}
 	}
+	beforeCuts, afterCuts := lateralPairCutSet(before), lateralPairCutSet(after)
+	for key, afterCut := range afterCuts {
+		if beforeCut, ok := beforeCuts[key]; ok && beforeCut.Cut != afterCut.Cut {
+			out.LateralEdgeConnectivityChanges = append(out.LateralEdgeConnectivityChanges, LateralEdgeConnectivityChange{Tier: afterCut.Tier, TierName: afterCut.TierName, Left: afterCut.Left, Right: afterCut.Right, BeforeCut: beforeCut.Cut, AfterCut: afterCut.Cut, Delta: afterCut.Cut - beforeCut.Cut})
+		}
+	}
 	for name, a := range afterLeaves {
 		beforeFanIn := 0
 		if b, ok := beforeLeaves[name]; ok {
@@ -324,6 +341,7 @@ func Diff(before, after Report) ReportDiff {
 	sortLateralArticulationPointChanges(out.LateralArticulationPointChanges)
 	sortLateralResilientPairs(out.IntroducedLateralResilientPairs)
 	sortLateralResilientPairs(out.ResolvedLateralResilientPairs)
+	sortLateralEdgeConnectivityChanges(out.LateralEdgeConnectivityChanges)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
@@ -332,7 +350,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -356,6 +374,57 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+type lateralPairCut struct {
+	Tier                  int
+	TierName, Left, Right string
+	Cut                   int
+}
+
+func lateralPairCutSet(r Report) map[string]lateralPairCut {
+	out := map[string]lateralPairCut{}
+	for _, block := range r.LateralBiconnectedBlocks {
+		for _, pair := range block.PairCuts {
+			key := fmt.Sprintf("%d\x00%s\x00%s", block.Tier, pair.Left, pair.Right)
+			if old, ok := out[key]; !ok || pair.Cut > old.Cut {
+				out[key] = lateralPairCut{block.Tier, block.TierName, pair.Left, pair.Right, pair.Cut}
+			}
+		}
+	}
+	return out
+}
+func sortLateralEdgeConnectivityChanges(c []LateralEdgeConnectivityChange) {
+	sort.Slice(c, func(i, j int) bool {
+		if (c[i].Delta < 0) != (c[j].Delta < 0) {
+			return c[i].Delta < 0
+		}
+		im, jm := c[i].Delta, c[j].Delta
+		if im < 0 {
+			im = -im
+		}
+		if jm < 0 {
+			jm = -jm
+		}
+		if im != jm {
+			return im > jm
+		}
+		if c[i].Tier != c[j].Tier {
+			return c[i].Tier < c[j].Tier
+		}
+		if c[i].Left != c[j].Left {
+			return c[i].Left < c[j].Left
+		}
+		return c[i].Right < c[j].Right
+	})
+}
+func hasDecreasedLateralEdgeConnectivity(c []LateralEdgeConnectivityChange) bool {
+	for _, x := range c {
+		if x.Delta < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func lateralResilientPairSet(r Report) map[string]LateralResilientPair {
