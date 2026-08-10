@@ -31,7 +31,6 @@ var scoreRoutes = map[string]func(argv []string){
 	"brittleness":         cmdBrittlenessScorecard,
 	"cache-health":        cmdCacheHealthScore,
 	"cachevalue-gate":     cmdCacheValueGateScore,
-	"catchup":             cmdCatchUpScore,
 	"code-quality":        cmdCodeQualityScore,
 	"conflation":          cmdConflationScorecard,
 	"concept-usage":       cmdConceptUsageScore,

@@ -89,6 +89,16 @@ gateway = ["internal/gateway/**"]
 	}
 }
 
+func TestCatchupExecutesThroughDevelopmentArtifact(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run(&out, &errOut, []string{"catchup", "--workspace", t.TempDir(), "--no-index", "--intake-behind", "3", "--intake-total", "10", "--json"}); code != 1 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"catchup_backlog": 3`) {
+		t.Fatalf("catchup did not execute through fak-dev:\n%s", out.String())
+	}
+}
+
 func TestBackendScaffoldExecutesThroughDevelopmentArtifact(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
