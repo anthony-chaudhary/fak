@@ -162,6 +162,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native trigram-postings literal search with exact line verification and short-query fallback is covered; regex candidate extraction and lexical similarity remain separate capability debt",
 	},
 	{
+		Leaf: "internal/codegraph", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"syntactic_go_call_graph_traversal"},
+		Reason:       "codegraph also exposes generic graph construction and BFS; syntactic multi-file function/method call graph construction plus forward/reverse path traversal is contracted together",
+	},
+	{
 		Leaf: "internal/codelint", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"go_syntax_validation"},
 		Reason:       "native standalone Go syntax validation with all-errors locations and no semantic false positives is covered; JSON, external language packs, registry routing, summaries, and LSP framing remain separate capability debt",
@@ -614,6 +619,21 @@ var contracts = []Contract{{
 			{Name: "Sourcegraph Search", Class: NextBest, Source: "https://sourcegraph.com/docs/code-search"},
 		},
 		Witness: "../../docs/benchmarks/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "syntactic_go_call_graph_traversal",
+		NativePath: "internal/codegraph/codegraph.go",
+		Workload:   "same two-file Go function/method source, exact node and direct-edge oracle, forward reach, reverse dependents, distances, and shortest paths across every arm",
+		Metrics:    []string{"node_precision", "node_recall", "edge_precision", "edge_recall", "forward_reach_accuracy", "reverse_reach_accuracy", "path_accuracy", "latency_ms", "throughput_source_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "network_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "go/ast direct-call scan", Class: TunedBaseline, Source: "internal/codegraph/compare.go"},
+			{Name: "golang.org/x/tools/go/callgraph", Class: NextBest, Source: "https://pkg.go.dev/golang.org/x/tools/go/callgraph"},
+			{Name: "gopls call hierarchy", Class: NextBest, Source: "https://go.dev/gopls/"},
+			{Name: "Go guru callers and callees", Class: NextBest, Source: "https://pkg.go.dev/golang.org/x/tools/cmd/guru"},
+			{Name: "CodeQL Go call graph", Class: NextBest, Source: "https://codeql.github.com/codeql-standard-libraries/go/semmle/go/CallGraph.qll/module.CallGraph.html"},
+			{Name: "SCIP Go code intelligence graph", Class: NextBest, Source: "https://github.com/sourcegraph/scip-go"},
+		},
+		Witness: "../../docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "go_syntax_validation",
