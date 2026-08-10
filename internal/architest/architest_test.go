@@ -401,6 +401,7 @@ var tier = map[string]int{
 	"fleetfreeze":      1, // operator freeze/dry-run gate: holds new spawns while allowing witness-close + status-refresh; stdlib-only, off the hot path.
 	"auditreason":      1, // closed vocabulary classifying commit-audit failures as transient (retryable) vs permanent unwitnessed claim; stdlib-only, off the hot path.
 	"commitissuelink":  1, // pure checker (#1812): flags a commit that carries this repo's ship-stamp trailer but whose subject omits a scannable #N, guessing the issue from a body Fixes/Closes/Resolves trailer when one exists; stdlib-only, off the hot path.
+	"committedtree":    2, // neutral committed git tree materialization shared by runtime and fak-dev; imports windowgate, no command ownership.
 	"unwitnessedclaim": 1, // pure checker (#1816): flags an open issue whose latest comment reads as a self-reported completion claim, rendering the missing-witness/recovery-action comment without closing the issue; stdlib-only, off the hot path.
 	"closebatch":       2, // pure batch planner (#1826): groups witnessed-closeable issues into dry-run batches, pricing each against mutationbudget.Guard and naming a rollback note; never closes an issue itself, off the hot path.
 	"skipledger":       2, // pure skip/select ledger fold (#1776): turns one dispatchorder.Result into per-candidate rows (issue, lane, reason, safety/capacity category, timestamp) for later rate-loss audit; imports only dispatchorder (tier 1), off the hot path.
