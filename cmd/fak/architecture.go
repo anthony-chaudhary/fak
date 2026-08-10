@@ -219,6 +219,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 					fmt.Fprintf(stdout, "      %s via=%v path=%s\n", seam.Dependency, seam.Dominators, strings.Join(seam.Path, " -> "))
 				}
 			}
+			if *leaf != "" && len(l.RedundantDependencies) > 0 {
+				fmt.Fprintln(stdout, "    redundant dependency edges:")
+				for _, redundant := range l.RedundantDependencies {
+					fmt.Fprintf(stdout, "      %s alternate=%s\n", redundant.Dependency, strings.Join(redundant.AlternatePath, " -> "))
+				}
+			}
 			if *leaf != "" && len(l.BlastPaths) > 0 {
 				fmt.Fprintln(stdout, "    blast paths:")
 				for _, path := range l.BlastPaths {

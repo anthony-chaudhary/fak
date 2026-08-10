@@ -59,6 +59,66 @@ import _ "github.com/anthony-chaudhary/fak/internal/mid"
 	}
 }
 
+func TestRedundantDependenciesExposeDeterministicAlternatePaths(t *testing.T) {
+	leaves := []Leaf{
+		{Name: "a", Dependencies: []string{"b", "c", "d", "z"}},
+		{Name: "b", Dependencies: []string{"d"}},
+		{Name: "c", Dependencies: []string{"d", "e"}},
+		{Name: "d", Dependencies: []string{"e"}},
+		{Name: "e", Dependencies: []string{"a"}},
+		{Name: "z"},
+	}
+	byName := map[string]int{"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "z": 5}
+	want := []RedundantDependency{
+		{Dependency: "d", AlternatePath: []string{"a", "b", "d"}},
+	}
+	for range 50 {
+		if got := redundantDependencies("a", leaves, byName); !reflect.DeepEqual(got, want) {
+			t.Fatalf("redundant dependencies=%v want=%v", got, want)
+		}
+	}
+}
+
+func TestAnalyzeRedundantDependenciesScopedParity(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":3,"b":2,"c":2,"d":1}
+var tierName=[]string{"root","primitive","foundation","mechanism"}
+`)
+	writeArchitectureFixture(t, root, "internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/c"; _ "github.com/anthony-chaudhary/fak/internal/d")
+`)
+	writeArchitectureFixture(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	writeArchitectureFixture(t, root, "internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	writeArchitectureFixture(t, root, "internal/d/d.go", "package d\n")
+
+	whole, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := Analyze(root, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected Leaf
+	for _, leaf := range whole.Leaves {
+		if leaf.Name == "a" {
+			selected = leaf
+		}
+	}
+	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0], selected) {
+		t.Fatalf("scoped leaf=%+v whole leaf=%+v", scoped.Leaves, selected)
+	}
+	want := []RedundantDependency{{Dependency: "d", AlternatePath: []string{"a", "b", "d"}}}
+	if !reflect.DeepEqual(selected.RedundantDependencies, want) {
+		t.Fatalf("redundant dependencies=%v want=%v", selected.RedundantDependencies, want)
+	}
+}
+
 func TestDependencyDominatorsDistinguishMandatoryFromOptionalPathNodes(t *testing.T) {
 	leaves := []Leaf{
 		{Name: "a", Dependencies: []string{"b", "c"}},

@@ -36,6 +36,7 @@ type Leaf struct {
 	DependencyDepth        int                   `json:"dependency_depth"`
 	DependencyPaths        []DependencyPath      `json:"dependency_paths"`
 	DependencyDominators   []DependencyDominator `json:"dependency_dominators"`
+	RedundantDependencies  []RedundantDependency `json:"redundant_dependencies"`
 	Dependents             []string              `json:"dependents,omitempty"`
 	TransitiveDependents   []string              `json:"transitive_dependents"`
 	BlastRadius            int                   `json:"blast_radius"`
@@ -53,6 +54,11 @@ type DependencyDominator struct {
 type DependencyPath struct {
 	Dependency string   `json:"dependency"`
 	Path       []string `json:"path"`
+}
+
+type RedundantDependency struct {
+	Dependency    string   `json:"dependency"`
+	AlternatePath []string `json:"alternate_path"`
 }
 
 type BlastPath struct {
@@ -347,6 +353,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		sort.Strings(allLeaves[i].Dependents)
 		allLeaves[i].DependencyPaths = dependencyPaths(allLeaves[i].Name, allLeaves, byName)
 		allLeaves[i].DependencyDominators = dependencyDominators(allLeaves[i].Name, allLeaves, byName, allLeaves[i].DependencyPaths)
+		allLeaves[i].RedundantDependencies = redundantDependencies(allLeaves[i].Name, allLeaves, byName)
 		allLeaves[i].TransitiveDependencies = make([]string, len(allLeaves[i].DependencyPaths))
 		for j, path := range allLeaves[i].DependencyPaths {
 			allLeaves[i].TransitiveDependencies[j] = path.Dependency
@@ -1203,6 +1210,43 @@ func lateralComponents(edges []ArchitectureEdge, tiers map[string]int, names []s
 		return strings.Join(out[i].Members, "\x00") < strings.Join(out[j].Members, "\x00")
 	})
 	return out
+}
+
+func redundantDependencies(source string, leaves []Leaf, byName map[string]int) []RedundantDependency {
+	dependencies := append([]string(nil), leaves[byName[source]].Dependencies...)
+	sort.Strings(dependencies)
+	var out []RedundantDependency
+	for _, dependency := range dependencies {
+		if path := alternateDependencyPath(source, dependency, leaves, byName); len(path) > 0 {
+			out = append(out, RedundantDependency{Dependency: dependency, AlternatePath: path})
+		}
+	}
+	return out
+}
+
+func alternateDependencyPath(source, destination string, leaves []Leaf, byName map[string]int) []string {
+	paths := map[string][]string{source: {source}}
+	pending := []string{source}
+	for len(pending) > 0 {
+		current := pending[0]
+		pending = pending[1:]
+		dependencies := append([]string(nil), leaves[byName[current]].Dependencies...)
+		sort.Strings(dependencies)
+		for _, dependency := range dependencies {
+			if current == source && dependency == destination {
+				continue
+			}
+			if _, seen := paths[dependency]; seen {
+				continue
+			}
+			paths[dependency] = append(append([]string(nil), paths[current]...), dependency)
+			if dependency == destination {
+				return paths[dependency]
+			}
+			pending = append(pending, dependency)
+		}
+	}
+	return nil
 }
 
 func dependencyDominators(source string, leaves []Leaf, byName map[string]int, paths []DependencyPath) []DependencyDominator {
