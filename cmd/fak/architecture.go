@@ -207,6 +207,9 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, edge := range diff.RemovedEdges {
 		fmt.Fprintf(stdout, "  - edge %s -> %s\n", edge.From, edge.To)
 	}
+	for _, change := range diff.TierGapChanges {
+		fmt.Fprintf(stdout, "  ~ tier-gap %s floor %d -> %d, gap %d -> %d (%+d)\n", change.Leaf, change.BeforeFloor, change.AfterFloor, change.BeforeGap, change.AfterGap, change.Delta)
+	}
 	for _, change := range diff.FanInChanges {
 		fmt.Fprintf(stdout, "  ~ fan-in %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
 	}

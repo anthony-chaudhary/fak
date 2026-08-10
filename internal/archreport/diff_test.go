@@ -127,3 +127,28 @@ func TestDiffFanInChangesMatchDirectEdgeDelta(t *testing.T) {
 		t.Fatalf("diff=%+v", got)
 	}
 }
+
+func TestDiffDerivesDeterministicTierGapChanges(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "worse", DeclaredTier: 4, ImportFloor: 3, TierGap: 1}, {Name: "better", DeclaredTier: 4, ImportFloor: 1, TierGap: 3}, {Name: "declared", DeclaredTier: 3, ImportFloor: 2, TierGap: 1}, {Name: "removed", DeclaredTier: 4, ImportFloor: 1, TierGap: 3}}}
+	after := Report{Leaves: []Leaf{{Name: "worse", DeclaredTier: 4, ImportFloor: 1, TierGap: 3}, {Name: "better", DeclaredTier: 4, ImportFloor: 3, TierGap: 1}, {Name: "declared", DeclaredTier: 4, ImportFloor: 2, TierGap: 2}, {Name: "added", DeclaredTier: 5, ImportFloor: 1, TierGap: 4}}}
+	got := Diff(before, after)
+	want := []TierGapChange{{Leaf: "worse", DeclaredTier: 4, BeforeFloor: 3, AfterFloor: 1, BeforeGap: 1, AfterGap: 3, Delta: 2}, {Leaf: "declared", DeclaredTier: 4, BeforeFloor: 2, AfterFloor: 2, BeforeGap: 1, AfterGap: 2, Delta: 1}, {Leaf: "better", DeclaredTier: 4, BeforeFloor: 1, AfterFloor: 3, BeforeGap: 3, AfterGap: 1, Delta: -2}}
+	if !reflect.DeepEqual(got.TierGapChanges, want) {
+		t.Fatalf("tier-gap changes=%+v want=%+v", got.TierGapChanges, want)
+	}
+	if got.Changes() != 3 {
+		t.Fatalf("changes=%d", got.Changes())
+	} // added, removed, and declared-tier change only.
+}
+
+func TestDiffTierGapChangeMatchesReportedFloor(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "leaf", DeclaredTier: 4, ImportFloor: 3, TierGap: 1}}}
+	after := Report{Leaves: []Leaf{{Name: "leaf", DeclaredTier: 4, ImportFloor: 2, TierGap: 2}}}
+	got := Diff(before, after)
+	if !reflect.DeepEqual(got.TierGapChanges, []TierGapChange{{Leaf: "leaf", DeclaredTier: 4, BeforeFloor: 3, AfterFloor: 2, BeforeGap: 1, AfterGap: 2, Delta: 1}}) {
+		t.Fatalf("diff=%+v", got)
+	}
+	if got.Changes() != 0 {
+		t.Fatalf("derived tier-gap view was double-counted: %d", got.Changes())
+	}
+}

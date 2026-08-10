@@ -20,6 +20,16 @@ type EdgeChange struct {
 	To   string `json:"to"`
 }
 
+type TierGapChange struct {
+	Leaf         string `json:"leaf"`
+	DeclaredTier int    `json:"declared_tier"`
+	BeforeFloor  int    `json:"before_floor"`
+	AfterFloor   int    `json:"after_floor"`
+	BeforeGap    int    `json:"before_gap"`
+	AfterGap     int    `json:"after_gap"`
+	Delta        int    `json:"delta"`
+}
+
 type FanInChange struct {
 	Leaf   string `json:"leaf"`
 	Before int    `json:"before"`
@@ -28,18 +38,19 @@ type FanInChange struct {
 }
 
 type ReportDiff struct {
-	Schema                string        `json:"schema"`
-	Verdict               string        `json:"verdict"`
-	AddedLeaves           []string      `json:"added_leaves,omitempty"`
-	RemovedLeaves         []string      `json:"removed_leaves,omitempty"`
-	TierChanges           []TierChange  `json:"tier_changes,omitempty"`
-	AddedEdges            []EdgeChange  `json:"added_edges,omitempty"`
-	RemovedEdges          []EdgeChange  `json:"removed_edges,omitempty"`
-	FanInChanges          []FanInChange `json:"fan_in_changes,omitempty"`
-	IntroducedViolations  []string      `json:"introduced_violations,omitempty"`
-	ResolvedViolations    []string      `json:"resolved_violations,omitempty"`
-	IntroducedDiagnostics []Diagnostic  `json:"introduced_diagnostics,omitempty"`
-	ResolvedDiagnostics   []Diagnostic  `json:"resolved_diagnostics,omitempty"`
+	Schema                string          `json:"schema"`
+	Verdict               string          `json:"verdict"`
+	AddedLeaves           []string        `json:"added_leaves,omitempty"`
+	RemovedLeaves         []string        `json:"removed_leaves,omitempty"`
+	TierChanges           []TierChange    `json:"tier_changes,omitempty"`
+	AddedEdges            []EdgeChange    `json:"added_edges,omitempty"`
+	RemovedEdges          []EdgeChange    `json:"removed_edges,omitempty"`
+	FanInChanges          []FanInChange   `json:"fan_in_changes,omitempty"`
+	TierGapChanges        []TierGapChange `json:"tier_gap_changes,omitempty"`
+	IntroducedViolations  []string        `json:"introduced_violations,omitempty"`
+	ResolvedViolations    []string        `json:"resolved_violations,omitempty"`
+	IntroducedDiagnostics []Diagnostic    `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics   []Diagnostic    `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -53,6 +64,9 @@ func Diff(before, after Report) ReportDiff {
 		}
 		if b.DeclaredTier != a.DeclaredTier {
 			out.TierChanges = append(out.TierChanges, TierChange{Leaf: name, Before: b.DeclaredTier, BeforeName: b.DeclaredTierName, After: a.DeclaredTier, AfterName: a.DeclaredTierName})
+		}
+		if b.TierGap != a.TierGap {
+			out.TierGapChanges = append(out.TierGapChanges, TierGapChange{Leaf: name, DeclaredTier: a.DeclaredTier, BeforeFloor: b.ImportFloor, AfterFloor: a.ImportFloor, BeforeGap: b.TierGap, AfterGap: a.TierGap, Delta: a.TierGap - b.TierGap})
 		}
 	}
 	for name := range beforeLeaves {
@@ -114,6 +128,7 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.AddedEdges)
 	sortEdges(out.RemovedEdges)
 	sortFanInChanges(out.FanInChanges)
+	sortTierGapChanges(out.TierGapChanges)
 	sort.Strings(out.IntroducedViolations)
 	sort.Strings(out.ResolvedViolations)
 	sortDiagnostics(out.IntroducedDiagnostics)
@@ -195,6 +210,26 @@ func sortFanInChanges(changes []FanInChange) {
 		}
 		if iMagnitude != jMagnitude {
 			return iMagnitude > jMagnitude
+		}
+		return changes[i].Leaf < changes[j].Leaf
+	})
+}
+
+func sortTierGapChanges(changes []TierGapChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		ig, jg := changes[i].Delta > 0, changes[j].Delta > 0
+		if ig != jg {
+			return ig
+		}
+		ai, aj := changes[i].Delta, changes[j].Delta
+		if ai < 0 {
+			ai = -ai
+		}
+		if aj < 0 {
+			aj = -aj
+		}
+		if ai != aj {
+			return ai > aj
 		}
 		return changes[i].Leaf < changes[j].Leaf
 	})

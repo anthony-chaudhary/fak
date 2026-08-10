@@ -138,6 +138,17 @@ import _ "github.com/anthony-chaudhary/fak/internal/added"
 	}
 }
 
+func TestWriteArchitectureDiffRendersTierGapChanges(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", TierGapChanges: []archreport.TierGapChange{{Leaf: "drift", DeclaredTier: 4, BeforeFloor: 3, AfterFloor: 1, BeforeGap: 1, AfterGap: 3, Delta: 2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, ""); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if want := "tier-gap drift floor 3 -> 1, gap 1 -> 3 (+2)"; !strings.Contains(out.String(), want) {
+		t.Fatalf("output %q missing %q", out.String(), want)
+	}
+}
+
 func TestWriteArchitectureDiffRendersFanInChanges(t *testing.T) {
 	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", FanInChanges: []archreport.FanInChange{{Leaf: "shared", Before: 2, After: 5, Delta: 3}, {Leaf: "smaller", Before: 4, After: 2, Delta: -2}}}
 	var out, errOut bytes.Buffer
