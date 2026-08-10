@@ -88,6 +88,50 @@ var leafClassifications = []LeafClassification{
 		Reason:       "headroom contains native structural compression plus external compressor adapters and admission plumbing",
 	},
 	{
+		Leaf: "internal/bench", Disposition: DispositionInfrastructure,
+		Reason: "benchmark corpus/report orchestration and claim bookkeeping; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchauthority", Disposition: DispositionInfrastructure,
+		Reason: "benchmark authority document validation; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchcatalog", Disposition: DispositionInfrastructure,
+		Reason: "benchmark catalog indexing and validation; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchckpt", Disposition: DispositionInfrastructure,
+		Reason: "benchmark checkpoint metadata handling; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchcli", Disposition: DispositionInfrastructure,
+		Reason: "benchmark command parsing/rendering; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchids", Disposition: DispositionInfrastructure,
+		Reason: "benchmark identifier validation; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchlineagegate", Disposition: DispositionInfrastructure,
+		Reason: "benchmark provenance gate; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchloop", Disposition: DispositionInfrastructure,
+		Reason: "benchmark run-loop orchestration; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchpost", Disposition: DispositionInfrastructure,
+		Reason: "benchmark result publication helper; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchruns", Disposition: DispositionInfrastructure,
+		Reason: "benchmark run ledger and rendering; not a runtime optimization",
+	},
+	{
+		Leaf: "internal/benchscore", Disposition: DispositionInfrastructure,
+		Reason: "benchmark score normalization/reporting; not a runtime optimization",
+	},
+	{
 		Leaf: "internal/nativebench", Disposition: DispositionInfrastructure,
 		Reason: "benchmark governance and coverage auditing; it does not implement a runtime optimization",
 	},
@@ -96,9 +140,26 @@ var leafClassifications = []LeafClassification{
 		Capabilities: []string{"prefix_kv_reuse"},
 		Reason:       "radixkv implements prefix-indexed KV reuse plus retention and eviction policy; prefix reuse is contracted separately",
 	},
+	{
+		Leaf: "internal/tokenizer", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"tokenization"},
+		Reason:       "tokenizer implements model-compatible BPE encoding, decoding, pretokenization, and incremental decode; tokenization is contracted separately",
+	},
 }
 
 var contracts = []Contract{
+	{
+		Capability: "tokenization",
+		NativePath: "internal/tokenizer/tokenizer.go",
+		Workload:   "same model tokenizer artifact, text corpus, special-token policy, warmup, and correctness oracle across every arm",
+		Metrics:    []string{"exact_token_ids", "decode_roundtrip", "tokens_per_second", "latency_ms", "peak_rss_bytes", "initialization_ms", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "exhaustive adjacent-pair BPE scan (tuned incumbent)", Class: TunedBaseline, Source: "internal/tokenizer/bpe_merge_test.go"},
+			{Name: "llama.cpp tokenizer", Class: NextBest, Source: "internal/tokenizer/oracle_qwen_test.go"},
+			{Name: "fak + Hugging Face tokenizers", Class: FirstClassIntegration, Integration: "huggingface/tokenizers", Source: "internal/tokenizer/tokenizer_test.go"},
+		},
+		Integrations: []string{"huggingface/tokenizers"},
+	},
 	{
 		Capability: "tool_filtering",
 		NativePath: "internal/gateway/mcp_defer.go",

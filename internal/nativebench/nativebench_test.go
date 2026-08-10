@@ -10,13 +10,13 @@ import (
 func TestRegistryHasComparisonContractsForInitialNativeCapabilities(t *testing.T) {
 	got := All()
 	if len(got) < 2 {
-		t.Fatalf("contracts=%d, want tool-filtering, compression, and prefix-reuse contracts", len(got))
+		t.Fatalf("contracts=%d, want tool-filtering, compression, prefix-reuse, and tokenization contracts", len(got))
 	}
 	names := map[string]bool{}
 	for _, c := range got {
 		names[c.Capability] = true
 	}
-	for _, name := range []string{"tool_filtering", "context_compression", "prefix_kv_reuse"} {
+	for _, name := range []string{"tool_filtering", "context_compression", "prefix_kv_reuse", "tokenization"} {
 		if !names[name] {
 			t.Errorf("missing %s", name)
 		}
@@ -79,10 +79,10 @@ func TestAuditRepositoryDiscoversNativeCoverageDebt(t *testing.T) {
 	if !report.Coverage.DiscoveryComplete || report.Coverage.NativeLeaves < 100 {
 		t.Fatalf("repository discovery did not cover the native leaf inventory: %+v", report.Coverage)
 	}
-	if report.Coverage.CoveredLeaves != 4 {
-		t.Fatalf("covered leaves=%d, want gateway + headroom + radixkv contracts and nativebench infrastructure", report.Coverage.CoveredLeaves)
+	if report.Coverage.CoveredLeaves != 16 {
+		t.Fatalf("covered leaves=%d, want four capability leaves plus twelve benchmark-governance infrastructure leaves", report.Coverage.CoveredLeaves)
 	}
-	if report.Coverage.ClassifiedLeaves != 4 || report.Coverage.UnclassifiedLeaves == 0 {
+	if report.Coverage.ClassifiedLeaves != 16 || report.Coverage.UnclassifiedLeaves == 0 {
 		t.Fatalf("classification debt is not explicit: %+v", report.Coverage)
 	}
 	if len(report.Coverage.MissingLeaves) == 0 || report.Complete {
@@ -105,7 +105,7 @@ func TestValidateClassificationsRejectsUnknownAndMalformedEntries(t *testing.T) 
 
 func TestClassifiedInfrastructureDoesNotNeedAComparisonContract(t *testing.T) {
 	root := t.TempDir()
-	for _, leaf := range []string{"gateway", "headroom", "nativebench", "radixkv"} {
+	for _, leaf := range []string{"gateway", "headroom", "nativebench", "radixkv", "tokenizer"} {
 		if err := os.MkdirAll(filepath.Join(root, "internal", leaf), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -114,7 +114,7 @@ func TestClassifiedInfrastructureDoesNotNeedAComparisonContract(t *testing.T) {
 		}
 	}
 	report := AuditRoot(root)
-	if report.Coverage.CoveredLeaves != 4 || report.Coverage.UnclassifiedLeaves != 0 {
+	if report.Coverage.CoveredLeaves != 5 || report.Coverage.UnclassifiedLeaves != 0 {
 		t.Fatalf("coverage=%+v", report.Coverage)
 	}
 	if got := report.Coverage.DispositionCounts[DispositionInfrastructure]; got != 1 {
@@ -144,6 +144,27 @@ func TestValidateRequiresEveryEquivalentIntegrationArm(t *testing.T) {
 			t.Fatalf("unexpected integration finding: %+v", f)
 		}
 	}
+}
+
+func TestTokenizationRequiresExternalAndIntegrationArms(t *testing.T) {
+	for _, contract := range All() {
+		if contract.Capability != "tokenization" {
+			continue
+		}
+		if len(contract.Integrations) != 1 || contract.Integrations[0] != "huggingface/tokenizers" {
+			t.Fatalf("tokenization integrations=%v", contract.Integrations)
+		}
+		var llama, hf bool
+		for _, arm := range contract.Alternatives {
+			llama = llama || (arm.Class == NextBest && arm.Name == "llama.cpp tokenizer")
+			hf = hf || (arm.Class == FirstClassIntegration && arm.Integration == "huggingface/tokenizers")
+		}
+		if !llama || !hf {
+			t.Fatalf("tokenization alternatives=%+v", contract.Alternatives)
+		}
+		return
+	}
+	t.Fatal("tokenization contract missing")
 }
 
 func TestPrefixReuseRequiresLLMDIntegrationArm(t *testing.T) {

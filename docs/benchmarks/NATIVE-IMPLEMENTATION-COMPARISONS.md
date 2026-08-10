@@ -30,10 +30,13 @@ The command discovers every production Go leaf directly beneath `internal/` and 
 | tool filtering | `internal/gateway/mcp_defer.go` | all schemas, provider cache enabled | retrieval-based selection (ToolRAG class) | task success, tool recall, input tokens, TTFT, total cost |
 | context compression | `internal/headroom/native.go` | full history, provider cache enabled | LongLLMLingua | task success, retained-fact recall, input tokens, latency, total cost |
 | prefix KV reuse | `internal/radixkv/radixkv.go` | prefix caching disabled | SGLang RadixAttention, plus `fak + llm-d` | output equivalence, prefix hit rate, TTFT, throughput, KV bytes, total cost |
+| tokenization | `internal/tokenizer/tokenizer.go` | exhaustive adjacent-pair BPE | llama.cpp tokenizer, plus `fak + Hugging Face tokenizers` | exact token IDs, decode round-trip, throughput, latency, RSS, initialization, total cost |
 
 All currently have missing witnesses, which is why `--check` fails. The registry is in `internal/nativebench`; new native capabilities must be added there with their alternatives before their benchmark obligation can be considered covered.
 
 ## Scope still to enumerate
+
+The benchmark-governance packages (`internal/bench*` and `internal/nativebench`) are explicitly classified as infrastructure with per-leaf reasons. This is not a blanket naming rule: each entry is enumerated and validation still leaves every newly discovered package unclassified by default.
 
 This spine does **not** yet prove repository-wide coverage. Leaf discovery is exhaustive at the package boundary and the disposition schema is now enforced, but most leaves are still explicitly unclassified. The authoritative completion work is to classify every discovered leaf, split every multi-capability leaf into contracts, map equivalent first-class integrations, and attach benchmark witnesses. Until the unclassified count reaches zero and every contract passes, the broad claim “all native implementations are benchmarked against next best alternatives” remains **not yet**.
 
