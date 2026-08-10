@@ -132,6 +132,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native Codex JSONL token-counter extraction, allowlist sanitization, and observed-turn conversion are covered; session discovery remains separate capability debt",
 	},
 	{
+		Leaf: "internal/vcacheqa", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"cache_honesty_ast_lint"},
+		Reason:       "native AST lint for cache-warmth context-elision reasoning is covered; forced-miss, witness-chain, provenance, determinism, and aggregate gate capabilities remain separate debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -467,6 +472,20 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/CODEX-TOKEN-SANITIZATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"opentelemetry", "prometheus"},
+	},
+	{
+		Capability: "cache_honesty_ast_lint",
+		NativePath: "internal/vcacheqa/vcacheqa.go",
+		Workload:   "same fixed Go package with two true cache-context elision findings, clean live code, excluded test content, and non-Go decoys; exact ordered file/line oracle across every arm",
+		Metrics:    []string{"true_positives", "false_positives", "false_negatives", "location_errors", "parse_failures", "latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "tuned non-test text scan", Class: TunedBaseline, Source: "internal/vcacheqa/compare.go"},
+			{Name: "go/analysis analyzer", Class: NextBest, Source: "https://pkg.go.dev/golang.org/x/tools/go/analysis"},
+			{Name: "Semgrep", Class: NextBest, Source: "https://semgrep.dev/docs/"},
+			{Name: "CodeQL", Class: NextBest, Source: "https://codeql.github.com/docs/"},
+			{Name: "golangci-lint custom analyzer", Class: NextBest, Source: "https://golangci-lint.run/docs/plugins/go-plugins/"},
+		},
+		Witness: "../../docs/benchmarks/CACHE-HONESTY-LINT-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "worker_launch_latency_summary",
