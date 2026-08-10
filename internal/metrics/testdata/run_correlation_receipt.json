@@ -1,0 +1,154 @@
+{
+  "cases": [
+    {
+      "name": "accepted",
+      "role": "known-positive: all five streams fak folds over one run copied the producer-issued identity, so the run correlates",
+      "correlation": {
+        "schema": "fak.run_correlation.v1",
+        "accepted": true,
+        "reason": "all 5 series across 5 streams copied the producer-issued identity \"run-2f8c1a\"",
+        "canonical_run_id": "run-2f8c1a",
+        "refused_index": -1,
+        "streams": 5,
+        "series": [
+          {
+            "stream": "worker",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "tool",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "session",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "annotation",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "summary",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          }
+        ]
+      },
+      "refusal": ""
+    },
+    {
+      "name": "refused",
+      "role": "refusal: the tool stream copied a different identity, so the series describe two runs and the fold refuses instead of splitting one run silently",
+      "correlation": {
+        "schema": "fak.run_correlation.v1",
+        "accepted": false,
+        "refusal": "divergent_identity",
+        "reason": "stream \"tool\" copied \"run-91b07d\" but the series set already established \"run-2f8c1a\": these describe two runs, not one",
+        "refused_stream": "tool",
+        "refused_index": 1,
+        "streams": 5,
+        "series": [
+          {
+            "stream": "worker",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "tool",
+            "run_id": "run-91b07d",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "session",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "annotation",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "summary",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          }
+        ]
+      },
+      "refusal": "metrics: run correlation refused the conclusion (divergent_identity): stream \"tool\" copied \"run-91b07d\" but the series set already established \"run-2f8c1a\": these describe two runs, not one"
+    },
+    {
+      "name": "adversarial_equal_strings",
+      "role": "adversarial: every identity string matches, so a string-equality check passes vacuously — the annotation stream reconstructed its identity from a display label and is refused on provenance",
+      "correlation": {
+        "schema": "fak.run_correlation.v1",
+        "accepted": false,
+        "refusal": "fallback_identity",
+        "reason": "stream \"annotation\" reconstructed its identity from display_label instead of copying the producer-issued one (equal strings are not agreement)",
+        "refused_stream": "annotation",
+        "refused_index": 3,
+        "streams": 5,
+        "series": [
+          {
+            "stream": "worker",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "tool",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "session",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "annotation",
+            "run_id": "run-2f8c1a",
+            "source": "display_label"
+          },
+          {
+            "stream": "summary",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          }
+        ]
+      },
+      "refusal": "metrics: run correlation refused the conclusion (fallback_identity): stream \"annotation\" reconstructed its identity from display_label instead of copying the producer-issued one (equal strings are not agreement)"
+    },
+    {
+      "name": "boundary_single_stream",
+      "role": "boundary: one stream repeated agrees with itself and witnesses no cross-stream correlation, so the contract fails closed rather than accepting a self-consistent set",
+      "correlation": {
+        "schema": "fak.run_correlation.v1",
+        "accepted": false,
+        "refusal": "single_stream",
+        "reason": "only stream \"worker\" was presented: one stream agrees with itself and witnesses no cross-stream correlation",
+        "refused_index": -1,
+        "streams": 1,
+        "series": [
+          {
+            "stream": "worker",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          },
+          {
+            "stream": "worker",
+            "run_id": "run-2f8c1a",
+            "source": "producer_issued"
+          }
+        ]
+      },
+      "refusal": "metrics: run correlation refused the conclusion (single_stream): only stream \"worker\" was presented: one stream agrees with itself and witnesses no cross-stream correlation"
+    }
+  ],
+  "issue": "https://github.com/anthony-chaudhary/fak/issues/5688",
+  "note": "One canonical producer-issued correlation identity across a run's measurement series. Generated by TestRunCorrelationReceiptGolden (UPDATE_GOLDEN=1); pure in-process values, no host state.",
+  "schema": "fak.run_correlation.v1"
+}
