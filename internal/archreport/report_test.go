@@ -133,12 +133,24 @@ import _ "github.com/anthony-chaudhary/fak/internal/beta"
 	if len(byName["delta"].Dependents) != 0 {
 		t.Fatalf("delta dependents=%v", byName["delta"].Dependents)
 	}
+	if got, want := byName["abi"].TransitiveDependents, []string{"alpha", "beta", "gamma"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("abi transitive dependents=%v want=%v", got, want)
+	}
+	if got := byName["abi"].BlastRadius; got != 3 {
+		t.Fatalf("abi blast radius=%d want=3", got)
+	}
+	if got, want := byName["beta"].TransitiveDependents, []string{"alpha", "gamma"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("beta transitive dependents=%v want=%v", got, want)
+	}
+	if got := byName["delta"].TransitiveDependents; got == nil || len(got) != 0 || byName["delta"].BlastRadius != 0 {
+		t.Fatalf("delta transitive dependents=%v blast radius=%d", got, byName["delta"].BlastRadius)
+	}
 
 	scoped, err := Analyze(root, "abi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0].Dependents, []string{"alpha", "beta"}) {
+	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0].Dependents, []string{"alpha", "beta"}) || !reflect.DeepEqual(scoped.Leaves[0].TransitiveDependents, []string{"alpha", "beta", "gamma"}) || scoped.Leaves[0].BlastRadius != 3 {
 		t.Fatalf("scoped=%+v", scoped)
 	}
 	if len(scoped.Hotspots) != 0 {

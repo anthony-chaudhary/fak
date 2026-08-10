@@ -118,7 +118,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	}
 	for _, l := range report.Leaves {
 		if *leaf != "" || len(l.ViolationEdges) > 0 {
-			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) gap=%d deps=%v dependents=%v", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.TierGap, l.Dependencies, l.Dependents)
+			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) gap=%d deps=%v dependents=%v blast-radius=%d", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.TierGap, l.Dependencies, l.Dependents, l.BlastRadius)
 			if len(l.ViolationEdges) > 0 {
 				fmt.Fprint(stdout, " violations=[")
 				for i, edge := range l.ViolationEdges {

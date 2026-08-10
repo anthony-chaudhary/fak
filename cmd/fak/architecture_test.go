@@ -15,10 +15,16 @@ import (
 func TestArchitectureJSON(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
-var tier=map[string]int{"leaf":1}
+var tier=map[string]int{"leaf":1,"caller":1,"top":1}
 var tierName=[]string{"root","primitive"}
 `)
 	mustWriteArchitectureFile(t, root, "internal/leaf/leaf.go", "package leaf\n")
+	mustWriteArchitectureFile(t, root, "internal/caller/caller.go", `package caller
+import _ "github.com/anthony-chaudhary/fak/internal/leaf"
+`)
+	mustWriteArchitectureFile(t, root, "internal/top/top.go", `package top
+import _ "github.com/anthony-chaudhary/fak/internal/caller"
+`)
 	var out, errout bytes.Buffer
 	if rc := runArchitecture(&out, &errout, []string{"--workspace", root, "--leaf", "leaf", "--json"}); rc != 0 {
 		t.Fatalf("rc=%d stderr=%s", rc, errout.String())
@@ -29,6 +35,9 @@ var tierName=[]string{"root","primitive"}
 	}
 	if r.Schema != "fak-architecture/1" || len(r.Leaves) != 1 || r.Leaves[0].DeclaredTierName != "primitive" {
 		t.Fatalf("%+v", r)
+	}
+	if got, want := r.Leaves[0].TransitiveDependents, []string{"caller", "top"}; !reflect.DeepEqual(got, want) || r.Leaves[0].BlastRadius != 2 {
+		t.Fatalf("transitive dependents=%v blast radius=%d want=%v/2", got, r.Leaves[0].BlastRadius, want)
 	}
 }
 func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
@@ -42,14 +51,25 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 	}
 }
 
-func TestRunArchitectureTextNamesDependents(t *testing.T) {
+func TestRunArchitectureTextNamesDependentsAndBlastRadius(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"leaf":1,"caller":1}
+var tierName=[]string{"root","primitive"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/leaf/leaf.go", "package leaf\n")
+	mustWriteArchitectureFile(t, root, "internal/caller/caller.go", `package caller
+import _ "github.com/anthony-chaudhary/fak/internal/leaf"
+`)
 	var out, errOut bytes.Buffer
-	code := runArchitecture(&out, &errOut, []string{"--leaf", "archreport"})
+	code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "leaf"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "dependents=") {
-		t.Fatalf("output does not name dependents: %s", out.String())
+	for _, want := range []string{"dependents=[caller]", "blast-radius=1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output does not name %q: %s", want, out.String())
+		}
 	}
 }
 

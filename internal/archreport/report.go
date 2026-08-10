@@ -23,16 +23,18 @@ type Tier struct {
 	Leaves int    `json:"leaves"`
 }
 type Leaf struct {
-	Name             string          `json:"name"`
-	DeclaredTier     int             `json:"declared_tier"`
-	DeclaredTierName string          `json:"declared_tier_name"`
-	ImportFloor      int             `json:"import_floor"`
-	ImportFloorName  string          `json:"import_floor_name"`
-	TierGap          int             `json:"tier_gap"`
-	Dependencies     []string        `json:"dependencies"`
-	Dependents       []string        `json:"dependents,omitempty"`
-	ViolationEdges   []ViolationEdge `json:"violation_edges,omitempty"`
-	Violations       []string        `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
+	Name                 string          `json:"name"`
+	DeclaredTier         int             `json:"declared_tier"`
+	DeclaredTierName     string          `json:"declared_tier_name"`
+	ImportFloor          int             `json:"import_floor"`
+	ImportFloorName      string          `json:"import_floor_name"`
+	TierGap              int             `json:"tier_gap"`
+	Dependencies         []string        `json:"dependencies"`
+	Dependents           []string        `json:"dependents,omitempty"`
+	TransitiveDependents []string        `json:"transitive_dependents"`
+	BlastRadius          int             `json:"blast_radius"`
+	ViolationEdges       []ViolationEdge `json:"violation_edges,omitempty"`
+	Violations           []string        `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
 }
 
 type Hotspot struct {
@@ -156,6 +158,8 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	}
 	for i := range allLeaves {
 		sort.Strings(allLeaves[i].Dependents)
+		allLeaves[i].TransitiveDependents = transitiveDependents(allLeaves[i].Name, allLeaves, byName)
+		allLeaves[i].BlastRadius = len(allLeaves[i].TransitiveDependents)
 		if len(allLeaves[i].Dependents) > 0 {
 			report.Hotspots = append(report.Hotspots, Hotspot{Name: allLeaves[i].Name, FanIn: len(allLeaves[i].Dependents)})
 		}
@@ -202,6 +206,29 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 	}
 	return report, nil
+}
+
+func transitiveDependents(name string, leaves []Leaf, byName map[string]int) []string {
+	seen := map[string]struct{}{name: {}}
+	pending := append([]string(nil), leaves[byName[name]].Dependents...)
+	for len(pending) > 0 {
+		dependent := pending[0]
+		pending = pending[1:]
+		if _, ok := seen[dependent]; ok {
+			continue
+		}
+		seen[dependent] = struct{}{}
+		if i, ok := byName[dependent]; ok {
+			pending = append(pending, leaves[i].Dependents...)
+		}
+	}
+	delete(seen, name)
+	out := make([]string, 0, len(seen))
+	for dependent := range seen {
+		out = append(out, dependent)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (r Report) JSON() ([]byte, error) { return json.MarshalIndent(r, "", "  ") }
