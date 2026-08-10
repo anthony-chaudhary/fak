@@ -61,6 +61,25 @@ Both put the **same reviewable capability floor** (`--policy floor.json`) on eve
 tool call. New here? The fastest "feel it" is the no-credential boundary below;
 the fastest "use it for real" is the dogfood path above.
 
+On the in-front-of-the-model path, an upstream rate limit **never sleeps past your
+client**. fak absorbs short waits in-handler — the transient backoff schedule caps
+at 30s, and a provider-named wait that fits under the ceiling is simply slept, which
+is the right UX for a throttle. But when the honored wait is longer than a wrapped
+client can hold a request open, sleeping is structurally uncompletable: your agent's
+own request timeout (~300s for Claude Code) fires first, so the wait burns futile
+client-side retries and then dies with an opaque timeout that names none of the
+rate-limit truth fak already holds. Past the ceiling fak therefore stops retrying and
+hands the truthful response downstream instead — the real upstream status (429, or
+529 for an overload), the provider's own `Retry-After` header verbatim, and the
+distinct `upstream_retry_ceiling` error code, so a Retry-After-honoring harness backs
+off correctly and a supervisor can park the turn across the reset rather than
+hammering it. `FAK_INHANDLER_WAIT_CEILING` sets the boundary (any Go duration,
+default `90s` — safely under that ~300s client timeout — clamped to `[0, 1h]`; `0`
+disables the ceiling and restores absorb-everything). The total retry budget
+(`FAK_PLANNER_RETRY_BUDGET`, default 4h) still bounds the loop overall, but on this
+proxy path it is deliberately **not** reachable in-handler: riding out a longer
+window is a supervisor's job (`fak guard`), not a sleeping request handler's.
+
 ## Try the boundary first
 
 Run the no-credential proof before reading the architecture:
@@ -178,12 +197,18 @@ fak architecture --leaf archreport
 # Stable machine-readable form for automation.
 fak architecture --leaf archreport --json
 
+# Compare two supplied workspace snapshots (no implicit Git execution).
+fak architecture --baseline-workspace /path/to/before --workspace /path/to/after
+fak architecture --baseline-workspace /path/to/before --workspace /path/to/after --json
+
 # Privacy-safe adoption fold (ISO-week counts; no paths, hostnames, or leaf names).
 fak architecture --usage
 fak architecture --usage --json
 ```
 
 The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly). Hotspots are sorted by direct fan-in descending, then leaf name.
+
+With `--baseline-workspace`, the command emits `fak-architecture-diff/1`: added/removed leaves, old→new tier changes, added/removed direct edges, and introduced/resolved upward violations. The caller supplies both snapshots; an empty diff is `0 change(s)` and exits successfully.
 
 The command does not run Git, execute package code, or mutate the workspace. It parses `internal/architest/architest_test.go` plus non-test Go import blocks. Malformed contracts or source files refuse with a recovery action. A stale tier declaration is a diagnostic—not a global outage—so healthy full and scoped queries remain usable.
 
