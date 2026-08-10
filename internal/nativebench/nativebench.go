@@ -77,10 +77,15 @@ type Report struct {
 }
 
 var leafClassifications = []LeafClassification{{
-	Leaf: "internal/laneadmit", Disposition: DispositionMultiCapability,
-	Capabilities: []string{"lane_tree_collision_admission"},
-	Reason:       "native shared lane/tree collision, exclusivity, ancestry, read-only, and self-renewal admission",
+	Leaf: "internal/cachesweep", Disposition: DispositionMultiCapability,
+	Capabilities: []string{"prefix_cache_budget_sweep"},
+	Reason:       "native prefix-access trace replay across cache budgets with infinite-cache ceiling and ROI knee",
 },
+	{
+		Leaf: "internal/laneadmit", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"lane_tree_collision_admission"},
+		Reason:       "native shared lane/tree collision, exclusivity, ancestry, read-only, and self-renewal admission",
+	},
 	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
@@ -232,20 +237,33 @@ var leafClassifications = []LeafClassification{{
 }
 
 var contracts = []Contract{{
-	Capability: "lane_tree_collision_admission",
-	NativePath: "internal/laneadmit/laneadmit.go",
-	Workload:   "same same-lane-disjoint, cross-lane-overlap, exclusive-lane, read-only, and self-renewal requests, live leases, taxonomy trees, and independent admission oracle across every arm",
-	Metrics:    []string{"admission_precision", "admission_recall", "false_denies", "false_allows", "decision_latency_ms", "acquisition_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+	Capability: "prefix_cache_budget_sweep",
+	NativePath: "internal/cachesweep/cachesweep.go",
+	Workload:   "same timestamped exact-prefix and divergent-child trace, finite token budgets, unbounded ceiling, write-delay overlay, token-cost assumptions, eviction semantics, and independent reuse oracle across every arm",
+	Metrics:    []string{"hit_correctness", "reuse_ratio", "reused_tokens", "evictions", "roi_knee_error", "simulation_latency_ms", "throughput_accesses_per_second", "cpu_seconds", "peak_rss_bytes", "storage_bytes", "network_bytes", "total_cost"},
 	Alternatives: []Alternative{
-		{Name: "geometry-only tree overlap", Class: TunedBaseline, Source: "internal/laneadmit/compare.go"},
-		{Name: "DOS arbitrate", Class: FirstClassIntegration, Integration: "dos", Source: "dos arbitrate"},
-		{Name: "GitHub Actions concurrency groups", Class: NextBest, Source: "https://docs.github.com/actions/using-jobs/using-concurrency"},
-		{Name: "Kubernetes Lease coordination", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"},
-		{Name: "etcd concurrency mutex", Class: NextBest, Source: "https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency"},
+		{Name: "no prefix cache", Class: TunedBaseline, Source: "internal/cachesweep/compare.go"},
+		{Name: "libCacheSim", Class: NextBest, Source: "https://github.com/1a1a11a/libCacheSim"},
+		{Name: "Caffeine simulator", Class: NextBest, Source: "https://github.com/ben-manes/caffeine/wiki/Simulator"},
+		{Name: "Redis or Valkey maxmemory policies", Class: NextBest, Source: "https://redis.io/docs/latest/develop/reference/eviction/"},
 	},
-	Witness:      "../../docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
-	Integrations: []string{"dos"},
+	Witness: "../../docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
 },
+	{
+		Capability: "lane_tree_collision_admission",
+		NativePath: "internal/laneadmit/laneadmit.go",
+		Workload:   "same same-lane-disjoint, cross-lane-overlap, exclusive-lane, read-only, and self-renewal requests, live leases, taxonomy trees, and independent admission oracle across every arm",
+		Metrics:    []string{"admission_precision", "admission_recall", "false_denies", "false_allows", "decision_latency_ms", "acquisition_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "geometry-only tree overlap", Class: TunedBaseline, Source: "internal/laneadmit/compare.go"},
+			{Name: "DOS arbitrate", Class: FirstClassIntegration, Integration: "dos", Source: "dos arbitrate"},
+			{Name: "GitHub Actions concurrency groups", Class: NextBest, Source: "https://docs.github.com/actions/using-jobs/using-concurrency"},
+			{Name: "Kubernetes Lease coordination", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"},
+			{Name: "etcd concurrency mutex", Class: NextBest, Source: "https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency"},
+		},
+		Witness:      "../../docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"dos"},
+	},
 	{
 		Capability: "compute_region_admission",
 		NativePath: "internal/computeadmit/computeadmit.go",
