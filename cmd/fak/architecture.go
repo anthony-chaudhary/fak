@@ -22,7 +22,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
-	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length|introduced-lateral-edges|introduced-lateral-couplings|introduced-or-increased-lateral-bridges|introduced-or-increased-lateral-articulation-points|resolved-lateral-resilient-pairs|decreased-lateral-edge-connectivity|decreased-lateral-vertex-connectivity")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length|introduced-lateral-edges|introduced-lateral-couplings|introduced-or-increased-lateral-bridges|introduced-or-increased-lateral-articulation-points|resolved-lateral-resilient-pairs|decreased-lateral-edge-connectivity|decreased-lateral-vertex-connectivity|decreased-lateral-vertex-pair-cuts")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -30,8 +30,8 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
 		return 2
 	}
-	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" && *failOn != "introduced-lateral-edges" && *failOn != "introduced-lateral-couplings" && *failOn != "introduced-or-increased-lateral-bridges" && *failOn != "introduced-or-increased-lateral-articulation-points" && *failOn != "resolved-lateral-resilient-pairs" && *failOn != "decreased-lateral-edge-connectivity" && *failOn != "decreased-lateral-vertex-connectivity" {
-		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, decreased-lateral-edge-connectivity, or decreased-lateral-vertex-connectivity)\n", *failOn)
+	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" && *failOn != "introduced-lateral-edges" && *failOn != "introduced-lateral-couplings" && *failOn != "introduced-or-increased-lateral-bridges" && *failOn != "introduced-or-increased-lateral-articulation-points" && *failOn != "resolved-lateral-resilient-pairs" && *failOn != "decreased-lateral-edge-connectivity" && *failOn != "decreased-lateral-vertex-connectivity" && *failOn != "decreased-lateral-vertex-pair-cuts" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, decreased-lateral-edge-connectivity, decreased-lateral-vertex-connectivity, or decreased-lateral-vertex-pair-cuts)\n", *failOn)
 		return 2
 	}
 	if *failOn != "" && *baseline == "" {
@@ -321,6 +321,9 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, change := range diff.LateralVertexConnectivityChanges {
 		fmt.Fprintf(stdout, "  ~ lateral-vertex-connectivity tier=%s(%d) members=%v cut %d -> %d (%+d) separators %v -> %v\n", change.TierName, change.Tier, change.Members, change.BeforeCut, change.AfterCut, change.Delta, change.BeforeSeparator, change.AfterSeparator)
 	}
+	for _, change := range diff.LateralVertexPairCutChanges {
+		fmt.Fprintf(stdout, "  ~ lateral-vertex-pair-cut tier=%s(%d) members=%v pair=%s--%s cut %d -> %d (%+d) separators %v -> %v\n", change.TierName, change.Tier, change.Members, change.Left, change.Right, change.BeforeCut, change.AfterCut, change.Delta, change.BeforeSeparator, change.AfterSeparator)
+	}
 	for _, change := range diff.TierGapChanges {
 		fmt.Fprintf(stdout, "  ~ tier-gap %s floor %d -> %d, gap %d -> %d (%+d)\n", change.Leaf, change.BeforeFloor, change.AfterFloor, change.BeforeGap, change.AfterGap, change.Delta)
 	}
@@ -381,6 +384,8 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 			fmt.Fprintln(stdout, "  remediation: restore or add an edge-disjoint same-tier path between each degraded pair; comparison is baseline -> workspace")
 		} else if failOn == "decreased-lateral-vertex-connectivity" {
 			fmt.Fprintln(stdout, "  remediation: diversify same-tier package paths so no critical separator remains a package-failure bottleneck; comparison is baseline -> workspace")
+		} else if failOn == "decreased-lateral-vertex-pair-cuts" {
+			fmt.Fprintln(stdout, "  remediation: add an internally vertex-disjoint same-tier package path around each degraded pair separator; comparison is baseline -> workspace")
 		} else {
 			fmt.Fprintln(stdout, "  remediation: restore the prior endpoint tiers or remove/invert the upward edge; comparison is baseline -> workspace")
 		}
@@ -473,6 +478,13 @@ func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 		return false
 	case "decreased-lateral-vertex-connectivity":
 		for _, change := range diff.LateralVertexConnectivityChanges {
+			if change.Delta < 0 {
+				return true
+			}
+		}
+		return false
+	case "decreased-lateral-vertex-pair-cuts":
+		for _, change := range diff.LateralVertexPairCutChanges {
 			if change.Delta < 0 {
 				return true
 			}

@@ -6,6 +6,39 @@ import (
 	"testing"
 )
 
+func TestDiffLateralVertexPairCutChangesExposeStableLocalDrift(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{
+		Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d", "e"}, MinVertexCut: 2,
+		VertexPairCuts: []LateralVertexPairCut{{Left: "a", Right: "d", Cut: 3, Separator: []string{"b", "c", "e"}}, {Left: "a", Right: "e", Cut: 2, Separator: []string{"b", "c"}}},
+	}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{
+		Tier: 2, TierName: "foundation-composite", Members: []string{"e", "d", "c", "b", "a"}, MinVertexCut: 2,
+		VertexPairCuts: []LateralVertexPairCut{{Left: "a", Right: "d", Cut: 2, Separator: []string{"b", "c"}}, {Left: "a", Right: "e", Cut: 3, Separator: []string{"b", "c", "d"}}, {Left: "b", Right: "e", Cut: 2, Separator: []string{"a", "c"}}},
+	}}}
+	diff := Diff(before, after)
+	want := []LateralVertexPairCutChange{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d", "e"}, Left: "a", Right: "d", BeforeCut: 3, AfterCut: 2, Delta: -1, BeforeSeparator: []string{"b", "c", "e"}, AfterSeparator: []string{"b", "c"}},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d", "e"}, Left: "a", Right: "e", BeforeCut: 2, AfterCut: 3, Delta: 1, BeforeSeparator: []string{"b", "c"}, AfterSeparator: []string{"b", "c", "d"}},
+	}
+	if !reflect.DeepEqual(diff.LateralVertexPairCutChanges, want) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+	after.LateralBiconnectedBlocks[0].Members[0] = "mutated"
+	after.LateralBiconnectedBlocks[0].VertexPairCuts[0].Separator[0] = "mutated"
+	if got := diff.LateralVertexPairCutChanges[0]; got.Members[0] != "a" || got.AfterSeparator[0] != "b" {
+		t.Fatalf("diff aliases input: %+v", got)
+	}
+}
+
+func TestDiffLateralVertexPairCutIncreaseRemainsClean(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, Members: []string{"a", "b", "c"}, MinVertexCut: 2, VertexPairCuts: []LateralVertexPairCut{{Left: "a", Right: "c", Cut: 1}}}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, Members: []string{"a", "b", "c"}, MinVertexCut: 2, VertexPairCuts: []LateralVertexPairCut{{Left: "a", Right: "c", Cut: 2}}}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.LateralVertexPairCutChanges) != 1 || diff.LateralVertexPairCutChanges[0].Delta != 1 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralVertexConnectivityChangesExposeStableBlockDrift(t *testing.T) {
 	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{
 		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, MinVertexCut: 3, CriticalSeparator: []string{"a", "b", "c"}},

@@ -696,7 +696,7 @@ func TestArchitectureLateralEdgeConnectivityPartitionPolicy(t *testing.T) {
 		AfterSourceSide: []string{"a", "c"}, AfterSinkSide: []string{"b", "d"},
 	}}}
 	var out, errOut bytes.Buffer
-	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity, or decreased-lateral-vertex-connectivity"); code != 3 {
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity, or decreased-lateral-vertex-connectivity, or decreased-lateral-vertex-pair-cuts"); code != 3 {
 		t.Fatalf("code=%d output=%s", code, out.String())
 	}
 	for _, want := range []string{"lateral-edge-connectivity tier=foundation-composite(2) a <=> b cut 3 -> 2 (-1)", "witnesses [a--b a--c a--d] -> [a--b a--c]", "partitions [a]|[b c d] -> [a c]|[b d]", "edge-disjoint same-tier path"} {
@@ -705,6 +705,30 @@ func TestArchitectureLateralEdgeConnectivityPartitionPolicy(t *testing.T) {
 		}
 	}
 }
+func TestArchitectureDecreasedLateralVertexPairCutPolicy(t *testing.T) {
+	diff := archreport.ReportDiff{LateralVertexPairCutChanges: []archreport.LateralVertexPairCutChange{{
+		Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, Left: "a", Right: "d",
+		BeforeCut: 3, AfterCut: 2, Delta: -1, BeforeSeparator: []string{"b", "c", "e"}, AfterSeparator: []string{"b", "c"},
+	}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-vertex-pair-cuts"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"lateral-vertex-pair-cut tier=foundation-composite(2) members=[a b c d] pair=a--d cut 3 -> 2 (-1)", "separators [b c e] -> [b c]", "internally vertex-disjoint"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureDecreasedLateralVertexPairCutPolicyIgnoresGain(t *testing.T) {
+	diff := archreport.ReportDiff{LateralVertexPairCutChanges: []archreport.LateralVertexPairCutChange{{Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-vertex-pair-cuts"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureDecreasedLateralVertexConnectivityPolicy(t *testing.T) {
 	diff := archreport.ReportDiff{LateralVertexConnectivityChanges: []archreport.LateralVertexConnectivityChange{{
 		Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"},
