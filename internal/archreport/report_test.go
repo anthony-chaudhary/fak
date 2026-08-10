@@ -14,8 +14,8 @@ func TestLateralBlockVertexConnectivityQuantifiesPackageSeparators(t *testing.T)
 	members := []string{"a", "b", "c", "d"}
 	cycle := map[string][2]string{"ab": {"a", "b"}, "bc": {"b", "c"}, "cd": {"c", "d"}, "ad": {"a", "d"}, "duplicate": {"b", "a"}}
 	for i := 0; i < 50; i++ {
-		cut, separator := blockVertexConnectivity(members, cycle)
-		if cut != 2 || !reflect.DeepEqual(separator, []string{"a", "c"}) {
+		cut, separator, pairCuts := blockVertexConnectivity(members, cycle)
+		if cut != 2 || !reflect.DeepEqual(separator, []string{"a", "c"}) || len(pairCuts) != 2 {
 			t.Fatalf("cycle run %d cut=%d separator=%v", i, cut, separator)
 		}
 	}
@@ -25,8 +25,8 @@ func TestLateralBlockVertexConnectivityQuantifiesPackageSeparators(t *testing.T)
 			clique[right+left] = [2]string{right, left}
 		}
 	}
-	cut, separator := blockVertexConnectivity(members, clique)
-	if cut != 3 || !reflect.DeepEqual(separator, []string{"a", "b", "c"}) {
+	cut, separator, pairCuts := blockVertexConnectivity(members, clique)
+	if cut != 3 || !reflect.DeepEqual(separator, []string{"a", "b", "c"}) || len(pairCuts) != 0 {
 		t.Fatalf("K4 cut=%d separator=%v", cut, separator)
 	}
 
@@ -35,7 +35,7 @@ func TestLateralBlockVertexConnectivityQuantifiesPackageSeparators(t *testing.T)
 		"bd": {"b", "d"}, "cd": {"c", "d"}, "de": {"d", "e"}, "ce": {"c", "e"},
 	}
 	asymmetricMembers := []string{"a", "b", "c", "d", "e"}
-	cut, separator = blockVertexConnectivity(asymmetricMembers, asymmetric)
+	cut, separator, pairCuts = blockVertexConnectivity(asymmetricMembers, asymmetric)
 	if cut != 2 || !reflect.DeepEqual(separator, []string{"b", "c"}) {
 		t.Fatalf("asymmetric cut=%d separator=%v", cut, separator)
 	}
@@ -83,6 +83,66 @@ func separatorDisconnectsOrTrivial(members []string, edges map[string][2]string,
 		}
 	}
 	return len(seen) != len(remaining)
+}
+
+func TestLateralVertexPairCutsExposeLocalPackageSeparators(t *testing.T) {
+	members := []string{"a", "b", "c", "d", "e", "f"}
+	edges := map[string][2]string{
+		"ab": {"a", "b"}, "ac": {"a", "c"},
+		"bc": {"b", "c"}, "bd": {"b", "d"}, "be": {"b", "e"}, "bf": {"b", "f"},
+		"cd": {"c", "d"}, "ce": {"c", "e"}, "cf": {"c", "f"},
+		"df": {"d", "f"}, "ef": {"e", "f"}, "duplicate": {"b", "a"},
+	}
+	want := []LateralVertexPairCut{
+		{Left: "a", Right: "d", Cut: 2, Separator: []string{"b", "c"}},
+		{Left: "a", Right: "e", Cut: 2, Separator: []string{"b", "c"}},
+		{Left: "a", Right: "f", Cut: 2, Separator: []string{"b", "c"}},
+		{Left: "d", Right: "e", Cut: 3, Separator: []string{"b", "c", "f"}},
+	}
+	for i := 0; i < 50; i++ {
+		_, _, pairCuts := blockVertexConnectivity(members, edges)
+		if !reflect.DeepEqual(pairCuts, want) {
+			t.Fatalf("run %d pair cuts=%+v want=%+v", i, pairCuts, want)
+		}
+		for _, pair := range pairCuts {
+			if len(pair.Separator) != pair.Cut || containsString(pair.Separator, pair.Left) || containsString(pair.Separator, pair.Right) || !separatorDisconnectsPair(members, edges, pair.Left, pair.Right, pair.Separator) {
+				t.Fatalf("invalid pair witness: %+v", pair)
+			}
+		}
+	}
+}
+
+func separatorDisconnectsPair(members []string, edges map[string][2]string, source, sink string, separator []string) bool {
+	removed := map[string]struct{}{}
+	for _, member := range separator {
+		removed[member] = struct{}{}
+	}
+	seen := map[string]struct{}{source: {}}
+	queue := []string{source}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range edges {
+			next := ""
+			if edge[0] == current {
+				next = edge[1]
+			} else if edge[1] == current {
+				next = edge[0]
+			}
+			if next == "" {
+				continue
+			}
+			if _, gone := removed[next]; gone {
+				continue
+			}
+			if _, ok := seen[next]; !ok {
+				seen[next] = struct{}{}
+				queue = append(queue, next)
+			}
+		}
+	}
+	_, connected := seen[sink]
+	return !connected
 }
 
 func TestLateralBlockEdgeConnectivityDistinguishesCycleAndClique(t *testing.T) {

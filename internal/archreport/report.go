@@ -69,17 +69,25 @@ type LateralCriticalPair struct {
 	SinkSide   []string         `json:"sink_side"`
 }
 
+type LateralVertexPairCut struct {
+	Left      string   `json:"left"`
+	Right     string   `json:"right"`
+	Cut       int      `json:"cut"`
+	Separator []string `json:"separator"`
+}
+
 type LateralBiconnectedBlock struct {
-	Tier              int                   `json:"tier"`
-	TierName          string                `json:"tier_name"`
-	Members           []string              `json:"members"`
-	MemberCount       int                   `json:"member_count"`
-	EdgeCount         int                   `json:"edge_count"`
-	MinEdgeCut        int                   `json:"min_edge_cut"`
-	MinVertexCut      int                   `json:"min_vertex_cut"`
-	CriticalSeparator []string              `json:"critical_separator"`
-	CriticalPairs     []LateralCriticalPair `json:"critical_pairs"`
-	PairCuts          []LateralCriticalPair `json:"pair_cuts"`
+	Tier              int                    `json:"tier"`
+	TierName          string                 `json:"tier_name"`
+	Members           []string               `json:"members"`
+	MemberCount       int                    `json:"member_count"`
+	EdgeCount         int                    `json:"edge_count"`
+	MinEdgeCut        int                    `json:"min_edge_cut"`
+	MinVertexCut      int                    `json:"min_vertex_cut"`
+	CriticalSeparator []string               `json:"critical_separator"`
+	VertexPairCuts    []LateralVertexPairCut `json:"vertex_pair_cuts"`
+	CriticalPairs     []LateralCriticalPair  `json:"critical_pairs"`
+	PairCuts          []LateralCriticalPair  `json:"pair_cuts"`
 }
 
 type LateralArticulationPoint struct {
@@ -392,7 +400,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	return report, nil
 }
 
-func blockVertexConnectivity(members []string, edges map[string][2]string) (int, []string) {
+func blockVertexConnectivity(members []string, edges map[string][2]string) (int, []string, []LateralVertexPairCut) {
 	adjacency := map[string]map[string]struct{}{}
 	for _, member := range members {
 		adjacency[member] = map[string]struct{}{}
@@ -420,18 +428,20 @@ func blockVertexConnectivity(members []string, edges map[string][2]string) (int,
 			minCut, separator = len(neighbors), neighbors
 		}
 	}
+	var pairCuts []LateralVertexPairCut
 	for i, source := range members {
 		for _, sink := range members[i+1:] {
 			if _, adjacent := adjacency[source][sink]; adjacent {
 				continue
 			}
 			cut, candidate := unitVertexMaxFlow(source, sink, members, adjacency)
+			pairCuts = append(pairCuts, LateralVertexPairCut{Left: source, Right: sink, Cut: cut, Separator: candidate})
 			if cut < minCut || cut == minCut && lexicalStringsLess(candidate, separator) {
 				minCut, separator = cut, candidate
 			}
 		}
 	}
-	return minCut, separator
+	return minCut, separator, pairCuts
 }
 
 func lexicalStringsLess(left, right []string) bool {
@@ -798,10 +808,10 @@ func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComp
 		}
 		tier := tierByMember[members[0]]
 		minCut, criticalPairs, pairCuts := blockEdgeConnectivity(members, undirected)
-		minVertexCut, separator := blockVertexConnectivity(members, undirected)
+		minVertexCut, separator, vertexPairCuts := blockVertexConnectivity(members, undirected)
 		out = append(out, LateralBiconnectedBlock{
 			Tier: tier.level, TierName: tier.name, Members: members, MemberCount: len(members), EdgeCount: edgeCount,
-			MinEdgeCut: minCut, MinVertexCut: minVertexCut, CriticalSeparator: separator,
+			MinEdgeCut: minCut, MinVertexCut: minVertexCut, CriticalSeparator: separator, VertexPairCuts: vertexPairCuts,
 			CriticalPairs: criticalPairs, PairCuts: pairCuts,
 		})
 	}

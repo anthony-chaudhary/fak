@@ -112,6 +112,46 @@ import _ "github.com/anthony-chaudhary/fak/internal/c"
 	}
 }
 
+func TestArchitectureTextRendersLateralVertexPairCuts(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2,"d":2}
+var tierName=[]string{"zero","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/d")
+`)
+	mustWriteArchitectureFile(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/c"
+`)
+	mustWriteArchitectureFile(t, root, "internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	mustWriteArchitectureFile(t, root, "internal/d/d.go", "package d\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"vertex-pair a--c cut=2 separator=[b d]", "vertex-pair b--d cut=2 separator=[a c]"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "b", "--json"}); code != 0 {
+		t.Fatalf("scoped code=%d stderr=%s", code, errOut.String())
+	}
+	var report archreport.Report
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	want := []archreport.LateralVertexPairCut{{Left: "a", Right: "c", Cut: 2, Separator: []string{"b", "d"}}, {Left: "b", Right: "d", Cut: 2, Separator: []string{"a", "c"}}}
+	if len(report.LateralBiconnectedBlocks) != 1 || !reflect.DeepEqual(report.LateralBiconnectedBlocks[0].VertexPairCuts, want) {
+		t.Fatalf("scoped blocks=%+v want=%+v", report.LateralBiconnectedBlocks, want)
+	}
+}
+
 func TestArchitectureTextRendersLateralMinimumCutPartition(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
