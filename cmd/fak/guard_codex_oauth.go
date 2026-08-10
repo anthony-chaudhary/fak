@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 // guard_codex_oauth.go — the Codex ChatGPT-subscription credential path. It reads the
@@ -134,6 +137,153 @@ func guardCodexSubscriptionHeaders(cred codexSubscriptionCredential) map[string]
 		return nil
 	}
 	return map[string]string{guardCodexChatGPTAccountHeader: strings.TrimSpace(cred.AccountID)}
+}
+
+// codexAccountFailover owns the live Codex subscription seat used by a guarded session.
+// It mirrors the Claude accountFailover seam but keeps the credential as a matched
+// token+ChatGPT-Account-Id pair: a long account-scoped wait marks the current account out,
+// selects one live sibling, and the planner reissues the SAME in-flight request immediately.
+// The moved/walled sets bound one session to each account at most once, so a fleet of capped
+// seats terminates instead of bouncing forever.
+type codexAccountFailover struct {
+	mu         sync.Mutex
+	homeRoot   string
+	currentDir string
+	walled     map[string]bool
+	moved      map[string]bool
+}
+
+func newCodexAccountFailover(homeRoot, pinnedDir string) *codexAccountFailover {
+	return &codexAccountFailover{
+		homeRoot:   homeRoot,
+		currentDir: filepath.Clean(pinnedDir),
+		walled:     make(map[string]bool),
+		moved:      make(map[string]bool),
+	}
+}
+
+func (a *codexAccountFailover) currentConfigDir() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.currentDir
+}
+
+func (a *codexAccountFailover) walledKeys() map[string]bool {
+	out := make(map[string]bool)
+	if a == nil {
+		return out
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for k, v := range a.walled {
+		out[k] = v
+	}
+	return out
+}
+
+func (a *codexAccountFailover) currentCredential() (codexSubscriptionCredential, bool) {
+	if a == nil {
+		return codexSubscriptionCredential{}, false
+	}
+	dir := a.currentConfigDir()
+	cred, err := readCodexSubscriptionCredential(filepath.Join(dir, codexAuthFileName))
+	return cred, err == nil
+}
+
+func (a *codexAccountFailover) failover(_ string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	currentKey := codexAccountKeyForDir(a.currentDir)
+	if currentKey != "" {
+		a.walled[currentKey] = true
+	}
+	for _, h := range a.homesLocked() {
+		key := h.Identity.AccountKey()
+		if filepath.Clean(h.Dir) == filepath.Clean(a.currentDir) || key == "" || a.walled[key] || a.moved[key] {
+			continue
+		}
+		cred, err := readCodexSubscriptionCredential(filepath.Join(h.Dir, codexAuthFileName))
+		if err != nil || strings.TrimSpace(cred.AccessToken) == "" || strings.TrimSpace(cred.AccountID) == "" {
+			continue
+		}
+		a.currentDir = filepath.Clean(h.Dir)
+		a.moved[key] = true
+		return cred.AccessToken, true
+	}
+	return "", false
+}
+
+func (a *codexAccountFailover) homesLocked() []accounts.Home {
+	profile, ok := harnessprofile.Lookup("codex")
+	if !ok {
+		return nil
+	}
+	homes, err := accounts.DiscoverProfile(a.homeRoot, profile)
+	if err != nil {
+		return nil
+	}
+	reg := accounts.Registry{Homes: homes}
+	plan := reg.RotationPlan()
+	out := make([]accounts.Home, 0, len(plan.Pool))
+	byName := make(map[string]accounts.Home, len(homes))
+	for _, h := range homes {
+		byName[h.Name] = h
+	}
+	for _, seat := range plan.Pool {
+		if h, ok := byName[seat.Name]; ok {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func codexAccountKeyForDir(dir string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	profile, ok := harnessprofile.Lookup("codex")
+	if !ok {
+		return ""
+	}
+	return accounts.DeriveIdentityForProfile(dir, profile).AccountKey()
+}
+
+func newCodexFailoverRefreshers(a *codexAccountFailover, first codexSubscriptionCredential) (func() string, func() map[string]string) {
+	var mu sync.Mutex
+	last := first
+	resolve := func() (codexSubscriptionCredential, bool) {
+		cred, ok := a.currentCredential()
+		if !ok {
+			return codexSubscriptionCredential{}, false
+		}
+		mu.Lock()
+		last = cred
+		mu.Unlock()
+		return cred, true
+	}
+	token := func() string {
+		if cred, ok := resolve(); ok {
+			return cred.AccessToken
+		}
+		return ""
+	}
+	headers := func() map[string]string {
+		mu.Lock()
+		cred := last
+		mu.Unlock()
+		if fresh, ok := resolve(); ok {
+			cred = fresh
+		}
+		return guardCodexSubscriptionHeaders(cred)
+	}
+	return token, headers
 }
 
 func newCodexSubscriptionRefreshers(codexHomeFlag string, first codexSubscriptionCredential) (func() string, func() map[string]string) {

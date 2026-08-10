@@ -1,11 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // guard_codex_oauth_test.go — coverage for the Codex ChatGPT-subscription credential
@@ -225,5 +232,107 @@ func TestGuardCodexSubscriptionEligible(t *testing.T) {
 				t.Fatalf("eligible = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func writeCodexSeat(t *testing.T, root, name, token, account string) string {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(`{"auth_mode":"chatgpt","tokens":{"access_token":%q,"account_id":%q}}`, token, account)
+	if err := os.WriteFile(filepath.Join(dir, codexAuthFileName), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestCodexAccountFailoverResendsWithMatchedSibling proves the missing Codex half of the
+// account-wall contract. The planner-facing failover callback advances to exactly one live
+// sibling; the credential functions used by the immediate reissue then expose that sibling's
+// matched bearer + ChatGPT-Account-Id pair, while the live status callbacks mark what happened.
+func TestCodexLongWallFailoverReissuesOwnedRequest(t *testing.T) {
+	root := t.TempDir()
+	a := writeCodexSeat(t, root, ".codex-a", "token-a", "acct-a")
+	_ = writeCodexSeat(t, root, ".codex-b", "token-b", "acct-b")
+	first, err := readCodexSubscriptionCredential(filepath.Join(a, codexAuthFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	af := newCodexAccountFailover(root, a)
+	token, headers := newCodexFailoverRefreshers(af, first)
+
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization") + "/" + r.Header.Get(guardCodexChatGPTAccountHeader)
+		requests = append(requests, got)
+		if len(requests) == 1 {
+			w.Header().Set("Retry-After", "3600")
+			http.Error(w, `{"error":{"message":"usage limit reached"}}`, http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"continued"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	planner := agent.NewHTTPPlanner(srv.URL, "test", first.AccessToken)
+	planner.APIKeyFunc = token
+	planner.ExtraHeadersFunc = headers
+	planner.AccountFailoverFunc = af.failover
+	got, err := planner.Complete(context.Background(), []agent.Message{{Role: "user", Content: "continue the owned request"}}, nil)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if got.Message.Content != "continued" {
+		t.Fatalf("completion = %q, want continued", got.Message.Content)
+	}
+	want := []string{"Bearer token-a/acct-a", "Bearer token-b/acct-b"}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("requests = %#v, want same request retried across matched account pairs %#v", requests, want)
+	}
+}
+
+func TestCodexAccountFailoverResendsWithMatchedSibling(t *testing.T) {
+	root := t.TempDir()
+	a := writeCodexSeat(t, root, ".codex-a", "token-a", "acct-a")
+	b := writeCodexSeat(t, root, ".codex-b", "token-b", "acct-b")
+	first, err := readCodexSubscriptionCredential(filepath.Join(a, codexAuthFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	af := newCodexAccountFailover(root, a)
+	token, headers := newCodexFailoverRefreshers(af, first)
+
+	if got := token(); got != "token-a" {
+		t.Fatalf("initial token = %q, want token-a", got)
+	}
+	if got := headers()[guardCodexChatGPTAccountHeader]; got != "acct-a" {
+		t.Fatalf("initial account header = %q, want acct-a", got)
+	}
+
+	if got, ok := af.failover("failover_account"); !ok || got != "token-b" {
+		t.Fatalf("failover = (%q,%v), want (token-b,true)", got, ok)
+	}
+	if got := af.currentConfigDir(); got != b {
+		t.Fatalf("current dir = %q, want adopted sibling %q", got, b)
+	}
+	if got := token(); got != "token-b" {
+		t.Fatalf("reissued token = %q, want token-b", got)
+	}
+	if got := headers()[guardCodexChatGPTAccountHeader]; got != "acct-b" {
+		t.Fatalf("reissued account header = %q, want acct-b (matched pair)", got)
+	}
+	if !af.walledKeys()[codexAccountKeyForDir(a)] {
+		t.Fatalf("walled status = %+v, want acct-a marked for observability", af.walledKeys())
+	}
+
+	// One sibling means one bounded switch. A second wall cannot bounce back to account A.
+	if got, ok := af.failover("failover_account"); ok || got != "" {
+		t.Fatalf("second failover = (%q,%v), want bounded no-target", got, ok)
+	}
+	if got := af.currentConfigDir(); got != b {
+		t.Fatalf("no-target failover moved current dir to %q, want it held at %q", got, b)
 	}
 }

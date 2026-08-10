@@ -220,7 +220,21 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 			p.oauthSource = cred.Source
 			p.resolvedBase = guardCodexChatGPTBackendBaseURL
 			p.extraHeaders = guardCodexSubscriptionHeaders(cred)
-			p.apiKeyFunc, p.extraHeadersFunc = newCodexSubscriptionRefreshers(in.codexHome, cred)
+
+			// Codex subscription seats need the same default account-wall recovery as Claude:
+			// the planner rotates once and resends the still-owned request in place. Keep the
+			// access token and ChatGPT-Account-Id on one moving credential source so a switch
+			// can never pair one account's bearer with another account's routing header.
+			pinnedDir := filepath.Dir(cred.Source)
+			if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
+				af := newCodexAccountFailover(homeRoot, pinnedDir)
+				p.accountFailoverFunc = af.failover
+				p.activeAccountDir = af.currentConfigDir
+				p.walledAccounts = af.walledKeys
+				p.apiKeyFunc, p.extraHeadersFunc = newCodexFailoverRefreshers(af, cred)
+			} else {
+				p.apiKeyFunc, p.extraHeadersFunc = newCodexSubscriptionRefreshers(in.codexHome, cred)
+			}
 		} else if strings.TrimSpace(os.Getenv(guardCodexEnvKey(in.apiKeyEnv))) == "" && !in.quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: Codex ChatGPT subscription unavailable: %v\n", err)
 		}
