@@ -55,10 +55,16 @@ type BlastHotspot struct {
 	MaxHops     int    `json:"max_hops"`
 }
 
-type LateralCriticalPair struct {
+type LateralCutEdge struct {
 	Left  string `json:"left"`
 	Right string `json:"right"`
-	Cut   int    `json:"cut"`
+}
+
+type LateralCriticalPair struct {
+	Left     string           `json:"left"`
+	Right    string           `json:"right"`
+	Cut      int              `json:"cut"`
+	CutEdges []LateralCutEdge `json:"cut_edges"`
 }
 
 type LateralBiconnectedBlock struct {
@@ -392,29 +398,38 @@ func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, [
 	var allPairs []LateralCriticalPair
 	for i := 0; i < len(members); i++ {
 		for j := i + 1; j < len(members); j++ {
-			cut := unitEdgeMaxFlow(members[i], members[j], edges, memberSet)
-			allPairs = append(allPairs, LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut})
+			cut, cutEdges := unitEdgeMaxFlow(members[i], members[j], edges, memberSet)
+			pair := LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut, CutEdges: cutEdges}
+			allPairs = append(allPairs, pair)
 			if minCut < 0 || cut < minCut {
 				minCut = cut
 				pairs = nil
 			}
 			if cut == minCut {
-				pairs = append(pairs, LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut})
+				pairs = append(pairs, pair)
 			}
 		}
 	}
 	return minCut, pairs, allPairs
 }
-func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members map[string]struct{}) int {
-	capacity := map[string]map[string]int{}
+func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members map[string]struct{}) (int, []LateralCutEdge) {
+	unique := map[string][2]string{}
 	for _, edge := range edges {
+		left, right := edge[0], edge[1]
+		if right < left {
+			left, right = right, left
+		}
+		if _, ok := members[left]; !ok {
+			continue
+		}
+		if _, ok := members[right]; !ok {
+			continue
+		}
+		unique[left+"\x00"+right] = [2]string{left, right}
+	}
+	capacity := map[string]map[string]int{}
+	for _, edge := range unique {
 		u, v := edge[0], edge[1]
-		if _, ok := members[u]; !ok {
-			continue
-		}
-		if _, ok := members[v]; !ok {
-			continue
-		}
 		if capacity[u] == nil {
 			capacity[u] = map[string]int{}
 		}
@@ -463,7 +478,51 @@ func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members ma
 		}
 		flow++
 	}
-	return flow
+	reachable := map[string]struct{}{source: {}}
+	queue := []string{source}
+	for len(queue) > 0 {
+		u := queue[0]
+		queue = queue[1:]
+		neighbors := make([]string, 0, len(capacity[u]))
+		for v, residual := range capacity[u] {
+			if residual > 0 {
+				neighbors = append(neighbors, v)
+			}
+		}
+		sort.Strings(neighbors)
+		for _, v := range neighbors {
+			if _, seen := reachable[v]; seen {
+				continue
+			}
+			reachable[v] = struct{}{}
+			queue = append(queue, v)
+		}
+	}
+	keys := make([]string, 0, len(unique))
+	for key := range unique {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	cutEdges := make([]LateralCutEdge, 0, flow)
+	for _, key := range keys {
+		edge := unique[key]
+		_, leftReachable := reachable[edge[0]]
+		_, rightReachable := reachable[edge[1]]
+		if leftReachable != rightReachable {
+			left, right := edge[0], edge[1]
+			if right < left {
+				left, right = right, left
+			}
+			cutEdges = append(cutEdges, LateralCutEdge{Left: left, Right: right})
+		}
+	}
+	sort.Slice(cutEdges, func(i, j int) bool {
+		if cutEdges[i].Left != cutEdges[j].Left {
+			return cutEdges[i].Left < cutEdges[j].Left
+		}
+		return cutEdges[i].Right < cutEdges[j].Right
+	})
+	return flow, cutEdges
 }
 
 func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComponent) []LateralBiconnectedBlock {

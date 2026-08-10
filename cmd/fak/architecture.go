@@ -155,6 +155,13 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stdout, "  lateral biconnected blocks (single-package resilient):")
 		for _, block := range report.LateralBiconnectedBlocks {
 			fmt.Fprintf(stdout, "    tier=%s members=%v edges=%d edge-connectivity=%d critical-pairs=%d\n", block.TierName, block.Members, block.EdgeCount, block.MinEdgeCut, len(block.CriticalPairs))
+			for _, pair := range block.CriticalPairs {
+				edges := make([]string, 0, len(pair.CutEdges))
+				for _, edge := range pair.CutEdges {
+					edges = append(edges, edge.Left+"--"+edge.Right)
+				}
+				fmt.Fprintf(stdout, "      %s--%s cut=%d witness=%v\n", pair.Left, pair.Right, pair.Cut, edges)
+			}
 		}
 	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {

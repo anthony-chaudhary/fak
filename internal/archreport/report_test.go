@@ -34,6 +34,38 @@ func TestLateralBlockEdgeConnectivityDistinguishesCycleAndClique(t *testing.T) {
 	}
 }
 
+func TestLateralMinimumCutWitnessIsCanonicalAndDeterministic(t *testing.T) {
+	members := map[string]struct{}{"a": {}, "b": {}, "c": {}, "d": {}}
+	cycle := map[string][2]string{
+		"z": {"d", "a"}, "bc": {"b", "c"}, "ab": {"b", "a"}, "cd": {"c", "d"},
+		"duplicate-orientation": {"a", "b"},
+	}
+	want := []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "d"}}
+	for i := 0; i < 20; i++ {
+		cut, witness := unitEdgeMaxFlow("a", "c", cycle, members)
+		if cut != 2 || !reflect.DeepEqual(witness, want) {
+			t.Fatalf("run %d: cut=%d witness=%+v want=%+v", i, cut, witness, want)
+		}
+		if len(witness) != cut {
+			t.Fatalf("run %d: witness cardinality=%d cut=%d", i, len(witness), cut)
+		}
+	}
+
+	clique := map[string][2]string{}
+	for left := range members {
+		for right := range members {
+			if left < right {
+				clique[left+right] = [2]string{right, left}
+			}
+		}
+	}
+	cut, witness := unitEdgeMaxFlow("a", "b", clique, members)
+	want = []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}, {Left: "a", Right: "d"}}
+	if cut != 3 || !reflect.DeepEqual(witness, want) {
+		t.Fatalf("K4 cut=%d witness=%+v want=%+v", cut, witness, want)
+	}
+}
+
 func TestAnalyzeDerivesLateralBiconnectedBlocks(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {
@@ -74,9 +106,17 @@ import _ "github.com/anthony-chaudhary/fak/internal/z"
 	if err != nil {
 		t.Fatal(err)
 	}
+	trianglePairs := func(a, b, c string) []LateralCriticalPair {
+		return []LateralCriticalPair{
+			{Left: a, Right: b, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: a, Right: c}}},
+			{Left: a, Right: c, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: a, Right: c}}},
+			{Left: b, Right: c, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: b, Right: c}}},
+		}
+	}
+	abc, cde := trianglePairs("a", "b", "c"), trianglePairs("c", "d", "e")
 	want := []LateralBiconnectedBlock{
-		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2}, {Left: "a", Right: "c", Cut: 2}, {Left: "b", Right: "c", Cut: 2}}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2}, {Left: "a", Right: "c", Cut: 2}, {Left: "b", Right: "c", Cut: 2}}},
-		{Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: []LateralCriticalPair{{Left: "c", Right: "d", Cut: 2}, {Left: "c", Right: "e", Cut: 2}, {Left: "d", Right: "e", Cut: 2}}, PairCuts: []LateralCriticalPair{{Left: "c", Right: "d", Cut: 2}, {Left: "c", Right: "e", Cut: 2}, {Left: "d", Right: "e", Cut: 2}}},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: abc, PairCuts: abc},
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"c", "d", "e"}, MemberCount: 3, EdgeCount: 3, MinEdgeCut: 2, CriticalPairs: cde, PairCuts: cde},
 	}
 	if !reflect.DeepEqual(r.LateralBiconnectedBlocks, want) {
 		t.Fatalf("blocks=%+v want=%+v", r.LateralBiconnectedBlocks, want)
