@@ -76,6 +76,30 @@ import _ "github.com/anthony-chaudhary/fak/internal/caller"
 	}
 }
 
+func TestArchitectureTextRendersLateralArticulationPoints(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2}
+var tierName=[]string{"zero","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	mustWriteArchitectureFile(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/c"
+`)
+	mustWriteArchitectureFile(t, root, "internal/c/c.go", "package c\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"lateral articulation points (package seams):", "b tier=foundation-composite fragments=[1 1] coupling-pairs=1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
 func TestArchitectureTextRendersLateralBridges(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

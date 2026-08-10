@@ -10,6 +10,73 @@ import (
 	"testing"
 )
 
+func TestAnalyzeIdentifiesLateralArticulationPoints(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2,"d":2,"center":3,"p":3,"q":3,"r":3,"x":4,"y":4,"z":4}
+var tierName=[]string{"zero","primitive","foundation-composite","mechanism","composer"}
+`)
+	write("internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	write("internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/c"
+`)
+	write("internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/d/d.go", "package d\n")
+	write("internal/center/center.go", `package center
+import (_ "github.com/anthony-chaudhary/fak/internal/p"; _ "github.com/anthony-chaudhary/fak/internal/q"; _ "github.com/anthony-chaudhary/fak/internal/r")
+`)
+	for _, leaf := range []string{"p", "q", "r"} {
+		write("internal/"+leaf+"/"+leaf+".go", "package "+leaf+"\n")
+	}
+	write("internal/x/x.go", `package x
+import (_ "github.com/anthony-chaudhary/fak/internal/y"; _ "github.com/anthony-chaudhary/fak/internal/z")
+`)
+	write("internal/y/y.go", `package y
+import _ "github.com/anthony-chaudhary/fak/internal/z"
+`)
+	write("internal/z/z.go", "package z\n")
+	r, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []LateralArticulationPoint{
+		{Tier: 3, TierName: "mechanism", Name: "center", Fragments: [][]string{{"p"}, {"q"}, {"r"}}, FragmentCount: 3, CouplingPairs: 3},
+		{Tier: 2, TierName: "foundation-composite", Name: "b", Fragments: [][]string{{"a"}, {"c", "d"}}, FragmentCount: 2, CouplingPairs: 2},
+		{Tier: 2, TierName: "foundation-composite", Name: "c", Fragments: [][]string{{"a", "b"}, {"d"}}, FragmentCount: 2, CouplingPairs: 2},
+	}
+	if !reflect.DeepEqual(r.LateralArticulationPoints, want) {
+		t.Fatalf("points=%+v want=%+v", r.LateralArticulationPoints, want)
+	}
+	scoped, err := Analyze(root, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scoped.LateralArticulationPoints, want[1:]) {
+		t.Fatalf("scoped=%+v", scoped.LateralArticulationPoints)
+	}
+	cycle, err := Analyze(root, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cycle.LateralArticulationPoints) != 0 {
+		t.Fatalf("cycle points=%+v", cycle.LateralArticulationPoints)
+	}
+}
+
 func TestAnalyzeIdentifiesLateralBridgesAndInducedCouplings(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

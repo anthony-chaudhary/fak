@@ -141,6 +141,16 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %s -> %s tier=%s sides=%d/%d coupling-pairs=%d\n", bridge.From, bridge.To, bridge.TierName, len(bridge.LeftSide), len(bridge.RightSide), bridge.CouplingPairs)
 		}
 	}
+	if len(report.LateralArticulationPoints) > 0 {
+		fmt.Fprintln(stdout, "  lateral articulation points (package seams):")
+		for _, point := range report.LateralArticulationPoints {
+			sizes := make([]int, len(point.Fragments))
+			for i, fragment := range point.Fragments {
+				sizes[i] = len(fragment)
+			}
+			fmt.Fprintf(stdout, "    %s tier=%s fragments=%v coupling-pairs=%d\n", point.Name, point.TierName, sizes, point.CouplingPairs)
+		}
+	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {
 		fmt.Fprintln(stdout, "  sink candidates (declared tier above import floor):")
 		for _, candidate := range report.SinkCandidates {
