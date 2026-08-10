@@ -55,6 +55,27 @@ func TestDistillGoTestNeverDropsErrorShapedUnknownLines(t *testing.T) {
 	}
 }
 
+func TestDistillRegistryDispatchesByToolAndKind(t *testing.T) {
+	orig := goTestFixture()
+	tests := []struct {
+		name string
+		in   Input
+		want bool
+	}{
+		{name: "text shell matches", in: Input{Tool: "shell", Kind: KindText, Bytes: orig}, want: true},
+		{name: "unknown kind is sniffed", in: Input{Tool: "Bash", Kind: KindUnknown, Bytes: orig}, want: true},
+		{name: "wrong tool", in: Input{Tool: "Read", Kind: KindText, Bytes: orig}},
+		{name: "wrong kind", in: Input{Tool: "Bash", Kind: KindJSON, Bytes: orig}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, got := applyDistillFilter(tt.in)
+			if got != tt.want {
+				t.Fatalf("matched = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 func TestDistillFallsBackToNativeWhenNoToolFilterMatches(t *testing.T) {
 	orig := []byte(strings.Repeat("same line repeated for native fallback\n", 20))
 	out, err := (distillCompressor{}).Compress(context.Background(), Input{Tool: "Read", Bytes: orig, UpstreamHeadroom: &Presence{}})

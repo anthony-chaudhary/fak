@@ -19,7 +19,7 @@ type distillCompressor struct {
 func (distillCompressor) Name() string { return DistillName }
 
 func (c distillCompressor) Compress(ctx context.Context, in Input) (Output, error) {
-	if body, dropped, ok := applyGoTestFilter(in.Tool, in.Bytes); ok {
+	if body, dropped, ok := applyDistillFilter(in); ok {
 		hint := fmt.Sprintf("[fak distill: %d routine go test line(s) dropped]", dropped)
 		body = append(body, '\n')
 		body = append(body, hint...)
@@ -42,14 +42,49 @@ func (c distillCompressor) Compress(ctx context.Context, in Input) (Output, erro
 	return fallback.Compress(ctx, in)
 }
 
+// A distillFilter is a trusted, compiled-in filter selected by both producer and
+// detected content kind. Keeping this registry internal prevents project output
+// from supplying the rules that decide which of its own bytes the model sees.
+type distillFilter struct {
+	matches func(Input) bool
+	apply   func([]byte) ([]byte, int, bool)
+}
+
+var distillFilters = []distillFilter{
+	{matches: matchesGoTest, apply: applyGoTestFilter},
+}
+
+func applyDistillFilter(in Input) ([]byte, int, bool) {
+	for _, filter := range distillFilters {
+		if filter.matches(in) {
+			return filter.apply(in.Bytes)
+		}
+	}
+	return nil, 0, false
+}
+
+func matchesGoTest(in Input) bool {
+	kind := in.Kind
+	if kind == KindUnknown {
+		kind = Detect(in.Bytes)
+	}
+	if kind != KindText && kind != KindLog {
+		return false
+	}
+	lowerTool := strings.ToLower(in.Tool)
+	if !strings.Contains(lowerTool, "bash") && !strings.Contains(lowerTool, "shell") && !strings.Contains(lowerTool, "go test") {
+		return false
+	}
+	// The result itself must carry Go test's stable record vocabulary; the tool
+	// name alone is not enough to apply a lossy classifier.
+	return bytes.Contains(in.Bytes, []byte("--- PASS:")) || bytes.Contains(in.Bytes, []byte("--- FAIL:"))
+}
+
 // applyGoTestFilter drops only routine passing-test records. FAIL records,
 // continuation lines, diagnostics, package summaries, and unknown lines are kept.
 // That conservative rule is the error-preservation invariant: classification
 // uncertainty spends tokens rather than hiding evidence.
-func applyGoTestFilter(tool string, raw []byte) ([]byte, int, bool) {
-	if !isGoTestTool(tool, raw) {
-		return nil, 0, false
-	}
+func applyGoTestFilter(raw []byte) ([]byte, int, bool) {
 	lines := strings.Split(string(raw), "\n")
 	out := make([]string, 0, len(lines))
 	dropped := 0
@@ -66,16 +101,6 @@ func applyGoTestFilter(tool string, raw []byte) ([]byte, int, bool) {
 	}
 	body := bytes.TrimRight([]byte(strings.Join(out, "\n")), "\n")
 	return body, dropped, true
-}
-
-func isGoTestTool(tool string, raw []byte) bool {
-	lowerTool := strings.ToLower(tool)
-	if !strings.Contains(lowerTool, "bash") && !strings.Contains(lowerTool, "shell") && !strings.Contains(lowerTool, "go test") {
-		return false
-	}
-	// The result itself must carry Go test's stable record vocabulary; the tool
-	// name alone is not enough to apply a lossy classifier.
-	return bytes.Contains(raw, []byte("--- PASS:")) || bytes.Contains(raw, []byte("--- FAIL:"))
 }
 
 func init() { Register(distillCompressor{}) }
