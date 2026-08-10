@@ -42,6 +42,30 @@ func TestToolCoverageAuditJSONReportsLoadBearingDebt(t *testing.T) {
 	}
 }
 
+func TestToolCoverageAuditDefaultsToNoFloor(t *testing.T) {
+	root := t.TempDir()
+	writeToolCoverageFixture(t, root, "tools/foo.py", "x=1\n")
+	writeToolCoverageFixture(t, root, ".claude/skills/audit/SKILL.md", "calls tools/foo.py\n")
+
+	var stdout, stderr bytes.Buffer
+	code := runToolCoverageAudit(&stdout, &stderr, []string{"--workspace", root, "--json"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var payload struct {
+		OK          bool     `json:"ok"`
+		Verdict     string   `json:"verdict"`
+		MinCoverage *float64 `json:"min_coverage"`
+		Debt        int      `json:"debt"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Verdict != "OK" || payload.MinCoverage != nil || payload.Debt != 1 {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
 func writeToolCoverageFixture(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))

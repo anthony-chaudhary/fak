@@ -3,6 +3,7 @@ package toolcoverage
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,9 @@ func TestBuildPayload(t *testing.T) {
 	p := BuildPayload("r", AuditModules([]string{"foo", "bar"}, map[string]bool{}, "foo.py bar.py"), &floor)
 	if p.OK || p.Verdict != "BELOW_FLOOR" {
 		t.Fatalf("payload=%+v", p)
+	}
+	if !strings.Contains(p.Reason, "bar") {
+		t.Fatalf("reason does not name untested module: %q", p.Reason)
 	}
 	p = BuildPayload("r", AuditModules([]string{"foo"}, map[string]bool{"foo": true}, "foo.py"), &floor)
 	if !p.OK || p.Verdict != "OK" {
