@@ -1147,6 +1147,11 @@
           "category": "incidental",
           "reason": "Private benchmark aggregation helper, not a production guard or gate.",
           "token": "aggregateTail"
+        },
+        {
+          "category": "incidental",
+          "reason": "A boolean predicate answering whether one issue is an aggregate (epic label, epic/track title prefix, or a task list of at least minItems entries) so percent-complete can be attempted on it. It gates nothing and refuses nothing -- it selects a population for measurement, and deliberately uses the looser of the repo's two existing epic rules rather than introducing a third.",
+          "token": "IsAggregate"
         }
       ],
       "exclude": [
@@ -1173,6 +1178,7 @@
         "FLEET_GIT_HYGIENE_GUARD",
         "GATED_UNWITNESSED",
         "GateFlipped",
+        "IsAggregate",
         "ReportedGates",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
@@ -2241,6 +2247,16 @@
           "category": "incidental",
           "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
           "token": "GoldDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "A fixed numeric floor (0.50) on the share of open aggregates whose progress is witnessed by child-issue closes. It is a threshold constant carrying its reasoning in a comment, not a governed concept: it names no new kind of witness, it only sets where the existing witnessed-progress KPI trips.",
+          "token": "WitnessedProgressFloor"
+        },
+        {
+          "category": "incidental",
+          "reason": "One of eight unexported per-KPI fold functions (kpiFlowEfficiency, kpiQueueTime, kpiAgingWIP, ...) that each map already-computed facts onto the shared KPI struct. It is an internal helper with the same shape as its seven siblings, not a distinct notion of witness.",
+          "token": "kpiWitnessedProgress"
         }
       ],
       "id": "witness-proof",
@@ -2273,6 +2289,7 @@
         "WitnessEvidenceStats",
         "WitnessMove",
         "WitnessRoute",
+        "WitnessedProgressFloor",
         "appendGuardCompactionWitnessTo",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
@@ -2300,6 +2317,7 @@
         "guardCompactionWitnessLedgerRel",
         "guardCompactionWitnessSchema",
         "held_axis_unwitnessed",
+        "kpiWitnessedProgress",
         "latestGuardCompactionWitness",
         "liveTreeWitness",
         "maxWitnessFileBytes",
@@ -2769,6 +2787,11 @@
           "category": "incidental",
           "reason": "Experiment-local live matrix aggregate; not a reusable capability policy concept.",
           "token": "liveToolPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local map keying observed predictions by phase and policy; not a new policy capability or public concept.",
+          "token": "phasePolicy"
         }
       ],
       "exclude": [
@@ -2827,6 +2850,7 @@
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "orgPostureGloss",
+        "phasePolicy",
         "policies",
         "policyErr",
         "policy_changed",
@@ -3199,6 +3223,11 @@
           "category": "incidental",
           "reason": "GitDailyDebtKey is only the Go const that HOLDS the positioned corpus key git_daily_debt (internal/metrics/git_daily_health.go); the concept is the key value itself, positioned as gitdailydebt. Same shape as RatchetDebtKey, which is named inside climb_ratchet_debt's definition rather than positioned on its own.",
           "token": "GitDailyDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "The corpus key under which the flow scorecard reports its defect count, following the repo-wide scorecard envelope convention corpus{<x>_debt, grade}. It is an enum-member-shaped string literal identical in role to every other package's <x>_debt key, not a distinct notion of debt.",
+          "token": "flow_debt"
         }
       ],
       "id": "score-debt",
@@ -3211,6 +3240,7 @@
         "TestModeDebtGradeInvariants",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
+        "flow_debt",
         "negation_operator_debt",
         "scorecardPath",
         "scorecard_since",
