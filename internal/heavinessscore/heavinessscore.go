@@ -38,22 +38,10 @@
 // JSON file -- only by genuinely slimming the surface. The fold/grade/markdown machinery lives in
 // pkg/scorecard; this package holds only the operator-surface extraction and the KPIs.
 //
-// TIER SPLIT (epic #2228 C6, #2235). The verb surface is reported as two meters, not one flat
-// count: frontdoor_verbs (the product tier an operator FACES -- what `fak help` lists) and
-// dev_verbs (the `fak dev <verb>` tooling tier, everything else). The split is WITNESSED: the tier
-// of each verb is read from internal/devindex (tiers.go), whose classification is derived from and
-// coverage-gated against the cmd/fak dispatch switch, so a count here is a fact fak authored, not a
-// value relayed. The two meters PARTITION the flat surface by construction -- frontdoor_verbs +
-// dev_verbs == the old flat count -- so the split is a continuity-preserving decomposition, never a
-// silent shrink.
-//
-// HONESTY FENCE. dev_verbs stays MEASURED even after C5 gates the bare dev spellings behind
-// `fak dev`: a gated verb is hidden from the front door, not from the meter. Because both meters
-// are reported, reclassifying a verb frontdoor->dev is VISIBLE (frontdoor falls by one, dev rises
-// by one, the sum is conserved) -- so the ratchet cannot be gamed. The heaviness drop this epic
-// buys must come from the frontdoor meter ONLY, and a future "move verbs to dev to lower heaviness"
-// commit must NOT be read as a real reduction unless the verb is actually deleted or the product is
-// simplified (removed from BOTH meters).
+// RUNTIME SPLIT (#6022). The verb surface is reported as runtime_verbs, the
+// commands still linked into the serving/guard binary, plus development_verbs, the
+// repository-maintenance surface migrating to the separately built fak-dev artifact.
+// The source-derived total remains measured so the split cannot manufacture a gain.
 package heavinessscore
 
 import (
@@ -65,7 +53,6 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/configsurface"
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -129,7 +116,7 @@ var requiredDocMapSurfaces = []requiredDocMapSurface{
 type Surface struct {
 	Verbs                     []string // distinct public top-level verbs (sorted)
 	MetaVerbs                 []string // the subset that are meta-scorecards / RSI verbs (sorted)
-	FrontdoorVerbs            int      // the subset classified frontdoor tier (devindex.TierFrontdoor) -- the product front door
+	FrontdoorVerbs            int      // runtime product spellings retained in fak
 	FrontDoorFlags            int      // flags defined on the front-door verb (`fak guard`)
 	RefusalReasons            int      // [reasons.*] blocks declared in dos.toml
 	AppealWired               bool     // the dispatch table routes the in-product appeal verb (`complain`)
@@ -185,15 +172,42 @@ func dispatchBlock(s string) string {
 	return rest
 }
 
-// countFrontdoor returns how many of the given verbs are classified frontdoor tier (the product
-// front door). The tier is read from internal/devindex, whose table is coverage-gated against the
-// live dispatch switch -- so this count is WITNESSED, not authored per-card. An unclassified or
-// dev/hidden verb is not frontdoor, so it lands in the dev meter (DevVerbs = total - frontdoor),
-// which keeps the two meters a clean partition of the flat surface (the continuity witness).
+// runtimeProductVerbs is a runtime-owned compact manifest for score accounting.
+// Development ownership/auditing remains in internal/devindex, but runtime code
+// must not import that package.
+var runtimeProductVerbs = map[string]bool{
+	"ablate":      true,
+	"agent":       true,
+	"attest":      true,
+	"audit":       true,
+	"codex":       true,
+	"doctor":      true,
+	"egress":      true,
+	"guard":       true,
+	"help":        true,
+	"info":        true,
+	"ls":          true,
+	"model":       true,
+	"policy":      true,
+	"preflight":   true,
+	"ps":          true,
+	"pull":        true,
+	"recover":     true,
+	"replay":      true,
+	"resume":      true,
+	"run":         true,
+	"self-update": true,
+	"serve":       true,
+	"session":     true,
+	"signal":      true,
+	"top":         true,
+	"version":     true,
+}
+
 func countFrontdoor(verbs []string) int {
 	n := 0
-	for _, v := range verbs {
-		if t, ok := devindex.TierOf(v); ok && t == devindex.TierFrontdoor {
+	for _, verb := range verbs {
+		if runtimeProductVerbs[verb] {
 			n++
 		}
 	}

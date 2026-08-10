@@ -129,6 +129,17 @@ func TestAppealChannelWired(t *testing.T) {
 	}
 }
 
+func TestRuntimeProductVerbManifestIsLocalAndPartitions(t *testing.T) {
+	verbs := []string{"guard", "serve", "commit", "issue"}
+	got := countFrontdoor(verbs)
+	if got != 2 {
+		t.Fatalf("runtime product count = %d, want guard+serve only", got)
+	}
+	if got+(len(verbs)-got) != len(verbs) {
+		t.Fatal("runtime/development split did not conserve total verb count")
+	}
+}
+
 func TestCLIVerbCount_SoftBelowCeilingHardAbove(t *testing.T) {
 	below := kpiCLIVerbCount(Surface{Verbs: make([]string, 136)})
 	if len(below.Defects) != 0 {
