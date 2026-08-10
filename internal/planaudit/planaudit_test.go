@@ -69,4 +69,3 @@ func TestAuditPlanRecognizesHeaderMarker(t *testing.T) {
 		t.Fatalf("plan=%+v", plan)
 	}
 }
-
