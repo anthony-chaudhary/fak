@@ -1,0 +1,294 @@
+{
+  "Schema": "fak-microcontext-counterfactual-tool-judgments/1",
+  "Adjudicator": "independent-groq",
+  "Model": "llama-3.3-70b-versatile",
+  "Endpoint": "openai-compatible",
+  "PromptVersion": "counterfactual-tool-need-v1",
+  "CorpusSHA256": "eb0fe02ba6e31f65251516f83d1425c7c3375f2c0d19f6306a2bdb75e06f41f5",
+  "CreatedAt": "2026-08-10T20:11:17Z",
+  "Judgments": [
+    {
+      "id": "issue-5148-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The issue packet provides detailed design and implementation information, but does not specify a concrete acceptance witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5148-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "requires live GitHub issue state",
+      "confidence": 0.5,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5154-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "short",
+      "required_tool": "none",
+      "rationale": "The issue packet does not specify a concrete acceptance witness for the requested work, instead it defines conditions and metrics for measuring acceptance.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5154-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5158-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The acceptance section describes a concrete test, TestInterruptLandsAtTurnBoundary, which serves as a witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5158-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "checking if issue is open now requires current state",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5207-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The packet contains a detailed description of the requested work, but does not specify a concrete acceptance witness.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5207-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "current issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "determine if issue is open",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5245-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The issue packet does not specify a concrete acceptance witness for the requested work, but it does outline the requirements and expectations for the work in the form of a Definition of Done (DoD).",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5245-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5347-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The issue packet does not specify a concrete acceptance witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5347-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining if the issue is open requires current state",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5363-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The issue packet provides a detailed description of the problem and the fix, including the implementation of a Keychain reader in `internal/accounts`. The acceptance witness is implicit in the description of the fix and the verification of its correctness.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5363-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5521-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The issue packet does not specify a concrete acceptance witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5521-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining if the issue is open requires checking its current state",
+      "confidence": 0.8,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5525-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The question is answered by examining the provided code and issue description.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5525-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining if the issue is open requires checking its current state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5636-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The issue packet provides sufficient information to determine that there is no concrete acceptance witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5636-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "confidence": 0.8,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5645-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The issue packet provides a detailed description of the feature and its requirements, including the done conditions and proof requirements, which serve as a concrete acceptance witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5645-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5672-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The issue packet does not mention a concrete acceptance witness.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5672-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "issue status",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5713-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "none",
+      "required_tool": "none",
+      "rationale": "The issue packet specifies a clear set of tasks and deliverables for the research work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5713-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "answering requires current issue state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5802-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "short",
+      "required_tool": "none",
+      "rationale": "The packet contains all necessary information to answer the question.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5802-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining if the issue is open now requires current state",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5859-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The issue packet does not specify a concrete acceptance witness for the requested work.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5859-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining if the issue is open requires checking its current state",
+      "status": "completed"
+    },
+    {
+      "id": "issue-5929-immutable",
+      "tool_need": "read_only",
+      "missing_fact": "empty",
+      "required_tool": "none",
+      "rationale": "The issue packet does not mention a concrete acceptance witness.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5929-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "GitHub issue state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining if the issue is open now requires current state",
+      "confidence": 1,
+      "status": "completed"
+    }
+  ],
+  "PromptTokens": 7623,
+  "OutputTokens": 498
+}

@@ -1,0 +1,285 @@
+{
+  "Schema": "fak-microcontext-counterfactual-tool-judgments/1",
+  "Adjudicator": "independent-openai",
+  "Model": "gpt-5.6-sol",
+  "Endpoint": "openai-compatible",
+  "PromptVersion": "counterfactual-tool-need-v1",
+  "CorpusSHA256": "eb0fe02ba6e31f65251516f83d1425c7c3375f2c0d19f6306a2bdb75e06f41f5",
+  "CreatedAt": "2026-08-10T19:58:23Z",
+  "Judgments": [
+    {
+      "id": "issue-5148-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "The packet describes the requested design and event semantics but does not provide a concrete acceptance witness such as a specific test, command, fixture, or expected observable output.",
+      "confidence": 0.97,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5148-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not provided.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "The question asks whether the GitHub issue is open right now, which requires reading its mutable current state.",
+      "confidence": 0.99,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5154-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "No. The packet gives an interim floor of 1.5 but explicitly requires replacing it with X from a measured external-engine mtp-vs-off scorecard run, which is not supplied.",
+      "confidence": 0.98,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5154-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "current open/closed state of GitHub issue",
+      "required_tool": "github_issue_state_read",
+      "rationale": "The packet lacks a live issue-state field, and the question asks whether the issue is open right now.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5158-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The Acceptance section names a concrete test witness, `TestInterruptLandsAtTurnBoundary` (plus per-verb siblings), and specifies the observable boundary behavior and closed-witness token.",
+      "confidence": 0.99,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5158-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not included.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining whether the GitHub issue is open right now requires reading its live state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5207-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "No. The packet describes desired behavior and implementation constraints, but gives no concrete test, command, observable artifact, or pass/fail witness demonstrating acceptance.",
+      "confidence": 0.97,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5207-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "current open/closed state of GitHub issue",
+      "required_tool": "github_issue_state_read",
+      "rationale": "The packet includes only the issue title and body, not its mutable current state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5245-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The DoD specifies a concrete deterministic witness: cmd/coalescebench must emit a markdown table with defined columns across specified B values, including coalescing, throughput, baseline, and roofline results.",
+      "confidence": 0.98,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5245-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "the issue's current open/closed state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "The packet contains title and body but no live issue state; determining whether it is open right now requires a GitHub state read.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5347-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "The packet specifies desired behavior and safety constraints, but no concrete acceptance witness such as a named test, command, or expected verification output.",
+      "confidence": 0.93,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5347-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not included in the packet.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining whether the GitHub issue is open right now requires reading its mutable current state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5363-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. It gives a concrete end-to-end witness: on macOS with a live Keychain login, `fak guard status` reports ready/can_serve and a guarded session boots.",
+      "confidence": 0.98,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5363-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not included in the packet.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Answering whether the GitHub issue is open right now requires reading its mutable current state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5521-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The packet gives concrete reproducible calls with distinct commit arguments and observable sha/source_files results; acceptance can be witnessed by each audit targeting and reporting the requested commit rather than HEAD.",
+      "confidence": 0.96,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5521-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not provided.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Whether a GitHub issue is open right now is mutable and requires a live issue-state read.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5525-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The packet gives a concrete witness: trigger a result-floor rejection and verify the 502 is counted by the upstream-error metric and produces a FAILED debug-output line.",
+      "confidence": 0.9,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5525-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not provided.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Whether a GitHub issue is open right now is mutable and requires a live issue-state lookup.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5636-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "No concrete acceptance witness such as a test, command, or expected observable output is specified.",
+      "confidence": 0.97,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5636-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not provided.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Answering whether the GitHub issue is open right now requires reading its live state.",
+      "confidence": 0.99,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5645-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The Proof requirement specifies a concrete acceptance witness: a failing-first fixture with an omitted declared artifact, an exact unpaid-row result, a repair, and an independent rerun producing paid.",
+      "confidence": 0.99,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5645-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "current open/closed state of GitHub issue 5645",
+      "required_tool": "github_issue_state_read",
+      "rationale": "The packet includes issue content but no live status; answering whether it is open right now requires reading the current GitHub issue state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5672-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The packet specifies concrete acceptance evidence: a relational implication test, a planted inversion that must fail it, domain-size output, diagnostics, machine-readable receipts, and positive/adversarial fixtures.",
+      "confidence": 0.98,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5672-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not included in the packet.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Answering whether the GitHub issue is open right now requires a live issue-state lookup.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5713-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. The packet specifies concrete proof artifacts: a pinned upstream identity, committed rerunnable probe/fixture, raw machine-readable results for positive and adversarial cases, and a source-linked gap table with owners and dispositions.",
+      "confidence": 0.99,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5713-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not provided.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining whether the GitHub issue is open right now requires reading its live mutable state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5802-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "No. The packet describes the grading gap and motivating examples, but does not provide a concrete test, fixture, command, or expected result that would witness acceptance of the requested width-per-turn behavior.",
+      "confidence": 0.95,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5802-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not included in the packet.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining whether the GitHub issue is open right now requires reading its mutable current state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5859-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "No. The packet provides a bug reproduction and root-cause analysis, but no concrete post-fix acceptance test or expected successful witness.",
+      "confidence": 0.96,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5859-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "The issue's current open/closed state is not included in the packet.",
+      "required_tool": "github_issue_state_read",
+      "rationale": "Determining whether the GitHub issue is open right now requires reading its mutable current state.",
+      "confidence": 1,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5929-immutable",
+      "tool_need": "read_only",
+      "required_tool": "none",
+      "rationale": "Yes. It gives a concrete witness: gateway/server must resolve through its declared gateway ancestor to internal/gateway/server/**, avoiding collisions with disjoint leases and inheriting root exclusivity.",
+      "confidence": 0.94,
+      "status": "completed"
+    },
+    {
+      "id": "issue-5929-mutable",
+      "tool_need": "current_state",
+      "missing_fact": "Current GitHub issue open/closed state",
+      "required_tool": "github_issue_state_read",
+      "rationale": "The supplied packet does not include the issue's live state; determining whether it is open right now requires a GitHub issue state read.",
+      "confidence": 1,
+      "status": "completed"
+    }
+  ],
+  "PromptTokens": 19540,
+  "OutputTokens": 3846
+}

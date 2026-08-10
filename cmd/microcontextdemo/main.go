@@ -392,6 +392,7 @@ func main() {
 	var filterToolSchedulerFold, filterToolSchedulerOutput, verifyFilterToolSchedulerPath string
 	var liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, verifyLiveFilterToolPath string
 	var disagreementPacket, disagreementFold, disagreementLive, disagreementOutput, verifyDisagreementPath string
+	var counterfactualSource, counterfactualCorpusOut, counterfactualCorpusIn, counterfactualJudgmentOut, counterfactualAdjudicator, counterfactualFoldA, counterfactualFoldB, counterfactualFoldOut, verifyCounterfactualCorpus, verifyCounterfactualFold, trueAdmissionOut, verifyTrueAdmissionPath string
 	var filterToolSchedulerTrials int
 	var routingVOISeed int64
 	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
@@ -506,6 +507,18 @@ func main() {
 	flag.StringVar(&disagreementLive, "disagreement-audit-live", "", "S8o live artifact for disagreement audit")
 	flag.StringVar(&disagreementOutput, "disagreement-audit-output", "", "write live disagreement audit")
 	flag.StringVar(&verifyDisagreementPath, "verify-disagreement-audit", "", "verify a live disagreement audit artifact")
+	flag.StringVar(&counterfactualSource, "counterfactual-source", "", "source semantic packet for paired counterfactual corpus")
+	flag.StringVar(&counterfactualCorpusOut, "counterfactual-corpus-output", "", "write paired counterfactual corpus")
+	flag.StringVar(&counterfactualCorpusIn, "counterfactual-corpus", "", "paired counterfactual corpus")
+	flag.StringVar(&counterfactualJudgmentOut, "counterfactual-judgment-output", "", "write counterfactual judgments")
+	flag.StringVar(&counterfactualAdjudicator, "counterfactual-adjudicator", "", "counterfactual adjudicator identity")
+	flag.StringVar(&counterfactualFoldA, "counterfactual-fold-a", "", "first model-distinct judgment bundle")
+	flag.StringVar(&counterfactualFoldB, "counterfactual-fold-b", "", "second model-distinct judgment bundle")
+	flag.StringVar(&counterfactualFoldOut, "counterfactual-fold-output", "", "write counterfactual consensus fold")
+	flag.StringVar(&verifyCounterfactualCorpus, "verify-counterfactual-corpus", "", "counterfactual corpus to verify")
+	flag.StringVar(&verifyCounterfactualFold, "verify-counterfactual-fold", "", "counterfactual fold to verify")
+	flag.StringVar(&trueAdmissionOut, "true-admission-output", "", "write true pre-answer admission matrix")
+	flag.StringVar(&verifyTrueAdmissionPath, "verify-true-admission", "", "verify true pre-answer admission matrix")
 	flag.StringVar(&verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
 	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
@@ -713,6 +726,68 @@ func main() {
 	}
 	if verifyLiveFilterToolPath != "" {
 		runVerify("verify-live-filter-tool", verifyLiveFilterToolPath, verifyLiveFilterToolMatrix)
+		return
+	}
+	if counterfactualCorpusOut != "" {
+		if err := buildCounterfactualCorpus(counterfactualSource, counterfactualCorpusOut); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS counterfactual corpus %s\n", counterfactualCorpusOut)
+		return
+	}
+	if counterfactualJudgmentOut != "" {
+		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+		if endpoint == "" {
+			endpoint = os.Getenv("OPENAI_BASE_URL")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if err := runCounterfactualAdjudicator(context.Background(), counterfactualCorpusIn, counterfactualJudgmentOut, endpoint, apiKey, semanticModel, counterfactualAdjudicator); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS counterfactual judgments %s\n", counterfactualJudgmentOut)
+		return
+	}
+	if counterfactualFoldOut != "" {
+		if err := foldCounterfactual(counterfactualCorpusIn, counterfactualFoldA, counterfactualFoldB, counterfactualFoldOut); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS counterfactual fold %s\n", counterfactualFoldOut)
+		return
+	}
+	if trueAdmissionOut != "" {
+		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+		if endpoint == "" {
+			endpoint = os.Getenv("OPENAI_BASE_URL")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if err := runTrueAdmission(context.Background(), counterfactualCorpusIn, verifyCounterfactualFold, trueAdmissionOut, endpoint, apiKey, liveMatrixModel); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS true admission %s\n", trueAdmissionOut)
+		return
+	}
+	if verifyCounterfactualFold != "" {
+		if err := verifyCounterfactual(verifyCounterfactualCorpus, verifyCounterfactualFold); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS counterfactual verified %s\n", verifyCounterfactualFold)
+		return
+	}
+	if verifyTrueAdmissionPath != "" {
+		if err := verifyTrueAdmission(verifyTrueAdmissionPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS true admission verified %s\n", verifyTrueAdmissionPath)
 		return
 	}
 	if verifyDisagreementPath != "" {

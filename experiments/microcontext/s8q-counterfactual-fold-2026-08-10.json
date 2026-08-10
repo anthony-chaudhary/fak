@@ -1,0 +1,467 @@
+{
+  "Schema": "fak-microcontext-counterfactual-tool-fold/1",
+  "CorpusSHA256": "eb0fe02ba6e31f65251516f83d1425c7c3375f2c0d19f6306a2bdb75e06f41f5",
+  "CreatedAt": "2026-08-10T20:11:50Z",
+  "Policy": "two model-distinct judgments must agree with each other and the construction oracle; otherwise abstain",
+  "GoldSHA256": "c79982d1c86b43a17b2f14af1e551decec9cfe71f2342d94cb5eac06feb70dbd",
+  "Adjudicators": [
+    "independent-openai",
+    "independent-groq"
+  ],
+  "Records": [
+    {
+      "ID": "issue-5148-immutable",
+      "PairID": "issue-5148",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5148-mutable",
+      "PairID": "issue-5148",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5154-immutable",
+      "PairID": "issue-5154",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5154-mutable",
+      "PairID": "issue-5154",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5158-immutable",
+      "PairID": "issue-5158",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5158-mutable",
+      "PairID": "issue-5158",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5207-immutable",
+      "PairID": "issue-5207",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5207-mutable",
+      "PairID": "issue-5207",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5245-immutable",
+      "PairID": "issue-5245",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5245-mutable",
+      "PairID": "issue-5245",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5347-immutable",
+      "PairID": "issue-5347",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5347-mutable",
+      "PairID": "issue-5347",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5363-immutable",
+      "PairID": "issue-5363",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5363-mutable",
+      "PairID": "issue-5363",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5521-immutable",
+      "PairID": "issue-5521",
+      "Split": "tune",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5521-mutable",
+      "PairID": "issue-5521",
+      "Split": "tune",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5525-immutable",
+      "PairID": "issue-5525",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5525-mutable",
+      "PairID": "issue-5525",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5636-immutable",
+      "PairID": "issue-5636",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5636-mutable",
+      "PairID": "issue-5636",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5645-immutable",
+      "PairID": "issue-5645",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5645-mutable",
+      "PairID": "issue-5645",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5672-immutable",
+      "PairID": "issue-5672",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5672-mutable",
+      "PairID": "issue-5672",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5713-immutable",
+      "PairID": "issue-5713",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5713-mutable",
+      "PairID": "issue-5713",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5802-immutable",
+      "PairID": "issue-5802",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5802-mutable",
+      "PairID": "issue-5802",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5859-immutable",
+      "PairID": "issue-5859",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5859-mutable",
+      "PairID": "issue-5859",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    },
+    {
+      "ID": "issue-5929-immutable",
+      "PairID": "issue-5929",
+      "Split": "test",
+      "ToolNeed": "read_only",
+      "MissingFact": "",
+      "RequiredTool": "none",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "read_only",
+        "independent-groq": "read_only",
+        "independent-openai": "read_only"
+      }
+    },
+    {
+      "ID": "issue-5929-mutable",
+      "PairID": "issue-5929",
+      "Split": "test",
+      "ToolNeed": "current_state",
+      "MissingFact": "current GitHub issue state",
+      "RequiredTool": "github_issue_state_read",
+      "Unanimous": true,
+      "Votes": {
+        "construction_oracle": "current_state",
+        "independent-groq": "current_state",
+        "independent-openai": "current_state"
+      }
+    }
+  ],
+  "Counts": {
+    "unanimous": 32,
+    "unanimous_current_state": 16,
+    "unanimous_read_only": 16
+  },
+  "PairwiseAgreement": 1
+}

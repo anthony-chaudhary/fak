@@ -417,6 +417,21 @@
           "category": "incidental",
           "reason": "CLI endpoint capability provenance string, not a cache implementation or policy.",
           "token": "strongMatrixCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "SubCacheWarmReplay"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local trajectory detector implementation token; not a new cache concept.",
+          "token": "minCacheRun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local trajectory detector implementation token; not a new cache concept.",
+          "token": "detectCacheWarmReplay"
         }
       ],
       "id": "cache",
@@ -447,6 +462,7 @@
         "OrgPolicyCachePathEnv",
         "ReasonCacheState",
         "RestartCacheHits",
+        "SubCacheWarmReplay",
         "TokenCacheDir",
         "UncachedMS",
         "UpgradeAnthropicStableCacheTTL1hHeadOnly",
@@ -520,6 +536,7 @@
         "cuda_arch_matrix_test",
         "defaultcacheandresidency",
         "defaultcachesize",
+        "detectCacheWarmReplay",
         "droppedcachedtokens",
         "fakcachevalueinputpermtokusd",
         "flushcache",
@@ -534,6 +551,7 @@
         "loadCacheValueGateBaseline",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
+        "minCacheRun",
         "newCache",
         "no_cache_state_delta",
         "non_cache_fingerprint",
@@ -1152,6 +1170,16 @@
           "category": "incidental",
           "reason": "A boolean predicate answering whether one issue is an aggregate (epic label, epic/track title prefix, or a task list of at least minItems entries) so percent-complete can be attempted on it. It gates nothing and refuses nothing -- it selects a population for measurement, and deliberately uses the looser of the repo's two existing epic rules rather than introducing a third.",
           "token": "IsAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "OutcomeDelegate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "ClaimRuntimeDelegated"
         }
       ],
       "exclude": [
@@ -1170,6 +1198,7 @@
         "AggregateErrors",
         "AggregateHBMBytes",
         "CacheValueGateDebtKey",
+        "ClaimRuntimeDelegated",
         "CorrectnessGate",
         "DELEGATE",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
@@ -1179,6 +1208,7 @@
         "GATED_UNWITNESSED",
         "GateFlipped",
         "IsAggregate",
+        "OutcomeDelegate",
         "ReportedGates",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
@@ -1711,6 +1741,21 @@
           "category": "incidental",
           "reason": "CLI-local experiment flag plumbing; not a reusable session-runtime concept.",
           "token": "filterToolSchedulerTrials"
+        },
+        {
+          "category": "incidental",
+          "reason": "local bridge slice from trajectory rows into the toolconcept leaf; not a new session-runtime concept",
+          "token": "conceptSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "local trajectory-report input slice; canonical episode/session concepts remain unchanged",
+          "token": "episodes"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON drill-down field containing source trajectory IDs; not a new session lifecycle concept",
+          "token": "member_sessions"
         }
       ],
       "id": "session-runtime",
@@ -1733,12 +1778,14 @@
         "boolInt",
         "bumpSessionHandoffBlocks",
         "compactThrashSessions",
+        "conceptSessions",
         "confusedsessions",
         "control-window",
         "deadline_released_slot",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
+        "episodes",
         "exact-filter",
         "fak_gateway_compaction_thrash_sessions_total",
         "filterToolSchedulerFold",
@@ -1763,6 +1810,7 @@
         "live-tool",
         "loadSchedulerRecords",
         "matchedSessions",
+        "member_sessions",
         "orderRecords",
         "readSessionHandoffBlocks",
         "repository-read",
@@ -2257,6 +2305,16 @@
           "category": "incidental",
           "reason": "One of eight unexported per-KPI fold functions (kpiFlowEfficiency, kpiQueueTime, kpiAgingWIP, ...) that each map already-computed facts onto the shared KPI struct. It is an internal helper with the same shape as its seven siblings, not a distinct notion of witness.",
           "token": "kpiWitnessedProgress"
+        },
+        {
+          "category": "incidental",
+          "reason": "Stable source-motif catalog identifier; domain vocabulary rather than a new proof mechanism.",
+          "token": "MotifCatalogReproduceFixWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "motifDetectReproduceFixWitness"
         }
       ],
       "id": "witness-proof",
@@ -2272,6 +2330,7 @@
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
+        "MotifCatalogReproduceFixWitness",
         "NewTreeWitness",
         "PROFILE_REQUIRES_WITNESS",
         "QualityWitness",
@@ -2321,6 +2380,7 @@
         "latestGuardCompactionWitness",
         "liveTreeWitness",
         "maxWitnessFileBytes",
+        "motifDetectReproduceFixWitness",
         "named_witness",
         "newGuardCompactionWitness",
         "nwitness",
@@ -2422,12 +2482,75 @@
           "category": "incidental",
           "reason": "unexported one-line predicate in internal/agent: reports whether the model has a model.EPDecodeCoordinator installed, so the decode seam can withdraw KV prefix reuse (#5553). Carries no governed distinction of its own -- it forwards model.Model.EPDecodeCoordinated.",
           "token": "inKernelPlannerEPCoordinated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "engineTokensPerCall"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "BaselineEngineCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "EngineReductionPct"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "DeniedEngineCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "PrivateAgentAEngineCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "PrivateAgentBEngineCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "cacheEmitter"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "countingEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "microcachedemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "microcache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
+          "token": "query_public_policy"
         }
       ],
       "id": "gateway-engine",
       "ignore": [
+        "BaselineEngineCalls",
+        "DeniedEngineCalls",
+        "EngineReductionPct",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
+        "PrivateAgentAEngineCalls",
+        "PrivateAgentBEngineCalls",
+        "cacheEmitter",
         "convkernel",
+        "countingEngine",
+        "engineTokensPerCall",
         "engineer",
         "engineered",
         "engineering",
@@ -2441,6 +2564,9 @@
         "kernelSession",
         "kernels",
         "kernelwiki",
+        "microcache",
+        "microcachedemo",
+        "query_public_policy",
         "resolveCallEngine",
         "resolveSpawnEngine",
         "selectorGateway",
@@ -2792,6 +2918,16 @@
           "category": "incidental",
           "reason": "Local map keying observed predictions by phase and policy; not a new policy capability or public concept.",
           "token": "phasePolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local live grader runner, not a reusable policy capability.",
+          "token": "runCounterfactualAdjudicator"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI flag variable naming an experiment grader identity, not a policy capability.",
+          "token": "counterfactualAdjudicator"
         }
       ],
       "exclude": [
@@ -2838,6 +2974,7 @@
         "config_posture_budget",
         "contractByCapability",
         "contractLeafByCapability",
+        "counterfactualAdjudicator",
         "dispatchPreflightChurnState",
         "executeLivePipeline",
         "executeTailPolicy",
@@ -2860,6 +2997,7 @@
         "printGuardLaunchPostures",
         "referencePolicyForCorpusCell",
         "routingPolicyStat",
+        "runCounterfactualAdjudicator",
         "runLiveSemanticMatrix",
         "runRoutingPolicy",
         "runSemanticAdjudicator",
@@ -3581,6 +3719,26 @@
           "category": "incidental",
           "reason": "Exported command entry point required only for cmd/fak-dev dispatch; it introduces no new support-maturity domain concept.",
           "token": "RunCommitSubjectCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "OutcomeSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "FormatUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "UNSUPPORTED_FORMAT"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "ErrUnsupportedFormat"
         }
       ],
       "id": "support-maturity",
@@ -3597,10 +3755,13 @@
         "DescriptionCoverage",
         "DomainCoverage",
         "ErrUnsupportedColdStart",
+        "ErrUnsupportedFormat",
+        "FormatUnsupported",
         "GuideCoverage",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "NonCacheParity",
+        "OutcomeSupported",
         "ParityAhead",
         "ParityAtParity",
         "ParityBehind",
@@ -3624,6 +3785,7 @@
         "SetupParityBlocks",
         "SetupParityReport",
         "SupportsRoutedExpertKQuant",
+        "UNSUPPORTED_FORMAT",
         "VerdictParityOK",
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",
@@ -4020,6 +4182,21 @@
           "category": "incidental",
           "reason": "Unexported markdown render helper that prints the #3227 shell-choice KPI table; presentation-only, no new domain concept.",
           "token": "renderShellChoice"
+        },
+        {
+          "category": "incidental",
+          "reason": "private CLI formatting helper for the positioned workflow concept surface",
+          "token": "renderConcepts"
+        },
+        {
+          "category": "incidental",
+          "reason": "private text formatter for workflow-concept report rows",
+          "token": "printWorkflowConcepts"
+        },
+        {
+          "category": "incidental",
+          "reason": "Human renderer for the workpattern report; incidental presentation helper.",
+          "token": "renderWorkpattern"
         }
       ],
       "id": "render-materialize",
@@ -4039,11 +4216,13 @@
         "materializers",
         "materializes",
         "metricsrender",
+        "printWorkflowConcepts",
         "priorwtrendercrash",
         "renderAxisPartition",
         "renderCheckpointWitness",
         "renderCommitDrainResult",
         "renderCommitVelocity",
+        "renderConcepts",
         "renderFleetControl",
         "renderGhostReport",
         "renderGitSpawnDelta",
@@ -4052,6 +4231,7 @@
         "renderShellChoice",
         "renderValidate",
         "renderVelocityLeg",
+        "renderWorkpattern",
         "rendered",
         "rendering",
         "renders",
@@ -4274,6 +4454,16 @@
           "category": "incidental",
           "reason": "unexported one-line predicate in internal/agent: reports whether the model has a model.EPDecodeCoordinator installed, so the decode seam can withdraw KV prefix reuse (#5553). Carries no governed distinction of its own -- it forwards model.Model.EPDecodeCoordinated.",
           "token": "inKernelPlannerEPCoordinated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "MotifCatalogPlanFanoutReconcile"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
+          "token": "motifDetectPlanFanoutReconcile"
         }
       ],
       "exclude": [
@@ -4291,6 +4481,7 @@
         "ExplainFilingPlan",
         "FleetBenchPlanDoc",
         "KindCandidate",
+        "MotifCatalogPlanFanoutReconcile",
         "NoteCandidates",
         "PlanDecodeInterleave",
         "PlanEviction",
@@ -4320,6 +4511,7 @@
         "inKernelPlannerEPCoordinated",
         "indexPlanSteps",
         "indexedPlanStep",
+        "motifDetectPlanFanoutReconcile",
         "notplanned",
         "nplan",
         "orderLaneCandidatesAged",

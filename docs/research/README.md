@@ -90,3 +90,12 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [S8o: live quality-qualified filter/tool scheduler](micro-context-s8o-live-filter-tool-scheduler.md)
 
 - [S8p live scheduler disagreement audit](micro-context-s8p-disagreement-audit.md) — blinded error atlas finds disputed gold and no stable pre-answer admission signal; records `not-yet`.
+
+## Named coding-workload patterns
+
+- [`coding-workload-vocabulary.md`](coding-workload-vocabulary.md) — cited proposal separating workload shape, orchestration topology, verification strategy, and failure mode; names reusable patterns/subpatterns and rejects common conflations.
+- [`coding-workload-vocabulary.json`](coding-workload-vocabulary.json) — deterministic machine companion with source provenance, inclusion/exclusion boundaries, aliases, and stable candidate IDs.
+
+Use `fak workpattern list|source|trajectory|report` to consume the canonical seed catalog and evidence miners. The report is bounded to explicit detectors and scrubbed/local inputs; it does not claim universal taxonomy consensus or infer private-chat intent.
+
+- [S8q/S8r true pre-answer tool admission](micro-context-s8qr-true-tool-admission.md) — paired model-distinct consensus gold; two-stage admission matches quality while opening 50% fewer reads on the scoped envelope.
