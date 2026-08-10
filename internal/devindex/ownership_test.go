@@ -80,15 +80,10 @@ func TestRuntimeGraphWitnessReportsCurrentDevLeaks(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := BuildGraphReport("github.com/anthony-chaudhary/fak/cmd/fak", nodes, DevOnlyPackages)
-	// #6020 is the baseline gate, not the migration: current leaks must remain
-	// visible until #6022 drives this count to zero.
-	if len(report.Leaks) == 0 {
-		t.Fatal("runtime graph unexpectedly has zero dev-only leaks; update #6020 baseline and ratchet")
-	}
-	for _, leak := range report.Leaks {
-		if len(leak.Path) < 2 || leak.Path[0] != report.Root || leak.Path[len(leak.Path)-1] != leak.Forbidden {
-			t.Errorf("invalid witnessed path: %+v", leak)
-		}
+	// #6022 is the migration ratchet: cmd/fak must never regain a path to a
+	// package explicitly declared development-only.
+	if len(report.Leaks) != 0 {
+		t.Fatalf("runtime graph has %d dev-only leak(s): %+v", len(report.Leaks), report.Leaks)
 	}
 }
 
