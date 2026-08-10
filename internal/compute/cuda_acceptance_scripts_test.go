@@ -24,6 +24,11 @@ func TestGPUAcceptanceScriptsResolveCleanEnvironmentToolkit(t *testing.T) {
 		if strings.Contains(script, "${CUDA_HOME:-$HOME/") {
 			t.Errorf("%s expands unset HOME under `set -u`", filepath.Base(path))
 		}
+		for _, cache := range []string{"GOCACHE", "GOMODCACHE", "GOPATH"} {
+			if !strings.Contains(script, "export "+cache+"=") {
+				t.Errorf("%s does not provision %s for a HOME-less clean session", filepath.Base(path), cache)
+			}
+		}
 		if !strings.Contains(script, "[ -x /usr/local/cuda/bin/nvcc ]") {
 			t.Errorf("%s does not probe the standard CUDA toolkit outside PATH", filepath.Base(path))
 		}

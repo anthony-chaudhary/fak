@@ -101,6 +101,15 @@ echo "[484] nvcc compile kernels ($ARCH) ..."
 
 # ---- cgo env for the `-tags cuda` test/bench link ---------------------------------
 export PATH="/usr/local/go/bin:$PATH"
+# Clean bridge sessions intentionally omit HOME and Go cache variables. Keep the
+# acceptance witness hermetic by assigning process-scoped scratch caches rather
+# than depending on an operator account's home directory.
+GO_SCRATCH="$(mktemp -d -t fak-go-cache.XXXXXX)"
+trap 'rm -rf "$GO_SCRATCH"' EXIT
+export GOCACHE="${GOCACHE:-$GO_SCRATCH/build}"
+export GOMODCACHE="${GOMODCACHE:-$GO_SCRATCH/mod}"
+export GOPATH="${GOPATH:-$GO_SCRATCH/gopath}"
+mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 export CGO_ENABLED=1
 export CC="${CC:-/usr/bin/gcc}"
