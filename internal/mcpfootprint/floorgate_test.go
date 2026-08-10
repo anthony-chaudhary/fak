@@ -79,9 +79,9 @@ func TestFloorGateDemandsBankedWin(t *testing.T) {
 // budget]: the ceiling itself is admissible, one token over is not, and sitting exactly
 // slack-below is still admissible.
 func TestFloorGateBandBoundaries(t *testing.T) {
-	// bytes -> tokens is a /4 floor, so drive the band with a synthetic footprint.
+	// bytes -> tokens uses the shared 4.5-char JSON-schema divisor, so drive the band with a synthetic footprint.
 	fpAt := func(tokens int) agent.Footprint {
-		return Price([]agent.ToolDef{td("t", strings.Repeat("x", tokens*4-len("t")), ``)})
+		return Price([]agent.ToolDef{td("t", strings.Repeat("x", tokens*9/2), ``)})
 	}
 	const budget, slack = 100, 10
 

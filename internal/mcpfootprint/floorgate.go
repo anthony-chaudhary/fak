@@ -44,7 +44,7 @@ import (
 // it whenever a deferral banks a win. Re-pinned 24→26 tools (#3608 pass): tools had
 // landed in the registry without banking the grown floor, leaving the ratchet stale —
 // the same-commit re-pin the gate demands so the measured floor greens again.
-const FloorBudgetTokens = 5888
+const FloorBudgetTokens = 5464
 
 // FloorRatchetSlackTokens is how far the measured floor may sit BELOW the budget
 // before the gate demands the ceiling be re-pinned. It absorbs incidental churn (a

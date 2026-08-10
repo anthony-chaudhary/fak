@@ -91,10 +91,10 @@ func TestDescriptionBudgetDemandsBankedWin(t *testing.T) {
 // budget]: the ceiling itself admits, one token over refuses, sitting exactly slack-below
 // still admits, one past the slack refuses as stale.
 func TestDescriptionBudgetBandBoundaries(t *testing.T) {
-	// bytes -> tokens is a /4 floor, so drive the band with a single description of
-	// known length: a description of tokens*4 bytes prices to exactly tokens.
+	// bytes -> tokens uses the shared 4.5-char JSON-schema divisor, so drive the band with a single description of
+	// known length: a description of tokens*4.5 bytes prices to exactly tokens.
 	defsAt := func(tokens int) []agent.ToolDef {
-		return []agent.ToolDef{td("t", strings.Repeat("x", tokens*4), ``)}
+		return []agent.ToolDef{td("t", strings.Repeat("x", tokens*9/2), ``)}
 	}
 	const budget, slack = 100, 10
 	for _, tc := range []struct {
