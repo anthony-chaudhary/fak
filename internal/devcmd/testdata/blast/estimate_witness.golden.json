@@ -1,0 +1,37 @@
+{
+  "schema": "fak.blast-estimate.v1",
+  "broken": "internal/a",
+  "radius": [
+    "internal/a",
+    "internal/b",
+    "internal/c"
+  ],
+  "leases": [
+    {
+      "lane": "held-c",
+      "tree_globs": [
+        "internal/c/**"
+      ],
+      "matched": [
+        "internal/c"
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "id": "7001",
+      "paths": [
+        "internal/a/fix.go"
+      ],
+      "matched": [
+        "internal/a"
+      ]
+    }
+  ],
+  "excluded_leases": [
+    "free-x"
+  ],
+  "excluded_issues": [
+    "7002"
+  ]
+}

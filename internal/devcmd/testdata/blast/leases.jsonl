@@ -1,0 +1,2 @@
+{"lane":"held-c","tree_globs":["internal/c/**"]}
+{"lane":"free-x","tree_globs":["internal/x/**"]}

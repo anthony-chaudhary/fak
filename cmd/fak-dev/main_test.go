@@ -139,6 +139,17 @@ func TestRunDispatchesBoundaryUsage(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesBlastUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"blast"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "expected a subcommand (estimate)") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
 func TestRunDispatchesBuildcheckUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"buildcheck", "--help"})
@@ -155,6 +166,16 @@ func TestRunDispatchesCIPreflightUsage(t *testing.T) {
 	code := run(&out, &errOut, []string{"ci-preflight", "--repo", t.TempDir(), "--ref", "missing", "--json"})
 	if code != 2 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchBlast(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "fak", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(src, []byte(`case "blast":`)) {
+		t.Fatal("runtime fak still dispatches dev-owned blast")
 	}
 }
 

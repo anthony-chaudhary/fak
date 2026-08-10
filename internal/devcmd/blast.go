@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 // `fak blast` -- the blast-radius estimator (epic #2712, W3). Given a broken package
 // or tree, it reports the AFFECTED SET: the live leases and queued issues whose
@@ -23,7 +23,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -34,22 +33,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/blastlease"
 	"github.com/anthony-chaudhary/fak/internal/blastradius"
 	"github.com/anthony-chaudhary/fak/internal/knownbad"
-	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
-
-func cmdBlast(argv []string) { os.Exit(runBlast(os.Stdout, os.Stderr, argv)) }
 
 // Seams the tests inject to avoid a real `go list` / git lease read.
 var (
 	blastDirGraph    = goListDirGraph
-	blastLeaseSource = liveBlastLeases
+	blastLeaseSource = blastlease.Live
 	blastNow         = time.Now
 )
 
-func runBlast(stdout, stderr io.Writer, argv []string) int {
+func RunBlast(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "fak blast: expected a subcommand (estimate)")
 		return 2
@@ -110,7 +107,7 @@ func runBlastEstimate(stdout, stderr io.Writer, argv []string) int {
 
 	var leases []blastradius.Lease
 	if *leasesFile != "" {
-		leases, err = readBlastLeases(*leasesFile)
+		leases, err = blastlease.Read(*leasesFile)
 	} else {
 		leases, err = blastLeaseSource(root, blastNow())
 	}
@@ -169,34 +166,8 @@ func writeBlastText(w io.Writer, set blastradius.AffectedSet) {
 	}
 }
 
-// liveBlastLeases reads the live dos lease ledger (leaseref) and projects each record
-// into the join's lease shape (lane id + tree globs). The clock is passed in so the
-// liveness cut is the shell's single now, not a hidden wall read.
-func liveBlastLeases(root string, now time.Time) ([]blastradius.Lease, error) {
-	live, _, err := leaseref.NewInDir(root).Live(context.Background(), now)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]blastradius.Lease, 0, len(live))
-	for _, r := range live {
-		out = append(out, blastradius.Lease{Lane: r.ID, TreeGlobs: r.TreeGlobs})
-	}
-	return out, nil
-}
-
-// readBlastLeases / readBlastIssues parse a JSONL fixture (one object per line, blank
-// lines skipped) into the join's input shapes. A malformed line is a hard error --
-// a fixture the operator hands the estimator must be well-formed, unlike the shared
-// append ledgers that tolerate torn writes.
-func readBlastLeases(path string) ([]blastradius.Lease, error) {
-	return readBlastJSONL[blastradius.Lease](path)
-}
-
 // readBlastJSONL decodes one JSONL fixture into a slice of T. Blank lines are skipped so a
-// trailing newline is not read as a record, while a malformed line stays the hard error the
-// contract above demands, reported with its 1-based line number. Both fixture shapes the
-// join takes are parsed by this one rule, so leases and issues can never come to disagree
-// about what a well-formed fixture is.
+// trailing newline is not read as a record, while a malformed line stays a hard error.
 func readBlastJSONL[T any](path string) ([]T, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -272,12 +243,21 @@ func goListDirGraph(root string) (edges map[string][]string, modPath string, tot
 // intra-module imports into dir->dir edges. The first package carrying a Module fixes
 // the module path/dir. A package whose dir cannot be made relative is skipped rather
 // than mis-keyed.
+type blastGoPkg struct {
+	ImportPath   string
+	Dir          string
+	Module       *struct{ Path, Dir string }
+	Imports      []string
+	TestImports  []string
+	XTestImports []string
+}
+
 func parseGoListDirs(r io.Reader) (edges map[string][]string, modPath string, total int, err error) {
-	var pkgs []goPkg
+	var pkgs []blastGoPkg
 	var modDir string
 	dec := json.NewDecoder(r)
 	for {
-		var p goPkg
+		var p blastGoPkg
 		if decErr := dec.Decode(&p); decErr != nil {
 			if decErr == io.EOF {
 				break

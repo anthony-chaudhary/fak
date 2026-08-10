@@ -33,6 +33,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCIPreflight(stdout, stderr, argv[1:])
 	case "buildcheck":
 		return devcmd.RunBuildCheck(stdout, stderr, argv[1:])
+	case "blast":
+		return devcmd.RunBlast(stdout, stderr, argv[1:])
 	case "catchup":
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
 	case "whats-changed":
@@ -71,6 +73,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  boundary [--json] [--workspace DIR]   lint repository demo/package boundaries")
 	fmt.Fprintln(w, "  ci-preflight [--ref R] [flags]        check committed repository tip in isolation")
 	fmt.Fprintln(w, "  buildcheck [--vet] [packages...]       compile-check while masking peer WIP")
+	fmt.Fprintln(w, "  blast estimate PATH [flags]           estimate dependency blast radius")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")

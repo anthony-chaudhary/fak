@@ -72,6 +72,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/blastlease"
 	"github.com/anthony-chaudhary/fak/internal/blastradius"
 	"github.com/anthony-chaudhary/fak/internal/blockerpost"
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
@@ -931,9 +932,9 @@ func runKnownBadReport(stdout, stderr io.Writer, argv []string, nowUnix int64) i
 // blast estimator uses.
 func reportLeaseSet(leasesPath, dir string, nowUnix int64) ([]blastradius.Lease, error) {
 	if strings.TrimSpace(leasesPath) != "" {
-		return readBlastLeases(leasesPath)
+		return blastlease.Read(leasesPath)
 	}
-	return liveBlastLeases(dir, time.Unix(nowUnix, 0))
+	return blastlease.Live(dir, time.Unix(nowUnix, 0))
 }
 
 // countAffectedLeases counts the live leases whose declared tree intersects the

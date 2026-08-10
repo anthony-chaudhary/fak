@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -38,7 +38,7 @@ func TestBlastEstimateWitnessGolden(t *testing.T) {
 	)
 
 	var stdout, stderr bytes.Buffer
-	rc := runBlast(&stdout, &stderr, []string{
+	rc := RunBlast(&stdout, &stderr, []string{
 		"estimate", "internal/a", "--json",
 		"--leases", leasesPath, "--issues", issuesPath,
 	})

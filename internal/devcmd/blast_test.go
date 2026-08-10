@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -57,7 +57,7 @@ func TestBlastEstimateJSONHeldAndExcluded(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if rc := runBlast(&stdout, &stderr, []string{"estimate", "internal/a", "--json"}); rc != 0 {
+	if rc := RunBlast(&stdout, &stderr, []string{"estimate", "internal/a", "--json"}); rc != 0 {
 		t.Fatalf("rc = %d, stderr=%s", rc, stderr.String())
 	}
 
@@ -108,7 +108,7 @@ func TestBlastEstimateWithFixtureFiles(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	rc := runBlast(&stdout, &stderr, []string{"estimate", "internal/a", "--json", "--leases", leasesPath, "--issues", issuesPath})
+	rc := RunBlast(&stdout, &stderr, []string{"estimate", "internal/a", "--json", "--leases", leasesPath, "--issues", issuesPath})
 	if rc != 0 {
 		t.Fatalf("rc = %d, stderr=%s", rc, stderr.String())
 	}
@@ -138,7 +138,7 @@ func TestBlastEstimateTextMode(t *testing.T) {
 		}, nil
 	})
 	var stdout, stderr bytes.Buffer
-	if rc := runBlast(&stdout, &stderr, []string{"estimate", "internal/a"}); rc != 0 {
+	if rc := RunBlast(&stdout, &stderr, []string{"estimate", "internal/a"}); rc != 0 {
 		t.Fatalf("rc = %d, stderr=%s", rc, stderr.String())
 	}
 	out := stdout.String()
@@ -159,8 +159,8 @@ func TestBlastUsageErrors(t *testing.T) {
 	}
 	for _, argv := range cases {
 		var stdout, stderr bytes.Buffer
-		if rc := runBlast(&stdout, &stderr, argv); rc != 2 {
-			t.Errorf("runBlast(%v) rc = %d, want 2 (stderr=%s)", argv, rc, stderr.String())
+		if rc := RunBlast(&stdout, &stderr, argv); rc != 2 {
+			t.Errorf("RunBlast(%v) rc = %d, want 2 (stderr=%s)", argv, rc, stderr.String())
 		}
 	}
 }
