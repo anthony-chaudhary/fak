@@ -3,14 +3,18 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 // The end-to-end witness for #2258 — "never sleep past the client". The unit tests around
@@ -179,5 +183,58 @@ func TestRetryCeiling_UnderCeilingWaitStillAbsorbsInHandler(t *testing.T) {
 	// It ABSORBED the wait and spent its full attempt budget, exactly as before #2258.
 	if got := atomic.LoadInt32(&hits); got != 2 {
 		t.Fatalf("upstream hits = %d, want 2 — an under-ceiling wait must still be slept and retried in-handler", got)
+	}
+}
+
+// capCeilingErr builds the exact error shape the planner returns when it REFUSES to sleep
+// toward a classified usage cap because the honored wait broke the in-handler ceiling —
+// the #2258 counterpart to #2257's capInterruptedErr, using the same 1h10m36s wait the
+// 2026-07-01 evidence log recorded.
+func capCeilingErr() error {
+	return fmt.Errorf("planner: %w", &agent.RetryCeilingError{
+		Cause: &agent.UpstreamStatusError{
+			Status:      http.StatusTooManyRequests,
+			LimitReason: resume.LimitUsage,
+			RetryAfter:  "4236",
+		},
+		Wait:    time.Hour + 10*time.Minute + 36*time.Second,
+		Ceiling: 90 * time.Second,
+	})
+}
+
+// The last DoD line on #2258: the over-ceiling bail must still be COUNTED as a rate limit.
+// A ceiling stop is fak's own decision, not a new failure mode, so it must not quietly land
+// in the catch-all bucket and make a cap storm invisible on a /metrics scrape — the operator
+// question "are we being rate-limited" has the same answer whether fak slept through the
+// wait or refused to. This is the metrics twin of the interrupted-cap-wait test next door.
+func TestObserveUpstreamError_RetryCeilingBail_CountsRateLimited(t *testing.T) {
+	if kind := upstreamErrorKind(capCeilingErr()); kind != "rate_limited" {
+		t.Fatalf("upstreamErrorKind = %q, want rate_limited (a ceiling bail is still a rate limit)", kind)
+	}
+	m := newGatewayMetrics(time.Now())
+	m.observeUpstreamError(capCeilingErr())
+	m.upstreamErrMu.Lock()
+	got := m.upstreamErrors["rate_limited"]
+	m.upstreamErrMu.Unlock()
+	if got != 1 {
+		t.Fatalf("upstreamErrors[rate_limited] = %d, want 1", got)
+	}
+}
+
+// ...and the operator-only readout must carry the CAP KIND alongside the two numbers that
+// explain the bail. Without the kind token a dashboard cannot tell a usage-cap stop from a
+// plain throttle stop; without the wait and ceiling an operator cannot tell whether the
+// ceiling is tuned wrong (a wait barely over it) or the account is genuinely capped.
+func TestDebugErrorDetail_RetryCeilingCarriesCapKindAndBounds(t *testing.T) {
+	got := debugErrorDetail(capCeilingErr())
+	for _, want := range []string{
+		"kind=" + resume.LimitUsage, // the closed cap-kind token
+		"announced_wait=1h10m36s",   // the wait fak refused to sleep
+		"ceiling=1m30s",             // the bound it broke
+		"relayed=true",              // and that the truth went downstream instead
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debugErrorDetail = %q, want it to contain %q", got, want)
+		}
 	}
 }
