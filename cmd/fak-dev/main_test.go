@@ -254,6 +254,28 @@ func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesCodexMemoryUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"codex-memory", "--help"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "usage: fak codex-memory doctor") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchCodexMemory(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "codex-memory":`) || strings.Contains(string(body), "cmdCodexMemory(") {
+		t.Fatal("runtime fak still dispatches the dev-only codex-memory command")
+	}
+}
+
 func TestRunDispatchesPlanAuditUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"plan-audit", "--help"})

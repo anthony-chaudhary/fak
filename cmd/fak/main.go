@@ -602,8 +602,6 @@ func main() {
 		cmdFleetTrend(os.Args[2:])
 	case "popularization-tickets":
 		cmdPopularizationTickets(os.Args[2:])
-	case "codex-memory":
-		cmdCodexMemory(os.Args[2:])
 	case "dormancy":
 		cmdDormancy(os.Args[2:])
 	case "version", "-v", "--version":

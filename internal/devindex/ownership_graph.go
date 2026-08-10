@@ -23,6 +23,7 @@ type PackageOwnership struct {
 var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "amdgpu", Owner: OwnerDev, Rationale: "probes development-host AMD GPU diagnostics and counters"},
 	{Path: moduleInternalPrefix + "commitsubject", Owner: OwnerDev, Rationale: "audits repository commit-subject grammar coverage"},
+	{Path: moduleInternalPrefix + "codexmemory", Owner: OwnerDev, Rationale: "diagnoses development-agent Codex memory posture"},
 	{Path: moduleInternalPrefix + "devcmd", Owner: OwnerDev, Rationale: "hosts repository-development command implementations for fak-dev"},
 	{Path: moduleInternalPrefix + "devindex", Owner: OwnerDev, Rationale: "indexes and audits the fak repository command surface"},
 	{Path: moduleInternalPrefix + "readmevisualaudit", Owner: OwnerDev, Rationale: "audits repository README visual and asset health"},

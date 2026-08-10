@@ -1,24 +1,21 @@
-package main
+package devcmd
 
 import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/codexmemory"
 )
 
-// cmdCodexMemory wires `fak codex-memory doctor` — a READ-ONLY diagnostic over
+// RunCodexMemory wires `fak-dev codex-memory doctor` — a READ-ONLY diagnostic over
 // an OpenAI Codex home that reports the operator-visible memory posture of a
 // guarded Codex session (what is enabled, what can be injected later, what
 // generated state lives on disk). It never writes Codex state and never prints
 // raw memory contents.
 
 //fak:ctxplan verb=codex-memory enters="nothing live — a read-only doctor over an on-disk OpenAI Codex home ($CODEX_HOME or ~/.codex) and the repo AGENTS.md guidance boundary" pages="nothing — it emits a Codex memory-posture report (what is enabled, what could be injected later, what generated state is on disk); it never prints raw memory contents into any window" warms="nothing — a diagnostic that never writes Codex state and warms no prompt cache or KV"
-func cmdCodexMemory(argv []string) { os.Exit(runCodexMemory(os.Stdout, os.Stderr, argv)) }
-
-func runCodexMemory(stdout, stderr io.Writer, argv []string) int {
+func RunCodexMemory(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "usage: fak codex-memory doctor [--codex-home DIR] [--repo DIR] [--json]")
 		return 2
