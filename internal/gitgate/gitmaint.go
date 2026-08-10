@@ -97,6 +97,15 @@ type MaintOptions struct {
 	// prove is at/above the 2-week floor (`now`, `1.weeks.ago`, free-text dates…)
 	// REFUSES the tier with MaintReasonPruneExpireUnsafe — the argv is never built.
 	PruneExpire string
+	// RequireBacklogHigh makes the safe-with-grace fold tier a HIGH-WATER trigger
+	// (#5084): the tier runs only when the PRE-run count already collected by this
+	// run shows LooseBacklogHigh, and is otherwise held back with
+	// MaintReasonBacklogLow. It gates nothing else — the always-safe tier still runs
+	// unconditionally, and the gate reads the count RunMaint collects anyway, so an
+	// unattended host below the threshold pays no extra git invocation. Default false
+	// keeps the operator-invoked `fak git-maint` verb folding on demand: an operator
+	// who asks for a fold means it regardless of the backlog.
+	RequireBacklogHigh bool
 }
 
 // MaintReason is a structured, closed-vocabulary reason the safe-with-grace tier was
@@ -132,6 +141,19 @@ const (
 	// sub-floor argv is never constructed, so `git prune --expire=now` cannot be
 	// emitted through this path even by misconfiguration.
 	MaintReasonPruneExpireUnsafe MaintReason = "PRUNE_EXPIRE_UNSAFE"
+	// MaintReasonBacklogLow: the caller asked for a HIGH-WATER-triggered fold
+	// (MaintOptions.RequireBacklogHigh, #5084) and the pre-run loose count is below
+	// LooseBacklogThreshold, so there is no backlog worth folding. Not an incident and
+	// not a deferral to retry — the clone is healthy; the always-safe tier still ran.
+	MaintReasonBacklogLow MaintReason = "BACKLOG_LOW"
+	// MaintReasonLooseBacklogHigh: the fold tier actually RAN against a high pre-run
+	// backlog and the loose count did NOT come down. This is the one maintenance
+	// outcome that is an incident rather than a refusal: folding is structurally
+	// unable to clear this backlog (it relocates loose objects, it never removes
+	// UNREACHABLE ones), so the clone keeps paying the cold-start object-store walk
+	// until the supervised grace-prune tier (#5079) reclaims them. Recorded in
+	// MaintResult.LooseBacklogIncident, never as a skip reason on a step.
+	MaintReasonLooseBacklogHigh MaintReason = "LOOSE_BACKLOG_HIGH"
 )
 
 // alwaysSafeSteps are the add-only, atomic, safe-even-mid-commit git verbs — they
@@ -285,6 +307,12 @@ type MaintResult struct {
 	// nothing and gates no tier — so an operator/caller can SEE the invisible backlog
 	// before any auto-trigger is wired. See #4602 Phase 0.
 	LooseBacklogHigh bool `json:"loose_backlog_high"`
+	// LooseBacklogIncident is MaintReasonLooseBacklogHigh when a fold RAN against a
+	// high pre-run backlog and the loose count failed to come down — the non-reduction
+	// signal that escalates to grace-prune (#5079). Empty when the backlog was not
+	// high, when no fold step ran, or when the count did fall. Fail-closed: an
+	// unavailable before/after count never raises the incident. See #5084.
+	LooseBacklogIncident MaintReason `json:"loose_backlog_incident,omitempty"`
 }
 
 // LooseDelta reports how many loose objects the run folded away (before − after). A
@@ -315,9 +343,18 @@ func LooseBacklogHigh(co CountObjects) bool {
 // `git prune --expire=<≥2w>`; with GracePrune unset RunMaint never prunes anything.
 // It never full-repacks, never edits config. Idempotent: a rerun with nothing to
 // consolidate is a no-op.
+//
+// An unattended host may additionally set MaintOptions.RequireBacklogHigh to make the
+// fold tier a HIGH-WATER trigger (#5084): it then runs only when the pre-run count is
+// at/above LooseBacklogThreshold, and is held back with MaintReasonBacklogLow
+// otherwise. When such a gated fold RUNS and the loose count still does not come down,
+// RunMaint raises the LOOSE_BACKLOG_HIGH incident (MaintResult.LooseBacklogIncident) —
+// the measured proof that folding cannot clear this backlog and it needs the
+// grace-prune tier (#5079).
 func RunMaint(ctx context.Context, run MaintRunner, opts MaintOptions) MaintResult {
 	res := MaintResult{Apply: opts.Apply}
 	res.Before = countObjects(ctx, run, opts.RepoRoot)
+	res.LooseBacklogHigh = LooseBacklogHigh(res.Before)
 	res.Posture = readPosture(ctx, run, opts.RepoRoot)
 	res.Locks = probeLocks(opts.GitCommonDir)
 
@@ -326,12 +363,18 @@ func RunMaint(ctx context.Context, run MaintRunner, opts MaintOptions) MaintResu
 		res.Steps = append(res.Steps, runStep(ctx, run, opts, "always-safe", args))
 	}
 
-	// Safe-with-grace tier: gated on posture, then locks.
+	// Safe-with-grace tier: gated on posture, then the optional high-water mark, then
+	// locks. Posture stays FIRST so a drifted shared config is still surfaced as an
+	// incident on a low-backlog box — the drift is a config-health signal an operator
+	// must repair whether or not there is anything to fold today.
 	switch {
 	case !res.Posture.Safe:
 		res.GraceRefused = MaintReasonPostureDrift
 		res.Incident = true
 		res.Steps = appendSkipped(res.Steps, MaintReasonPostureDrift)
+	case opts.RequireBacklogHigh && !res.LooseBacklogHigh:
+		res.GraceRefused = MaintReasonBacklogLow
+		res.Steps = appendSkipped(res.Steps, MaintReasonBacklogLow)
 	case len(res.Locks) > 0:
 		res.GraceRefused = MaintReasonLocked
 		res.Steps = appendSkipped(res.Steps, MaintReasonLocked)
@@ -355,8 +398,39 @@ func RunMaint(ctx context.Context, run MaintRunner, opts MaintOptions) MaintResu
 	res.Steps = append(res.Steps, gracePruneStep(ctx, run, opts, &res))
 
 	res.After = countObjects(ctx, run, opts.RepoRoot)
-	res.LooseBacklogHigh = LooseBacklogHigh(res.Before)
+	if res.LooseBacklogIncident = looseBacklogIncident(res); res.LooseBacklogIncident != "" {
+		res.Incident = true
+	}
 	return res
+}
+
+// looseBacklogIncident decides the #5084 non-reduction signal: a fold that actually RAN
+// against a high pre-run backlog and left the loose count no lower than it found it.
+// Every clause is a reason the observation would be unearned — a dry run mutated
+// nothing, a held-back tier never got the chance, and an unavailable count proves
+// nothing either way — so the incident only fires on a real, measured failure to reduce.
+func looseBacklogIncident(res MaintResult) MaintReason {
+	switch {
+	case !res.Apply, !res.LooseBacklogHigh:
+		return ""
+	case !res.Before.Available || !res.After.Available:
+		return ""
+	case !ranTier(res.Steps, "safe-with-grace"):
+		return ""
+	case res.After.Count < res.Before.Count:
+		return ""
+	}
+	return MaintReasonLooseBacklogHigh
+}
+
+// ranTier reports whether any step of the given tier actually executed.
+func ranTier(steps []MaintStep, tier string) bool {
+	for _, s := range steps {
+		if s.Tier == tier && s.Ran {
+			return true
+		}
+	}
+	return false
 }
 
 // gracePruneStep decides and (when every gate passes) executes the single supervised
