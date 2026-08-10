@@ -122,6 +122,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native provider-cache economics/value fold is covered; provider action planning/application and context joins remain separate capability debt",
 	},
 	{
+		Leaf: "internal/vcachesnapshot", Disposition: DispositionCapability,
+		Capabilities: []string{"bounded_cache_snapshot"},
+		Reason:       "native bounded fsynced JSONL provider-cache snapshot persistence and tolerant replay",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -424,6 +429,22 @@ var contracts = []Contract{{
 			{Name: "LangSmith", Class: NextBest, Source: "https://docs.smith.langchain.com/observability/how_to_guides/monitor_costs"},
 		},
 		Witness:      "../../docs/benchmarks/PROVIDER-CACHE-ECONOMICS-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "bounded_cache_snapshot",
+		NativePath: "internal/vcachesnapshot/vcachesnapshot.go",
+		Workload:   "same five ordered provider-cache turns, three-row retention window, replay-fidelity oracle, fsync requirement, and represented-token count across every arm",
+		Metrics:    []string{"retained_rows", "dropped_rows", "corrupt_rows", "lost_rows", "write_latency_ms", "read_latency_ms", "throughput_rows_per_second", "input_tokens_represented", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "unbounded append-only JSONL", Class: TunedBaseline, Source: "internal/vcachesnapshot/compare.go"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "SQLite WAL", Class: NextBest, Source: "https://sqlite.org/wal.html"},
+			{Name: "Prometheus TSDB", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/storage/"},
+			{Name: "ClickHouse", Class: NextBest, Source: "https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree"},
+		},
+		Witness:      "../../docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
