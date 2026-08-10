@@ -152,6 +152,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native six-question net-true/strawman/not-yet claim grading is covered; witness planning, fixture fingerprinting, and reuse remain separate capability debt",
 	},
 	{
+		Leaf: "internal/astquery", Disposition: DispositionCapability,
+		Capabilities: []string{"go_structural_expression_search"},
+		Reason:       "native Go expression AST matching with metavariable back-references, wildcards, bindings, and source positions",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -555,6 +560,20 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/NET-TRUE-CLAIM-GRADING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "go_structural_expression_search",
+		NativePath: "internal/astquery/astquery.go",
+		Workload:   "same Go source and repeated-metavariable call pattern with two true calls, inconsistent-argument call, comment/string decoys, and unrelated call; exact ordered location and binding oracle",
+		Metrics:    []string{"true_positives", "false_positives", "false_negatives", "binding_errors", "location_errors", "parse_failures", "latency_ns", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "literal text search", Class: TunedBaseline, Source: "internal/astquery/compare.go"},
+			{Name: "Semgrep", Class: NextBest, Source: "https://semgrep.dev/docs/"},
+			{Name: "ast-grep", Class: NextBest, Source: "https://ast-grep.github.io/"},
+			{Name: "Comby", Class: NextBest, Source: "https://comby.dev/docs/"},
+			{Name: "gogrep", Class: NextBest, Source: "https://github.com/mvdan/gogrep"},
+		},
+		Witness: "../../docs/benchmarks/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "worker_launch_latency_summary",
