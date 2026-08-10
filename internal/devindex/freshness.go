@@ -347,6 +347,23 @@ func DispatchVerbs(b []byte) []string { return mainDispatchVerbs(b) }
 // that switch's `default:` or its closing brace. Shared by UndeclaredVerbs and the
 // freshness test so the detector and its dogfood test cannot disagree.
 func mainDispatchVerbs(b []byte) []string {
+	return dispatchVerbs(b, func(t string) bool {
+		return strings.HasPrefix(t, "switch os.Args[1]") || strings.HasPrefix(t, "switch name")
+	})
+}
+
+// devDispatchVerbs is the same scan against the `fak-dev` artifact, whose dispatch
+// switch opens on its own `argv[0]` slice rather than `os.Args[1]`. It is a separate
+// opener rather than a third alternative inside mainDispatchVerbs because `cmd/fak`
+// ALSO contains a nested `switch argv[0]` that is not a dispatch surface; folding the
+// two together would read that nested switch's cases as runtime verbs.
+func devDispatchVerbs(b []byte) []string {
+	return dispatchVerbs(b, func(t string) bool { return strings.HasPrefix(t, "switch argv[0]") })
+}
+
+// dispatchVerbs carries the shared scan; isOpener decides which switch header starts
+// a dispatch surface for the artifact being read.
+func dispatchVerbs(b []byte, isOpener func(string) bool) []string {
 	seen := map[string]bool{}
 	var out []string
 	inSwitch := false
@@ -354,7 +371,7 @@ func mainDispatchVerbs(b []byte) []string {
 	for _, raw := range strings.Split(string(b), "\n") {
 		t := strings.TrimSpace(raw)
 		if !inSwitch {
-			if strings.HasPrefix(t, "switch os.Args[1]") || strings.HasPrefix(t, "switch name") {
+			if isOpener(t) {
 				inSwitch = true
 				depth = 1 // the `{` that opens the dispatch switch
 			}

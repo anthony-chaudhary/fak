@@ -26,6 +26,14 @@ import (
 // liveTierTokens loads the real repo's dispatch tokens, skipping (like
 // TestRealRepoDogfood) when the tree is not readable — outside a repo there is
 // no live switch to reconcile against.
+//
+// Liveness spans BOTH artifacts. The runtime/dev split (#6022) moves dev-owned
+// verbs out of `cmd/fak` and into `cmd/fak-dev`; such a verb is still live and
+// still needs its tier row, it just dispatches from the other binary. Reading
+// only the runtime switch would read every migration as a removal and demand
+// the row be deleted, which would silently drop the classification the ratchet
+// exists to keep. `cmd/fak-dev/main.go` is optional so this stays checkable in
+// a tree that predates the split.
 func liveTierTokens(t *testing.T) []string {
 	t.Helper()
 	root := FindRoot(".")
@@ -33,7 +41,11 @@ func liveTierTokens(t *testing.T) []string {
 	if err != nil {
 		t.Skip("cmd/fak/main.go unreadable (no repo root); tier coverage is only checkable in-repo")
 	}
-	return mainDispatchVerbs(b)
+	tokens := mainDispatchVerbs(b)
+	if devB, devErr := os.ReadFile(filepath.Join(root, "cmd", "fak-dev", "main.go")); devErr == nil {
+		tokens = append(tokens, devDispatchVerbs(devB)...)
+	}
+	return tokens
 }
 
 // TestVerbTierCoverageIsTotal reds when any live dispatch token (canonical or

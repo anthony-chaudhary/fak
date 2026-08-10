@@ -118,7 +118,6 @@ var verbTiers = map[string]VerbTier{
 	"budget":                        TierDev,
 	"buildcheck":                    TierDev,
 	"c":                             TierDev,
-	"cache":                         TierDev,
 	"cachesweep":                    TierDev,
 	"cachevalue":                    TierDev,
 	"cadence":                       TierDev,
