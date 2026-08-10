@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type indexPolicyFinding struct {
@@ -76,7 +77,7 @@ func runIndexPolicy(stdout, stderr io.Writer, root string, args []string, asJSON
 }
 
 func gitTrackedPaths(root string) ([]string, error) {
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z")
+	cmd := windowgate.Command("git", "-C", root, "ls-files", "-z")
 	out, err := cmd.Output()
 	if err == nil {
 		var paths []string
