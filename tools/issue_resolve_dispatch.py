@@ -3520,10 +3520,22 @@ def default_loop_ledger(root: Path) -> Path:
 
 
 def fak_loop_cmd(root: Path) -> list[str]:
+    """Resolve the durable fak binary for optional loop-ledger appends.
+
+    A shared peer-dirty trunk must never compile ``go run ./cmd/fak`` merely to
+    append observability: that fallback can take minutes, inherit unrelated WIP,
+    and make scheduled dispatch ticks overrun their cadence. Prefer the explicit
+    binary, then PATH, then the in-tree binary; return an empty argv when none is
+    available so the append fails open without compiling the repository.
+    """
     configured = os.environ.get("FAK_BIN")
     if configured:
         return split_command_env(configured)
-    return ["go", "run", "./cmd/fak"]
+    on_path = shutil.which("fak")
+    if on_path:
+        return [on_path]
+    in_tree = root / ("fak.exe" if os.name == "nt" else "fak")
+    return [str(in_tree)] if in_tree.exists() else []
 
 
 def split_command_env(value: str) -> list[str]:
@@ -5279,7 +5291,11 @@ def append_loop_event(root: Path, ledger: Path, event: dict[str, Any],
     observability append could not find a binary. The error is returned into the
     tick payload for audit, while the dispatch verdict stays grounded in preflight.
     """
-    cmd = fak_loop_cmd(root) + [
+    base_cmd = fak_loop_cmd(root)
+    if not base_cmd:
+        return {"ok": False, "kind": event.get("kind"),
+                "error": "fak binary unavailable; loop append skipped"}
+    cmd = base_cmd + [
         "loop", "append",
         "--ledger", str(ledger),
         "--loop", str(event["loop_id"]),

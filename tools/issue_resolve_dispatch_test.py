@@ -7587,6 +7587,16 @@ class AppendLoopEventArgvTest(unittest.TestCase):
     `fak loop health` read the loop 0-of-N witnessed with witness_collapse=true.
     """
 
+    def test_fak_loop_cmd_prefers_path_and_never_go_run(self) -> None:
+        mod = load()
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(mod.shutil, "which", return_value=r"C:\bin\fak.exe"):
+            self.assertEqual(mod.fak_loop_cmd(ROOT), [r"C:\bin\fak.exe"])
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(mod.shutil, "which", return_value=None):
+            self.assertEqual(mod.fak_loop_cmd(Path(td)), [])
+
     def _argv(self, event: dict[str, object]) -> list[str]:
         mod = load()
         seen: list[list[str]] = []
