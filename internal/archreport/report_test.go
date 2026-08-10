@@ -10,6 +10,59 @@ import (
 	"testing"
 )
 
+func TestAnalyzeTypesEveryLiveArchitectureEdgeDirection(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"root":1,"low":2,"peer":2,"high":3,"stale":3}
+var tierName=[]string{"zero","primitive","foundation-composite","mechanism"}
+`)
+	write("internal/root/root.go", "package root\n")
+	write("internal/peer/peer.go", "package peer\n")
+	write("internal/high/high.go", "package high\n")
+	write("internal/low/low.go", `package low
+import (
+ _ "github.com/anthony-chaudhary/fak/internal/root"
+ _ "github.com/anthony-chaudhary/fak/internal/peer"
+ _ "github.com/anthony-chaudhary/fak/internal/high"
+ _ "github.com/anthony-chaudhary/fak/internal/stale"
+)
+`)
+	r, err := Analyze(root, "low")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ArchitectureEdge{
+		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "high", ToTier: 3, ToTierName: "mechanism", TierDelta: 1, Direction: "upward"},
+		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "peer", ToTier: 2, ToTierName: "foundation-composite", TierDelta: 0, Direction: "lateral"},
+		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "root", ToTier: 1, ToTierName: "primitive", TierDelta: -1, Direction: "rootward"},
+	}
+	if !reflect.DeepEqual(r.Edges, want) {
+		t.Fatalf("edges=%+v want=%+v", r.Edges, want)
+	}
+	if len(r.Leaves) != 1 || len(r.Leaves[0].ViolationEdges) != 1 || r.Leaves[0].ViolationEdges[0].To != "high" {
+		t.Fatalf("leaf=%+v", r.Leaves)
+	}
+	upward := []string{}
+	for _, edge := range r.Edges {
+		if edge.Direction == "upward" {
+			upward = append(upward, edge.From+" -> "+edge.To)
+		}
+	}
+	if !reflect.DeepEqual(upward, []string{"low -> high"}) {
+		t.Fatalf("upward=%v", upward)
+	}
+}
+
 func TestAnalyzeReportsUpwardEdgeAndLegalReverse(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

@@ -54,6 +54,17 @@ type BlastHotspot struct {
 	MaxHops     int    `json:"max_hops"`
 }
 
+type ArchitectureEdge struct {
+	From         string `json:"from"`
+	FromTier     int    `json:"from_tier"`
+	FromTierName string `json:"from_tier_name"`
+	To           string `json:"to"`
+	ToTier       int    `json:"to_tier"`
+	ToTierName   string `json:"to_tier_name"`
+	TierDelta    int    `json:"tier_delta"`
+	Direction    string `json:"direction"`
+}
+
 type ViolationEdge struct {
 	From         string `json:"from"`
 	FromTier     int    `json:"from_tier"`
@@ -83,15 +94,16 @@ type Diagnostic struct {
 }
 
 type Report struct {
-	Schema               string          `json:"schema"`
-	Tiers                []Tier          `json:"tiers"`
-	Leaves               []Leaf          `json:"leaves"`
-	Hotspots             []Hotspot       `json:"hotspots,omitempty"`
-	BlastHotspots        []BlastHotspot  `json:"blast_hotspots,omitempty"`
-	Diagnostics          []Diagnostic    `json:"diagnostics,omitempty"`
-	SinkCandidates       []SinkCandidate `json:"sink_candidates,omitempty"`
-	Violations           int             `json:"violations"`
-	MaxViolationDistance int             `json:"max_violation_distance"`
+	Schema               string             `json:"schema"`
+	Tiers                []Tier             `json:"tiers"`
+	Leaves               []Leaf             `json:"leaves"`
+	Hotspots             []Hotspot          `json:"hotspots,omitempty"`
+	BlastHotspots        []BlastHotspot     `json:"blast_hotspots,omitempty"`
+	Edges                []ArchitectureEdge `json:"edges,omitempty"`
+	Diagnostics          []Diagnostic       `json:"diagnostics,omitempty"`
+	SinkCandidates       []SinkCandidate    `json:"sink_candidates,omitempty"`
+	Violations           int                `json:"violations"`
+	MaxViolationDistance int                `json:"max_violation_distance"`
 }
 
 func Analyze(root, onlyLeaf string) (Report, error) {
@@ -162,6 +174,38 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		byName[name] = len(allLeaves)
 		allLeaves = append(allLeaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), TierGap: declared - floor, Dependencies: deps, ViolationEdges: violationEdges, Violations: violations})
 	}
+	for _, leaf := range allLeaves {
+		for _, dep := range leaf.Dependencies {
+			if _, ok := byName[dep]; !ok {
+				continue
+			}
+			toTier := tiers[dep]
+			delta := toTier - leaf.DeclaredTier
+			direction := "lateral"
+			if delta < 0 {
+				direction = "rootward"
+			} else if delta > 0 {
+				direction = "upward"
+			}
+			report.Edges = append(report.Edges, ArchitectureEdge{From: leaf.Name, FromTier: leaf.DeclaredTier, FromTierName: leaf.DeclaredTierName, To: dep, ToTier: toTier, ToTierName: tierName(names, toTier), TierDelta: delta, Direction: direction})
+		}
+	}
+	sort.Slice(report.Edges, func(i, j int) bool {
+		if report.Edges[i].From != report.Edges[j].From {
+			return report.Edges[i].From < report.Edges[j].From
+		}
+		return report.Edges[i].To < report.Edges[j].To
+	})
+	for i := range allLeaves {
+		liveViolations := allLeaves[i].ViolationEdges[:0]
+		for _, edge := range allLeaves[i].ViolationEdges {
+			if _, ok := byName[edge.To]; ok {
+				liveViolations = append(liveViolations, edge)
+			}
+		}
+		allLeaves[i].ViolationEdges = liveViolations
+		allLeaves[i].Violations = violationStrings(liveViolations)
+	}
 	for _, importer := range allLeaves {
 		for _, dependency := range importer.Dependencies {
 			if i, ok := byName[dependency]; ok {
@@ -224,6 +268,13 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 		report.Hotspots = nil
 		report.BlastHotspots = nil
+		edges := report.Edges[:0]
+		for _, edge := range report.Edges {
+			if edge.From == onlyLeaf {
+				edges = append(edges, edge)
+			}
+		}
+		report.Edges = edges
 		report.SinkCandidates = nil
 		diagnostics := report.Diagnostics[:0]
 		for _, diagnostic := range report.Diagnostics {

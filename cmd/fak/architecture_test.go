@@ -76,6 +76,31 @@ import _ "github.com/anthony-chaudhary/fak/internal/caller"
 	}
 }
 
+func TestArchitectureTextSummarizesTypedEdgeDirections(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"root":1,"low":2,"peer":2,"high":3}
+var tierName=[]string{"zero","primitive","foundation-composite","mechanism"}
+`)
+	for _, leaf := range []string{"root", "peer", "high"} {
+		mustWriteArchitectureFile(t, root, "internal/"+leaf+"/"+leaf+".go", "package "+leaf+"\n")
+	}
+	mustWriteArchitectureFile(t, root, "internal/low/low.go", `package low
+import (
+ _ "github.com/anthony-chaudhary/fak/internal/root"
+ _ "github.com/anthony-chaudhary/fak/internal/peer"
+ _ "github.com/anthony-chaudhary/fak/internal/high"
+)
+`)
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "low"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if want := "typed edges: rootward=1 lateral=1 upward=1"; !strings.Contains(out.String(), want) {
+		t.Fatalf("output %q missing %q", out.String(), want)
+	}
+}
+
 func TestArchitectureTextRendersBlastHotspots(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

@@ -99,6 +99,18 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "architecture: %d leaves, %d upward violation(s), max tier distance %d\n", sumArchitectureLeaves(report), report.Violations, report.MaxViolationDistance)
+	rootward, lateral, upward := 0, 0, 0
+	for _, edge := range report.Edges {
+		switch edge.Direction {
+		case "rootward":
+			rootward++
+		case "lateral":
+			lateral++
+		case "upward":
+			upward++
+		}
+	}
+	fmt.Fprintf(stdout, "  typed edges: rootward=%d lateral=%d upward=%d\n", rootward, lateral, upward)
 	for _, t := range report.Tiers {
 		fmt.Fprintf(stdout, "  tier %d %-22s %d\n", t.Level, t.Name, t.Leaves)
 	}
