@@ -6,6 +6,36 @@ import (
 	"testing"
 )
 
+func TestDiffRootwardLayerSkipChangesExposeBypassGrowth(t *testing.T) {
+	before := Report{RootwardLayerSkips: []RootwardLayerSkip{
+		{From: "a", FromTier: 3, FromTierName: "mechanism", To: "x", ToTier: 1, ToTierName: "primitive", TierDistance: 2, SkippedTiers: 1},
+		{From: "b", FromTier: 4, FromTierName: "policy", To: "y", ToTier: 0, ToTierName: "root", TierDistance: 4, SkippedTiers: 3},
+	}}
+	after := Report{RootwardLayerSkips: []RootwardLayerSkip{
+		{From: "a", FromTier: 4, FromTierName: "policy", To: "x", ToTier: 1, ToTierName: "primitive", TierDistance: 3, SkippedTiers: 2},
+		{From: "b", FromTier: 3, FromTierName: "mechanism", To: "y", ToTier: 0, ToTierName: "root", TierDistance: 3, SkippedTiers: 2},
+		{From: "c", FromTier: 3, FromTierName: "mechanism", To: "z", ToTier: 0, ToTierName: "root", TierDistance: 3, SkippedTiers: 2},
+	}}
+	diff := Diff(before, after)
+	wantChanges := []RootwardLayerSkipChange{
+		{From: "a", FromTier: 4, FromTierName: "policy", To: "x", ToTier: 1, ToTierName: "primitive", BeforeTierDistance: 2, AfterTierDistance: 3, BeforeSkippedTiers: 1, AfterSkippedTiers: 2, Delta: 1},
+		{From: "b", FromTier: 3, FromTierName: "mechanism", To: "y", ToTier: 0, ToTierName: "root", BeforeTierDistance: 4, AfterTierDistance: 3, BeforeSkippedTiers: 3, AfterSkippedTiers: 2, Delta: -1},
+	}
+	wantIntro := []RootwardLayerSkip{{From: "c", FromTier: 3, FromTierName: "mechanism", To: "z", ToTier: 0, ToTierName: "root", TierDistance: 3, SkippedTiers: 2}}
+	if !reflect.DeepEqual(diff.RootwardLayerSkipChanges, wantChanges) || !reflect.DeepEqual(diff.IntroducedRootwardLayerSkips, wantIntro) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffRootwardLayerSkipContractionAndResolutionRemainClean(t *testing.T) {
+	before := Report{RootwardLayerSkips: []RootwardLayerSkip{{From: "a", To: "x", TierDistance: 3, SkippedTiers: 2}, {From: "b", To: "y", TierDistance: 2, SkippedTiers: 1}}}
+	after := Report{RootwardLayerSkips: []RootwardLayerSkip{{From: "a", To: "x", TierDistance: 2, SkippedTiers: 1}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.ResolvedRootwardLayerSkips) != 1 || diff.RootwardLayerSkipChanges[0].Delta != -1 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffFanOutChangesExposeDirectDependencyGrowth(t *testing.T) {
 	before := Report{Leaves: []Leaf{{Name: "a", Dependencies: []string{"x"}}, {Name: "b", Dependencies: []string{"x", "y", "z"}}}}
 	after := Report{Leaves: []Leaf{{Name: "a", Dependencies: []string{"x", "y", "z"}}, {Name: "b", Dependencies: []string{"x"}}}}

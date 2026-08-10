@@ -612,6 +612,26 @@ func TestArchitectureViolationDistancePolicyIgnoresOtherRegressions(t *testing.T
 	}
 }
 
+func TestArchitectureIntroducedOrIncreasedRootwardLayerSkipPolicy(t *testing.T) {
+	diff := archreport.ReportDiff{IntroducedRootwardLayerSkips: []archreport.RootwardLayerSkip{{From: "a", FromTier: 3, FromTierName: "mechanism", To: "x", ToTier: 0, ToTierName: "root", TierDistance: 3, SkippedTiers: 2}}, RootwardLayerSkipChanges: []archreport.RootwardLayerSkipChange{{From: "b", FromTier: 4, FromTierName: "policy", To: "y", ToTier: 1, ToTierName: "primitive", BeforeTierDistance: 2, AfterTierDistance: 3, BeforeSkippedTiers: 1, AfterSkippedTiers: 2, Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-or-increased-rootward-layer-skips"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"+ rootward-layer-skip a(mechanism:3) -> x(root:0) distance=3 skipped-tiers=2", "skipped-tiers 1 -> 2 (+1)", "route through an intermediate tier"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+func TestArchitectureIntroducedOrIncreasedRootwardLayerSkipPolicyIgnoresContraction(t *testing.T) {
+	diff := archreport.ReportDiff{RootwardLayerSkipChanges: []archreport.RootwardLayerSkipChange{{Delta: -1}}, ResolvedRootwardLayerSkips: []archreport.RootwardLayerSkip{{From: "a", To: "x"}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-or-increased-rootward-layer-skips"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureIncreasedFanOutPolicy(t *testing.T) {
 	diff := archreport.ReportDiff{FanOutChanges: []archreport.FanOutChange{{Leaf: "a", Before: 1, After: 3, Delta: 2}}}
 	var out, errOut bytes.Buffer
@@ -923,7 +943,7 @@ func TestArchitectureDecreasedLateralEdgeConnectivityPolicyIgnoresGain(t *testin
 
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-fan-out, increased-dependency-reach, increased-dependency-depth, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, or decreased-lateral-edge-connectivity") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, introduced-or-increased-rootward-layer-skips, increased-fan-out, increased-dependency-reach, increased-dependency-depth, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, or decreased-lateral-edge-connectivity") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

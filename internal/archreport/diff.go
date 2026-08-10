@@ -110,6 +110,20 @@ type LateralBridgeChange struct {
 	AfterRightSide      []string `json:"after_right_side"`
 }
 
+type RootwardLayerSkipChange struct {
+	From               string `json:"from"`
+	FromTier           int    `json:"from_tier"`
+	FromTierName       string `json:"from_tier_name"`
+	To                 string `json:"to"`
+	ToTier             int    `json:"to_tier"`
+	ToTierName         string `json:"to_tier_name"`
+	BeforeTierDistance int    `json:"before_tier_distance"`
+	AfterTierDistance  int    `json:"after_tier_distance"`
+	BeforeSkippedTiers int    `json:"before_skipped_tiers"`
+	AfterSkippedTiers  int    `json:"after_skipped_tiers"`
+	Delta              int    `json:"delta"`
+}
+
 type LateralEdgeConnectivityChange struct {
 	Tier             int              `json:"tier"`
 	TierName         string           `json:"tier_name"`
@@ -184,6 +198,9 @@ type ReportDiff struct {
 	RemovedEdges                        []EdgeChange                      `json:"removed_edges,omitempty"`
 	IntroducedTypedEdges                []ArchitectureEdge                `json:"introduced_typed_edges,omitempty"`
 	ResolvedTypedEdges                  []ArchitectureEdge                `json:"resolved_typed_edges,omitempty"`
+	IntroducedRootwardLayerSkips        []RootwardLayerSkip               `json:"introduced_rootward_layer_skips,omitempty"`
+	ResolvedRootwardLayerSkips          []RootwardLayerSkip               `json:"resolved_rootward_layer_skips,omitempty"`
+	RootwardLayerSkipChanges            []RootwardLayerSkipChange         `json:"rootward_layer_skip_changes,omitempty"`
 	IntroducedLateralCouplings          []LateralCoupling                 `json:"introduced_lateral_couplings,omitempty"`
 	ResolvedLateralCouplings            []LateralCoupling                 `json:"resolved_lateral_couplings,omitempty"`
 	IntroducedLateralBridges            []LateralBridge                   `json:"introduced_lateral_bridges,omitempty"`
@@ -256,6 +273,19 @@ func Diff(before, after Report) ReportDiff {
 	for key, edge := range beforeTypedEdges {
 		if _, ok := afterTypedEdges[key]; !ok {
 			out.ResolvedTypedEdges = append(out.ResolvedTypedEdges, edge)
+		}
+	}
+	beforeSkips, afterSkips := rootwardLayerSkipSet(before), rootwardLayerSkipSet(after)
+	for key, skip := range afterSkips {
+		if beforeSkip, ok := beforeSkips[key]; !ok {
+			out.IntroducedRootwardLayerSkips = append(out.IntroducedRootwardLayerSkips, skip)
+		} else if beforeSkip.SkippedTiers != skip.SkippedTiers {
+			out.RootwardLayerSkipChanges = append(out.RootwardLayerSkipChanges, RootwardLayerSkipChange{From: skip.From, FromTier: skip.FromTier, FromTierName: skip.FromTierName, To: skip.To, ToTier: skip.ToTier, ToTierName: skip.ToTierName, BeforeTierDistance: beforeSkip.TierDistance, AfterTierDistance: skip.TierDistance, BeforeSkippedTiers: beforeSkip.SkippedTiers, AfterSkippedTiers: skip.SkippedTiers, Delta: skip.SkippedTiers - beforeSkip.SkippedTiers})
+		}
+	}
+	for key, skip := range beforeSkips {
+		if _, ok := afterSkips[key]; !ok {
+			out.ResolvedRootwardLayerSkips = append(out.ResolvedRootwardLayerSkips, skip)
 		}
 	}
 	beforeCouplings, afterCouplings := lateralCouplingSet(before), lateralCouplingSet(after)
@@ -433,6 +463,9 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.RemovedEdges)
 	sortArchitectureEdges(out.IntroducedTypedEdges)
 	sortArchitectureEdges(out.ResolvedTypedEdges)
+	sortRootwardLayerSkips(out.IntroducedRootwardLayerSkips)
+	sortRootwardLayerSkips(out.ResolvedRootwardLayerSkips)
+	sortRootwardLayerSkipChanges(out.RootwardLayerSkipChanges)
 	sortLateralCouplings(out.IntroducedLateralCouplings)
 	sortLateralCouplings(out.ResolvedLateralCouplings)
 	sortLateralBridges(out.IntroducedLateralBridges)
@@ -457,7 +490,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedFanOut(out.FanOutChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || len(out.IntroducedRootwardLayerSkips) > 0 || hasIncreasedRootwardLayerSkip(out.RootwardLayerSkipChanges) || hasIncreasedFanOut(out.FanOutChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -481,6 +514,57 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+func rootwardLayerSkipSet(r Report) map[string]RootwardLayerSkip {
+	out := map[string]RootwardLayerSkip{}
+	for _, skip := range r.RootwardLayerSkips {
+		out[skip.From+"\x00"+skip.To] = skip
+	}
+	return out
+}
+func sortRootwardLayerSkips(skips []RootwardLayerSkip) {
+	sort.Slice(skips, func(i, j int) bool {
+		if skips[i].SkippedTiers != skips[j].SkippedTiers {
+			return skips[i].SkippedTiers > skips[j].SkippedTiers
+		}
+		if skips[i].TierDistance != skips[j].TierDistance {
+			return skips[i].TierDistance > skips[j].TierDistance
+		}
+		if skips[i].From != skips[j].From {
+			return skips[i].From < skips[j].From
+		}
+		return skips[i].To < skips[j].To
+	})
+}
+func sortRootwardLayerSkipChanges(changes []RootwardLayerSkipChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if (changes[i].Delta > 0) != (changes[j].Delta > 0) {
+			return changes[i].Delta > 0
+		}
+		li, lj := changes[i].Delta, changes[j].Delta
+		if li < 0 {
+			li = -li
+		}
+		if lj < 0 {
+			lj = -lj
+		}
+		if li != lj {
+			return li > lj
+		}
+		if changes[i].From != changes[j].From {
+			return changes[i].From < changes[j].From
+		}
+		return changes[i].To < changes[j].To
+	})
+}
+func hasIncreasedRootwardLayerSkip(changes []RootwardLayerSkipChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func vertexPairCutSet(pairs []LateralVertexPairCut) map[string]LateralVertexPairCut {
