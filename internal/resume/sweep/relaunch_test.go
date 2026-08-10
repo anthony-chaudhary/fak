@@ -77,6 +77,18 @@ func TestRelaunchBannerProseCountsAsError(t *testing.T) {
 	}
 }
 
+func TestRelaunchResetMentionIsRealProgress(t *testing.T) {
+	// Merely discussing resets is not the terminal banner. This ports the Python
+	// regression that keeps such a turn eligible to prove progress past an API error.
+	r := RelaunchVerdict([]Record{
+		rec("assistant", "API Error: 529", "", "2026-06-23T10:00:00Z", true),
+		rec("assistant", "The resetPassed helper handles when a window resets.", "", "2026-06-23T11:00:00Z", false),
+	})
+	if r.Verdict != VerdictRelaunchedOK {
+		t.Fatalf("ordinary reset prose must prove progress, got %+v", r)
+	}
+}
+
 func TestRelaunchEqualTimestampsStayStranded(t *testing.T) {
 	// The rule is strictly NEWER: a real turn at the exact error timestamp proves nothing.
 	r := RelaunchVerdict([]Record{
