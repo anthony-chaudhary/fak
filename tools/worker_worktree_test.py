@@ -180,6 +180,7 @@ class WorktreeEnvTest(unittest.TestCase):
             result = subprocess.run(
                 ["go", "build", "-x", "./warm"], cwd=module, env=env,
                 check=True, capture_output=True, text=True,
+                creationflags=mod.no_window_creationflags(),
             )
             self.assertNotIn("/compile", result.stderr.replace("\\", "/"))
             self.assertNotIn("compile.exe", result.stderr.lower())
@@ -508,7 +509,8 @@ def _run(cmd: list[str], cwd: Path, env: dict | None = None) -> "tuple[int, str]
     """Run one subprocess hermetically; return (rc, stdout+stderr). Used only by the
     LIVE build-poison witness (skipped when git/go are absent)."""
     proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True,
-                          text=True, encoding="utf-8", errors="replace")
+                          text=True, encoding="utf-8", errors="replace",
+                          creationflags=mod.no_window_creationflags())
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
