@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/ratelimit", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"tool_call_rate_limiting"},
+		Reason:       "native per-trace/per-tool/global call and cost limiter plus typed retry-after denial",
+	},
+	{
 		Leaf: "internal/enginecache", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"engine_cache_invalidation"},
 		Reason:       "native governance-bound invalidation planner and first-class vLLM/SGLang cache-reset adapters",
@@ -173,6 +178,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "tool_call_rate_limiting",
+		NativePath: "internal/ratelimit/ratelimit.go",
+		Workload:   "same request arrival trace, call and cost caps, key dimension, window semantics, warmup, concurrency, and independent admission oracle across every arm",
+		Metrics:    []string{"decision_equivalence", "overshoot_calls", "latency_ms", "throughput_calls_per_second", "state_bytes", "network_bytes", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "no limiter", Class: TunedBaseline, Source: "internal/ratelimit/compare.go"},
+			{Name: "Envoy local rate limit", Class: NextBest, Source: "https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/local_rate_limit_filter"},
+			{Name: "Kong rate limiting", Class: NextBest, Source: "https://docs.konghq.com/hub/kong-inc/rate-limiting/"},
+			{Name: "Redis-cell", Class: NextBest, Source: "https://github.com/brandur/redis-cell"},
+		},
+	},
 	{
 		Capability: "engine_cache_invalidation",
 		NativePath: "internal/enginecache/enginecache.go",
