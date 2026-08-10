@@ -133,7 +133,7 @@ func Diff(before, after Report) ReportDiff {
 	sort.Strings(out.ResolvedViolations)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolations) > 0 || len(out.IntroducedDiagnostics) > 0 {
+	if len(out.IntroducedViolations) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -233,4 +233,13 @@ func sortTierGapChanges(changes []TierGapChange) {
 		}
 		return changes[i].Leaf < changes[j].Leaf
 	})
+}
+
+func hasIncreasedTierGap(changes []TierGapChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
 }

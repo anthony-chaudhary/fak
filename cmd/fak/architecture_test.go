@@ -211,9 +211,30 @@ func TestArchitectureDiagnosticPolicyIgnoresViolationOnlyRegression(t *testing.T
 	}
 }
 
+func TestArchitectureFailOnIncreasedTierGap(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", TierGapChanges: []archreport.TierGapChange{{Leaf: "drift", BeforeFloor: 3, AfterFloor: 2, BeforeGap: 1, AfterGap: 2, Delta: 1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-tier-gap"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"tier-gap drift", "restore the prior import floor", "baseline -> workspace"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureTierGapPolicyIgnoresOtherRegressions(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolations: []string{"a -> b"}, IntroducedDiagnostics: []archreport.Diagnostic{{Kind: "stale", Leaf: "gone"}}, TierGapChanges: []archreport.TierGapChange{{Leaf: "better", Delta: -1}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-tier-gap"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations or introduced-diagnostics") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, or increased-tier-gap") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

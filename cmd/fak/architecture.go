@@ -21,7 +21,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
-	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -29,8 +29,8 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
 		return 2
 	}
-	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" {
-		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations or introduced-diagnostics)\n", *failOn)
+	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, or increased-tier-gap)\n", *failOn)
 		return 2
 	}
 	if *failOn != "" && *baseline == "" {
@@ -228,8 +228,10 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	if architectureFailOnMatched(diff, failOn) {
 		if failOn == "introduced-violations" {
 			fmt.Fprintln(stdout, "  remediation: remove/invert introduced upward edges or move the shared seam down; comparison is baseline -> workspace")
-		} else {
+		} else if failOn == "introduced-diagnostics" {
 			fmt.Fprintln(stdout, "  remediation: apply each introduced diagnostic recovery action; comparison is baseline -> workspace")
+		} else {
+			fmt.Fprintln(stdout, "  remediation: restore the prior import floor or lower the over-declared tier; comparison is baseline -> workspace")
 		}
 		return 3
 	}
@@ -242,6 +244,13 @@ func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 		return len(diff.IntroducedViolations) > 0
 	case "introduced-diagnostics":
 		return len(diff.IntroducedDiagnostics) > 0
+	case "increased-tier-gap":
+		for _, change := range diff.TierGapChanges {
+			if change.Delta > 0 {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}

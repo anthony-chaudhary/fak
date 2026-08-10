@@ -152,3 +152,19 @@ func TestDiffTierGapChangeMatchesReportedFloor(t *testing.T) {
 		t.Fatalf("derived tier-gap view was double-counted: %d", got.Changes())
 	}
 }
+
+func TestDiffTierGapIncreaseIsRegression(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "leaf", DeclaredTier: 4, ImportFloor: 3, TierGap: 1}}}
+	after := Report{Leaves: []Leaf{{Name: "leaf", DeclaredTier: 4, ImportFloor: 2, TierGap: 2}}}
+	if got := Diff(before, after); got.Verdict != "regression" {
+		t.Fatalf("verdict=%q diff=%+v", got.Verdict, got)
+	}
+}
+
+func TestDiffTierGapImprovementRemainsClean(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "leaf", DeclaredTier: 4, ImportFloor: 2, TierGap: 2}}}
+	after := Report{Leaves: []Leaf{{Name: "leaf", DeclaredTier: 4, ImportFloor: 3, TierGap: 1}}}
+	if got := Diff(before, after); got.Verdict != "clean" {
+		t.Fatalf("verdict=%q diff=%+v", got.Verdict, got)
+	}
+}
