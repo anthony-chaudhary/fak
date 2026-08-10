@@ -14,8 +14,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
 const (
@@ -249,7 +247,7 @@ func (l *behaviorLens) noteToolResult(toolUseID string, isError bool, text strin
 			}
 		}
 	}
-	if devindex.RepeatBenign(tool) {
+	if repeatBenign(tool) {
 		return
 	}
 	sig := normHead(text, 160)
@@ -360,7 +358,7 @@ func (l *behaviorLens) summary() Behavior {
 	b.FileChurn = topChurn(b.FileChurn, 10)
 
 	for _, k := range l.callOrder {
-		if devindex.RepeatBenign(k.tool) {
+		if repeatBenign(k.tool) {
 			continue
 		}
 		succ := l.callSigs[k] - l.errSigCounts[k]
