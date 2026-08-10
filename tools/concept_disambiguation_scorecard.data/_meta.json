@@ -412,6 +412,11 @@
           "category": "incidental",
           "reason": "CLI provenance string for endpoint capability reporting, not a cache implementation or policy.",
           "token": "liveMatrixPrefixCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI endpoint capability provenance string, not a cache implementation or policy.",
+          "token": "strongMatrixCache"
         }
       ],
       "id": "cache",
@@ -544,6 +549,7 @@
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
         "selectorCacheKey",
+        "strongMatrixCache",
         "tokencache",
         "uncached",
         "usercachedir"

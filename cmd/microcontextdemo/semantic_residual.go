@@ -307,13 +307,14 @@ const semanticGoldSchema = "fak-microcontext-semantic-gold/1"
 const semanticGradeSchema = "fak-microcontext-semantic-grade/1"
 
 type semanticConsensus struct {
-	ID                   string          `json:"id"`
-	Split                string          `json:"split"`
-	SemanticNeed         string          `json:"semantic_need"`
-	ToolNeed             string          `json:"tool_need"`
-	Actionability        string          `json:"actionability"`
-	Evidence             []string        `json:"evidence"`
-	AdjudicatorAgreement map[string]bool `json:"adjudicator_agreement"`
+	ID                   string             `json:"id"`
+	Split                string             `json:"split"`
+	SemanticNeed         string             `json:"semantic_need"`
+	ToolNeed             string             `json:"tool_need"`
+	Actionability        string             `json:"actionability"`
+	Evidence             []string           `json:"evidence"`
+	AdjudicatorAgreement map[string]bool    `json:"adjudicator_agreement,omitempty"`
+	Confidence           map[string]float64 `json:"confidence,omitempty"`
 }
 type semanticGold struct {
 	Schema              string              `json:"schema"`

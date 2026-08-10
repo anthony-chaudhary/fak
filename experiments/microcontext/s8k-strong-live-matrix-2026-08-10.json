@@ -1,0 +1,2298 @@
+{
+  "schema": "fak-microcontext-strong-live-matrix/1",
+  "CreatedAt": "2026-08-10T13:23:42Z",
+  "PacketSHA256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "GoldSHA256": "bc4cc9958e3a39c9590410de83edb15543055eb9edaf3234c40fa67e01cd0c67",
+  "endpoint": {
+    "Class": "separate-openai-compatible-live",
+    "Model": "gpt-5.6-sol",
+    "Hardware": "provider-managed-undisclosed",
+    "NativeBatch": "unsupported-by-chat-route",
+    "PrefixCache": "usage-field-observed",
+    "PricingSnapshot": "unavailable-for-gpt-5.6-sol-route",
+    "InputPerMTok": null,
+    "OutputPerMTok": null
+  },
+  "Trials": 2,
+  "Workers": 8,
+  "ChunkSize": 4,
+  "RetrievalK": 3,
+  "pipelines": [
+    {
+      "pipeline": "retrieval-rerank",
+      "calibration": {
+        "candidates": [
+          0,
+          0.5,
+          0.7,
+          0.85,
+          0.95,
+          1.01
+        ],
+        "selected": 0.85,
+        "tune_exact": {
+          "0.00": 2,
+          "0.50": 2,
+          "0.70": 3,
+          "0.85": 8,
+          "0.95": 6,
+          "1.01": 0
+        },
+        "tune_records": 16,
+        "rule": "maximize exact tune records; ties choose lower threshold"
+      },
+      "retrieval_trace": [
+        {
+          "query_id": "issue-5148",
+          "selected_ids": [
+            "issue-6075",
+            "issue-6014",
+            "issue-6072"
+          ],
+          "scores": [
+            0.26993865030674846,
+            0.267515923566879,
+            0.2605210420841683
+          ]
+        },
+        {
+          "query_id": "issue-5154",
+          "selected_ids": [
+            "issue-6014",
+            "issue-6075",
+            "issue-6072"
+          ],
+          "scores": [
+            0.22362869198312235,
+            0.20298507462686566,
+            0.2028985507246377
+          ]
+        },
+        {
+          "query_id": "issue-5158",
+          "selected_ids": [
+            "issue-6014",
+            "issue-6072",
+            "issue-6075"
+          ],
+          "scores": [
+            0.17422867513611615,
+            0.17061611374407584,
+            0.15048543689320387
+          ]
+        },
+        {
+          "query_id": "issue-5207",
+          "selected_ids": [
+            "issue-5146",
+            "issue-5211",
+            "issue-5847"
+          ],
+          "scores": [
+            0.08333333333333333,
+            0.072992700729927,
+            0.07194244604316546
+          ]
+        },
+        {
+          "query_id": "issue-5245",
+          "selected_ids": [
+            "issue-6014",
+            "issue-6072",
+            "issue-6075"
+          ],
+          "scores": [
+            0.1383399209486166,
+            0.13793103448275862,
+            0.1307901907356948
+          ]
+        },
+        {
+          "query_id": "issue-5347",
+          "selected_ids": [
+            "issue-6072",
+            "issue-6075",
+            "issue-6014"
+          ],
+          "scores": [
+            0.2517814726840855,
+            0.22871046228710462,
+            0.20727272727272728
+          ]
+        },
+        {
+          "query_id": "issue-5363",
+          "selected_ids": [
+            "issue-6084",
+            "issue-5253",
+            "issue-6014"
+          ],
+          "scores": [
+            0.125,
+            0.11796246648793565,
+            0.11235955056179775
+          ]
+        },
+        {
+          "query_id": "issue-5521",
+          "selected_ids": [
+            "issue-5847",
+            "issue-6075",
+            "issue-6072"
+          ],
+          "scores": [
+            0.16964285714285715,
+            0.16831683168316833,
+            0.15942028985507245
+          ]
+        },
+        {
+          "query_id": "issue-5525",
+          "selected_ids": [
+            "issue-5847",
+            "issue-6072",
+            "issue-6075"
+          ],
+          "scores": [
+            0.2109704641350211,
+            0.19090909090909092,
+            0.17209302325581396
+          ]
+        },
+        {
+          "query_id": "issue-5636",
+          "selected_ids": [
+            "issue-6072",
+            "issue-6075",
+            "issue-6014"
+          ],
+          "scores": [
+            0.25412541254125415,
+            0.2516778523489933,
+            0.2503401360544218
+          ]
+        },
+        {
+          "query_id": "issue-5645",
+          "selected_ids": [
+            "issue-6014",
+            "issue-5232",
+            "issue-6072"
+          ],
+          "scores": [
+            0.29942418426103645,
+            0.27936507936507937,
+            0.24489795918367346
+          ]
+        },
+        {
+          "query_id": "issue-5672",
+          "selected_ids": [
+            "issue-5718",
+            "issue-5738",
+            "issue-5232"
+          ],
+          "scores": [
+            0.29253731343283584,
+            0.29069767441860467,
+            0.28776978417266186
+          ]
+        },
+        {
+          "query_id": "issue-5713",
+          "selected_ids": [
+            "issue-5718",
+            "issue-5738",
+            "issue-6075"
+          ],
+          "scores": [
+            0.8855421686746988,
+            0.8563049853372434,
+            0.2631578947368421
+          ]
+        },
+        {
+          "query_id": "issue-5802",
+          "selected_ids": [
+            "issue-6014",
+            "issue-5847",
+            "issue-6075"
+          ],
+          "scores": [
+            0.19543973941368079,
+            0.17726396917148363,
+            0.17684210526315788
+          ]
+        },
+        {
+          "query_id": "issue-5859",
+          "selected_ids": [
+            "issue-5847",
+            "issue-5253",
+            "issue-6075"
+          ],
+          "scores": [
+            0.19776119402985073,
+            0.1967799642218247,
+            0.12601626016260162
+          ]
+        },
+        {
+          "query_id": "issue-5929",
+          "selected_ids": [
+            "issue-6075",
+            "issue-5847",
+            "issue-6072"
+          ],
+          "scores": [
+            0.177319587628866,
+            0.17391304347826086,
+            0.17373737373737375
+          ]
+        }
+      ],
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 14997,
+          "CompletionTokens": 3631,
+          "CachedTokens": 0,
+          "WallMS": 14524.1227,
+          "TTFTP50MS": 5719.1284,
+          "TTFTP95MS": 9011.9157,
+          "LatencyP50MS": 5719.1284,
+          "LatencyP95MS": 9011.9157,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.91,
+                "tool_need": 0.58
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.93,
+                "tool_need": 0.72
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.94,
+                "tool_need": 0.88
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.93,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.76,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.93,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.91,
+                "tool_need": 0.76
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.82
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.91,
+                "semantic_need": 0.94,
+                "tool_need": 0.87
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.9,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.91,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.94,
+                "tool_need": 0.84
+              }
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 14997,
+          "CompletionTokens": 3172,
+          "CachedTokens": 0,
+          "WallMS": 17395.1761,
+          "TTFTP50MS": 5823.6874,
+          "TTFTP95MS": 11637.1826,
+          "LatencyP50MS": 5823.6874,
+          "LatencyP95MS": 11637.1826,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.94,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.93,
+                "tool_need": 0.72
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.95,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.9,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.93,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.82
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.88,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.86,
+                "tool_need": 0.72
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.91,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.95,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.88,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.91,
+                "tool_need": 0.76
+              }
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 32,
+        "Successful": 32,
+        "Failed": 0,
+        "Retries": 0,
+        "PromptTokens": 29994,
+        "CompletionTokens": 6803,
+        "CachedTokens": 0,
+        "MeanWallMS": 15959.6494,
+        "TTFTP50MS": 5771.4079,
+        "TTFTP95MS": 10324.549149999999,
+        "LatencyP50MS": 5771.4079,
+        "LatencyP95MS": 10324.549149999999,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 2,
+        "field_errors": {
+          "actionability": 3,
+          "semantic_need": 14,
+          "tool_need": 7
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "pipeline": "long-context",
+      "calibration": {
+        "candidates": [
+          0,
+          0.5,
+          0.7,
+          0.85,
+          0.95,
+          1.01
+        ],
+        "selected": 0,
+        "tune_exact": {
+          "0.00": 0,
+          "0.50": 0,
+          "0.70": 0,
+          "0.85": 0,
+          "0.95": 0,
+          "1.01": 0
+        },
+        "tune_records": 16,
+        "rule": "maximize exact tune records; ties choose lower threshold"
+      },
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 1,
+          "Successful": 1,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 8659,
+          "CompletionTokens": 1813,
+          "CachedTokens": 7936,
+          "WallMS": 41128.3071,
+          "TTFTP50MS": 41128.3071,
+          "TTFTP95MS": 41128.3071,
+          "LatencyP50MS": 41128.3071,
+          "LatencyP95MS": 41128.3071,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.97,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.95,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.82,
+                "semantic_need": 0.94,
+                "tool_need": 0.88
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.94,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.9,
+                "semantic_need": 0.97,
+                "tool_need": 0.89
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "not_actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.72,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.97,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.95,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.95,
+                "tool_need": 0.94
+              }
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 1,
+          "Successful": 1,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 8659,
+          "CompletionTokens": 1294,
+          "CachedTokens": 0,
+          "WallMS": 24452.7888,
+          "TTFTP50MS": 24452.7888,
+          "TTFTP95MS": 24452.7888,
+          "LatencyP50MS": 24452.7888,
+          "LatencyP95MS": 24452.7888,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.94,
+                "tool_need": 0.82
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.95,
+                "tool_need": 0.85
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.91,
+                "semantic_need": 0.9,
+                "tool_need": 0.81
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.93,
+                "tool_need": 0.88
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.87
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.81,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.76,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.8
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.87,
+                "semantic_need": 0.99,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.82
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.87,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.91,
+                "tool_need": 0.83
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.83
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.83,
+                "tool_need": 0.91
+              }
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 2,
+        "Successful": 2,
+        "Failed": 0,
+        "Retries": 0,
+        "PromptTokens": 17318,
+        "CompletionTokens": 3107,
+        "CachedTokens": 7936,
+        "MeanWallMS": 32790.54795,
+        "TTFTP50MS": 32790.54795,
+        "TTFTP95MS": 32790.54795,
+        "LatencyP50MS": 32790.54795,
+        "LatencyP95MS": 32790.54795,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 0,
+        "field_errors": {
+          "actionability": 2,
+          "semantic_need": 13,
+          "tool_need": 15
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "pipeline": "chunk-map-reduce",
+      "calibration": {
+        "candidates": [
+          0,
+          0.5,
+          0.7,
+          0.85,
+          0.95,
+          1.01
+        ],
+        "selected": 0.95,
+        "tune_exact": {
+          "0.00": 0,
+          "0.50": 0,
+          "0.70": 0,
+          "0.85": 0,
+          "0.95": 3,
+          "1.01": 0
+        },
+        "tune_records": 16,
+        "rule": "maximize exact tune records; ties choose lower threshold"
+      },
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 4,
+          "Successful": 4,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 9056,
+          "CompletionTokens": 1748,
+          "CachedTokens": 0,
+          "WallMS": 11243.1635,
+          "TTFTP50MS": 8733.2328,
+          "TTFTP95MS": 11242.6425,
+          "LatencyP50MS": 8733.2328,
+          "LatencyP95MS": 11242.6425,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.98,
+                "tool_need": 0.99
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.93,
+                "semantic_need": 0.96,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.98,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.86,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.94,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.98,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.95,
+                "tool_need": 0.92
+              }
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 4,
+          "Successful": 4,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 9056,
+          "CompletionTokens": 1845,
+          "CachedTokens": 1792,
+          "WallMS": 12182.1899,
+          "TTFTP50MS": 9389.0294,
+          "TTFTP95MS": 12182.1899,
+          "LatencyP50MS": 9389.0294,
+          "LatencyP95MS": 12182.1899,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.88
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.94,
+                "tool_need": 0.98
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.95,
+                "semantic_need": 0.92,
+                "tool_need": 0.87
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.9,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.94,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.72,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.96,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.99,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.92
+              }
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 8,
+        "Successful": 8,
+        "Failed": 0,
+        "Retries": 0,
+        "PromptTokens": 18112,
+        "CompletionTokens": 3593,
+        "CachedTokens": 1792,
+        "MeanWallMS": 11712.6767,
+        "TTFTP50MS": 9061.131099999999,
+        "TTFTP95MS": 11712.4162,
+        "LatencyP50MS": 9061.131099999999,
+        "LatencyP95MS": 11712.4162,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 2,
+        "field_errors": {
+          "actionability": 4,
+          "semantic_need": 12,
+          "tool_need": 8
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "pipeline": "micro-context",
+      "calibration": {
+        "candidates": [
+          0,
+          0.5,
+          0.7,
+          0.85,
+          0.95,
+          1.01
+        ],
+        "selected": 0.95,
+        "tune_exact": {
+          "0.00": 0,
+          "0.50": 0,
+          "0.70": 0,
+          "0.85": 0,
+          "0.95": 2,
+          "1.01": 0
+        },
+        "tune_records": 16,
+        "rule": "maximize exact tune records; ties choose lower threshold"
+      },
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 10564,
+          "CompletionTokens": 2378,
+          "CachedTokens": 0,
+          "WallMS": 12661.5921,
+          "TTFTP50MS": 5268.9351,
+          "TTFTP95MS": 6952.3958,
+          "LatencyP50MS": 5268.9351,
+          "LatencyP95MS": 6952.3958,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.93,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.98
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.86,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.94
+              }
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 1,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 10564,
+          "CompletionTokens": 2846,
+          "CachedTokens": 0,
+          "WallMS": 619379.2172,
+          "TTFTP50MS": 6258.675,
+          "TTFTP95MS": 614255.4628,
+          "LatencyP50MS": 6258.675,
+          "LatencyP95MS": 614255.4628,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.98,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.94,
+                "tool_need": 0.98
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.86,
+                "semantic_need": 0.98,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.88,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 32,
+        "Successful": 32,
+        "Failed": 0,
+        "Retries": 1,
+        "PromptTokens": 21128,
+        "CompletionTokens": 5224,
+        "CachedTokens": 0,
+        "MeanWallMS": 316020.40465,
+        "TTFTP50MS": 5763.80505,
+        "TTFTP95MS": 310603.9293,
+        "LatencyP50MS": 5763.80505,
+        "LatencyP95MS": 310603.9293,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 2,
+        "field_errors": {
+          "actionability": 4,
+          "semantic_need": 13,
+          "tool_need": 8
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    }
+  ],
+  "limits": [
+    "Tune-only threshold calibration; held-out answers never select configuration.",
+    "Dollar price unavailable for this exact route.",
+    "Typed chunk reduce concatenates validated per-record facts; no extra model call.",
+    "Tool evidence execution remains outside this matrix."
+  ]
+}

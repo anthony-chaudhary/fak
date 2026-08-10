@@ -401,6 +401,10 @@ func main() {
 	var liveMatrixNativeBatch, liveMatrixPrefixCache, liveMatrixPricing string
 	var liveMatrixTrials, liveMatrixWorkers int
 	var liveMatrixInputPrice, liveMatrixOutputPrice float64
+	var strongMatrixPacket, strongMatrixGold, strongMatrixOutput, verifyStrongMatrixPath string
+	var strongMatrixEndpoint, strongMatrixAPIKey, strongMatrixModel, strongMatrixClass, strongMatrixHardware string
+	var strongMatrixBatch, strongMatrixCache, strongMatrixPricing string
+	var strongMatrixTrials, strongMatrixWorkers, strongMatrixK, strongMatrixChunk int
 	var routingVOITrials, routingVOIRecords int
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
@@ -520,6 +524,22 @@ func main() {
 	flag.IntVar(&liveMatrixWorkers, "live-matrix-workers", 8, "bounded micro-context concurrency")
 	flag.Float64Var(&liveMatrixInputPrice, "live-matrix-input-per-mtok", -1, "input USD per million tokens; negative means unavailable")
 	flag.Float64Var(&liveMatrixOutputPrice, "live-matrix-output-per-mtok", -1, "output USD per million tokens; negative means unavailable")
+	flag.StringVar(&strongMatrixPacket, "strong-matrix-packet", "", "S8i packet for strengthened baselines")
+	flag.StringVar(&strongMatrixGold, "strong-matrix-gold", "", "hidden S8i gold")
+	flag.StringVar(&strongMatrixOutput, "strong-matrix-output", "", "write strengthened live matrix")
+	flag.StringVar(&verifyStrongMatrixPath, "verify-strong-matrix", "", "verify strengthened live matrix")
+	flag.StringVar(&strongMatrixEndpoint, "strong-matrix-endpoint", "", "OpenAI-compatible endpoint")
+	flag.StringVar(&strongMatrixAPIKey, "strong-matrix-api-key", "", "endpoint API key")
+	flag.StringVar(&strongMatrixModel, "strong-matrix-model", "", "endpoint model")
+	flag.StringVar(&strongMatrixClass, "strong-matrix-endpoint-class", "", "endpoint class")
+	flag.StringVar(&strongMatrixHardware, "strong-matrix-hardware", "", "hardware provenance")
+	flag.StringVar(&strongMatrixBatch, "strong-matrix-native-batch", "unsupported", "native batching capability")
+	flag.StringVar(&strongMatrixCache, "strong-matrix-prefix-cache", "usage-observed-only", "prefix-cache capability")
+	flag.StringVar(&strongMatrixPricing, "strong-matrix-pricing", "unavailable", "pricing provenance")
+	flag.IntVar(&strongMatrixTrials, "strong-matrix-trials", 2, "held-out trials")
+	flag.IntVar(&strongMatrixWorkers, "strong-matrix-workers", 8, "request admission limit")
+	flag.IntVar(&strongMatrixK, "strong-matrix-retrieval-k", 3, "top-k tune examples")
+	flag.IntVar(&strongMatrixChunk, "strong-matrix-chunk-size", 4, "parallel chunk size")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -558,6 +578,18 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
+		return
+	}
+	if strongMatrixPacket != "" {
+		if err := runStrongLiveMatrix(strongMatrixPacket, strongMatrixGold, strongMatrixOutput, strongMatrixEndpoint, strongMatrixAPIKey, strongMatrixModel, strongMatrixClass, strongMatrixHardware, strongMatrixBatch, strongMatrixCache, strongMatrixPricing, strongMatrixTrials, strongMatrixWorkers, strongMatrixK, strongMatrixChunk); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: strong matrix: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS strong matrix %s\n", strongMatrixOutput)
+		return
+	}
+	if verifyStrongMatrixPath != "" {
+		runVerify("verify-strong-matrix", verifyStrongMatrixPath, verifyStrongLiveMatrix)
 		return
 	}
 	if liveMatrixPacket != "" {

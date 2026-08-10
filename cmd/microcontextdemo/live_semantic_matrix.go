@@ -157,7 +157,7 @@ func (c *liveMatrixClient) call(ctx context.Context, prompt string) liveCall {
 }
 func livePrompt(records []semanticRecord, examples []semanticConsensus, mode string) string {
 	var b strings.Builder
-	b.WriteString("Classify each issue. Allowed semantic_need: literal, semantic, abstain. tool_need: none, read_only, current_state, abstain. actionability: actionable, not_actionable, abstain. Preserve ID. Output {\"answers\":[...]}. When uncertain use abstain.\nMODE: " + mode + "\n")
+	b.WriteString("Classify each issue. Allowed semantic_need: literal, semantic, abstain. tool_need: none, read_only, current_state, abstain. actionability: actionable, not_actionable, abstain. Preserve ID. Output {\"answers\":[{id,semantic_need,tool_need,actionability,confidence:{semantic_need:0..1,tool_need:0..1,actionability:0..1}}]}. When uncertain use abstain.\nMODE: " + mode + "\n")
 	if len(examples) > 0 {
 		b.WriteString("TUNING EXAMPLES:\n")
 		for _, x := range examples {
