@@ -85,24 +85,35 @@ func matchesGoTest(in Input) bool {
 // That conservative rule is the error-preservation invariant: classification
 // uncertainty spends tokens rather than hiding evidence.
 func applyGoTestFilter(raw []byte) ([]byte, int, bool) {
-	lines := strings.Split(string(raw), "\n")
-	out := make([]string, 0, len(lines))
+	records := groupDistillRecords(raw, 64*1024, classifyGoTestLine)
+	out := make([]distillRecord, 0, len(records))
 	dropped := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "--- PASS:") || strings.HasPrefix(trimmed, "=== RUN") || strings.HasPrefix(trimmed, "=== PAUSE") || strings.HasPrefix(trimmed, "=== CONT") {
+	for _, record := range records {
+		if record.Kind == recordRoutine && !record.ForceKeep {
 			dropped++
 			continue
 		}
-		out = append(out, line)
+		out = append(out, record)
 	}
 	if dropped == 0 {
 		return nil, 0, false
 	}
-	body := bytes.TrimRight([]byte(strings.Join(out, "\n")), "\n")
-	return body, dropped, true
+	return bytes.TrimRight(joinDistillRecords(out), "\r\n"), dropped, true
 }
 
+func classifyGoTestLine(line []byte) recordLineKind {
+	trimmed := strings.TrimSpace(string(line))
+	switch {
+	case strings.HasPrefix(trimmed, "--- PASS:"), strings.HasPrefix(trimmed, "=== RUN"), strings.HasPrefix(trimmed, "=== PAUSE"), strings.HasPrefix(trimmed, "=== CONT"):
+		return recordRoutine
+	case strings.HasPrefix(trimmed, "--- FAIL:"), trimmed == "FAIL", strings.HasPrefix(trimmed, "FAIL\t"):
+		return recordError
+	case len(line) > 0 && (line[0] == ' ' || line[0] == '\t'):
+		return recordContinuation
+	default:
+		return recordUnknown
+	}
+}
 func init() { Register(distillCompressor{}) }
 
 func appendRestoreHint(body []byte, origin string) []byte {
