@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/attemptbudget", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"retry_attempt_budgeting"},
+		Reason:       "native failure-class-aware attempt ceilings, cooldowns, transient headroom, and typed block routing",
+	},
+	{
 		Leaf: "internal/cacheobs", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"cache_observability"},
 		Reason:       "native prompt-prefix reuse, cacheability, eligibility, miss-attribution, and reuse-distribution aggregation",
@@ -188,6 +193,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "retry_attempt_budgeting",
+		NativePath: "internal/attemptbudget/attemptbudget.go",
+		Workload:   "same upstream failure trace, retryable-status classes, attempt and backoff policy, process lifetime, concurrency, and independent retry/stop oracle across every arm",
+		Metrics:    []string{"retry_stop_equivalence", "successful_recovery", "request_amplification", "latency_ms", "upstream_requests", "cpu_seconds", "peak_rss_bytes", "network_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "unlimited retries", Class: TunedBaseline, Source: "internal/attemptbudget/compare.go"},
+			{Name: "Envoy retry budget", Class: NextBest, Source: "https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/http_connection_management#arch-overview-http-routing-retry"},
+			{Name: "gRPC retry policy", Class: NextBest, Source: "https://grpc.io/docs/guides/retry/"},
+			{Name: "AWS SDK adaptive retry", Class: NextBest, Source: "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html"},
+		},
+	},
 	{
 		Capability: "cache_observability",
 		NativePath: "internal/cacheobs/cacheobs.go",
