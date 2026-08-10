@@ -456,17 +456,11 @@ func indexOwnership(stdout, stderr io.Writer, root string, args []string, inheri
 			return 2
 		}
 	}
-	report, err := devindex.BuildOwnershipReport(root, "./...", "github.com/anthony-chaudhary/fak/cmd/fak")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak-dev index ownership: %v\n", err)
-		return 1
-	}
-	if asJSON {
-		return encodeJSONOrFail(stdout, stderr, report, "fak-dev index ownership")
-	}
-	fmt.Fprintf(stdout, "commands=%d packages=%d internal=%d leaks=%d\n", len(report.Commands), report.Graph.PackageCount, report.Graph.InternalCount, len(report.Graph.Leaks))
-	for _, leak := range report.Graph.Leaks {
-		fmt.Fprintf(stdout, "leak: %s via %s\n", leak.Forbidden, strings.Join(leak.Path, " -> "))
-	}
-	return 0
+	// One implementation only (#6022). This dispatch used to build its own report
+	// with pattern "./...", which counts the WHOLE MODULE's dependency closure
+	// instead of what the runtime binary links — so packages=/internal= reported
+	// numbers no runtime artifact has. RunOwnership is the migrated body and it
+	// asks for "./cmd/fak"; parse the flags here and hand off, so the pattern
+	// cannot drift apart in two places again.
+	return RunOwnership(stdout, stderr, root, asJSON)
 }

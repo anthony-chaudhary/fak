@@ -1,7 +1,6 @@
 package devcmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -11,22 +10,25 @@ import (
 
 const runtimeImportRoot = "github.com/anthony-chaudhary/fak/cmd/fak"
 
+// runtimeClosurePattern is the go-list pattern whose dependency closure IS the
+// runtime artifact: exactly what linking cmd/fak pulls in. It must never widen to
+// "./..." — that closure is the whole module (every dev-only and test-only package
+// too), so the reported package/internal counts would describe no shipped binary
+// (#6022). The leak BFS is rooted at runtimeImportRoot and so is insensitive to the
+// widening; the COUNTS are not.
+const runtimeClosurePattern = "./cmd/fak"
+
 // RunOwnership emits the complete runtime/dev ownership and dependency witness.
-// It is the first command implementation migrated out of package main.
+// It is the first command implementation migrated out of package main, and the
+// single body behind `fak-dev index ownership`.
 func RunOwnership(stdout, stderr io.Writer, root string, asJSON bool) int {
-	report, err := devindex.BuildOwnershipReport(root, "./cmd/fak", runtimeImportRoot)
+	report, err := devindex.BuildOwnershipReport(root, runtimeClosurePattern, runtimeImportRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak-dev index ownership: %v\n", err)
 		return 1
 	}
 	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak-dev index ownership: encode json: %v\n", err)
-			return 1
-		}
-		return 0
+		return encodeJSONOrFail(stdout, stderr, report, "fak-dev index ownership")
 	}
 	var runtime, dev, shared int
 	for _, command := range report.Commands {
