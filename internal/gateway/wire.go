@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
+	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/toolshape"
 )
 
@@ -154,6 +155,9 @@ type SyscallRequest struct {
 	// (every caller shares, v0.1 behavior). A tool declared vdso-Shareable ignores it
 	// (public, identity-independent reads stay cross-tenant shared).
 	Principal string `json:"principal,omitempty"`
+	// Preferences is a per-call narrowing/convenience layer. Kernel and
+	// organization requirements remain monotone when it is resolved.
+	Preferences toolplugin.Preference `json:"preferences,omitempty"`
 }
 
 // AdmitRequest is the body of POST /v1/fak/admit and the `arguments` of the
@@ -263,10 +267,12 @@ type ContextChangeResponse struct {
 // only on the execute path (fak_syscall); RepairedArguments is present only when
 // the verdict is TRANSFORM (the canonical args the client should run instead).
 type SyscallResponse struct {
-	Verdict           WireVerdict     `json:"verdict"`
-	Result            *ResultEnvelope `json:"result,omitempty"`
-	RepairedArguments json.RawMessage `json:"repaired_arguments,omitempty"`
-	TraceID           string          `json:"trace_id,omitempty"`
+	Verdict              WireVerdict                    `json:"verdict"`
+	Result               *ResultEnvelope                `json:"result,omitempty"`
+	RepairedArguments    json.RawMessage                `json:"repaired_arguments,omitempty"`
+	TraceID              string                         `json:"trace_id,omitempty"`
+	PluginTrace          []toolplugin.TraceEvent        `json:"plugin_trace,omitempty"`
+	EffectivePreferences *toolplugin.ResolvedPreference `json:"effective_preferences,omitempty"`
 }
 
 // ResultEnvelope is a tool result rendered for the wire (bytes resolved, never a

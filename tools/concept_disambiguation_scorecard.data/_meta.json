@@ -392,6 +392,11 @@
           "category": "incidental",
           "reason": "Fixture ledger counter for cache hits after serialized restart; not a new cache primitive.",
           "token": "RestartCacheHits"
+        },
+        {
+          "category": "incidental",
+          "reason": "measured coefficient field, not a cache capability",
+          "token": "UncachedMS"
         }
       ],
       "id": "cache",
@@ -420,7 +425,9 @@
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "ReasonCacheState",
+        "RestartCacheHits",
         "TokenCacheDir",
+        "UncachedMS",
         "UpgradeAnthropicStableCacheTTL1hHeadOnly",
         "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes",
         "VerdictNoCacheStateDelta",
@@ -521,8 +528,7 @@
         "selectorCacheKey",
         "tokencache",
         "uncached",
-        "usercachedir",
-        "RestartCacheHits"
+        "usercachedir"
       ],
       "min_files": 3,
       "name": "Cache family",
@@ -1077,6 +1083,16 @@
           "category": "incidental",
           "reason": "Unexported Check implementation for the GIT_HYGIENE_BYPASS gate (#5588); a positional member of the established gate<Name> helper family (gateUntieredLeaf, gateDemoCommandTree, gateScratchMarkTree), not a governed concept — the concept it implements is GIT_HYGIENE_BYPASS, which the fail-closed ledger and gateScopes already carry.",
           "token": "gateGitHygieneBypass"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter from typed plugin host into the existing kernel decision; not a new guard gate",
+          "token": "gatewayPluginFloor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter that delegates execution to Kernel.Syscall; not a guard gate",
+          "token": "gatewayPluginExecutor"
         }
       ],
       "exclude": [
@@ -1124,6 +1140,8 @@
         "gateresult",
         "gates",
         "gatew",
+        "gatewayPluginExecutor",
+        "gatewayPluginFloor",
         "gating",
         "guardAllowDropExpired",
         "guardAllowExpiryStamp",
@@ -1432,11 +1450,18 @@
           "category": "incidental",
           "reason": "Fixture evidence counter for existing scheduler slot separation; not a new session runtime concept.",
           "token": "ModelSlotsDuringToolWait"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark JSON schema constant, not a runtime session concept",
+          "token": "HeldScheduleReportSchema"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
+        "ModelSlotsDuringToolWait",
         "NarrowsSessions",
         "SessionAutonomous",
         "SessionClass",
@@ -1491,8 +1516,7 @@
         "topsessions",
         "totalslots",
         "tuisessionrow",
-        "wipPeerCheckpointSessions",
-        "ModelSlotsDuringToolWait"
+        "wipPeerCheckpointSessions"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -2030,16 +2054,34 @@
           "category": "incidental",
           "reason": "Private fixture selector runner; it is not a reusable gateway or engine concept.",
           "token": "selectorGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private gateway adapter, not an engine or serving backend",
+          "token": "gatewayPluginFloor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private executor adapter, not a gateway engine implementation",
+          "token": "gatewayPluginExecutor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local refusal reason, not an engine or gateway concept",
+          "token": "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW"
         }
       ],
       "id": "gateway-engine",
       "ignore": [
+        "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "convkernel",
         "engineer",
         "engineered",
         "engineering",
         "engineers",
         "fak_gateway_compaction_thrash_sessions_total",
+        "gatewayPluginExecutor",
+        "gatewayPluginFloor",
         "gateways",
         "kernel32",
         "kernelSession",
@@ -2047,8 +2089,8 @@
         "kernelwiki",
         "resolveCallEngine",
         "resolveSpawnEngine",
-        "shrinkWireInKernel",
-        "selectorGateway"
+        "selectorGateway",
+        "shrinkWireInKernel"
       ],
       "min_files": 3,
       "name": "Gateway / engine family",
@@ -2216,6 +2258,11 @@
           "category": "incidental",
           "reason": "Configuration audit budget count, not a policy capability",
           "token": "MaxPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark transport struct, not a production policy capability",
+          "token": "HeldSchedulePolicy"
         }
       ],
       "exclude": [
@@ -2228,6 +2275,7 @@
         "DispositionMultiCapability",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
+        "HeldSchedulePolicy",
         "MaxPostures",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
@@ -3138,10 +3186,37 @@
           "category": "incidental",
           "reason": "Local audit reason proving observers cannot decide; not a decision framework",
           "token": "OBSERVER_DECISION_IGNORED"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark timing helper, not a product decision",
+          "token": "MeasureHeldDecisionOverhead"
+        },
+        {
+          "category": "incidental",
+          "reason": "offline benchmark evaluator, not a runtime product decision",
+          "token": "EvaluateHeldSchedule"
+        },
+        {
+          "category": "incidental",
+          "reason": "private benchmark calculation helper",
+          "token": "scheduleOutcome"
+        },
+        {
+          "category": "incidental",
+          "reason": "private arithmetic helper",
+          "token": "predictHeld"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private translation helper from frozen ABI verdicts into typed plugin decisions",
+          "token": "pluginDecisionFromVerdict"
         }
       ],
       "id": "decision",
       "ignore": [
+        "EvaluateHeldSchedule",
+        "MeasureHeldDecisionOverhead",
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
         "ReuseDecision",
@@ -3152,6 +3227,9 @@
         "gooddecisionratio",
         "kinddecisionsabout",
         "partialretrydecision",
+        "pluginDecisionFromVerdict",
+        "predictHeld",
+        "scheduleOutcome",
         "selectorDecision",
         "selectorOracle"
       ],

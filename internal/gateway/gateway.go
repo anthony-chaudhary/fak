@@ -51,6 +51,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -821,6 +822,11 @@ type Config struct {
 	// resource reach fak (proxy-closed world), so it is an explicit operator opt-in.
 	// Set by `fak serve --vdso-proxy-fill`. Inert (zero behavior change) when false.
 	VDSOProxyFill bool
+	// ToolPlugins and ToolPreferences arm the optional monotone extension host on
+	// live fak_syscall calls. Empty plugins + zero preferences preserve the legacy
+	// syscall path byte-for-byte.
+	ToolPlugins     []toolplugin.Plugin
+	ToolPreferences toolplugin.PreferenceLayers
 
 	// ToolMaxAge is the per-tool served-read freshness CEILING (#1349): the operator's
 	// deterministic counterpart to the model-driven `_fak_fresh` opt-out. A positive
@@ -1224,10 +1230,12 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
-	k          *kernel.Kernel
-	engineID   string
-	model      string
-	requireKey string
+	k               *kernel.Kernel
+	toolPlugins     []toolplugin.Plugin
+	toolPreferences toolplugin.PreferenceLayers
+	engineID        string
+	model           string
+	requireKey      string
 	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
 	// ONLY on /healthz, /debug/vars, /metrics, never on a mutating route.
 	readBearer string
@@ -2013,6 +2021,8 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{
 		k:                            k,
+		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
+		toolPreferences:              cfg.ToolPreferences,
 		engineID:                     engineID,
 		model:                        model,
 		servedSide:                   servedSide,

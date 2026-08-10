@@ -10,9 +10,11 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"reflect"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
 // MCP transport. The kernel is exposed as an MCP server speaking JSON-RPC 2.0,
@@ -310,12 +312,22 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		// same journal the guard hooks feed, keyed by the kernel trace id the
 		// seam-2 revocation gate also keys on.
 		tpID := mcpToolprocSpawn(ctx, req.TraceID, req.Tool)
-		wv, env, err := s.syscall(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
+		var trace []toolplugin.TraceEvent
+		var pref *toolplugin.ResolvedPreference
+		var wv WireVerdict
+		var env *ResultEnvelope
+		var err error
+		if len(s.toolPlugins) == 0 && reflect.DeepEqual(s.toolPreferences, toolplugin.PreferenceLayers{}) && reflect.DeepEqual(req.Preferences, toolplugin.Preference{}) {
+			// Exact legacy path: no allocations, no response fields, no behavior delta.
+			wv, env, err = s.syscall(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
+		} else {
+			wv, env, trace, pref, err = s.syscallWithPlugins(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID, req.Preferences)
+		}
 		mcpToolprocExit(tpID, err)
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
-		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID}), nil
+		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID, PluginTrace: trace, EffectivePreferences: pref}), nil
 	case "fak_read":
 		// The vToolcall serve seam (#795): a real, kernel-mediated file read the model can
 		// call INSTEAD of the harness's built-in Read. Routing through k.Syscall means the
