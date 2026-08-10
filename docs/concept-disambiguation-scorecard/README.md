@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **165** (clarity 11 + coverage 154) |
+| **Disambiguation-debt (drive to 0)** | **166** (clarity 12 + coverage 154) |
 | **Crystal-clear concepts (and climbing)** | **438** crystal of 2151 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2307 / 2461** (93.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2829 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 91.6/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 91.0/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2151 concepts - score 91.6/100 (grade A) - disambiguation-debt 165
+concept-disambiguation chart - 2151 concepts - score 91.0/100 (grade A) - disambiguation-debt 166
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 438
@@ -2422,8 +2422,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | separation | `reference_resolves` | 30 | 5 | 5 dangling distinct_from reference(s) |
+| grounded | `grounded` | 52 | 3 | 3 ungrounded concept(s) |
 | honesty | `clarity_consistent` | 64 | 2 | 2 verdict overclaim(s) |
-| grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |

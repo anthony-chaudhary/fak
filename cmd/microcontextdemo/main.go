@@ -379,6 +379,8 @@ func main() {
 	var selectorSelfcheck bool
 	var toolEnrichmentOutput, verifyToolEnrichmentPath string
 	var toolEnrichmentSelfcheck bool
+	var provenanceFoldOutput, verifyProvenanceFoldPath string
+	var provenanceFoldSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
@@ -432,6 +434,9 @@ func main() {
 	flag.BoolVar(&toolEnrichmentSelfcheck, "tool-enrichment-selfcheck", false, "run the read-only tool-enrichment fan-out proof")
 	flag.StringVar(&toolEnrichmentOutput, "tool-enrichment-output", "", "write the read-only tool-enrichment proof artifact")
 	flag.StringVar(&verifyToolEnrichmentPath, "verify-tool-enrichment", "", "verify a captured tool-enrichment artifact")
+	flag.BoolVar(&provenanceFoldSelfcheck, "provenance-fold-selfcheck", false, "run the provenance-preserving hierarchical fold proof")
+	flag.StringVar(&provenanceFoldOutput, "provenance-fold-output", "", "write the hierarchical fold proof artifact")
+	flag.StringVar(&verifyProvenanceFoldPath, "verify-provenance-fold", "", "verify a captured hierarchical fold artifact")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -460,6 +465,17 @@ func main() {
 	if gradeOutput != "" {
 		if err := writeHealthGrade(gradeInput, gradeOutput); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifyProvenanceFoldPath != "" {
+		runVerify("verify-provenance-fold", verifyProvenanceFoldPath, verifyProvenanceFoldArtifact)
+		return
+	}
+	if provenanceFoldSelfcheck {
+		if err := runProvenanceFoldSelfcheck(provenanceFoldOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "provenance-fold selfcheck: %v\n", err)
 			os.Exit(1)
 		}
 		return

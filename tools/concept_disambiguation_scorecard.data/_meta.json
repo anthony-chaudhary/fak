@@ -397,6 +397,16 @@
           "category": "incidental",
           "reason": "measured coefficient field, not a cache capability",
           "token": "UncachedMS"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark fitted coefficient, not a cache capability",
+          "token": "CacheReadRate"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark JSON coefficient, not a cache capability",
+          "token": "cache_read_rate_ms_per_token"
         }
       ],
       "id": "cache",
@@ -405,6 +415,7 @@
         "CacheCreationTokensMessagePrefix",
         "CacheLever",
         "CacheLevers",
+        "CacheReadRate",
         "CacheStateAllowlist",
         "CacheValueBaseline",
         "CacheValueFacts",
@@ -445,6 +456,7 @@
         "cache_misses",
         "cache_no_longer_verifies",
         "cache_read_at_fire",
+        "cache_read_rate_ms_per_token",
         "cache_state_changed",
         "cache_state_fingerprint",
         "cache_trace_test",
@@ -2263,6 +2275,31 @@
           "category": "incidental",
           "reason": "benchmark transport struct, not a production policy capability",
           "token": "HeldSchedulePolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a new policy capability",
+          "token": "ConfigPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a new policy capability",
+          "token": "ConfigMaxPostures"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a new policy capability",
+          "token": "ConfigDefaultCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a new policy capability",
+          "token": "ConfigDescriptionCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "heaviness-score metric field, not a new policy capability",
+          "token": "config_posture_budget"
         }
       ],
       "exclude": [
@@ -2271,6 +2308,10 @@
       "id": "policy-capability",
       "ignore": [
         "CapabilitySnapshot",
+        "ConfigDefaultCoverage",
+        "ConfigDescriptionCoverage",
+        "ConfigMaxPostures",
+        "ConfigPostures",
         "DispositionCapability",
         "DispositionMultiCapability",
         "FAK_ORG_POLICY_CACHE_PATH",
@@ -2296,6 +2337,7 @@
         "capabilities",
         "capability_denied",
         "capability_failure",
+        "config_posture_budget",
         "contractByCapability",
         "contractLeafByCapability",
         "dispatchPreflightChurnState",
@@ -3211,17 +3253,35 @@
           "category": "incidental",
           "reason": "Private translation helper from frozen ABI verdicts into typed plugin decisions",
           "token": "pluginDecisionFromVerdict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue-local metrics contract data, not a reusable architectural decision primitive",
+          "token": "GenerationContentionDecisionContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "measured benchmark overhead field, not a product decision",
+          "token": "DecisionMS"
+        },
+        {
+          "category": "incidental",
+          "reason": "benchmark JSON timing field, not a product decision",
+          "token": "decision_ms_per_request"
         }
       ],
       "id": "decision",
       "ignore": [
+        "DecisionMS",
         "EvaluateHeldSchedule",
+        "GenerationContentionDecisionContract",
         "MeasureHeldDecisionOverhead",
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
         "ReuseDecision",
         "appendsteerdecisions",
         "decisionStderr",
+        "decision_ms_per_request",
         "deterministicSelectorDecision",
         "fixtureSelectStage",
         "gooddecisionratio",
@@ -3594,6 +3654,11 @@
           "category": "incidental",
           "reason": "Fixture-only reason string for routing to the existing auth-relevance stage; not a planning abstraction.",
           "token": "candidate_requires_auth_relevance"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private stable top-k row used by the fixture reducer; not a planning abstraction.",
+          "token": "foldCandidate"
         }
       ],
       "exclude": [
@@ -3657,7 +3722,8 @@
         "runAblatePlan",
         "wipLandOptions",
         "wipLandWith",
-        "candidate_requires_auth_relevance"
+        "candidate_requires_auth_relevance",
+        "foldCandidate"
       ],
       "min_files": 2,
       "name": "Plan family",
