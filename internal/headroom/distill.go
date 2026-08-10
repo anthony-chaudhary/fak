@@ -57,6 +57,8 @@ var distillFilters = []distillFilter{
 	{codec: "go-test-distill", dropLabel: "routine go test line(s)", reason: "built-in go test filter removed routine passing output and preserved errors", matches: matchesGoTest, apply: applyGoTestFilter},
 	{codec: "golangci-lint-distill", dropLabel: "routine golangci-lint line(s)", reason: "built-in golangci-lint filter removed routine info output and preserved diagnostics", matches: matchesGolangCILint, apply: applyGolangCILintFilter},
 	{codec: "package-manager-distill", dropLabel: "routine npm/pnpm line(s)", reason: "built-in npm/pnpm filter removed routine progress and preserved warnings and failures", matches: matchesPackageManager, apply: applyPackageManagerFilter},
+	{codec: "git-status-distill", dropLabel: "routine git status advice line(s)", reason: "built-in git status filter removed routine advice and preserved repository state", matches: matchesGitStatus, apply: applyGitStatusFilter},
+	{codec: "git-log-distill", dropLabel: "routine git log date line(s)", reason: "built-in git log filter removed routine date metadata and preserved commit identities and subjects", matches: matchesGitLog, apply: applyGitLogFilter},
 }
 
 func applyDistillFilter(in Input) ([]byte, int, distillFilter, bool) {
