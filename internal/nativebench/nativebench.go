@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/cacheobs", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"cache_observability"},
+		Reason:       "native prompt-prefix reuse, cacheability, eligibility, miss-attribution, and reuse-distribution aggregation",
+	},
+	{
 		Leaf: "internal/cacheprice", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"cache_cost_accounting"},
 		Reason:       "native resident-prefix admission-token and cache-shedding value arithmetic",
@@ -183,6 +188,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "cache_observability",
+		NativePath: "internal/cacheobs/cacheobs.go",
+		Workload:   "same cache observation trace, label/cardinality policy, process lifetime, aggregation interval, and independent counter oracle across every arm",
+		Metrics:    []string{"counter_ratio_equivalence", "dropped_events", "cardinality", "ingestion_latency_ms", "query_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "no telemetry", Class: TunedBaseline, Source: "internal/cacheobs/compare.go"},
+			{Name: "Prometheus client", Class: NextBest, Source: "https://prometheus.io/docs/instrumenting/clientlibs/"},
+			{Name: "OpenTelemetry metrics", Class: NextBest, Source: "https://opentelemetry.io/docs/specs/otel/metrics/"},
+			{Name: "Datadog DogStatsD", Class: NextBest, Source: "https://docs.datadoghq.com/developers/dogstatsd/"},
+		},
+	},
 	{
 		Capability: "cache_cost_accounting",
 		NativePath: "internal/cacheprice/cacheprice.go",
