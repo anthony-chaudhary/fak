@@ -82,6 +82,11 @@ var leafClassifications = []LeafClassification{{
 	Reason:       "native prefix-access trace replay across cache budgets with infinite-cache ceiling and ROI knee",
 },
 	{
+		Leaf: "internal/issuededup", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"issue_near_duplicate_detection"},
+		Reason:       "issuededup also provides backlog census clustering; write-time near-duplicate candidate detection is contracted separately",
+	},
+	{
 		Leaf: "internal/laneadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"lane_tree_collision_admission"},
 		Reason:       "native shared lane/tree collision, exclusivity, ancestry, read-only, and self-renewal admission",
@@ -349,6 +354,13 @@ var contracts = []Contract{{
 	},
 	Witness: "../../docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
 },
+	{
+		Capability: "issue_near_duplicate_detection", NativePath: "internal/issuededup/issuededup.go",
+		Workload:     "same three-issue backlog, two paraphrased duplicates, one unrelated candidate, and exact existing-issue oracle across every arm",
+		Metrics:      []string{"precision", "recall", "false_positives", "false_negatives", "pointer_accuracy", "latency_ms", "throughput_candidates_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "network_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{{Name: "normalized exact-title equality", Class: TunedBaseline, Source: "internal/issuededup/compare.go"}, {Name: "GitHub issue search", Class: FirstClassIntegration, Integration: "github", Source: "internal/issuededup/compare.go"}, {Name: "GitHub duplicate issue detection", Class: NextBest, Source: "https://docs.github.com/issues"}, {Name: "Linear duplicate detection", Class: NextBest, Source: "https://linear.app"}, {Name: "Jira similar requests", Class: NextBest, Source: "https://www.atlassian.com/software/jira"}, {Name: "sentence-transformer cosine retrieval", Class: NextBest, Source: "https://www.sbert.net"}},
+		Witness:      "../../docs/benchmarks/ISSUE-DEDUP-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"},
+	},
 	{
 		Capability: "lane_tree_collision_admission",
 		NativePath: "internal/laneadmit/laneadmit.go",
