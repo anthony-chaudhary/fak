@@ -690,6 +690,7 @@ for why putting the check on the same call path (default-deny, fail-closed) is t
 - [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the field-by-field schema reference (`arg_rules`, IFC `sources`/`safe_sinks`, the closed reason vocabulary) and the roadmap.
 - [`examples/`](https://github.com/anthony-chaudhary/fak/tree/main/examples) — the five worked manifests above plus `repo-guard-policy.json`, `dogfood-claude-policy.json`, and `policy.example.json`, all copy-ready.
 - [server-config.md](server-config.md) — the `/v1/fak/policy/reload` endpoint and gateway auth/network config.
+- [org-policy-plane.md](org-policy-plane.md) — publishing one of these manifests, signed, as the floor for a whole team; `fak org status` then shows which channel owns each knob on a given machine.
 - [tutorial.md §1.5](tutorial.md) — authoring a floor in the guided first session.
 - [security.md](security.md) — hardening the deployed gateway (auth, network, defense-in-depth).
 - [Policy in the kernel](../explainers/policy-in-the-kernel.md) — the design rationale.

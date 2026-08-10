@@ -229,6 +229,8 @@ security policy.
 ## See also
 
 - [policy-guide.md](policy-guide.md) — building the capability floor (with worked examples).
+- [org-policy-plane.md](org-policy-plane.md) — setting that floor centrally for a fleet from a
+  signed manifest, and why a local operator can tighten it but never loosen it.
 - [observability.md](observability.md) — the audit log + metrics, and securing those surfaces.
 - [server-config.md](server-config.md) — every flag and env var.
 - [`SECURITY-capability-floor-2026-06-18.md`](../notes/SECURITY-capability-floor-2026-06-18.md) — the floor visual + the dogfood verdict matrix.

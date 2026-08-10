@@ -405,6 +405,7 @@ allow-list.
 | Look up every endpoint and field | [api-reference.md](api-reference.md) |
 | Fix a startup / port / model-load problem | [server-troubleshooting.md](server-troubleshooting.md) |
 | Build a capability floor (worked examples) | [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) |
+| Set one policy for a whole team, from one signed manifest | [org-policy-plane.md](org-policy-plane.md) |
 | Harden a network-facing deployment | [security.md](security.md) · [deployment-guide.md](deployment-guide.md) |
 | Wire up metrics, logs, and traces | [observability.md](observability.md) |
 | Move an existing stack (LangChain / AutoGen / llama.cpp / OpenAI) over | [migration-guide.md](migration-guide.md) |
