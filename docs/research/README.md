@@ -24,6 +24,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 - [Micro-context S8c provenance-fold witness](micro-context-s8c-provenance-fold.md) — bounded typed reducers, content-addressed trees, minority/uncertainty retention, source-resolved claims, and path-local invalidation.
 - [Micro-context S8d tuned-baseline falsification spine](micro-context-s8d-falsification-spine.md) — fixture-modeled five-pipeline decision boundaries that expose both micro-context wins and losses while leaving live net-true evidence open.
 - [Micro-context S8e witnessed effect receipts](micro-context-s8e-effect-receipts.md) — capability/idempotency/resource-bound effects with denial, conflict, partial failure, cancellation ambiguity, restart replay, breaker, and independent read-back states.
+- [Micro-context S8f non-fixture corpus and grader](micro-context-s8f-corpus-grader.md) — frozen 1,000 real-issue snapshot, train/tune/test isolation, separately hashed answers, leakage checks, and a strict held-out grader (#6108).
 - [Micro-context S1 real-endpoint witness](micro-context-s1-real-endpoint.md) — 100/100 contexts through four bounded workers, with TTFT/usage telemetry and a retained 16-worker overload finding.
 - [Micro-context S2 shared-prefix A/B](micro-context-s2-prefix-ab.md) — no cache benefit observed on the first real endpoint; scoped concurrency improved aggregate work while worsening TTFT.
 ## Read research by maturity

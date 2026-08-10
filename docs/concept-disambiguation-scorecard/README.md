@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **166** (clarity 12 + coverage 154) |
-| **Crystal-clear concepts (and climbing)** | **438** crystal of 2151 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2307 / 2461** (93.7% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **171** (clarity 13 + coverage 158) |
+| **Crystal-clear concepts (and climbing)** | **439** crystal of 2152 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2307 / 2465** (93.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2829 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2830 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 91.0/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 90.6/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2151 concepts - score 91.0/100 (grade A) - disambiguation-debt 166
+concept-disambiguation chart - 2152 concepts - score 90.6/100 (grade A) - disambiguation-debt 171
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 438
+  * crystal       #######..................... 439
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ************oooooooooooooooooooooooooooooooo (44 concept(s); 12 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 13 crystal)
-  guard-gate       ***************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (328 concept(s); 87 crystal)
+  guard-gate       ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (329 concept(s); 88 crystal)
   layout           ****ooooooooo      (13 concept(s); 4 crystal)
   loop             ****************************oooooooooooooooooooooooooooooooooooooo (66 concept(s); 28 crystal)
   plan             ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 23 crystal)
@@ -70,21 +70,21 @@ coverage by family (positioned / discovered):
   render-materialize ##########################.. 177/190
   cache            ###########################. 261/270
   loop             ##########################.. 77/84
-  witness-proof    ###########################. 140/146
-  gateway-engine   ###########################. 169/174
+  witness-proof    ###########################. 140/147
+  gateway-engine   ###########################. 169/175
   evict            ##########################.. 49/53
   support-maturity ##########################.. 45/48
+  attention        ###########################. 74/76
   decision         ###########################. 52/54
   score-debt       ###########################. 85/87
   layout           ##########################.. 14/15
   pool             ###########################. 39/40
-  attention        ############################ 74/74
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 93.7%  (2307/2461 confusable tokens positioned)
+namespace coverage  [##############################..] 93.6%  (2307/2465 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 191/191
 
-name index: 2829 lookup name(s) -> 2151 concept(s), 61 ambiguous
+name index: 2830 lookup name(s) -> 2152 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,8 +118,8 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **191 / 191** (190 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1490 / 3997 |
-| Dangling `distinct_from` references (drive to 0) | 5 |
+| Boundaries drawn (mutual / total) | 1494 / 4001 |
+| Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
 
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2829 over 2151 concepts |
+| Lookup names indexed | 2830 over 2152 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2151 |
+| Concepts carrying a contrast set | 2152 |
 
 ## The concepts (best verdict first)
 
@@ -300,6 +300,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **guardApplySelfTightenOverlay** - cmd/fak/guard_self_tighten_overlay.go: the launch-boundary entry point loadGuardCapabilityFloor calls to fold the agent's self-tighten overlay into the capability floor. It builds the union of the installed floor with the overlay, submits that proposal to the amendment gate, and returns the verdict, the amendment class and the count of elements added so the floor-source provenance can record them. An empty overlay short-circuits to a no-op admit without building a proposal, so the ordinary launch stays byte-identical to the pre-overlay floor. |
 | * | crystal | symbol | guard-gate | **guardSharedHookSettingsPath** - The cmd/fak/guard.go resolver that answers which single --settings file every guard hook installer must name, so SessionStart, toolproc, Stop and PreCompact converge on one payload instead of each passing the path it was handed. |
 | * | crystal | symbol | guard-gate | **fak_gateway_compaction_thrash_sessions_total (metric)** - The gateway metrics counter naming how many served sessions reached the COMPACTION_THRASH verdict. It is the operator-visible half of the thrash detector: incremented on every thrash session regardless of whether the stop is armed, so the signal is readable before anything acts on it. |
+| * | crystal | symbol | guard-gate | **aggregateAnswers** - Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading. |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
@@ -2421,15 +2422,15 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| separation | `reference_resolves` | 30 | 5 | 5 dangling distinct_from reference(s) |
+| separation | `reference_resolves` | 16 | 6 | 6 dangling distinct_from reference(s) |
 | grounded | `grounded` | 52 | 3 | 3 ungrounded concept(s) |
 | honesty | `clarity_consistent` | 64 | 2 | 2 verdict overclaim(s) |
 | indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2507/3997 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2151 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2507/4001 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2152 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2448,15 +2449,15 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | render-materialize | 177 | 190 | 13 |
 | cache | 261 | 270 | 9 |
 | loop | 77 | 84 | 7 |
-| witness-proof | 140 | 146 | 6 |
-| gateway-engine | 169 | 174 | 5 |
+| witness-proof | 140 | 147 | 7 |
+| gateway-engine | 169 | 175 | 6 |
 | evict | 49 | 53 | 4 |
 | support-maturity | 45 | 48 | 3 |
+| attention | 74 | 76 | 2 |
 | decision | 52 | 54 | 2 |
 | score-debt | 85 | 87 | 2 |
 | layout | 14 | 15 | 1 |
 | pool | 39 | 40 | 1 |
-| attention | 74 | 74 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | trajectory-control | 0 | 0 | 0 |

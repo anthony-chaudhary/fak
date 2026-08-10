@@ -384,6 +384,9 @@ func main() {
 	var falsificationOutput, verifyFalsificationPath string
 	var falsificationSelfcheck bool
 	var effectBatchOutput, verifyEffectBatchPath string
+	var corpusInputPath, corpusPublicPath, corpusAnswersPath, corpusReportPath string
+	var corpusSource, verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport string
+	var gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput string
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
@@ -447,6 +450,17 @@ func main() {
 	flag.BoolVar(&effectBatchSelfcheck, "effect-batch-selfcheck", false, "run the witnessed effect-batch proof")
 	flag.StringVar(&effectBatchOutput, "effect-batch-output", "", "write the effect-batch proof artifact")
 	flag.StringVar(&verifyEffectBatchPath, "verify-effect-batch", "", "verify a captured effect-batch artifact")
+	flag.StringVar(&corpusInputPath, "corpus-input", "", "freeze a public GitHub issue JSON export into leakage-controlled corpus artifacts")
+	flag.StringVar(&corpusPublicPath, "corpus-public-output", "", "public candidate-input corpus output")
+	flag.StringVar(&corpusAnswersPath, "corpus-answers-output", "", "separate answer bundle output")
+	flag.StringVar(&corpusReportPath, "corpus-report-output", "", "corpus provenance/leak/grade report output")
+	flag.StringVar(&corpusSource, "corpus-source", "github.com/anthony-chaudhary/fak/issues", "source provenance label")
+	flag.StringVar(&verifyCorpusPublic, "verify-corpus-public", "", "verify public corpus with answer/report artifacts")
+	flag.StringVar(&verifyCorpusAnswers, "verify-corpus-answers", "", "answer bundle paired with --verify-corpus-public")
+	flag.StringVar(&verifyCorpusReport, "verify-corpus-report", "", "report paired with --verify-corpus-public")
+	flag.StringVar(&gradeCorpusAnswers, "grade-corpus-answers", "", "hidden answer bundle for independent grading")
+	flag.StringVar(&gradeCorpusSubmission, "grade-corpus-submission", "", "candidate submission to grade")
+	flag.StringVar(&gradeCorpusOutput, "grade-corpus-output", "", "write independent grade report")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -477,6 +491,30 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		return
+	}
+	if corpusInputPath != "" {
+		if err := freezeCorpus(corpusInputPath, corpusPublicPath, corpusAnswersPath, corpusReportPath, corpusSource); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus freeze: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
+		return
+	}
+	if gradeCorpusSubmission != "" {
+		if err := gradeSubmissionFiles(gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus grade: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS corpus grade %s\n", gradeCorpusOutput)
+		return
+	}
+	if verifyCorpusPublic != "" {
+		if err := verifyCorpusArtifacts(verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus verify: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS corpus artifact %s\n", verifyCorpusPublic)
 		return
 	}
 	if verifyEffectBatchPath != "" {

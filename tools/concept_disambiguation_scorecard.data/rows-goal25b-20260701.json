@@ -1344,7 +1344,8 @@
       "definition": "origin_witness (internal/taskmgr, /fak/tasks filter) is the evidence axis naming WHICH witness vouched for a task's origin claim.",
       "distinction": "Names the vouching witness on a task record; PathWitness/ShapeWitness are witness kinds it may name.",
       "distinct_from": [
-        "x-goal25-witness-proof-pathwitness"
+        "x-goal25-witness-proof-pathwitness",
+        "x1348-witness-proof-fakwitnessargkey"
       ],
       "aliases": [],
       "grounding": "origin_witness",
@@ -2437,6 +2438,26 @@
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "aggregateanswers",
+      "canonical": "aggregateAnswers",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading.",
+      "distinction": "aggregateAnswers is the benchmark answer payload; guard-corpus is a policy-test corpus and grade-candidates are scorecard candidates, not expected benchmark facts.",
+      "distinct_from": [
+        "cov5305-guard-corpus",
+        "c729-grade-candidates"
+      ],
+      "aliases": [],
+      "grounding": "aggregateAnswers",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
       "gaps": []
     }
   ]

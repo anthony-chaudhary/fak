@@ -2134,3 +2134,17 @@ repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a 
 A lightweight logical agent execution context containing only a task delta, bounded mutable state, capabilities, budget, continuation identity, and output contract over an immutable shared agent base.
 
 **Distinct from:** A logical scheduling and isolation unit over one shared base; not a full harness process, not a provider context-window limit, and not context-MMU result-byte admission.
+
+
+### FakWitnessArgKey
+
+FakWitnessArgKey (internal/gateway/proxy_fill_witness.go) is the reserved wire key "_fak_witness": the external world-state token (git SHA / blob hash / etag / lease epoch) a proxy CLIENT declares on a tool_result (or its call args) to say what state it read at. A declared token is used VERBATIM as the vDSO admission witness for that fill, so an operator can retire every entry admitted under it out of band with fak_revoke using the same token they already know.
+
+**Distinct from:** It is a CLIENT ASSERTION carried on the wire, not a fak-derived or fak-verified value: unlike syspromptmmu.witnessPrefix (a blob-sha256 label fak computes over content it holds) and unlike origin_witness (a taskmgr evidence AXIS naming which witness kind proved a claim), FakWitnessArgKey names the inbound field fak reads and trusts only for revocation identity - fak's own path-scoped refutation still applies on top of it, and a client that declares a constant token can only lose fills, never force a stale serve.
+
+
+### aggregateAnswers
+
+Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading.
+
+**Distinct from:** aggregateAnswers is the benchmark answer payload; guard-corpus is a policy-test corpus and grade-candidates are scorecard candidates, not expected benchmark facts.

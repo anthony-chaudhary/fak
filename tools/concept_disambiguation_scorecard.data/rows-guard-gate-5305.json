@@ -836,7 +836,8 @@
       "distinction": "The folded multi-session DATASET - NOT guard_audit (one lane's raw journal) and NOT SessionMeta (a single session's identity within it).",
       "distinct_from": [
         "cov5305-guard-audit",
-        "cov5303-session-meta"
+        "cov5303-session-meta",
+        "aggregateanswers"
       ],
       "aliases": [],
       "grounding": "guardcorpus",

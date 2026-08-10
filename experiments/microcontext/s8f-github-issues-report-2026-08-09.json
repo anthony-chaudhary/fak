@@ -1,0 +1,49 @@
+{
+  "schema": "fak-microcontext-corpus-report/1",
+  "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+  "answers_sha256": "bbf56de5287dc7d474336ab2b60497550ef0f7ea497b4ae0e9cb03f0b15e0c01",
+  "records": 1000,
+  "train_records": 212,
+  "tune_records": 108,
+  "test_records": 680,
+  "open_records": 380,
+  "closed_records": 620,
+  "reference_edges": 2037,
+  "duplicate_edges": 12,
+  "scope_contradictions": 102,
+  "scrubbed_records": 8,
+  "scrubbed_matches": 30,
+  "leak_checks": {
+    "answer_digest_absent_from_public": true,
+    "disjoint_train_tune_test_content": true,
+    "disjoint_train_tune_test_ids": true,
+    "oracle_blind_run_exact": true,
+    "public_omits_derived_answer_fields": true,
+    "public_preserves_source_state_labels_closed_at": true
+  },
+  "blind_oracle_grade": {
+    "schema": "fak-microcontext-grade/1",
+    "corpus_sha256": "0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827",
+    "test_records": 680,
+    "exact_records": 680,
+    "false_positive_facts": 0,
+    "false_negative_facts": 0,
+    "aggregate_errors": 0,
+    "citation_errors": 0,
+    "quality_pass": true
+  },
+  "question_slices": [
+    "held-out state/label classification",
+    "reference and duplicate relations",
+    "scope contradiction detection",
+    "exhaustive state/label counts",
+    "chronology top-10",
+    "recent-update top-10"
+  ],
+  "provenance": [
+    "source records fetched from the public GitHub Issues API and scrubbed through a committed corpus redaction map",
+    "source state/labels/closure metadata remain in candidate input; only derived relation/cue/aggregate answers are isolated",
+    "train/tune/test split groups exact duplicate titles/bodies and in-corpus reference components before deterministic hashing",
+    "candidate pipelines receive only the public corpus"
+  ]
+}

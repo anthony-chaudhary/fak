@@ -1105,6 +1105,16 @@
           "category": "incidental",
           "reason": "Private adapter that delegates execution to Kernel.Syscall; not a guard gate",
           "token": "gatewayPluginExecutor"
+        },
+        {
+          "category": "incidental",
+          "reason": "A field counter in the micro-context benchmark grade report, not a new guard or gate concept.",
+          "token": "AggregateErrors"
+        },
+        {
+          "category": "incidental",
+          "reason": "A private equality helper for benchmark expected values, not a new aggregate or guard abstraction.",
+          "token": "equalAggregate"
         }
       ],
       "exclude": [
@@ -1120,6 +1130,7 @@
       ],
       "id": "guard-gate",
       "ignore": [
+        "AggregateErrors",
         "AggregateHBMBytes",
         "CacheValueGateDebtKey",
         "CorrectnessGate",
@@ -1140,6 +1151,7 @@
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
+        "equalAggregate",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
         "fleetbarecommitguard",
@@ -1477,6 +1489,11 @@
           "category": "incidental",
           "reason": "Fixture-modeled benchmark cost field; not a new scheduler runtime concept.",
           "token": "SchedulerOverhead"
+        },
+        {
+          "category": "incidental",
+          "reason": "Thin per-session accessor over FoldShellChoice for the #3227 shell-choice KPI distribution; carries no governed concept beyond ShellChoice itself.",
+          "token": "SessionShellErrorRate"
         }
       ],
       "id": "session-runtime",
@@ -1486,9 +1503,11 @@
         "ITERM_SESSION_ID",
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
+        "SchedulerOverhead",
         "SessionAutonomous",
         "SessionClass",
         "SessionInteractive",
+        "SessionShellErrorRate",
         "SetSessionAffinity",
         "bumpSessionHandoffBlocks",
         "compactThrashSessions",
@@ -1539,8 +1558,7 @@
         "topsessions",
         "totalslots",
         "tuisessionrow",
-        "wipPeerCheckpointSessions",
-        "SchedulerOverhead"
+        "wipPeerCheckpointSessions"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -3493,6 +3511,11 @@
           "category": "incidental",
           "reason": "Ordinary adjective describing inline policy bytes that have not been written to a file",
           "token": "unmaterialized"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported markdown render helper that prints the #3227 shell-choice KPI table; presentation-only, no new domain concept.",
+          "token": "renderShellChoice"
         }
       ],
       "id": "render-materialize",
@@ -3522,6 +3545,7 @@
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
         "renderRunaway",
+        "renderShellChoice",
         "renderValidate",
         "renderVelocityLeg",
         "rendered",

@@ -847,7 +847,8 @@
       "distinction": "The plural, order-fixed grader over a model LIST - NOT GradeCapability (the single-model fold it calls) and NOT gradedPool (the candidate pool the grades are then applied to).",
       "distinct_from": [
         "c729-grade-capability",
-        "c729-graded-pool"
+        "c729-graded-pool",
+        "aggregateanswers"
       ],
       "aliases": [],
       "grounding": "GradeCandidates",
