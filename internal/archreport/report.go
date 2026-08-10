@@ -26,6 +26,7 @@ type Leaf struct {
 	DeclaredTierName string   `json:"declared_tier_name"`
 	ImportFloor      int      `json:"import_floor"`
 	ImportFloorName  string   `json:"import_floor_name"`
+	TierGap          int      `json:"tier_gap"`
 	Dependencies     []string `json:"dependencies"`
 	Dependents       []string `json:"dependents,omitempty"`
 	Violations       []string `json:"violations,omitempty"`
@@ -36,6 +37,15 @@ type Hotspot struct {
 	FanIn int    `json:"fan_in"`
 }
 
+type SinkCandidate struct {
+	Name             string `json:"name"`
+	DeclaredTier     int    `json:"declared_tier"`
+	DeclaredTierName string `json:"declared_tier_name"`
+	ImportFloor      int    `json:"import_floor"`
+	ImportFloorName  string `json:"import_floor_name"`
+	TierGap          int    `json:"tier_gap"`
+}
+
 type Diagnostic struct {
 	Kind     string `json:"kind"`
 	Leaf     string `json:"leaf"`
@@ -44,12 +54,13 @@ type Diagnostic struct {
 }
 
 type Report struct {
-	Schema      string       `json:"schema"`
-	Tiers       []Tier       `json:"tiers"`
-	Leaves      []Leaf       `json:"leaves"`
-	Hotspots    []Hotspot    `json:"hotspots,omitempty"`
-	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
-	Violations  int          `json:"violations"`
+	Schema         string          `json:"schema"`
+	Tiers          []Tier          `json:"tiers"`
+	Leaves         []Leaf          `json:"leaves"`
+	Hotspots       []Hotspot       `json:"hotspots,omitempty"`
+	Diagnostics    []Diagnostic    `json:"diagnostics,omitempty"`
+	SinkCandidates []SinkCandidate `json:"sink_candidates,omitempty"`
+	Violations     int             `json:"violations"`
 }
 
 func Analyze(root, onlyLeaf string) (Report, error) {
@@ -117,7 +128,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 		sort.Strings(violations)
 		byName[name] = len(allLeaves)
-		allLeaves = append(allLeaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), Dependencies: deps, Violations: violations})
+		allLeaves = append(allLeaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), TierGap: declared - floor, Dependencies: deps, Violations: violations})
 	}
 	for _, importer := range allLeaves {
 		for _, dependency := range importer.Dependencies {
@@ -132,6 +143,17 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			report.Hotspots = append(report.Hotspots, Hotspot{Name: allLeaves[i].Name, FanIn: len(allLeaves[i].Dependents)})
 		}
 	}
+	for _, leaf := range allLeaves {
+		if leaf.DeclaredTier > 1 && leaf.TierGap >= 2 {
+			report.SinkCandidates = append(report.SinkCandidates, SinkCandidate{Name: leaf.Name, DeclaredTier: leaf.DeclaredTier, DeclaredTierName: leaf.DeclaredTierName, ImportFloor: leaf.ImportFloor, ImportFloorName: leaf.ImportFloorName, TierGap: leaf.TierGap})
+		}
+	}
+	sort.Slice(report.SinkCandidates, func(i, j int) bool {
+		if report.SinkCandidates[i].TierGap != report.SinkCandidates[j].TierGap {
+			return report.SinkCandidates[i].TierGap > report.SinkCandidates[j].TierGap
+		}
+		return report.SinkCandidates[i].Name < report.SinkCandidates[j].Name
+	})
 	sort.Slice(report.Hotspots, func(i, j int) bool {
 		if report.Hotspots[i].FanIn != report.Hotspots[j].FanIn {
 			return report.Hotspots[i].FanIn > report.Hotspots[j].FanIn
@@ -145,6 +167,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			report.Leaves = []Leaf{allLeaves[i]}
 		}
 		report.Hotspots = nil
+		report.SinkCandidates = nil
 		diagnostics := report.Diagnostics[:0]
 		for _, diagnostic := range report.Diagnostics {
 			if diagnostic.Leaf == onlyLeaf {

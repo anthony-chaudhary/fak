@@ -3713,6 +3713,16 @@
           "category": "incidental",
           "reason": "Private stable top-k row used by the fixture reducer; not a planning abstraction.",
           "token": "foldCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Report DTO naming for a tier-gap advisory row; not a new planning concept.",
+          "token": "SinkCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plural report field for tier-gap advisory rows; not a new planning concept.",
+          "token": "SinkCandidates"
         }
       ],
       "exclude": [
@@ -3741,6 +3751,8 @@
         "PlanStepDecision",
         "ReconcilePlan",
         "RemoteDrainCandidate",
+        "SinkCandidate",
+        "SinkCandidates",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
@@ -3748,9 +3760,11 @@
         "candidateID",
         "candidateNote",
         "candidatePaths",
+        "candidate_requires_auth_relevance",
         "candidatemean",
         "candidates",
         "fitandplanserveggufexpertparallelpathondevice",
+        "foldCandidate",
         "hostPlan",
         "indexPlanSteps",
         "indexedPlanStep",
@@ -3775,9 +3789,7 @@
         "register_bench_plan_doc",
         "runAblatePlan",
         "wipLandOptions",
-        "wipLandWith",
-        "candidate_requires_auth_relevance",
-        "foldCandidate"
+        "wipLandWith"
       ],
       "min_files": 2,
       "name": "Plan family",

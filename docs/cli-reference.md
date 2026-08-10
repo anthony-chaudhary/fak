@@ -207,7 +207,7 @@ fak architecture --usage
 fak architecture --usage --json
 ```
 
-The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly). Hotspots are sorted by direct fan-in descending, then leaf name.
+The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly), and `tier_gap` measures declared tier minus import-derived floor. Full reports rank `sink_candidates` whose gap is at least two, largest gap first then leaf name, so the old verbose-test mis-tier advisory is queryable by operators. Hotspots are sorted by direct fan-in descending, then leaf name.
 
 With `--baseline-workspace`, the command emits `fak-architecture-diff/1`: added/removed leaves, old→new tier changes, added/removed direct edges, introduced/resolved upward violations, and a typed `clean`/`regression` verdict. The caller supplies both snapshots; an empty diff is `0 change(s)` and exits successfully. Add `--fail-on introduced-violations` for CI/pre-push use: a newly introduced upward edge exits `3` and names the remediation, while resolved violations and non-violating architecture changes remain exit `0`.
 

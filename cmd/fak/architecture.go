@@ -110,9 +110,15 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %-22s %d\n", hotspot.Name, hotspot.FanIn)
 		}
 	}
+	if *leaf == "" && len(report.SinkCandidates) > 0 {
+		fmt.Fprintln(stdout, "  sink candidates (declared tier above import floor):")
+		for _, candidate := range report.SinkCandidates {
+			fmt.Fprintf(stdout, "    %-22s declared=%s(%d) floor=%s(%d) gap=%d\n", candidate.Name, candidate.DeclaredTierName, candidate.DeclaredTier, candidate.ImportFloorName, candidate.ImportFloor, candidate.TierGap)
+		}
+	}
 	for _, l := range report.Leaves {
 		if *leaf != "" || len(l.Violations) > 0 {
-			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) deps=%v dependents=%v", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.Dependencies, l.Dependents)
+			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) gap=%d deps=%v dependents=%v", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.TierGap, l.Dependencies, l.Dependents)
 			if len(l.Violations) > 0 {
 				fmt.Fprintf(stdout, " violations=%v", l.Violations)
 			}

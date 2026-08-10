@@ -277,6 +277,41 @@ func TestAnalyzeErrorsNameRecovery(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRanksSinkCandidatesByTierGapThenName(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"abi":0,"alpha":4,"beta":3,"gamma":3,"delta":2}
+var tierName=[]string{"root","primitive","foundation-composite","mechanism","composer"}
+`)
+	for _, leaf := range []string{"abi", "alpha", "beta", "gamma", "delta"} {
+		writeArchitectureFixture(t, root, "internal/"+leaf+"/leaf.go", "package "+leaf+"\n")
+	}
+	report, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SinkCandidate{
+		{Name: "alpha", DeclaredTier: 4, DeclaredTierName: "composer", ImportFloor: 1, ImportFloorName: "primitive", TierGap: 3},
+		{Name: "beta", DeclaredTier: 3, DeclaredTierName: "mechanism", ImportFloor: 1, ImportFloorName: "primitive", TierGap: 2},
+		{Name: "gamma", DeclaredTier: 3, DeclaredTierName: "mechanism", ImportFloor: 1, ImportFloorName: "primitive", TierGap: 2},
+	}
+	if !reflect.DeepEqual(report.SinkCandidates, want) {
+		t.Fatalf("candidates=%+v want=%+v", report.SinkCandidates, want)
+	}
+	for _, leaf := range report.Leaves {
+		if leaf.TierGap != leaf.DeclaredTier-leaf.ImportFloor {
+			t.Fatalf("leaf=%+v", leaf)
+		}
+	}
+	scoped, err := Analyze(root, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.SinkCandidates) != 0 || len(scoped.Leaves) != 1 || scoped.Leaves[0].TierGap != 3 {
+		t.Fatalf("scoped=%+v", scoped)
+	}
+}
+
 func TestAnalyzeStaleDeclarationDoesNotSuppressHealthyLeaves(t *testing.T) {
 	root := t.TempDir()
 	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
