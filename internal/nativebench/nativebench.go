@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/enginecache", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"engine_cache_invalidation"},
+		Reason:       "native governance-bound invalidation planner and first-class vLLM/SGLang cache-reset adapters",
+	},
+	{
 		Leaf: "internal/vdso", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"tool_result_caching"},
 		Reason:       "vdso implements pure, content-cached, and static local tool-result fast paths plus sound invalidation; tool-result caching is contracted separately",
@@ -168,6 +173,21 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "engine_cache_invalidation",
+		NativePath: "internal/enginecache/enginecache.go",
+		Workload:   "same quarantined KV span plus dependent attention-index invalidation, engine state, process lifetime, warmup, and post-invalidation reuse oracle across every arm",
+		Metrics:    []string{"poisoned_reuse_prevented", "invalidated_objects", "latency_ms", "control_requests", "bytes_transferred", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "no invalidation", Class: TunedBaseline, Source: "internal/enginecache/compare.go"},
+			{Name: "vLLM", Class: NextBest, Source: "https://docs.vllm.ai/"},
+			{Name: "SGLang", Class: NextBest, Source: "https://docs.sglang.ai/"},
+			{Name: "LMCache", Class: NextBest, Source: "https://docs.lmcache.ai/"},
+			{Name: "fak + vLLM", Class: FirstClassIntegration, Integration: "vllm", Source: "cmd/fak/serve.go"},
+			{Name: "fak + SGLang", Class: FirstClassIntegration, Integration: "sglang", Source: "cmd/fak/serve.go"},
+		},
+		Integrations: []string{"vllm", "sglang"},
+	},
 	{
 		Capability: "tool_result_caching",
 		NativePath: "internal/vdso/vdso.go",

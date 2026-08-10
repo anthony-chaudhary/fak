@@ -30,6 +30,7 @@ The command discovers every production Go leaf directly beneath `internal/` and 
 | tool filtering | `internal/gateway/mcp_defer.go` | all schemas, provider cache enabled | retrieval-based selection (ToolRAG class) | task success, tool recall, input tokens, TTFT, total cost |
 | context compression | `internal/headroom/native.go` | full history, provider cache enabled | LongLLMLingua | task success, retained-fact recall, input tokens, latency, total cost |
 | prefix KV reuse | `internal/radixkv/radixkv.go` | prefix caching disabled | SGLang RadixAttention, plus `fak + llm-d` | output equivalence, prefix hit rate, TTFT, throughput, KV bytes, total cost |
+| engine-cache invalidation | `internal/enginecache/enginecache.go` | no invalidation | standalone vLLM, standalone SGLang, LMCache, plus separate `fak + vLLM` and `fak + SGLang` arms | poisoned-reuse prevention, invalidated objects, latency, control requests/bytes, RSS, total cost |
 | tool-result caching | `internal/vdso/vdso.go` | uncached optimized upstream | Redis client-side/server-assisted cache and Momento Cache | output equivalence, hit rate, latency, upstream calls, RSS, total cost |
 | context-memory management | `internal/ctxmmu/mmu.go` | retain full history | Letta, plus separate `fak + mem0`, `fak + Letta`, `fak + Zep/Graphiti`, and `fak + LangMem` arms | task success, write precision, retained-fact recall, tokens, latency, RSS, total cost |
 | policy adjudication | `internal/adjudicator/decide.go` | direct allow/deny lookup | OPA/Rego and Cedar | verdict equivalence, policy coverage, latency, throughput, RSS, total cost |
@@ -43,5 +44,3 @@ All currently have missing witnesses, which is why `--check` fails. The registry
 The benchmark-governance packages (`internal/bench*` and `internal/nativebench`) are explicitly classified as infrastructure with per-leaf reasons. This is not a blanket naming rule: each entry is enumerated and validation still leaves every newly discovered package unclassified by default.
 
 This spine does **not** yet prove repository-wide coverage. Leaf discovery is exhaustive at the package boundary and the disposition schema is now enforced, but most leaves are still explicitly unclassified. The authoritative completion work is to classify every discovered leaf, split every multi-capability leaf into contracts, map equivalent first-class integrations, and attach benchmark witnesses. Until the unclassified count reaches zero and every contract passes, the broad claim “all native implementations are benchmarked against next best alternatives” remains **not yet**.
-
-
