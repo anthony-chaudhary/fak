@@ -396,6 +396,11 @@ func main() {
 	var semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput string
 	var semanticGradeGold, semanticGradeSubmission, semanticGradeOutput, semanticGradeSplit string
 	var verifySemanticGoldPath, verifySemanticGradePath string
+	var liveMatrixPacket, liveMatrixGold, liveMatrixOutput, verifyLiveMatrixPath string
+	var liveMatrixEndpoint, liveMatrixAPIKey, liveMatrixModel, liveMatrixClass, liveMatrixHardware string
+	var liveMatrixNativeBatch, liveMatrixPrefixCache, liveMatrixPricing string
+	var liveMatrixTrials, liveMatrixWorkers int
+	var liveMatrixInputPrice, liveMatrixOutputPrice float64
 	var routingVOITrials, routingVOIRecords int
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
@@ -499,6 +504,22 @@ func main() {
 	flag.StringVar(&semanticGradeSplit, "semantic-grade-split", "test", "split to grade")
 	flag.StringVar(&verifySemanticGoldPath, "verify-semantic-gold", "", "verify semantic consensus artifact")
 	flag.StringVar(&verifySemanticGradePath, "verify-semantic-grade", "", "verify semantic blind grade")
+	flag.StringVar(&liveMatrixPacket, "live-matrix-packet", "", "S8i public semantic packet")
+	flag.StringVar(&liveMatrixGold, "live-matrix-gold", "", "hidden S8i semantic gold")
+	flag.StringVar(&liveMatrixOutput, "live-matrix-output", "", "write live comparative matrix")
+	flag.StringVar(&verifyLiveMatrixPath, "verify-live-matrix", "", "verify live semantic matrix")
+	flag.StringVar(&liveMatrixEndpoint, "live-matrix-endpoint", "", "OpenAI-compatible endpoint")
+	flag.StringVar(&liveMatrixAPIKey, "live-matrix-api-key", "", "live endpoint API key")
+	flag.StringVar(&liveMatrixModel, "live-matrix-model", "", "live endpoint model")
+	flag.StringVar(&liveMatrixClass, "live-matrix-endpoint-class", "", "public provenance class")
+	flag.StringVar(&liveMatrixHardware, "live-matrix-hardware", "", "public hardware provenance")
+	flag.StringVar(&liveMatrixNativeBatch, "live-matrix-native-batch", "unsupported", "endpoint native batching capability")
+	flag.StringVar(&liveMatrixPrefixCache, "live-matrix-prefix-cache", "usage-observed-only", "endpoint prefix-cache capability")
+	flag.StringVar(&liveMatrixPricing, "live-matrix-pricing", "unavailable", "pricing snapshot provenance")
+	flag.IntVar(&liveMatrixTrials, "live-matrix-trials", 3, "repeated trials per pipeline")
+	flag.IntVar(&liveMatrixWorkers, "live-matrix-workers", 8, "bounded micro-context concurrency")
+	flag.Float64Var(&liveMatrixInputPrice, "live-matrix-input-per-mtok", -1, "input USD per million tokens; negative means unavailable")
+	flag.Float64Var(&liveMatrixOutputPrice, "live-matrix-output-per-mtok", -1, "output USD per million tokens; negative means unavailable")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -537,6 +558,18 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
+		return
+	}
+	if liveMatrixPacket != "" {
+		if err := runLiveSemanticMatrix(liveMatrixPacket, liveMatrixGold, liveMatrixOutput, liveMatrixEndpoint, liveMatrixAPIKey, liveMatrixModel, liveMatrixClass, liveMatrixHardware, liveMatrixNativeBatch, liveMatrixPrefixCache, liveMatrixPricing, liveMatrixInputPrice, liveMatrixOutputPrice, liveMatrixTrials, liveMatrixWorkers); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: live matrix: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS live matrix %s\n", liveMatrixOutput)
+		return
+	}
+	if verifyLiveMatrixPath != "" {
+		runVerify("verify-live-matrix", verifyLiveMatrixPath, verifyLiveSemanticMatrix)
 		return
 	}
 	if semanticFoldPacket != "" {

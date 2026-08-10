@@ -1,0 +1,1493 @@
+{
+  "schema": "fak-microcontext-live-semantic-matrix/1",
+  "created_at": "2026-08-10T12:44:42Z",
+  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "gold_sha256": "bc4cc9958e3a39c9590410de83edb15543055eb9edaf3234c40fa67e01cd0c67",
+  "endpoint": {
+    "Class": "separate-openai-compatible-live",
+    "Model": "gpt-5.6-sol",
+    "Hardware": "provider-managed-undisclosed",
+    "NativeBatch": "unsupported-by-chat-route",
+    "PrefixCache": "usage-field-observed",
+    "PricingSnapshot": "unavailable-for-gpt-5.6-sol-route",
+    "InputPerMTok": null,
+    "OutputPerMTok": null
+  },
+  "trials": 2,
+  "pipelines": [
+    {
+      "pipeline": "retrieval-rerank",
+      "configuration": "S8i-v1; same model; temperature=0; streaming; max_tokens=2200",
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 1,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 31892,
+          "CompletionTokens": 2647,
+          "CachedTokens": 1792,
+          "WallMS": 15605.5888,
+          "TTFTP50MS": 4926.4994,
+          "TTFTP95MS": 11159.1578,
+          "LatencyP50MS": 4926.4994,
+          "LatencyP95MS": 11159.1578,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "none",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "none",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "none",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 31892,
+          "CompletionTokens": 2679,
+          "CachedTokens": 3584,
+          "WallMS": 14030.4708,
+          "TTFTP50MS": 5213.561,
+          "TTFTP95MS": 7279.1401,
+          "LatencyP50MS": 5213.561,
+          "LatencyP95MS": 7279.6592,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "none",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "none",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "none",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 32,
+        "Successful": 32,
+        "Failed": 0,
+        "Retries": 1,
+        "PromptTokens": 63784,
+        "CompletionTokens": 5326,
+        "CachedTokens": 5376,
+        "MeanWallMS": 14818.0298,
+        "TTFTP50MS": 5070.030199999999,
+        "TTFTP95MS": 9219.14895,
+        "LatencyP50MS": 5070.030199999999,
+        "LatencyP95MS": 9219.408500000001,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 1,
+        "field_errors": {
+          "actionability": 3,
+          "semantic_need": 14,
+          "tool_need": 9
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "pipeline": "long-context",
+      "configuration": "S8i-v1; same model; temperature=0; streaming; max_tokens=2200",
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 1,
+          "Successful": 1,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 8623,
+          "CompletionTokens": 1026,
+          "CachedTokens": 0,
+          "WallMS": 21947.7959,
+          "TTFTP50MS": 21947.2731,
+          "TTFTP95MS": 21947.2731,
+          "LatencyP50MS": 21947.2731,
+          "LatencyP95MS": 21947.2731,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 1,
+          "Successful": 1,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 8623,
+          "CompletionTokens": 1354,
+          "CachedTokens": 7936,
+          "WallMS": 30141.7037,
+          "TTFTP50MS": 30141.7037,
+          "TTFTP95MS": 30141.7037,
+          "LatencyP50MS": 30141.7037,
+          "LatencyP95MS": 30141.7037,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 2,
+        "Successful": 2,
+        "Failed": 0,
+        "Retries": 0,
+        "PromptTokens": 17246,
+        "CompletionTokens": 2380,
+        "CachedTokens": 7936,
+        "MeanWallMS": 26044.749799999998,
+        "TTFTP50MS": 26044.4884,
+        "TTFTP95MS": 26044.4884,
+        "LatencyP50MS": 26044.4884,
+        "LatencyP95MS": 26044.4884,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 0,
+        "field_errors": {
+          "actionability": 3,
+          "semantic_need": 13,
+          "tool_need": 14
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "pipeline": "chunk-map-reduce",
+      "configuration": "S8i-v1; same model; temperature=0; streaming; max_tokens=2200",
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 4,
+          "Successful": 4,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 8904,
+          "CompletionTokens": 1226,
+          "CachedTokens": 0,
+          "WallMS": 34829.2172,
+          "TTFTP50MS": 9464.3879,
+          "TTFTP95MS": 10571.4857,
+          "LatencyP50MS": 9464.3879,
+          "LatencyP95MS": 10571.4857,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 4,
+          "Successful": 4,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 8904,
+          "CompletionTokens": 1545,
+          "CachedTokens": 3584,
+          "WallMS": 45829.2575,
+          "TTFTP50MS": 11773.5405,
+          "TTFTP95MS": 16493.6814,
+          "LatencyP50MS": 11773.5405,
+          "LatencyP95MS": 16493.6814,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "not_actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 8,
+        "Successful": 8,
+        "Failed": 0,
+        "Retries": 0,
+        "PromptTokens": 17808,
+        "CompletionTokens": 2771,
+        "CachedTokens": 3584,
+        "MeanWallMS": 40329.237349999996,
+        "TTFTP50MS": 10618.964199999999,
+        "TTFTP95MS": 13532.58355,
+        "LatencyP50MS": 10618.964199999999,
+        "LatencyP95MS": 13532.58355,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 0,
+        "field_errors": {
+          "actionability": 3,
+          "semantic_need": 13,
+          "tool_need": 14
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "pipeline": "micro-context",
+      "configuration": "S8i-v1; same model; temperature=0; streaming; max_tokens=2200",
+      "trial_results": [
+        {
+          "trial": 1,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 9988,
+          "CompletionTokens": 2279,
+          "CachedTokens": 0,
+          "WallMS": 19289.4436,
+          "TTFTP50MS": 4991.0708,
+          "TTFTP95MS": 14235.9706,
+          "LatencyP50MS": 4991.0708,
+          "LatencyP95MS": 14235.9706,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "not_actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        },
+        {
+          "trial": 2,
+          "Requests": 16,
+          "Successful": 16,
+          "Failed": 0,
+          "Retries": 0,
+          "CancelledBilled": 0,
+          "ToolCalls": 0,
+          "PromptTokens": 9988,
+          "CompletionTokens": 2309,
+          "CachedTokens": 0,
+          "WallMS": 15280.858,
+          "TTFTP50MS": 4680.2102,
+          "TTFTP95MS": 11040.9711,
+          "LatencyP50MS": 4680.7302,
+          "LatencyP95MS": 11040.9711,
+          "SchedulerMS": 0,
+          "ToolCostUSD": 0,
+          "dollar_cost": null,
+          "answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "adjudicator_agreement": null
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "Requests": 32,
+        "Successful": 32,
+        "Failed": 0,
+        "Retries": 0,
+        "PromptTokens": 19976,
+        "CompletionTokens": 4588,
+        "CachedTokens": 0,
+        "MeanWallMS": 17285.1508,
+        "TTFTP50MS": 4835.6405,
+        "TTFTP95MS": 12638.470850000002,
+        "LatencyP50MS": 4835.9005,
+        "LatencyP95MS": 12638.470850000002,
+        "dollar_cost": null
+      },
+      "grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 0,
+        "field_errors": {
+          "actionability": 2,
+          "semantic_need": 13,
+          "tool_need": 14
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    }
+  ],
+  "limits": [
+    "Dollar cost is null when the endpoint model has no authoritative public pricing snapshot.",
+    "Native batching and prefix-cache support are endpoint-declared; cached tokens are counted only when returned by usage.",
+    "Tool calls remain zero: this matrix predicts tool eligibility but does not fabricate an external evidence source.",
+    "Quality is blind-graded against abstention-heavy two-model consensus; tool-label stabilization remains #6140."
+  ]
+}

@@ -407,6 +407,11 @@
           "category": "incidental",
           "reason": "benchmark JSON coefficient, not a cache capability",
           "token": "cache_read_rate_ms_per_token"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI provenance string for endpoint capability reporting, not a cache implementation or policy.",
+          "token": "liveMatrixPrefixCache"
         }
       ],
       "id": "cache",
@@ -520,6 +525,7 @@
         "infercachedhits",
         "infercachedtokens",
         "lastcacherd",
+        "liveMatrixPrefixCache",
         "loadCacheValueGateBaseline",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
@@ -1115,6 +1121,16 @@
           "category": "incidental",
           "reason": "A private equality helper for benchmark expected values, not a new aggregate or guard abstraction.",
           "token": "equalAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live benchmark metric/helper, not a production gate, session runtime, or policy capability.",
+          "token": "liveAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private benchmark aggregation helper, not a production guard or gate.",
+          "token": "aggregateLive"
         }
       ],
       "exclude": [
@@ -1144,6 +1160,7 @@
         "ReportedGates",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
+        "aggregateLive",
         "appendGuardCompactionWitnessTo",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
@@ -1246,6 +1263,7 @@
         "guardwireretryhop",
         "installguardmcpregistration",
         "latestGuardCompactionWitness",
+        "liveAggregate",
         "loadCacheValueGateBaseline",
         "loadGuardSelfTightenOverlay",
         "newGuardCompactionWitness",
@@ -1499,6 +1517,11 @@
           "category": "incidental",
           "reason": "Observed operation-count field in one benchmark report, not a new session runtime abstraction.",
           "token": "SchedulerEvents"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live benchmark metric/helper, not a production gate, session runtime, or policy capability.",
+          "token": "SchedulerMS"
         }
       ],
       "id": "session-runtime",
@@ -1509,6 +1532,7 @@
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
         "SchedulerEvents",
+        "SchedulerMS",
         "SchedulerOverhead",
         "SessionAutonomous",
         "SessionClass",
@@ -2418,6 +2442,16 @@
           "category": "incidental",
           "reason": "Benchmark provenance/accounting field, not a production policy capability or authority.",
           "token": "AdjudicatorSHA256"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live benchmark metric/helper, not a production gate, session runtime, or policy capability.",
+          "token": "executeLivePipeline"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live benchmark metric/helper, not a production gate, session runtime, or policy capability.",
+          "token": "runLiveSemanticMatrix"
         }
       ],
       "exclude": [
@@ -2463,6 +2497,7 @@
         "contractByCapability",
         "contractLeafByCapability",
         "dispatchPreflightChurnState",
+        "executeLivePipeline",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
         "gradeSemanticFiles",
@@ -2480,6 +2515,7 @@
         "printGuardLaunchPostures",
         "referencePolicyForCorpusCell",
         "routingPolicyStat",
+        "runLiveSemanticMatrix",
         "runRoutingPolicy",
         "runSemanticAdjudicator",
         "semanticAdjudicator",
