@@ -37,7 +37,7 @@ Artifacts:
 | Contradiction/conflict cue facts | 102 |
 | Public-scrub affected records / matches | 8 / 30 |
 | Public corpus SHA-256 | `0740c911815eba7e44c63a14e021f418b66e8a42556d40f14b8b4cd58f173827` |
-| Answer bundle SHA-256 | `bbf56de5287dc7d474336ab2b60497550ef0f7ea497b4ae0e9cb03f0b15e0c01` |
+| Answer bundle SHA-256 | `af827ddca1063c602153f80b14523bda8d07e1a7e909a5c487616f2702eda05d` |
 
 Exact duplicate-title/body records and all records connected by in-corpus issue references are
 first grouped into components. Each component is assigned by `SHA-256(minimum issue number) mod 10`:

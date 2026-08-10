@@ -41,6 +41,15 @@ func TestCorpusFreezeVerifyAndBlindGrade(t *testing.T) {
 	if err := json.Unmarshal(ab, &gold); err != nil {
 		t.Fatal(err)
 	}
+	for _, answer := range gold.Answers {
+		seen := map[string]bool{}
+		for _, label := range answer.Labels {
+			if seen[label] {
+				t.Fatalf("duplicate label %q in %s", label, answer.ID)
+			}
+			seen[label] = true
+		}
+	}
 	s := submission{Schema: "fak-microcontext-submission/1", CorpusSHA256: gold.CorpusSHA256, Answers: gold.Answers, Aggregates: gold.Aggregates}
 	sb, _ := json.Marshal(s)
 	sp := filepath.Join(d, "submission.json")

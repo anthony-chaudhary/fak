@@ -170,11 +170,6 @@ func freezeCorpus(input, publicOut, answersOut, reportOut, source string) error 
 		for _, l := range x.Labels {
 			if l.Name != "" {
 				labels = append(labels, l.Name)
-			}
-		}
-		for _, l := range x.Labels {
-			if l.Name != "" {
-				labels = append(labels, l.Name)
 				ans.Aggregates.LabelCounts[l.Name]++
 			}
 		}
