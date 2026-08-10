@@ -9,11 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/archreport"
 )
 
 // modPrefix is the import-path prefix for every internal leaf.
@@ -728,33 +731,39 @@ func TestEveryPackageDeclaresTier(t *testing.T) {
 // tier table to admit it.
 func TestNoUpwardImports(t *testing.T) {
 	internal := internalDir(t)
-	var violations []string
-	for _, pkg := range goPackageDirs(t, internal) {
-		from, ok := tier[pkg]
-		if !ok {
-			continue // reported by TestEveryPackageDeclaresTier
-		}
-		for _, imp := range imports(t, internal, pkg) {
-			if !strings.HasPrefix(imp, modPrefix) {
-				continue
-			}
-			dep := strings.TrimPrefix(imp, modPrefix)
-			dep = strings.SplitN(dep, "/", 2)[0] // collapse any future sub-packages
-			to, ok := tier[dep]
-			if !ok {
-				continue // the missing-tier case is the other test's job
-			}
-			if upwardImport(from, to) {
-				violations = append(violations, fmtEdge(pkg, from, dep, to))
-			}
-		}
+	report, err := archreport.Analyze(filepath.Dir(internal), "")
+	if err != nil {
+		t.Fatalf("derive enforced architecture graph: %v", err)
 	}
+	violations := reportViolationEdges(report)
 	if len(violations) > 0 {
-		sort.Strings(violations)
 		t.Fatalf("layered-DAG import rule violated (a lower layer imports a higher one).\n"+
 			"Rule: a package may import only packages whose tier is <= its own.\n  %s\n"+
 			"Invert the dependency (registration seam) or push the shared type down a layer; "+
 			"do not loosen the tier table.", strings.Join(violations, "\n  "))
+	}
+}
+
+// reportViolationEdges is the enforcement/report parity seam: CI folds the exact
+// named edges archreport exposes instead of maintaining a second import walker.
+func reportViolationEdges(report archreport.Report) []string {
+	var edges []string
+	for _, leaf := range report.Leaves {
+		edges = append(edges, leaf.Violations...)
+	}
+	sort.Strings(edges)
+	return edges
+}
+
+func TestReportedAndEnforcedUpwardEdgesStayIdentical(t *testing.T) {
+	report := archreport.Report{Leaves: []archreport.Leaf{
+		{Name: "primitive", Violations: []string{"primitive -> composite", "primitive -> mechanism"}},
+		{Name: "composer"},
+	}}
+	got := reportViolationEdges(report)
+	want := []string{"primitive -> composite", "primitive -> mechanism"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("enforced edges=%v reported edges=%v", got, want)
 	}
 }
 
@@ -772,18 +781,18 @@ func TestPrimitiveCannotImportFoundationComposite(t *testing.T) {
 // TestPrimitiveLeavesStayPrimitive makes tier 1 meaningful: every primitive imports only abi.
 func TestPrimitiveLeavesStayPrimitive(t *testing.T) {
 	internal := internalDir(t)
+	report, err := archreport.Analyze(filepath.Dir(internal), "")
+	if err != nil {
+		t.Fatalf("derive enforced architecture graph: %v", err)
+	}
 	var violations []string
-	for pkg, declared := range tier {
-		if declared != 1 {
+	for _, leaf := range report.Leaves {
+		if leaf.DeclaredTier != 1 {
 			continue
 		}
-		for _, imp := range imports(t, internal, pkg) {
-			if !strings.HasPrefix(imp, modPrefix) {
-				continue
-			}
-			dep := strings.SplitN(strings.TrimPrefix(imp, modPrefix), "/", 2)[0]
-			if dep != "abi" && dep != pkg {
-				violations = append(violations, "internal/"+pkg+" imports internal/"+dep)
+		for _, dep := range leaf.Dependencies {
+			if dep != "abi" && dep != leaf.Name {
+				violations = append(violations, "internal/"+leaf.Name+" imports internal/"+dep)
 			}
 		}
 	}
