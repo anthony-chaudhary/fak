@@ -52,6 +52,7 @@ var tier = map[string]int{
 
 	"envconfiglint":        2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
 	"flowcredit":           2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
+	"flowmetrics":          1, // pure flow-metrics fold (#6194): joins issue rows against commit rows into started/closed spans and grades eight Little's-Law KPIs (flow efficiency, queue time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress, local WIP), plus a working-tree WIP census; the twin of growthgate/stallscan — a Classify-shaped fold whose thresholds are fixed constants. Stdlib-only, imports nothing internal, off the hot path.
 	"stallpage":            2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
 	"agenticbench":         2, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":           1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
@@ -513,6 +514,7 @@ var tier = map[string]int{
 	"dependencyquarantine":  0, // #5947: stdlib-only repository dependency-budget and nested-module quarantine checker; imports no sibling leaf.
 	"enumlint":              0, // #5935: pure stdlib Go AST closed-enum discovery, exhaustiveness rules, and counted baseline ratchet; repository I/O is caller-selected.
 	"archreport":            2, // read-only query/report over the architest declaration source and package import graph.
+	"generationctl": 3,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
