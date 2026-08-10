@@ -45,6 +45,10 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunPlanAudit(stdout, stderr, argv[1:])
 	case "codex-memory":
 		return devcmd.RunCodexMemory(stdout, stderr, argv[1:])
+	case "sessiondiag":
+		return devcmd.RunSessionDiag(stdout, stderr, argv[1:], nil)
+	case "fleetcap":
+		return devcmd.RunFleetcap(stdout, stderr, argv[1:])
 	case "catchup":
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
 	case "whats-changed":
@@ -89,6 +93,8 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  readme-visual-audit [flags]           audit repository README visual health")
 	fmt.Fprintln(w, "  plan-audit [flags]                   audit repository plan-document drift")
 	fmt.Fprintln(w, "  codex-memory doctor [flags]          inspect Codex memory posture")
+	fmt.Fprintln(w, "  sessiondiag [flags]                  diagnose abrupt Codex/fak sessions")
+	fmt.Fprintln(w, "  fleetcap [flags]                      plan fleet capacity (Little's law, no live worker)")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")

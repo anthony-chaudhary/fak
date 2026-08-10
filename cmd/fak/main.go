@@ -127,8 +127,6 @@ func main() {
 		cmdScheduleHeld(os.Args[2:])
 	case "learning-observation":
 		cmdLearningObservation(os.Args[2:])
-	case "sessiondiag":
-		cmdSessionDiag(os.Args[2:])
 	case "host-crash":
 		cmdHostCrash(os.Args[2:])
 	case "host-relaunch-broker":

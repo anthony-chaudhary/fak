@@ -17,6 +17,13 @@ import (
 
 var readCodexMCPEvents = readCodexMCPEventsSQLite
 
+func defaultCodexLogDB() string {
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, ".codex", "logs_2.sqlite")
+	}
+	return "logs_2.sqlite"
+}
+
 func runDoctorCodexMCPWarning(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("doctor codex-mcp-warning", flag.ContinueOnError)
 	fs.SetOutput(stderr)

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -20,11 +20,10 @@ import (
 
 type sessionDiagQuery func(string, time.Duration) (sessiondiag.Evidence, error)
 
-func cmdSessionDiag(args []string) {
-	os.Exit(runSessionDiag(os.Stdout, os.Stderr, args, queryCodexLogReadOnly))
-}
-
-func runSessionDiag(stdout, stderr io.Writer, args []string, query sessionDiagQuery) int {
+func RunSessionDiag(stdout, stderr io.Writer, args []string, query sessionDiagQuery) int {
+	if query == nil {
+		query = queryCodexLogReadOnly
+	}
 	fs := flag.NewFlagSet("sessiondiag", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	db := fs.String("db", defaultCodexLogDB(), "Codex structured-log SQLite path")

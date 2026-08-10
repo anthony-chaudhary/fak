@@ -254,6 +254,28 @@ func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesSessionDiagUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"sessiondiag", "--help"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Usage of sessiondiag") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchSessionDiag(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "sessiondiag":`) || strings.Contains(string(body), "cmdSessionDiag(") {
+		t.Fatal("runtime fak still dispatches the dev-only sessiondiag command")
+	}
+}
+
 func TestRunDispatchesCodexMemoryUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"codex-memory", "--help"})

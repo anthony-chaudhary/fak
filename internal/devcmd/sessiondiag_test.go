@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ func TestRunSessionDiagCapturedPressure(t *testing.T) {
 	q := func(string, time.Duration) (sessiondiag.Evidence, error) {
 		return sessiondiag.Evidence{DBBasename: "logs_2.sqlite", DBBytes: 1755549696, WALBytes: 400748312, PageSize: 4096, PageCount: 428601, FreelistPages: 359146, QueueDrops: 996, SlowWrites: 4, Integrity: "ok"}, nil
 	}
-	code := runSessionDiag(&out, &er, []string{"--json"}, q)
+	code := RunSessionDiag(&out, &er, []string{"--json"}, q)
 	if code != 1 {
 		t.Fatalf("code=%d err=%s", code, er.String())
 	}
@@ -31,7 +31,7 @@ func TestRunSessionDiagCapturedPressure(t *testing.T) {
 }
 func TestRunSessionDiagRedactsReaderFailure(t *testing.T) {
 	var o, e bytes.Buffer
-	code := runSessionDiag(&o, &e, nil, func(string, time.Duration) (sessiondiag.Evidence, error) {
+	code := RunSessionDiag(&o, &e, nil, func(string, time.Duration) (sessiondiag.Evidence, error) {
 		return sessiondiag.Evidence{}, errors.New(`C:\private\token-secret.db: authorization bearer-secret`)
 	})
 	if code != 2 || strings.Contains(e.String(), `C:\private`) || strings.Contains(e.String(), "bearer-secret") {
@@ -40,7 +40,7 @@ func TestRunSessionDiagRedactsReaderFailure(t *testing.T) {
 }
 func TestRunSessionDiagMissing(t *testing.T) {
 	var o, e bytes.Buffer
-	code := runSessionDiag(&o, &e, nil, func(string, time.Duration) (sessiondiag.Evidence, error) {
+	code := RunSessionDiag(&o, &e, nil, func(string, time.Duration) (sessiondiag.Evidence, error) {
 		return sessiondiag.Evidence{}, errors.New("missing store")
 	})
 	if code != 2 || !strings.Contains(e.String(), "reader error") {
@@ -55,7 +55,7 @@ func TestRunSessionDiagMalformedStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	var o, e bytes.Buffer
-	code := runSessionDiag(&o, &e, []string{"--db", p}, queryCodexLogReadOnly)
+	code := RunSessionDiag(&o, &e, []string{"--db", p}, queryCodexLogReadOnly)
 	if code != 2 || !strings.Contains(e.String(), "reader error") || strings.Contains(e.String(), dir) {
 		t.Fatalf("code=%d err=%q", code, e.String())
 	}
@@ -74,7 +74,7 @@ func TestRunSessionDiagWritesRedactedIncident(t *testing.T) {
 	q := func(string, time.Duration) (sessiondiag.Evidence, error) {
 		return sessiondiag.Evidence{QueueDrops: 3, SlowWrites: 2, WALBytes: 4096, ProcessCount: 4}, nil
 	}
-	code := runSessionDiag(&out, &er, []string{"--incident-out", dst, "--process-id", "42", "--process-uuid", "proc-42", "--thread-id", "thread-7", "--exit-kind", "failure", "--exit-code", "23", "--os-failure-event"}, q)
+	code := RunSessionDiag(&out, &er, []string{"--incident-out", dst, "--process-id", "42", "--process-uuid", "proc-42", "--thread-id", "thread-7", "--exit-kind", "failure", "--exit-code", "23", "--os-failure-event"}, q)
 	if code != 1 {
 		t.Fatalf("code=%d err=%s", code, er.String())
 	}
