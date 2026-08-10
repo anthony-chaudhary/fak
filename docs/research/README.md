@@ -86,3 +86,4 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [Micro-context quality and observability ledger](micro-context-quality-ledger.md)
 - [Micro-context S7 mixed-tenant fairness](micro-context-s7-fairness.md)
 - [S8m: three-adjudicator tool-routing gold stabilization](micro-context-s8m-tool-gold.md)
+- [S8n: filter/tool micro-window scheduler](micro-context-s8n-filter-tool-scheduler.md)

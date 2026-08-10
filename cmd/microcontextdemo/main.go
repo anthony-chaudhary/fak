@@ -389,6 +389,8 @@ func main() {
 	var gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput string
 	var tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput, verifyTunedBaselinesPath string
 	var routingVOIOutput, verifyRoutingVOIPath string
+	var filterToolSchedulerFold, filterToolSchedulerOutput, verifyFilterToolSchedulerPath string
+	var filterToolSchedulerTrials int
 	var routingVOISeed int64
 	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
 	var semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator, semanticPromptVersion string
@@ -490,6 +492,10 @@ func main() {
 	flag.StringVar(&verifyTunedBaselinesPath, "verify-tuned-baselines", "", "verify a tuned baseline report")
 	flag.StringVar(&routingVOIOutput, "routing-voi-output", "", "run adaptive filter/tool routing experiment")
 	flag.StringVar(&verifyRoutingVOIPath, "verify-routing-voi", "", "verify an adaptive routing experiment")
+	flag.StringVar(&filterToolSchedulerFold, "filter-tool-scheduler-fold", "", "stabilized tool fold input for scheduler matrix")
+	flag.StringVar(&filterToolSchedulerOutput, "filter-tool-scheduler-output", "", "write filter/tool scheduler matrix")
+	flag.IntVar(&filterToolSchedulerTrials, "filter-tool-scheduler-trials", 5, "controlled trials per scheduler policy")
+	flag.StringVar(&verifyFilterToolSchedulerPath, "verify-filter-tool-scheduler", "", "verify filter/tool scheduler matrix")
 	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
 	flag.IntVar(&routingVOIRecords, "routing-voi-records", 200, "records per mixture and trial")
@@ -692,6 +698,22 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS semantic adjudicator %s\n", semanticJudgmentOutput)
+		return
+	}
+	if verifyFilterToolSchedulerPath != "" {
+		runVerify("verify-filter-tool-scheduler", verifyFilterToolSchedulerPath, verifyFilterToolScheduler)
+		return
+	}
+	if filterToolSchedulerOutput != "" {
+		if filterToolSchedulerFold == "" {
+			fmt.Fprintln(os.Stderr, "microcontextdemo: -filter-tool-scheduler-fold required")
+			os.Exit(2)
+		}
+		if err := runFilterToolScheduler(filterToolSchedulerFold, filterToolSchedulerOutput, filterToolSchedulerTrials); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: filter/tool scheduler: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS filter/tool scheduler %s\n", filterToolSchedulerOutput)
 		return
 	}
 	if routingVOIOutput != "" {

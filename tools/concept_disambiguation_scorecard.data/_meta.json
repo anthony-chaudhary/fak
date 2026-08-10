@@ -1545,6 +1545,166 @@
           "category": "incidental",
           "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
           "token": "tailTrial"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "filterToolSchedulerSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "schedulerRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "schedulerReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "schedulerPolicyResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "filterToolSchedulerReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "schedulerAttempt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "attemptHeap"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "hashUnit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "loadSchedulerRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "stagesFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "orderRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "boolInt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "taskSufficient"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "taskQuality"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "schedulerRun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "simulateScheduler"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "runFilterToolScheduler"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "verifyFilterToolScheduler"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
+          "token": "schedulerFixture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "deadline_released_slot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "witnessed_sufficiency_slot_released"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "hedge_loser_slot_released"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "exact-filter"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "control-window"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "semantic-window"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "repository-read"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "live-tool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "adaptive-selective-hedge"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI-local experiment flag plumbing; not a reusable session-runtime concept.",
+          "token": "filterToolSchedulerFold"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI-local experiment flag plumbing; not a reusable session-runtime concept.",
+          "token": "filterToolSchedulerOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI-local experiment flag plumbing; not a reusable session-runtime concept.",
+          "token": "verifyFilterToolSchedulerPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI-local experiment flag plumbing; not a reusable session-runtime concept.",
+          "token": "filterToolSchedulerTrials"
         }
       ],
       "id": "session-runtime",
@@ -1562,13 +1722,24 @@
         "SessionInteractive",
         "SessionShellErrorRate",
         "SetSessionAffinity",
+        "adaptive-selective-hedge",
+        "attemptHeap",
+        "boolInt",
         "bumpSessionHandoffBlocks",
         "compactThrashSessions",
         "confusedsessions",
+        "control-window",
+        "deadline_released_slot",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
+        "exact-filter",
         "fak_gateway_compaction_thrash_sessions_total",
+        "filterToolSchedulerFold",
+        "filterToolSchedulerOutput",
+        "filterToolSchedulerReport",
+        "filterToolSchedulerSchema",
+        "filterToolSchedulerTrials",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
         "guardSessionStartDriverEntrypointBases",
@@ -1579,22 +1750,36 @@
         "handleFakSessionMidflight",
         "handleSessionCheckpointVerb",
         "handoff_session_give_up",
+        "hashUnit",
+        "hedge_loser_slot_released",
         "interactivesession",
         "kernelSession",
+        "live-tool",
+        "loadSchedulerRecords",
         "matchedSessions",
+        "orderRecords",
         "readSessionHandoffBlocks",
+        "repository-read",
         "requireminimaxsession",
         "restartfreshsession",
+        "runFilterToolScheduler",
         "runSessionAuditBatch",
         "runSessionAuditCodex",
         "runSessionCheckpointWitness",
         "runtuisessions",
         "sanitizeSessionForPath",
         "scheduled",
+        "schedulerAttempt",
+        "schedulerFixture",
+        "schedulerPolicyResult",
+        "schedulerReceipt",
+        "schedulerRecord",
+        "schedulerRun",
         "scheduler_units",
         "scheduler_weights",
         "schedulers",
         "scheduling",
+        "semantic-window",
         "sessionAffinity",
         "sessionNameForBatch",
         "sessionRegistryRecoveryStage",
@@ -1603,16 +1788,23 @@
         "sessionids",
         "sessions",
         "sessionsaudited",
+        "simulateScheduler",
         "slots",
         "slotting",
+        "stagesFor",
         "stopDispHandoffSessionGiveUp",
         "tSESSION",
         "tailTrial",
+        "taskQuality",
+        "taskSufficient",
         "thrashSessions",
         "topsessions",
         "totalslots",
         "tuisessionrow",
-        "wipPeerCheckpointSessions"
+        "verifyFilterToolScheduler",
+        "verifyFilterToolSchedulerPath",
+        "wipPeerCheckpointSessions",
+        "witnessed_sufficiency_slot_released"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -2019,6 +2211,36 @@
           "category": "incidental",
           "reason": "built-in plugin trace reason, not a distinct witness proof concept",
           "token": "PROFILE_REQUIRES_WITNESS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
+          "token": "witnessed_sufficiency_slot_released"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
+          "token": "witnessed_sufficiency"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
+          "token": "taskSufficient"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
+          "token": "taskQuality"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
+          "token": "ReceiptsDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local witness label or metric; not a reusable proof concept.",
+          "token": "GoldDigest"
         }
       ],
       "id": "witness-proof",
@@ -2029,6 +2251,7 @@
         "CoreLockWitnessTrailer",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
+        "GoldDigest",
         "GradedVerdictUnwitnessed",
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
@@ -2037,6 +2260,7 @@
         "PROFILE_REQUIRES_WITNESS",
         "QualityWitness",
         "REVOCABLE",
+        "ReceiptsDigest",
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
@@ -2099,6 +2323,8 @@
         "revokeProxyFillWitness",
         "runSessionCheckpointWitness",
         "setup_not_witnessed",
+        "taskQuality",
+        "taskSufficient",
         "tree_witness",
         "verifyCheckpointWitness",
         "want_witness",
@@ -2110,6 +2336,8 @@
         "witness_request",
         "witnessable",
         "witnessed",
+        "witnessed_sufficiency",
+        "witnessed_sufficiency_slot_released",
         "witnesses",
         "witnessing",
         "witnesssametaskids",
@@ -2531,6 +2759,11 @@
           "category": "incidental",
           "reason": "Private experiment constant/local/result, not a reusable production capability or context abstraction.",
           "token": "windowResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
+          "token": "schedulerPolicyResult"
         }
       ],
       "exclude": [
@@ -2602,6 +2835,7 @@
         "runSemanticAdjudicator",
         "runTailPolicyMatrix",
         "runWindow",
+        "schedulerPolicyResult",
         "semanticAdjudicator",
         "semanticConsensus",
         "semanticGold",
