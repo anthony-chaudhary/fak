@@ -9,7 +9,10 @@ import (
 	"strings"
 )
 
-const fallback = "dev"
+const (
+	fallback                = "dev"
+	BenchmarkConceptVersion = "fak.benchmark-concept.v1"
+)
 
 // BuildVersion may be set by release builds with:
 //
@@ -45,14 +48,22 @@ func Current() string {
 	if v := strings.TrimSpace(BuildVersion); v != "" {
 		return v
 	}
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		if v, ok := releaseFromModuleVersion(bi.Main.Version); ok {
-			return v
+	// A go test binary can inherit the module's release version even though it is not an
+	// installed fak executable. Keep tests on the same unstamped fallback path as a local
+	// development build; real binaries still use their embedded module release.
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
+	if !strings.HasSuffix(base, ".test") {
+		if bi, ok := debug.ReadBuildInfo(); ok {
+			if v, ok := releaseFromModuleVersion(bi.Main.Version); ok {
+				return v
+			}
 		}
 	}
-	if exe, err := os.Executable(); err == nil {
-		if v, ok := FromDir(filepath.Dir(exe)); ok {
-			return v
+	if !strings.HasSuffix(base, ".test") {
+		if exe, err := os.Executable(); err == nil {
+			if v, ok := FromDir(filepath.Dir(exe)); ok {
+				return v
+			}
 		}
 	}
 	return fallback
@@ -107,7 +118,10 @@ func FromDir(start string) (string, bool) {
 		dir = filepath.Dir(dir)
 	}
 	for {
-		if v, ok := readVersionFile(filepath.Join(dir, "VERSION")); ok {
+		if v, found, valid := readVersionFile(filepath.Join(dir, "VERSION")); found {
+			if !valid {
+				return "", false
+			}
 			return v, true
 		}
 		if hasRepoBoundary(dir) {
@@ -121,16 +135,31 @@ func FromDir(start string) (string, bool) {
 	}
 }
 
-func readVersionFile(path string) (string, bool) {
+func readVersionFile(path string) (value string, found, valid bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", false
+		return "", false, false
 	}
 	v := strings.TrimSpace(string(b))
 	if v == "" {
-		return "", false
+		return "", false, false
 	}
-	return v, true
+	if hasConflictMarker(v) {
+		return "", true, false
+	}
+	return v, true, true
+}
+
+func hasConflictMarker(value string) bool {
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, strings.Repeat("<", 7)) ||
+			strings.HasPrefix(line, strings.Repeat("=", 7)) ||
+			strings.HasPrefix(line, strings.Repeat(">", 7)) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasRepoBoundary(dir string) bool {

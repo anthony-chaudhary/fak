@@ -27,6 +27,34 @@ func TestFromDirWalksUpToVersionMarker(t *testing.T) {
 	}
 }
 
+func TestBenchmarkConceptVersionPreservesFleetContract(t *testing.T) {
+	if BenchmarkConceptVersion != "fak.benchmark-concept.v1" {
+		t.Fatalf("BenchmarkConceptVersion = %q, want fleet contract value", BenchmarkConceptVersion)
+	}
+}
+
+func TestFromDirRejectsConflictMarkers(t *testing.T) {
+	tests := []struct {
+		name   string
+		marker string
+	}{
+		{name: "ours", marker: strings.Repeat("<", 7) + " HEAD"},
+		{name: "separator", marker: strings.Repeat("=", 7)},
+		{name: "theirs", marker: strings.Repeat(">", 7) + " branch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte(tt.marker+"\n1.0.0\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := FromDir(dir); ok || got != "" {
+				t.Fatalf("FromDir() = %q, %v; want empty, false", got, ok)
+			}
+		})
+	}
+}
+
 func TestFromDirStopsAtRepositoryBoundary(t *testing.T) {
 	parent := t.TempDir()
 	if err := os.WriteFile(filepath.Join(parent, "VERSION"), []byte("parent-version\n"), 0o644); err != nil {
