@@ -714,8 +714,6 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdLLMSFull(args)
 	case "attest":
 		cmdAttest(args)
-	case "backend":
-		cmdBackend(args)
 	case "bench":
 		cmdBench(args)
 	case "benchmarks":
