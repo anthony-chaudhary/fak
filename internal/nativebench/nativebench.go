@@ -77,10 +77,15 @@ type Report struct {
 }
 
 var leafClassifications = []LeafClassification{{
-	Leaf: "internal/mutationbudget", Disposition: DispositionMultiCapability,
-	Capabilities: []string{"github_mutation_budgeting"},
-	Reason:       "native GitHub API mutation reserve guard and mixed hourly call estimator",
+	Leaf: "internal/launchlatency", Disposition: DispositionMultiCapability,
+	Capabilities: []string{"worker_launch_latency_summary"},
+	Reason:       "native dispatch-to-heartbeat histogram, percentile, and negative-clock-skew fold",
 },
+	{
+		Leaf: "internal/mutationbudget", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"github_mutation_budgeting"},
+		Reason:       "native GitHub API mutation reserve guard and mixed hourly call estimator",
+	},
 	{
 		Leaf: "internal/deadlineadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"deadline_aware_admission"},
@@ -217,18 +222,31 @@ var leafClassifications = []LeafClassification{{
 }
 
 var contracts = []Contract{{
-	Capability: "github_mutation_budgeting",
-	NativePath: "internal/mutationbudget/mutationbudget.go",
-	Workload:   "same eight-close, five-comment, two-fetch plan, observed twelve-call remainder, five-call reserve, reset time, and independent hold oracle across every arm",
-	Metrics:    []string{"hold_correctness", "calls_attempted", "calls_avoided", "decision_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "total_cost"},
+	Capability: "worker_launch_latency_summary",
+	NativePath: "internal/launchlatency/launchlatency.go",
+	Workload:   "same six dispatch-to-heartbeat observations, bucket edges, percentile convention, negative-clock-skew sample, and independent summary oracle across every arm",
+	Metrics:    []string{"bucket_accuracy", "quantile_error", "dropped_observations", "ingestion_latency_ms", "query_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
 	Alternatives: []Alternative{
-		{Name: "direct API calls without reserve", Class: TunedBaseline, Source: "internal/mutationbudget/compare.go"},
-		{Name: "GitHub Octokit rate-limit handling", Class: NextBest, Source: "https://github.com/octokit"},
-		{Name: "gh api rate-limit handling", Class: NextBest, Source: "https://cli.github.com/manual/gh_api"},
-		{Name: "Envoy global rate limit", Class: NextBest, Source: "https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/rate_limit_filter"},
+		{Name: "raw launch events without summary", Class: TunedBaseline, Source: "internal/launchlatency/compare.go"},
+		{Name: "Prometheus histogram", Class: NextBest, Source: "https://prometheus.io/docs/practices/histograms/"},
+		{Name: "OpenTelemetry metrics", Class: NextBest, Source: "https://opentelemetry.io/docs/concepts/signals/metrics/"},
+		{Name: "Datadog distribution metric", Class: NextBest, Source: "https://docs.datadoghq.com/metrics/distributions/"},
 	},
-	Witness: "../../docs/benchmarks/MUTATION-BUDGET-ALTERNATIVES-2026-08-10.md",
+	Witness: "../../docs/benchmarks/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
 },
+	{
+		Capability: "github_mutation_budgeting",
+		NativePath: "internal/mutationbudget/mutationbudget.go",
+		Workload:   "same eight-close, five-comment, two-fetch plan, observed twelve-call remainder, five-call reserve, reset time, and independent hold oracle across every arm",
+		Metrics:    []string{"hold_correctness", "calls_attempted", "calls_avoided", "decision_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "direct API calls without reserve", Class: TunedBaseline, Source: "internal/mutationbudget/compare.go"},
+			{Name: "GitHub Octokit rate-limit handling", Class: NextBest, Source: "https://github.com/octokit"},
+			{Name: "gh api rate-limit handling", Class: NextBest, Source: "https://cli.github.com/manual/gh_api"},
+			{Name: "Envoy global rate limit", Class: NextBest, Source: "https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/rate_limit_filter"},
+		},
+		Witness: "../../docs/benchmarks/MUTATION-BUDGET-ALTERNATIVES-2026-08-10.md",
+	},
 	{
 		Capability: "deadline_aware_admission",
 		NativePath: "internal/deadlineadmit/deadlineadmit.go",
