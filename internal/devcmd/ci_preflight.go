@@ -1,6 +1,7 @@
-package main
+package devcmd
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/json"
 	"flag"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -37,8 +39,6 @@ import (
 //   fak ci-preflight --ref R    # check an explicit ref/sha instead of HEAD
 //   fak ci-preflight --skip-build   # gofmt-only (fast; build dominates the runtime)
 
-func cmdCIPreflight(argv []string) { os.Exit(runCIPreflight(os.Stdout, os.Stderr, argv)) }
-
 // ciPreflightFailure is one failing CI-relevant check against the committed tip.
 type ciPreflightFailure struct {
 	Step   string   `json:"step"`             // "build" | "gofmt"
@@ -55,7 +55,7 @@ type ciPreflightResult struct {
 	Skipped  []string             `json:"skipped,omitempty"`
 }
 
-func runCIPreflight(stdout, stderr io.Writer, argv []string) int {
+func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("ci-preflight", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
@@ -136,7 +136,7 @@ func gitRevParse(r, ref string) (string, error) {
 // a Windows PATH is MSYS GNU tar, which cannot open a native Windows `-C` path and exits status 2,
 // so `git archive` blocks writing a full pipe — or, as here, `tar` exits and the whole commit
 // build-check silently FAILS OPEN on Windows (the COMMITTED_RED gate becomes a no-op that never
-// runs). Reusing the in-process path (no external tar dependency, hard prepushArchiveTimeout
+// runs). Reusing the in-process path (no external tar dependency, hard ciPreflightArchiveTimeout
 // deadline) makes the commit / ci-preflight tree extraction functional and immune to the tar-flavor
 // ambiguity on every OS, aligning it with prepushArchiveTip's already-hardened extraction.
 func extractCommittedTip(r, sha string) (string, error) {
@@ -144,9 +144,9 @@ func extractCommittedTip(r, sha string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), prepushArchiveTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), ciPreflightArchiveTimeout)
 	defer cancel()
-	if err := extractArchive(ctx, r, sha, dir); err != nil {
+	if err := extractCIArchive(ctx, r, sha, dir); err != nil {
 		os.RemoveAll(dir)
 		return "", err
 	}
@@ -211,4 +211,81 @@ func renderCIPreflight(w io.Writer, res ciPreflightResult) {
 			}
 		}
 	}
+}
+
+var ciPreflightArchiveTimeout = 2 * time.Minute
+
+func extractCIArchive(ctx context.Context, repo, sha, dir string) error {
+	cmd := windowgate.CommandContext(ctx, "git", "-C", repo, "archive", "--format=tar", sha)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git archive start: %w", err)
+	}
+	untarErr := untarCIArchive(stdout, dir)
+	if untarErr != nil {
+		_ = cmd.Process.Kill()
+	}
+	_, _ = io.Copy(io.Discard, stdout)
+	waitErr := cmd.Wait()
+	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("archive timed out after %s: %w", ciPreflightArchiveTimeout, ctx.Err())
+	case untarErr != nil:
+		return fmt.Errorf("untar archive: %w", untarErr)
+	case waitErr != nil:
+		return fmt.Errorf("git archive: %w (%s)", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func untarCIArchive(r io.Reader, dir string) error {
+	tr := tar.NewReader(r)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		target, err := safeCIArchiveJoin(dir, hdr.Name)
+		if err != nil {
+			return err
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777|0o600)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				_ = f.Close()
+				return err
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func safeCIArchiveJoin(root, name string) (string, error) {
+	rel := filepath.Clean(filepath.FromSlash(name))
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("archive entry %q escapes extraction root", name)
+	}
+	return filepath.Join(root, rel), nil
 }

@@ -29,6 +29,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunBackend(stdout, stderr, argv[1:])
 	case "boundary":
 		return devcmd.RunBoundary(stdout, stderr, argv[1:])
+	case "ci-preflight":
+		return devcmd.RunCIPreflight(stdout, stderr, argv[1:])
 	case "catchup":
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
 	case "whats-changed":
@@ -65,6 +67,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  orient [env] --paths GLOB             show repository conventions and live ownership")
 	fmt.Fprintln(w, "  backend scaffold NAME --lane LANE     generate a repository compute backend")
 	fmt.Fprintln(w, "  boundary [--json] [--workspace DIR]   lint repository demo/package boundaries")
+	fmt.Fprintln(w, "  ci-preflight [--ref R] [flags]        check committed repository tip in isolation")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")

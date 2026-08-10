@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -66,7 +66,7 @@ func commitFiles(t *testing.T, repo string, git func(args ...string) (string, er
 func runPreflightJSON(t *testing.T, argv []string) (ciPreflightResult, int) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := runCIPreflight(&stdout, &stderr, argv)
+	code := RunCIPreflight(&stdout, &stderr, argv)
 	var res ciPreflightResult
 	if stdout.Len() > 0 {
 		if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {

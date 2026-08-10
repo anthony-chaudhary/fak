@@ -683,8 +683,6 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdSelfUpdate(args)
 	case "preflight":
 		cmdPreflight(args)
-	case "ci-preflight":
-		cmdCIPreflight(args)
 	case "validate":
 		cmdValidate(args)
 	case "llms-full":

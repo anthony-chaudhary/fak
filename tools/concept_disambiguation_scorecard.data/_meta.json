@@ -2452,6 +2452,16 @@
           "category": "incidental",
           "reason": "Private live benchmark metric/helper, not a production gate, session runtime, or policy capability.",
           "token": "runLiveSemanticMatrix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Thin fak-dev dispatch symbol for the migrated repository preflight command, not a new policy concept",
+          "token": "RunCIPreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local execution deadline for extracting a committed git archive, not a policy capability",
+          "token": "ciPreflightArchiveTimeout"
         }
       ],
       "exclude": [
@@ -2480,6 +2490,7 @@
         "RetryPolicy",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
+        "RunCIPreflight",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",
@@ -2493,6 +2504,7 @@
         "capabilities",
         "capability_denied",
         "capability_failure",
+        "ciPreflightArchiveTimeout",
         "config_posture_budget",
         "contractByCapability",
         "contractLeafByCapability",
