@@ -20,18 +20,26 @@ type EdgeChange struct {
 	To   string `json:"to"`
 }
 
+type FanInChange struct {
+	Leaf   string `json:"leaf"`
+	Before int    `json:"before"`
+	After  int    `json:"after"`
+	Delta  int    `json:"delta"`
+}
+
 type ReportDiff struct {
-	Schema                string       `json:"schema"`
-	Verdict               string       `json:"verdict"`
-	AddedLeaves           []string     `json:"added_leaves,omitempty"`
-	RemovedLeaves         []string     `json:"removed_leaves,omitempty"`
-	TierChanges           []TierChange `json:"tier_changes,omitempty"`
-	AddedEdges            []EdgeChange `json:"added_edges,omitempty"`
-	RemovedEdges          []EdgeChange `json:"removed_edges,omitempty"`
-	IntroducedViolations  []string     `json:"introduced_violations,omitempty"`
-	ResolvedViolations    []string     `json:"resolved_violations,omitempty"`
-	IntroducedDiagnostics []Diagnostic `json:"introduced_diagnostics,omitempty"`
-	ResolvedDiagnostics   []Diagnostic `json:"resolved_diagnostics,omitempty"`
+	Schema                string        `json:"schema"`
+	Verdict               string        `json:"verdict"`
+	AddedLeaves           []string      `json:"added_leaves,omitempty"`
+	RemovedLeaves         []string      `json:"removed_leaves,omitempty"`
+	TierChanges           []TierChange  `json:"tier_changes,omitempty"`
+	AddedEdges            []EdgeChange  `json:"added_edges,omitempty"`
+	RemovedEdges          []EdgeChange  `json:"removed_edges,omitempty"`
+	FanInChanges          []FanInChange `json:"fan_in_changes,omitempty"`
+	IntroducedViolations  []string      `json:"introduced_violations,omitempty"`
+	ResolvedViolations    []string      `json:"resolved_violations,omitempty"`
+	IntroducedDiagnostics []Diagnostic  `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics   []Diagnostic  `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -63,6 +71,21 @@ func Diff(before, after Report) ReportDiff {
 			out.RemovedEdges = append(out.RemovedEdges, edge)
 		}
 	}
+	for name, a := range afterLeaves {
+		beforeFanIn := 0
+		if b, ok := beforeLeaves[name]; ok {
+			beforeFanIn = len(b.Dependents)
+		}
+		afterFanIn := len(a.Dependents)
+		if beforeFanIn != afterFanIn {
+			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: beforeFanIn, After: afterFanIn, Delta: afterFanIn - beforeFanIn})
+		}
+	}
+	for name, b := range beforeLeaves {
+		if _, ok := afterLeaves[name]; !ok && len(b.Dependents) > 0 {
+			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: len(b.Dependents), After: 0, Delta: -len(b.Dependents)})
+		}
+	}
 	beforeDiagnostics, afterDiagnostics := diagnosticSet(before), diagnosticSet(after)
 	for key, diagnostic := range afterDiagnostics {
 		if _, ok := beforeDiagnostics[key]; !ok {
@@ -90,6 +113,7 @@ func Diff(before, after Report) ReportDiff {
 	sort.Slice(out.TierChanges, func(i, j int) bool { return out.TierChanges[i].Leaf < out.TierChanges[j].Leaf })
 	sortEdges(out.AddedEdges)
 	sortEdges(out.RemovedEdges)
+	sortFanInChanges(out.FanInChanges)
 	sort.Strings(out.IntroducedViolations)
 	sort.Strings(out.ResolvedViolations)
 	sortDiagnostics(out.IntroducedDiagnostics)
@@ -153,5 +177,25 @@ func sortDiagnostics(diagnostics []Diagnostic) {
 			return diagnostics[i].Kind < diagnostics[j].Kind
 		}
 		return diagnostics[i].Leaf < diagnostics[j].Leaf
+	})
+}
+
+func sortFanInChanges(changes []FanInChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		iGrowth, jGrowth := changes[i].Delta > 0, changes[j].Delta > 0
+		if iGrowth != jGrowth {
+			return iGrowth
+		}
+		iMagnitude, jMagnitude := changes[i].Delta, changes[j].Delta
+		if iMagnitude < 0 {
+			iMagnitude = -iMagnitude
+		}
+		if jMagnitude < 0 {
+			jMagnitude = -jMagnitude
+		}
+		if iMagnitude != jMagnitude {
+			return iMagnitude > jMagnitude
+		}
+		return changes[i].Leaf < changes[j].Leaf
 	})
 }

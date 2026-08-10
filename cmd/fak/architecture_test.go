@@ -133,8 +133,21 @@ import _ "github.com/anthony-chaudhary/fak/internal/added"
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != archreport.DiffSchema || got.Changes() != 3 || !reflect.DeepEqual(got.AddedLeaves, []string{"added"}) || len(got.TierChanges) != 1 || !reflect.DeepEqual(got.AddedEdges, []archreport.EdgeChange{{From: "leaf", To: "added"}}) {
+	if got.Schema != archreport.DiffSchema || got.Changes() != 3 || !reflect.DeepEqual(got.AddedLeaves, []string{"added"}) || len(got.TierChanges) != 1 || !reflect.DeepEqual(got.AddedEdges, []archreport.EdgeChange{{From: "leaf", To: "added"}}) || !reflect.DeepEqual(got.FanInChanges, []archreport.FanInChange{{Leaf: "added", Before: 0, After: 1, Delta: 1}}) {
 		t.Fatalf("diff=%+v", got)
+	}
+}
+
+func TestWriteArchitectureDiffRendersFanInChanges(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "clean", FanInChanges: []archreport.FanInChange{{Leaf: "shared", Before: 2, After: 5, Delta: 3}, {Leaf: "smaller", Before: 4, After: 2, Delta: -2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, ""); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	for _, want := range []string{"fan-in shared 2 -> 5 (+3)", "fan-in smaller 4 -> 2 (-2)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
 	}
 }
 

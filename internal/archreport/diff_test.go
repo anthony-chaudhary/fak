@@ -82,3 +82,48 @@ func TestDiffResolvedDiagnosticsRemainClean(t *testing.T) {
 		t.Fatalf("diff=%+v", got)
 	}
 }
+
+func TestDiffDerivesDeterministicFanInChanges(t *testing.T) {
+	before := Report{Leaves: []Leaf{
+		{Name: "grow", Dependents: []string{"one"}},
+		{Name: "grow-tie", Dependents: []string{"one"}},
+		{Name: "shrink", Dependents: []string{"one", "two", "three"}},
+		{Name: "removed", Dependents: []string{"one", "two"}},
+	}}
+	after := Report{Leaves: []Leaf{
+		{Name: "grow", Dependents: []string{"one", "two", "three"}},
+		{Name: "grow-tie", Dependents: []string{"one", "two", "three"}},
+		{Name: "shrink", Dependents: []string{"one"}},
+		{Name: "added", Dependents: []string{"one"}},
+	}}
+	got := Diff(before, after)
+	want := []FanInChange{
+		{Leaf: "grow", Before: 1, After: 3, Delta: 2},
+		{Leaf: "grow-tie", Before: 1, After: 3, Delta: 2},
+		{Leaf: "added", Before: 0, After: 1, Delta: 1},
+		{Leaf: "removed", Before: 2, After: 0, Delta: -2},
+		{Leaf: "shrink", Before: 3, After: 1, Delta: -2},
+	}
+	if !reflect.DeepEqual(got.FanInChanges, want) {
+		t.Fatalf("fan-in changes=%+v want=%+v", got.FanInChanges, want)
+	}
+	if got.Changes() != 2 { // Added/removed leaves only; fan-in changes are a derived view.
+		t.Fatalf("changes=%d", got.Changes())
+	}
+}
+
+func TestDiffFanInChangesMatchDirectEdgeDelta(t *testing.T) {
+	before := Report{Leaves: []Leaf{
+		{Name: "a", Dependencies: []string{"seam"}},
+		{Name: "seam", Dependents: []string{"a"}},
+	}}
+	after := Report{Leaves: []Leaf{
+		{Name: "a", Dependencies: []string{"seam"}},
+		{Name: "b", Dependencies: []string{"seam"}},
+		{Name: "seam", Dependents: []string{"a", "b"}},
+	}}
+	got := Diff(before, after)
+	if !reflect.DeepEqual(got.FanInChanges, []FanInChange{{Leaf: "seam", Before: 1, After: 2, Delta: 1}}) || !reflect.DeepEqual(got.AddedEdges, []EdgeChange{{From: "b", To: "seam"}}) {
+		t.Fatalf("diff=%+v", got)
+	}
+}

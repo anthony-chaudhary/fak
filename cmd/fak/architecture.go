@@ -207,6 +207,9 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, edge := range diff.RemovedEdges {
 		fmt.Fprintf(stdout, "  - edge %s -> %s\n", edge.From, edge.To)
 	}
+	for _, change := range diff.FanInChanges {
+		fmt.Fprintf(stdout, "  ~ fan-in %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
+	}
 	for _, edge := range diff.IntroducedViolations {
 		fmt.Fprintf(stdout, "  ! introduced violation %s\n", edge)
 	}
