@@ -87,6 +87,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native shared lane/tree collision, exclusivity, ancestry, read-only, and self-renewal admission",
 	},
 	{
+		Leaf: "internal/regionadmit", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"shared_region_admission"},
+		Reason:       "native execution-surface region collision, narrowed-tree, hierarchy, exclusivity, read-only, and self-renewal admission",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -263,6 +268,22 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"dos"},
+	},
+	{
+		Capability: "shared_region_admission",
+		NativePath: "internal/regionadmit/regionadmit.go",
+		Workload:   "same narrowed-disjoint, cross-lane-overlap, exclusive-lane, read-only, self-renewal, and hierarchical sub-lane requests, live leases, taxonomy, and independent admission oracle across every arm",
+		Metrics:    []string{"admission_precision", "admission_recall", "false_denies", "false_allows", "decision_latency_ms", "acquisition_latency_ms", "throughput_decisions_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "geometry-only region overlap", Class: TunedBaseline, Source: "internal/regionadmit/compare.go"},
+			{Name: "fak + DOS arbitrate", Class: FirstClassIntegration, Integration: "dos", Source: "dos arbitrate"},
+			{Name: "fak + Git-ref leases", Class: FirstClassIntegration, Integration: "leaseref", Source: "internal/leaseref"},
+			{Name: "Kubernetes Lease coordination", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"},
+			{Name: "etcd concurrency mutex", Class: NextBest, Source: "https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency"},
+			{Name: "GitHub Actions concurrency groups", Class: NextBest, Source: "https://docs.github.com/actions/using-jobs/using-concurrency"},
+		},
+		Witness:      "../../docs/benchmarks/SHARED-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"dos", "leaseref"},
 	},
 	{
 		Capability: "compute_region_admission",
