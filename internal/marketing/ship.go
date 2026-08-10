@@ -69,7 +69,7 @@ func CollectShips(root, revRange string) ([]Ship, Activity, error) {
 		return nil, Activity{}, err
 	}
 	ships, act := parseShipLog(out)
-	attachShipPaths(root, ships)
+	attachShipPaths(root, revRange, ships)
 	sort.SliceStable(ships, func(i, j int) bool { return ships[i].Date.After(ships[j].Date) })
 	return ships, act, nil
 }
@@ -93,13 +93,57 @@ func runGitLog(root, revRange string) (string, error) {
 	return string(b), nil
 }
 
-func attachShipPaths(root string, ships []Ship) {
+func attachShipPaths(root, revRange string, ships []Ship) {
+	if len(ships) == 0 {
+		return
+	}
+	args := []string{"log", "--no-merges", "--format=%x1e%H", "--name-only"}
+	if strings.TrimSpace(revRange) != "" {
+		args = append(args, revRange)
+	}
+	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	b, err := cmd.Output()
+	if err == nil {
+		bySHA := parseShipPathsLog(string(b))
+		for i := range ships {
+			ships[i].Paths = bySHA[ships[i].SHA]
+		}
+		return
+	}
+
+	// Keep the old per-commit read as a failure fallback. A configured git that refuses
+	// the bulk format must degrade in speed, not silently lose path-based honesty grading.
 	for i := range ships {
-		paths, err := commitPaths(root, ships[i].SHA)
-		if err == nil {
+		paths, pathErr := commitPaths(root, ships[i].SHA)
+		if pathErr == nil {
 			ships[i].Paths = paths
 		}
 	}
+}
+
+// parseShipPathsLog folds `git log --format=%x1e%H --name-only` into the short-sha key
+// CollectShips stores. One history walk replaces one `git show` process per ship — essential
+// on a high-velocity trunk where a seven-day refresh can contain thousands of commits.
+func parseShipPathsLog(out string) map[string][]string {
+	bySHA := map[string][]string{}
+	for _, rec := range strings.Split(out, "\x1e") {
+		lines := strings.Split(strings.TrimSpace(rec), "\n")
+		if len(lines) == 0 {
+			continue
+		}
+		sha := shortSHA(strings.TrimSpace(lines[0]))
+		if sha == "" {
+			continue
+		}
+		for _, raw := range lines[1:] {
+			if p := strings.TrimSpace(raw); p != "" {
+				bySHA[sha] = append(bySHA[sha], p)
+			}
+		}
+	}
+	return bySHA
 }
 
 func commitPaths(root, sha string) ([]string, error) {

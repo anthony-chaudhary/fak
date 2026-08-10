@@ -29,11 +29,12 @@ import (
 // channel is never a hard-coded default — a marketing post never silently lands in
 // #scoreboard).
 func cmdMarketing(argv []string) {
-	dispatchSubcommands("marketing", "generate | post | tick | aeo | epic | release", argv,
+	dispatchSubcommands("marketing", "generate | post | tick | aeo | whats-new | epic | release", argv,
 		subcommand{"generate", runMarketingGenerate},
 		subcommand{"post", runMarketingPost},
 		subcommand{"tick", runMarketingTick},
 		subcommand{"aeo", runMarketingAEO},
+		subcommand{"whats-new", runMarketingWhatsNew},
 		subcommand{"epic", runMarketingEpic},
 		subcommand{"release", runMarketingRelease},
 	)

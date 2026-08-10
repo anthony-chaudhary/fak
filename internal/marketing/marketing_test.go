@@ -60,6 +60,21 @@ func TestCollectShipsOrdersNewestFirst(t *testing.T) {
 	}
 }
 
+func TestParseShipPathsLogFoldsOneHistoryWalk(t *testing.T) {
+	out := "\x1eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\ninternal/gateway/a.go\ndocs/notes/a.md\n" +
+		"\x1ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n\ncmd/fak/main.go\n"
+	got := parseShipPathsLog(out)
+	if len(got) != 2 {
+		t.Fatalf("commits = %d, want 2: %#v", len(got), got)
+	}
+	if want := []string{"internal/gateway/a.go", "docs/notes/a.md"}; !sameStrings(got["aaaaaaaa"], want) {
+		t.Errorf("paths(aaaaaaaa) = %v, want %v", got["aaaaaaaa"], want)
+	}
+	if want := []string{"cmd/fak/main.go"}; !sameStrings(got["bbbbbbbb"], want) {
+		t.Errorf("paths(bbbbbbbb) = %v, want %v", got["bbbbbbbb"], want)
+	}
+}
+
 func TestNewClaimRefusesUnwitnessed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -176,6 +191,18 @@ func sortNewestFirst(ships []Ship) {
 			ships[j], ships[j-1] = ships[j-1], ships[j]
 		}
 	}
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func leaves(ships []Ship) []string {
