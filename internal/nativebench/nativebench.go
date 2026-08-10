@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/timeoutphase", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"timeout_phase_attribution"},
+		Reason:       "native closed-vocabulary attribution of worker timeouts to startup, edit, test, commit, push, or unknown phases",
+	},
+	{
 		Leaf: "internal/kvbudget", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"kv_memory_budget_modeling"},
 		Reason:       "native MHA/MLA/DSA KV bytes-per-token, stream-fit, and context-budget closed forms",
@@ -203,6 +208,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "timeout_phase_attribution",
+		NativePath: "internal/timeoutphase/timeoutphase.go",
+		Workload:   "same timeout-at-stage trace, instrumentation points, process lifecycle, sampling policy, and independent phase oracle across every arm",
+		Metrics:    []string{"phase_precision", "phase_recall", "dropped_traces", "ingestion_latency_ms", "query_latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "one undifferentiated timeout bucket", Class: TunedBaseline, Source: "internal/timeoutphase/compare.go"},
+			{Name: "OpenTelemetry spans", Class: NextBest, Source: "https://opentelemetry.io/docs/concepts/signals/traces/"},
+			{Name: "Datadog APM", Class: NextBest, Source: "https://docs.datadoghq.com/tracing/"},
+			{Name: "AWS X-Ray", Class: NextBest, Source: "https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html"},
+		},
+	},
 	{
 		Capability: "kv_memory_budget_modeling",
 		NativePath: "internal/kvbudget/kvbudget.go",
