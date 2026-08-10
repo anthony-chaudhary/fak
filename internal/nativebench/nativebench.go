@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/cacheprice", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"cache_cost_accounting"},
+		Reason:       "native resident-prefix admission-token and cache-shedding value arithmetic",
+	},
+	{
 		Leaf: "internal/ratelimit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"tool_call_rate_limiting"},
 		Reason:       "native per-trace/per-tool/global call and cost limiter plus typed retry-after denial",
@@ -178,6 +183,18 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "cache_cost_accounting",
+		NativePath: "internal/cacheprice/cacheprice.go",
+		Workload:   "same provider-observed prompt and resident-prefix trace, service SKU, rates, billing period, and independent bill reconciliation across every arm",
+		Metrics:    []string{"admission_token_equivalence", "billed_unit_error", "latency_ms", "bytes_processed", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "charge full prompt", Class: TunedBaseline, Source: "internal/cacheprice/compare.go"},
+			{Name: "AWS Pricing Calculator", Class: NextBest, Source: "https://calculator.aws/"},
+			{Name: "Google Cloud Pricing Calculator", Class: NextBest, Source: "https://cloud.google.com/products/calculator"},
+			{Name: "Azure Pricing Calculator", Class: NextBest, Source: "https://azure.microsoft.com/pricing/calculator/"},
+		},
+	},
 	{
 		Capability: "tool_call_rate_limiting",
 		NativePath: "internal/ratelimit/ratelimit.go",
