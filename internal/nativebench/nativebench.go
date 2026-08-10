@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/vdso", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"tool_result_caching"},
+		Reason:       "vdso implements pure, content-cached, and static local tool-result fast paths plus sound invalidation; tool-result caching is contracted separately",
+	},
+	{
 		Leaf: "internal/ctxmmu", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"context_memory_management"},
 		Reason:       "ctxmmu implements result quarantine, context paging, tool-schema residency, and durable-memory write admission; context-memory management is contracted separately",
@@ -163,6 +168,17 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "tool_result_caching",
+		NativePath: "internal/vdso/vdso.go",
+		Workload:   "same deterministic tool calls, result bytes, upstream service, cache budget, concurrency, warmup, invalidation trace, and correctness oracle across every arm",
+		Metrics:    []string{"output_equivalence", "hit_rate", "latency_ms", "upstream_calls", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "uncached optimized upstream", Class: TunedBaseline, Source: "internal/vdso/compare.go"},
+			{Name: "Redis client-side/server-assisted cache", Class: NextBest, Source: "https://redis.io/docs/latest/develop/clients/client-side-caching/"},
+			{Name: "Momento Cache", Class: NextBest, Source: "https://www.gomomento.com/"},
+		},
+	},
 	{
 		Capability: "context_memory_management",
 		NativePath: "internal/ctxmmu/mmu.go",
