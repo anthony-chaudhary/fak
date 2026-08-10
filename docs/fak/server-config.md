@@ -38,6 +38,15 @@ so postures are data over the real config system, not a second source of truth.
 `fak init` remains available when you want the small deployment-topology
 starting artifact rather than a minimal intent delta.
 
+Keep flexibility bounded with `fak config audit --check` (`--json` for CI). The
+audit enumerates the parser's actual closed vocabulary, requires a typed built-in
+default and discoverable description for every key, reports what fraction is
+covered by intent-level guide postures, and fails when the manifest exceeds 32
+keys or the guide exceeds 8 postures. Current witnessed surface: 13 keys, 4
+postures, 100% default coverage, and 100% description coverage. Guide coverage is
+intentionally partial: coherent intents should expose common decisions without
+turning every low-level knob into a preset.
+
 Precedence is **explicit CLI flag > declared `fak.toml` value > built-in
 default**. An explicit flag wins even when its value happens to equal the
 built-in default. `--print-effective-config` exits before opening a listener and
@@ -92,6 +101,47 @@ manifest remains serve-safe: its topology declarations either match what
 > refuse (an operator may run outside a fak workspace deliberately). To bind the fak tree
 > explicitly regardless of launch cwd, set the MCP server config `cwd` to your fak
 > workspace root rather than `"."`.
+
+### Session Durability (on by default)
+
+`fak serve` persists per-session **drive state** across a process restart, and it is **on by
+default** (#1365) — no flag needed. On a clean shutdown, and on every signal the graceful
+drain handles, the live session table is written to an integrity-checked fleet snapshot; the
+next boot restores it, re-attaching each session at the budget / priority / run-state / pace
+it held rather than at its defaults. A `STOPPED` session reloads `STOPPED` with its reason,
+never silently `RUNNING`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--session-state` | string | *(default path)* | Cold-resume snapshot file. Empty resolves the per-user default `<user config dir>/fak/session-state.snap`. Pass a **FILE** to relocate it; pass `off` to opt out. |
+
+**What is persisted:** run-state and stop reason, context budget (turns/tokens), priority,
+pace, and revision — per session.
+
+**Which signals flush it:** the graceful drain flushes on `SIGINT` (Ctrl-C), `SIGTERM`, and
+`SIGHUP` on POSIX; `SIGINT` and `SIGTERM` on Windows (the OS raises no `SIGHUP`). Only an
+uncatchable `SIGKILL` escapes the flush.
+
+**Opting out.** Either knob disables persistence and restores byte-for-byte the pre-#1365
+no-persistence path:
+
+```bash
+fak serve --session-state off        # flag opt-out
+FAK_SESSION_STATE=off fak serve      # env opt-out (unit files, container entrypoints)
+FAK_SESSION_STATE=/var/lib/fak/state.snap fak serve   # or relocate without a flag
+```
+
+Precedence is **flag > `FAK_SESSION_STATE` > default**, so an explicitly typed
+`--session-state FILE` is never overridden by ambient configuration.
+
+**Seeing the posture.** The active posture is printed on stderr at boot and reported by
+`fak doctor serve` (also `--json`, under `durability`) as the `session-durability` row —
+where the state file is, what is persisted, and which signals flush it.
+
+This is distinct from the always-on session **descriptor registry**
+(`<user config dir>/fak/session-registry.json`, `FAK_SESSION_REGISTRY`), which mirrors
+session control-verb writes, and from the live Paused→Running resume the
+`/v1/fak/session` control verbs already perform.
 
 ### Upstream Model Configuration (Proxy Mode)
 
@@ -169,6 +219,8 @@ manifest remains serve-safe: its topology declarations either match what
 | `FAK_IFC_GATE_EXEC` | Restrictive opt-in for the untrusted-input threat model: set to `1` to also gate the EXEC (shell/Bash) sink when the session is tainted. Default OFF — the reasonable default gates only the EGRESS and DESTRUCTIVE sinks, because gating shell on the session taint high-water mark blocks normal Bash after any untrusted read (and the hard arg-rules block dangerous shell unconditionally regardless of taint). Enable it for an agent processing untrusted input. |
 | `FAK_NORMGATE` | Normalization gate toggle. Set to `off` to make the admit gate a no-op. Default: enabled. |
 | `FAK_VDSO_GRANULARITY` | vDSO tier-2 invalidation granularity (overrides `--invalidation`). Options: `global`, `namespace`, `resource`. |
+| `FAK_SESSION_STATE` | Cold-resume snapshot path, or `off` to opt out of the default-on session durability (#1365). Consulted only when `--session-state` is not given; see [Session Durability](#session-durability-on-by-default). Default: `<user config dir>/fak/session-state.snap`. |
+| `FAK_SESSION_REGISTRY` | Session **descriptor** registry path (the always-on control-verb mirror, distinct from the cold-resume snapshot above). Default: `<user config dir>/fak/session-registry.json`. |
 
 ### HTTP Server
 

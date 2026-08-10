@@ -179,6 +179,77 @@ type Key struct {
 
 func (k Key) Dotted() string { return k.Section + "." + k.Name }
 
+// Descriptor is the discoverability contract for one fak.toml opinion. Every
+// parser key must have one, so customization never degenerates into a mystery
+// knob whose default or purpose lives only in source code.
+type Descriptor struct {
+	Key         Key    `json:"key"`
+	Default     any    `json:"default"`
+	Description string `json:"description"`
+	Secret      bool   `json:"secret"`
+}
+
+var keyDescriptions = map[string]string{
+	"agent_templates.dir":    "directory containing agent templates for the all-in-one runtime",
+	"audit.journal":          "path of the deployment audit journal",
+	"audit.retention_days":   "days to retain audit records; zero keeps them indefinitely",
+	"auth.require_key_env":   "name of the environment variable containing the gateway token; never the token itself",
+	"budgets.default_tokens": "default per-session context token ceiling; zero leaves it unset",
+	"observability.bind":     "gateway listener address",
+	"observability.metrics":  "whether the all-in-one topology exposes metrics",
+	"policy.floor":           "path to the reviewed capability-floor policy",
+	"policy.inline":          "inline capability-floor body for orchestrators that materialize it safely",
+	"runtimes.agent_runtime": "whether the all-in-one topology starts the agent runtime",
+	"runtimes.gateway":       "whether the all-in-one topology starts the gateway",
+	"runtimes.model":         "completion source: upstream or in-kernel",
+	"tenants.enabled":        "whether the all-in-one topology enables tenant isolation",
+}
+
+// Descriptors returns the complete configuration vocabulary with witnessed
+// built-in defaults in stable key order.
+func Descriptors() []Descriptor {
+	defaults := Defaults()
+	out := make([]Descriptor, 0, len(knownSections))
+	for _, key := range KnownKeys() {
+		out = append(out, Descriptor{Key: key, Default: defaults.Value(key), Description: keyDescriptions[key.Dotted()]})
+	}
+	return out
+}
+
+// Value projects one typed manifest field by its closed-vocabulary key.
+func (m Manifest) Value(key Key) any {
+	switch key.Dotted() {
+	case "runtimes.gateway":
+		return m.Runtimes.Gateway
+	case "runtimes.agent_runtime":
+		return m.Runtimes.AgentRuntime
+	case "runtimes.model":
+		return m.Runtimes.Model
+	case "policy.floor":
+		return m.Policy.Floor
+	case "policy.inline":
+		return m.Policy.Inline
+	case "auth.require_key_env":
+		return m.Auth.RequireKeyEnv
+	case "budgets.default_tokens":
+		return m.Budgets.DefaultTokens
+	case "audit.journal":
+		return m.Audit.Journal
+	case "audit.retention_days":
+		return m.Audit.RetentionDays
+	case "tenants.enabled":
+		return m.Tenants.Enabled
+	case "agent_templates.dir":
+		return m.AgentTemplates.Dir
+	case "observability.metrics":
+		return m.Observability.Metrics
+	case "observability.bind":
+		return m.Observability.Bind
+	default:
+		panic("unknown fak.toml key: " + key.Dotted())
+	}
+}
+
 // KnownKeys returns the complete closed vocabulary in stable dotted order.
 func KnownKeys() []Key {
 	keys := make([]Key, 0)

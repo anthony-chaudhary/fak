@@ -64,3 +64,23 @@ func TestConfigGuideWriteRefusesClobber(t *testing.T) {
 		t.Fatalf("clobber code/output = %d %q", code, errb.String())
 	}
 }
+
+func TestConfigAuditReportsBoundedDiscoverableSurface(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runConfigGuide(&out, &errb, []string{"audit", "--json", "--check"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var report struct {
+		Keys                int     `json:"keys"`
+		Postures            int     `json:"postures"`
+		DefaultCoverage     float64 `json:"default_coverage"`
+		DescriptionCoverage float64 `json:"description_coverage"`
+		Discoverable        bool    `json:"discoverable"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Keys != 13 || report.Postures != 4 || report.DefaultCoverage != 1 || report.DescriptionCoverage != 1 || !report.Discoverable {
+		t.Fatalf("audit = %+v", report)
+	}
+}

@@ -387,6 +387,11 @@
           "category": "incidental",
           "reason": "private content-key helper for the experiment; not a cache subsystem",
           "token": "selectorCacheKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture ledger counter for cache hits after serialized restart; not a new cache primitive.",
+          "token": "RestartCacheHits"
         }
       ],
       "id": "cache",
@@ -516,7 +521,8 @@
         "selectorCacheKey",
         "tokencache",
         "uncached",
-        "usercachedir"
+        "usercachedir",
+        "RestartCacheHits"
       ],
       "min_files": 3,
       "name": "Cache family",
@@ -1061,6 +1067,16 @@
           "category": "incidental",
           "reason": "Trace label recording ignored observer authority; not a product guard gate",
           "token": "observer_guard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mode env var for the GIT_HYGIENE_BYPASS advisory gate (#5588); a positional member of the established FLEET_<NAME>_GUARD family (FLEET_PF_NUDGE, FLEET_TIER_GUARD, FLEET_BARE_COMMIT_GUARD), not a new governed concept — it names no distinct idea beyond 'the mode knob for this gate'.",
+          "token": "FLEET_GIT_HYGIENE_GUARD"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported Check implementation for the GIT_HYGIENE_BYPASS gate (#5588); a positional member of the established gate<Name> helper family (gateUntieredLeaf, gateDemoCommandTree, gateScratchMarkTree), not a governed concept — the concept it implements is GIT_HYGIENE_BYPASS, which the fail-closed ledger and gateScopes already carry.",
+          "token": "gateGitHygieneBypass"
         }
       ],
       "exclude": [
@@ -1083,6 +1099,7 @@
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
+        "FLEET_GIT_HYGIENE_GUARD",
         "GATED_UNWITNESSED",
         "GateFlipped",
         "ReportedGates",
@@ -1099,6 +1116,7 @@
         "fetchGuardPreCompactSignalsHTTP",
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
+        "gateGitHygieneBypass",
         "gate_test",
         "gate_verbtier",
         "gated",
@@ -1409,6 +1427,11 @@
           "category": "incidental",
           "reason": "setter for the private scheduler affinity map, not a separate session lifecycle concept",
           "token": "SetSessionAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture evidence counter for existing scheduler slot separation; not a new session runtime concept.",
+          "token": "ModelSlotsDuringToolWait"
         }
       ],
       "id": "session-runtime",
@@ -1468,7 +1491,8 @@
         "topsessions",
         "totalslots",
         "tuisessionrow",
-        "wipPeerCheckpointSessions"
+        "wipPeerCheckpointSessions",
+        "ModelSlotsDuringToolWait"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -2167,6 +2191,31 @@
           "category": "incidental",
           "reason": "Enum member marking a package with several benchmark contracts, not a runtime capability policy.",
           "token": "DispositionMultiCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed fixture refusal reason emitted by the existing allowlist contract; not a new capability-policy primitive.",
+          "token": "capability_denied"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized benchmark-inventory disposition, not a runtime policy capability.",
+          "token": "multi_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local validation map keyed by already-declared benchmark capability identifiers.",
+          "token": "contractByCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local validation map joining benchmark capability identifiers to package leaves.",
+          "token": "contractLeafByCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Configuration audit budget count, not a policy capability",
+          "token": "MaxPostures"
         }
       ],
       "exclude": [
@@ -2179,6 +2228,7 @@
         "DispositionMultiCapability",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
+        "MaxPostures",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
@@ -2196,10 +2246,14 @@
         "adjudication",
         "adjudicators",
         "capabilities",
+        "capability_denied",
         "capability_failure",
+        "contractByCapability",
+        "contractLeafByCapability",
         "dispatchPreflightChurnState",
         "formatAmendmentPosture",
         "guardWindowsArgvPreflight",
+        "multi_capability",
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "orgPostureGloss",
@@ -2866,6 +2920,16 @@
           "category": "incidental",
           "reason": "A CLI refusal reason scoped to fak.toml serve wiring, not a reusable support-maturity concept",
           "token": "CONFIG_OPINION_UNSUPPORTED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Configuration documentation coverage ratio, not a support maturity level",
+          "token": "DescriptionCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Intent-guide key coverage ratio, not a support maturity level",
+          "token": "GuideCoverage"
         }
       ],
       "id": "support-maturity",
@@ -2877,8 +2941,10 @@
         "DecodeInterleaveUnsupported",
         "DefaultSetupParityPairs",
         "DefaultSetupParityReport",
+        "DescriptionCoverage",
         "DomainCoverage",
         "ErrUnsupportedColdStart",
+        "GuideCoverage",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "NonCacheParity",

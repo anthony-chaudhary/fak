@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/configguide"
+	"github.com/anthony-chaudhary/fak/internal/configsurface"
 )
 
 func cmdConfig(argv []string) {
@@ -16,8 +17,36 @@ func cmdConfig(argv []string) {
 }
 
 func runConfigGuide(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "audit" {
+		fs := flag.NewFlagSet("config audit", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		asJSON := fs.Bool("json", false, "emit machine-readable config-surface audit")
+		check := fs.Bool("check", false, "exit nonzero when the surface is undefaulted, undescribed, or over budget")
+		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
+			return 2
+		}
+		report := configsurface.Audit()
+		if *asJSON {
+			if err := json.NewEncoder(stdout).Encode(report); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+		} else {
+			fmt.Fprintf(stdout, "config surface: %d/%d keys, %d/%d postures, defaults %.0f%%, descriptions %.0f%%, guide %.0f%%\n", report.Keys, report.MaxKeys, report.Postures, report.MaxPostures, report.DefaultCoverage*100, report.DescriptionCoverage*100, report.GuideCoverage*100)
+			for _, finding := range report.Findings {
+				fmt.Fprintf(stdout, "- %s: %s\n", finding.Key, finding.Reason)
+			}
+		}
+		if *check {
+			if err := report.Check(); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+		}
+		return 0
+	}
 	if len(argv) == 0 || argv[0] != "guide" {
-		fmt.Fprintf(stderr, "usage: fak config guide [--posture %s] [--json|--write FILE] [intent overrides]\n", strings.Join(configguide.Names(), "|"))
+		fmt.Fprintf(stderr, "usage: fak config <guide|audit>; guide postures: %s\n", strings.Join(configguide.Names(), "|"))
 		return 2
 	}
 	fs := flag.NewFlagSet("config guide", flag.ContinueOnError)
