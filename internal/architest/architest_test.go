@@ -521,6 +521,7 @@ var tier = map[string]int{
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
 	"kvquantmeta": 1,
+	"quantdetect": 1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
