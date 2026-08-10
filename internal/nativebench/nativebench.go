@@ -92,6 +92,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native execution-surface region collision, narrowed-tree, hierarchy, exclusivity, read-only, and self-renewal admission",
 	},
 	{
+		Leaf: "internal/vcachegov", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"warm_cache_budget_scheduling"},
+		Reason:       "native rate-limit-aware warm-cache budget planning and value-ranked candidate scheduling; governor, proof, and secret-policy functions remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -298,6 +303,22 @@ var contracts = []Contract{{
 			{Name: "AWS Batch", Class: NextBest, Source: "https://docs.aws.amazon.com/batch/"},
 		},
 		Witness: "../../docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "warm_cache_budget_scheduling",
+		NativePath: "internal/vcachegov/warmbudget.go",
+		Workload:   "same provider rate-limit snapshot, TTL, anchor size, six mixed-value/secret candidates, request trace, and independent warm-set quality oracle across every arm",
+		Metrics:    []string{"useful_warm_hits", "value_captured", "wasted_writes", "quota_violations", "planning_latency_ms", "request_latency_ms", "throughput_requests_per_second", "input_tokens", "cache_write_tokens", "cache_read_tokens", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "demand-only fills without proactive warming", Class: TunedBaseline, Source: "internal/vcachegov/compare.go"},
+			{Name: "fak + LMCache", Class: FirstClassIntegration, Integration: "lmcache", Source: "internal/cachemeta/lmcache_transfer.go"},
+			{Name: "fak + Mooncake", Class: FirstClassIntegration, Integration: "mooncake", Source: "internal/cachemeta/mooncake_transfer.go"},
+			{Name: "fak + NIXL", Class: FirstClassIntegration, Integration: "nixl", Source: "internal/cachemeta/nixl_lease.go"},
+			{Name: "vLLM automatic prefix caching", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/design/prefix_caching/"},
+			{Name: "SGLang HiCache and cache-aware scheduling", Class: NextBest, Source: "https://docs.sglang.ai/advanced_features/hicache.html"},
+		},
+		Witness:      "../../docs/benchmarks/WARM-CACHE-BUDGET-SCHEDULING-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"lmcache", "mooncake", "nixl"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
