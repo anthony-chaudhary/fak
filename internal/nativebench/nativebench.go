@@ -232,6 +232,7 @@ var leafClassifications = []LeafClassification{{
 		Capabilities: []string{"failure_signature_resume_backoff"},
 		Reason:       "native same-signature exponential resume backoff and cross-session signature parking",
 	},
+	{Leaf: "internal/answershape", Disposition: DispositionMultiCapability, Capabilities: []string{"answer_degeneration_detection"}, Reason: "answershape also implements OpenAI conformance and MCP interop; multi-signal output degeneration detection is contracted separately"},
 	{
 		Leaf: "internal/attemptbudget", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"retry_attempt_budgeting"},
@@ -810,6 +811,7 @@ var contracts = []Contract{{
 			{Name: "AWS Step Functions retry", Class: NextBest, Source: "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"},
 		},
 	},
+	{Capability: "answer_degeneration_detection", NativePath: "internal/answershape/answershape.go", Workload: "same coherent response, phrase loop, short-period byte loop, and repeated-line loop with independent degeneration labels", Metrics: []string{"precision", "recall", "false_positives", "false_negatives", "reason_accuracy", "latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "exact repeated-line ratio", Class: TunedBaseline, Source: "internal/answershape/compare.go"}, {Name: "OpenAI response guard", Class: FirstClassIntegration, Integration: "openai", Source: "internal/answershape/compare.go"}, {Name: "Anthropic response guard", Class: FirstClassIntegration, Integration: "anthropic", Source: "internal/answershape/compare.go"}, {Name: "llama.cpp repetition controls", Class: NextBest, Source: "https://github.com/ggml-org/llama.cpp"}, {Name: "vLLM repetition penalties", Class: NextBest, Source: "https://docs.vllm.ai"}, {Name: "Hugging Face transformers repetition penalty", Class: NextBest, Source: "https://huggingface.co/docs/transformers"}, {Name: "NeMo Guardrails output rail", Class: NextBest, Source: "https://github.com/NVIDIA/NeMo-Guardrails"}}, Witness: "../../docs/benchmarks/ANSWER-DEGENERATION-ALTERNATIVES-2026-08-10.md", Integrations: []string{"openai", "anthropic"}},
 	{
 		Capability: "retry_attempt_budgeting",
 		NativePath: "internal/attemptbudget/attemptbudget.go",
