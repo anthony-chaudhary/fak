@@ -78,6 +78,38 @@ type termFeed struct {
 	Modified    string        `json:"dateModified,omitempty"`
 }
 
+// ConfigAnswer is one concise, source-linked answer about configuring fak. The
+// same roster drives JSON-LD for crawlers and plain text for people and agents.
+type ConfigAnswer struct {
+	Question  string
+	Answer    string
+	Authority string
+	Keywords  []string
+}
+
+type configFAQFeed struct {
+	Context      string           `json:"@context"`
+	Type         string           `json:"@type"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	URL          string           `json:"url"`
+	DateModified string           `json:"dateModified"`
+	MainEntity   []configQuestion `json:"mainEntity"`
+}
+
+type configQuestion struct {
+	Type           string       `json:"@type"`
+	Name           string       `json:"name"`
+	Keywords       []string     `json:"keywords,omitempty"`
+	AcceptedAnswer configAnswer `json:"acceptedAnswer"`
+}
+
+type configAnswer struct {
+	Type     string `json:"@type"`
+	Text     string `json:"text"`
+	Citation string `json:"citation"`
+}
+
 type definedTerm struct {
 	Type        string `json:"@type"`
 	Name        string `json:"name"`
@@ -96,6 +128,23 @@ const repoBlobURL = "https://github.com/anthony-chaudhary/fak/blob/main/"
 // not adoption claims. If a term names one, it must land on a fak page about
 // routing, cache economics, fallback handling, capability/quarantine, or the
 // tool-call boundary — never a page that claims fak authored the external thing.
+// AEOConfigAnswers is the canonical answer corpus for configuration discovery.
+// Keep answers direct and actionable; Authority points to the human-readable
+// source of truth rather than duplicating its exhaustive option tables here.
+func AEOConfigAnswers() []ConfigAnswer {
+	const serverConfig = "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md"
+	return []ConfigAnswer{
+		{Question: "How do I configure fak?", Answer: "Start with fak config guide, which recommends no file for the default posture and explains minimal changes for other intents. fak serve also accepts explicit flags and an optional TOML manifest selected with --config; explicit flags override manifest values. Environment variables carry secrets and documented integration settings.", Authority: serverConfig + "#opinionated-defaults-reviewable-overrides", Keywords: []string{"fak configuration", "fak config file", "configuration precedence"}},
+		{Question: "Where is the complete fak configuration reference?", Answer: "The fak server configuration guide is the authoritative, human-readable reference for every fak serve flag and environment variable. The CLI help remains authoritative for other commands.", Authority: serverConfig, Keywords: []string{"fak config reference", "fak serve flags", "fak environment variables"}},
+		{Question: "Does fak require a config file?", Answer: "No. fak serve works with tested built-in defaults and command-line flags. A TOML deployment manifest is optional and is useful when reviewed deployment defaults should be reused.", Authority: serverConfig + "#opinionated-defaults-reviewable-overrides", Keywords: []string{"fak JSON config", "fak deployment manifest", "fak no config file"}},
+		{Question: "What wins when a fak setting appears in more than one place?", Answer: "Explicit command-line flags win over declared fak.toml values, and declared values win over built-in defaults. There is no implicit search for an ambient fak.toml, so changing directories cannot silently change a serve.", Authority: serverConfig + "#opinionated-defaults-reviewable-overrides", Keywords: []string{"fak config precedence", "flags versus config", "fak defaults"}},
+		{Question: "How can I inspect the effective fak serve configuration?", Answer: "Run fak serve --print-effective-config, optionally with --config and any overriding flags. It prints JSON containing each effective value and whether it came from a flag, the manifest, or a default, then exits before starting the server.", Authority: serverConfig + "#inspect-the-effective-configuration", Keywords: []string{"fak effective config", "fak print config", "configuration provenance"}},
+		{Question: "How should secrets be configured in fak?", Answer: "Keep secret values out of TOML manifests and command history. Put secrets in environment variables, configure fak with the variable name where required, and use --require-key-env when inbound API authentication must fail closed.", Authority: serverConfig + "#authentication", Keywords: []string{"fak secrets", "fak authentication config", "FAK_API_KEY"}},
+		{Question: "How do I validate a fak configuration before serving traffic?", Answer: "Use fak serve --print-effective-config to parse the manifest, reject unsupported fields, apply explicit overrides, and show the resulting configuration without starting the server. Then use the documented health and readiness endpoints for deployment checks.", Authority: serverConfig + "#inspect-the-effective-configuration", Keywords: []string{"validate fak config", "fak config errors", "fak readiness"}},
+		{Question: "Where do client and editor configuration examples live?", Answer: "Use the integration guide for the client or editor you run. The integrations index links setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.", Authority: "https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations", Keywords: []string{"fak client config", "fak editor setup", "fak integrations"}},
+	}
+}
+
 func AEODisambiguationTerms() []DisambiguationTerm {
 	var terms []DisambiguationTerm
 	terms = append(terms, aeoCoreTerms()...)
@@ -780,6 +829,48 @@ func aeoLocalizedTerms() []DisambiguationTerm {
 			Keywords:    []string{"self-host prompt cache", "uzun oturum ucuz", "KVKK"},
 		},
 	}
+}
+
+// ConfigFAQFeed renders configuration answers as schema.org FAQPage JSON-LD.
+func ConfigFAQFeed(when time.Time) ([]byte, error) {
+	answers := AEOConfigAnswers()
+	questions := make([]configQuestion, 0, len(answers))
+	for _, a := range answers {
+		questions = append(questions, configQuestion{
+			Type:           "Question",
+			Name:           a.Question,
+			Keywords:       append([]string(nil), a.Keywords...),
+			AcceptedAnswer: configAnswer{Type: "Answer", Text: a.Answer, Citation: a.Authority},
+		})
+	}
+	feed := configFAQFeed{
+		Context:      "https://schema.org",
+		Type:         "FAQPage",
+		Name:         "fak configuration answers",
+		Description:  "Direct answers and authoritative documentation links for configuring the Fused Agent Kernel (fak).",
+		URL:          "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md",
+		DateModified: when.UTC().Format("2006-01-02"),
+		MainEntity:   questions,
+	}
+	b, err := json.MarshalIndent(feed, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
+}
+
+// ConfigAnswersText renders the human- and agent-readable sibling of ConfigFAQFeed.
+func ConfigAnswersText(when time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# fak configuration answers\n\nUpdated: %s\nAuthority: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md\n\n", when.UTC().Format("2006-01-02"))
+	for _, a := range AEOConfigAnswers() {
+		fmt.Fprintf(&b, "## %s\n%s\nSource: %s\n", a.Question, a.Answer, a.Authority)
+		if len(a.Keywords) > 0 {
+			fmt.Fprintf(&b, "Search terms: %s\n", strings.Join(a.Keywords, ", "))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // DisambiguationTermsFeed renders the term roster as a schema.org DefinedTermSet

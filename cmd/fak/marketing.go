@@ -166,18 +166,27 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 	}
 	updatesTxt := marketing.LlmsUpdatesText(col.Ships, now)
 	termsTxt := marketing.LlmsTermsText(now)
+	configFeed, err := marketing.ConfigFAQFeed(now)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak marketing aeo: render config answers: %v\n", err)
+		return 1
+	}
+	configTxt := marketing.ConfigAnswersText(now)
 
 	feedPath := filepath.Join(*root, "docs", "marketing", "updates.json")
 	termsPath := filepath.Join(*root, "docs", "marketing", "disambiguation-terms.json")
+	configPath := filepath.Join(*root, "docs", "marketing", "config-answers.json")
 	txtPath := filepath.Join(*root, "llms-updates.txt")
 	termsTxtPath := filepath.Join(*root, "llms-terms.txt")
+	configTxtPath := filepath.Join(*root, "llms-config.txt")
 
 	if *dryRun || !*refresh {
-		fmt.Fprintf(stdout, "would write %s (%d witnessed ships), %s (%d terms), %s, and %s\n",
-			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), txtPath, termsTxtPath)
+		fmt.Fprintf(stdout, "would write %s (%d witnessed ships), %s (%d terms), %s (%d answers), %s, %s, and %s\n",
+			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), configPath, len(marketing.AEOConfigAnswers()), txtPath, termsTxtPath, configTxtPath)
 		if *dryRun {
 			fmt.Fprintln(stdout, string(feed))
 			fmt.Fprintln(stdout, string(termsFeed))
+			fmt.Fprintln(stdout, string(configFeed))
 			return 0
 		}
 	}
@@ -190,8 +199,12 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak marketing aeo: write feed: %v\n", err)
 			return 1
 		}
-		if err := os.WriteFile(termsPath, append(termsFeed, '\n'), 0o644); err != nil {
+		if err := os.WriteFile(termsPath, termsFeed, 0o644); err != nil {
 			fmt.Fprintf(stderr, "fak marketing aeo: write terms feed: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(configPath, configFeed, 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write config answer feed: %v\n", err)
 			return 1
 		}
 		if err := os.WriteFile(txtPath, []byte(updatesTxt), 0o644); err != nil {
@@ -202,8 +215,12 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak marketing aeo: write llms-terms.txt: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s (%d terms)\nwrote %s\nwrote %s\n",
-			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), txtPath, termsTxtPath)
+		if err := os.WriteFile(configTxtPath, []byte(configTxt), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak marketing aeo: write llms-config.txt: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote %s (%d witnessed ships)\nwrote %s (%d terms)\nwrote %s (%d answers)\nwrote %s\nwrote %s\nwrote %s\n",
+			feedPath, len(col.Ships), termsPath, len(marketing.AEODisambiguationTerms()), configPath, len(marketing.AEOConfigAnswers()), txtPath, termsTxtPath, configTxtPath)
 	}
 
 	if *inject {

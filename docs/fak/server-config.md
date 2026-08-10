@@ -11,6 +11,27 @@ This document catalogs all configuration options for `fak serve`, the gateway se
 
 ---
 
+## Quick configuration answers
+
+**How do I configure fak?** Start with `fak config guide`. The default posture
+needs no file; other postures explain a minimal, reviewable TOML delta. You can
+also pass explicit `fak serve` flags, which override declared manifest values.
+
+**Does fak require a config file?** No. `fak serve` works with tested built-in
+defaults and flags alone. Pass `--config fak.toml` only when reusable deployment
+opinions are useful. fak never searches implicitly for an ambient config file.
+
+**How do I see what fak will actually use?** Run
+`fak serve --config fak.toml --print-effective-config` with any intended flag
+overrides. It validates the manifest, prints each effective value and source,
+and exits before opening a listener.
+
+**Where are machine-readable answers?** Search engines can consume the generated
+schema.org [`config-answers.json`](../marketing/config-answers.json); answer
+engines, agents, and people can read the equivalent
+[`llms-config.txt`](../../llms-config.txt). This page remains the exhaustive
+configuration authority.
+
 ## Opinionated Defaults, Reviewable Overrides
 
 `fak serve` works without a configuration file and keeps its tested built-in

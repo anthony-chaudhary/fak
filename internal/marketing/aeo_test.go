@@ -393,3 +393,59 @@ func TestDisambiguationTermsIncludeGlobalWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigAnswerFeedsStayEquivalentAndCiteAuthorities(t *testing.T) {
+	when := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	answers := AEOConfigAnswers()
+	if len(answers) < 8 {
+		t.Fatalf("config answers = %d, want at least 8", len(answers))
+	}
+
+	b, err := ConfigFAQFeed(when)
+	if err != nil {
+		t.Fatalf("ConfigFAQFeed: %v", err)
+	}
+	var feed struct {
+		Context    string `json:"@context"`
+		Type       string `json:"@type"`
+		MainEntity []struct {
+			Name           string `json:"name"`
+			AcceptedAnswer struct {
+				Text     string `json:"text"`
+				Citation string `json:"citation"`
+			} `json:"acceptedAnswer"`
+		} `json:"mainEntity"`
+	}
+	if err := json.Unmarshal(b, &feed); err != nil {
+		t.Fatalf("decode config FAQ: %v", err)
+	}
+	if feed.Context != "https://schema.org" || feed.Type != "FAQPage" {
+		t.Fatalf("schema = %q %q, want schema.org FAQPage", feed.Context, feed.Type)
+	}
+	if len(feed.MainEntity) != len(answers) {
+		t.Fatalf("JSON questions = %d, answers = %d", len(feed.MainEntity), len(answers))
+	}
+
+	plain := ConfigAnswersText(when)
+	for i, answer := range answers {
+		if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Answer) == "" || strings.TrimSpace(answer.Authority) == "" {
+			t.Fatalf("answer %d has an empty required field: %+v", i, answer)
+		}
+		if !strings.HasPrefix(answer.Authority, "https://github.com/anthony-chaudhary/fak/") {
+			t.Errorf("answer %q authority = %q, want repository URL", answer.Question, answer.Authority)
+		}
+		if feed.MainEntity[i].Name != answer.Question || feed.MainEntity[i].AcceptedAnswer.Text != answer.Answer || feed.MainEntity[i].AcceptedAnswer.Citation != answer.Authority {
+			t.Errorf("JSON answer %d diverged from canonical roster", i)
+		}
+		for _, want := range []string{answer.Question, answer.Answer, answer.Authority} {
+			if !strings.Contains(plain, want) {
+				t.Errorf("plain config feed missing %q", want)
+			}
+		}
+	}
+	for _, want := range []string{"How do I configure fak?", "Does fak require a config file?", "--print-effective-config", "flags win over declared fak.toml values", "Keep secret values out"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("plain config feed missing discoverability phrase %q", want)
+		}
+	}
+}

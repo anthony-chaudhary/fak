@@ -17,8 +17,10 @@ recently, and where does it fit when the AI market shifts?" It has two jobs:
 |---|---|---|
 | [`updates.json`](updates.json) | `fak marketing aeo` | schema.org `ItemList` of recent git-witnessed ships. |
 | [`disambiguation-terms.json`](disambiguation-terms.json) | `fak marketing aeo` | schema.org `DefinedTermSet` for core, localized, and market-event search terms. |
+| [`config-answers.json`](config-answers.json) | `fak marketing aeo` | schema.org `FAQPage` with concise, cited answers to configuration questions. |
 | [`llms-updates.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms-updates.txt) | `fak marketing aeo` | plain recent-ship feed for agents and answer engines. |
 | [`llms-terms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms-terms.txt) | `fak marketing aeo` | plain term feed mirroring the JSON-LD term set. |
+| [`llms-config.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms-config.txt) | `fak marketing aeo` | human- and agent-readable configuration answers mirroring the FAQPage feed. |
 | [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) | `fak marketing aeo --inject` + `tools/gen_structured_data.py` | the stable answer-engine doc map with the bounded "What's new" block. |
 
 Refresh them from the repo root:

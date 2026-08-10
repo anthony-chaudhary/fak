@@ -1,0 +1,45 @@
+# fak configuration answers
+
+Updated: 2026-08-10
+Authority: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md
+
+## How do I configure fak?
+Start with fak config guide, which recommends no file for the default posture and explains minimal changes for other intents. fak serve also accepts explicit flags and an optional TOML manifest selected with --config; explicit flags override manifest values. Environment variables carry secrets and documented integration settings.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#opinionated-defaults-reviewable-overrides
+Search terms: fak configuration, fak config file, configuration precedence
+
+## Where is the complete fak configuration reference?
+The fak server configuration guide is the authoritative, human-readable reference for every fak serve flag and environment variable. The CLI help remains authoritative for other commands.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md
+Search terms: fak config reference, fak serve flags, fak environment variables
+
+## Does fak require a config file?
+No. fak serve works with tested built-in defaults and command-line flags. A TOML deployment manifest is optional and is useful when reviewed deployment defaults should be reused.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#opinionated-defaults-reviewable-overrides
+Search terms: fak JSON config, fak deployment manifest, fak no config file
+
+## What wins when a fak setting appears in more than one place?
+Explicit command-line flags win over declared fak.toml values, and declared values win over built-in defaults. There is no implicit search for an ambient fak.toml, so changing directories cannot silently change a serve.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#opinionated-defaults-reviewable-overrides
+Search terms: fak config precedence, flags versus config, fak defaults
+
+## How can I inspect the effective fak serve configuration?
+Run fak serve --print-effective-config, optionally with --config and any overriding flags. It prints JSON containing each effective value and whether it came from a flag, the manifest, or a default, then exits before starting the server.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#inspect-the-effective-configuration
+Search terms: fak effective config, fak print config, configuration provenance
+
+## How should secrets be configured in fak?
+Keep secret values out of TOML manifests and command history. Put secrets in environment variables, configure fak with the variable name where required, and use --require-key-env when inbound API authentication must fail closed.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#authentication
+Search terms: fak secrets, fak authentication config, FAK_API_KEY
+
+## How do I validate a fak configuration before serving traffic?
+Use fak serve --print-effective-config to parse the manifest, reject unsupported fields, apply explicit overrides, and show the resulting configuration without starting the server. Then use the documented health and readiness endpoints for deployment checks.
+Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md#inspect-the-effective-configuration
+Search terms: validate fak config, fak config errors, fak readiness
+
+## Where do client and editor configuration examples live?
+Use the integration guide for the client or editor you run. The integrations index links setup instructions for Claude Code, Codex, Cursor, VS Code, OpenAI-compatible clients, MCP, and managed runtimes.
+Source: https://github.com/anthony-chaudhary/fak/tree/main/docs/integrations
+Search terms: fak client config, fak editor setup, fak integrations
+
