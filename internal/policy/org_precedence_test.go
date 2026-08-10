@@ -9,17 +9,21 @@ package policy
 // raise a cap the operator lowered?" / "can the operator widen past a central grant?",
 // both expected: NO).
 //
-// It is green-by-skip today: every case is guarded by t.Skip("pending #5322 org
-// precedence fold") BEFORE it asserts, so the package stays green while the real fold
-// does not yet exist. It is failing-first because the placeholder resolveOrgPrecedence
-// returns a sentinel that no expected row matches — the moment #5322 removes the Skip
-// guards and points the cases at the real fold, the enumerated verdicts become the
-// acceptance test.
+// It was green-by-skip until #5322: every case was guarded by a t.Skip BEFORE it
+// asserted, so the package stayed green while the real fold did not exist. #5322
+// landed orgprecedence.go, deleted the skips, and pointed resolveOrgPrecedence at
+// ResolveOrgPrecedence — so these enumerated verdicts are now the acceptance test
+// rather than a promise. If you are changing the lattice, this file is the contract
+// you are changing.
 //
-// Deliberately self-contained: standard `testing` only, and its own local vocabulary
-// (orgPrec* identifiers) so it compiles at trunk HEAD independent of the in-flight
-// amendment.go registry. The string values mirror amendment.go's AmendmentClass
-// vocabulary (FROZEN / RATCHET / GATED_WIDEN) so the two stay legible together.
+// The local vocabulary (orgPrec* identifiers) is deliberately KEPT rather than
+// rewritten against the production types. The spec should be able to disagree with
+// the implementation: if these rows were written in terms of OrgPrecedenceInput and
+// OrgAmendVerdict directly, then a rename or a semantic drift in those types would
+// silently carry the spec along with it. The adapter below is the single, obvious
+// place the two vocabularies meet. The string values mirror amendment.go's
+// AmendmentClass vocabulary (FROZEN / RATCHET / GATED_WIDEN) so the two stay legible
+// together.
 
 import "testing"
 
@@ -54,13 +58,10 @@ type orgPrecVerdict string
 const (
 	orgPrecAllow orgPrecVerdict = "ALLOW"
 	orgPrecDeny  orgPrecVerdict = "DENY"
-	// orgPrecUnimplemented is what the placeholder fold returns until #5322 wires
-	// the real resolution — it matches no expected row, so removing the skip fails.
-	orgPrecUnimplemented orgPrecVerdict = "UNIMPLEMENTED"
 )
 
 // orgPrecResolved is the resolved posture: a boolean Verdict for RATCHET/FROZEN and
-// a numeric Cap for GATED_WIDEN. Cap == -1 is the unimplemented sentinel.
+// a numeric Cap for GATED_WIDEN.
 type orgPrecResolved struct {
 	Verdict orgPrecVerdict
 	Cap     int
@@ -76,13 +77,30 @@ type orgPrecInput struct {
 	Operator   orgPrecContribution
 }
 
-// resolveOrgPrecedence is the PLACEHOLDER fold. #5322 replaces its body with a call
-// into the real precedence resolver (union/max-restriction for RATCHET floors, min
-// for GATED_WIDEN ceilings, identity for FROZEN), folding
-// {compiled-in > central > operator > agent-self}. Until then it returns the
-// unimplemented sentinel so every enumerated case below is failing-first.
-func resolveOrgPrecedence(_ orgPrecInput) orgPrecResolved {
-	return orgPrecResolved{Verdict: orgPrecUnimplemented, Cap: -1}
+// resolveOrgPrecedence adapts a spec row onto the real fold in orgprecedence.go —
+// union/max-restriction for RATCHET floors, min for GATED_WIDEN ceilings, identity
+// for FROZEN, folding {compiled-in > central > operator > agent-self}.
+//
+// It translates and asserts nothing. Every judgement below is the production
+// resolver's; this function only carries the row across the vocabulary boundary, so
+// a failing case is always a real disagreement with the lattice rather than an
+// artifact of the harness.
+func resolveOrgPrecedence(in orgPrecInput) orgPrecResolved {
+	got := ResolveOrgPrecedence(OrgPrecedenceInput{
+		Class:      AmendmentClass(in.Class),
+		CompiledIn: orgPrecReal(in.CompiledIn),
+		Central:    orgPrecReal(in.Central),
+		Operator:   orgPrecReal(in.Operator),
+	})
+	return orgPrecResolved{Verdict: orgPrecVerdict(got.Verdict), Cap: got.Cap}
+}
+
+// orgPrecReal is the per-channel half of that translation. The two structs are
+// field-identical today and are still written out by hand: a field added to one and
+// not the other must break the build here, not quietly resolve to a zero value in a
+// security lattice.
+func orgPrecReal(c orgPrecContribution) OrgKnobContribution {
+	return OrgKnobContribution{Deny: c.Deny, WidenAttempt: c.WidenAttempt, Set: c.Set, Cap: c.Cap}
 }
 
 // deny/allow/attempt constructors keep the case tables readable.
@@ -111,7 +129,6 @@ func TestOrgPrecedenceRatchet(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Skip("pending #5322 org precedence fold")
 			got := resolveOrgPrecedence(tc.in)
 			if got.Verdict != tc.want {
 				t.Fatalf("RATCHET %s: got verdict %q, want %q", tc.name, got.Verdict, tc.want)
@@ -138,7 +155,6 @@ func TestOrgPrecedenceGatedWiden(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Skip("pending #5322 org precedence fold")
 			got := resolveOrgPrecedence(tc.in)
 			if got.Cap != tc.want {
 				t.Fatalf("GATED_WIDEN %s: got cap %d, want %d", tc.name, got.Cap, tc.want)
@@ -163,7 +179,6 @@ func TestOrgPrecedenceFrozen(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Skip("pending #5322 org precedence fold")
 			got := resolveOrgPrecedence(tc.in)
 			if got.Verdict != tc.want {
 				t.Fatalf("FROZEN %s: got verdict %q, want %q", tc.name, got.Verdict, tc.want)
@@ -176,7 +191,6 @@ func TestOrgPrecedenceFrozen(t *testing.T) {
 // (§3): can central raise a cap the operator lowered? Expected: NO. The operator
 // lowered the cap to 50; central then grants 180 (> 50). min-wins keeps 50.
 func TestOrgPrecedenceCentralCannotRaiseOperatorLoweredCap(t *testing.T) {
-	t.Skip("pending #5322 org precedence fold")
 	in := orgPrecInput{
 		Class:      orgPrecGatedWiden,
 		CompiledIn: orgPrecCapC(200),
@@ -193,7 +207,6 @@ func TestOrgPrecedenceCentralCannotRaiseOperatorLoweredCap(t *testing.T) {
 // can the operator widen past a central grant? Expected: NO. Operator asks for 150
 // over a central grant of 100; it clamps to 100.
 func TestOrgPrecedenceOperatorCannotWidenPastCentral(t *testing.T) {
-	t.Skip("pending #5322 org precedence fold")
 	in := orgPrecInput{
 		Class:      orgPrecGatedWiden,
 		CompiledIn: orgPrecCapC(200),
