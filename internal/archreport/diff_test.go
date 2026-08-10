@@ -6,6 +6,35 @@ import (
 	"testing"
 )
 
+func TestDiffDependencyReachChangesExposeFootprintGrowth(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "a", DependencyReach: 2}, {Name: "b", DependencyReach: 5}}}
+	after := Report{Leaves: []Leaf{{Name: "a", DependencyReach: 5}, {Name: "b", DependencyReach: 3}}}
+	diff := Diff(before, after)
+	want := []DependencyReachChange{{Leaf: "a", Before: 2, After: 5, Delta: 3}, {Leaf: "b", Before: 5, After: 3, Delta: -2}}
+	if !reflect.DeepEqual(diff.DependencyReachChanges, want) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffDependencyDepthChangesExposeStackGrowth(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "a", DependencyDepth: 2}, {Name: "b", DependencyDepth: 4}}}
+	after := Report{Leaves: []Leaf{{Name: "a", DependencyDepth: 3}, {Name: "b", DependencyDepth: 2}}}
+	diff := Diff(before, after)
+	want := []DependencyDepthChange{{Leaf: "a", Before: 2, After: 3, Delta: 1}, {Leaf: "b", Before: 4, After: 2, Delta: -2}}
+	if !reflect.DeepEqual(diff.DependencyDepthChanges, want) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
+func TestDiffDependencyReachAndDepthContractionsRemainClean(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "a", DependencyReach: 4, DependencyDepth: 3}}}
+	after := Report{Leaves: []Leaf{{Name: "a", DependencyReach: 2, DependencyDepth: 1}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || diff.DependencyReachChanges[0].Delta >= 0 || diff.DependencyDepthChanges[0].Delta >= 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralVertexPairCutChangesExposeStableLocalDrift(t *testing.T) {
 	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{
 		Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d", "e"}, MinVertexCut: 2,

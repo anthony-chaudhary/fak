@@ -49,6 +49,20 @@ type FanInChange struct {
 	Delta  int    `json:"delta"`
 }
 
+type DependencyReachChange struct {
+	Leaf   string `json:"leaf"`
+	Before int    `json:"before"`
+	After  int    `json:"after"`
+	Delta  int    `json:"delta"`
+}
+
+type DependencyDepthChange struct {
+	Leaf   string `json:"leaf"`
+	Before int    `json:"before"`
+	After  int    `json:"after"`
+	Delta  int    `json:"delta"`
+}
+
 type BlastRadiusChange struct {
 	Leaf   string `json:"leaf"`
 	Before int    `json:"before"`
@@ -177,6 +191,8 @@ type ReportDiff struct {
 	LateralVertexConnectivityChanges    []LateralVertexConnectivityChange `json:"lateral_vertex_connectivity_changes,omitempty"`
 	LateralVertexPairCutChanges         []LateralVertexPairCutChange      `json:"lateral_vertex_pair_cut_changes,omitempty"`
 	FanInChanges                        []FanInChange                     `json:"fan_in_changes,omitempty"`
+	DependencyReachChanges              []DependencyReachChange           `json:"dependency_reach_changes,omitempty"`
+	DependencyDepthChanges              []DependencyDepthChange           `json:"dependency_depth_changes,omitempty"`
 	BlastRadiusChanges                  []BlastRadiusChange               `json:"blast_radius_changes,omitempty"`
 	IntroducedBlastImpacts              []BlastImpact                     `json:"introduced_blast_impacts,omitempty"`
 	ResolvedBlastImpacts                []BlastImpact                     `json:"resolved_blast_impacts,omitempty"`
@@ -334,6 +350,12 @@ func Diff(before, after Report) ReportDiff {
 			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: beforeFanIn, After: afterFanIn, Delta: afterFanIn - beforeFanIn})
 		}
 		if b, ok := beforeLeaves[name]; ok {
+			if b.DependencyReach != a.DependencyReach {
+				out.DependencyReachChanges = append(out.DependencyReachChanges, DependencyReachChange{Leaf: name, Before: b.DependencyReach, After: a.DependencyReach, Delta: a.DependencyReach - b.DependencyReach})
+			}
+			if b.DependencyDepth != a.DependencyDepth {
+				out.DependencyDepthChanges = append(out.DependencyDepthChanges, DependencyDepthChange{Leaf: name, Before: b.DependencyDepth, After: a.DependencyDepth, Delta: a.DependencyDepth - b.DependencyDepth})
+			}
 			if b.BlastRadius != a.BlastRadius {
 				out.BlastRadiusChanges = append(out.BlastRadiusChanges, BlastRadiusChange{Leaf: name, Before: b.BlastRadius, After: a.BlastRadius, Delta: a.BlastRadius - b.BlastRadius})
 			}
@@ -414,6 +436,8 @@ func Diff(before, after Report) ReportDiff {
 	sortLateralVertexConnectivityChanges(out.LateralVertexConnectivityChanges)
 	sortLateralVertexPairCutChanges(out.LateralVertexPairCutChanges)
 	sortFanInChanges(out.FanInChanges)
+	sortDependencyReachChanges(out.DependencyReachChanges)
+	sortDependencyDepthChanges(out.DependencyDepthChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
 	sortBlastImpacts(out.ResolvedBlastImpacts)
@@ -421,7 +445,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -848,6 +872,49 @@ func sortBlastImpacts(impacts []BlastImpact) {
 		}
 		return impacts[i].Dependent < impacts[j].Dependent
 	})
+}
+
+func sortDependencyReachChanges(changes []DependencyReachChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		return metricGrowthLess(changes[i].Delta, changes[j].Delta, changes[i].Leaf, changes[j].Leaf)
+	})
+}
+func sortDependencyDepthChanges(changes []DependencyDepthChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		return metricGrowthLess(changes[i].Delta, changes[j].Delta, changes[i].Leaf, changes[j].Leaf)
+	})
+}
+func metricGrowthLess(leftDelta, rightDelta int, leftLeaf, rightLeaf string) bool {
+	if (leftDelta > 0) != (rightDelta > 0) {
+		return leftDelta > 0
+	}
+	leftMagnitude, rightMagnitude := leftDelta, rightDelta
+	if leftMagnitude < 0 {
+		leftMagnitude = -leftMagnitude
+	}
+	if rightMagnitude < 0 {
+		rightMagnitude = -rightMagnitude
+	}
+	if leftMagnitude != rightMagnitude {
+		return leftMagnitude > rightMagnitude
+	}
+	return leftLeaf < rightLeaf
+}
+func hasIncreasedDependencyReach(changes []DependencyReachChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
+}
+func hasIncreasedDependencyDepth(changes []DependencyDepthChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func sortBlastRadiusChanges(changes []BlastRadiusChange) {

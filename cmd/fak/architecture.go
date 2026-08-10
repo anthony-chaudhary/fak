@@ -22,7 +22,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
-	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length|introduced-lateral-edges|introduced-lateral-couplings|introduced-or-increased-lateral-bridges|introduced-or-increased-lateral-articulation-points|resolved-lateral-resilient-pairs|decreased-lateral-edge-connectivity|decreased-lateral-vertex-connectivity|decreased-lateral-vertex-pair-cuts")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-dependency-reach|increased-dependency-depth|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length|introduced-lateral-edges|introduced-lateral-couplings|introduced-or-increased-lateral-bridges|introduced-or-increased-lateral-articulation-points|resolved-lateral-resilient-pairs|decreased-lateral-edge-connectivity|decreased-lateral-vertex-connectivity|decreased-lateral-vertex-pair-cuts")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -30,8 +30,8 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
 		return 2
 	}
-	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" && *failOn != "introduced-lateral-edges" && *failOn != "introduced-lateral-couplings" && *failOn != "introduced-or-increased-lateral-bridges" && *failOn != "introduced-or-increased-lateral-articulation-points" && *failOn != "resolved-lateral-resilient-pairs" && *failOn != "decreased-lateral-edge-connectivity" && *failOn != "decreased-lateral-vertex-connectivity" && *failOn != "decreased-lateral-vertex-pair-cuts" {
-		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, decreased-lateral-edge-connectivity, decreased-lateral-vertex-connectivity, or decreased-lateral-vertex-pair-cuts)\n", *failOn)
+	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-dependency-reach" && *failOn != "increased-dependency-depth" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" && *failOn != "introduced-lateral-edges" && *failOn != "introduced-lateral-couplings" && *failOn != "introduced-or-increased-lateral-bridges" && *failOn != "introduced-or-increased-lateral-articulation-points" && *failOn != "resolved-lateral-resilient-pairs" && *failOn != "decreased-lateral-edge-connectivity" && *failOn != "decreased-lateral-vertex-connectivity" && *failOn != "decreased-lateral-vertex-pair-cuts" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-dependency-reach, increased-dependency-depth, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, decreased-lateral-edge-connectivity, decreased-lateral-vertex-connectivity, or decreased-lateral-vertex-pair-cuts)\n", *failOn)
 		return 2
 	}
 	if *failOn != "" && *baseline == "" {
@@ -336,6 +336,12 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, change := range diff.FanInChanges {
 		fmt.Fprintf(stdout, "  ~ fan-in %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
 	}
+	for _, change := range diff.DependencyReachChanges {
+		fmt.Fprintf(stdout, "  ~ dependency-reach %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
+	}
+	for _, change := range diff.DependencyDepthChanges {
+		fmt.Fprintf(stdout, "  ~ dependency-depth %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
+	}
 	for _, change := range diff.BlastRadiusChanges {
 		fmt.Fprintf(stdout, "  ~ blast-radius %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
 	}
@@ -370,6 +376,10 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 			fmt.Fprintln(stdout, "  remediation: apply each introduced diagnostic recovery action; comparison is baseline -> workspace")
 		} else if failOn == "increased-tier-gap" {
 			fmt.Fprintln(stdout, "  remediation: restore the prior import floor or lower the over-declared tier; comparison is baseline -> workspace")
+		} else if failOn == "increased-dependency-reach" {
+			fmt.Fprintln(stdout, "  remediation: remove the new transitive dependency path or move the shared seam downward to reduce footprint; comparison is baseline -> workspace")
+		} else if failOn == "increased-dependency-depth" {
+			fmt.Fprintln(stdout, "  remediation: shorten the dependency chain by removing an intermediary or moving the shared seam downward; comparison is baseline -> workspace")
 		} else if failOn == "increased-blast-radius" {
 			fmt.Fprintln(stdout, "  remediation: remove/invert the new dependency path or move the shared seam down; comparison is baseline -> workspace")
 		} else if failOn == "introduced-blast-impacts" {
@@ -423,6 +433,20 @@ func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 		return false
 	case "increased-violation-distance":
 		for _, change := range diff.ViolationDistanceChanges {
+			if change.Delta > 0 {
+				return true
+			}
+		}
+		return false
+	case "increased-dependency-reach":
+		for _, change := range diff.DependencyReachChanges {
+			if change.Delta > 0 {
+				return true
+			}
+		}
+		return false
+	case "increased-dependency-depth":
+		for _, change := range diff.DependencyDepthChanges {
 			if change.Delta > 0 {
 				return true
 			}

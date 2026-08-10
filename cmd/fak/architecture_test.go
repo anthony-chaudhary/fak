@@ -542,6 +542,48 @@ func TestArchitectureViolationDistancePolicyIgnoresOtherRegressions(t *testing.T
 	}
 }
 
+func TestArchitectureIncreasedDependencyReachPolicy(t *testing.T) {
+	diff := archreport.ReportDiff{DependencyReachChanges: []archreport.DependencyReachChange{{Leaf: "a", Before: 2, After: 5, Delta: 3}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-dependency-reach"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"dependency-reach a 2 -> 5 (+3)", "reduce footprint"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureIncreasedDependencyReachPolicyIgnoresContractionAndDepth(t *testing.T) {
+	diff := archreport.ReportDiff{DependencyReachChanges: []archreport.DependencyReachChange{{Delta: -1}}, DependencyDepthChanges: []archreport.DependencyDepthChange{{Delta: 2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-dependency-reach"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
+func TestArchitectureIncreasedDependencyDepthPolicy(t *testing.T) {
+	diff := archreport.ReportDiff{DependencyDepthChanges: []archreport.DependencyDepthChange{{Leaf: "a", Before: 2, After: 4, Delta: 2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-dependency-depth"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"dependency-depth a 2 -> 4 (+2)", "shorten the dependency chain"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureIncreasedDependencyDepthPolicyIgnoresContractionAndReach(t *testing.T) {
+	diff := archreport.ReportDiff{DependencyDepthChanges: []archreport.DependencyDepthChange{{Delta: -1}}, DependencyReachChanges: []archreport.DependencyReachChange{{Delta: 2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-dependency-depth"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureFailOnIncreasedBlastRadius(t *testing.T) {
 	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", BlastRadiusChanges: []archreport.BlastRadiusChange{{Leaf: "shared", Before: 2, After: 5, Delta: 3}}}
 	var out, errOut bytes.Buffer
@@ -790,7 +832,7 @@ func TestArchitectureDecreasedLateralEdgeConnectivityPolicyIgnoresGain(t *testin
 
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, or decreased-lateral-edge-connectivity") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-dependency-reach, increased-dependency-depth, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, or decreased-lateral-edge-connectivity") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
