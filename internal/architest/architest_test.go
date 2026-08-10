@@ -514,7 +514,10 @@ var tier = map[string]int{
 	"dependencyquarantine":  0, // #5947: stdlib-only repository dependency-budget and nested-module quarantine checker; imports no sibling leaf.
 	"enumlint":              0, // #5935: pure stdlib Go AST closed-enum discovery, exhaustiveness rules, and counted baseline ratchet; repository I/O is caller-selected.
 	"archreport":            2, // read-only query/report over the architest declaration source and package import graph.
-	"generationctl": 3,
+	"generationctl":         3,
+	"coordinateoperator":    1, // #6055 (epic #6042): the operator VIEW and control surface over the whole agent path — the pure Resolve folding four-layer observations plus scoped/TTL'd operator pins into ONE Report, the status/plan/explain renderers that are all projections of that same Report, and the `fak coordinate` argv surface. Stdlib-only, imports nothing internal (the layer adapters #6047-#6050 publish INTO it via a versioned JSON snapshot, never by import, which is what keeps the surface from climbing the tier ladder behind them). Off the hot path.
+	"quantprov":             1,
+	"cudaarch":              1, // deterministic CUDA architecture compatibility matrix; stdlib-only pure parser/renderer.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
