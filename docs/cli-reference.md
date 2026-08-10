@@ -201,6 +201,7 @@ fak architecture --leaf archreport --json
 fak architecture --baseline-workspace /path/to/before --workspace /path/to/after
 fak architecture --baseline-workspace /path/to/before --workspace /path/to/after --json
 fak architecture --baseline-workspace /path/to/before --workspace /path/to/after --fail-on introduced-violations
+fak architecture --baseline-workspace /path/to/before --workspace /path/to/after --fail-on introduced-diagnostics
 
 # Privacy-safe adoption fold (ISO-week counts; no paths, hostnames, or leaf names).
 fak architecture --usage
@@ -209,7 +210,7 @@ fak architecture --usage --json
 
 The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly), and `tier_gap` measures declared tier minus import-derived floor. Full reports rank `sink_candidates` whose gap is at least two, largest gap first then leaf name, so the old verbose-test mis-tier advisory is queryable by operators. Hotspots are sorted by direct fan-in descending, then leaf name.
 
-With `--baseline-workspace`, the command emits `fak-architecture-diff/1`: added/removed leaves, old→new tier changes, added/removed direct edges, introduced/resolved upward violations, and a typed `clean`/`regression` verdict. The caller supplies both snapshots; an empty diff is `0 change(s)` and exits successfully. Add `--fail-on introduced-violations` for CI/pre-push use: a newly introduced upward edge exits `3` and names the remediation, while resolved violations and non-violating architecture changes remain exit `0`.
+With `--baseline-workspace`, the command emits `fak-architecture-diff/1`: added/removed leaves, old→new tier changes, added/removed direct edges, introduced/resolved upward violations, introduced/resolved typed diagnostics, and a typed `clean`/`regression` verdict. Diagnostics are matched by stable `(kind, leaf)` identity, so workspace-specific paths in diagnostic messages cannot fabricate a delta; output retains the relevant side’s message and recovery. The caller supplies both snapshots; an empty diff is `0 change(s)` and exits successfully. Add `--fail-on introduced-violations` for CI/pre-push use when a newly introduced upward edge should exit `3`, or `--fail-on introduced-diagnostics` when a newly stale declaration or other typed diagnostic should exit `3`. Each policy names its remediation; resolved findings and unrelated architecture changes remain exit `0`.
 
 The command does not run Git, execute package code, or mutate the workspace. It parses `internal/architest/architest_test.go` plus non-test Go import blocks. Malformed contracts or source files refuse with a recovery action. A stale tier declaration is a typed `stale-tier-declaration` diagnostic—not a global report outage—so healthy full and scoped queries remain usable; the committed `internal/architest` gate still fails until its recovery action (create the package or remove the tier row) is applied.
 

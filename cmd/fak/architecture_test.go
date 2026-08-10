@@ -165,9 +165,31 @@ func TestArchitectureFailOnIntroducedViolations(t *testing.T) {
 	}
 }
 
+func TestArchitectureFailOnIntroducedDiagnostics(t *testing.T) {
+	diagnostic := archreport.Diagnostic{Kind: archreport.DiagnosticStaleTierDeclaration, Leaf: "gone", Message: "gone is missing", Recovery: "remove its tier row"}
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedDiagnostics: []archreport.Diagnostic{diagnostic}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-diagnostics"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"verdict=regression", "introduced diagnostic stale-tier-declaration leaf=gone", "remove its tier row", "remediation:", "baseline -> workspace"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureDiagnosticPolicyIgnoresViolationOnlyRegression(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolations: []string{"a -> b"}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-diagnostics"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations or introduced-diagnostics") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

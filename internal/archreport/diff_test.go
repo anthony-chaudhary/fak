@@ -50,3 +50,35 @@ func TestDiffEmpty(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestDiffReportsTypedDiagnosticDeltasByStableIdentity(t *testing.T) {
+	before := Report{Diagnostics: []Diagnostic{
+		{Kind: DiagnosticStaleTierDeclaration, Leaf: "baseline", Message: "C:/before/internal/baseline does not exist", Recovery: "remove baseline row"},
+		{Kind: "parse-error", Leaf: "fixed", Message: "before parse error", Recovery: "repair syntax"},
+	}}
+	after := Report{Diagnostics: []Diagnostic{
+		{Kind: DiagnosticStaleTierDeclaration, Leaf: "baseline", Message: "D:/after/internal/baseline does not exist", Recovery: "remove baseline row"},
+		{Kind: DiagnosticStaleTierDeclaration, Leaf: "zeta", Message: "zeta missing", Recovery: "remove zeta row"},
+		{Kind: "parse-error", Leaf: "alpha", Message: "alpha broken", Recovery: "repair alpha"},
+	}}
+	got := Diff(before, after)
+	wantIntroduced := []Diagnostic{
+		{Kind: "parse-error", Leaf: "alpha", Message: "alpha broken", Recovery: "repair alpha"},
+		{Kind: DiagnosticStaleTierDeclaration, Leaf: "zeta", Message: "zeta missing", Recovery: "remove zeta row"},
+	}
+	wantResolved := []Diagnostic{{Kind: "parse-error", Leaf: "fixed", Message: "before parse error", Recovery: "repair syntax"}}
+	if !reflect.DeepEqual(got.IntroducedDiagnostics, wantIntroduced) || !reflect.DeepEqual(got.ResolvedDiagnostics, wantResolved) {
+		t.Fatalf("diagnostic diff=%+v", got)
+	}
+	if got.Verdict != "regression" || got.Changes() != 3 {
+		t.Fatalf("verdict=%q changes=%d", got.Verdict, got.Changes())
+	}
+}
+
+func TestDiffResolvedDiagnosticsRemainClean(t *testing.T) {
+	before := Report{Diagnostics: []Diagnostic{{Kind: DiagnosticStaleTierDeclaration, Leaf: "gone"}}}
+	got := Diff(before, Report{})
+	if got.Verdict != "clean" || len(got.ResolvedDiagnostics) != 1 || got.Changes() != 1 {
+		t.Fatalf("diff=%+v", got)
+	}
+}

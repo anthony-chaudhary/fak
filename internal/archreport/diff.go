@@ -21,15 +21,17 @@ type EdgeChange struct {
 }
 
 type ReportDiff struct {
-	Schema               string       `json:"schema"`
-	Verdict              string       `json:"verdict"`
-	AddedLeaves          []string     `json:"added_leaves,omitempty"`
-	RemovedLeaves        []string     `json:"removed_leaves,omitempty"`
-	TierChanges          []TierChange `json:"tier_changes,omitempty"`
-	AddedEdges           []EdgeChange `json:"added_edges,omitempty"`
-	RemovedEdges         []EdgeChange `json:"removed_edges,omitempty"`
-	IntroducedViolations []string     `json:"introduced_violations,omitempty"`
-	ResolvedViolations   []string     `json:"resolved_violations,omitempty"`
+	Schema                string       `json:"schema"`
+	Verdict               string       `json:"verdict"`
+	AddedLeaves           []string     `json:"added_leaves,omitempty"`
+	RemovedLeaves         []string     `json:"removed_leaves,omitempty"`
+	TierChanges           []TierChange `json:"tier_changes,omitempty"`
+	AddedEdges            []EdgeChange `json:"added_edges,omitempty"`
+	RemovedEdges          []EdgeChange `json:"removed_edges,omitempty"`
+	IntroducedViolations  []string     `json:"introduced_violations,omitempty"`
+	ResolvedViolations    []string     `json:"resolved_violations,omitempty"`
+	IntroducedDiagnostics []Diagnostic `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics   []Diagnostic `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -61,6 +63,17 @@ func Diff(before, after Report) ReportDiff {
 			out.RemovedEdges = append(out.RemovedEdges, edge)
 		}
 	}
+	beforeDiagnostics, afterDiagnostics := diagnosticSet(before), diagnosticSet(after)
+	for key, diagnostic := range afterDiagnostics {
+		if _, ok := beforeDiagnostics[key]; !ok {
+			out.IntroducedDiagnostics = append(out.IntroducedDiagnostics, diagnostic)
+		}
+	}
+	for key, diagnostic := range beforeDiagnostics {
+		if _, ok := afterDiagnostics[key]; !ok {
+			out.ResolvedDiagnostics = append(out.ResolvedDiagnostics, diagnostic)
+		}
+	}
 	beforeViolations, afterViolations := violationSet(before), violationSet(after)
 	for edge := range afterViolations {
 		if !beforeViolations[edge] {
@@ -79,14 +92,16 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.RemovedEdges)
 	sort.Strings(out.IntroducedViolations)
 	sort.Strings(out.ResolvedViolations)
-	if len(out.IntroducedViolations) > 0 {
+	sortDiagnostics(out.IntroducedDiagnostics)
+	sortDiagnostics(out.ResolvedDiagnostics)
+	if len(out.IntroducedViolations) > 0 || len(out.IntroducedDiagnostics) > 0 {
 		out.Verdict = "regression"
 	}
 	return out
 }
 
 func (d ReportDiff) Changes() int {
-	return len(d.AddedLeaves) + len(d.RemovedLeaves) + len(d.TierChanges) + len(d.AddedEdges) + len(d.RemovedEdges) + len(d.IntroducedViolations) + len(d.ResolvedViolations)
+	return len(d.AddedLeaves) + len(d.RemovedLeaves) + len(d.TierChanges) + len(d.AddedEdges) + len(d.RemovedEdges) + len(d.IntroducedViolations) + len(d.ResolvedViolations) + len(d.IntroducedDiagnostics) + len(d.ResolvedDiagnostics)
 }
 func (d ReportDiff) JSON() ([]byte, error) { return json.MarshalIndent(d, "", "  ") }
 func leafIndex(r Report) map[string]Leaf {
@@ -121,5 +136,22 @@ func sortEdges(edges []EdgeChange) {
 			return edges[i].From < edges[j].From
 		}
 		return edges[i].To < edges[j].To
+	})
+}
+
+func diagnosticSet(r Report) map[string]Diagnostic {
+	out := map[string]Diagnostic{}
+	for _, diagnostic := range r.Diagnostics {
+		out[diagnostic.Kind+"\x00"+diagnostic.Leaf] = diagnostic
+	}
+	return out
+}
+
+func sortDiagnostics(diagnostics []Diagnostic) {
+	sort.Slice(diagnostics, func(i, j int) bool {
+		if diagnostics[i].Kind != diagnostics[j].Kind {
+			return diagnostics[i].Kind < diagnostics[j].Kind
+		}
+		return diagnostics[i].Leaf < diagnostics[j].Leaf
 	})
 }
