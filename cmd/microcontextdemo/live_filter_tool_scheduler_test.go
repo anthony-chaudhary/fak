@@ -47,6 +47,19 @@ func TestFetchIssueReceiptIsBoundedRead(t *testing.T) { // Exercise response sha
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestGitHubFallbackIsConfiguredBeforeOutput(t *testing.T) {
+	p := "live_filter_tool_scheduler.go"
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	configure := strings.Index(s, "windowgate.ConfigureBackgroundCommand(cmd)")
+	output := strings.Index(s, "out, ge := cmd.Output()")
+	if configure < 0 || output < 0 || configure > output {
+		t.Fatal("GitHub gh fallback must be configured windowlessly before Output")
+	}
+}
 func TestVerifyLiveFilterToolArtifact(t *testing.T) {
 	p := filepath.Join("..", "..", "experiments", "microcontext", "s8o-live-filter-tool-2026-08-10.json")
 	if _, e := os.Stat(p); e != nil {

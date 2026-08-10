@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const liveFilterToolSchema = "fak-microcontext-live-filter-tool-scheduler/1"
@@ -106,6 +108,7 @@ func fetchIssueReceipt(ctx context.Context, r semanticRecord) (string, string, e
 		// The unauthenticated REST budget is deliberately not treated as tool failure;
 		// fall back to the authenticated gh read seam and preserve the same bounded fields.
 		cmd := exec.CommandContext(ctx, "gh", "api", "repos/anthony-chaudhary/fak/issues/"+fmt.Sprint(r.Number), "--jq", "{state:.state,updated_at:.updated_at,locked:.locked}")
+		windowgate.ConfigureBackgroundCommand(cmd)
 		out, ge := cmd.Output()
 		if ge != nil {
 			return "", req.URL.String(), fmt.Errorf("github %s; gh fallback: %w", resp.Status, ge)
