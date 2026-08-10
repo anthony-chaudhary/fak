@@ -1,18 +1,15 @@
-package main
+package devcmd
 
 import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/toolcoverage"
 )
 
-func cmdToolCoverageAudit(argv []string) { os.Exit(runToolCoverageAudit(os.Stdout, os.Stderr, argv)) }
-
-func runToolCoverageAudit(stdout, stderr io.Writer, argv []string) int {
+func RunToolCoverageAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("tool-coverage-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")

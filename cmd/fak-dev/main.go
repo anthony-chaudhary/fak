@@ -49,6 +49,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunSessionDiag(stdout, stderr, argv[1:], nil)
 	case "refactor-verify":
 		return devcmd.RunRefactorVerify(stdout, stderr, argv[1:])
+	case "tool-coverage-audit":
+		return devcmd.RunToolCoverageAudit(stdout, stderr, argv[1:])
 	case "fleetcap":
 		return devcmd.RunFleetcap(stdout, stderr, argv[1:])
 	case "catchup":
@@ -97,6 +99,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  codex-memory doctor [flags]          inspect Codex memory posture")
 	fmt.Fprintln(w, "  sessiondiag [flags]                  diagnose abrupt Codex/fak sessions")
 	fmt.Fprintln(w, "  refactor-verify [flags]              verify declaration-preserving code motion")
+	fmt.Fprintln(w, "  tool-coverage-audit [flags]          audit load-bearing tool test coverage")
 	fmt.Fprintln(w, "  fleetcap [flags]                      plan fleet capacity (Little's law, no live worker)")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")

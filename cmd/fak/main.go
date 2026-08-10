@@ -232,8 +232,6 @@ func main() {
 		cmdCodelint(os.Args[2:])
 	case "breath":
 		cmdBreath(os.Args[2:])
-	case "tool-coverage-audit":
-		cmdToolCoverageAudit(os.Args[2:])
 	case "answer-shape":
 		cmdAnswerShape(os.Args[2:])
 	case "negate":

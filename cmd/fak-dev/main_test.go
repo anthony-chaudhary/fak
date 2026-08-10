@@ -254,6 +254,17 @@ func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	}
 }
 
+func TestRuntimeSourceDoesNotDispatchToolCoverageAudit(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "tool-coverage-audit":`) || strings.Contains(string(body), "cmdToolCoverageAudit(") {
+		t.Fatal("runtime fak still dispatches the dev-only tool-coverage-audit command")
+	}
+}
+
 func TestRunDispatchesRefactorVerify(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"refactor-verify", "--ref", "definitely-not-a-commit"})

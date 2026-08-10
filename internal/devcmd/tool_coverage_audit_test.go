@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ func TestToolCoverageAuditJSONReportsLoadBearingDebt(t *testing.T) {
 	writeToolCoverageFixture(t, root, ".claude/skills/audit/SKILL.md", "calls tools/foo.py and tools/bar.py\n")
 
 	var stdout, stderr bytes.Buffer
-	code := runToolCoverageAudit(&stdout, &stderr, []string{
+	code := RunToolCoverageAudit(&stdout, &stderr, []string{
 		"--workspace", root,
 		"--min-coverage", "90",
 		"--json",
@@ -48,7 +48,7 @@ func TestToolCoverageAuditDefaultsToNoFloor(t *testing.T) {
 	writeToolCoverageFixture(t, root, ".claude/skills/audit/SKILL.md", "calls tools/foo.py\n")
 
 	var stdout, stderr bytes.Buffer
-	code := runToolCoverageAudit(&stdout, &stderr, []string{"--workspace", root, "--json"})
+	code := RunToolCoverageAudit(&stdout, &stderr, []string{"--workspace", root, "--json"})
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
