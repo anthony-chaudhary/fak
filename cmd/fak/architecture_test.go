@@ -51,3 +51,21 @@ func TestRunArchitectureTextNamesDependents(t *testing.T) {
 		t.Fatalf("output does not name dependents: %s", out.String())
 	}
 }
+
+func TestArchitectureTextNamesStaleDeclarationRecovery(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"healthy":1,"stale":2}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/healthy/healthy.go", "package healthy\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"diagnostic stale-tier-declaration", "leaf=stale", "create the package or remove its stale tier declaration"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}

@@ -50,6 +50,9 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	for _, t := range report.Tiers {
 		fmt.Fprintf(stdout, "  tier %d %-22s %d\n", t.Level, t.Name, t.Leaves)
 	}
+	for _, diagnostic := range report.Diagnostics {
+		fmt.Fprintf(stdout, "  diagnostic %-24s leaf=%s: %s; recovery: %s\n", diagnostic.Kind, diagnostic.Leaf, diagnostic.Message, diagnostic.Recovery)
+	}
 	if *leaf == "" && len(report.Hotspots) > 0 {
 		fmt.Fprintln(stdout, "  hotspots (direct fan-in):")
 		for _, hotspot := range report.Hotspots {

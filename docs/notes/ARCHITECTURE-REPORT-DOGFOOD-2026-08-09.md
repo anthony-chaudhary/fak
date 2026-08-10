@@ -36,3 +36,22 @@ The snapshot contains a `"docrender": 2` entry in
 
 No other defects are claimed: this first failure prevents the report from reaching later
 leaves, so later graph quality remains unobserved until #6084 lands.
+
+## Post-fix candidate readout (#6084)
+
+The #6084 candidate was overlaid onto a fresh `origin/main` archive and the same production
+`Analyze` seam completed instead of aborting:
+
+```text
+schema:       fak-architecture/1
+tiers:       6
+healthy leaves: 552
+diagnostics: 1
+upward violations: 0
+top hotspot: abi (direct fan-in 78)
+```
+
+The one diagnostic is `stale-tier-declaration` for `docrender`, with recovery
+`create the package or remove its stale tier declaration`. This confirms the report can now
+expose the defect and the rest of the committed architecture graph simultaneously. Final
+ship evidence remains the origin-backed #6084 commit, not this uncommitted candidate run.

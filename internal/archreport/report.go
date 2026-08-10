@@ -36,12 +36,20 @@ type Hotspot struct {
 	FanIn int    `json:"fan_in"`
 }
 
+type Diagnostic struct {
+	Kind     string `json:"kind"`
+	Leaf     string `json:"leaf"`
+	Message  string `json:"message"`
+	Recovery string `json:"recovery"`
+}
+
 type Report struct {
-	Schema     string    `json:"schema"`
-	Tiers      []Tier    `json:"tiers"`
-	Leaves     []Leaf    `json:"leaves"`
-	Hotspots   []Hotspot `json:"hotspots,omitempty"`
-	Violations int       `json:"violations"`
+	Schema      string       `json:"schema"`
+	Tiers       []Tier       `json:"tiers"`
+	Leaves      []Leaf       `json:"leaves"`
+	Hotspots    []Hotspot    `json:"hotspots,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	Violations  int          `json:"violations"`
 }
 
 func Analyze(root, onlyLeaf string) (Report, error) {
@@ -75,7 +83,20 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	allLeaves := make([]Leaf, 0, len(leaves))
 	byName := make(map[string]int, len(leaves))
 	for _, name := range leaves {
-		deps, err := internalImports(filepath.Join(root, "internal", name))
+		dir := filepath.Join(root, "internal", name)
+		if _, err := os.Stat(dir); err != nil {
+			if os.IsNotExist(err) {
+				report.Diagnostics = append(report.Diagnostics, Diagnostic{
+					Kind:     "stale-tier-declaration",
+					Leaf:     name,
+					Message:  fmt.Sprintf("declared package directory %s does not exist", dir),
+					Recovery: "create the package or remove its stale tier declaration",
+				})
+				continue
+			}
+			return Report{}, fmt.Errorf("inspect declared leaf %q: stat declared package directory %s: %w; restore access and retry", name, dir, err)
+		}
+		deps, err := internalImports(dir)
 		if err != nil {
 			return Report{}, fmt.Errorf("inspect declared leaf %q: %w", name, err)
 		}
@@ -120,8 +141,17 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	if onlyLeaf == "" {
 		report.Leaves = allLeaves
 	} else {
-		report.Leaves = []Leaf{allLeaves[byName[onlyLeaf]]}
+		if i, ok := byName[onlyLeaf]; ok {
+			report.Leaves = []Leaf{allLeaves[i]}
+		}
 		report.Hotspots = nil
+		diagnostics := report.Diagnostics[:0]
+		for _, diagnostic := range report.Diagnostics {
+			if diagnostic.Leaf == onlyLeaf {
+				diagnostics = append(diagnostics, diagnostic)
+			}
+		}
+		report.Diagnostics = diagnostics
 	}
 	for _, leaf := range report.Leaves {
 		report.Violations += len(leaf.Violations)

@@ -176,11 +176,6 @@ func TestAnalyzeAdversarialInputs(t *testing.T) {
 			wantErr:  `leaf "hostile-not-declared" has no tier declaration`,
 		},
 		{
-			name:     "declared directory missing",
-			contract: "package architest\nvar tier=map[string]int{\"missing\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
-			wantErr:  "internal/missing",
-		},
-		{
 			name:     "malformed leaf source",
 			contract: "package architest\nvar tier=map[string]int{\"broken\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
 			files:    map[string]string{"internal/broken/broken.go": "package broken\nimport ("},
@@ -256,11 +251,6 @@ func TestAnalyzeErrorsNameRecovery(t *testing.T) {
 			want:     []string{"has no tier declaration", "choose a declared leaf", "or add its tier there"},
 		},
 		{
-			name:     "stale declaration",
-			contract: "package architest\nvar tier=map[string]int{\"missing\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
-			want:     []string{"declared package directory", "does not exist", "create the package or remove its stale tier declaration"},
-		},
-		{
 			name:     "leaf syntax",
 			contract: "package architest\nvar tier=map[string]int{\"broken\":1}\nvar tierName=[]string{\"root\",\"primitive\"}\n",
 			files:    map[string]string{"internal/broken/broken.go": "package broken\nimport ("},
@@ -284,6 +274,48 @@ func TestAnalyzeErrorsNameRecovery(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnalyzeStaleDeclarationDoesNotSuppressHealthyLeaves(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"healthy":1,"stale":2}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	writeArchitectureFixture(t, root, "internal/healthy/healthy.go", "package healthy\n")
+
+	full, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Leaves) != 1 || full.Leaves[0].Name != "healthy" {
+		t.Fatalf("healthy leaves suppressed: %+v", full.Leaves)
+	}
+	wantDiagnostic := Diagnostic{
+		Kind:     "stale-tier-declaration",
+		Leaf:     "stale",
+		Message:  "declared package directory " + filepath.Join(root, "internal", "stale") + " does not exist",
+		Recovery: "create the package or remove its stale tier declaration",
+	}
+	if !reflect.DeepEqual(full.Diagnostics, []Diagnostic{wantDiagnostic}) {
+		t.Fatalf("diagnostics=%+v want=%+v", full.Diagnostics, wantDiagnostic)
+	}
+
+	healthy, err := Analyze(root, "healthy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(healthy.Leaves) != 1 || healthy.Leaves[0].Name != "healthy" || len(healthy.Diagnostics) != 0 {
+		t.Fatalf("healthy scoped report=%+v", healthy)
+	}
+
+	stale, err := Analyze(root, "stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale.Leaves) != 0 || !reflect.DeepEqual(stale.Diagnostics, []Diagnostic{wantDiagnostic}) {
+		t.Fatalf("stale scoped report=%+v", stale)
 	}
 }
 
