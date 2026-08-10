@@ -30,17 +30,10 @@ func recoverUsage(verb *string, argv *[]string, start time.Time) {
 	}
 }
 
-// resolveEarlyDispatch runs the two pre-switch gates and returns true when it fully
-// handled the call (so main() should return without entering the dispatch switch):
-//
-//   - no verb at all → usage() + exit 2.
-//   - the `fak dev <verb>` namespace (C2 of epic #2228, #2231): it resolves BEFORE the
-//     dispatch switch by rewriting os.Args to the underlying verb, so the very same case
-//     arm runs — byte-identical dispatch, no re-exec — and the 200-case switch (plus the
-//     devindex scanner keyed on its `switch os.Args[1]` header) stays untouched. The
-//     usage journal records the composite verb ("dev commit" vs bare "commit"): the
-//     bare-vs-namespaced adoption evidence the C5 enforcement flip is gated on. A
-//     dev-only verb with no top-level arm is dispatched here and reported handled.
+// resolveEarlyDispatch runs pre-switch gates and reports whether main should
+// return: no verb prints usage, orchestration keeps its early route, and
+// `fak dev ...` delegates across a process boundary to separately built fak-dev.
+// Runtime fak never imports or executes development implementation packages.
 func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 	if len(os.Args) < 2 {
 		if maybeLaunchDefault() {
@@ -55,17 +48,9 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		return true
 	}
 	if os.Args[1] == "dev" {
-		v, rest, code := resolveDevVerb(os.Args[2:], os.Stdout, os.Stderr)
-		if code >= 0 {
-			recordUsage(*verb, *argv, code, start)
-			os.Exit(code)
-		}
-		*verb = "dev " + v
-		*argv = rest
-		if dispatchDevOnlyVerb(v, rest) {
-			return true
-		}
-		os.Args = append([]string{os.Args[0], v}, rest...)
+		code := runDevHandoff(os.Stdin, os.Stdout, os.Stderr, os.Args[2:])
+		recordUsage(*verb, *argv, code, start)
+		os.Exit(code)
 	}
 	return false
 }

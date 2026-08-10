@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
 // The compact-overview taste gate. `fak --help` regressed into a ~650-line wall
@@ -32,141 +30,26 @@ func TestUsageCompactStaysCompact(t *testing.T) {
 	}
 }
 
-// TestOverviewVerbsAreLive pins every curated overview verb to the live verb
-// catalog (dispatch-derived when the repo is readable), so the overview can
-// never advertise a verb the binary does not route.
-func TestOverviewVerbsAreLive(t *testing.T) {
-	cat := helpCatalog()
-	if cat == nil {
-		t.Skip("devindex catalog unavailable (no repo root); overview membership is only checkable in-repo")
-	}
-	live := map[string]bool{}
-	for _, v := range cat.Verbs() {
-		for _, sp := range v.Spellings() {
-			live[strings.ToLower(sp)] = true
-		}
-	}
-	for _, g := range overviewGroups {
-		for _, e := range g.entries {
-			if !live[e.name] {
-				t.Errorf("overview advertises %q under %q but no dispatched verb has that spelling", e.name, g.title)
-			}
-		}
-	}
-}
-
-// TestOverviewIsExactlyFrontdoor is the C3 (#2232) set-equality gate: the compact
-// overview presents the FRONTDOOR tier and only the frontdoor tier, so C1's
-// classification (internal/devindex) and the visible front door can never drift.
-// It reds two ways: a dev/hidden verb sneaking into the overview, or a frontdoor
-// verb missing from it (not even as a declared companion fold).
-func TestOverviewIsExactlyFrontdoor(t *testing.T) {
-	cat := helpCatalog()
-	if cat == nil {
-		t.Skip("devindex catalog unavailable (no repo root); tier equality is only checkable in-repo")
-	}
-	// 1. Nothing but frontdoor appears in the overview.
-	inOverview := map[string]bool{}
-	for _, g := range overviewGroups {
-		for _, e := range g.entries {
-			inOverview[e.name] = true
-			tier, ok := devindex.TierOf(e.name)
-			if !ok || tier != devindex.TierFrontdoor {
-				t.Errorf("overview lists %q (tier %q, ok=%v) — the overview is frontdoor-ONLY; dev/repo tooling lives under 'fak dev'", e.name, tier, ok)
-			}
-		}
-	}
-	// 2. Every frontdoor verb is covered — its own line, or a declared companion
-	//    (replay/top/pull/ls) whose primary is present AND names it in the blurb.
-	blurbOf := map[string]string{}
-	for _, g := range overviewGroups {
-		for _, e := range g.entries {
-			blurbOf[e.name] = e.blurb
-		}
-	}
-	covered := func(v string) bool {
-		if inOverview[v] {
-			return true
-		}
-		p, ok := frontdoorCompanions[v]
-		if !ok || !inOverview[p] {
-			return false
-		}
-		// The fold must keep the spelling visible in its primary's blurb.
-		return strings.Contains(blurbOf[p], v)
-	}
-	for _, fv := range cat.Verbs() {
-		if fv.Tier != devindex.TierFrontdoor {
-			continue
-		}
-		if !covered(fv.Name) {
-			t.Errorf("frontdoor verb %q is missing from the compact overview (add a line, or fold it via frontdoorCompanions and name it in the primary's blurb)", fv.Name)
-		}
-	}
-}
-
-// TestUsageAllVerbsShowsTier is the C3 (#2232) tiered-catalog gate: `fak help --all`
-// carries each verb's tier, and hidden re-exec seams stay unlisted.
-func TestUsageAllVerbsShowsTier(t *testing.T) {
-	if helpCatalog() == nil {
-		t.Skip("devindex catalog unavailable (no repo root); --all tier column is only checkable in-repo")
-	}
+// TestRuntimeHelpHasNoDevelopmentCatalog proves --all remains useful while
+// exposing only runtime-owned help text. The development inventory belongs to
+// the separately built fak-dev artifact.
+func TestRuntimeHelpHasNoDevelopmentCatalog(t *testing.T) {
 	var b strings.Builder
 	usageAllVerbs(&b)
 	out := b.String()
-	for _, want := range []string{"guard", "[frontdoor]", "commit", "[dev]"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("fak help --all missing %q; got:\n%s", want, out)
-		}
+	if !strings.Contains(out, "fak guard") {
+		t.Fatalf("runtime --all help omitted guard:\n%s", out)
 	}
-	// The frontdoor 'guard' and the dev 'commit' must be tagged with their tiers.
-	for _, ln := range strings.Split(out, "\n") {
-		f := strings.Fields(ln)
-		if len(f) >= 2 && f[0] == "guard" && f[1] != "[frontdoor]" {
-			t.Errorf("guard line not tagged frontdoor: %q", ln)
-		}
-		if len(f) >= 2 && f[0] == "commit" && f[1] != "[dev]" {
-			t.Errorf("commit line not tagged dev: %q", ln)
-		}
-		// Hidden seams are never listed.
-		if len(f) > 0 && (f[0] == "guard-stophook" || f[0] == "ablate-arm" || f[0] == "hook") {
-			t.Errorf("fak help --all leaked a hidden re-exec seam: %q", ln)
+	for _, forbidden := range []string{"[dev]", "fak dev sweep", "internal/devindex"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("runtime help leaked development catalog marker %q", forbidden)
 		}
 	}
 }
 
-// TestDevVerbHelpNamesDevSpelling is the C3 (#2232) header gate: `fak help <devverb>`
-// still works (help is never gated) and its header names the canonical `fak dev <verb>`
-// spelling, while a frontdoor verb keeps the bare `fak <verb>` spelling.
-func TestDevVerbHelpNamesDevSpelling(t *testing.T) {
-	if helpCatalog() == nil {
-		t.Skip("devindex catalog unavailable (no repo root); dev-spelling header is only checkable in-repo")
-	}
-	var dev strings.Builder
-	if !verbDeepHelpBody(&dev, "sweep") {
-		t.Fatal("verbDeepHelpBody found nothing for the dev verb 'sweep'")
-	}
-	if !strings.Contains(dev.String(), "fak dev sweep") {
-		t.Errorf("`fak help sweep` header must name the canonical 'fak dev sweep' spelling; got:\n%s", dev.String())
-	}
-	var front strings.Builder
-	if !verbDeepHelpBody(&front, "guard") {
-		t.Fatal("verbDeepHelpBody found nothing for the frontdoor verb 'guard'")
-	}
-	if got := front.String(); !strings.Contains(got, "fak guard ") || strings.Contains(got, "fak dev guard") {
-		t.Errorf("`fak help guard` header must keep the bare 'fak guard' spelling; got:\n%s", got)
-	}
-}
-
-// TestSuggestVerbSpellingIsTierAware is the C3 (#2232) did-you-mean gate: a
-// top-level near-miss of a DEV verb yields the dev-prefixed spelling (so the C5
-// enforcement flip is a one-line change), while a frontdoor near-miss stays bare.
-func TestSuggestVerbSpellingIsTierAware(t *testing.T) {
-	if got := suggestVerbSpelling("swep"); got != "dev sweep" {
-		t.Errorf("suggestVerbSpelling(swep) = %q, want \"dev sweep\" (tier-aware)", got)
-	}
+func TestSuggestVerbSpellingUsesRuntimeSurface(t *testing.T) {
 	if got := suggestVerbSpelling("guardd"); got != "guard" {
-		t.Errorf("suggestVerbSpelling(guardd) = %q, want \"guard\" (frontdoor stays bare)", got)
+		t.Errorf("suggestVerbSpelling(guardd) = %q, want guard", got)
 	}
 	if got := suggestVerbSpelling("zzqx"); got != "" {
 		t.Errorf("suggestVerbSpelling(zzqx) = %q, want no suggestion", got)
@@ -198,38 +81,17 @@ func TestVerbWallSectionsCarvesDepth(t *testing.T) {
 }
 
 func TestSyncHelpNamesPushAndDirtyGuidance(t *testing.T) {
-	if cat := helpCatalog(); cat != nil {
-		var synopsis string
-		for _, v := range cat.Verbs() {
-			if v.Name == "sync" {
-				synopsis = v.Synopsis
-				break
-			}
-		}
-		if !strings.Contains(synopsis, "sync/push") {
-			t.Fatalf("sync catalog synopsis = %q, want it to name sync/push", synopsis)
-		}
+	var b strings.Builder
+	if !verbDeepHelpBody(&b, "sync") {
+		t.Fatal("runtime usage wall has no sync section")
 	}
-
-	sections := verbWallSections([]string{"sync"})
-	if len(sections) == 0 {
-		t.Fatal("verbWallSections found no wall block for 'sync'")
-	}
-	joined := strings.Join(sections, "")
-	for _, want := range []string{
-		"[check|apply|push]",
-		"SAFE SYNC/PUSH",
-		"dirty-tree sweep next action",
-		"safe push path",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("sync wall block missing %q:\n%s", want, joined)
+	for _, want := range []string{"push", "dirty"} {
+		if !strings.Contains(strings.ToLower(b.String()), want) {
+			t.Errorf("sync runtime help omitted %q:\n%s", want, b.String())
 		}
 	}
 }
 
-// TestSuggestVerb pins did-you-mean: a near-miss typo maps to the real verb, and
-// garbage maps to nothing rather than a random suggestion.
 func TestSuggestVerb(t *testing.T) {
 	if got := suggestVerb("comit"); got != "commit" {
 		t.Errorf("suggestVerb(comit) = %q, want commit", got)

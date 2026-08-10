@@ -1,139 +1,57 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-// The C2 (#2231, epic #2228) namespace contract for `fak dev`. resolveDevVerb is
-// the whole decision surface (main() only rewrites os.Args on exit == -1), so
-// these tests pin the contract without process spawns:
-//
-//   - a dev-tier verb (any alias spelling) dispatches with its args intact;
-//   - a frontdoor verb refuses — one spelling per frontdoor verb;
-//   - a hidden seam is NOT advertised: it takes the unknown path, no suggestion;
-//   - an unknown token gets a tier-aware did-you-mean;
-//   - bare / -h / --help print the dev-tier listing (dev verbs only).
+func TestRunDevHandoffExecutesSeparateArtifact(t *testing.T) {
+	dir := t.TempDir()
+	name := "fak-dev"
+	body := "#!/bin/sh\nprintf 'child:%s\\n' \"$*\"\nprintf 'child-err\\n' >&2\nexit 7\n"
+	if runtime.GOOS == "windows" {
+		name += ".cmd"
+		body = "@echo off\r\necho child:%*\r\necho child-err 1>&2\r\nexit /b 7\r\n"
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := findFakDev
+	findFakDev = func() (string, error) { return path, nil }
+	t.Cleanup(func() { findFakDev = old })
 
-func resolveDev(t *testing.T, argv ...string) (string, []string, int, string, string) {
-	t.Helper()
-	var out, errb strings.Builder
-	v, rest, code := resolveDevVerb(argv, &out, &errb)
-	return v, rest, code, out.String(), errb.String()
-}
-
-func TestResolveDevVerbDispatchesDevTier(t *testing.T) {
-	v, rest, code, _, _ := resolveDev(t, "sweep", "--dir", "x")
-	if code != -1 || v != "sweep" {
-		t.Fatalf("resolveDevVerb(sweep) = (%q, %v, %d), want dispatch of sweep", v, rest, code)
+	var stdout, stderr bytes.Buffer
+	got := runDevHandoff(strings.NewReader(""), &stdout, &stderr, []string{"index", "ownership", "--json"})
+	if got != 7 {
+		t.Fatalf("exit = %d, want child exit 7; stderr=%s", got, stderr.String())
 	}
-	if len(rest) != 2 || rest[0] != "--dir" || rest[1] != "x" {
-		t.Fatalf("args not passed through intact: %v", rest)
+	if !strings.Contains(stdout.String(), "child:index ownership --json") {
+		t.Fatalf("stdout did not prove argv handoff: %q", stdout.String())
 	}
-	// An alias spelling of a dev verb dispatches too — under its own token, which
-	// the dispatch switch routes identically.
-	if v, _, code, _, _ := resolveDev(t, "benchloop"); code != -1 || v != "benchloop" {
-		t.Errorf("resolveDevVerb(benchloop) = (%q, %d), want dispatch", v, code)
-	}
-	// Case-insensitive like the rest of the verb machinery.
-	if v, _, code, _, _ := resolveDev(t, "SWEEP"); code != -1 || v != "sweep" {
-		t.Errorf("resolveDevVerb(SWEEP) = (%q, %d), want lowercased dispatch", v, code)
-	}
-	// Dev-only commands do not have a bare top-level dispatch case, but still
-	// route through the dev namespace.
-	if v, rest, code, _, _ := resolveDev(t, "gh-spam-comments", "--json"); code != -1 || v != "gh-spam-comments" || len(rest) != 1 || rest[0] != "--json" {
-		t.Errorf("resolveDevVerb(gh-spam-comments) = (%q, %v, %d), want dev-only dispatch", v, rest, code)
+	if !strings.Contains(stderr.String(), "child-err") {
+		t.Fatalf("stderr was not connected: %q", stderr.String())
 	}
 }
 
-func TestResolveDevVerbRefusesFrontdoor(t *testing.T) {
-	_, _, code, _, errs := resolveDev(t, "guard")
-	if code != 2 {
-		t.Fatalf("resolveDevVerb(guard) exit = %d, want 2", code)
-	}
-	if !strings.Contains(errs, "'fak guard'") || !strings.Contains(errs, "frontdoor") {
-		t.Errorf("frontdoor refusal must name the one true spelling; got: %s", errs)
-	}
-}
+func TestRunDevHandoffMissingArtifactIsActionable(t *testing.T) {
+	old := findFakDev
+	findFakDev = func() (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { findFakDev = old })
 
-func TestResolveDevVerbHidesHiddenSeams(t *testing.T) {
-	_, _, code, _, errs := resolveDev(t, "guard-stophook")
-	if code != 2 {
-		t.Fatalf("resolveDevVerb(guard-stophook) exit = %d, want 2", code)
+	var stderr bytes.Buffer
+	if got := runDevHandoff(strings.NewReader(""), io.Discard, &stderr, []string{"index"}); got != 2 {
+		t.Fatalf("exit = %d, want 2", got)
 	}
-	if !strings.Contains(errs, "unknown verb") {
-		t.Errorf("a hidden seam must take the unknown path, got: %s", errs)
-	}
-	if strings.Contains(errs, "did you mean") {
-		t.Errorf("a hidden seam must not be suggested back: %s", errs)
-	}
-}
-
-func TestResolveDevVerbSuggestsTierAware(t *testing.T) {
-	_, _, code, _, errs := resolveDev(t, "swep")
-	if code != 2 {
-		t.Fatalf("resolveDevVerb(swep) exit = %d, want 2", code)
-	}
-	if !strings.Contains(errs, "did you mean 'fak dev sweep'?") {
-		t.Errorf("dev-tier near-miss must suggest the dev spelling; got: %s", errs)
-	}
-	// A near-miss of a FRONTDOOR verb points at the bare spelling.
-	_, _, _, _, errs = resolveDev(t, "guardd")
-	if !strings.Contains(errs, "did you mean 'fak guard'?") {
-		t.Errorf("frontdoor near-miss must suggest the bare spelling; got: %s", errs)
-	}
-}
-
-func TestDevListingIsDevTierOnly(t *testing.T) {
-	_, _, code, out, _ := resolveDev(t)
-	if code != 0 {
-		t.Fatalf("bare `fak dev` exit = %d, want 0 (the listing)", code)
-	}
-	for _, want := range []string{"  sweep\t", "  commit\t", "  scorecard\t", "  gh-spam-comments\t"} {
-		if !strings.Contains(out, strings.ReplaceAll(want, "\t", "")) {
-			t.Errorf("dev listing missing dev verb %q", strings.TrimSpace(want))
+	for _, want := range []string{"separate 'fak-dev' executable", "fak-dev <command>"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("missing %q in actionable error:\n%s", want, stderr.String())
 		}
-	}
-	// Every dev verb appears EXACTLY ONCE (#2231 DoD): the listing is a set, not a
-	// bag. A verb line is an indented ("  name\tsynopsis") row; header/footer sit at
-	// column 0. A duplicate first-field would be a merge bug in devTierVerbs (e.g. a
-	// verb present in both the live catalog and devOnlyVerbs), which this pins.
-	seen := map[string]int{}
-	for _, ln := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(ln, "  ") { // header/footer lines start at column 0
-			continue
-		}
-		f := strings.Fields(ln)
-		if len(f) == 0 {
-			continue
-		}
-		seen[f[0]]++
-	}
-	if len(seen) == 0 {
-		t.Fatalf("no verb lines parsed from the dev listing; head: %.120s", out)
-	}
-	for verb, n := range seen {
-		if n != 1 {
-			t.Errorf("dev verb %q appears %d times in the listing, want exactly 1 (the tier is a set)", verb, n)
-		}
-	}
-	for _, want := range []string{"sweep", "commit", "scorecard", "gh-spam-comments"} {
-		if seen[want] != 1 {
-			t.Errorf("dev verb %q counted %d times, want exactly 1", want, seen[want])
-		}
-	}
-	for _, ln := range strings.Split(out, "\n") {
-		f := strings.Fields(ln)
-		if len(f) > 0 && (f[0] == "guard" || f[0] == "serve" || f[0] == "guard-stophook") {
-			t.Errorf("dev listing leaked a non-dev verb line: %q", ln)
-		}
-	}
-	if !strings.Contains(out, "fak dev <verb> [args...]") {
-		t.Errorf("listing must show the usage line; got head: %.120s", out)
-	}
-	// --help prints the same listing.
-	_, _, code, out2, _ := resolveDev(t, "--help")
-	if code != 0 || out2 != out {
-		t.Errorf("`fak dev --help` must print the same listing (exit %d)", code)
 	}
 }

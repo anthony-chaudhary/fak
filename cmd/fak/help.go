@@ -14,9 +14,8 @@
 // cannot drift: help_test.go asserts every overview verb is live in the dispatch
 // switch and that the overview stays compact. Per-verb depth is carved from the
 // usage.go wall constants at runtime, so there is exactly one authored copy of
-// each verb's documentation. The devindex catalog (when the repo is readable)
-// supplies the --all index and upgrades did-you-mean; outside a repo help still
-// works from the compiled-in wall alone.
+// each verb's documentation. Runtime help has no repository-development catalog
+// dependency; the separate fak-dev artifact owns that inventory.
 package main
 
 import (
@@ -27,7 +26,6 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
 // overviewEntry is one curated line of the compact overview. The blurb is
@@ -38,19 +36,9 @@ type overviewEntry struct {
 	blurb string
 }
 
-// overviewGroups is the compact overview: the FRONTDOOR tier and only the
-// frontdoor tier (epic #2228 C3, #2232), grouped by what an operator or adopter
-// of the kernel is doing. Membership is no longer taste — it is C1's tier
-// classification (internal/devindex): help_test.go's TestOverviewIsExactlyFrontdoor
-// asserts this set EQUALS the frontdoor tier, so the visible front door and the
-// classification can never drift. The dev/repo tooling (~240 verbs) lives one
-// level down under `fak dev`; the compact overview names the count and the door.
-// INSTALL.md "What's in the binary" is the ADOPTER-facing half of that split (#5465):
-// why a gateway binary carries them, and why they are inert in a production image.
-//
-// The replay/top/pull/ls frontdoor companions fold into run/ps/model (see
-// frontdoorCompanions) and are named in their primary's blurb rather than given
-// their own line — the concept count stays ~20 without hiding a spelling.
+// overviewGroups is the compact runtime-product overview, grouped by what an
+// operator or adopter is doing. Repository-development inventory and search are
+// exposed by the separately built fak-dev artifact.
 var overviewGroups = []struct {
 	title   string
 	entries []overviewEntry
@@ -112,13 +100,8 @@ func usageCompact(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
-	if n := len(devTierVerbs()); n > 0 {
-		fmt.Fprintf(w, "%d dev/repo verbs live under 'fak dev' — 'fak dev' lists them.\n", n)
-	}
-	if cat := helpCatalog(); cat != nil {
-		fmt.Fprintf(w, "%d verbs in this build. ", len(cat.Verbs()))
-	}
-	fmt.Fprintln(w, "'fak help --all' lists every verb;")
+	fmt.Fprintln(w, "repository-development tooling is in the separate 'fak-dev' executable.")
+	fmt.Fprintln(w, "'fak help --all' lists runtime usage;")
 	fmt.Fprintln(w, "'fak help <verb>' explains one in depth; 'fak <verb> -h' lists its flags.")
 }
 
@@ -148,39 +131,10 @@ func cmdHelp(args []string) {
 	}
 }
 
-// usageAllVerbs prints the one-line-per-verb index of the whole catalog: the
-// devindex live view (dispatch-derived coverage, curated synopses) when the repo
-// is readable, else the compiled-in wall.
+// usageAllVerbs prints runtime fak's complete usage wall. The development command
+// catalog belongs to fak-dev and is intentionally absent from this binary.
 func usageAllVerbs(w io.Writer) {
-	cat := helpCatalog()
-	if cat == nil {
-		usageWall(w)
-		return
-	}
-	// Hidden-tier verbs are internal re-exec/hook seams — never listed, here or
-	// anywhere (C1). Everything else carries its tier so the two-tier story is
-	// visible per line, not just in the compact front door.
-	var verbs []devindex.Verb
-	for _, v := range cat.Verbs() {
-		if v.Tier == devindex.TierHidden {
-			continue
-		}
-		verbs = append(verbs, v)
-	}
-	fmt.Fprintf(w, "fak - the Fused Agent Kernel (v%s) — %d verbs\n\n", appversion.Current(), len(verbs))
-	for _, v := range verbs {
-		name := v.Name
-		if len(v.Aliases) > 0 {
-			name += " (" + strings.Join(v.Aliases, ", ") + ")"
-		}
-		tier := string(v.Tier)
-		if tier == "" {
-			tier = "-"
-		}
-		fmt.Fprintf(w, "  %-34s %-11s %s\n", name, "["+tier+"]", v.Synopsis)
-	}
-	fmt.Fprintln(w, "\nverbs are tiered: [frontdoor] is the product; [dev] is 'fak dev <verb>' tooling.")
-	fmt.Fprintln(w, "'fak help <verb>' explains one in depth; 'fak <verb> -h' lists its flags.")
+	usageWall(w)
 }
 
 // printVerbHelp prints one verb's deep help: the catalog synopsis line (when
@@ -203,44 +157,12 @@ func printVerbHelp(w io.Writer, tok string) bool {
 // nor the wall knows the verb.
 func verbDeepHelpBody(w io.Writer, tok string) bool {
 	tok = strings.ToLower(strings.TrimSpace(tok))
-	spellings := []string{tok}
-	var header string
-	cat := helpCatalog()
-	if cat == nil {
-		// VerbByName reads only the curated manifest, so an unloaded catalog
-		// still answers — help works outside a repo.
-		cat = &devindex.Catalog{}
-	}
-	if v, ok := cat.VerbByName(tok); ok {
-		spellings = v.Spellings()
-		// A dev-tier verb's canonical spelling is `fak dev <verb>` (C2/#2231);
-		// the header names it so `fak help <devverb>` teaches the real invocation
-		// even though help itself is never gated by tier. Frontdoor stays `fak <verb>`.
-		canonical := "fak " + v.Name
-		if t, _ := devindex.TierOf(v.Name); t == devindex.TierDev {
-			canonical = "fak dev " + v.Name
-		}
-		header = fmt.Sprintf("%s — %s", canonical, v.Synopsis)
-		if len(v.Aliases) > 0 {
-			header += "\naliases: " + strings.Join(v.Aliases, ", ")
-		}
-		if v.Doc != "" {
-			header += "\nsee also: " + v.Doc
-		}
-	}
-	sections := verbWallSections(spellings)
-	if header == "" && len(sections) == 0 {
+	sections := verbWallSections([]string{tok})
+	if len(sections) == 0 {
 		return false
 	}
-	if header != "" {
-		fmt.Fprintln(w, header)
-	}
-	for _, s := range sections {
-		fmt.Fprintln(w)
-		fmt.Fprint(w, s)
-	}
-	if len(sections) == 0 {
-		fmt.Fprintln(w)
+	for _, section := range sections {
+		fmt.Fprint(w, section)
 	}
 	return true
 }
@@ -341,31 +263,22 @@ func suggestVerb(tok string) string {
 			best, bestDist = name, d
 		}
 	}
-	cat := helpCatalog()
-	if cat != nil {
-		for _, v := range cat.Verbs() {
-			for _, sp := range v.Spellings() {
-				consider(sp)
-			}
+	for _, group := range overviewGroups {
+		for _, entry := range group.entries {
+			consider(entry.name)
 		}
 	}
 	for _, line := range strings.Split(usageWallText(), "\n") {
-		if t, ok := wallHeaderVerb(line); ok {
-			consider(t)
+		if name, ok := wallHeaderVerb(line); ok {
+			consider(name)
 		}
 	}
-	// Short tokens need a tight radius or the suggestion is noise.
 	maxDist := 2
 	if len(tok) <= 3 {
 		maxDist = 1
 	}
 	if best != "" && bestDist <= maxDist {
 		return best
-	}
-	if cat != nil {
-		if hits := cat.SearchVerbs(tok); len(hits) > 0 {
-			return hits[0].Name
-		}
 	}
 	return ""
 }
@@ -378,23 +291,5 @@ func suggestVerb(tok string) string {
 // `fak swep` already answers "did you mean 'fak dev sweep'?" (help stays ungated,
 // so `fak help <typo>` keeps suggesting the bare `fak help <verb>` spelling).
 func suggestVerbSpelling(tok string) string {
-	s := suggestVerb(tok)
-	if s == "" {
-		return ""
-	}
-	if t, ok := devindex.TierOf(s); ok && t == devindex.TierDev {
-		return "dev " + s
-	}
-	return s
-}
-
-// helpCatalog loads the devindex catalog when the repo is readable (dos.toml
-// found from cwd), else nil — help then runs from the compiled-in wall alone.
-func helpCatalog() *devindex.Catalog {
-	root := devindex.FindRoot(".")
-	cat, err := devindex.Load(root)
-	if err != nil {
-		return nil
-	}
-	return cat
+	return suggestVerb(tok)
 }
