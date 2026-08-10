@@ -662,12 +662,7 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdBlast(args)
 	case "buildcheck":
 		cmdBuildCheck(args)
-	case "boundary":
-		// The boundary-tell linter as a verb (cmd/fak/boundary.go). It shipped with a
-		// devindex entry and a CI step that shells `go run ./cmd/fak boundary`, but no
-		// dispatch arm -- so the advertised verb resolved to "unknown verb" and its gate
-		// exited 2 without ever running a witness.
-		os.Exit(runBoundary(os.Stdout, os.Stderr, args))
+
 	case "go":
 		cmdGoShim(args)
 	case "worktree":

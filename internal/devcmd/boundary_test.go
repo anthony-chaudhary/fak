@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -29,7 +29,7 @@ func TestBoundaryCleanWorkspace(t *testing.T) {
 	writeBoundaryFile(t, root, "internal/x/x.go", "package x\n\nfunc F() int { return 1 }\n")
 
 	var out, errOut bytes.Buffer
-	rc := runBoundary(&out, &errOut, []string{"--workspace", root, "--json"})
+	rc := RunBoundary(&out, &errOut, []string{"--workspace", root, "--json"})
 	if rc != 0 {
 		t.Fatalf("clean workspace: rc=%d want 0 (stderr=%s)", rc, errOut.String())
 	}
@@ -60,7 +60,7 @@ func TestBoundaryDirtyWorkspaceURLTell(t *testing.T) {
 		"package x\n\nconst U = \"https://huggingface.co/org/repo/resolve/main/model.gguf\"\n")
 
 	var out, errOut bytes.Buffer
-	rc := runBoundary(&out, &errOut, []string{"--workspace", root, "--json"})
+	rc := RunBoundary(&out, &errOut, []string{"--workspace", root, "--json"})
 	if rc != 1 {
 		t.Fatalf("dirty workspace: rc=%d want 1 (stderr=%s)", rc, errOut.String())
 	}
@@ -96,7 +96,7 @@ func TestBoundaryAllowlistedChokepoint(t *testing.T) {
 		"package main\n\nconst U = \"https://huggingface.co/org/repo/resolve/main/model.gguf\"\n\nfunc main() {}\n")
 
 	var out, errOut bytes.Buffer
-	rc := runBoundary(&out, &errOut, []string{"--workspace", root})
+	rc := RunBoundary(&out, &errOut, []string{"--workspace", root})
 	if rc != 0 {
 		t.Fatalf("allowlisted chokepoint: rc=%d want 0 (stderr=%s, stdout=%s)", rc, errOut.String(), out.String())
 	}
@@ -105,7 +105,7 @@ func TestBoundaryAllowlistedChokepoint(t *testing.T) {
 // A stray positional is a usage error (exit 2), per the cmd/fak convention.
 func TestBoundaryRejectsPositional(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if rc := runBoundary(&out, &errOut, []string{"extra"}); rc != 2 {
+	if rc := RunBoundary(&out, &errOut, []string{"extra"}); rc != 2 {
 		t.Fatalf("positional: rc=%d want 2", rc)
 	}
 }

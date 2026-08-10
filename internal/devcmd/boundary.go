@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 // fak boundary — the BOUNDARY-TELL linter run as a verb, not just a test. The
 // kernel's "the part that doesn't believe the agents" discipline, turned on the
@@ -73,15 +73,18 @@ const boundarySchema = "fak-boundary-lint/1"
 // whose URLs the reachability test HEAD-checks.
 var urllintAllow = map[string]bool{"cmd/simpledemo/main.go": true}
 
-// runBoundary is the testable core: it returns the process exit code instead of
+// RunBoundary is the testable core: it returns the process exit code instead of
 // calling os.Exit, and takes its streams explicitly.
-func runBoundary(stdout, stderr io.Writer, argv []string) int {
+func RunBoundary(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak boundary", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
-	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
-		return rc
+	if err := fs.Parse(argv); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak boundary: unexpected argument %q\n", fs.Arg(0))

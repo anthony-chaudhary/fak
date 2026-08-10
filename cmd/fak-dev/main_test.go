@@ -131,6 +131,23 @@ func TestRunDispatchesWhatsChangedUsage(t *testing.T) {
 		t.Fatalf("stderr=%s", errOut.String())
 	}
 }
+func TestRunDispatchesBoundaryUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"boundary", "extra"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchBoundary(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "fak", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(src, []byte(`case "boundary":`)) {
+		t.Fatal("runtime fak still dispatches dev-owned boundary")
+	}
+}
 func TestRuntimeSourceDoesNotDispatchWhatsChanged(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("..", "fak", "main.go"))
 	if err != nil {
