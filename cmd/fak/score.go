@@ -42,6 +42,7 @@ var scoreRoutes = map[string]func(argv []string){
 	"guard-rsi":           cmdGuardRSIScorecard,
 	"guard-verdict-rsi":   cmdGuardVerdictRSI,
 	"issue-hygiene":       cmdIssueHygieneScorecard,
+	"lightgap":            cmdLightgapScore,
 	"loop":                cmdLoopScore,
 	"loop-index":          cmdLoopIndexScorecard,
 	"milestone":           cmdMilestoneScorecard,
