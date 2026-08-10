@@ -157,6 +157,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native Go expression AST matching with metavariable back-references, wildcards, bindings, and source positions",
 	},
 	{
+		Leaf: "internal/trigram", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"indexed_literal_code_search"},
+		Reason:       "native trigram-postings literal search with exact line verification and short-query fallback is covered; regex candidate extraction and lexical similarity remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -574,6 +579,21 @@ var contracts = []Contract{{
 			{Name: "gogrep", Class: NextBest, Source: "https://github.com/mvdan/gogrep"},
 		},
 		Witness: "../../docs/benchmarks/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "indexed_literal_code_search",
+		NativePath: "internal/trigram/trigram.go",
+		Workload:   "same six-file corpus and four literal queries spanning multiple matches, no match, short-pattern fallback, and Unicode with exact ordered path/line oracle",
+		Metrics:    []string{"exact_queries", "false_positives", "false_negatives", "location_errors", "build_latency_ms", "query_latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "corpus_bytes", "index_bytes", "network_bytes", "storage_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "optimized in-memory linear scan", Class: TunedBaseline, Source: "internal/trigram/compare.go"},
+			{Name: "ripgrep", Class: NextBest, Source: "https://github.com/BurntSushi/ripgrep"},
+			{Name: "git grep", Class: NextBest, Source: "https://git-scm.com/docs/git-grep"},
+			{Name: "Zoekt", Class: NextBest, Source: "https://github.com/sourcegraph/zoekt"},
+			{Name: "livegrep", Class: NextBest, Source: "https://github.com/livegrep/livegrep"},
+			{Name: "Sourcegraph Search", Class: NextBest, Source: "https://sourcegraph.com/docs/code-search"},
+		},
+		Witness: "../../docs/benchmarks/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "worker_launch_latency_summary",
