@@ -177,7 +177,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	}
 	for _, l := range report.Leaves {
 		if *leaf != "" || len(l.ViolationEdges) > 0 {
-			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) gap=%d deps=%v dependents=%v blast-radius=%d", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.TierGap, l.Dependencies, l.Dependents, l.BlastRadius)
+			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) gap=%d deps=%v dependents=%v dependency-reach=%d dependency-depth=%d blast-radius=%d", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.TierGap, l.Dependencies, l.Dependents, l.DependencyReach, l.DependencyDepth, l.BlastRadius)
 			if len(l.ViolationEdges) > 0 {
 				fmt.Fprint(stdout, " violations=[")
 				for i, edge := range l.ViolationEdges {
@@ -189,6 +189,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 				fmt.Fprint(stdout, "]")
 			}
 			fmt.Fprintln(stdout)
+			if *leaf != "" && len(l.DependencyPaths) > 0 {
+				fmt.Fprintln(stdout, "    dependency paths:")
+				for _, path := range l.DependencyPaths {
+					fmt.Fprintf(stdout, "      %s: %s\n", path.Dependency, strings.Join(path.Path, " -> "))
+				}
+			}
 			if *leaf != "" && len(l.BlastPaths) > 0 {
 				fmt.Fprintln(stdout, "    blast paths:")
 				for _, path := range l.BlastPaths {

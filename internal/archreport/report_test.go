@@ -10,6 +10,82 @@ import (
 	"testing"
 )
 
+func TestDependencyReachUsesCanonicalShortestPathsAndTerminatesCycles(t *testing.T) {
+	leaves := []Leaf{
+		{Name: "a", Dependencies: []string{"c", "b"}},
+		{Name: "b", Dependencies: []string{"d"}},
+		{Name: "c", Dependencies: []string{"d"}},
+		{Name: "d", Dependencies: []string{"e"}},
+		{Name: "e", Dependencies: []string{"a"}},
+		{Name: "z"},
+	}
+	byName := map[string]int{"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "z": 5}
+	want := []DependencyPath{
+		{Dependency: "b", Path: []string{"a", "b"}},
+		{Dependency: "c", Path: []string{"a", "c"}},
+		{Dependency: "d", Path: []string{"a", "b", "d"}},
+		{Dependency: "e", Path: []string{"a", "b", "d", "e"}},
+	}
+	for i := 0; i < 100; i++ {
+		if got := dependencyPaths("a", leaves, byName); !reflect.DeepEqual(got, want) {
+			t.Fatalf("run %d paths=%+v want=%+v", i, got, want)
+		}
+	}
+}
+
+func TestAnalyzeDependencyReachScopedParity(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":1,"c":1,"d":0,"z":0}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	write("internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/c"; _ "github.com/anthony-chaudhary/fak/internal/b")
+`)
+	write("internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/d/d.go", "package d\n")
+	write("internal/z/z.go", "package z\n")
+	whole, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := Analyze(root, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wholeA Leaf
+	for _, leaf := range whole.Leaves {
+		if leaf.Name == "a" {
+			wholeA = leaf
+		}
+	}
+	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0], wholeA) {
+		t.Fatalf("scoped=%+v whole-a=%+v", scoped.Leaves, wholeA)
+	}
+	if wholeA.DependencyReach != 3 || wholeA.DependencyDepth != 2 || !reflect.DeepEqual(wholeA.TransitiveDependencies, []string{"b", "c", "d"}) {
+		t.Fatalf("leaf a=%+v", wholeA)
+	}
+	wantPaths := []DependencyPath{{Dependency: "b", Path: []string{"a", "b"}}, {Dependency: "c", Path: []string{"a", "c"}}, {Dependency: "d", Path: []string{"a", "b", "d"}}}
+	if !reflect.DeepEqual(wholeA.DependencyPaths, wantPaths) {
+		t.Fatalf("paths=%+v want=%+v", wholeA.DependencyPaths, wantPaths)
+	}
+}
+
 func TestLateralBlockVertexConnectivityQuantifiesPackageSeparators(t *testing.T) {
 	members := []string{"a", "b", "c", "d"}
 	cycle := map[string][2]string{"ab": {"a", "b"}, "bc": {"b", "c"}, "cd": {"c", "d"}, "ad": {"a", "d"}, "duplicate": {"b", "a"}}

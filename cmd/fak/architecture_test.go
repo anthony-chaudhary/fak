@@ -51,6 +51,33 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 	}
 }
 
+func TestArchitectureTextRendersDependencyReachAndPaths(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":1,"c":1,"d":0}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/c"; _ "github.com/anthony-chaudhary/fak/internal/b")
+`)
+	mustWriteArchitectureFile(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	mustWriteArchitectureFile(t, root, "internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	mustWriteArchitectureFile(t, root, "internal/d/d.go", "package d\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "a"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"dependency-reach=3 dependency-depth=2", "dependency paths:", "b: a -> b", "c: a -> c", "d: a -> b -> d"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
 func TestRunArchitectureTextNamesDependentsAndBlastRadius(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

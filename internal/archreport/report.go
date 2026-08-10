@@ -24,19 +24,28 @@ type Tier struct {
 	Leaves int    `json:"leaves"`
 }
 type Leaf struct {
-	Name                 string          `json:"name"`
-	DeclaredTier         int             `json:"declared_tier"`
-	DeclaredTierName     string          `json:"declared_tier_name"`
-	ImportFloor          int             `json:"import_floor"`
-	ImportFloorName      string          `json:"import_floor_name"`
-	TierGap              int             `json:"tier_gap"`
-	Dependencies         []string        `json:"dependencies"`
-	Dependents           []string        `json:"dependents,omitempty"`
-	TransitiveDependents []string        `json:"transitive_dependents"`
-	BlastRadius          int             `json:"blast_radius"`
-	BlastPaths           []BlastPath     `json:"blast_paths"`
-	ViolationEdges       []ViolationEdge `json:"violation_edges,omitempty"`
-	Violations           []string        `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
+	Name                   string           `json:"name"`
+	DeclaredTier           int              `json:"declared_tier"`
+	DeclaredTierName       string           `json:"declared_tier_name"`
+	ImportFloor            int              `json:"import_floor"`
+	ImportFloorName        string           `json:"import_floor_name"`
+	TierGap                int              `json:"tier_gap"`
+	Dependencies           []string         `json:"dependencies"`
+	TransitiveDependencies []string         `json:"transitive_dependencies"`
+	DependencyReach        int              `json:"dependency_reach"`
+	DependencyDepth        int              `json:"dependency_depth"`
+	DependencyPaths        []DependencyPath `json:"dependency_paths"`
+	Dependents             []string         `json:"dependents,omitempty"`
+	TransitiveDependents   []string         `json:"transitive_dependents"`
+	BlastRadius            int              `json:"blast_radius"`
+	BlastPaths             []BlastPath      `json:"blast_paths"`
+	ViolationEdges         []ViolationEdge  `json:"violation_edges,omitempty"`
+	Violations             []string         `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
+}
+
+type DependencyPath struct {
+	Dependency string   `json:"dependency"`
+	Path       []string `json:"path"`
 }
 
 type BlastPath struct {
@@ -288,6 +297,15 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	}
 	for i := range allLeaves {
 		sort.Strings(allLeaves[i].Dependents)
+		allLeaves[i].DependencyPaths = dependencyPaths(allLeaves[i].Name, allLeaves, byName)
+		allLeaves[i].TransitiveDependencies = make([]string, len(allLeaves[i].DependencyPaths))
+		for j, path := range allLeaves[i].DependencyPaths {
+			allLeaves[i].TransitiveDependencies[j] = path.Dependency
+			if depth := len(path.Path) - 1; depth > allLeaves[i].DependencyDepth {
+				allLeaves[i].DependencyDepth = depth
+			}
+		}
+		allLeaves[i].DependencyReach = len(allLeaves[i].DependencyPaths)
 		allLeaves[i].BlastPaths = blastPaths(allLeaves[i].Name, allLeaves, byName)
 		allLeaves[i].TransitiveDependents = make([]string, len(allLeaves[i].BlastPaths))
 		for j, path := range allLeaves[i].BlastPaths {
@@ -1102,6 +1120,37 @@ func lateralComponents(edges []ArchitectureEdge, tiers map[string]int, names []s
 		}
 		return strings.Join(out[i].Members, "\x00") < strings.Join(out[j].Members, "\x00")
 	})
+	return out
+}
+
+func dependencyPaths(name string, leaves []Leaf, byName map[string]int) []DependencyPath {
+	paths := map[string][]string{name: {name}}
+	pending := []string{name}
+	for len(pending) > 0 {
+		current := pending[0]
+		pending = pending[1:]
+		dependencies := append([]string(nil), leaves[byName[current]].Dependencies...)
+		sort.Strings(dependencies)
+		for _, dependency := range dependencies {
+			candidate := append(append([]string(nil), paths[current]...), dependency)
+			existing, seen := paths[dependency]
+			if seen && (len(existing) < len(candidate) || len(existing) == len(candidate) && strings.Join(existing, "\x00") <= strings.Join(candidate, "\x00")) {
+				continue
+			}
+			paths[dependency] = candidate
+			pending = append(pending, dependency)
+		}
+	}
+	delete(paths, name)
+	dependencies := make([]string, 0, len(paths))
+	for dependency := range paths {
+		dependencies = append(dependencies, dependency)
+	}
+	sort.Strings(dependencies)
+	out := make([]DependencyPath, 0, len(dependencies))
+	for _, dependency := range dependencies {
+		out = append(out, DependencyPath{Dependency: dependency, Path: paths[dependency]})
+	}
 	return out
 }
 
