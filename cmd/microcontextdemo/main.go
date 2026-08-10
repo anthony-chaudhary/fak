@@ -390,6 +390,12 @@ func main() {
 	var tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput, verifyTunedBaselinesPath string
 	var routingVOIOutput, verifyRoutingVOIPath string
 	var routingVOISeed int64
+	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
+	var semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator string
+	var semanticPerSplit int
+	var semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput string
+	var semanticGradeGold, semanticGradeSubmission, semanticGradeOutput, semanticGradeSplit string
+	var verifySemanticGoldPath, verifySemanticGradePath string
 	var routingVOITrials, routingVOIRecords int
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
@@ -474,6 +480,25 @@ func main() {
 	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
 	flag.IntVar(&routingVOIRecords, "routing-voi-records", 200, "records per mixture and trial")
+	flag.StringVar(&semanticCorpus, "semantic-packet-corpus", "", "public corpus used to build a blinded semantic packet")
+	flag.StringVar(&semanticPacketOutput, "semantic-packet-output", "", "write a blinded semantic annotation packet")
+	flag.IntVar(&semanticPerSplit, "semantic-per-split", 16, "semantic packet records per tune/test split")
+	flag.StringVar(&semanticPacketInput, "semantic-adjudicate-packet", "", "semantic packet to adjudicate through a live endpoint")
+	flag.StringVar(&semanticJudgmentOutput, "semantic-adjudicate-output", "", "write one adjudicator bundle")
+	flag.StringVar(&semanticEndpoint, "semantic-endpoint", "", "OpenAI-compatible endpoint root for semantic adjudication")
+	flag.StringVar(&semanticAPIKey, "semantic-api-key", "", "API key for semantic endpoint")
+	flag.StringVar(&semanticModel, "semantic-model", "", "semantic adjudicator model id")
+	flag.StringVar(&semanticAdjudicator, "semantic-adjudicator", "", "independent adjudicator identity")
+	flag.StringVar(&semanticFoldPacket, "semantic-fold-packet", "", "packet bound to two independent adjudicators")
+	flag.StringVar(&semanticFoldA, "semantic-fold-a", "", "first independent adjudicator bundle")
+	flag.StringVar(&semanticFoldB, "semantic-fold-b", "", "second independent adjudicator bundle")
+	flag.StringVar(&semanticGoldOutput, "semantic-gold-output", "", "write hidden semantic consensus/abstention answers")
+	flag.StringVar(&semanticGradeGold, "semantic-grade-gold", "", "hidden semantic answers for blind grading")
+	flag.StringVar(&semanticGradeSubmission, "semantic-grade-submission", "", "candidate semantic submission")
+	flag.StringVar(&semanticGradeOutput, "semantic-grade-output", "", "write semantic blind grade")
+	flag.StringVar(&semanticGradeSplit, "semantic-grade-split", "test", "split to grade")
+	flag.StringVar(&verifySemanticGoldPath, "verify-semantic-gold", "", "verify semantic consensus artifact")
+	flag.StringVar(&verifySemanticGradePath, "verify-semantic-grade", "", "verify semantic blind grade")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -512,6 +537,46 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
+		return
+	}
+	if semanticFoldPacket != "" {
+		if err := foldSemanticAdjudicators(semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic fold: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS semantic fold %s\n", semanticGoldOutput)
+		return
+	}
+	if semanticGradeSubmission != "" {
+		if err := gradeSemanticFiles(semanticGradeGold, semanticGradeSubmission, semanticGradeOutput, semanticGradeSplit); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic grade: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS semantic grade %s\n", semanticGradeOutput)
+		return
+	}
+	if verifySemanticGoldPath != "" {
+		runVerify("verify-semantic-gold", verifySemanticGoldPath, verifySemanticGold)
+		return
+	}
+	if verifySemanticGradePath != "" {
+		runVerify("verify-semantic-grade", verifySemanticGradePath, verifySemanticGrade)
+		return
+	}
+	if semanticCorpus != "" {
+		if err := makeSemanticPacket(semanticCorpus, semanticPacketOutput, semanticPerSplit); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic packet: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS semantic packet %s\n", semanticPacketOutput)
+		return
+	}
+	if semanticPacketInput != "" {
+		if err := runSemanticAdjudicator(semanticPacketInput, semanticJudgmentOutput, semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic adjudicator: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS semantic adjudicator %s\n", semanticJudgmentOutput)
 		return
 	}
 	if routingVOIOutput != "" {

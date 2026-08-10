@@ -1,0 +1,368 @@
+{
+  "schema": "fak-microcontext-semantic-judgments/1",
+  "adjudicator": "independent-openai",
+  "model": "gpt-5.6-sol",
+  "prompt_version": "semantic-residual-v1",
+  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "created_at": "2026-08-10T11:15:19Z",
+  "judgments": [
+    {
+      "id": "issue-6084",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Architecture reporting represents stale tier declarations as named diagnostics instead of aborting"
+      ],
+      "rationale": "Clear defect, desired behavior, tests, and completion criteria."
+    },
+    {
+      "id": "issue-5146",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.96,
+      "evidence": [
+        "Update only the authoritative baseline/fixture or fix the violating implementation; do not weaken gates."
+      ],
+      "rationale": "Clear remediation and success criteria require repository and CI validation."
+    },
+    {
+      "id": "issue-5782",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "not_actionable",
+      "confidence": 0.99,
+      "evidence": [
+        "dispatchability: `triage_only`"
+      ],
+      "rationale": "Explicitly requires human triage before becoming worker-ready."
+    },
+    {
+      "id": "issue-5211",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.99,
+      "evidence": [
+        "Add a fail-closed candidate provenance read-back before `Move-Item` swaps the installed executable."
+      ],
+      "rationale": "Explicit implementation steps, verification requirements, and regression-test criteria."
+    },
+    {
+      "id": "issue-5718",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Run a bounded serving comparison for routing, prefix reuse, cancellation, streaming, and failure receipts."
+      ],
+      "rationale": "Requires repository research, comparative testing, and synthesized findings."
+    },
+    {
+      "id": "issue-5847",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "tools/fleet_regdir.py is a NEW python tool; port it to Go instead (NEW_PYTHON_TOOL)"
+      ],
+      "rationale": "Requires code migration and verification against current main."
+    },
+    {
+      "id": "issue-5501",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "not_actionable",
+      "confidence": 0.99,
+      "evidence": [
+        "dispatchability: `triage_only`"
+      ],
+      "rationale": "Explicitly marked triage-only and lacking worker-ready acceptance criteria."
+    },
+    {
+      "id": "issue-5253",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Root cause: a bare `index.lock` is never auto-reaped"
+      ],
+      "rationale": "Explicit bug, root cause, and requested fix."
+    },
+    {
+      "id": "issue-5238",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "not_actionable",
+      "confidence": 0.99,
+      "evidence": [
+        "dispatchability: `triage_only`"
+      ],
+      "rationale": "Explicitly marked triage-only and lacking acceptance criteria."
+    },
+    {
+      "id": "issue-5507",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "not_actionable",
+      "confidence": 0.99,
+      "evidence": [
+        "dispatchability: `triage_only`"
+      ],
+      "rationale": "Explicitly marked triage-only and lacking worker-ready acceptance criteria."
+    },
+    {
+      "id": "issue-6014",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Generation\n\nnext (`gen/next`)"
+      ],
+      "rationale": "Explicit generation and bounded implementation requirements."
+    },
+    {
+      "id": "issue-6016",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "idea-scout candidates need human scope, lane, witness, and acceptance criteria"
+      ],
+      "rationale": "Human synthesis and missing acceptance criteria prevent direct execution."
+    },
+    {
+      "id": "issue-6072",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.99,
+      "evidence": [
+        "Table-driven tests over internal/archreport/, cmd/fak/architecture.go"
+      ],
+      "rationale": "Scope, tests, completion criteria, and acceptance gate are explicit."
+    },
+    {
+      "id": "issue-5232",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "The terminal wake remains queued until the next turn is admitted by gateTurn."
+      ],
+      "rationale": "Clear behavioral change and acceptance tests require repository inspection."
+    },
+    {
+      "id": "issue-5738",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Run one equivalent multi-step tool task and compare lifecycle, interruption, handoff, memory, and receipt contracts."
+      ],
+      "rationale": "Requires comparative synthesis using pinned repository evidence and defined deliverables."
+    },
+    {
+      "id": "issue-6075",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "A committed readout of a real run exists and every defect it surfaced is filed with a marker key."
+      ],
+      "rationale": "Requires executing report, interpreting defects, and verifying live repository state."
+    },
+    {
+      "id": "issue-5158",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "This ticket tracks the **write half**: structured *mid-flight* session verbs"
+      ],
+      "rationale": "Defined feature scope requires implementation and design judgment."
+    },
+    {
+      "id": "issue-5713",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Map its provider-routing and retry semantics to fak and probe one compatible and one adversarial request."
+      ],
+      "rationale": "Requires repository analysis, compatibility testing, and synthesized gap classification."
+    },
+    {
+      "id": "issue-5148",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.94,
+      "evidence": [
+        "An operator or client cannot watch *what the loop is doing* mid-flight"
+      ],
+      "rationale": "Concrete feature request requires interpreting architecture and repository context."
+    },
+    {
+      "id": "issue-5207",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.94,
+      "evidence": [
+        "spawn a detached fire-and-forget rollout"
+      ],
+      "rationale": "Implementation is specified, but repository context may affect feasibility."
+    },
+    {
+      "id": "issue-5859",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "`acquire()` (`lane_lease.py:389`) deliberately passes the structural fold:"
+      ],
+      "rationale": "Requires code inspection to validate dead-lease handling and remediation."
+    },
+    {
+      "id": "issue-5636",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "`internal/modelroute` has a serving-liveness record and nothing in fak produces it."
+      ],
+      "rationale": "Implement gateway-derived serving reports to replace manually maintained JSON."
+    },
+    {
+      "id": "issue-5347",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Add age-based retention to the archive directory"
+      ],
+      "rationale": "Clear defect, implementation direction, retention policy, and safety context."
+    },
+    {
+      "id": "issue-5802",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "grade tool-call WIDTH per turn, not just MinToolCalls per task"
+      ],
+      "rationale": "Concrete feature gap with implementation locations and desired grading behavior."
+    },
+    {
+      "id": "issue-5929",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "A sub-lane resolves to NO tree, so it collides with everything."
+      ],
+      "rationale": "Detailed reproduction identifies faulty lookup and affected admission paths."
+    },
+    {
+      "id": "issue-5672",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "Declare prerequisite relationships between validator levels."
+      ],
+      "rationale": "Clear implementation requirements require repository context and policy interpretation."
+    },
+    {
+      "id": "issue-5154",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "not_actionable",
+      "confidence": 0.91,
+      "evidence": [
+        "replace with the measured X once an engine that exposes the acceptance counter is chosen."
+      ],
+      "rationale": "Blocked on unmeasured threshold and unspecified external engine."
+    },
+    {
+      "id": "issue-5245",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 0.96,
+      "evidence": [
+        "A deterministic replay bench (new `cmd/coalescebench`, mirroring `cmd/batchbench`)"
+      ],
+      "rationale": "Clear implementation request requiring repository and linked design context."
+    },
+    {
+      "id": "issue-5525",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "case p.wroteError:\n    return true // a clean terminal HTTP error was already written"
+      ],
+      "rationale": "Identifies a specific unobserved error path and expected behavior."
+    },
+    {
+      "id": "issue-5363",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "Fix: one Keychain reader in `internal/accounts`"
+      ],
+      "rationale": "Requires understanding architecture but provides a concrete implementation plan."
+    },
+    {
+      "id": "issue-5645",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.97,
+      "evidence": [
+        "Add a repository closeout verifier that derives secondary obligations from a commit range"
+      ],
+      "rationale": "Detailed feature scope and acceptance conditions require implementation synthesis."
+    },
+    {
+      "id": "issue-5521",
+      "semantic_need": "semantic",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 0.98,
+      "evidence": [
+        "The argument is *declared*: passing it raises no validation error. It is accepted and dropped."
+      ],
+      "rationale": "Clear bug, reproduction data, expected argument behavior, and concrete impact."
+    }
+  ],
+  "usage": {
+    "completion_tokens": 6764,
+    "prompt_tokens": 16289,
+    "total_tokens": 23053
+  },
+  "endpoint": "sanctioned-openai-compatible"
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "fak-microcontext-semantic-grade/1",
+  "split": "test",
+  "records": 16,
+  "exact": 16,
+  "field_errors": {},
+  "quality_pass": true,
+  "semantic_residual": 3,
+  "abstentions": 16
+}

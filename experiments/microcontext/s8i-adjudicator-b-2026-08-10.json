@@ -1,0 +1,369 @@
+{
+  "judgments": [
+    {
+      "id": "issue-6084",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "keep reports usable with stale tier declarations"
+      ],
+      "rationale": "clear actionable task"
+    },
+    {
+      "id": "issue-5146",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "fix(ci): reconcile remaining decisive-gate governance baselines"
+      ],
+      "rationale": "clearly defined steps and done condition"
+    },
+    {
+      "id": "issue-5782",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "needs human triage"
+      ],
+      "rationale": "requires human review"
+    },
+    {
+      "id": "issue-5211",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.9,
+      "evidence": [
+        "Add a fail-closed candidate provenance read-back before Move-Item swaps"
+      ],
+      "rationale": "clear actionable steps"
+    },
+    {
+      "id": "issue-5718",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.9,
+      "evidence": [
+        "Run a bounded serving comparison for routing, prefix reuse, cancellation, streaming, and failure receipts."
+      ],
+      "rationale": "Requires interpretation of proposed actions and current state"
+    },
+    {
+      "id": "issue-5847",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "TestNoNewPythonTools is red on main and blocks every tools-lane commit"
+      ],
+      "rationale": "clear actionable test failure"
+    },
+    {
+      "id": "issue-5501",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "needs human triage"
+      ],
+      "rationale": "requires manual review"
+    },
+    {
+      "id": "issue-5253",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "`.git/index.lock` held 512s, then later 713s, by a holder that was already dead."
+      ],
+      "rationale": "Evidence of stale lock causing outage."
+    },
+    {
+      "id": "issue-5238",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "needs human triage"
+      ],
+      "rationale": "requires manual review"
+    },
+    {
+      "id": "issue-5507",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "needs human triage"
+      ],
+      "rationale": "requires manual review"
+    },
+    {
+      "id": "issue-6014",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "Implementing the smallest read-only schema spine now prevents future authority consumers from laundering one assertion's witness onto its siblings"
+      ],
+      "rationale": "Clear implementation step"
+    },
+    {
+      "id": "issue-6016",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "needs human triage"
+      ],
+      "rationale": "requires manual review"
+    },
+    {
+      "id": "issue-6072",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "The working spine of Architecture graph report exists"
+      ],
+      "rationale": "clear scope and status"
+    },
+    {
+      "id": "issue-5232",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "A terminal/non-proceed gate cannot acknowledge or drop the wake and emits no applied Next row."
+      ],
+      "rationale": "clear actionable fix"
+    },
+    {
+      "id": "issue-5738",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "Run one equivalent multi-step tool task and compare lifecycle, interruption, handoff, memory, and receipt contracts."
+      ],
+      "rationale": "Requires interpretation of research tasks."
+    },
+    {
+      "id": "issue-6075",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "run Architecture graph report on this repo's own live work"
+      ],
+      "rationale": "task has clear scope and status"
+    },
+    {
+      "id": "issue-5158",
+      "semantic_need": "literal",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "read half — typed loop-progress SSE"
+      ],
+      "rationale": "clearly defined feature implementation"
+    },
+    {
+      "id": "issue-5713",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.9,
+      "evidence": [
+        "This active project overlaps fak's gateway boundary."
+      ],
+      "rationale": "Requires interpretation of compatibility needs."
+    },
+    {
+      "id": "issue-5148",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.9,
+      "evidence": [
+        "The native owned-loop stream hand-builds text-only Anthropic SSE."
+      ],
+      "rationale": "Evidence directly from the issue body."
+    },
+    {
+      "id": "issue-5207",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "feat(guard): P0 PreCompact async mini-lookahead"
+      ],
+      "rationale": "clear feature request"
+    },
+    {
+      "id": "issue-5859",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "dead worker's lane lease blocks its lane forever"
+      ],
+      "rationale": "clear root cause identified"
+    },
+    {
+      "id": "issue-5636",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 0.9,
+      "evidence": [
+        "So the fleet rung of the placement ladder is gated by a hand-written JSON file."
+      ],
+      "rationale": "Interprets current state and suggests automation."
+    },
+    {
+      "id": "issue-5347",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "`worktree-archive/2026-07-14` alone holds 4.6GB"
+      ],
+      "rationale": "clear problem and fix direction"
+    },
+    {
+      "id": "issue-5802",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "`MinToolCalls`, `internal/modelaccept/modelaccept.go:28",
+        "gated at `:162` and validated at `:308`"
+      ],
+      "rationale": "existing fields lack width grading"
+    },
+    {
+      "id": "issue-5929",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "--lane gateway/server resolves to no tree and collides with everything"
+      ],
+      "rationale": "clear divergence in functionality"
+    },
+    {
+      "id": "issue-5672",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "Make this distinction explicit at the project boundary"
+      ],
+      "rationale": "Requires interpretation of validator relationships."
+    },
+    {
+      "id": "issue-5154",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "not_actionable",
+      "confidence": 0.9,
+      "evidence": [
+        "No native draft head lands until an external-engine mtp-vs-off run produces a real target."
+      ],
+      "rationale": "Conditional on external acceptance"
+    },
+    {
+      "id": "issue-5245",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "not_actionable",
+      "confidence": 1,
+      "evidence": [
+        "A deterministic replay bench that drives the cross-agent coalescing simulator over synthetic (and later real)"
+      ],
+      "rationale": "Clear design description, no actionable items."
+    },
+    {
+      "id": "issue-5525",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "a result-floor 502 on the streaming passthrough is never counted or printed"
+      ],
+      "rationale": "clear actionable item"
+    },
+    {
+      "id": "issue-5363",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "fak guard: no Claude subscription token found"
+      ],
+      "rationale": "clear issue with specific fix"
+    },
+    {
+      "id": "issue-5645",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "Accept a commit range and, optionally, selected dirty paths."
+      ],
+      "rationale": "clear scope"
+    },
+    {
+      "id": "issue-5521",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "confidence": 1,
+      "evidence": [
+        "dos_commit_audit silently ignores its commit argument"
+      ],
+      "rationale": "clear actionable bug report"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 1929,
+    "prompt_tokens": 16867,
+    "total_tokens": 18796
+  },
+  "endpoint": "sanctioned-openai-compatible",
+  "schema": "fak-microcontext-semantic-judgments/1",
+  "adjudicator": "sanctioned-qwen-b",
+  "model": "qwen2.5:14b",
+  "prompt_version": "semantic-residual-v1",
+  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "created_at": "2026-08-10T11:00:14Z"
+}

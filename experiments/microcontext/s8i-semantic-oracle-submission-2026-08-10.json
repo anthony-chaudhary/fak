@@ -1,0 +1,518 @@
+{
+  "schema": "fak-microcontext-semantic-submission/1",
+  "answers": [
+    {
+      "id": "issue-6084",
+      "split": "tune",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "keep reports usable with stale tier declarations",
+        "Architecture reporting represents stale tier declarations as named diagnostics instead of aborting"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5146",
+      "split": "tune",
+      "semantic_need": "abstain",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "evidence": [
+        "fix(ci): reconcile remaining decisive-gate governance baselines",
+        "Update only the authoritative baseline/fixture or fix the violating implementation; do not weaken gates."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-5782",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "not_actionable",
+      "evidence": [
+        "needs human triage",
+        "dispatchability: `triage_only`"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5211",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "Add a fail-closed candidate provenance read-back before Move-Item swaps",
+        "Add a fail-closed candidate provenance read-back before `Move-Item` swaps the installed executable."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5718",
+      "split": "tune",
+      "semantic_need": "semantic",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "Run a bounded serving comparison for routing, prefix reuse, cancellation, streaming, and failure receipts.",
+        "Run a bounded serving comparison for routing, prefix reuse, cancellation, streaming, and failure receipts."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5847",
+      "split": "tune",
+      "semantic_need": "abstain",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "evidence": [
+        "TestNoNewPythonTools is red on main and blocks every tools-lane commit",
+        "tools/fleet_regdir.py is a NEW python tool; port it to Go instead (NEW_PYTHON_TOOL)"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-5501",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "not_actionable",
+      "evidence": [
+        "needs human triage",
+        "dispatchability: `triage_only`"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5253",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "`.git/index.lock` held 512s, then later 713s, by a holder that was already dead.",
+        "Root cause: a bare `index.lock` is never auto-reaped"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5238",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "not_actionable",
+      "evidence": [
+        "needs human triage",
+        "dispatchability: `triage_only`"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5507",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "not_actionable",
+      "evidence": [
+        "needs human triage",
+        "dispatchability: `triage_only`"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-6014",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "Implementing the smallest read-only schema spine now prevents future authority consumers from laundering one assertion's witness onto its siblings",
+        "Generation\n\nnext (`gen/next`)"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-6016",
+      "split": "tune",
+      "semantic_need": "abstain",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "evidence": [
+        "needs human triage",
+        "idea-scout candidates need human scope, lane, witness, and acceptance criteria"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-6072",
+      "split": "tune",
+      "semantic_need": "literal",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "The working spine of Architecture graph report exists",
+        "Table-driven tests over internal/archreport/, cmd/fak/architecture.go"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5232",
+      "split": "tune",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "A terminal/non-proceed gate cannot acknowledge or drop the wake and emits no applied Next row.",
+        "The terminal wake remains queued until the next turn is admitted by gateTurn."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5738",
+      "split": "tune",
+      "semantic_need": "semantic",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "Run one equivalent multi-step tool task and compare lifecycle, interruption, handoff, memory, and receipt contracts.",
+        "Run one equivalent multi-step tool task and compare lifecycle, interruption, handoff, memory, and receipt contracts."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-6075",
+      "split": "tune",
+      "semantic_need": "abstain",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "evidence": [
+        "run Architecture graph report on this repo's own live work",
+        "A committed readout of a real run exists and every defect it surfaced is filed with a marker key."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-5158",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "none",
+      "actionability": "actionable",
+      "evidence": [
+        "read half \u2014 typed loop-progress SSE",
+        "This ticket tracks the **write half**: structured *mid-flight* session verbs"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-5713",
+      "split": "test",
+      "semantic_need": "semantic",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "This active project overlaps fak's gateway boundary.",
+        "Map its provider-routing and retry semantics to fak and probe one compatible and one adversarial request."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5148",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "The native owned-loop stream hand-builds text-only Anthropic SSE.",
+        "An operator or client cannot watch *what the loop is doing* mid-flight"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5207",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "feat(guard): P0 PreCompact async mini-lookahead",
+        "spawn a detached fire-and-forget rollout"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5859",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "evidence": [
+        "dead worker's lane lease blocks its lane forever",
+        "`acquire()` (`lane_lease.py:389`) deliberately passes the structural fold:"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-5636",
+      "split": "test",
+      "semantic_need": "semantic",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "So the fleet rung of the placement ladder is gated by a hand-written JSON file.",
+        "`internal/modelroute` has a serving-liveness record and nothing in fak produces it."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5347",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "`worktree-archive/2026-07-14` alone holds 4.6GB",
+        "Add age-based retention to the archive directory"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5802",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "abstain",
+      "evidence": [
+        "`MinToolCalls`, `internal/modelaccept/modelaccept.go:28",
+        "gated at `:162` and validated at `:308`",
+        "grade tool-call WIDTH per turn, not just MinToolCalls per task"
+      ],
+      "adjudicator_agreement": {
+        "actionability": false,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5929",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "--lane gateway/server resolves to no tree and collides with everything",
+        "A sub-lane resolves to NO tree, so it collides with everything."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5672",
+      "split": "test",
+      "semantic_need": "semantic",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "Make this distinction explicit at the project boundary",
+        "Declare prerequisite relationships between validator levels."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": true,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5154",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "current_state",
+      "actionability": "not_actionable",
+      "evidence": [
+        "No native draft head lands until an external-engine mtp-vs-off run produces a real target.",
+        "replace with the measured X once an engine that exposes the acceptance counter is chosen."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": true
+      }
+    },
+    {
+      "id": "issue-5245",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "abstain",
+      "evidence": [
+        "A deterministic replay bench that drives the cross-agent coalescing simulator over synthetic (and later real)",
+        "A deterministic replay bench (new `cmd/coalescebench`, mirroring `cmd/batchbench`)"
+      ],
+      "adjudicator_agreement": {
+        "actionability": false,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5525",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "a result-floor 502 on the streaming passthrough is never counted or printed",
+        "case p.wroteError:\n    return true // a clean terminal HTTP error was already written"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5363",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "fak guard: no Claude subscription token found",
+        "Fix: one Keychain reader in `internal/accounts`"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5645",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "Accept a commit range and, optionally, selected dirty paths.",
+        "Add a repository closeout verifier that derives secondary obligations from a commit range"
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    },
+    {
+      "id": "issue-5521",
+      "split": "test",
+      "semantic_need": "abstain",
+      "tool_need": "abstain",
+      "actionability": "actionable",
+      "evidence": [
+        "dos_commit_audit silently ignores its commit argument",
+        "The argument is *declared*: passing it raises no validation error. It is accepted and dropped."
+      ],
+      "adjudicator_agreement": {
+        "actionability": true,
+        "semantic_need": false,
+        "tool_need": false
+      }
+    }
+  ]
+}

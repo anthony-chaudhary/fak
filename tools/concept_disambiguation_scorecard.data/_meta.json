@@ -2363,6 +2363,61 @@
           "category": "incidental",
           "reason": "Controlled experiment simulator function, not a production policy evaluator or authority boundary.",
           "token": "runRoutingPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI provenance string naming a benchmark annotator, not a production policy capability or authority.",
+          "token": "semanticAdjudicator"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment corpus/adjudication data path, not a production policy capability or authority boundary.",
+          "token": "foldSemanticAdjudicators"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment corpus/adjudication data path, not a production policy capability or authority boundary.",
+          "token": "runSemanticAdjudicator"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment corpus/adjudication data path, not a production policy capability or authority boundary.",
+          "token": "semanticConsensus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment corpus/adjudication data path, not a production policy capability or authority boundary.",
+          "token": "semanticGold"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment corpus/adjudication data path, not a production policy capability or authority boundary.",
+          "token": "semanticSubmission"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private semantic benchmark schema/helper, not a production policy capability or authority boundary.",
+          "token": "adjudicationPrompt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private semantic benchmark schema/helper, not a production policy capability or authority boundary.",
+          "token": "semanticGrade"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private semantic benchmark schema/helper, not a production policy capability or authority boundary.",
+          "token": "gradeSemanticFiles"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark provenance/accounting field, not a production policy capability or authority.",
+          "token": "AdjudicatorAgreement"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark provenance/accounting field, not a production policy capability or authority.",
+          "token": "AdjudicatorSHA256"
         }
       ],
       "exclude": [
@@ -2370,6 +2425,8 @@
       ],
       "id": "policy-capability",
       "ignore": [
+        "AdjudicatorAgreement",
+        "AdjudicatorSHA256",
         "CapabilitySnapshot",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
@@ -2397,6 +2454,7 @@
         "adjudicated",
         "adjudicates",
         "adjudication",
+        "adjudicationPrompt",
         "adjudicators",
         "capabilities",
         "capability_denied",
@@ -2405,7 +2463,9 @@
         "contractByCapability",
         "contractLeafByCapability",
         "dispatchPreflightChurnState",
+        "foldSemanticAdjudicators",
         "formatAmendmentPosture",
+        "gradeSemanticFiles",
         "guardWindowsArgvPreflight",
         "multi_capability",
         "normalizeDecodePolicyLabel",
@@ -2421,6 +2481,12 @@
         "referencePolicyForCorpusCell",
         "routingPolicyStat",
         "runRoutingPolicy",
+        "runSemanticAdjudicator",
+        "semanticAdjudicator",
+        "semanticConsensus",
+        "semanticGold",
+        "semanticGrade",
+        "semanticSubmission",
         "tool_policy_grammar"
       ],
       "min_files": 3,
