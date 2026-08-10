@@ -88,6 +88,13 @@ type LateralBridgeChange struct {
 	AfterRightSide      []string `json:"after_right_side"`
 }
 
+type LateralResilientPair struct {
+	Tier     int    `json:"tier"`
+	TierName string `json:"tier_name"`
+	Left     string `json:"left"`
+	Right    string `json:"right"`
+}
+
 type LateralCoupling struct {
 	Tier     int    `json:"tier"`
 	TierName string `json:"tier_name"`
@@ -123,6 +130,8 @@ type ReportDiff struct {
 	IntroducedLateralArticulationPoints []LateralArticulationPoint       `json:"introduced_lateral_articulation_points,omitempty"`
 	ResolvedLateralArticulationPoints   []LateralArticulationPoint       `json:"resolved_lateral_articulation_points,omitempty"`
 	LateralArticulationPointChanges     []LateralArticulationPointChange `json:"lateral_articulation_point_changes,omitempty"`
+	IntroducedLateralResilientPairs     []LateralResilientPair           `json:"introduced_lateral_resilient_pairs,omitempty"`
+	ResolvedLateralResilientPairs       []LateralResilientPair           `json:"resolved_lateral_resilient_pairs,omitempty"`
 	FanInChanges                        []FanInChange                    `json:"fan_in_changes,omitempty"`
 	BlastRadiusChanges                  []BlastRadiusChange              `json:"blast_radius_changes,omitempty"`
 	IntroducedBlastImpacts              []BlastImpact                    `json:"introduced_blast_impacts,omitempty"`
@@ -218,6 +227,17 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedLateralArticulationPoints = append(out.ResolvedLateralArticulationPoints, point)
 		}
 	}
+	beforeResilience, afterResilience := lateralResilientPairSet(before), lateralResilientPairSet(after)
+	for key, pair := range afterResilience {
+		if _, ok := beforeResilience[key]; !ok {
+			out.IntroducedLateralResilientPairs = append(out.IntroducedLateralResilientPairs, pair)
+		}
+	}
+	for key, pair := range beforeResilience {
+		if _, ok := afterResilience[key]; !ok {
+			out.ResolvedLateralResilientPairs = append(out.ResolvedLateralResilientPairs, pair)
+		}
+	}
 	for name, a := range afterLeaves {
 		beforeFanIn := 0
 		if b, ok := beforeLeaves[name]; ok {
@@ -302,6 +322,8 @@ func Diff(before, after Report) ReportDiff {
 	sortLateralArticulationPoints(out.IntroducedLateralArticulationPoints)
 	sortLateralArticulationPoints(out.ResolvedLateralArticulationPoints)
 	sortLateralArticulationPointChanges(out.LateralArticulationPointChanges)
+	sortLateralResilientPairs(out.IntroducedLateralResilientPairs)
+	sortLateralResilientPairs(out.ResolvedLateralResilientPairs)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
@@ -310,7 +332,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 {
 		out.Verdict = "regression"
 	}
 	return out
@@ -334,6 +356,34 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+func lateralResilientPairSet(r Report) map[string]LateralResilientPair {
+	out := map[string]LateralResilientPair{}
+	for _, block := range r.LateralBiconnectedBlocks {
+		for i := 0; i < len(block.Members); i++ {
+			for j := i + 1; j < len(block.Members); j++ {
+				left, right := block.Members[i], block.Members[j]
+				if right < left {
+					left, right = right, left
+				}
+				pair := LateralResilientPair{Tier: block.Tier, TierName: block.TierName, Left: left, Right: right}
+				out[fmt.Sprintf("%d\x00%s\x00%s", block.Tier, left, right)] = pair
+			}
+		}
+	}
+	return out
+}
+func sortLateralResilientPairs(pairs []LateralResilientPair) {
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].Tier != pairs[j].Tier {
+			return pairs[i].Tier < pairs[j].Tier
+		}
+		if pairs[i].Left != pairs[j].Left {
+			return pairs[i].Left < pairs[j].Left
+		}
+		return pairs[i].Right < pairs[j].Right
+	})
 }
 
 func lateralArticulationPointSet(r Report) map[string]LateralArticulationPoint {

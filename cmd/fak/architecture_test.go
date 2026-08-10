@@ -573,9 +573,29 @@ func TestArchitectureLateralArticulationPointPolicyIgnoresResolvedAndDecreased(t
 	}
 }
 
+func TestArchitectureLateralResilientPairPolicyGatesLoss(t *testing.T) {
+	diff := archreport.ReportDiff{ResolvedLateralResilientPairs: []archreport.LateralResilientPair{{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b"}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "resolved-lateral-resilient-pairs"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"resolved lateral-resilient-pair tier=foundation-composite(2) a <=> b", "restore a lateral cycle"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+func TestArchitectureLateralResilientPairPolicyIgnoresGain(t *testing.T) {
+	diff := archreport.ReportDiff{IntroducedLateralResilientPairs: []archreport.LateralResilientPair{{Left: "a", Right: "b"}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "resolved-lateral-resilient-pairs"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, or introduced-or-increased-lateral-articulation-points") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, or resolved-lateral-resilient-pairs") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }

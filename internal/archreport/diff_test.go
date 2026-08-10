@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+func TestDiffLateralResilientPairsExposeBlockGainAndLoss(t *testing.T) {
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c"}}, {Tier: 3, TierName: "mechanism", Members: []string{"x", "y", "z"}}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}}, {Tier: 3, TierName: "mechanism", Members: []string{"x", "y"}}}}
+	diff := Diff(before, after)
+	wantIntro := []LateralResilientPair{{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "d"}, {Tier: 2, TierName: "foundation-composite", Left: "b", Right: "d"}, {Tier: 2, TierName: "foundation-composite", Left: "c", Right: "d"}}
+	wantResolved := []LateralResilientPair{{Tier: 3, TierName: "mechanism", Left: "x", Right: "z"}, {Tier: 3, TierName: "mechanism", Left: "y", Right: "z"}}
+	if !reflect.DeepEqual(diff.IntroducedLateralResilientPairs, wantIntro) || !reflect.DeepEqual(diff.ResolvedLateralResilientPairs, wantResolved) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+func TestDiffIntroducedLateralResilienceRemainsClean(t *testing.T) {
+	diff := Diff(Report{}, Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, Members: []string{"a", "b", "c"}}}})
+	if diff.Verdict != "clean" || len(diff.IntroducedLateralResilientPairs) != 3 || len(diff.ResolvedLateralResilientPairs) != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralArticulationPointChangesPreserveIdentityAndImpact(t *testing.T) {
 	introduced := LateralArticulationPoint{Tier: 2, TierName: "foundation-composite", Name: "new", Fragments: [][]string{{"a"}, {"b", "c"}}, FragmentCount: 2, CouplingPairs: 2}
 	resolved := LateralArticulationPoint{Tier: 2, TierName: "foundation-composite", Name: "gone", FragmentCount: 2, CouplingPairs: 1}
