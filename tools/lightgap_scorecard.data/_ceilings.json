@@ -1,0 +1,84 @@
+{
+  "_about": "The c anchor per facet -- 'the speed of light in a vacuum'. c is the best possible for ANYONE, not the best fak or any competitor has achieved. Every entry must carry a derivation; an asserted ceiling reds NO_DERIVATION. kind=physical means a derived limit, definitional means the metric's own bound, lower-bound means the best system currently known (cells against one are capped at RELATIVISTIC, because you cannot claim to be near light-speed when all you know is where the record sits).",
+  "ceilings": [
+    {
+      "id": "token-economy",
+      "metric": "fraction of input-token cost eliminated versus re-sending the full history uncached every turn",
+      "unit": "fraction",
+      "direction": "higher",
+      "c": 1.0,
+      "kind": "definitional",
+      "derivation": "1.0 = every token that has been transmitted once is never paid for again -- you pay for each distinct token exactly once. That is the information-theoretic floor of the bill: a system cannot charge you for less than the distinct content it must transmit. No prefix-reuse, caching, or compaction scheme can exceed it.",
+      "caveat": "Cells in the wrapper shape use pure_tax against the bare agent instead: there the alternative is the reference point, the absolute elimination fraction cancels in the ratio, and mediation can only subtract."
+    },
+    {
+      "id": "raw-speed",
+      "metric": "sustained single-stream decode throughput as a fraction of the host's memory-bandwidth roofline",
+      "unit": "fraction",
+      "direction": "higher",
+      "c": 1.0,
+      "kind": "physical",
+      "derivation": "Autoregressive decode at batch 1 is memory-bandwidth-bound: producing one token requires streaming the entire weight set from memory once. The roofline is therefore bandwidth / bytes-per-weight-pass. On the primary bench node (Apple M3 Pro, 150 GB/s) with Qwen2.5-1.5B Q8_0 resident at ~1.54 GB that is ~97.4 tok/s. No decoder can exceed it without changing the arithmetic itself -- quantizing further, speculating, or batching. Normalizing to the roofline makes the facet hardware-independent.",
+      "caveat": "Cells in the gateway shape use pure_tax against the served engine: when fak fronts vLLM or SGLang, the engine IS the ceiling for that deployment and mediation can only take a cut."
+    },
+    {
+      "id": "session-longevity",
+      "metric": "share of the model's context window that must stay resident for the session to keep going",
+      "unit": "fraction of window",
+      "direction": "lower",
+      "c": 0.0,
+      "kind": "definitional",
+      "derivation": "0 = an ideal manager retains only a sufficient statistic of the work so far, so the resident share tends to zero as the session grows without bound. The floor is 0 by definition: no system needs to hold context it can reconstruct on demand. The opposite pole, 1.0, is where a client that manages nothing sits -- it holds everything and then stops.",
+      "caveat": "The ideal is unreachable in practice; what the score measures is the gap to it, not arrival at it."
+    },
+    {
+      "id": "run-integrity",
+      "metric": "fraction of unattended runs that end in a true, inspectable state -- no false completion, no silent death",
+      "unit": "fraction",
+      "direction": "higher",
+      "c": 1.0,
+      "kind": "definitional",
+      "derivation": "1.0 = every run that reports done is done, and every run that dies leaves a state you can inspect and resume. The bound is definitional: a run cannot end more truthfully than truthfully. This is distinct from task success -- a run that correctly reports failure counts as integrity, because the operator learns the truth."
+    },
+    {
+      "id": "injection-control",
+      "metric": "attack success rate under an indirect-prompt-injection suite, at unchanged benign utility",
+      "unit": "fraction",
+      "direction": "lower",
+      "c": 0.0,
+      "kind": "definitional",
+      "derivation": "0 = no instruction embedded in data the agent reads ever produces an attacker-chosen action. Definitional floor. It matters that this floor is REACHED today by more than one system: the published formal-isolation defenses (CaMeL at ASR 0, MELON at 0.0-2.4%) are already there, which is why fak's own 0/38 scores as parity rather than as a lead.",
+      "caveat": "At unchanged benign utility is load-bearing: a system that refuses everything also scores 0 and is useless. fak's benign/under-attack utility on the same suite is NEEDS_KEY -- unmeasured -- so every cell on this facet is fenced."
+    },
+    {
+      "id": "observability",
+      "metric": "fraction of consequential decision classes reconstructable after the fact from a single artifact, with no live attach",
+      "unit": "fraction",
+      "direction": "higher",
+      "c": 1.0,
+      "kind": "definitional",
+      "derivation": "The five classes that change a run's outcome are: model traffic, cache reuse, context compaction, tool-policy verdicts, and recovery decisions. 1.0 = all five are recoverable post-hoc from one artifact by someone who was not present. The bound is definitional over the enumerated classes.",
+      "caveat": "A five-class decomposition is coarse. It is the granularity at which both sides can be scored without inventing detail, and no system would sit exactly at 1.0 under a finer one -- which is part of why cells here are capped by their provenance."
+    },
+    {
+      "id": "portability",
+      "metric": "fraction of the model x backend support grid that actually runs, rather than refusing or falling back",
+      "unit": "fraction",
+      "direction": "higher",
+      "c": 1.0,
+      "kind": "definitional",
+      "derivation": "1.0 = every model family you might want runs on every backend you might have. The bound is definitional over the declared grid (14 model families x 4 backends = 56 cells in `internal/covmatrix`). Adopting any layer can only narrow this relative to what you already run, which is why cells here are pure_tax.",
+      "caveat": "An honestly FENCED cell -- the accelerated path refusing rather than returning a wrong answer -- is good engineering and bad portability at the same time. This facet scores the second thing only. `docs/HARDWARE-MATRIX.md` scores the first, and grades it A."
+    },
+    {
+      "id": "steady-state-ops",
+      "metric": "recurring engineer-hours per month to keep it running, after adoption is complete",
+      "unit": "hours/month",
+      "direction": "lower",
+      "c": 0.0,
+      "kind": "definitional",
+      "derivation": "0 = it never needs attention again. Definitional floor. This is deliberately disjoint from the adoption tax: the tax is one-time hours to first durable value, this is the bill that arrives every month afterwards. Counting both is not double-counting -- they are different money, and a layer that is cheap to install and expensive to keep is a real and common failure mode.",
+      "caveat": "Because c = 0, the denominator is -N: any system whose recurring cost is more than double the incumbent's falls straight to the display floor. That insensitivity is intended. Doubling somebody's monthly operational burden is off the map regardless of by how much."
+    }
+  ]
+}

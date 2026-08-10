@@ -1,0 +1,125 @@
+{
+  "_about": "Researcher measuring agent behaviour. Five facets scored; injection-control and portability are declared unrun, and steady-state-ops is immaterial (weight 0) because a researcher runs experiments rather than a service.",
+  "cells": [
+    {
+      "segment": "researcher",
+      "facet": "observability",
+      "shape": "served",
+      "fak": {
+        "value": 0.8,
+        "provenance": "OBSERVED",
+        "source": "the session journal records the consequential decision classes -- model traffic, cache reuse, compaction, tool-policy verdicts, recovery -- post-hoc with no live attach, every DENY stamped with a consequence class. Scored 4 of 5, not 5 of 5: all five classes are RECORDED, but not in one artifact -- the session journal, `docs/nightrun/cache-savings.jsonl`, and the /metrics split are separate surfaces, so a full reconstruction means joining across them. Everything is captured; single-artifact reconstruction is not."
+      },
+      "alt": {
+        "id": "llm-tracing",
+        "value": 0.4,
+        "source": "OTel GenAI conventions instrument the model call and partially the cache; no span exists for a compaction event, a tool-policy verdict, or a recovery decision. 2 of 5 classes"
+      },
+      "cost": {
+        "hours": 8,
+        "alt_hours": 8,
+        "basis": [
+          "fak: the journal is on by default; the cost is learning what the record contains -- docs/fak/tutorial.md 4,252 w",
+          "alternative: hand-rolled logging plus a tracing product, which costs this buyer roughly the same to stand up"
+        ]
+      },
+      "note": "The cleanest cell on the board: the two options cost the same to adopt, so `load` is exactly zero and the score is pure axis gap. It is also this buyer's highest-weighted facet by a distance (0.40). An experiment you cannot reconstruct afterwards is not a result, and three of the five decision classes are simply absent from the alternative.",
+      "fence": "A capability decomposition, not a benchmark -- nobody has scored both artifacts by running a fixed set of post-hoc questions against them. Capped at RELATIVISTIC by the OBSERVED provenance rule; a finer decomposition than five classes would likely pull fak below 0.8 as well."
+    },
+    {
+      "segment": "researcher",
+      "facet": "token-economy",
+      "shape": "served",
+      "fak": {
+        "value": 0.983,
+        "provenance": "MEASURED",
+        "source": "BENCHMARK-AUTHORITY.md headline row, `headline-qwen-50x5.json`: 1 unit of prefill work against naive re-prefill's 60.3, eliminating 0.983"
+      },
+      "alt": {
+        "id": "tuned-per-agent-kv",
+        "value": 0.932,
+        "source": "the tuned arm of the same artifact: 4.1 units of 60.3, eliminating 0.932"
+      },
+      "cost": {
+        "hours": 8,
+        "alt_hours": 0,
+        "basis": [
+          "docs/serve-config.md 3,286 w -- configuring a shared endpoint for repeated experimental runs"
+        ]
+      },
+      "note": "For this buyer the token win is an experiment-turnaround cost, not a bill: the same sweep finishes sooner. That is why it is weighted 0.15 and not 0.25.",
+      "fence": "Measured on Qwen2.5-1.5B Q8_0, 50 turns x 5 agents. A researcher sweeping one agent over many seeds gets less of this than a 5-agent measurement implies -- though repeated runs over a shared prefix is exactly the shape radix reuse is good at."
+    },
+    {
+      "segment": "researcher",
+      "facet": "run-integrity",
+      "shape": "served",
+      "fak": {
+        "value": 1.0,
+        "provenance": "MODELED",
+        "source": "tools/loopgate `verified-vs-naive-loop.report.json`: governed arm cuts false-done 0.50 -> 0.00"
+      },
+      "alt": {
+        "id": "ungoverned-loop",
+        "value": 0.5,
+        "source": "the ungoverned arm of the same report: false-done 0.50"
+      },
+      "cost": {
+        "hours": 8,
+        "alt_hours": 0,
+        "basis": [
+          "POLICY.md 1,726 w + docs/governed-agent-quickstart.md 1,361 w"
+        ]
+      },
+      "note": "A false completion in a research sweep is worse than a crash: it silently contaminates the result set rather than failing loudly.",
+      "fence": "Authored corpus, not field measurement; capped at CRUISE by the MODELED provenance rule. A researcher is exactly the person who would notice."
+    },
+    {
+      "segment": "researcher",
+      "facet": "raw-speed",
+      "shape": "gateway",
+      "pure_tax": true,
+      "fak": {
+        "value": 0.75,
+        "provenance": "MEASURED",
+        "source": "BENCHMARK-AUTHORITY.md gateway row, `compare.json`: fak-gateway 1085.6 vs raw-SGLang 1451.6 tok/s at C=64"
+      },
+      "alt": {
+        "id": "raw-sglang",
+        "value": 1.0,
+        "source": "the raw-SGLang arm of the same comparison"
+      },
+      "cost": {
+        "hours": 8,
+        "alt_hours": 0,
+        "basis": [
+          "same endpoint configuration as the token-economy cell"
+        ]
+      },
+      "note": "Worst measured point, and the one that hurts most here: research sweeps run at low concurrency, which is where the gateway tax is largest. The convergence to ~3% at saturation does NOT rescue this buyer, because they rarely saturate."
+    },
+    {
+      "segment": "researcher",
+      "facet": "session-longevity",
+      "shape": "served",
+      "fak": {
+        "value": 0.24,
+        "provenance": "OBSERVED",
+        "source": "`compaction_budget=48000` in `docs/nightrun/cache-savings.jsonl` against a 200,000-token window"
+      },
+      "alt": {
+        "id": "window-bound",
+        "value": 1.0,
+        "source": "definitional: an unmanaged client holds the whole history and then stops"
+      },
+      "cost": {
+        "hours": 8,
+        "alt_hours": 0,
+        "basis": [
+          "compaction is on by default once the guard is running"
+        ]
+      },
+      "fence": "Scores the enforced resident budget, not work preserved across a fire -- and for a researcher, a compaction that silently changes what the agent knows is a confound, not a feature. That interaction is unmeasured."
+    }
+  ]
+}

@@ -1,0 +1,198 @@
+{
+  "_about": "Builder embedding fak in their own product. All eight facets scored -- this buyer weights everything, because they inherit every constraint permanently and cannot route around one later.",
+  "cells": [
+    {
+      "segment": "framework-builder",
+      "facet": "observability",
+      "shape": "served",
+      "fak": {
+        "value": 0.8,
+        "provenance": "OBSERVED",
+        "source": "the session journal records the consequential decision classes -- model traffic, cache reuse, compaction, tool-policy verdicts, recovery -- post-hoc with no live attach. Scored 4 of 5, not 5 of 5: all five classes are RECORDED, but not in one artifact -- the session journal, `docs/nightrun/cache-savings.jsonl`, and the /metrics split are separate surfaces, so a full reconstruction means joining across them. Everything is captured; single-artifact reconstruction is not."
+      },
+      "alt": {
+        "id": "llm-tracing",
+        "value": 0.4,
+        "source": "OTel GenAI conventions cover the model call and partially the cache; no span for a compaction, a tool verdict, or a recovery decision. 2 of 5 classes"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 15,
+        "basis": [
+          "EXTENDING.md 2,867 w + docs/fak/tutorial.md 4,252 w -- the read to embedding rather than merely running",
+          "alternative: instrumenting their own glue and shipping a tracing integration"
+        ]
+      },
+      "note": "The strongest reason for this buyer to build on fak rather than on an SDK plus an engine: the evidence surface is the part they would otherwise have to invent, and inventing it well is a product in itself.",
+      "fence": "Capability decomposition, not a benchmark; capped at RELATIVISTIC by the OBSERVED provenance rule."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "token-economy",
+      "shape": "served",
+      "fak": {
+        "value": 0.983,
+        "provenance": "MEASURED",
+        "source": "BENCHMARK-AUTHORITY.md headline row, `headline-qwen-50x5.json`: 1 unit of prefill work against naive re-prefill's 60.3, eliminating 0.983"
+      },
+      "alt": {
+        "id": "tuned-per-agent-kv",
+        "value": 0.932,
+        "source": "the tuned arm of the same artifact: 4.1 units of 60.3, eliminating 0.932"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 0,
+        "basis": [
+          "EXTENDING.md 2,867 w + docs/serve-config.md 3,286 w -- embedding the serving path, not just configuring it"
+        ]
+      },
+      "fence": "Measured on Qwen2.5-1.5B Q8_0, 50 turns x 5 agents, single host. A product builder inherits this ratio only for workloads shaped like that measurement."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "session-longevity",
+      "shape": "served",
+      "fak": {
+        "value": 0.24,
+        "provenance": "OBSERVED",
+        "source": "`compaction_budget=48000` in `docs/nightrun/cache-savings.jsonl` against a 200,000-token window"
+      },
+      "alt": {
+        "id": "window-bound",
+        "value": 1.0,
+        "source": "definitional: an unmanaged client holds the whole history and then stops"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 0,
+        "basis": [
+          "compaction is on by default; the cost is understanding its interaction with their own state model"
+        ]
+      },
+      "fence": "Scores the enforced resident budget, not work preserved across a fire. A builder inherits the compaction policy's behaviour permanently, so the unmeasured part is the part they should care about most."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "run-integrity",
+      "shape": "served",
+      "fak": {
+        "value": 1.0,
+        "provenance": "MODELED",
+        "source": "tools/loopgate `verified-vs-naive-loop.report.json`: governed arm cuts false-done 0.50 -> 0.00, with one-holder leases and runaway/injection caps"
+      },
+      "alt": {
+        "id": "ungoverned-loop",
+        "value": 0.5,
+        "source": "the ungoverned arm of the same report"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 0,
+        "basis": [
+          "POLICY.md 1,726 w + EXTENDING.md 2,867 w -- embedding the governance surface in their own control flow"
+        ]
+      },
+      "fence": "Authored corpus, not field measurement; capped at CRUISE by the MODELED provenance rule."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "injection-control",
+      "shape": "wrapper",
+      "parity_at_ceiling": true,
+      "fak": {
+        "value": 0.0,
+        "provenance": "MEASURED",
+        "source": "BENCHMARK-AUTHORITY.md AgentDojo row: full-stack ASR 0/38 = 0.000 versus 29/38 = 0.763 detection-only"
+      },
+      "alt": {
+        "id": "formal-isolation",
+        "value": 0.0,
+        "source": "CaMeL ASR 0, MELON 0.0-2.4% -- already at the definitional floor"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 80,
+        "basis": [
+          "fak: POLICY.md 1,726 w plus embedding the guard in their control flow",
+          "alternative: designing their product's data flow so untrusted content cannot reach the control path -- a foundational architecture choice, not an integration"
+        ]
+      },
+      "note": "Parity on the number, and a real saving on the shape -- but a builder should weigh the other direction too: the formal-isolation approach is a property of THEIR architecture and travels with their product, whereas fak's is a property of a dependency.",
+      "fence": "Benign and under-attack utility on the same suite is NEEDS_KEY."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "raw-speed",
+      "shape": "gateway",
+      "pure_tax": true,
+      "fak": {
+        "value": 0.75,
+        "provenance": "MEASURED",
+        "source": "BENCHMARK-AUTHORITY.md gateway row, `compare.json`: fak-gateway 1085.6 vs raw-SGLang 1451.6 tok/s at C=64"
+      },
+      "alt": {
+        "id": "raw-sglang",
+        "value": 1.0,
+        "source": "the raw-SGLang arm of the same comparison"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 0,
+        "basis": [
+          "same embedded serving path as the token-economy cell"
+        ]
+      },
+      "note": "Worst measured point; converges to ~3% at saturation. A builder inherits whichever end of that range their users actually run at, which they do not control."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "portability",
+      "shape": "served",
+      "pure_tax": true,
+      "fak": {
+        "value": 0.5714,
+        "provenance": "MEASURED",
+        "source": "`docs/HARDWARE-MATRIX.md` support-maturity matrix (GENERATED by `fak support-maturity-scorecard --write-doc`, CI freshness-gated): 32 of 56 cells SUPPORTED across 14 model families x 4 backends -- 24 FENCED, 0 PROOF-PATH-ONLY, 0 UNDEFINED"
+      },
+      "alt": {
+        "id": "raw-sglang",
+        "value": 1.0,
+        "source": "building directly on a serving engine leaves the model x backend question to that engine, which is the ceiling for this axis by construction"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 0,
+        "basis": [
+          "GPU.md 2,574 w + EXTENDING.md 2,867 w -- understanding which cells are SUPPORTED and what a FENCED cell does at runtime"
+        ]
+      },
+      "note": "This buyer weights portability higher than anyone else (0.20) because a narrow model matrix becomes a ceiling on THEIR product, permanently. Across the whole grid it is 32/56; the shape matters more than the fraction -- all 14 families run on CPU, but only 6 of 14 on any accelerator, so a product whose users have GPUs inherits the narrower number.",
+      "fence": "A FENCED cell refuses honestly rather than returning a wrong answer, which is good engineering. This facet scores portability only; `docs/HARDWARE-MATRIX.md` scores the honesty and grades it A. Also note BENCHMARK-AUTHORITY.md:106 still reports 19/56 for this instrument -- a stale snapshot; the generated doc is authoritative."
+    },
+    {
+      "segment": "framework-builder",
+      "facet": "steady-state-ops",
+      "shape": "served",
+      "fak": {
+        "value": 10,
+        "provenance": "MODELED",
+        "source": "authored estimate from the measured adoption surface, 2026-08-10: 100 top-level verbs and 34 root operating documents, and a builder tracks the dependency's releases and behaviour changes on behalf of every one of their own users"
+      },
+      "alt": {
+        "id": "raw-sglang",
+        "value": 6,
+        "source": "authored estimate: tracking a serving engine's releases and their own glue"
+      },
+      "cost": {
+        "hours": 30,
+        "alt_hours": 0,
+        "basis": [
+          "same embedded path as the other cells in this segment"
+        ]
+      },
+      "note": "Doubling the recurring bill lands on the display floor by the ceiling's construction. For a builder the burden is worse than the number suggests, because they absorb their dependency's churn on behalf of every downstream user rather than just themselves.",
+      "fence": "Authored estimates grounded in the measured surface. The ratio is the claim."
+    }
+  ]
+}

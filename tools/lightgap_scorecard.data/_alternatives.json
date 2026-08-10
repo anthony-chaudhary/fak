@@ -1,0 +1,75 @@
+{
+  "_about": "The next-best-option registry -- what a competent team does today WITHOUT fak, per axis. This is the ORIGIN of the score, not a punching bag. class=sota is a real state-of-the-art system; class=tuned is a competently configured setup, not a default; class=floor is what a system does when nobody has done anything special (real, common, and honest to compare against, but say so); class=naive is a strawman, and any cell scored against one reds NAIVE_BASELINE. A win over class=naive is not a win.",
+  "alternatives": [
+    {
+      "id": "claude-code-bare",
+      "name": "bare `claude`, as installed",
+      "class": "sota",
+      "source": "experiments/ablate/cross-agent-pong-opus.json -- the bare claude_code arm of the committed cross-agent ablation (K=5 per arm), summarized in BENCHMARK-AUTHORITY.md",
+      "notes": "The incumbent for every solo developer: already installed, already working, with its own context management and its own permission prompts. The hardest baseline in this file to beat, because its adoption cost is zero and already sunk."
+    },
+    {
+      "id": "tuned-per-agent-kv",
+      "name": "tuned warm per-agent KV cache",
+      "class": "tuned",
+      "source": "BENCHMARK-AUTHORITY.md headline row, `headline-qwen-50x5.json` tuned arm (50 turns x 5 agents, Qwen2.5-1.5B Q8_0)",
+      "notes": "Each agent keeps its own warm KV cache -- what a competent engineer builds when they notice re-prefill is expensive. This is the honest reuse baseline. The naive re-prefill arm in the same artifact is 60.3x and is NOT a legitimate comparison target."
+    },
+    {
+      "id": "naive-reprefill",
+      "name": "re-prefill the whole prompt every turn",
+      "class": "naive",
+      "source": "BENCHMARK-AUTHORITY.md headline row, `headline-qwen-50x5.json` naive arm",
+      "notes": "Present only as the zero point that defines the elimination fraction. Scoring a cell against it reds NAIVE_BASELINE, deliberately -- the 60.3x number is not a win over anyone real."
+    },
+    {
+      "id": "llama-cpp",
+      "name": "llama.cpp serving GGUF locally",
+      "class": "sota",
+      "source": "BENCHMARK-AUTHORITY.md CPU-parity row, `model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json` (llama.cpp 68.7 tok/s at -t6, 52.4 at -t12; fak 38.1)",
+      "notes": "The portable single-stream inference reference, with a hand-tuned int8 GEMM. Already installed on every local-first machine, which makes its adoption cost zero for that buyer."
+    },
+    {
+      "id": "raw-sglang",
+      "name": "a raw SGLang endpoint, unmediated",
+      "class": "sota",
+      "source": "BENCHMARK-AUTHORITY.md gateway row, `experiments/qwen36/gpu-server-r4-20260622/compare.json` (raw-SGLang 1451.6 tok/s vs fak-gateway 1085.6 at C=64)",
+      "notes": "RadixAttention prefix reuse plus a cache-aware router. When fak fronts it, this engine IS the ceiling for that deployment -- which is why the gateway cells are pure_tax and can never score positive on speed."
+    },
+    {
+      "id": "anthropic-prompt-cache",
+      "name": "provider prompt caching alone",
+      "class": "sota",
+      "source": "Anthropic prompt caching: cache-read tokens bill at 0.1x the base input rate, so a cached token's cost is eliminated by 90%",
+      "notes": "The default token economy for anyone on a hosted frontier API. fak's own accounting (`cacheprice.ShedTokenEquiv`) is explicitly built to price fak-authored savings ON TOP of this, never to claim the provider's slice."
+    },
+    {
+      "id": "window-bound",
+      "name": "no context management -- run until the window fills",
+      "class": "floor",
+      "source": "definitional: a client that manages no context must hold the entire history, so the session ends when history exceeds the model's context window",
+      "notes": "The floor a custom harness starts from, and where a self-built platform sits until someone implements summarization. Honest for a buyer who has not built context management; NOT honest for a hosted agent that ships its own auto-compaction, which is exactly why the solo-max cell on this facet is left unscored."
+    },
+    {
+      "id": "ungoverned-loop",
+      "name": "an agent loop that trusts its own completion report",
+      "class": "floor",
+      "source": "tools/loopgate `verified-vs-naive-loop.report.json` -- the ungoverned arm, false-done rate 0.50",
+      "notes": "Not a strawman: taking the model's word for done is what most harnesses do, because the alternative requires an external verifier. The corpus behind the 0.50 is authored rather than harvested from the field, so every cell against it is MODELED and fenced."
+    },
+    {
+      "id": "formal-isolation",
+      "name": "formal-isolation defenses (CaMeL, MELON)",
+      "class": "sota",
+      "source": "published AgentDojo defense results: CaMeL ASR 0, MELON ASR 0.0-2.4%",
+      "notes": "The tier that already reaches the definitional floor on attack success. fak is at parity with it, not ahead of it. The difference is deployment shape -- these require restructuring the agent's data flow, fak is a wrapper -- and that difference shows up in this scorecard as adoption cost, which is the honest place for it."
+    },
+    {
+      "id": "llm-tracing",
+      "name": "OpenTelemetry GenAI tracing (LangSmith, Langfuse, OTel)",
+      "class": "sota",
+      "source": "OpenTelemetry GenAI semantic conventions and the tracing products built on them: spans over model calls with request/response and token attributes",
+      "notes": "Instruments the provider call. It carries no span for a compaction event, a tool-policy verdict, or a recovery decision, because those are a wrapper's decisions and there is no wrapper -- which is what makes the observability comparison a capability decomposition rather than a benchmark."
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "_about": "Solo developer on a flat-rate plan. Four of eight facets are scored; the other four are declared unrun in _meta.json because the deciding comparisons against THIS buyer's actual alternative have never been run. That is the headline finding for this segment, not an omission.",
+  "cells": [
+    {
+      "segment": "solo-max",
+      "facet": "token-economy",
+      "shape": "wrapper",
+      "pure_tax": true,
+      "fak": {
+        "value": 0.641,
+        "provenance": "MEASURED",
+        "source": "cross-agent ablation `experiments/ablate/cross-agent-pong-opus.json`, K=5 per arm: output tokens 0.98x, turns 1.00x (the same work delivered), total ingested 1.56x -- +28,986 tokens. Work-per-token relative to the bare agent = 1/1.56 = 0.641"
+      },
+      "alt": {
+        "id": "claude-code-bare",
+        "value": 1.0,
+        "source": "the bare claude_code arm of the same artifact, normalized to 1.0 as the reference point"
+      },
+      "cost": {
+        "hours": 0.5,
+        "alt_hours": 0,
+        "basis": [
+          "README.md 1,746 w + GETTING-STARTED.md 3,124 w + INSTALL.md 1,647 w -- the minimum read to a first working `fak guard -- claude`",
+          "the alternative is already installed and its cost is already sunk, so alt_hours = 0"
+        ]
+      },
+      "note": "pure_tax because the bare agent is the reference point, not a rung below the ceiling: the absolute elimination fraction cancels in the ratio, so only the 1.56x matters. On the ONE committed head-to-head against what this buyer actually uses, fak costs MORE tokens, not fewer. The compaction row cannot rescue this cell: BENCHMARK-AUTHORITY.md:66 fences shed tokens to a proportional blend and forbids ratioing them against cache_read, so no like-for-like elimination fraction is derivable from it.",
+      "fence": "K=5 per arm on ONE tiny tool-light task. The guard's fixed preamble dominates a short session and would amortize over a long one -- which is precisely the long-session comparison this segment's session-longevity cell records as never run. Read this as 'unamortized overhead is real and measured', not as 'fak costs 1.56x forever'."
+    },
+    {
+      "segment": "solo-max",
+      "facet": "raw-speed",
+      "shape": "gateway",
+      "pure_tax": true,
+      "fak": {
+        "value": 0.971,
+        "provenance": "MEASURED",
+        "source": "BENCHMARK-AUTHORITY.md Gemma-4-31B serving row: end-to-end p50 1.03x versus the unmediated endpoint, i.e. 3% slower; expressed as a speed fraction, 1/1.03 = 0.971"
+      },
+      "alt": {
+        "id": "raw-sglang",
+        "value": 1.0,
+        "source": "the unmediated endpoint arm of the same comparison, normalized to 1.0"
+      },
+      "cost": {
+        "hours": 0.5,
+        "alt_hours": 0,
+        "basis": [
+          "same install as the token-economy cell; no additional configuration is needed to observe the latency tax"
+        ]
+      },
+      "note": "A ~3% end-to-end tax at the median. Small, and small is the correct answer here -- mediation is cheap when the model call dominates.",
+      "fence": "PROXY, and scope-mismatched on purpose: measured on a self-hosted Gemma-4-31B endpoint, not on the hosted-provider path this buyer actually uses. It is the closest committed measurement of fak's end-to-end mediation cost. The equivalent measurement against a hosted provider has not been run. It is quoted here because it costs fak points rather than winning them; a flattering out-of-scope number would not be admissible."
+    },
+    {
+      "segment": "solo-max",
+      "facet": "run-integrity",
+      "shape": "wrapper",
+      "fak": {
+        "value": 1.0,
+        "provenance": "MODELED",
+        "source": "tools/loopgate `verified-vs-naive-loop.report.json`: the governed arm cuts false-done from 0.50 to 0.00 (net +3,900 tokens), with one-holder leases and runaway/injection caps"
+      },
+      "alt": {
+        "id": "ungoverned-loop",
+        "value": 0.5,
+        "source": "the ungoverned arm of the same report: false-done 0.50, so 0.50 of runs end in a true state"
+      },
+      "cost": {
+        "hours": 1.5,
+        "alt_hours": 0,
+        "basis": [
+          "docs/governed-agent-quickstart.md 1,361 w + POLICY.md 1,726 w -- the read to a working governed loop",
+          "docs/troubleshooting-first-run.md 890 w, which exists because the first run frequently does not work"
+        ]
+      },
+      "note": "Scores the UNATTENDED case. A developer sitting and watching the terminal catches some false completions by eye, so their lived rate is better than 0.50 -- at the price of having to watch, which is the thing they wanted to stop doing.",
+      "fence": "The 0.50 baseline comes from an AUTHORED corpus, not from field measurement. The governing mechanism is real and tested; the rate it is measured against is constructed. Capped at CRUISE by the MODELED provenance rule for exactly this reason -- a simulated corpus cannot buy a category-defining claim."
+    },
+    {
+      "segment": "solo-max",
+      "facet": "steady-state-ops",
+      "shape": "wrapper",
+      "fak": {
+        "value": 2.5,
+        "provenance": "MODELED",
+        "source": "authored estimate from the measured adoption surface, 2026-08-10: 100 top-level `fak` verbs, 34 operating .md files at repo root, ~2.0M words across root+docs, plus its own upgrade cadence, its own config file (dos.toml), and its own failure modes layered on the agent's"
+      },
+      "alt": {
+        "id": "claude-code-bare",
+        "value": 1.0,
+        "source": "authored estimate: keeping a single vendor CLI current -- it updates itself and occasionally breaks"
+      },
+      "cost": {
+        "hours": 0.5,
+        "alt_hours": 0,
+        "basis": [
+          "same install as the other cells in this segment"
+        ]
+      },
+      "note": "The worst cell on the board for this buyer, and the most important one. Because the ceiling is 0 hours/month, the denominator is -N: any layer costing more than double the incumbent's monthly attention falls straight to the display floor. Adding a management layer to a setup that already works more than doubles a solo developer's recurring burden, and no token or safety win on this board is currently measured well enough to pay for it.",
+      "fence": "Both endpoints are authored estimates grounded in the measured surface, not timing studies. The RATIO is the claim, not the absolute hours: a 100-verb, 2M-word layer on top of a working single-binary CLI is not a wash, whatever the true hours are."
+    }
+  ]
+}

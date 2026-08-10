@@ -1,0 +1,271 @@
+{
+  "schema": "fak-lightgap-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-08-10",
+    "fak_version": "v0.34.0",
+    "title": "unbounded usability vs the next-best option and the physical limit",
+    "summary": "Every other scorecard in this repo tops out at 100. This one does not top out at all. Each cell asks a single question: relative to what you would do INSTEAD of fak, and relative to the best that is physically possible, how far does fak actually get you -- and is that worth what it costs you to learn it? Being worse than the alternative is a negative score, not a low one. There is deliberately no overall number, because the answer differs by an order of magnitude across use cases and averaging them would hide exactly the thing you came here to find out.",
+    "_doc": "Data for tools/lightgap_scorecard.py. One concern per file: _meta (facets, segments, weights, tolerances), _ceilings (the c anchor and its derivation per facet), _alternatives (the next-best-option registry), cells-<segment>.json (the scored cells). Every fak value must trace to BENCHMARK-AUTHORITY.md or a committed generated artifact; every next-best value must carry a source; every adoption cost must carry a measured basis. Regenerate the doc: python tools/lightgap_scorecard.py --markdown-dir docs/lightgap-scorecard"
+  },
+  "bands": [
+    {"id": "economics", "name": "What it costs to run", "blurb": "tokens and wall-clock -- the bill and the wait"},
+    {"id": "continuity", "name": "Whether the work survives", "blurb": "long sessions and unattended runs that end in a true state"},
+    {"id": "trust", "name": "Whether you can defend it", "blurb": "hostile input, and reconstructing what happened afterwards"},
+    {"id": "freedom", "name": "What it costs to keep", "blurb": "what you can still swap out, and the recurring bill"}
+  ],
+  "facets": [
+    {
+      "id": "token-economy",
+      "abbr": "TOK",
+      "name": "Token economy",
+      "band": "economics",
+      "question": "For the same delivered work, how much of the input-token bill does it remove?"
+    },
+    {
+      "id": "raw-speed",
+      "abbr": "SPD",
+      "name": "Raw speed",
+      "band": "economics",
+      "question": "How fast do tokens actually come out, against the hardware's physical limit?"
+    },
+    {
+      "id": "session-longevity",
+      "abbr": "LONG",
+      "name": "Session longevity",
+      "band": "continuity",
+      "question": "How long can one session keep going before context forces you to start over?"
+    },
+    {
+      "id": "run-integrity",
+      "abbr": "RUN",
+      "name": "Run integrity",
+      "band": "continuity",
+      "question": "When you are not watching, does the run end in a state you can trust and resume?"
+    },
+    {
+      "id": "injection-control",
+      "abbr": "CTRL",
+      "name": "Injection control",
+      "band": "trust",
+      "question": "Can hostile text inside the data the agent reads make it act for the attacker?"
+    },
+    {
+      "id": "observability",
+      "abbr": "OBS",
+      "name": "Observability",
+      "band": "trust",
+      "question": "After the fact, from one artifact, can you reconstruct why it did what it did?"
+    },
+    {
+      "id": "portability",
+      "abbr": "PORT",
+      "name": "Portability",
+      "band": "freedom",
+      "question": "Once you adopt it, what can you still swap out -- model, backend, agent, host?"
+    },
+    {
+      "id": "steady-state-ops",
+      "abbr": "OPS",
+      "name": "Steady-state ops",
+      "band": "freedom",
+      "question": "After you have adopted it, what does it cost every month to keep it running?"
+    }
+  ],
+  "segments": [
+    {
+      "id": "solo-max",
+      "abbr": "solo dev, flat-rate plan",
+      "name": "Solo developer on a flat-rate plan",
+      "tolerance_hours": 2,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "One person running `claude` all day against a subscription. They are not paying per token, so the token bill is somebody else's problem; what they feel is the session dying mid-task and having to re-explain everything. Their patience for setup is about one evening, and it competes with actually shipping. This is the largest population by headcount and the hardest to win, because the incumbent is already installed, already works, and costs them nothing to keep.",
+      "next_best_summary": "keep using bare `claude` (or `codex`) exactly as installed, and restart the session when it gets confused",
+      "weights": {
+        "token-economy": 0.1,
+        "raw-speed": 0.05,
+        "session-longevity": 0.35,
+        "run-integrity": 0.2,
+        "injection-control": 0.05,
+        "observability": 0.05,
+        "portability": 0.05,
+        "steady-state-ops": 0.15
+      },
+      "unrun": {
+        "session-longevity": {
+          "why": "the deciding comparison for this buyer -- fak's compaction versus Claude Code's own native auto-compaction, over a session long enough for both to fire repeatedly -- has never been run. The repo has fak's per-fire shed (~107K tokens against a 48K budget) but no measurement of the alternative on the same session, and `docs/benchmarks/AUTHORITY-GENERATED-SAMPLE.md:465` states plainly that sessionbench has no checkpoint/resume. A number for one arm is not a comparison.",
+          "next_action": "run one long real task twice (bare `claude` vs `fak guard -- claude`), same prompt and same tools, and report turns-to-context-exhaustion and re-explanation events for both arms"
+        },
+        "injection-control": {
+          "why": "the formal-isolation tier fak's 0/38 AgentDojo result is at parity with (CaMeL, MELON) costs more to deploy than this buyer's entire tolerance, so it is not their next-best option -- and no ASR measurement exists against what they would actually use, which is the host agent's own permission prompts.",
+          "next_action": "run AgentDojo against bare `claude` with default permission prompting as the alternative arm, so the comparison is against the thing this buyer actually has"
+        },
+        "observability": {
+          "why": "the alternative here is the agent's own transcript, not an OTel tracing stack, and nobody has decomposed what a bare Claude Code transcript does and does not let you reconstruct after the fact.",
+          "next_action": "take one failed real session and score both artifacts against the same five decision classes (model traffic, cache reuse, compaction, tool verdicts, recovery)"
+        },
+        "portability": {
+          "why": "for this buyer portability means keeping their agent and their login, not the model x backend grid; there is no committed comparison of what bare Claude Code locks in versus what fak locks in.",
+          "next_action": "enumerate the swap points (agent, provider, model, host) for both and mark which are actually exercised in CI"
+        }
+      }
+    },
+    {
+      "id": "platform-team",
+      "abbr": "platform team",
+      "name": "Platform team running agents for others",
+      "tolerance_hours": 40,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "A small team that operates agent infrastructure their colleagues depend on. They pay the token bill, they get paged when it breaks, and they are the ones who have to explain an incident afterwards. One engineer-week of integration is a normal cost of doing business for them. They are the natural buyer for a management layer, because the thing they are missing is not intelligence, it is control and evidence.",
+      "next_best_summary": "an OpenAI-compatible proxy in front of a self-hosted vLLM/SGLang endpoint, plus an LLM tracing product, plus whatever policy the agent framework ships",
+      "weights": {
+        "token-economy": 0.18,
+        "raw-speed": 0.1,
+        "session-longevity": 0.12,
+        "run-integrity": 0.1,
+        "injection-control": 0.15,
+        "observability": 0.15,
+        "portability": 0.1,
+        "steady-state-ops": 0.1
+      },
+      "unrun": {
+        "portability": {
+          "why": "this buyer's portability question is provider and agent lock-in, not the model x backend grid; the committed support matrix answers a different question and there is no comparison against what a plain proxy locks in.",
+          "next_action": "score both against the same swap list (provider, model, agent, host) with a CI witness per swap point"
+        }
+      }
+    },
+    {
+      "id": "regulated",
+      "abbr": "regulated / audited",
+      "name": "Regulated buyer who must show their work",
+      "tolerance_hours": 240,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "Finance, health, defence, or anyone whose agent output ends up in front of an auditor. Their binding constraint is not cost or speed, it is being able to prove, months later, what the system was told and why it did what it did -- and to show that hostile input could not have steered it. They will absorb six engineer-weeks without blinking. That deep tolerance cuts both ways: it is why they can adopt fak, and it is why fak's 'it is only a wrapper' advantage is worth much less to them than to anyone else.",
+      "next_best_summary": "a container-isolated agent behind a reviewed policy, with tracing retained for audit and a human in the loop on effectful actions",
+      "weights": {
+        "token-economy": 0.05,
+        "raw-speed": 0.05,
+        "session-longevity": 0.05,
+        "run-integrity": 0.1,
+        "injection-control": 0.35,
+        "observability": 0.3,
+        "portability": 0.05,
+        "steady-state-ops": 0.05
+      },
+      "unrun": {
+        "portability": {
+          "why": "no committed comparison of vendor lock-in against a container-plus-policy incumbent; the model x backend grid is not what this buyer means by portability.",
+          "next_action": "enumerate the exit path from each and mark which steps have a witness"
+        }
+      }
+    },
+    {
+      "id": "local-first",
+      "abbr": "local-first / offline",
+      "name": "Local-first developer running models on their own hardware",
+      "tolerance_hours": 12,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "Runs models on a laptop or a single box, for privacy, cost, or because the network is not always there. They already have llama.cpp or Ollama working and they measure things in tokens per second. This is the segment where fak's ambitions collide hardest with reality: it wants to be the engine, and on the engine's own axis it loses to the thing they already run.",
+      "next_best_summary": "llama.cpp or Ollama serving GGUF locally, driven by whatever agent they like",
+      "weights": {
+        "token-economy": 0.15,
+        "raw-speed": 0.35,
+        "session-longevity": 0.15,
+        "run-integrity": 0.05,
+        "injection-control": 0.05,
+        "observability": 0.05,
+        "portability": 0.15,
+        "steady-state-ops": 0.05
+      },
+      "unrun": {
+        "injection-control": {
+          "why": "the formal-isolation tier costs more to deploy than this buyer's whole 12h tolerance, so it cannot be their next-best option, and nobody has measured ASR against what they would actually use.",
+          "next_action": "run AgentDojo with the local agent's own approval prompts as the alternative arm"
+        }
+      }
+    },
+    {
+      "id": "fleet-operator",
+      "abbr": "fleet operator",
+      "name": "Operator running many agents unattended",
+      "tolerance_hours": 80,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "Runs tens or hundreds of agent workers against shared infrastructure, mostly with nobody watching. Their pain is not any single run -- it is that a percentage of runs quietly lie about having finished, and they find out days later. They will spend two engineer-weeks to make that stop. This is the shape fak was actually built for, and it shows.",
+      "next_best_summary": "a queue of agent workers against a shared inference endpoint, each trusting its own completion report",
+      "weights": {
+        "token-economy": 0.25,
+        "raw-speed": 0.15,
+        "session-longevity": 0.15,
+        "run-integrity": 0.25,
+        "injection-control": 0.05,
+        "observability": 0.1,
+        "portability": 0.0,
+        "steady-state-ops": 0.05
+      },
+      "unrun": {}
+    },
+    {
+      "id": "researcher",
+      "abbr": "researcher",
+      "name": "Researcher measuring agent behaviour",
+      "tolerance_hours": 24,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "Needs the run to be reconstructable more than they need it to be fast, because an experiment you cannot explain afterwards is not a result. Tolerance is a few days -- they will build tooling, but only if it answers questions their own logging cannot. Throughput matters to them only as an experiment-turnaround cost.",
+      "next_best_summary": "hand-rolled logging around an agent SDK, plus an LLM tracing product for the model calls",
+      "weights": {
+        "token-economy": 0.15,
+        "raw-speed": 0.15,
+        "session-longevity": 0.05,
+        "run-integrity": 0.1,
+        "injection-control": 0.1,
+        "observability": 0.4,
+        "portability": 0.05,
+        "steady-state-ops": 0.0
+      },
+      "unrun": {
+        "injection-control": {
+          "why": "the formal-isolation tier costs more than this buyer's whole tolerance, so it is not their next-best option; the honest alternative is their own ad-hoc filtering, which nobody has measured.",
+          "next_action": "add an unguarded-harness arm to the AgentDojo run so the comparison is against real practice"
+        },
+        "portability": {
+          "why": "no committed comparison of what an SDK-plus-logging setup locks in versus what fak locks in.",
+          "next_action": "score both on the same swap list with a witness per swap point"
+        }
+      }
+    },
+    {
+      "id": "framework-builder",
+      "abbr": "framework builder",
+      "name": "Builder embedding it in their own product",
+      "tolerance_hours": 120,
+      "switch_bar": 0.5,
+      "block_weight": 0.2,
+      "undecidable_weight": 0.25,
+      "description": "Building a product on top, so they inherit every constraint permanently and cannot route around one later. They will spend three engineer-weeks evaluating, and they weight portability far above everyone else, because for them a narrow model matrix is not an inconvenience -- it is a ceiling on their own product.",
+      "next_best_summary": "build directly on an agent SDK plus a serving engine, and own the glue",
+      "weights": {
+        "token-economy": 0.1,
+        "raw-speed": 0.1,
+        "session-longevity": 0.1,
+        "run-integrity": 0.1,
+        "injection-control": 0.15,
+        "observability": 0.15,
+        "portability": 0.2,
+        "steady-state-ops": 0.1
+      },
+      "unrun": {}
+    }
+  ]
+}
