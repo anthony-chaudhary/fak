@@ -6,6 +6,27 @@ import (
 	"testing"
 )
 
+func TestTypedEdgeDiffKeepsCompatibilityProjection(t *testing.T) {
+	rootward := ArchitectureEdge{From: "high", FromTier: 3, FromTierName: "mechanism", To: "low", ToTier: 1, ToTierName: "primitive", TierDelta: -2, Direction: "rootward"}
+	lateral := ArchitectureEdge{From: "peer", FromTier: 2, FromTierName: "foundation-composite", To: "side", ToTier: 2, ToTierName: "foundation-composite", TierDelta: 0, Direction: "lateral"}
+	upward := ArchitectureEdge{From: "low", FromTier: 1, FromTierName: "primitive", To: "high", ToTier: 3, ToTierName: "mechanism", TierDelta: 2, Direction: "upward"}
+	resolved := ArchitectureEdge{From: "old", FromTier: 2, FromTierName: "foundation-composite", To: "gone", ToTier: 2, ToTierName: "foundation-composite", Direction: "lateral"}
+	before := Report{Leaves: []Leaf{{Name: "old", Dependencies: []string{"gone"}}}, Edges: []ArchitectureEdge{resolved}}
+	after := Report{Leaves: []Leaf{{Name: "high", Dependencies: []string{"low"}}, {Name: "low", Dependencies: []string{"high"}}, {Name: "peer", Dependencies: []string{"side"}}}, Edges: []ArchitectureEdge{upward, lateral, rootward}}
+	diff := Diff(before, after)
+	wantIntroduced := []ArchitectureEdge{rootward, upward, lateral}
+	if !reflect.DeepEqual(diff.IntroducedTypedEdges, wantIntroduced) || !reflect.DeepEqual(diff.ResolvedTypedEdges, []ArchitectureEdge{resolved}) {
+		t.Fatalf("introduced=%+v resolved=%+v", diff.IntroducedTypedEdges, diff.ResolvedTypedEdges)
+	}
+	wantAdded := []EdgeChange{{From: "high", To: "low"}, {From: "low", To: "high"}, {From: "peer", To: "side"}}
+	if !reflect.DeepEqual(diff.AddedEdges, wantAdded) || !reflect.DeepEqual(diff.RemovedEdges, []EdgeChange{{From: "old", To: "gone"}}) {
+		t.Fatalf("compat added=%+v removed=%+v", diff.AddedEdges, diff.RemovedEdges)
+	}
+	if diff.Changes() != 8 { // four leaf membership changes plus four edge changes; typed views add zero.
+		t.Fatalf("changes=%d diff=%+v", diff.Changes(), diff)
+	}
+}
+
 func TestDiffBlastPathChangesExposeStableImpactReroutes(t *testing.T) {
 	before := Report{Leaves: []Leaf{
 		{Name: "deep", BlastPaths: []BlastPath{{Dependent: "target", Path: []string{"deep", "target"}}}},

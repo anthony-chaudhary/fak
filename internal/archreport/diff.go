@@ -77,6 +77,8 @@ type ReportDiff struct {
 	TierChanges              []TierChange              `json:"tier_changes,omitempty"`
 	AddedEdges               []EdgeChange              `json:"added_edges,omitempty"`
 	RemovedEdges             []EdgeChange              `json:"removed_edges,omitempty"`
+	IntroducedTypedEdges     []ArchitectureEdge        `json:"introduced_typed_edges,omitempty"`
+	ResolvedTypedEdges       []ArchitectureEdge        `json:"resolved_typed_edges,omitempty"`
 	FanInChanges             []FanInChange             `json:"fan_in_changes,omitempty"`
 	BlastRadiusChanges       []BlastRadiusChange       `json:"blast_radius_changes,omitempty"`
 	IntroducedBlastImpacts   []BlastImpact             `json:"introduced_blast_impacts,omitempty"`
@@ -122,6 +124,17 @@ func Diff(before, after Report) ReportDiff {
 	for key, edge := range beforeEdges {
 		if _, ok := afterEdges[key]; !ok {
 			out.RemovedEdges = append(out.RemovedEdges, edge)
+		}
+	}
+	beforeTypedEdges, afterTypedEdges := typedEdgeSet(before), typedEdgeSet(after)
+	for key, edge := range afterTypedEdges {
+		if _, ok := beforeTypedEdges[key]; !ok {
+			out.IntroducedTypedEdges = append(out.IntroducedTypedEdges, edge)
+		}
+	}
+	for key, edge := range beforeTypedEdges {
+		if _, ok := afterTypedEdges[key]; !ok {
+			out.ResolvedTypedEdges = append(out.ResolvedTypedEdges, edge)
 		}
 	}
 	for name, a := range afterLeaves {
@@ -198,6 +211,8 @@ func Diff(before, after Report) ReportDiff {
 	sort.Slice(out.TierChanges, func(i, j int) bool { return out.TierChanges[i].Leaf < out.TierChanges[j].Leaf })
 	sortEdges(out.AddedEdges)
 	sortEdges(out.RemovedEdges)
+	sortArchitectureEdges(out.IntroducedTypedEdges)
+	sortArchitectureEdges(out.ResolvedTypedEdges)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
@@ -230,6 +245,23 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+func typedEdgeSet(r Report) map[string]ArchitectureEdge {
+	out := make(map[string]ArchitectureEdge, len(r.Edges))
+	for _, edge := range r.Edges {
+		out[edge.From+"\x00"+edge.To] = edge
+	}
+	return out
+}
+
+func sortArchitectureEdges(edges []ArchitectureEdge) {
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].From != edges[j].From {
+			return edges[i].From < edges[j].From
+		}
+		return edges[i].To < edges[j].To
+	})
 }
 
 func edgeSet(r Report) map[string]EdgeChange {
