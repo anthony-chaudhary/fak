@@ -47,6 +47,7 @@ type ViolationEdge struct {
 	To           string `json:"to"`
 	ToTier       int    `json:"to_tier"`
 	ToTierName   string `json:"to_tier_name"`
+	TierDistance int    `json:"tier_distance"`
 }
 
 func (e ViolationEdge) String() string { return e.From + " -> " + e.To }
@@ -68,13 +69,14 @@ type Diagnostic struct {
 }
 
 type Report struct {
-	Schema         string          `json:"schema"`
-	Tiers          []Tier          `json:"tiers"`
-	Leaves         []Leaf          `json:"leaves"`
-	Hotspots       []Hotspot       `json:"hotspots,omitempty"`
-	Diagnostics    []Diagnostic    `json:"diagnostics,omitempty"`
-	SinkCandidates []SinkCandidate `json:"sink_candidates,omitempty"`
-	Violations     int             `json:"violations"`
+	Schema               string          `json:"schema"`
+	Tiers                []Tier          `json:"tiers"`
+	Leaves               []Leaf          `json:"leaves"`
+	Hotspots             []Hotspot       `json:"hotspots,omitempty"`
+	Diagnostics          []Diagnostic    `json:"diagnostics,omitempty"`
+	SinkCandidates       []SinkCandidate `json:"sink_candidates,omitempty"`
+	Violations           int             `json:"violations"`
+	MaxViolationDistance int             `json:"max_violation_distance"`
 }
 
 func Analyze(root, onlyLeaf string) (Report, error) {
@@ -136,7 +138,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 					floor = level
 				}
 				if level > declared {
-					violationEdges = append(violationEdges, ViolationEdge{From: name, FromTier: declared, FromTierName: tierName(names, declared), To: dep, ToTier: level, ToTierName: tierName(names, level)})
+					violationEdges = append(violationEdges, ViolationEdge{From: name, FromTier: declared, FromTierName: tierName(names, declared), To: dep, ToTier: level, ToTierName: tierName(names, level), TierDistance: level - declared})
 				}
 			}
 		}
@@ -193,6 +195,11 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	}
 	for _, leaf := range report.Leaves {
 		report.Violations += len(leaf.ViolationEdges)
+		for _, edge := range leaf.ViolationEdges {
+			if edge.TierDistance > report.MaxViolationDistance {
+				report.MaxViolationDistance = edge.TierDistance
+			}
+		}
 	}
 	return report, nil
 }
@@ -293,6 +300,9 @@ func tierName(names []string, level int) string {
 
 func sortViolationEdges(edges []ViolationEdge) {
 	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].TierDistance != edges[j].TierDistance {
+			return edges[i].TierDistance > edges[j].TierDistance
+		}
 		if edges[i].From != edges[j].From {
 			return edges[i].From < edges[j].From
 		}

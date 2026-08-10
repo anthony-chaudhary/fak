@@ -52,7 +52,7 @@ import _ "github.com/anthony-chaudhary/fak/internal/primitive"
 			c = l
 		}
 	}
-	wantEdge := ViolationEdge{From: "primitive", FromTier: 1, FromTierName: "primitive", To: "composite", ToTier: 2, ToTierName: "foundation-composite"}
+	wantEdge := ViolationEdge{From: "primitive", FromTier: 1, FromTierName: "primitive", To: "composite", ToTier: 2, ToTierName: "foundation-composite", TierDistance: 1}
 	if len(p.ViolationEdges) != 1 || p.ViolationEdges[0] != wantEdge || !reflect.DeepEqual(p.Violations, []string{"primitive -> composite"}) || p.ImportFloor != 2 {
 		t.Fatalf("primitive=%+v", p)
 	}
@@ -453,17 +453,17 @@ import (
 		t.Fatal(err)
 	}
 	want := []ViolationEdge{
-		{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "beta", ToTier: 2, ToTierName: "foundation-composite"},
-		{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "zeta", ToTier: 3, ToTierName: "mechanism"},
+		{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "zeta", ToTier: 3, ToTierName: "mechanism", TierDistance: 2},
+		{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "beta", ToTier: 2, ToTierName: "foundation-composite", TierDistance: 1},
 	}
-	if len(r.Leaves) != 1 || !reflect.DeepEqual(r.Leaves[0].ViolationEdges, want) || !reflect.DeepEqual(r.Leaves[0].Violations, []string{"alpha -> beta", "alpha -> zeta"}) {
+	if len(r.Leaves) != 1 || !reflect.DeepEqual(r.Leaves[0].ViolationEdges, want) || !reflect.DeepEqual(r.Leaves[0].Violations, []string{"alpha -> zeta", "alpha -> beta"}) || r.MaxViolationDistance != 2 {
 		t.Fatalf("report=%+v", r)
 	}
 	raw, err := r.JSON()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"violation_edges"`, `"from_tier_name"`, `"violations"`} {
+	for _, key := range []string{`"violation_edges"`, `"from_tier_name"`, `"violations"`, `"tier_distance"`, `"max_violation_distance"`} {
 		if !bytes.Contains(raw, []byte(key)) {
 			t.Fatalf("JSON missing %s: %s", key, raw)
 		}

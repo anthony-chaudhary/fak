@@ -173,12 +173,12 @@ func TestWriteArchitectureDiffEmpty(t *testing.T) {
 }
 
 func TestArchitectureFailOnIntroducedViolations(t *testing.T) {
-	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "primitive", FromTierName: "primitive", To: "composite", ToTierName: "foundation-composite"}}, IntroducedViolations: []string{"primitive -> composite"}}
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "primitive", FromTierName: "primitive", To: "composite", ToTierName: "foundation-composite", TierDistance: 1}}, IntroducedViolations: []string{"primitive -> composite"}}
 	var out, errOut bytes.Buffer
 	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-violations"); code != 3 {
 		t.Fatalf("code=%d output=%s", code, out.String())
 	}
-	for _, want := range []string{"verdict=regression", "introduced violation primitive(primitive) -> composite(foundation-composite)", "remediation:", "baseline -> workspace"} {
+	for _, want := range []string{"verdict=regression", "introduced violation primitive(primitive) -> composite(foundation-composite), distance=1", "remediation:", "baseline -> workspace"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q missing %q", out.String(), want)
 		}

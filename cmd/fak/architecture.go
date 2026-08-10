@@ -97,7 +97,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stdout, string(raw))
 		return 0
 	}
-	fmt.Fprintf(stdout, "architecture: %d leaves, %d upward violation(s)\n", sumArchitectureLeaves(report), report.Violations)
+	fmt.Fprintf(stdout, "architecture: %d leaves, %d upward violation(s), max tier distance %d\n", sumArchitectureLeaves(report), report.Violations, report.MaxViolationDistance)
 	for _, t := range report.Tiers {
 		fmt.Fprintf(stdout, "  tier %d %-22s %d\n", t.Level, t.Name, t.Leaves)
 	}
@@ -125,7 +125,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 					if i > 0 {
 						fmt.Fprint(stdout, ", ")
 					}
-					fmt.Fprintf(stdout, "%s(%s) -> %s(%s)", edge.From, edge.FromTierName, edge.To, edge.ToTierName)
+					fmt.Fprintf(stdout, "%s(%s) -> %s(%s), distance=%d", edge.From, edge.FromTierName, edge.To, edge.ToTierName, edge.TierDistance)
 				}
 				fmt.Fprint(stdout, "]")
 			}
@@ -221,10 +221,10 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 		fmt.Fprintf(stdout, "  ~ fan-in %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
 	}
 	for _, edge := range diff.IntroducedViolationEdges {
-		fmt.Fprintf(stdout, "  ! introduced violation %s(%s) -> %s(%s)\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName)
+		fmt.Fprintf(stdout, "  ! introduced violation %s(%s) -> %s(%s), distance=%d\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName, edge.TierDistance)
 	}
 	for _, edge := range diff.ResolvedViolationEdges {
-		fmt.Fprintf(stdout, "  resolved violation %s(%s) -> %s(%s)\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName)
+		fmt.Fprintf(stdout, "  resolved violation %s(%s) -> %s(%s), distance=%d\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName, edge.TierDistance)
 	}
 	for _, diagnostic := range diff.IntroducedDiagnostics {
 		fmt.Fprintf(stdout, "  ! introduced diagnostic %s leaf=%s: %s; recovery: %s\n", diagnostic.Kind, diagnostic.Leaf, diagnostic.Message, diagnostic.Recovery)

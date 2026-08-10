@@ -8,13 +8,13 @@ import (
 
 func TestDiffNamesEveryArchitectureChangeDeterministically(t *testing.T) {
 	before := Report{Leaves: []Leaf{
-		{Name: "alpha", DeclaredTier: 1, DeclaredTierName: "primitive", Dependencies: []string{"abi", "old"}, ViolationEdges: []ViolationEdge{{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "old", ToTier: 2, ToTierName: "foundation-composite"}}, Violations: []string{"alpha -> old"}},
+		{Name: "alpha", DeclaredTier: 1, DeclaredTierName: "primitive", Dependencies: []string{"abi", "old"}, ViolationEdges: []ViolationEdge{{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "old", ToTier: 2, ToTierName: "foundation-composite", TierDistance: 1}}, Violations: []string{"alpha -> old"}},
 		{Name: "old", DeclaredTier: 2, DeclaredTierName: "foundation-composite"},
 		{Name: "removed", DeclaredTier: 2, DeclaredTierName: "foundation-composite"},
 	}}
 	after := Report{Leaves: []Leaf{
 		{Name: "new", DeclaredTier: 2, DeclaredTierName: "foundation-composite"},
-		{Name: "alpha", DeclaredTier: 3, DeclaredTierName: "mechanism", Dependencies: []string{"abi", "new"}, ViolationEdges: []ViolationEdge{{From: "alpha", FromTier: 3, FromTierName: "mechanism", To: "new", ToTier: 4, ToTierName: "composer"}}, Violations: []string{"alpha -> new"}},
+		{Name: "alpha", DeclaredTier: 3, DeclaredTierName: "mechanism", Dependencies: []string{"abi", "new"}, ViolationEdges: []ViolationEdge{{From: "alpha", FromTier: 3, FromTierName: "mechanism", To: "new", ToTier: 4, ToTierName: "composer", TierDistance: 1}}, Violations: []string{"alpha -> new"}},
 		{Name: "old", DeclaredTier: 2, DeclaredTierName: "foundation-composite"},
 	}}
 	got := Diff(before, after)
@@ -28,8 +28,8 @@ func TestDiffNamesEveryArchitectureChangeDeterministically(t *testing.T) {
 	if !reflect.DeepEqual(got.AddedEdges, []EdgeChange{{From: "alpha", To: "new"}}) || !reflect.DeepEqual(got.RemovedEdges, []EdgeChange{{From: "alpha", To: "old"}}) {
 		t.Fatalf("edges=%+v", got)
 	}
-	wantIntroduced := []ViolationEdge{{From: "alpha", FromTier: 3, FromTierName: "mechanism", To: "new", ToTier: 4, ToTierName: "composer"}}
-	wantResolved := []ViolationEdge{{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "old", ToTier: 2, ToTierName: "foundation-composite"}}
+	wantIntroduced := []ViolationEdge{{From: "alpha", FromTier: 3, FromTierName: "mechanism", To: "new", ToTier: 4, ToTierName: "composer", TierDistance: 1}}
+	wantResolved := []ViolationEdge{{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "old", ToTier: 2, ToTierName: "foundation-composite", TierDistance: 1}}
 	if !reflect.DeepEqual(got.IntroducedViolationEdges, wantIntroduced) || !reflect.DeepEqual(got.ResolvedViolationEdges, wantResolved) || !reflect.DeepEqual(got.IntroducedViolations, []string{"alpha -> new"}) || !reflect.DeepEqual(got.ResolvedViolations, []string{"alpha -> old"}) {
 		t.Fatalf("violations=%+v", got)
 	}
@@ -182,7 +182,7 @@ func TestDiffViolationIdentityIgnoresTierDisplayChanges(t *testing.T) {
 }
 
 func TestDiffTypedViolationJSONKeepsCompatibilityProjection(t *testing.T) {
-	edge := ViolationEdge{From: "low", FromTier: 1, FromTierName: "primitive", To: "high", ToTier: 3, ToTierName: "mechanism"}
+	edge := ViolationEdge{From: "low", FromTier: 1, FromTierName: "primitive", To: "high", ToTier: 3, ToTierName: "mechanism", TierDistance: 2}
 	got := Diff(Report{}, Report{Leaves: []Leaf{{Name: "low", ViolationEdges: []ViolationEdge{edge}}}})
 	raw, err := got.JSON()
 	if err != nil {
@@ -192,5 +192,14 @@ func TestDiffTypedViolationJSONKeepsCompatibilityProjection(t *testing.T) {
 		if !bytes.Contains(raw, []byte(key)) {
 			t.Fatalf("JSON missing %s: %s", key, raw)
 		}
+	}
+}
+
+func TestDiffRanksTypedViolationsByTierDistance(t *testing.T) {
+	near := ViolationEdge{From: "alpha", FromTier: 1, To: "near", ToTier: 2, TierDistance: 1}
+	far := ViolationEdge{From: "alpha", FromTier: 1, To: "far", ToTier: 4, TierDistance: 3}
+	got := Diff(Report{}, Report{Leaves: []Leaf{{Name: "alpha", ViolationEdges: []ViolationEdge{near, far}}}})
+	if !reflect.DeepEqual(got.IntroducedViolationEdges, []ViolationEdge{far, near}) || !reflect.DeepEqual(got.IntroducedViolations, []string{"alpha -> far", "alpha -> near"}) {
+		t.Fatalf("diff=%+v", got)
 	}
 }
