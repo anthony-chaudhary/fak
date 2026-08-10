@@ -46,49 +46,149 @@ A witness is independent relative to the claim. It may be:
 
 "A second agent said yes" is not by itself independence. The witness contract must specify an acceptable source and the verifier must establish that source did not merely echo the proposing agent.
 
-## State machine
+## Process model: a reconciled graph, not a pipeline
+
+The arrows in a simple state diagram are useful for orientation, but they are not the
+process model. A held call is a **durable resource reconciled from facts and events**.
+Evidence can arrive twice, in either order, or after cancellation; policy can change while
+approval is pending; a witness can revoke an attestation; an execution worker can die after
+the effect but before recording completion; result delivery can fail while the effect remains
+complete. Treating those cases as one linear `WAITING -> VERIFYING -> EXECUTING -> RESUME`
+program creates races and duplicate effects.
+
+Do not make one enum carry all of this. Keep orthogonal observed facts on the held-call
+resource:
 
 ```text
-PROPOSED
-   |
-   | adjudication = REQUIRE_WITNESS
-   v
-HELD --publish--> WAITING
-  |                  |
-  | cancel/expiry    | attestation arrives
-  v                  v
-CANCELLED/EXPIRED  VERIFYING
-                       |
-             invalid / denied --> REJECTED
-                       |
-                    valid
-                       v
-                 REVALIDATING
-                  /         \
-     policy/input stale     still valid
-              |                 |
-           REJECTED              v
-                              READY
-                                |
-                         CAS execution lease
-                                v
-                            EXECUTING
-                                |
-                    result admission gate
-                       /                \
-                 QUARANTINED          COMPLETED
-                       \                /
-                        RESUME CONTINUATION
+HeldCallStatus {
+  intent_generation       // increments if tool/args/contract changes
+  lifecycle               // open | cancelled | expired
+  evidence[]              // pending | valid | rejected | revoked, each source-bound
+  witness_rule            // all | any | quorum(n) | expression over witness classes
+  policy_epoch_checked
+  readiness               // unsatisfied | satisfied | stale
+  execution               // none | leased | effect-recorded | outcome-unknown
+  result_admission        // pending | admitted | quarantined
+  continuation_delivery   // pending | delivered | acknowledged
+}
 ```
 
-Important properties:
+Each durable event is appended idempotently, then a reducer updates observed facts and a
+reconciler asks **what work is enabled now?** It may schedule zero, one, or several actions.
+Workers claim actions with leases and report new facts; they do not advance a global program
+counter.
 
-- **No witness executes the tool.** It only satisfies a named gate; the kernel remains the sole disposer.
-- **No auto-allow after waiting.** Policy, principal authority, plugin versions, argument digest, and time-sensitive preconditions are revalidated immediately before execution. A stale approval returns to `HELD` with a new request or fails closed.
-- **At-most-once effect.** A compare-and-swap execution lease plus an idempotency key prevents two witness consumers or retries from running the same call twice.
-- **One terminal decision.** Conflicting attestations fold fail-closed according to policy; the first arrival does not automatically win.
-- **Cancellation propagates.** Cancelling the session or held call makes late attestations inert.
-- **Result admission still applies.** Witnessing the call does not trust its output; `QUARANTINE` remains a separate result-side verdict.
+```text
+on event(call_id, event_id):
+    append_once(event_id)
+    facts = reduce(all_events_for(call_id))
+
+    repeat until no local fact changes:
+        desired = derive_desired_state(spec, facts, current_policy)
+        actions = diff(desired, facts)
+        enqueue_idempotently(actions)
+        facts = reduce(new_local_events)
+```
+
+The repeat is a bounded fixed-point calculation, not an unbounded busy loop. External work
+returns through new events and starts another reconciliation tick. A per-call generation and
+event IDs make old work harmless after edits or cancellation.
+
+### The loops that cooperate
+
+There is no requirement that one process own a held call for its lifetime. At least four
+independent loops can cooperate through the durable record:
+
+1. **Call controller loop** — folds proposal, policy, user edits, cancellation, time, and
+   evidence into desired readiness. It can move `unsatisfied -> satisfied -> stale ->
+   unsatisfied` rather than only forward.
+2. **Witness loops** — one adapter per eligible witness route publishes requests and ingests
+   attestations or revocations. Routes can run concurrently; `all`, `any`, quorum, veto, and
+   fallback-after-timeout are data in the witness rule.
+3. **Execution recovery loop** — acquires the effect lease only for the current generation,
+   revalidates immediately before dispatch, and resolves crashes using the tool's idempotency
+   key or an independent effect read-back. `outcome-unknown` is a real state; it must not be
+   converted into a blind retry.
+4. **Continuation delivery loop** — admits/quarantines the result and retries delivery to an
+   offline or moved session. Delivery can loop independently after execution is complete and
+   can be acknowledged separately.
+
+Notification, expiry, garbage collection, and audit projection can be additional observer
+loops. They do not authorize execution.
+
+### Common non-linear paths
+
+```text
+                              policy/config changes
+                           +-------------------------+
+                           v                         |
+PROPOSED -> HELD <-> EVIDENCE_UNSATISFIED -> SATISFIED
+                ^       ^          |              |
+                |       |          | revoke/veto  | pre-exec revalidation
+ edit/transform |       +----------+              v
+(new generation)                            READY_FOR_LEASE
+                ^                              |       |
+                |                         lease lost   | effect dispatched
+                |                              |       v
+                +------------------------------+  EFFECT_RECORDED
+                                                   |          |
+                                          quarantine      admit result
+                                                   |          v
+                                                   +----> DELIVERY_PENDING
+                                                            ^       |
+                                                     retry  |       v
+                                                            +-- DELIVERED
+
+Any open pre-effect node --cancel/expiry--> TERMINAL_NO_EFFECT
+Any post-dispatch ambiguity -----------> OUTCOME_UNKNOWN --read-back--> effect/no-effect
+```
+
+This is deliberately a graph with cycles:
+
+- a policy epoch change makes previously sufficient evidence stale and sends the call back
+  for reconciliation;
+- a transform or user edit creates a new generation, invalidating attestations bound to the
+  old call digest;
+- one witness may approve while another vetoes, or a quorum may become satisfied before a
+  late duplicate arrives;
+- cancellation wins before the execution lease, while cancellation after dispatch records
+  user intent but cannot pretend an irreversible effect did not happen;
+- continuation delivery may retry many times without rerunning the tool;
+- a dependent call may become held when an upstream result changes, while unrelated calls
+  continue.
+
+### Joins, forks, and nested holds
+
+A witness obligation is often a dependency graph rather than one request. For example,
+`transfer_money` may require `(human approval AND fraud check) OR break-glass operator`, with
+a compliance veto. The controller forks witness requests, folds responses under that
+expression, and joins only when the rule is satisfied. A witness provider may itself propose
+a governed tool call; that nested call receives its own `held_id` and dependency edge rather
+than blocking the parent worker in memory. Cycle detection and a maximum dependency depth
+must fail closed, because `A waits for B waits for A` is otherwise a durable deadlock.
+
+The same graph permits speculative work without violating ordering. The scheduler may run
+calls proven independent of the held result, but any call with a dependency edge remains
+unready. "Pause the agent" is therefore a policy/UI projection of the dependency graph, not a
+kernel-wide process suspension.
+
+### Invariants across every loop
+
+- **No witness executes the tool.** It only adds or removes source-bound evidence; the kernel
+  remains the sole disposer.
+- **No auto-allow after waiting.** Every execution lease is generation-, digest-, principal-,
+  plugin-set-, and policy-epoch-bound and is revalidated at dispatch.
+- **At-most-once effect, at-least-once reconciliation.** Events and work delivery may repeat;
+  effects may not. A compare-and-swap lease plus tool idempotency/read-back closes the crash
+  window.
+- **No first-response-wins shortcut.** The declared join/veto rule folds concurrent and
+  conflicting attestations deterministically.
+- **Cancellation and expiry are facts, not queue deletion.** Late events remain auditable but
+  cannot enable stale work.
+- **Result admission is independent.** Witnessing a call never trusts its output;
+  `QUARANTINE` remains a result-side decision.
+- **Resume is idempotent and separable from execution.** Replaying a delivery notification
+  cannot replay the effect.
 
 ## Does the whole agent pause?
 
@@ -200,7 +300,7 @@ Plugin selection is also policy. A profile should pin plugin identity, version/d
 
 ## Minimal external protocol
 
-A practical first spine needs only four durable operations:
+A practical first spine needs only four durable command/query operations. These mutate or read the held-call resource; they do not encode a linear workflow:
 
 ```http
 POST /tool-calls
@@ -216,9 +316,9 @@ POST /held/{held_id}/cancel
   -> idempotent cancellation
 ```
 
-A queue consumer and a polling client are then two adapters over the same state machine. A later event stream (`held.created`, `attestation.accepted`, `held.ready`, `call.completed`, `result.quarantined`) improves latency but should not be the source of truth.
+A queue consumer and a polling client are then two adapters over the same reconciliation graph. A later event stream (`held.created`, `attestation.accepted`, `held.ready`, `call.completed`, `result.quarantined`) improves latency but should not be the source of truth.
 
-The smallest end-to-end witness is: a fake `money_transfer` call returns `202`; a second principal submits a call-digest-bound approval; the kernel revalidates and executes it once; duplicate approval and replay do not duplicate the effect; the parked session receives exactly one admitted result. That test is the proof that this concept has become execution rather than vocabulary.
+The smallest end-to-end witness is: a fake `money_transfer` call returns `202`; a second principal submits a call-digest-bound approval; the kernel revalidates and executes it once; duplicate and out-of-order approval delivery does not duplicate the effect; a policy-epoch change sends a ready call back to evidence reconciliation; and result-delivery retry gives the parked session exactly one logical admitted result without rerunning the tool. A crash-after-effect/read-back case closes the most important non-linear window. Those tests are the proof that this concept has become execution rather than vocabulary.
 
 ## Design choices to keep separate
 
@@ -230,4 +330,4 @@ The smallest end-to-end witness is: a fake `money_transfer` call returns `202`; 
 
 ## Recommendation
 
-Treat `REQUIRE_WITNESS` as the kernel's durable `await` primitive and `TRANSFORM` as one typed output available to proposal-stage plugins. Build the held-call ledger and exact-once resume spine before adding a broad plugin marketplace. Then expose plugins at typed stages with pinned identities and monotone authority, and expose user preferences primarily as routing, latency, disclosure, and stricter-policy choices.
+Treat `REQUIRE_WITNESS` as the kernel's durable `await` primitive, implemented by convergent reconciliation loops rather than a blocking pipeline, and `TRANSFORM` as one typed output available to proposal-stage plugins. Build the held-call event ledger, reducer/reconciler, and exact-once effect plus idempotent-delivery spine before adding a broad plugin marketplace. Then expose plugins at typed stages with pinned identities and monotone authority, and expose user preferences primarily as routing, latency, disclosure, and stricter-policy choices.
