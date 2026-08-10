@@ -82,6 +82,11 @@ var leafClassifications = []LeafClassification{{
 	Reason:       "native prefix-access trace replay across cache budgets with infinite-cache ceiling and ROI knee",
 },
 	{
+		Leaf: "internal/guardroute", Disposition: DispositionCapability,
+		Capabilities: []string{"guard_journal_action_routing"},
+		Reason:       "typed guard-journal fold routing to no-op, pickable finding, or deduped issue",
+	},
+	{
 		Leaf: "internal/issuededup", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"issue_near_duplicate_detection"},
 		Reason:       "issuededup also provides backlog census clustering; write-time near-duplicate candidate detection is contracted separately",
@@ -354,6 +359,11 @@ var contracts = []Contract{{
 	},
 	Witness: "../../docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
 },
+	{
+		Capability: "guard_journal_action_routing", NativePath: "internal/guardroute/guardroute.go", Workload: "same empty, structural-anomaly, below-threshold reason, and at-threshold reason journal folds with exact no-op, finding, or issue action oracle",
+		Metrics:      []string{"action_accuracy", "false_routes", "missed_routes", "severity_accuracy", "latency_ms", "throughput_folds_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{{Name: "count-threshold-only routing", Class: TunedBaseline, Source: "internal/guardroute/compare.go"}, {Name: "DOS decisions", Class: FirstClassIntegration, Integration: "dos", Source: "dos decisions"}, {Name: "OPA decision policy", Class: NextBest, Source: "https://www.openpolicyagent.org"}, {Name: "Cedar policy evaluator", Class: NextBest, Source: "https://www.cedarpolicy.com"}, {Name: "Drools rule engine", Class: NextBest, Source: "https://www.drools.org"}, {Name: "Prometheus Alertmanager routing", Class: NextBest, Source: "https://prometheus.io/docs/alerting/latest/alertmanager/"}}, Witness: "../../docs/benchmarks/GUARD-JOURNAL-ROUTING-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"},
+	},
 	{
 		Capability: "issue_near_duplicate_detection", NativePath: "internal/issuededup/issuededup.go",
 		Workload:     "same three-issue backlog, two paraphrased duplicates, one unrelated candidate, and exact existing-issue oracle across every arm",
