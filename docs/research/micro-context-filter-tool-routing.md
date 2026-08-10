@@ -30,6 +30,39 @@ contract.
 This is a design hypothesis, not yet a net-true performance claim. #6105 tracks the executable
 comparison; #6033 tracks the broader tuned-baseline falsification.
 
+## Three different micro-window seams
+
+"A micro-window for filters and tools" can mean three different executions. Keeping them separate
+prevents a useful optimization from becoming an authority leak:
+
+| Seam | Bounded input | Output | Authority | Typical cache key |
+|---|---|---|---|---|
+| **Control window** | record metadata, prior typed facts, candidate descriptors, remaining budget | propose `skip`, `run filter`, `call read tool`, `widen`, `stop`, or `escalate` | proposal only; the kernel admits a catalogued stage | policy + candidate-set + fact-summary digest |
+| **Filter window** | one record, field, or value plus one semantic predicate | typed match / class / abstention with evidence span | no tools and no new capabilities | filter/rubric version + normalized value digest |
+| **Tool-result window** | one bounded read receipt or result slice plus the unresolved question | typed fact / relevance / abstention with citation | cannot mint another call or convert a read into an effect | tool/version + canonical args + result digest + rubric |
+
+The windows may use the same model endpoint, but they are not interchangeable calls. A control-window
+cache hit cannot stand in for a filter result; a tool-result interpretation cannot authorize another
+tool; and a filter's semantic answer cannot certify that a global task is complete. Separate receipts
+also make it possible to batch filter work, cache stable read results, and invalidate routing policy
+without discarding underlying facts.
+
+A concrete path is:
+
+```text
+issue record
+  -> exact metadata filters
+  -> control window: is a semantic residual worth opening?
+  -> filter window: classify one title/body/value
+  -> control window: does freshness uncertainty justify a read tool?
+  -> kernel admits a canonical read call
+  -> tool-result window: extract one relevant bounded fact
+  -> typed fold
+```
+
+At every arrow the controller may avoid unopened work. That is the economic promise. It is not a
+claim that model decisions should precede cheap deterministic filters.
+
 ## Why route stages instead of running everything?
 
 A conventional pipeline often runs a fixed cascade:
@@ -90,6 +123,24 @@ retain enough information to estimate **oracle regret** afterward:
 
 A selector that saves calls but increases false negatives is not a win.
 
+### Sufficiency is task-shaped, not "N records arrived"
+
+Cancellation is sound only when a predicate over independently witnessed facts proves unfinished work
+cannot change the answer contract:
+
+- **Existence** (`is any open issue a release blocker?`) may stop after one witnessed positive.
+- **Top-k** may stop only when every unopened partition has a structural upper bound below the current
+  witnessed kth score; merely having k candidates is insufficient.
+- **Exhaustive count/list** normally must inspect every eligible partition, unless an exact index or
+  partition-completeness receipt proves that the remainder is empty.
+- **Contradiction/duplicate clustering** generally needs group-aware coverage; per-record confidence
+  alone cannot prove that no cross-record relation remains.
+
+The routing model must not author and approve its own stop condition. The kernel evaluates a declared
+predicate over receipts, or an independent grader/read-back does so. Otherwise "sufficient" is just
+self-certified early exit. S8l's fixed-count stop proves that cancellation changes the latency/quality
+point, not that the stopping rule is sound.
+
 ## Authority and safety invariants
 
 1. **Choice is not authority.** Selector output names a catalog entry; capability checks occur at
@@ -116,12 +167,17 @@ A selector that saves calls but increases false negatives is not a win.
 Run one selected stage, update state, then decide again. This minimizes wasted work and makes budgets
 simple, but adds control-loop latency.
 
-### Parallel read race
+### Queue-aware deadlines and selective read races
 
-Launch two bounded, read-only candidates when their combined expected latency benefit exceeds extra
-cost; accept the first sufficient typed result and cancel the loser. This is useful for tail latency,
-but cancellation may arrive after the provider has billed the request. Report attempted and avoided
-work separately.
+A deadline is useful only if timeout releases the scheduler slot; a timed-out stream that still occupies
+admission capacity can make the whole task slower. Record cancellation request, transport completion,
+slot release, returned usage, and unknown post-cancel billing as separate facts.
+
+For safe read-only candidates, selective hedging may launch a duplicate only when measured tail risk
+multiplied by decision value exceeds the duplicate's expected work. Keep the first result satisfying a
+fixed quality predicate and cancel the loser. Compare this with both no hedge and universal hedge.
+S8l's universal arm opened 18 duplicates for two wins and no wall-time gain, so micro-windows make
+hedging possible, but current evidence does not show that hedging helps. Effects remain forbidden.
 
 ### Deterministic fast path plus semantic residual
 
@@ -187,6 +243,19 @@ retrieval/reranking, long context, and coarse chunks. Record:
 
 Report decision regions rather than one average. A routing policy can win on sparse mixed workloads
 and lose on homogeneous or dense ones.
+
+## Current evidence boundary
+
+- S8h (`#6105`) observed a controlled crossover: a static filter+tool policy won the exact-heavy
+  mixture, while adaptive routing won several residual-heavy mixtures under the fixture's common
+  utility. Its costs are calibrated units, not provider billing.
+- S8l (`#6160`) showed that bounded records permit typed cancellation and partial folds. Count-based
+  early stop reduced wall time and returned prompt tokens but also reduced exact quality; fixed
+  deadlines retained slots; universal hedging was wasteful. Cancelled-but-billed usage remains unknown.
+- The live alternatives still miss the strict quality floor, and tool-need labels await stabilization
+  in `#6140`. There is no quality-qualified net-true winner yet.
+- `#6167` is the executable next falsification: task-specific witnessed sufficiency, queue-aware slot
+  release, and selective filter/tool/window admission against tuned static alternatives.
 
 ## Falsification sequence
 
