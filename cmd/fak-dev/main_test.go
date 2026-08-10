@@ -254,6 +254,28 @@ func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesRefactorVerify(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"refactor-verify", "--ref", "definitely-not-a-commit"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "refactor-verify: not a commit") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchRefactorVerify(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "refactor-verify":`) || strings.Contains(string(body), "cmdRefactorVerify(") {
+		t.Fatal("runtime fak still dispatches the dev-only refactor-verify command")
+	}
+}
+
 func TestRunDispatchesSessionDiagUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"sessiondiag", "--help"})
@@ -341,6 +363,29 @@ func TestRuntimeSourceDoesNotDispatchReadmeVisualAudit(t *testing.T) {
 		t.Fatal("runtime fak still dispatches the dev-only readme-visual-audit command")
 	}
 }
+// TestRunDispatchesFleetcapPlanner proves the capacity planner answers from the
+// development artifact now that the runtime arm is gone (#6022 DoD row 4).
+func TestRunDispatchesFleetcapPlanner(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run(&out, &errOut, []string{"fleetcap", "--rate", "400", "--session", "10", "--available", "40"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "UNDER_CAPACITY") {
+		t.Fatalf("stdout=%s", out.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchFleetcap(t *testing.T) {
+	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
+	body, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `case "fleetcap":`) || strings.Contains(string(body), "cmdFleetcap(") {
+		t.Fatal("runtime fak still dispatches the dev-only fleetcap command")
+	}
+}
+
 func TestRuntimeSourceDoesNotDispatchOrient(t *testing.T) {
 	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
 	body, err := os.ReadFile(mainPath)

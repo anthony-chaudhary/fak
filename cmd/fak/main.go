@@ -71,8 +71,6 @@ func main() {
 		cmdTrunkBuildProbe(os.Args[2:])
 	case "godsplit-plan":
 		cmdGodsplitPlan(os.Args[2:])
-	case "refactor-verify":
-		cmdRefactorVerify(os.Args[2:])
 	case "glm52-prefill-sweep":
 		cmdGLM52PrefillSweep(os.Args[2:])
 	case "recall":
@@ -341,8 +339,6 @@ func main() {
 		cmdUsage(os.Args[2:])
 	case "headroom":
 		cmdHeadroom(os.Args[2:])
-	case "fleetcap":
-		cmdFleetcap(os.Args[2:])
 	case "vcache":
 		cmdVCache(os.Args[2:])
 	case "hook":
