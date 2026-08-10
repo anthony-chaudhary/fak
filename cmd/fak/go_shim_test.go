@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 )
 
 // withGoShimSeams swaps the shim's impure seams (the SAME untracked/modified-dirs listers
@@ -95,7 +97,7 @@ func TestGoShimOverlayEqualsBuildcheckSelection(t *testing.T) {
 	mine := []string{"cmd/fak/mine.go"}
 
 	// buildcheck's canonical selection for this tree state:
-	wantMasked, _, _ := selectMaskedFiles(untracked, mine, modifiedDirs)
+	wantMasked, _, _ := buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
 
 	withGoShimSeams(t, untracked, modifiedDirs, nil)
 	scratch := t.TempDir()
@@ -112,11 +114,11 @@ func TestGoShimOverlayEqualsBuildcheckSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read overlay: %v", err)
 	}
-	var got goOverlay
+	var got buildoverlay.Overlay
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("overlay json: %v", err)
 	}
-	want := buildOverlay("/repo", wantMasked)
+	want := buildoverlay.Build("/repo", wantMasked)
 	if !reflect.DeepEqual(got.Replace, want.Replace) {
 		t.Errorf("overlay Replace = %v, want %v", got.Replace, want.Replace)
 	}

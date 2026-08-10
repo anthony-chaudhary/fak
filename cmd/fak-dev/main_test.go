@@ -139,11 +139,32 @@ func TestRunDispatchesBoundaryUsage(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesBuildcheckUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"buildcheck", "--help"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Usage of fak buildcheck:") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
 func TestRunDispatchesCIPreflightUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"ci-preflight", "--repo", t.TempDir(), "--ref", "missing", "--json"})
 	if code != 2 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+}
+
+func TestRuntimeSourceDoesNotDispatchBuildcheck(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "fak", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(src, []byte(`case "buildcheck":`)) {
+		t.Fatal("runtime fak still dispatches dev-owned buildcheck")
 	}
 }
 

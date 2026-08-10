@@ -660,8 +660,6 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdAffected(args)
 	case "blast":
 		cmdBlast(args)
-	case "buildcheck":
-		cmdBuildCheck(args)
 
 	case "go":
 		cmdGoShim(args)

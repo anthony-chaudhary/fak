@@ -24,6 +24,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 )
 
 // wipFenceSlug derives the fence slug (the tag is wip_<slug>) from a file path or
@@ -147,7 +149,7 @@ func runWipFence(stdout, stderr io.Writer, argv []string) int {
 		if root == "" {
 			root = repoRoot()
 		}
-		files, err := untrackedFiles(root)
+		files, err := buildoverlay.UntrackedGoFiles(root)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak wip fence: listing untracked files: %v\n", err)
 			return 1

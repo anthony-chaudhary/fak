@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 	"github.com/anthony-chaudhary/fak/internal/maturity"
 	"github.com/anthony-chaudhary/fak/internal/modver"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -137,7 +138,7 @@ func joinCoverageScores(stderr io.Writer, root, profile string, rep *modver.Repo
 		fmt.Fprintf(stderr, "fak version modules: %v\n", err)
 		return 2
 	}
-	modulePath, err := readModulePath(filepath.Join(root, "go.mod"))
+	modulePath, err := buildoverlay.ModulePath(filepath.Join(root, "go.mod"))
 	if err != nil {
 		fmt.Fprintf(stderr, "fak version modules: read module path: %v\n", err)
 		return 1

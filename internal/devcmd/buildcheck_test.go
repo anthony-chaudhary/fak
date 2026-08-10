@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 	"time"
 )
 
@@ -31,7 +33,7 @@ func TestSelectMaskedFiles(t *testing.T) {
 		"cmd/fak/data.txt",
 		"internal/foo/peer2.go",
 	}
-	masked, kept, stale := selectMaskedFiles(untracked, []string{"cmd/fak/mine_new.go"}, nil)
+	masked, kept, stale := buildoverlay.SelectMaskedFiles(untracked, []string{"cmd/fak/mine_new.go"}, nil)
 	wantMasked := []string{"cmd/fak/peer_wip.go", "internal/foo/peer2.go"}
 	if !reflect.DeepEqual(masked, wantMasked) {
 		t.Errorf("masked = %v, want %v (only untracked .go not declared --mine)", masked, wantMasked)
@@ -48,7 +50,7 @@ func TestSelectMaskedFilesStaleAndBackslashMine(t *testing.T) {
 	untracked := []string{"cmd/fak/peer.go", "cmd/fak/keep.go"}
 	// --mine given with a backslash separator (Windows paste) and a duplicate, plus one
 	// path that is not actually untracked -> normalized, deduped, and reported as stale.
-	masked, _, stale := selectMaskedFiles(untracked, []string{`cmd\fak\keep.go`, "cmd/fak/keep.go", "cmd/fak/tracked.go"}, nil)
+	masked, _, stale := buildoverlay.SelectMaskedFiles(untracked, []string{`cmd\fak\keep.go`, "cmd/fak/keep.go", "cmd/fak/tracked.go"}, nil)
 	if !reflect.DeepEqual(masked, []string{"cmd/fak/peer.go"}) {
 		t.Errorf("masked = %v, want [cmd/fak/peer.go] (keep.go protected via slash-normalized --mine)", masked)
 	}
@@ -58,7 +60,7 @@ func TestSelectMaskedFilesStaleAndBackslashMine(t *testing.T) {
 }
 
 func TestSelectMaskedFilesEmpty(t *testing.T) {
-	masked, kept, stale := selectMaskedFiles(nil, nil, nil)
+	masked, kept, stale := buildoverlay.SelectMaskedFiles(nil, nil, nil)
 	if len(masked) != 0 || len(kept) != 0 || len(stale) != 0 {
 		t.Errorf("empty inputs -> masked=%v kept=%v stale=%v, want all empty", masked, kept, stale)
 	}
@@ -70,7 +72,7 @@ func TestSelectMaskedFilesKeepsInModifiedDir(t *testing.T) {
 		"internal/peer/newthing.go",       // independent peer WIP, its dir has no edits
 	}
 	modified := map[string]bool{"internal/slackoutbox": true}
-	masked, kept, stale := selectMaskedFiles(untracked, nil, modified)
+	masked, kept, stale := buildoverlay.SelectMaskedFiles(untracked, nil, modified)
 	if !reflect.DeepEqual(kept, []string{"internal/slackoutbox/compact.go"}) {
 		t.Errorf("kept = %v, want [internal/slackoutbox/compact.go] (untracked .go in an edited pkg is kept, not masked)", kept)
 	}
@@ -84,7 +86,7 @@ func TestSelectMaskedFilesKeepsInModifiedDir(t *testing.T) {
 
 func TestBuildOverlayHidesEachFile(t *testing.T) {
 	root := filepath.FromSlash("/repo/root")
-	ov := buildOverlay(root, []string{"cmd/fak/peer.go", "internal/foo/bar.go"})
+	ov := buildoverlay.Build(root, []string{"cmd/fak/peer.go", "internal/foo/bar.go"})
 	if len(ov.Replace) != 2 {
 		t.Fatalf("Replace has %d entries, want 2", len(ov.Replace))
 	}
@@ -166,7 +168,7 @@ func TestRunBuildCheckIsolatesSiblings(t *testing.T) {
 		return 0, nil
 	})
 	var out, errb bytes.Buffer
-	if rc := runBuildCheck(&out, &errb, []string{"./cmd/fak"}); rc != 0 {
+	if rc := RunBuildCheck(&out, &errb, []string{"./cmd/fak"}); rc != 0 {
 		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
 	}
 	joined := strings.Join(gotArgs, " ")
@@ -194,7 +196,7 @@ func TestRunBuildCheckNoIsolate(t *testing.T) {
 		return 0, nil
 	})
 	var out, errb bytes.Buffer
-	if rc := runBuildCheck(&out, &errb, []string{"--isolate=false", "./..."}); rc != 0 {
+	if rc := RunBuildCheck(&out, &errb, []string{"--isolate=false", "./..."}); rc != 0 {
 		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
 	}
 	if !called {
@@ -207,7 +209,7 @@ func TestRunBuildCheckJSONReport(t *testing.T) {
 		return 0, nil
 	})
 	var out, errb bytes.Buffer
-	if rc := runBuildCheck(&out, &errb, []string{"--json", "./..."}); rc != 0 {
+	if rc := RunBuildCheck(&out, &errb, []string{"--json", "./..."}); rc != 0 {
 		t.Fatalf("rc = %d, want 0", rc)
 	}
 	var rep buildCheckReport
@@ -234,7 +236,7 @@ func TestRunBuildCheckBuildFailedExit(t *testing.T) {
 		return 2, nil
 	})
 	var out, errb bytes.Buffer
-	rc := runBuildCheck(&out, &errb, []string{"--json", "./..."})
+	rc := RunBuildCheck(&out, &errb, []string{"--json", "./..."})
 	if rc != 2 {
 		t.Fatalf("rc = %d, want 2 (mirror go's exit code)", rc)
 	}
@@ -262,7 +264,7 @@ func TestRunBuildCheckKeepsMatchedSibling(t *testing.T) {
 			return 0, nil
 		})
 	var out, errb bytes.Buffer
-	if rc := runBuildCheck(&out, &errb, []string{"--json", "./cmd/fak"}); rc != 0 {
+	if rc := RunBuildCheck(&out, &errb, []string{"--json", "./cmd/fak"}); rc != 0 {
 		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
 	}
 	if strings.Contains(strings.Join(gotArgs, " "), "-overlay") {
@@ -298,7 +300,7 @@ func TestRunBuildCheckLiveCrossCheckPasses(t *testing.T) {
 			return 0, nil // live tree (no overlay) compiles
 		})
 	var out, errb bytes.Buffer
-	rc := runBuildCheck(&out, &errb, []string{"--json", "./..."})
+	rc := RunBuildCheck(&out, &errb, []string{"--json", "./..."})
 	if rc != 0 {
 		t.Fatalf("rc = %d, want 0 (live tree compiles -> mask-induced false red reclassified)", rc)
 	}
@@ -326,7 +328,7 @@ func TestRunBuildCheckLiveCrossCheckAlsoFails(t *testing.T) {
 			return 2, nil // both masked and live builds fail
 		})
 	var out, errb bytes.Buffer
-	rc := runBuildCheck(&out, &errb, []string{"--json", "./..."})
+	rc := RunBuildCheck(&out, &errb, []string{"--json", "./..."})
 	if rc != 2 {
 		t.Fatalf("rc = %d, want 2 (live tree also red -> real breakage, not rescued)", rc)
 	}
@@ -374,7 +376,7 @@ func TestLoadBearingUntrackedFilesKeepsImportedPackageClosure(t *testing.T) {
 	write("internal/nested/nested.go", "package nested\n")
 	write("internal/orphan/orphan.go", "package orphan\n")
 	untracked := []string{"internal/newpkg/new.go", "internal/newpkg/sibling.go", "internal/nested/nested.go", "internal/orphan/orphan.go"}
-	got, err := loadBearingUntrackedFiles(root, untracked)
+	got, err := buildoverlay.LoadBearingUntrackedFiles(root, untracked)
 	if err != nil {
 		t.Fatal(err)
 	}

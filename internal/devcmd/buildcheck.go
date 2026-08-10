@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 // `fak buildcheck` -- a lightweight, concurrency-safe compile check for a fleet of
 // agents editing ONE shared trunk tree. It removes the two ways one agent's build
@@ -39,37 +39,29 @@ package main
 //	fak buildcheck --vet ./cmd/...     run go vet instead of go build
 //	fak buildcheck --json              emit a machine-readable report
 //
-// It is the impure shell over a handful of pure folds (selectMaskedFiles, buildOverlay,
+// It is the impure shell over a handful of pure folds (buildoverlay.SelectMaskedFiles, buildoverlay.Build,
 // buildCheckArgs), each unit-tested. `make ci` still runs the full suite as the
 // authoritative gate -- this is the fast, collision-free inner-loop compile check.
 
 import (
-	"bufio"
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"go/parser"
-	"go/token"
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-func cmdBuildCheck(argv []string) { os.Exit(runBuildCheck(os.Stdout, os.Stderr, argv)) }
-
 var (
-	buildCheckUntracked    = untrackedFiles
-	buildCheckModifiedDirs = trackedModifiedDirs
-	buildCheckLoadBearing  = loadBearingUntrackedFiles
+	buildCheckUntracked    = buildoverlay.UntrackedGoFiles
+	buildCheckModifiedDirs = buildoverlay.ModifiedDirs
+	buildCheckLoadBearing  = buildoverlay.LoadBearingUntrackedFiles
 	buildCheckRun          = runGoBuildCheck
 	buildCheckNow          = time.Now
 )
@@ -101,7 +93,7 @@ type buildCheckReport struct {
 	Reason           string   `json:"reason,omitempty"`
 }
 
-func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
+func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak buildcheck", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "buildcheck")
@@ -154,7 +146,7 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 			}
 			modifiedDirs = nil
 		}
-		masked, kept, staleMine = selectMaskedFiles(untracked, mine, modifiedDirs)
+		masked, kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
 		for _, m := range staleMine {
 			fmt.Fprintf(stderr, "fak buildcheck: --mine %s is not an untracked file; ignoring (it is already in the build)\n", m)
 		}
@@ -166,7 +158,7 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 		}
 		if len(masked) > 0 {
 			overlayPath = filepath.Join(scratch, "overlay.json")
-			if werr := writeOverlayFile(overlayPath, buildOverlay(root, masked)); werr != nil {
+			if werr := buildoverlay.Write(overlayPath, buildoverlay.Build(root, masked)); werr != nil {
 				fmt.Fprintf(stderr, "fak buildcheck: writing overlay: %v\n", werr)
 				return 1
 			}
@@ -281,7 +273,7 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	return code
 }
 
-// selectMaskedFiles is the pure selection behind --isolate: from the repo-relative
+// buildoverlay.SelectMaskedFiles is the pure selection behind --isolate: from the repo-relative
 // untracked paths, the .go files to HIDE are every untracked .go that is NOT declared as
 // your own via --mine AND does NOT live in a package with an in-flight tracked edit
 // (modifiedDirs). An untracked .go in an edited dir is KEPT (returned in `kept`) because it
@@ -292,144 +284,8 @@ func runBuildCheck(stdout, stderr io.Writer, argv []string) int {
 // those fail OPEN -- a tracked file named by --mine is in the build regardless, so ignoring
 // it is safe (the opposite of `fak affected --mine`, where a bad declaration must fail
 // closed because it could exonerate a real red). Inputs/outputs slash-normalized; sorted.
-func selectMaskedFiles(untracked []string, mine []string, modifiedDirs map[string]bool) (masked, kept, staleMine []string) {
-	untrackedSet := make(map[string]bool, len(untracked))
-	for _, f := range untracked {
-		untrackedSet[repoSlash(f)] = true
-	}
-	mineSet := make(map[string]bool, len(mine))
-	for _, m := range mine {
-		m = repoSlash(m)
-		if mineSet[m] {
-			continue
-		}
-		mineSet[m] = true
-		if !untrackedSet[m] {
-			staleMine = append(staleMine, m)
-		}
-	}
-	for _, f := range untracked {
-		f = repoSlash(f)
-		if !strings.HasSuffix(f, ".go") || mineSet[f] {
-			continue
-		}
-		if modifiedDirs[path.Dir(f)] {
-			kept = append(kept, f)
-			continue
-		}
-		masked = append(masked, f)
-	}
-	sort.Strings(masked)
-	sort.Strings(kept)
-	sort.Strings(staleMine)
-	return masked, kept, staleMine
-}
-
-// loadBearingUntrackedFiles returns untracked Go files in local packages reachable
-// from tracked Go source. Those packages are dependencies of the tree under test, not
-// sibling poison, so the isolation overlay must retain their complete package contents.
-func loadBearingUntrackedFiles(root string, untracked []string) ([]string, error) {
-	modulePath, err := readModulePath(filepath.Join(root, "go.mod"))
-	if err != nil {
-		return nil, err
-	}
-	untrackedByDir := map[string][]string{}
-	for _, name := range untracked {
-		name = filepath.ToSlash(filepath.Clean(name))
-		if strings.HasSuffix(name, ".go") {
-			dir := path.Dir(name)
-			untrackedByDir[dir] = append(untrackedByDir[dir], name)
-		}
-	}
-	if len(untrackedByDir) == 0 {
-		return nil, nil
-	}
-	cmd := windowgate.Command("git", "ls-files", "--", "*.go")
-	cmd.Dir = root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	queue := localImportDirs(root, modulePath, strings.Fields(string(out)))
-	seen := map[string]bool{}
-	var kept []string
-	for len(queue) > 0 {
-		dir := path.Clean(queue[0])
-		queue = queue[1:]
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		files := untrackedByDir[dir]
-		if len(files) == 0 {
-			continue
-		}
-		kept = append(kept, files...)
-		queue = append(queue, localImportDirs(root, modulePath, files)...)
-	}
-	sort.Strings(kept)
-	return kept, nil
-}
-
-func readModulePath(goMod string) (string, error) {
-	f, err := os.Open(goMod)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		fields := strings.Fields(s.Text())
-		if len(fields) == 2 && fields[0] == "module" {
-			return strings.TrimSpace(fields[1]), nil
-		}
-	}
-	if err := s.Err(); err != nil {
-		return "", err
-	}
-	return "", fmt.Errorf("module directive not found in %s", goMod)
-}
-
-func localImportDirs(root, modulePath string, files []string) []string {
-	prefix := strings.TrimSuffix(modulePath, "/") + "/"
-	seen := map[string]bool{}
-	var dirs []string
-	for _, name := range files {
-		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, filepath.FromSlash(name)), nil, parser.ImportsOnly)
-		if err != nil {
-			continue // the compiler will report malformed source; this fold only preserves dependencies
-		}
-		for _, spec := range parsed.Imports {
-			importPath, err := strconv.Unquote(spec.Path.Value)
-			if err != nil || !strings.HasPrefix(importPath, prefix) {
-				continue
-			}
-			dir := path.Clean(strings.TrimPrefix(importPath, prefix))
-			if dir != "." && !seen[dir] {
-				seen[dir] = true
-				dirs = append(dirs, dir)
-			}
-		}
-	}
-	return dirs
-}
-
-// buildOverlay maps each masked repo-relative file to an EMPTY backing path (absolute,
+// buildoverlay.Build maps each masked repo-relative file to an EMPTY backing path (absolute,
 // OS-native — how the go command keys the overlay), which hides it from the compile.
-func buildOverlay(root string, masked []string) goOverlay {
-	rep := make(map[string]string, len(masked))
-	for _, f := range masked {
-		abs := filepath.Clean(filepath.Join(root, filepath.FromSlash(f)))
-		rep[abs] = ""
-	}
-	return goOverlay{Replace: rep}
-}
-
-// buildCheckArgs assembles the argv after the "go" binary: the mode (build|vet), an
-// optional -overlay file, the -o output target for a build (the null device by default,
-// so nothing lands in the tree; a --out DIR when the caller wants the binaries), then
-// the package patterns. `go vet` writes nothing, so it never takes -o.
 func buildCheckArgs(mode, overlayPath, outTarget string, pkgs []string) []string {
 	args := []string{mode}
 	if overlayPath != "" {
@@ -441,59 +297,9 @@ func buildCheckArgs(mode, overlayPath, outTarget string, pkgs []string) []string
 	return append(args, pkgs...)
 }
 
-// untrackedFiles returns the repo-relative, slash-separated untracked-but-not-ignored
+// buildoverlay.UntrackedGoFiles returns the repo-relative, slash-separated untracked-but-not-ignored
 // paths (`git ls-files --others --exclude-standard`) -- the peers'-WIP surface the
 // overlay hides. Git emits forward-slash paths on every platform.
-func untrackedFiles(root string) ([]string, error) {
-	out, err := gitOut(root, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return nil, err
-	}
-	var files []string
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			files = append(files, filepath.ToSlash(line))
-		}
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-// trackedModifiedDirs returns the set of repo-relative, slash-separated directories that
-// hold a TRACKED .go file differing from HEAD (staged or unstaged) -- the packages with
-// in-flight edits. --isolate uses it to KEEP, not mask, an untracked .go sibling in such a
-// dir: on this shared trunk that sibling is almost always the matched other half of the
-// edit (a new file the edited file references), so masking it would red the edit's own
-// compile. Restricted to .go changes so a stray doc/config edit does not un-mask a
-// genuinely-independent untracked .go. Fails to the caller, which then masks all as before.
-func trackedModifiedDirs(root string) (map[string]bool, error) {
-	out, err := gitOut(root, "diff", "--name-only", "HEAD")
-	if err != nil {
-		return nil, err
-	}
-	dirs := map[string]bool{}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasSuffix(line, ".go") {
-			continue
-		}
-		dirs[path.Dir(filepath.ToSlash(line))] = true
-	}
-	return dirs, nil
-}
-
-func writeOverlayFile(path string, ov goOverlay) error {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false) // paths, not HTML
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(ov); err != nil {
-		return err
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
 func runGoBuildCheck(root string, args []string, stdout, stderr io.Writer) (int, error) {
 	cmd := windowgate.Command("go", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)

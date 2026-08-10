@@ -33,15 +33,37 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func cmdGoShim(argv []string) { os.Exit(runGoShim(os.Stdout, os.Stderr, argv)) }
 
 // goShimRun is the exec seam (stubbed in tests); it defaults to the same runner
 // `fak buildcheck` uses so a real invocation execs the real `go`.
-var goShimRun = runGoBuildCheck
+var (
+	buildCheckLoadBearing = buildoverlay.LoadBearingUntrackedFiles
+	goShimRun             = runGoShimCommand
+)
+
+func runGoShimCommand(root string, args []string, stdout, stderr io.Writer) (int, error) {
+	cmd := windowgate.Command("go", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode(), nil
+		}
+		return 1, err
+	}
+	return 0, nil
+}
 
 // goShimOverlaySubcommands are the `go` subcommands that accept build flags and therefore
 // `-overlay`. Everything else (env, mod, version, …) is a pure passthrough — injecting
@@ -142,12 +164,12 @@ func runGoShim(stdout, stderr io.Writer, argv []string) int {
 // failure the caller should return. It fails OPEN on a missing in-flight-edit answer
 // (mask all, as buildcheck does) but hard-fails if it cannot list untracked files at all.
 func goShimOverlay(root string, mine []string, scratch string, stderr io.Writer) (masked []string, overlayPath string, code int) {
-	untracked, uerr := buildCheckUntracked(root)
+	untracked, uerr := buildoverlay.UntrackedGoFiles(root)
 	if uerr != nil {
 		fmt.Fprintf(stderr, "fak go: listing untracked files: %v\n", uerr)
 		return nil, "", 1
 	}
-	modifiedDirs, merr := buildCheckModifiedDirs(root)
+	modifiedDirs, merr := buildoverlay.ModifiedDirs(root)
 	if merr != nil {
 		fmt.Fprintf(stderr, "fak go: cannot read in-flight edits (%v); masking all untracked siblings\n", merr)
 		modifiedDirs = nil
@@ -158,7 +180,7 @@ func goShimOverlay(root string, mine []string, scratch string, stderr io.Writer)
 		return nil, "", 1
 	}
 	mine = append(mine, loadBearing...)
-	masked, _, staleMine := selectMaskedFiles(untracked, mine, modifiedDirs)
+	masked, _, staleMine := buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
 	for _, m := range staleMine {
 		fmt.Fprintf(stderr, "fak go: --mine %s is not an untracked file; ignoring (it is already in the build)\n", m)
 	}
@@ -166,7 +188,7 @@ func goShimOverlay(root string, mine []string, scratch string, stderr io.Writer)
 		return nil, "", 0
 	}
 	overlayPath = filepath.Join(scratch, "overlay.json")
-	if werr := writeOverlayFile(overlayPath, buildOverlay(root, masked)); werr != nil {
+	if werr := buildoverlay.Write(overlayPath, buildoverlay.Build(root, masked)); werr != nil {
 		fmt.Fprintf(stderr, "fak go: writing overlay: %v\n", werr)
 		return nil, "", 1
 	}
