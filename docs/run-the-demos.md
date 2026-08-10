@@ -150,6 +150,28 @@ and **not yet shipped**; when they land, this entry becomes a `go run ./cmd/fak 
 walkthrough with a live curve. Until then the data-plane test is the honest end-to-end
 witness, and the skill describes the CLI steps conceptually rather than inventing output.
 
+## Architecture report demo — enforced graph in one command
+
+No key, network, Git metadata, or GPU is required. This drives the production `internal/archreport` seam over a deterministic miniature architecture containing legal edges, one upward violation, direct fan-in hotspots, and one stale tier declaration.
+
+```bash
+go run ./cmd/archreportdemo -selfcheck
+```
+
+Expected invariant output:
+
+```text
+fak architecture report demo
+schema: fak-architecture/1
+healthy leaves: 4 across 3 tiers
+upward violations: 1 (primitive -> composite)
+direct fan-in hotspots: abi=2, policy=2
+diagnostic: retired has a stale tier declaration
+selfcheck: PASS (real archreport seam, deterministic fixture)
+```
+
+The selfcheck exits nonzero if tier counts, violation direction, hotspot ranking, or stale-row diagnostics drift.
+
 ## Adding a demo
 
 New demos should not expand the front door by default. A new start-here demo must meet the
