@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **178** (clarity 14 + coverage 164) |
+| **Disambiguation-debt (drive to 0)** | **180** (clarity 14 + coverage 166) |
 | **Crystal-clear concepts (and climbing)** | **439** crystal of 2152 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2308 / 2472** (93.4% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2308 / 2474** (93.3% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2830 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.9/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.8/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2152 concepts - score 89.9/100 (grade B) - disambiguation-debt 178
+concept-disambiguation chart - 2152 concepts - score 89.8/100 (grade B) - disambiguation-debt 180
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 439
@@ -64,16 +64,16 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   guard-gate       ##########################.. 388/425
   plan             ##########################.. 320/343
+  policy-capability #########################... 153/174
   session-runtime  #########################... 213/234
-  policy-capability #########################... 153/173
   context-ctx      ##########################.. 202/216
   render-materialize ##########################.. 177/190
-  cache            ###########################. 261/271
+  cache            ###########################. 261/273
   witness-proof    ##########################.. 140/148
   loop             ##########################.. 77/84
   gateway-engine   ###########################. 169/175
   evict            ##########################.. 49/53
-  support-maturity ##########################.. 45/48
+  support-maturity ##########################.. 45/49
   attention        ###########################. 74/76
   decision         ###########################. 52/54
   score-debt       ###########################. 85/87
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 93.4%  (2308/2472 confusable tokens positioned)
+namespace coverage  [##############################..] 93.3%  (2308/2474 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -2443,16 +2443,16 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | guard-gate | 388 | 425 | 37 |
 | plan | 320 | 343 | 23 |
+| policy-capability | 153 | 174 | 21 |
 | session-runtime | 213 | 234 | 21 |
-| policy-capability | 153 | 173 | 20 |
 | context-ctx | 202 | 216 | 14 |
 | render-materialize | 177 | 190 | 13 |
-| cache | 261 | 271 | 10 |
+| cache | 261 | 273 | 12 |
 | witness-proof | 140 | 148 | 8 |
 | loop | 77 | 84 | 7 |
 | gateway-engine | 169 | 175 | 6 |
 | evict | 49 | 53 | 4 |
-| support-maturity | 45 | 48 | 3 |
+| support-maturity | 45 | 49 | 4 |
 | attention | 74 | 76 | 2 |
 | decision | 52 | 54 | 2 |
 | score-debt | 85 | 87 | 2 |

@@ -84,6 +84,9 @@ func (c *liveMatrixClient) call(ctx context.Context, prompt string) liveCall {
 		resp, e := c.client.Do(h)
 		if e != nil {
 			last = e
+			if ctx.Err() != nil {
+				return liveCall{err: last, retry: attempt, latency: time.Since(start)}
+			}
 			continue
 		}
 		if resp.StatusCode/100 != 2 {

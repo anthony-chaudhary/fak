@@ -405,6 +405,9 @@ func main() {
 	var strongMatrixEndpoint, strongMatrixAPIKey, strongMatrixModel, strongMatrixClass, strongMatrixHardware string
 	var strongMatrixBatch, strongMatrixCache, strongMatrixPricing string
 	var strongMatrixTrials, strongMatrixWorkers, strongMatrixK, strongMatrixChunk int
+	var tailPacket, tailGold, tailOutput, verifyTailPath, tailEndpoint, tailAPIKey, tailModel, tailClass, tailHardware string
+	var tailTrials, tailWorkers, tailSufficiency int
+	var tailWindowMS, tailTaskMS, tailHedgeMS int64
 	var routingVOITrials, routingVOIRecords int
 	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
@@ -540,6 +543,21 @@ func main() {
 	flag.IntVar(&strongMatrixWorkers, "strong-matrix-workers", 8, "request admission limit")
 	flag.IntVar(&strongMatrixK, "strong-matrix-retrieval-k", 3, "top-k tune examples")
 	flag.IntVar(&strongMatrixChunk, "strong-matrix-chunk-size", 4, "parallel chunk size")
+	flag.StringVar(&tailPacket, "tail-policy-packet", "", "S8i packet for tail policies")
+	flag.StringVar(&tailGold, "tail-policy-gold", "", "hidden S8i gold")
+	flag.StringVar(&tailOutput, "tail-policy-output", "", "write live tail-policy matrix")
+	flag.StringVar(&verifyTailPath, "verify-tail-policy", "", "verify live tail-policy matrix")
+	flag.StringVar(&tailEndpoint, "tail-policy-endpoint", "", "OpenAI-compatible endpoint")
+	flag.StringVar(&tailAPIKey, "tail-policy-api-key", "", "endpoint API key")
+	flag.StringVar(&tailModel, "tail-policy-model", "", "endpoint model")
+	flag.StringVar(&tailClass, "tail-policy-endpoint-class", "", "endpoint provenance class")
+	flag.StringVar(&tailHardware, "tail-policy-hardware", "", "hardware provenance")
+	flag.IntVar(&tailTrials, "tail-policy-trials", 2, "trials per policy")
+	flag.IntVar(&tailWorkers, "tail-policy-workers", 8, "bounded workers")
+	flag.IntVar(&tailSufficiency, "tail-policy-sufficiency", 12, "confirmed records before early stop")
+	flag.Int64Var(&tailWindowMS, "tail-policy-window-ms", 15000, "per-window deadline milliseconds")
+	flag.Int64Var(&tailTaskMS, "tail-policy-task-ms", 60000, "global task deadline milliseconds")
+	flag.Int64Var(&tailHedgeMS, "tail-policy-hedge-ms", 6000, "bounded hedge delay milliseconds")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -578,6 +596,18 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
+		return
+	}
+	if tailPacket != "" {
+		if err := runTailPolicyMatrix(tailPacket, tailGold, tailOutput, tailEndpoint, tailAPIKey, tailModel, tailClass, tailHardware, tailTrials, tailWorkers, tailWindowMS, tailTaskMS, tailHedgeMS, tailSufficiency); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: tail policy: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS tail policy %s\n", tailOutput)
+		return
+	}
+	if verifyTailPath != "" {
+		runVerify("verify-tail-policy", verifyTailPath, verifyTailPolicyMatrix)
 		return
 	}
 	if strongMatrixPacket != "" {

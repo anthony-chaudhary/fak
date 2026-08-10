@@ -1137,6 +1137,16 @@
           "category": "incidental",
           "reason": "Private benchmark aggregation helper, not a production guard or gate.",
           "token": "aggregateLive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "tailAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private benchmark aggregation helper, not a production guard or gate.",
+          "token": "aggregateTail"
         }
       ],
       "exclude": [
@@ -1167,6 +1177,7 @@
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
         "aggregateLive",
+        "aggregateTail",
         "appendGuardCompactionWitnessTo",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
@@ -1290,6 +1301,7 @@
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
         "summarizeguardstops",
+        "tailAggregate",
         "transform_guard",
         "ungated",
         "unguarded"
@@ -1528,6 +1540,11 @@
           "category": "incidental",
           "reason": "Private live benchmark metric/helper, not a production gate, session runtime, or policy capability.",
           "token": "SchedulerMS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "tailTrial"
         }
       ],
       "id": "session-runtime",
@@ -1590,6 +1607,7 @@
         "slotting",
         "stopDispHandoffSessionGiveUp",
         "tSESSION",
+        "tailTrial",
         "thrashSessions",
         "topsessions",
         "totalslots",
@@ -2468,6 +2486,51 @@
           "category": "incidental",
           "reason": "Local execution deadline for extracting a committed git archive, not a policy capability",
           "token": "ciPreflightArchiveTimeout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "runTailPolicyMatrix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "verifyTailPolicyMatrix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "tailPolicyReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "tailPolicyResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "executeTailPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "runWindow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private live experiment policy/receipt/metric schema, not a production policy capability, runtime, or guard.",
+          "token": "windowReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment constant/local/result, not a reusable production capability or context abstraction.",
+          "token": "tailPolicySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment constant/local/result, not a reusable production capability or context abstraction.",
+          "token": "windowResult"
         }
       ],
       "exclude": [
@@ -2516,6 +2579,7 @@
         "contractLeafByCapability",
         "dispatchPreflightChurnState",
         "executeLivePipeline",
+        "executeTailPolicy",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
         "gradeSemanticFiles",
@@ -2536,12 +2600,20 @@
         "runLiveSemanticMatrix",
         "runRoutingPolicy",
         "runSemanticAdjudicator",
+        "runTailPolicyMatrix",
+        "runWindow",
         "semanticAdjudicator",
         "semanticConsensus",
         "semanticGold",
         "semanticGrade",
         "semanticSubmission",
-        "tool_policy_grammar"
+        "tailPolicyReport",
+        "tailPolicyResult",
+        "tailPolicySchema",
+        "tool_policy_grammar",
+        "verifyTailPolicyMatrix",
+        "windowReceipt",
+        "windowResult"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
@@ -2760,6 +2832,11 @@
           "category": "incidental",
           "reason": "Local test context used to model cancellation after dispatch; not a context abstraction.",
           "token": "postCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private experiment constant/local/result, not a reusable production capability or context abstraction.",
+          "token": "wctx"
         }
       ],
       "id": "context-ctx",
@@ -2783,6 +2860,7 @@
         "compactionWitness",
         "compactions",
         "context",
+        "context_cancelled",
         "contexts",
         "ctx",
         "ctxAdviceNote",
@@ -2803,6 +2881,7 @@
         "newGuardCompactionWitness",
         "noteCompactionContract",
         "noteCtxValueTTL1hScope",
+        "postCtx",
         "readGuardCompactionWitnesses",
         "recalled",
         "recalling",
@@ -2812,8 +2891,7 @@
         "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
         "takeCompactionContract",
-        "context_cancelled",
-        "postCtx"
+        "wctx"
       ],
       "min_files": 3,
       "name": "Context-management family",

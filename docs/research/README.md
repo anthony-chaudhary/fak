@@ -30,6 +30,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 - [Micro-context S8i independently adjudicated semantic residual](micro-context-s8i-semantic-residual.md) — blinded tune/test packet, two-model live adjudication, exact-agreement/abstention fold, and blind semantic grader (#6124).
 - [Micro-context S8j live semantic matrix](micro-context-s8j-live-semantic-matrix.md) — same-endpoint retrieval/long/chunk/micro execution with observed tokens, cache, TTFT/tail, retries, strict quality, and a no-winner falsification (#6110).
 - [Micro-context S8k strengthened live baselines](micro-context-s8k-strong-live-baselines.md) — leave-one-out top-k retrieval, concurrent chunks, tune-only abstention calibration, tail outlier evidence, and continued no-winner result (#6151).
+- [Micro-context S8l live cancellation and partial-fold policies](micro-context-s8l-tail-policies.md) — wait-all/deadline/early-stop/hedge receipts, typed partial folds, live latency-quality tradeoffs, and cancellation billing limits (#6160).
 - [Micro-context S1 real-endpoint witness](micro-context-s1-real-endpoint.md) — 100/100 contexts through four bounded workers, with TTFT/usage telemetry and a retained 16-worker overload finding.
 - [Micro-context S2 shared-prefix A/B](micro-context-s2-prefix-ab.md) — no cache benefit observed on the first real endpoint; scoped concurrency improved aggregate work while worsening TTFT.
 ## Read research by maturity

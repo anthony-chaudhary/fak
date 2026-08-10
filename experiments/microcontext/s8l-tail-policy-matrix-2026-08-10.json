@@ -1,0 +1,3621 @@
+{
+  "Schema": "fak-microcontext-tail-policy-matrix/1",
+  "CreatedAt": "2026-08-10T14:11:56Z",
+  "PacketSHA256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "GoldSHA256": "bc4cc9958e3a39c9590410de83edb15543055eb9edaf3234c40fa67e01cd0c67",
+  "Endpoint": {
+    "Class": "separate-openai-compatible-live",
+    "Model": "gpt-5.6-sol",
+    "Hardware": "provider-managed-undisclosed",
+    "NativeBatch": "unsupported-by-chat-route",
+    "PrefixCache": "usage-observed-only",
+    "PricingSnapshot": "unavailable",
+    "InputPerMTok": null,
+    "OutputPerMTok": null
+  },
+  "Trials": 2,
+  "Workers": 4,
+  "WindowDeadlineMS": 12000,
+  "TaskDeadlineMS": 45000,
+  "Policies": [
+    {
+      "Policy": "wait-all",
+      "Description": "no policy deadline beyond task cap",
+      "Trials": [
+        {
+          "Trial": 1,
+          "WallMS": 24535.773,
+          "Opened": 16,
+          "Completed": 16,
+          "TimedOut": 0,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 0,
+          "HedgesOpened": 0,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 10612,
+          "CompletionTokens": 2772,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3094.5279,
+              "PromptTokens": 699,
+              "CompletionTokens": 114,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6693.8323,
+              "PromptTokens": 723,
+              "CompletionTokens": 218,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5087.8876,
+              "PromptTokens": 697,
+              "CompletionTokens": 183,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7537.0407,
+              "PromptTokens": 282,
+              "CompletionTokens": 184,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6016.639,
+              "PromptTokens": 826,
+              "CompletionTokens": 192,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 9663.7564,
+              "PromptTokens": 742,
+              "CompletionTokens": 265,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5514.4971,
+              "PromptTokens": 557,
+              "CompletionTokens": 170,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4719.3184,
+              "PromptTokens": 728,
+              "CompletionTokens": 182,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4905.9783,
+              "PromptTokens": 734,
+              "CompletionTokens": 152,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4321.6239,
+              "PromptTokens": 712,
+              "CompletionTokens": 174,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3906.5932,
+              "PromptTokens": 578,
+              "CompletionTokens": 125,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6019.4975,
+              "PromptTokens": 533,
+              "CompletionTokens": 153,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4610.2195,
+              "PromptTokens": 570,
+              "CompletionTokens": 142,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6262.7749,
+              "PromptTokens": 707,
+              "CompletionTokens": 178,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5252.3215,
+              "PromptTokens": 752,
+              "CompletionTokens": 190,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5363.0822,
+              "PromptTokens": 772,
+              "CompletionTokens": 150,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.97,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.9,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.9,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            }
+          ]
+        },
+        {
+          "Trial": 2,
+          "WallMS": 27254.8153,
+          "Opened": 16,
+          "Completed": 16,
+          "TimedOut": 0,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 0,
+          "HedgesOpened": 0,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 10612,
+          "CompletionTokens": 2787,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4221.0655,
+              "PromptTokens": 699,
+              "CompletionTokens": 132,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 9017.5645,
+              "PromptTokens": 723,
+              "CompletionTokens": 332,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4119.4063,
+              "PromptTokens": 697,
+              "CompletionTokens": 162,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 10332.2791,
+              "PromptTokens": 282,
+              "CompletionTokens": 223,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 8944.8247,
+              "PromptTokens": 826,
+              "CompletionTokens": 264,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4123.7579,
+              "PromptTokens": 742,
+              "CompletionTokens": 100,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4952.1446,
+              "PromptTokens": 557,
+              "CompletionTokens": 200,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7193.5008,
+              "PromptTokens": 728,
+              "CompletionTokens": 191,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5085.2246,
+              "PromptTokens": 734,
+              "CompletionTokens": 152,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5086.2653,
+              "PromptTokens": 712,
+              "CompletionTokens": 127,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4603.3427,
+              "PromptTokens": 578,
+              "CompletionTokens": 177,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 10855.1239,
+              "PromptTokens": 533,
+              "CompletionTokens": 200,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3915.7175,
+              "PromptTokens": 570,
+              "CompletionTokens": 112,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3699.2134,
+              "PromptTokens": 707,
+              "CompletionTokens": 132,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4830.2939,
+              "PromptTokens": 752,
+              "CompletionTokens": 175,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3235.4667,
+              "PromptTokens": 772,
+              "CompletionTokens": 108,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.84,
+                "semantic_need": 0.98,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.94,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "literal",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.98
+              }
+            }
+          ]
+        }
+      ],
+      "Aggregate": {
+        "MeanWallMS": 25895.29415,
+        "Opened": 32,
+        "Completed": 32,
+        "TimedOut": 0,
+        "CancelledBeforeOpen": 0,
+        "CancelledInFlight": 0,
+        "HedgesOpened": 0,
+        "HedgeWins": 0,
+        "PromptTokens": 21224,
+        "CompletionTokens": 5559,
+        "CachedTokens": 0,
+        "WastedTokens": 0
+      },
+      "Grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 4,
+        "field_errors": {
+          "actionability": 4,
+          "semantic_need": 12,
+          "tool_need": 6
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "Policy": "deadline-abstain",
+      "Description": "per-window deadline folds timeout as abstention",
+      "Trials": [
+        {
+          "Trial": 1,
+          "WallMS": 26085.8785,
+          "Opened": 16,
+          "Completed": 15,
+          "TimedOut": 1,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 1,
+          "HedgesOpened": 0,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 9945,
+          "CompletionTokens": 2656,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4622.748,
+              "PromptTokens": 701,
+              "CompletionTokens": 181,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6960.3092,
+              "PromptTokens": 725,
+              "CompletionTokens": 258,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context deadline exceeded",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context deadline exceeded"
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5723.9023,
+              "PromptTokens": 284,
+              "CompletionTokens": 178,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5243.4434,
+              "PromptTokens": 828,
+              "CompletionTokens": 206,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4445.068,
+              "PromptTokens": 744,
+              "CompletionTokens": 162,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4064.7669,
+              "PromptTokens": 559,
+              "CompletionTokens": 154,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5044.4721,
+              "PromptTokens": 730,
+              "CompletionTokens": 156,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6732.1811,
+              "PromptTokens": 736,
+              "CompletionTokens": 179,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6771.5756,
+              "PromptTokens": 714,
+              "CompletionTokens": 252,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6816.7656,
+              "PromptTokens": 580,
+              "CompletionTokens": 232,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 10060.7059,
+              "PromptTokens": 535,
+              "CompletionTokens": 183,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4717.55,
+              "PromptTokens": 572,
+              "CompletionTokens": 111,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3382.2053,
+              "PromptTokens": 709,
+              "CompletionTokens": 117,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4180.6385,
+              "PromptTokens": 754,
+              "CompletionTokens": 142,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4140.255,
+              "PromptTokens": 774,
+              "CompletionTokens": 145,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.99
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.9,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.95,
+                "semantic_need": 0.96,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.89
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.91,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.96,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.97,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.86,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.86,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.94,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            }
+          ]
+        },
+        {
+          "Trial": 2,
+          "WallMS": 28682.0269,
+          "Opened": 16,
+          "Completed": 14,
+          "TimedOut": 2,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 2,
+          "HedgesOpened": 0,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 9328,
+          "CompletionTokens": 2649,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5220.7693,
+              "PromptTokens": 701,
+              "CompletionTokens": 167,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7562.5439,
+              "PromptTokens": 725,
+              "CompletionTokens": 314,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5220.7693,
+              "PromptTokens": 699,
+              "CompletionTokens": 205,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4313.6673,
+              "PromptTokens": 284,
+              "CompletionTokens": 123,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 8024.9271,
+              "PromptTokens": 828,
+              "CompletionTokens": 182,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context deadline exceeded",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context deadline exceeded"
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5943.3221,
+              "PromptTokens": 559,
+              "CompletionTokens": 194,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4925.3564,
+              "PromptTokens": 730,
+              "CompletionTokens": 205,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6535.4749,
+              "PromptTokens": 736,
+              "CompletionTokens": 153,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5960.6268,
+              "PromptTokens": 714,
+              "CompletionTokens": 249,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4990.5861,
+              "PromptTokens": 580,
+              "CompletionTokens": 180,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4894.1661,
+              "PromptTokens": 535,
+              "CompletionTokens": 127,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context deadline exceeded",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context deadline exceeded"
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4213.415,
+              "PromptTokens": 709,
+              "CompletionTokens": 129,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6437.4696,
+              "PromptTokens": 754,
+              "CompletionTokens": 246,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7773.9246,
+              "PromptTokens": 774,
+              "CompletionTokens": 175,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.84,
+                "semantic_need": 0.97,
+                "tool_need": 0.88
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.82,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.93,
+                "tool_need": 0.96
+              }
+            }
+          ]
+        }
+      ],
+      "Aggregate": {
+        "MeanWallMS": 27383.9527,
+        "Opened": 32,
+        "Completed": 29,
+        "TimedOut": 3,
+        "CancelledBeforeOpen": 0,
+        "CancelledInFlight": 3,
+        "HedgesOpened": 0,
+        "HedgeWins": 0,
+        "PromptTokens": 19273,
+        "CompletionTokens": 5305,
+        "CachedTokens": 0,
+        "WastedTokens": 0
+      },
+      "Grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 2,
+        "field_errors": {
+          "actionability": 5,
+          "semantic_need": 10,
+          "tool_need": 9
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "Policy": "sufficiency-stop",
+      "Description": "cancel after configured confirmed-fact count",
+      "Trials": [
+        {
+          "Trial": 1,
+          "WallMS": 16857.03,
+          "Opened": 16,
+          "Completed": 12,
+          "TimedOut": 4,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 4,
+          "HedgesOpened": 0,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 7758,
+          "CompletionTokens": 1745,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5885.2398,
+              "PromptTokens": 700,
+              "CompletionTokens": 192,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7025.3149,
+              "PromptTokens": 724,
+              "CompletionTokens": 251,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3572.1097,
+              "PromptTokens": 698,
+              "CompletionTokens": 107,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3825.9077,
+              "PromptTokens": 283,
+              "CompletionTokens": 117,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4362.934,
+              "PromptTokens": 743,
+              "CompletionTokens": 99,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3400.2549,
+              "PromptTokens": 558,
+              "CompletionTokens": 100,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5070.5892,
+              "PromptTokens": 713,
+              "CompletionTokens": 181,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4301.1027,
+              "PromptTokens": 534,
+              "CompletionTokens": 102,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6749.2051,
+              "PromptTokens": 571,
+              "CompletionTokens": 251,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3081.989,
+              "PromptTokens": 708,
+              "CompletionTokens": 112,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3556.5004,
+              "PromptTokens": 753,
+              "CompletionTokens": 130,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6311.8071,
+              "PromptTokens": 773,
+              "CompletionTokens": 103,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.78,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            }
+          ]
+        },
+        {
+          "Trial": 2,
+          "WallMS": 19485.9878,
+          "Opened": 16,
+          "Completed": 12,
+          "TimedOut": 4,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 4,
+          "HedgesOpened": 0,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 8038,
+          "CompletionTokens": 1897,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7090.832,
+              "PromptTokens": 700,
+              "CompletionTokens": 176,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5968.8639,
+              "PromptTokens": 698,
+              "CompletionTokens": 136,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 7142.6005,
+              "PromptTokens": 283,
+              "CompletionTokens": 163,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5326.6307,
+              "PromptTokens": 827,
+              "CompletionTokens": 180,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4062.8457,
+              "PromptTokens": 743,
+              "CompletionTokens": 105,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3370.9782,
+              "PromptTokens": 735,
+              "CompletionTokens": 110,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4713.3412,
+              "PromptTokens": 713,
+              "CompletionTokens": 141,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "timed_out",
+              "Winner": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled",
+              "Opened": false,
+              "Hedged": false,
+              "ReadbackVerified": false,
+              "LatencyMS": 0,
+              "PromptTokens": 0,
+              "CompletionTokens": 0,
+              "CachedTokens": 0,
+              "Reason": "Post \"http://127.0.0.1:60804/v1/chat/completions\": context canceled"
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4111.0956,
+              "PromptTokens": 534,
+              "CompletionTokens": 161,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 10000.9915,
+              "PromptTokens": 571,
+              "CompletionTokens": 265,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4157.3455,
+              "PromptTokens": 708,
+              "CompletionTokens": 124,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 6113.5489,
+              "PromptTokens": 753,
+              "CompletionTokens": 162,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 5018.2966,
+              "PromptTokens": 773,
+              "CompletionTokens": 174,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.95,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.95
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null
+            }
+          ]
+        }
+      ],
+      "Aggregate": {
+        "MeanWallMS": 18171.5089,
+        "Opened": 32,
+        "Completed": 24,
+        "TimedOut": 8,
+        "CancelledBeforeOpen": 0,
+        "CancelledInFlight": 8,
+        "HedgesOpened": 0,
+        "HedgeWins": 0,
+        "PromptTokens": 15796,
+        "CompletionTokens": 3642,
+        "CachedTokens": 0,
+        "WastedTokens": 0
+      },
+      "Grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 3,
+        "field_errors": {
+          "actionability": 5,
+          "semantic_need": 9,
+          "tool_need": 6
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    },
+    {
+      "Policy": "bounded-hedge",
+      "Description": "launch one duplicate after hedge delay; first valid result wins",
+      "Trials": [
+        {
+          "Trial": 1,
+          "WallMS": 22834.3169,
+          "Opened": 16,
+          "Completed": 16,
+          "TimedOut": 0,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 0,
+          "HedgesOpened": 9,
+          "HedgeWins": 0,
+          "LogicalRecords": 16,
+          "PromptTokens": 10644,
+          "CompletionTokens": 2518,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3170.2108,
+              "PromptTokens": 701,
+              "CompletionTokens": 96,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5385.0469,
+              "PromptTokens": 725,
+              "CompletionTokens": 223,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 7913.8134,
+              "PromptTokens": 699,
+              "CompletionTokens": 188,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4616.905,
+              "PromptTokens": 284,
+              "CompletionTokens": 107,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5892.374,
+              "PromptTokens": 828,
+              "CompletionTokens": 231,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5212.8996,
+              "PromptTokens": 744,
+              "CompletionTokens": 138,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3325.8735,
+              "PromptTokens": 559,
+              "CompletionTokens": 107,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4984.5059,
+              "PromptTokens": 730,
+              "CompletionTokens": 163,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3108.2647,
+              "PromptTokens": 736,
+              "CompletionTokens": 107,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5856.7818,
+              "PromptTokens": 714,
+              "CompletionTokens": 245,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6718.1033,
+              "PromptTokens": 580,
+              "CompletionTokens": 230,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6286.409,
+              "PromptTokens": 535,
+              "CompletionTokens": 151,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4316.5011,
+              "PromptTokens": 572,
+              "CompletionTokens": 169,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5418.7746,
+              "PromptTokens": 709,
+              "CompletionTokens": 109,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6450.4541,
+              "PromptTokens": 754,
+              "CompletionTokens": 150,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3090.4456,
+              "PromptTokens": 774,
+              "CompletionTokens": 104,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.99,
+                "tool_need": 0.98
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.97,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.91,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.98
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.97,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.92
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.88,
+                "semantic_need": 0.96,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.86
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "abstain",
+              "tool_need": "current_state",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.93,
+                "tool_need": 0.96
+              }
+            }
+          ]
+        },
+        {
+          "Trial": 2,
+          "WallMS": 27951.2361,
+          "Opened": 16,
+          "Completed": 16,
+          "TimedOut": 0,
+          "CancelledBeforeOpen": 0,
+          "CancelledInFlight": 0,
+          "HedgesOpened": 9,
+          "HedgeWins": 2,
+          "LogicalRecords": 16,
+          "PromptTokens": 10644,
+          "CompletionTokens": 2581,
+          "CachedTokens": 0,
+          "Retries": 0,
+          "WastedPromptTokens": 0,
+          "WastedCompletionTokens": 0,
+          "CancelledBilled": "unknown: endpoint does not expose post-cancel billing",
+          "Receipts": [
+            {
+              "ID": "issue-5148",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3324.7879,
+              "PromptTokens": 701,
+              "CompletionTokens": 115,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5154",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 10094.2323,
+              "PromptTokens": 725,
+              "CompletionTokens": 321,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5158",
+              "Status": "confirmed",
+              "Winner": "hedge",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6807.6309,
+              "PromptTokens": 699,
+              "CompletionTokens": 109,
+              "CachedTokens": 0,
+              "Reason": "hedge"
+            },
+            {
+              "ID": "issue-5207",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5601.5673,
+              "PromptTokens": 284,
+              "CompletionTokens": 106,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5245",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6990.1127,
+              "PromptTokens": 828,
+              "CompletionTokens": 161,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5347",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6431.8054,
+              "PromptTokens": 744,
+              "CompletionTokens": 167,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5363",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3839.8158,
+              "PromptTokens": 559,
+              "CompletionTokens": 130,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5521",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 6940.1504,
+              "PromptTokens": 730,
+              "CompletionTokens": 288,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5525",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3377.4028,
+              "PromptTokens": 736,
+              "CompletionTokens": 112,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5636",
+              "Status": "confirmed",
+              "Winner": "hedge",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5104.7217,
+              "PromptTokens": 714,
+              "CompletionTokens": 151,
+              "CachedTokens": 0,
+              "Reason": "hedge"
+            },
+            {
+              "ID": "issue-5645",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4000.8644,
+              "PromptTokens": 580,
+              "CompletionTokens": 126,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5672",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5137.8972,
+              "PromptTokens": 535,
+              "CompletionTokens": 214,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5713",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3919.0732,
+              "PromptTokens": 572,
+              "CompletionTokens": 144,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5802",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 3585.1058,
+              "PromptTokens": 709,
+              "CompletionTokens": 124,
+              "CachedTokens": 0,
+              "Reason": ""
+            },
+            {
+              "ID": "issue-5859",
+              "Status": "confirmed",
+              "Winner": "primary",
+              "Opened": true,
+              "Hedged": true,
+              "ReadbackVerified": true,
+              "LatencyMS": 5518.2363,
+              "PromptTokens": 754,
+              "CompletionTokens": 194,
+              "CachedTokens": 0,
+              "Reason": "primary"
+            },
+            {
+              "ID": "issue-5929",
+              "Status": "confirmed",
+              "Winner": "",
+              "Opened": true,
+              "Hedged": false,
+              "ReadbackVerified": true,
+              "LatencyMS": 4368.284,
+              "PromptTokens": 774,
+              "CompletionTokens": 119,
+              "CachedTokens": 0,
+              "Reason": ""
+            }
+          ],
+          "Answers": [
+            {
+              "id": "issue-5158",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.96,
+                "semantic_need": 0.98,
+                "tool_need": 0.9
+              }
+            },
+            {
+              "id": "issue-5713",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.93
+              }
+            },
+            {
+              "id": "issue-5148",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.88
+              }
+            },
+            {
+              "id": "issue-5207",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.97,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5859",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5636",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.93,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5347",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.97
+              }
+            },
+            {
+              "id": "issue-5802",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5929",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5672",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.94,
+                "semantic_need": 0.98,
+                "tool_need": 0.91
+              }
+            },
+            {
+              "id": "issue-5154",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "abstain",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.67,
+                "semantic_need": 0.96,
+                "tool_need": 0.78
+              }
+            },
+            {
+              "id": "issue-5245",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.99,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5525",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.98,
+                "semantic_need": 0.96,
+                "tool_need": 0.84
+              }
+            },
+            {
+              "id": "issue-5363",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "read_only",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.96
+              }
+            },
+            {
+              "id": "issue-5645",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.98,
+                "tool_need": 0.94
+              }
+            },
+            {
+              "id": "issue-5521",
+              "split": "",
+              "semantic_need": "semantic",
+              "tool_need": "abstain",
+              "actionability": "actionable",
+              "evidence": null,
+              "confidence": {
+                "actionability": 0.99,
+                "semantic_need": 0.96,
+                "tool_need": 0.91
+              }
+            }
+          ]
+        }
+      ],
+      "Aggregate": {
+        "MeanWallMS": 25392.7765,
+        "Opened": 32,
+        "Completed": 32,
+        "TimedOut": 0,
+        "CancelledBeforeOpen": 0,
+        "CancelledInFlight": 0,
+        "HedgesOpened": 18,
+        "HedgeWins": 2,
+        "PromptTokens": 21288,
+        "CompletionTokens": 5099,
+        "CachedTokens": 0,
+        "WastedTokens": 0
+      },
+      "Grade": {
+        "schema": "fak-microcontext-semantic-grade/1",
+        "split": "test",
+        "records": 16,
+        "exact": 2,
+        "field_errors": {
+          "actionability": 4,
+          "semantic_need": 12,
+          "tool_need": 9
+        },
+        "quality_pass": false,
+        "semantic_residual": 3,
+        "abstentions": 16
+      }
+    }
+  ],
+  "Limits": [
+    "Cancelled-but-billed is unknown because the endpoint exposes usage only on completed streams.",
+    "Quality uses first-trial fold; all trials preserve receipts and usage.",
+    "Sufficiency is a configured count proxy, not a learned task-completion oracle.",
+    "No dollar claim: exact route pricing is unavailable."
+  ]
+}
