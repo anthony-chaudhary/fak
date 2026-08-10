@@ -10,6 +10,67 @@ import (
 	"testing"
 )
 
+func TestAnalyzeIdentifiesLateralBridgesAndInducedCouplings(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2,"d":2,"x":3,"y":3,"z":3}
+var tierName=[]string{"zero","primitive","foundation-composite","mechanism"}
+`)
+	write("internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	write("internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/c"
+`)
+	write("internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/d/d.go", "package d\n")
+	write("internal/x/x.go", `package x
+import (_ "github.com/anthony-chaudhary/fak/internal/y"; _ "github.com/anthony-chaudhary/fak/internal/z")
+`)
+	write("internal/y/y.go", `package y
+import _ "github.com/anthony-chaudhary/fak/internal/z"
+`)
+	write("internal/z/z.go", "package z\n")
+	r, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []LateralBridge{
+		{Tier: 2, TierName: "foundation-composite", From: "b", To: "c", Left: "b", Right: "c", LeftSide: []string{"a", "b"}, RightSide: []string{"c", "d"}, CouplingPairs: 4},
+		{Tier: 2, TierName: "foundation-composite", From: "a", To: "b", Left: "a", Right: "b", LeftSide: []string{"a"}, RightSide: []string{"b", "c", "d"}, CouplingPairs: 3},
+		{Tier: 2, TierName: "foundation-composite", From: "c", To: "d", Left: "c", Right: "d", LeftSide: []string{"a", "b", "c"}, RightSide: []string{"d"}, CouplingPairs: 3},
+	}
+	if !reflect.DeepEqual(r.LateralBridges, want) {
+		t.Fatalf("bridges=%+v want=%+v", r.LateralBridges, want)
+	}
+	scoped, err := Analyze(root, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scoped.LateralBridges, want) {
+		t.Fatalf("scoped=%+v", scoped.LateralBridges)
+	}
+	diamond, err := Analyze(root, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diamond.LateralBridges) != 0 {
+		t.Fatalf("diamond bridges=%+v", diamond.LateralBridges)
+	}
+}
+
 func TestAnalyzeDerivesDeterministicLateralComponents(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

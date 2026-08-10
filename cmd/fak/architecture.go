@@ -135,6 +135,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %-22s members=%d edges=%d %v\n", component.TierName, component.MemberCount, component.EdgeCount, component.Members)
 		}
 	}
+	if len(report.LateralBridges) > 0 {
+		fmt.Fprintln(stdout, "  lateral bridges (articulation edges):")
+		for _, bridge := range report.LateralBridges {
+			fmt.Fprintf(stdout, "    %s -> %s tier=%s sides=%d/%d coupling-pairs=%d\n", bridge.From, bridge.To, bridge.TierName, len(bridge.LeftSide), len(bridge.RightSide), bridge.CouplingPairs)
+		}
+	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {
 		fmt.Fprintln(stdout, "  sink candidates (declared tier above import floor):")
 		for _, candidate := range report.SinkCandidates {

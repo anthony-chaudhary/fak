@@ -55,6 +55,18 @@ type BlastHotspot struct {
 	MaxHops     int    `json:"max_hops"`
 }
 
+type LateralBridge struct {
+	Tier          int      `json:"tier"`
+	TierName      string   `json:"tier_name"`
+	From          string   `json:"from"`
+	To            string   `json:"to"`
+	Left          string   `json:"left"`
+	Right         string   `json:"right"`
+	LeftSide      []string `json:"left_side"`
+	RightSide     []string `json:"right_side"`
+	CouplingPairs int      `json:"coupling_pairs"`
+}
+
 type LateralComponent struct {
 	Tier        int      `json:"tier"`
 	TierName    string   `json:"tier_name"`
@@ -110,6 +122,7 @@ type Report struct {
 	BlastHotspots        []BlastHotspot     `json:"blast_hotspots,omitempty"`
 	Edges                []ArchitectureEdge `json:"edges,omitempty"`
 	LateralComponents    []LateralComponent `json:"lateral_components,omitempty"`
+	LateralBridges       []LateralBridge    `json:"lateral_bridges,omitempty"`
 	Diagnostics          []Diagnostic       `json:"diagnostics,omitempty"`
 	SinkCandidates       []SinkCandidate    `json:"sink_candidates,omitempty"`
 	Violations           int                `json:"violations"`
@@ -207,6 +220,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		return report.Edges[i].To < report.Edges[j].To
 	})
 	report.LateralComponents = lateralComponents(report.Edges, tiers, names)
+	report.LateralBridges = lateralBridges(report.Edges, report.LateralComponents)
 	for i := range allLeaves {
 		liveViolations := allLeaves[i].ViolationEdges[:0]
 		for _, edge := range allLeaves[i].ViolationEdges {
@@ -286,6 +300,13 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 		}
 		report.Edges = edges
+		bridges := report.LateralBridges[:0]
+		for _, bridge := range report.LateralBridges {
+			if slices.Contains(bridge.LeftSide, onlyLeaf) || slices.Contains(bridge.RightSide, onlyLeaf) {
+				bridges = append(bridges, bridge)
+			}
+		}
+		report.LateralBridges = bridges
 		components := report.LateralComponents[:0]
 		for _, component := range report.LateralComponents {
 			if slices.Contains(component.Members, onlyLeaf) {
@@ -311,6 +332,105 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 	}
 	return report, nil
+}
+
+func lateralBridges(edges []ArchitectureEdge, components []LateralComponent) []LateralBridge {
+	var out []LateralBridge
+	for _, component := range components {
+		members := map[string]struct{}{}
+		for _, member := range component.Members {
+			members[member] = struct{}{}
+		}
+		for _, edge := range edges {
+			if edge.Direction != "lateral" {
+				continue
+			}
+			if _, ok := members[edge.From]; !ok {
+				continue
+			}
+			if _, ok := members[edge.To]; !ok {
+				continue
+			}
+			left, right := edge.From, edge.To
+			if right < left {
+				left, right = right, left
+			}
+			leftSide := reachableWithoutEdge(left, left, right, edges, members)
+			if slices.Contains(leftSide, right) {
+				continue
+			}
+			leftSet := map[string]struct{}{}
+			for _, member := range leftSide {
+				leftSet[member] = struct{}{}
+			}
+			var rightSide []string
+			for _, member := range component.Members {
+				if _, ok := leftSet[member]; !ok {
+					rightSide = append(rightSide, member)
+				}
+			}
+			out = append(out, LateralBridge{Tier: component.Tier, TierName: component.TierName, From: edge.From, To: edge.To, Left: left, Right: right, LeftSide: leftSide, RightSide: rightSide, CouplingPairs: len(leftSide) * len(rightSide)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CouplingPairs != out[j].CouplingPairs {
+			return out[i].CouplingPairs > out[j].CouplingPairs
+		}
+		if out[i].Tier != out[j].Tier {
+			return out[i].Tier < out[j].Tier
+		}
+		if out[i].Left != out[j].Left {
+			return out[i].Left < out[j].Left
+		}
+		return out[i].Right < out[j].Right
+	})
+	return out
+}
+
+func reachableWithoutEdge(start, skipLeft, skipRight string, edges []ArchitectureEdge, members map[string]struct{}) []string {
+	seen := map[string]struct{}{start: {}}
+	pending := []string{start}
+	for len(pending) > 0 {
+		current := pending[0]
+		pending = pending[1:]
+		var next []string
+		for _, edge := range edges {
+			if edge.Direction != "lateral" {
+				continue
+			}
+			left, right := edge.From, edge.To
+			if right < left {
+				left, right = right, left
+			}
+			if left == skipLeft && right == skipRight {
+				continue
+			}
+			neighbor := ""
+			if edge.From == current {
+				neighbor = edge.To
+			} else if edge.To == current {
+				neighbor = edge.From
+			}
+			if neighbor == "" {
+				continue
+			}
+			if _, ok := members[neighbor]; !ok {
+				continue
+			}
+			if _, ok := seen[neighbor]; !ok {
+				seen[neighbor] = struct{}{}
+				next = append(next, neighbor)
+			}
+		}
+		sort.Strings(next)
+		pending = append(pending, next...)
+	}
+	out := make([]string, 0, len(seen))
+	for member := range seen {
+		out = append(out, member)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func lateralComponents(edges []ArchitectureEdge, tiers map[string]int, names []string) []LateralComponent {
