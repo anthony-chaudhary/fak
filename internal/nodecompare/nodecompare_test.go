@@ -57,6 +57,24 @@ func TestParseBatchbenchText(t *testing.T) {
 	}
 }
 
+func TestParseBatchbenchInvalidJSONFallsBackToText(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteNode(t, filepath.Join(dir, "batchbench-q8.json"), "{")
+	p := filepath.Join(dir, "batchbench.txt")
+	mustWriteNode(t, p, "B=1 step=0.1 agg= 9.0 tok/s\nB=4 step=0.4 agg= 30.0 tok/s\n")
+	out := ParseBatchbench(p)
+	if out.B1TokS == nil || *out.B1TokS != 9.0 || out.BMax == nil || *out.BMax != 4 || out.BMaxTokS == nil || *out.BMaxTokS != 30.0 {
+		t.Fatalf("batch=%+v", out)
+	}
+}
+
+func TestParseBatchbenchMissing(t *testing.T) {
+	out := ParseBatchbench(filepath.Join(t.TempDir(), "missing.txt"))
+	if out.B1TokS != nil || out.BMax != nil || out.BMaxTokS != nil {
+		t.Fatalf("missing batch=%+v", out)
+	}
+}
+
 func TestLoadNodes(t *testing.T) {
 	root := t.TempDir()
 	host := filepath.Join(root, "node-a")
