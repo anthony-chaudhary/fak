@@ -1,0 +1,507 @@
+{
+  "schema": "fak-microcontext-semantic-tool-fold/2",
+  "policy": "predeclared: one legacy baseline vote plus two model-distinct v2 rubric votes; strict 2-of-3 majority else abstain",
+  "prompt_version": "semantic-tool-need-v2",
+  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "source_sha256": {
+    "s8i-adjudicator-a-2026-08-10.json": "61f8a538729200410305d7a7e4adb4615625015045bbd1f7ed5ef6e094fed255",
+    "s8i-adjudicator-openai-2026-08-10.json": "01c6ae3df3ba44ce54343363a30cb73a566f6ff2dd84b735440f043b61425f56",
+    "s8m-adjudicator-groq-2026-08-10.json": "4c54012a55c031fbc4e013d58b24cbde52a50c912c192ece8dadf1503133bc55",
+    "s8m-adjudicator-openai-2026-08-10.json": "95d2905c6a35f48dd049ba60a327477e9605aaa2c72826194896c2c18a2658d3"
+  },
+  "adjudicators": [
+    "sanctioned-qwen-a",
+    "independent-openai-v2",
+    "independent-groq-llama"
+  ],
+  "pairwise_agreement": {
+    "legacy-v2a": {
+      "tool_need": 0.375
+    },
+    "legacy-v2b": {
+      "tool_need": 0.4375
+    },
+    "v2a-v2b": {
+      "tool_need": 0.6875
+    }
+  },
+  "per_class": {
+    "current_state": {
+      "majority": 11,
+      "unanimous": 1
+    },
+    "read_only": {
+      "majority": 21,
+      "unanimous": 7
+    }
+  },
+  "confidence_calibration": [
+    {
+      "lower": 0,
+      "upper": 0.25,
+      "count": 0,
+      "agreement": 0
+    },
+    {
+      "lower": 0.25,
+      "upper": 0.5,
+      "count": 0,
+      "agreement": 0
+    },
+    {
+      "lower": 0.5,
+      "upper": 0.75,
+      "count": 0,
+      "agreement": 0
+    },
+    {
+      "lower": 0.75,
+      "upper": 1,
+      "count": 32,
+      "agreement": 0.25
+    }
+  ],
+  "changes_from_two_model": {
+    "old_exact_agreement": 0.21875,
+    "new_resolved": 32,
+    "new_abstained": 0
+  },
+  "counts": {
+    "current_state": 11,
+    "read_only": 21
+  },
+  "judgments": [
+    {
+      "id": "issue-6084",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5146",
+      "split": "tune",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5782",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": true,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5211",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.8833333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5718",
+      "split": "tune",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.89,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5847",
+      "split": "tune",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5501",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": true,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5253",
+      "split": "tune",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5238",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": true,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5507",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": true,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-6014",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9,
+      "unanimous": true,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-6016",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": true,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-6072",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9233333333333333,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5232",
+      "split": "tune",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5738",
+      "split": "tune",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-6075",
+      "split": "tune",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9066666666666666,
+      "unanimous": true,
+      "answer_evidence": "repository",
+      "action_evidence": "live"
+    },
+    {
+      "id": "issue-5158",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "none"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5713",
+      "split": "test",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.8866666666666667,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5148",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.8533333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5207",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5859",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": true,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5636",
+      "split": "test",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.8799999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5347",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5802",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5929",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5672",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5154",
+      "split": "test",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.8866666666666667,
+      "unanimous": false
+    },
+    {
+      "id": "issue-5245",
+      "split": "test",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9133333333333334,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5525",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9233333333333333,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5363",
+      "split": "test",
+      "tool_need": "current_state",
+      "votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9233333333333333,
+      "unanimous": false,
+      "answer_evidence": "repository"
+    },
+    {
+      "id": "issue-5645",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9100000000000001,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    },
+    {
+      "id": "issue-5521",
+      "split": "test",
+      "tool_need": "read_only",
+      "votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "confidence": 0.9199999999999999,
+      "unanimous": false,
+      "answer_evidence": "repository",
+      "action_evidence": "repository"
+    }
+  ],
+  "gold_sha256": "113f91c641cb38e75cba6206f4cb172ee04afba08ce75961bccc6d95ee208658"
+}

@@ -85,3 +85,4 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [Micro-context outcome counters](micro-context-outcome-counters.md) — the existing quality ledger exposes reconciled success/error/refusal totals; controlled 1k CUDA readout is 1000/0/0.
 - [Micro-context quality and observability ledger](micro-context-quality-ledger.md)
 - [Micro-context S7 mixed-tenant fairness](micro-context-s7-fairness.md)
+- [S8m: three-adjudicator tool-routing gold stabilization](micro-context-s8m-tool-gold.md)

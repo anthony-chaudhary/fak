@@ -391,9 +391,10 @@ func main() {
 	var routingVOIOutput, verifyRoutingVOIPath string
 	var routingVOISeed int64
 	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
-	var semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator string
+	var semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator, semanticPromptVersion string
 	var semanticPerSplit int
 	var semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput string
+	var semanticTriplePacket, semanticTripleOldA, semanticTripleOldB, semanticTripleV2A, semanticTripleV2B, semanticTripleOutput string
 	var semanticGradeGold, semanticGradeSubmission, semanticGradeOutput, semanticGradeSplit string
 	var verifySemanticGoldPath, verifySemanticGradePath string
 	var liveMatrixPacket, liveMatrixGold, liveMatrixOutput, verifyLiveMatrixPath string
@@ -501,10 +502,17 @@ func main() {
 	flag.StringVar(&semanticAPIKey, "semantic-api-key", "", "API key for semantic endpoint")
 	flag.StringVar(&semanticModel, "semantic-model", "", "semantic adjudicator model id")
 	flag.StringVar(&semanticAdjudicator, "semantic-adjudicator", "", "independent adjudicator identity")
+	flag.StringVar(&semanticPromptVersion, "semantic-prompt-version", semanticPromptV1, "semantic adjudication rubric version")
 	flag.StringVar(&semanticFoldPacket, "semantic-fold-packet", "", "packet bound to two independent adjudicators")
 	flag.StringVar(&semanticFoldA, "semantic-fold-a", "", "first independent adjudicator bundle")
 	flag.StringVar(&semanticFoldB, "semantic-fold-b", "", "second independent adjudicator bundle")
 	flag.StringVar(&semanticGoldOutput, "semantic-gold-output", "", "write hidden semantic consensus/abstention answers")
+	flag.StringVar(&semanticTriplePacket, "semantic-triple-packet", "", "packet for three-adjudicator tool fold")
+	flag.StringVar(&semanticTripleOldA, "semantic-triple-old-a", "", "legacy adjudicator A")
+	flag.StringVar(&semanticTripleOldB, "semantic-triple-old-b", "", "legacy adjudicator B for old agreement")
+	flag.StringVar(&semanticTripleV2A, "semantic-triple-v2-a", "", "v2 adjudicator A")
+	flag.StringVar(&semanticTripleV2B, "semantic-triple-v2-b", "", "v2 adjudicator B")
+	flag.StringVar(&semanticTripleOutput, "semantic-triple-output", "", "three-adjudicator tool fold output")
 	flag.StringVar(&semanticGradeGold, "semantic-grade-gold", "", "hidden semantic answers for blind grading")
 	flag.StringVar(&semanticGradeSubmission, "semantic-grade-submission", "", "candidate semantic submission")
 	flag.StringVar(&semanticGradeOutput, "semantic-grade-output", "", "write semantic blind grade")
@@ -634,6 +642,18 @@ func main() {
 		runVerify("verify-live-matrix", verifyLiveMatrixPath, verifyLiveSemanticMatrix)
 		return
 	}
+	if semanticTriplePacket != "" {
+		if semanticTripleOldA == "" || semanticTripleOldB == "" || semanticTripleV2A == "" || semanticTripleV2B == "" || semanticTripleOutput == "" {
+			fmt.Fprintln(os.Stderr, "microcontextdemo: semantic triple fold requires all inputs and output")
+			os.Exit(2)
+		}
+		if err := foldSemanticToolTriple(semanticTriplePacket, semanticTripleOldA, semanticTripleOldB, semanticTripleV2A, semanticTripleV2B, semanticTripleOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic triple fold: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS semantic triple fold %s\n", semanticTripleOutput)
+		return
+	}
 	if semanticFoldPacket != "" {
 		if err := foldSemanticAdjudicators(semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic fold: %v\n", err)
@@ -667,7 +687,7 @@ func main() {
 		return
 	}
 	if semanticPacketInput != "" {
-		if err := runSemanticAdjudicator(semanticPacketInput, semanticJudgmentOutput, semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator); err != nil {
+		if err := runSemanticAdjudicator(semanticPacketInput, semanticJudgmentOutput, semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator, semanticPromptVersion); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic adjudicator: %v\n", err)
 			os.Exit(1)
 		}

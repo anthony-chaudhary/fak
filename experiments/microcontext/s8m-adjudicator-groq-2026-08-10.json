@@ -1,0 +1,432 @@
+{
+  "schema": "fak-microcontext-semantic-judgments/1",
+  "adjudicator": "independent-groq-llama",
+  "model": "llama-3.3-70b-versatile",
+  "prompt_version": "semantic-tool-need-v2",
+  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "created_at": "2026-08-10T15:27:29Z",
+  "judgments": [
+    {
+      "id": "issue-6084",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "Analyze"
+      ],
+      "rationale": "code fix"
+    },
+    {
+      "id": "issue-5146",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "fails in go test"
+      ],
+      "rationale": "fix governance"
+    },
+    {
+      "id": "issue-5782",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "\u003e needs human triage"
+      ],
+      "rationale": "needs human review"
+    },
+    {
+      "id": "issue-5211",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`scripts/dogfood-claude.ps1 --install`"
+      ],
+      "rationale": "code inspection"
+    },
+    {
+      "id": "issue-5718",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "evaluate triton-inference-server/server"
+      ],
+      "rationale": "needs live evidence"
+    },
+    {
+      "id": "issue-5847",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`go test ./internal/pythongate -run TestNoNewPythonTools`"
+      ],
+      "rationale": "port tools"
+    },
+    {
+      "id": "issue-5501",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "\u003e needs human triage"
+      ],
+      "rationale": "needs code review"
+    },
+    {
+      "id": "issue-5253",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "LOCK_BUSY"
+      ],
+      "rationale": "dead holder"
+    },
+    {
+      "id": "issue-5238",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "\u003e needs human triage"
+      ],
+      "rationale": "needs human review"
+    },
+    {
+      "id": "issue-5507",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "\u003e needs human triage"
+      ],
+      "rationale": "needs human review"
+    },
+    {
+      "id": "issue-6014",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`internal/bench/authorityview.go`"
+      ],
+      "rationale": "code inspection needed"
+    },
+    {
+      "id": "issue-6016",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "\u003e needs human triage"
+      ],
+      "rationale": "human review needed"
+    },
+    {
+      "id": "issue-6072",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "Architecture graph report"
+      ],
+      "rationale": "code review needed"
+    },
+    {
+      "id": "issue-5232",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "admit tool-terminal wake"
+      ],
+      "rationale": "code fix needed"
+    },
+    {
+      "id": "issue-5738",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "Integrate cutting-edge LLM technology"
+      ],
+      "rationale": "needs live evidence"
+    },
+    {
+      "id": "issue-6075",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "run Architecture graph report"
+      ],
+      "rationale": "live work required"
+    },
+    {
+      "id": "issue-5158",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "\"turn boundary\""
+      ],
+      "rationale": "code implementation"
+    },
+    {
+      "id": "issue-5713",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "evaluate open-webui"
+      ],
+      "rationale": "needs live evidence"
+    },
+    {
+      "id": "issue-5148",
+      "semantic_need": "semantic",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "typed loop-progress observer"
+      ],
+      "rationale": "code inspection required"
+    },
+    {
+      "id": "issue-5207",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "gate via `AdmitSpeculation`"
+      ],
+      "rationale": "code implementation request"
+    },
+    {
+      "id": "issue-5859",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "lane 'tools' is already held by a live loop"
+      ],
+      "rationale": "dead lease filter"
+    },
+    {
+      "id": "issue-5636",
+      "semantic_need": "semantic",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "fleet rung"
+      ],
+      "rationale": "live gateway"
+    },
+    {
+      "id": "issue-5347",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`worktree-archive/2026-07-14`"
+      ],
+      "rationale": "code inspection"
+    },
+    {
+      "id": "issue-5802",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`internal/modelaccept`"
+      ],
+      "rationale": "code inspection"
+    },
+    {
+      "id": "issue-5929",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`tax.Trees` is keyed by declared lane name only"
+      ],
+      "rationale": "code inspection required"
+    },
+    {
+      "id": "issue-5672",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "Make this distinction explicit"
+      ],
+      "rationale": "code inspection"
+    },
+    {
+      "id": "issue-5154",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "not_actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "native DeepSeek V4 MTP"
+      ],
+      "rationale": "code review needed"
+    },
+    {
+      "id": "issue-5245",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`docs/notes/MOE-SSD-MULTI-AGENT-NET-TOKS-2026-07-18.md`"
+      ],
+      "rationale": "code review needed"
+    },
+    {
+      "id": "issue-5525",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "`internal/gateway/messages_stream_passthrough.go:449-450`"
+      ],
+      "rationale": "code inspection required"
+    },
+    {
+      "id": "issue-5363",
+      "semantic_need": "literal",
+      "tool_need": "current_state",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "live",
+      "confidence": 0.8,
+      "evidence": [
+        "no Claude subscription token"
+      ],
+      "rationale": "Keychain credentials"
+    },
+    {
+      "id": "issue-5645",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "Add a repository closeout verifier"
+      ],
+      "rationale": "code inspection request"
+    },
+    {
+      "id": "issue-5521",
+      "semantic_need": "literal",
+      "tool_need": "read_only",
+      "actionability": "actionable",
+      "answer_evidence": "repository",
+      "action_evidence": "repository",
+      "confidence": 0.8,
+      "evidence": [
+        "silently ignores it"
+      ],
+      "rationale": "code issue"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 2509,
+    "prompt_tokens": 20147,
+    "total_tokens": 22656
+  },
+  "endpoint": "sanctioned-openai-compatible"
+}
