@@ -1,0 +1,14 @@
+{
+  "schema":"quantprov/v1",
+  "source_model":"example/model",
+  "source_revision":"rev-1",
+  "source_digest":"sha256:source",
+  "artifact_digest":"sha256:artifact",
+  "quantizer":"example-quantizer",
+  "quantizer_version":"1.2.0",
+  "calibration_identity":"dataset@example-rev",
+  "format":"example-format",
+  "parameters":{"bits":"4"},
+  "license":"Apache-2.0",
+  "conversion_chain":[{"tool":"example-quantizer","tool_version":"1.2.0","input_digest":"sha256:other","output_digest":"sha256:artifact"}]
+}
