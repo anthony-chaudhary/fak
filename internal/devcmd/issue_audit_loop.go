@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -36,28 +36,28 @@ func runIssueAuditLoop(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue audit-loop: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue audit-loop: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *statusOnly {
 		return runIssueAuditLoopStatus(stdout, stderr, *ledgerPath, *cursorPath, *asJSON)
 	}
 	if strings.TrimSpace(*snapshotPath) == "" {
-		fmt.Fprintln(stderr, "fak issue audit-loop: --snapshot FILE is required (the bounded discovery snapshot)")
+		fmt.Fprintln(stderr, "fak-dev issue audit-loop: --snapshot FILE is required (the bounded discovery snapshot)")
 		return 2
 	}
 	if *batchCap <= 0 {
-		fmt.Fprintln(stderr, "fak issue audit-loop: --batch-cap must be positive")
+		fmt.Fprintln(stderr, "fak-dev issue audit-loop: --batch-cap must be positive")
 		return 2
 	}
 	subjects, err := loadIssueAuditLoopSnapshot(*snapshotPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit-loop: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit-loop: %v\n", err)
 		return 2
 	}
 	replayIssues, err := parseIssueAuditLoopReplay(*replay)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit-loop: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit-loop: %v\n", err)
 		return 2
 	}
 
@@ -74,14 +74,14 @@ func runIssueAuditLoop(stdout, stderr io.Writer, argv []string) int {
 	}
 	report, err := modelroute.RunIssueAuditLoopTick(context.Background(), cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit-loop: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit-loop: %v\n", err)
 		return 1
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak issue audit-loop: encode report: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit-loop: encode report: %v\n", err)
 			return 1
 		}
 	} else {
@@ -111,14 +111,14 @@ type issueAuditLoopStatus struct {
 func runIssueAuditLoopStatus(stdout, stderr io.Writer, ledgerPath, cursorPath string, asJSON bool) int {
 	cursor, err := modelroute.LoadIssueAuditLoopCursor(cursorPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit-loop: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit-loop: %v\n", err)
 		return 1
 	}
 	status := issueAuditLoopStatus{Schema: "fak.issue-audit-loop-status.v1", CursorRows: cursor.LedgerRows}
 	if _, statErr := os.Stat(ledgerPath); statErr == nil {
 		v, err := modelroute.VerifyAuditReceiptLedger(ledgerPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue audit-loop: ledger verify: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit-loop: ledger verify: %v\n", err)
 			return 1
 		}
 		status.LedgerPresent = true
@@ -142,7 +142,7 @@ func runIssueAuditLoopStatus(stdout, stderr io.Writer, ledgerPath, cursorPath st
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(status); err != nil {
-			fmt.Fprintf(stderr, "fak issue audit-loop: encode status: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit-loop: encode status: %v\n", err)
 			return 1
 		}
 		return 0

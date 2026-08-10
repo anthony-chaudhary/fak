@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-// The witness-gathering shell behind `fak issue fanout --coverage` (#2532).
+// The witness-gathering shell behind `fak-dev issue fanout --coverage` (#2532).
 //
 // The leaf stays pure: everything here does is run the two witnesses (git for
 // the leaf set and its spine artifacts, gh for the filed fan-out markers) and
@@ -126,12 +126,12 @@ func gatherFanoutCoverage(since, repo string, scanCap int, deps fanoutCoverageDe
 func emitFanoutCoverage(stdout, stderr io.Writer, since, repo string, scanCap int, asJSON bool, deps fanoutCoverageDeps) int {
 	rep, err := gatherFanoutCoverage(since, repo, scanCap, deps)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue fanout --coverage: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue fanout --coverage: %v\n", err)
 		return 2
 	}
 	if asJSON {
 		if err := writeIndentedJSON(stdout, rep); err != nil {
-			fmt.Fprintf(stderr, "fak issue fanout: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue fanout: encode json: %v\n", err)
 			return 1
 		}
 	} else {

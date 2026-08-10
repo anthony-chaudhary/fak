@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -21,8 +21,8 @@ type projectCompletionIssue struct {
 	URL    string                     `json:"url,omitempty"`
 }
 
-func runProjectCompletion(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("fak project completion", flag.ContinueOnError)
+func RunProjectCompletion(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak-dev project completion", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fromIssues := fs.String("from-issues", "", "GitHub issue JSON (number,title,body,state,labels)")
 	asJSON := fs.Bool("json", false, "emit machine-readable weighted completion")
@@ -30,7 +30,7 @@ func runProjectCompletion(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*fromIssues) == "" {
-		fmt.Fprintln(stderr, "fak project completion: --from-issues ISSUES.json is required")
+		fmt.Fprintln(stderr, "fak-dev project completion: --from-issues ISSUES.json is required")
 		return 2
 	}
 	var b []byte
@@ -41,12 +41,12 @@ func runProjectCompletion(stdout, stderr io.Writer, argv []string) int {
 		b, err = os.ReadFile(*fromIssues)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "fak project completion: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev project completion: %v\n", err)
 		return 2
 	}
 	var rows []projectCompletionIssue
 	if err = json.Unmarshal(b, &rows); err != nil {
-		fmt.Fprintf(stderr, "fak project completion: decode: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev project completion: decode: %v\n", err)
 		return 2
 	}
 	issues := make([]projectcompletion.Issue, 0, len(rows))

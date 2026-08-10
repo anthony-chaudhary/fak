@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ import (
 // already filed, asks the planner what to do (CREATE/UPDATE/REOPEN/COMMENT/
 // NOOP/ESCALATE), renders each CREATE as an issue-contract-DISPATCHABLE
 // candidate, and — only when explicitly armed — applies the bounded GitHub
-// mutations through the same governed gh atoms `fak issue create` uses. It
+// mutations through the same governed gh atoms `fak-dev issue create` uses. It
 // DEFAULTS to a dry-run plan that never touches GitHub, and it refuses to emit a
 // candidate the strict issue contract would not admit, so a broken generator is
 // caught before it can file spam.
@@ -116,7 +116,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue finding: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue finding: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 
@@ -134,7 +134,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 			}
 		}
 		if selected != 1 {
-			fmt.Fprintln(stderr, "fak issue finding: pass exactly one of --ledger LEDGER.jsonl or --receipts RECEIPTS.json")
+			fmt.Fprintln(stderr, "fak-dev issue finding: pass exactly one of --ledger LEDGER.jsonl or --receipts RECEIPTS.json")
 			return 2
 		}
 		var err error
@@ -144,7 +144,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 			receiptRows, err = loadFindingReceiptsFile(*receipts)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue finding: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue finding: %v\n", err)
 			return 2
 		}
 	}
@@ -158,7 +158,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 		var err error
 		existing, err = loadFindingExistingFile(*fromIssues)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue finding: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue finding: %v\n", err)
 			return 2
 		}
 	}
@@ -274,7 +274,7 @@ func runIssueFindingWith(stdout, stderr io.Writer, argv []string, deps issueFind
 // cap) before it touches GitHub. Returns 0 on success, or a non-zero exit code.
 func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, result *issueFindingResult, repo string, runner issueCreateRunner, authoring findingProjectWork) int {
 	if result.DedupeCap <= 0 {
-		fmt.Fprintln(stderr, "fak issue finding: --live requires --dedupe-cap N (a bounded issue-scan cap)")
+		fmt.Fprintln(stderr, "fak-dev issue finding: --live requires --dedupe-cap N (a bounded issue-scan cap)")
 		result.Refusal = "live sync not armed: missing dedupe cap"
 		return 2
 	}
@@ -283,7 +283,7 @@ func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, res
 		if result.Refusal == "" {
 			result.Refusal = "live sync blocked: a generated candidate is not dispatchable"
 		}
-		fmt.Fprintf(stderr, "fak issue finding: %s\n", result.Refusal)
+		fmt.Fprintf(stderr, "fak-dev issue finding: %s\n", result.Refusal)
 		return 2
 	}
 	run := runner
@@ -313,7 +313,7 @@ func applyFindingLive(stdout, stderr io.Writer, plan modelroute.FindingPlan, res
 			applied.Error = strings.TrimSpace(errOut)
 			result.Applied = append(result.Applied, applied)
 			result.Refusal = fmt.Sprintf("gh %s failed for %s", item.Action, item.Key)
-			fmt.Fprintf(stderr, "fak issue finding: gh %s failed: %s\n", item.Action, applied.Error)
+			fmt.Fprintf(stderr, "fak-dev issue finding: gh %s failed: %s\n", item.Action, applied.Error)
 			return 1
 		}
 		result.Applied = append(result.Applied, applied)
@@ -361,7 +361,7 @@ func findingMutationArgs(item modelroute.FindingPlanItem, repo string, authoring
 func emitFindingResult(stdout, stderr io.Writer, result issueFindingResult, asJSON bool) {
 	if asJSON {
 		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak issue finding: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue finding: encode json: %v\n", err)
 		}
 		return
 	}
@@ -472,7 +472,7 @@ func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeC
 		InScope:        fmt.Sprintf("Reproduce the re-audit REFUTE for #%d, land a corrected closing change, and re-run the cross-audit to a PASS.", n),
 		OutOfScope:     "Unrelated refactors or polish, and closing this finding on the auditor's word alone without a witnessed fix and an independent re-audit.",
 		DoneCondition:  fmt.Sprintf("A new closing commit for #%d lands AND an independent cross-model re-audit of that commit returns PASS.", n),
-		Witness:        fmt.Sprintf("`fak issue audit --issue %d` returns PASS on the new closing commit (a fresh crossaudit PASS receipt) with the fix commit green under `go test ./...`.", n),
+		Witness:        fmt.Sprintf("`fak-dev issue audit --issue %d` returns PASS on the new closing commit (a fresh crossaudit PASS receipt) with the fix commit green under `go test ./...`.", n),
 		AcceptanceGate: "The cross-audit re-run on the corrected commit returns PASS and its receipt is appended to the audit ledger.",
 		ClosureBinding: fmt.Sprintf("Close only when witnessed by a new closing commit for #%d AND an independent re-audit PASS — never on this finding report alone.", n),
 		Lane:           lane,
@@ -545,7 +545,7 @@ func findingCandidatePaths(refs []modelroute.EvidenceRef) []string {
 // with the dedupe markers (finding key + last-recorded receipt digest) so a
 // later run recovers the finding's state, then lays out the standard issue
 // sections so the filed issue re-parses to the same dispatchable candidate under
-// `fak issue contract --from-issues`.
+// `fak-dev issue contract --from-issues`.
 func renderFindingIssueBody(item modelroute.FindingPlanItem) string {
 	body, _ := renderFindingIssueBodyWithProjectWork(item, findingProjectWork{Baseline: float64(buildFindingCandidate(item, "crossaudit", 1).ExpectedSteps), Standard: "demo"})
 	return body

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -40,7 +40,7 @@ const decomposeSchema = "fak.issue-decompose.v1"
 // child leaves and --live files them; without a plan, decompose emits SCAFFOLD
 // stubs — the work order an agent then fills — which are dry-run only unless
 // --allow-stubs is set (filing empty stubs would just flood the tracker with
-// non-dispatchable rows). Governance mirrors `fak issue repair`: dry-run by
+// non-dispatchable rows). Governance mirrors `fak-dev issue repair`: dry-run by
 // default, --live to arm, and a --max-create blast-radius fuse because filing
 // new issues is the highest-consequence write in the pipeline.
 func runIssueDecompose(stdout, stderr io.Writer, argv []string) int {
@@ -71,7 +71,7 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue decompose: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue decompose: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 
@@ -83,14 +83,14 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 		var err error
 		loaded, err = loadDecomposeIssues(*fromIssues, *root)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue decompose: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue decompose: %v\n", err)
 			return 2
 		}
 	}
 
 	planByParent, err := loadDecomposePlan(*fromPlan)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue decompose: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue decompose: %v\n", err)
 		return 2
 	}
 
@@ -116,11 +116,11 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 			}
 		}
 		if fileable > 0 && *parentBaseline <= 0 {
-			fmt.Fprintln(stderr, "fak issue decompose: --live child creation requires --parent-baseline-points")
+			fmt.Fprintln(stderr, "fak-dev issue decompose: --live child creation requires --parent-baseline-points")
 			return 2
 		}
 		if fileable > *maxCreate {
-			fmt.Fprintf(stderr, "fak issue decompose: --live would create %d child issues, over --max-create=%d; narrow with --issue or raise --max-create\n", fileable, *maxCreate)
+			fmt.Fprintf(stderr, "fak-dev issue decompose: --live would create %d child issues, over --max-create=%d; narrow with --issue or raise --max-create\n", fileable, *maxCreate)
 			return 2
 		}
 	}
@@ -133,7 +133,7 @@ func runIssueDecomposeWith(stdout, stderr io.Writer, argv []string, injected []i
 		exit = 1
 	}
 	if *asJSON {
-		if code := encodeJSONOrFail(stdout, stderr, result, "fak issue decompose"); code != 0 {
+		if code := encodeJSONOrFail(stdout, stderr, result, "fak-dev issue decompose"); code != 0 {
 			return code
 		}
 		return exit
@@ -250,7 +250,7 @@ const (
 // A row is emitted when the issue is a decompose target (mirrors
 // issuecohort.isSplitTarget so decompose and the cohort planner agree on what an
 // epic is) OR the caller explicitly named it in --from-plan (operator override,
-// the way `fak issue repair --issue` honors an explicit selection). Loaded
+// the way `fak-dev issue repair --issue` honors an explicit selection). Loaded
 // issues are walked in input order for determinism; plan-only parents that are
 // not in the loaded set become error rows (sorted) because we cannot fetch their
 // current body to link against.
@@ -464,7 +464,7 @@ func applyDecompose(result *decomposeResult, byNumber map[int]issuecontract.Issu
 		}
 	}
 	if live && skippedStubs > 0 {
-		fmt.Fprintf(stderr, "fak issue decompose: %d scaffold epic(s) not filed — supply real children via --from-plan, or pass --allow-stubs to file the stubs\n", skippedStubs)
+		fmt.Fprintf(stderr, "fak-dev issue decompose: %d scaffold epic(s) not filed — supply real children via --from-plan, or pass --allow-stubs to file the stubs\n", skippedStubs)
 	}
 	return anyFail
 }
@@ -602,7 +602,7 @@ func renderDecompose(w io.Writer, result decomposeResult) {
 	if result.Live {
 		mode = "live"
 	}
-	fmt.Fprintf(w, "fak issue decompose — %s\n", mode)
+	fmt.Fprintf(w, "fak-dev issue decompose — %s\n", mode)
 	fmt.Fprintf(w, "epics=%d children_planned=%d children_created=%d parents_linked=%d failed=%d\n",
 		result.Counts.Epics, result.Counts.ChildrenPlanned, result.Counts.ChildrenCreated, result.Counts.ParentsLinked, result.Counts.Failed)
 	for _, r := range result.Rows {

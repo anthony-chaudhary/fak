@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"

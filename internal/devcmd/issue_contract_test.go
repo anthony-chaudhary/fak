@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 	path := writeIssueContractJSON(t, completeIssueCandidate())
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
 	}
@@ -108,7 +108,7 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 	c.Paths = nil
 	path := writeIssueContractJSON(t, c)
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--file", path})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", path})
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -139,7 +139,7 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 func TestIssueContractLiveRequiresDedupeArmor(t *testing.T) {
 	path := writeIssueContractJSON(t, completeIssueCandidate())
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--live", "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", path, "--live", "--json"})
 	if code != 3 {
 		t.Fatalf("unarmored live exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -149,7 +149,7 @@ func TestIssueContractLiveRequiresDedupeArmor(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	code = runIssue(&out, &errb, []string{
+	code = RunIssue(&out, &errb, []string{
 		"contract", "--file", path, "--live", "--dedupe-checked", "--dedupe-cap", "300", "--json",
 	})
 	if code != 0 {
@@ -168,7 +168,7 @@ func TestIssueContractFromPlanReviewsCandidatesArray(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-plan", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-plan", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -193,7 +193,7 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -220,7 +220,7 @@ func TestIssueContractFromIssuesEmitsTemplateRepairPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3 for corrupt generated body\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -259,7 +259,7 @@ func TestIssueContractFromIssuesEmitsTemplateRepairPlan(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	code = runIssue(&out, &errb, []string{"contract", "--from-issues", path})
+	code = RunIssue(&out, &errb, []string{"contract", "--from-issues", path})
 	if code != 3 {
 		t.Fatalf("text exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -288,7 +288,7 @@ func TestIssueContractReportsGenerationFit(t *testing.T) {
 	clean.InScope = "Add the generation checklist with promotion evidence, demotion evidence, and runtime feature gate boundaries."
 	clean.OutOfScope = "Do not create a branch per generation; priority, shared trunk, and runtime feature gates remain orthogonal."
 	clean.DoneCondition = "The issue names promotion evidence, demotion/retirement evidence, and an invalidating assumption."
-	clean.Witness = "Captured command witness from fak issue contract."
+	clean.Witness = "Captured command witness from fak-dev issue contract."
 	clean.Assumptions = []string{"Invalidating assumption: generation labels stay available during issue grooming."}
 
 	mismatch := clean
@@ -303,7 +303,7 @@ func TestIssueContractReportsGenerationFit(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -356,7 +356,7 @@ func TestIssueContractModelTierReadout(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -408,12 +408,12 @@ func TestIssueContractModelTierReadout(t *testing.T) {
 	}
 	out.Reset()
 	errb.Reset()
-	if code := runIssue(&out, &errb, []string{"contract", "--from-issues", upath}); code != 0 {
+	if code := RunIssue(&out, &errb, []string{"contract", "--from-issues", upath}); code != 0 {
 		t.Fatalf("default untagged exit = %d, want 0 (advisory)\nstdout:\n%s", code, out.String())
 	}
 	out.Reset()
 	errb.Reset()
-	code = runIssue(&out, &errb, []string{"contract", "--from-issues", upath, "--strict-model-tier"})
+	code = RunIssue(&out, &errb, []string{"contract", "--from-issues", upath, "--strict-model-tier"})
 	if code != 3 {
 		t.Fatalf("strict untagged exit = %d, want 3\nstdout:\n%s", code, out.String())
 	}
@@ -427,7 +427,7 @@ func TestIssueContractScaleReadout(t *testing.T) {
 	// budget, with a matching test/gate witness and no scale flags.
 	path := writeIssueContractJSON(t, completeIssueCandidate())
 	var out, errb bytes.Buffer
-	if code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"}); code != 0 {
+	if code := RunIssue(&out, &errb, []string{"contract", "--file", path, "--json"}); code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
 	}
 	var got struct {
@@ -470,7 +470,7 @@ func TestIssueContractScaleReadout(t *testing.T) {
 	fpath := writeIssueContractJSON(t, feature)
 	out.Reset()
 	errb.Reset()
-	code := runIssue(&out, &errb, []string{"contract", "--file", fpath})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", fpath})
 	if code != 3 {
 		t.Fatalf("feature default exit = %d, want 3\nstdout:\n%s", code, out.String())
 	}
@@ -485,7 +485,7 @@ func TestIssueContractScaleReadout(t *testing.T) {
 	// closed reason.
 	out.Reset()
 	errb.Reset()
-	if code := runIssue(&out, &errb, []string{"contract", "--file", fpath, "--strict-scale"}); code != 3 {
+	if code := RunIssue(&out, &errb, []string{"contract", "--file", fpath, "--strict-scale"}); code != 3 {
 		t.Fatalf("feature strict-scale exit = %d, want 3\nstdout:\n%s", code, out.String())
 	}
 	if !strings.Contains(out.String(), issuecontract.ReasonWitnessScaleMismatch) {
@@ -510,7 +510,7 @@ func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -558,7 +558,7 @@ func TestIssueContractGroupsDuplicateGeneratedMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -622,7 +622,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -765,7 +765,7 @@ func TestIssueContractFromIssuesRefusesVagueRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path})
+	code := RunIssue(&out, &errb, []string{"contract", "--from-issues", path})
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
@@ -902,7 +902,7 @@ func TestIssueContractStrictWitnessFlagHoldsForgeableCandidate(t *testing.T) {
 	c.Witness = "agent reports that it completed the task"
 	path := writeIssueContractJSON(t, c)
 	var out, errb bytes.Buffer
-	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--strict-witness", "--json"})
+	code := RunIssue(&out, &errb, []string{"contract", "--file", path, "--strict-witness", "--json"})
 	if code != 3 {
 		t.Fatalf("exit = %d, want 3\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
 	}
@@ -913,7 +913,7 @@ func TestIssueContractStrictWitnessFlagHoldsForgeableCandidate(t *testing.T) {
 	if len(got.Reviews) != 1 || got.Reviews[0].WitnessGrade.Grade != issuecontract.WitnessGradeForgeable {
 		t.Fatalf("review = %+v", got.Reviews)
 	}
-	if !containsString(got.Reviews[0].Reasons, issuecontract.ReasonWitnessForgeable) {
+	if !containsIssueString(got.Reviews[0].Reasons, issuecontract.ReasonWitnessForgeable) {
 		t.Fatalf("reasons = %+v", got.Reviews[0].Reasons)
 	}
 }
@@ -976,4 +976,13 @@ func TestRenderIssueContractClosureGate(t *testing.T) {
 			t.Fatalf("render missing %q:\n%s", want, got)
 		}
 	}
+}
+
+func containsIssueString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

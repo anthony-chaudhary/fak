@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -15,9 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 )
 
-func cmdIssue(argv []string) { os.Exit(runIssue(os.Stdout, os.Stderr, argv)) }
-
-func runIssue(stdout, stderr io.Writer, argv []string) int {
+func RunIssue(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		issueUsage(stderr)
 		return 2
@@ -51,7 +49,7 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 		issueUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak issue: unknown subcommand %q\n", argv[0])
+		fmt.Fprintf(stderr, "fak-dev issue: unknown subcommand %q\n", argv[0])
 		issueUsage(stderr)
 		return 2
 	}
@@ -182,7 +180,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	if fs.NArg() != 0 || selected != 1 {
-		fmt.Fprintln(stderr, "fak issue contract: pass exactly one of --file CANDIDATE.json, --from-plan PLAN.json, or --from-issues ISSUES.json")
+		fmt.Fprintln(stderr, "fak-dev issue contract: pass exactly one of --file CANDIDATE.json, --from-plan PLAN.json, or --from-issues ISSUES.json")
 		return 2
 	}
 
@@ -198,12 +196,12 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	}
 	path, err := filepath.Abs(pathArg)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue contract: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue contract: %v\n", err)
 		return 2
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue contract: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue contract: %v\n", err)
 		return 2
 	}
 	result := issueContractResult{
@@ -257,7 +255,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak issue contract: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue contract: encode json: %v\n", err)
 			return 1
 		}
 	} else {
@@ -274,7 +272,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 // same exit 2 (usage, not a failed review), so an operator who fed the wrong file gets one
 // answer regardless of which mode they asked for.
 func issueContractDecodeRefusal(stderr io.Writer, err error) int {
-	fmt.Fprintf(stderr, "fak issue contract: %v\n", err)
+	fmt.Fprintf(stderr, "fak-dev issue contract: %v\n", err)
 	return 2
 }
 
@@ -1222,37 +1220,37 @@ func renderIssueContractReasonCounts(counts map[string]int) string {
 }
 
 func issueUsage(w io.Writer) {
-	fmt.Fprint(w, `fak issue - generated-issue gates
+	fmt.Fprint(w, `fak-dev issue - generated-issue gates
 
-  fak issue audit    --issue N --author-manifest A
+  fak-dev issue audit    --issue N --author-manifest A
                      --auditor PROVIDER/FAMILY/MODEL --identity-roster R [--json]
-  fak issue audit-loop --snapshot SUBJECTS.json [--ledger P] [--cursor P]
+  fak-dev issue audit-loop --snapshot SUBJECTS.json [--ledger P] [--cursor P]
                      [--scan-cap N] [--batch-cap N] [--replay N,M] [--json]
-  fak issue audit-loop --status [--ledger P] [--cursor P] [--json]
-  fak issue contract --file CANDIDATE.json [--json]
-  fak issue contract --from-plan PLAN.json [--json]
-  fak issue contract --from-issues ISSUES.json [--json]
+  fak-dev issue audit-loop --status [--ledger P] [--cursor P] [--json]
+  fak-dev issue contract --file CANDIDATE.json [--json]
+  fak-dev issue contract --from-plan PLAN.json [--json]
+  fak-dev issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
                      [--strict-model-tier] [--strict-scale]
-  fak issue cohort   --from-plan PLAN.json [--json]
-  fak issue cohort   --from-issues ISSUES.json [--json]
+  fak-dev issue cohort   --from-plan PLAN.json [--json]
+  fak-dev issue cohort   --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
-  fak issue fanout   --title T --leaf L --spine REF [--parent REF]
+  fak-dev issue fanout   --title T --leaf L --spine REF [--parent REF]
                      [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
-  fak issue create   --title T (--body B | --body-file F) [--labels l1,l2]
+  fak-dev issue create   --title T (--body B | --body-file F) [--labels l1,l2]
                      [--repo owner/name] [--dry-run] [--json]
-  fak issue edit     --issue N [--title T] [--body B | --body-file F]
+  fak-dev issue edit     --issue N [--title T] [--body B | --body-file F]
                      [--add-label l1,l2] [--remove-label l1,l2]
                      [--repo owner/name] [--dry-run] [--json]
-  fak issue repair   [--live] [--kind k1,k2] [--issue N,M] [--limit N]
+  fak-dev issue repair   [--live] [--kind k1,k2] [--issue N,M] [--limit N]
                      [--max-apply N] [--from-issues ISSUES.json]
                      [--repo owner/name] [--json | --markdown]
-  fak issue decompose [--live] [--from-plan PLAN.json] [--issue N,M]
+  fak-dev issue decompose [--live] [--from-plan PLAN.json] [--issue N,M]
                      [--from-issues ISSUES.json] [--allow-stubs]
                      [--max-create N] [--repo owner/name] [--json]
-  fak issue dedup    [--json] [--limit N] [--threshold F] [--topk N]
-  fak issue dedup    --from-issues ISSUES.json|- [--json]
-  fak issue finding  (--ledger LEDGER.jsonl | --receipts RECEIPTS.json)
+  fak-dev issue dedup    [--json] [--limit N] [--threshold F] [--topk N]
+  fak-dev issue dedup    --from-issues ISSUES.json|- [--json]
+  fak-dev issue finding  (--ledger LEDGER.jsonl | --receipts RECEIPTS.json)
                      [--from-issues ISSUES.json] [--lane L] [--json]
                      [--live --dedupe-cap N --max-apply N] [--repo owner/name]
 

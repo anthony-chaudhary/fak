@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -42,7 +42,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 		sources++
 	}
 	if fs.NArg() != 0 || sources != 1 || (*fromPlan != "" && *file != "" && *fromPlan != *file) {
-		fmt.Fprintln(stderr, "fak issue cohort: pass exactly one of --from-plan PLAN.json or --from-issues ISSUES.json")
+		fmt.Fprintln(stderr, "fak-dev issue cohort: pass exactly one of --from-plan PLAN.json or --from-issues ISSUES.json")
 		return 2
 	}
 
@@ -52,12 +52,12 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	}
 	abs, err := filepath.Abs(inputPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue cohort: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue cohort: %v\n", err)
 		return 2
 	}
 	b, err := os.ReadFile(abs)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue cohort: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue cohort: %v\n", err)
 		return 2
 	}
 
@@ -65,7 +65,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	if *fromIssues != "" {
 		issues, derr := decodeIssueContractIssues(b)
 		if derr != nil {
-			fmt.Fprintf(stderr, "fak issue cohort: %v\n", derr)
+			fmt.Fprintf(stderr, "fak-dev issue cohort: %v\n", derr)
 			return 2
 		}
 		candidates = make([]issuecontract.Candidate, 0, len(issues))
@@ -75,7 +75,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		candidates, err = decodeIssueContractCandidates(b)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue cohort: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue cohort: %v\n", err)
 			return 2
 		}
 	}
@@ -91,7 +91,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	})
 
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, plan, "fak issue cohort")
+		return encodeJSONOrFail(stdout, stderr, plan, "fak-dev issue cohort")
 	}
 	fmt.Fprintln(stdout, issuecohort.Render(plan))
 	return 0

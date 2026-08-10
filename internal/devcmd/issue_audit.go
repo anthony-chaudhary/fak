@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -50,15 +50,15 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue audit: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue audit: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *issueNumber <= 0 {
-		fmt.Fprintln(stderr, "fak issue audit: --issue is required")
+		fmt.Fprintln(stderr, "fak-dev issue audit: --issue is required")
 		return 2
 	}
 	if *auditorTimeout <= 0 {
-		fmt.Fprintln(stderr, "fak issue audit: --auditor-timeout must be positive")
+		fmt.Fprintln(stderr, "fak-dev issue audit: --auditor-timeout must be positive")
 		return 2
 	}
 	if *bundleOnly {
@@ -69,40 +69,40 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		defer cancel()
 		evidence, err := injectedFetcher.FetchIssueAuditEvidence(ctx, *issueNumber)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue audit: fetch bundle evidence: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit: fetch bundle evidence: %v\n", err)
 			return 1
 		}
 		bundle, err := modelroute.BuildIssueAuditBundle(evidence, modelroute.IssueAuditBundleOptions{})
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if encodeErr := enc.Encode(bundle); encodeErr != nil {
-			fmt.Fprintf(stderr, "fak issue audit: encode bundle: %v\n", encodeErr)
+			fmt.Fprintf(stderr, "fak-dev issue audit: encode bundle: %v\n", encodeErr)
 			return 1
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit: %v\n", err)
 			return 3
 		}
 		return 0
 	}
 	if strings.TrimSpace(*authorManifestPath) == "" || strings.TrimSpace(*auditorTarget) == "" || strings.TrimSpace(*identityRosterPath) == "" {
-		fmt.Fprintln(stderr, "fak issue audit: --issue, --author-manifest, --auditor PROVIDER/FAMILY/MODEL, and --identity-roster are required")
+		fmt.Fprintln(stderr, "fak-dev issue audit: --issue, --author-manifest, --auditor PROVIDER/FAMILY/MODEL, and --identity-roster are required")
 		return 2
 	}
 
 	manifest, err := loadCrossAuditAuthorManifest(*authorManifestPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit: %v\n", err)
 		return 2
 	}
 	roster, err := loadCrossAuditIdentityRoster(*identityRosterPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit: %v\n", err)
 		return 2
 	}
 	auditor, err := parseCrossAuditAuditorTarget(*auditorTarget)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit: %v\n", err)
 		return 2
 	}
 	auditor.WeightsRevision = strings.TrimSpace(*auditorWeights)
@@ -115,7 +115,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 	case "codex", "claude":
 		effort := strings.ToLower(strings.TrimSpace(*auditorReasoning))
 		if !validIssueAuditEffort(effort) {
-			fmt.Fprintf(stderr, "fak issue audit: --auditor-driver %s requires --auditor-reasoning low|medium|high|xhigh|max\n", driver)
+			fmt.Fprintf(stderr, "fak-dev issue audit: --auditor-driver %s requires --auditor-reasoning low|medium|high|xhigh|max\n", driver)
 			return 2
 		}
 		auditor.Harness = driver + "-cli"
@@ -124,7 +124,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		auditor.ReasoningPosture = effort
 	case "http":
 		if strings.TrimSpace(*auditorReasoning) != "" {
-			fmt.Fprintln(stderr, "fak issue audit: HTTP does not bind --auditor-reasoning; omit it (the request is stamped provider-default)")
+			fmt.Fprintln(stderr, "fak-dev issue audit: HTTP does not bind --auditor-reasoning; omit it (the request is stamped provider-default)")
 			return 2
 		}
 		auditor.Harness = "openai-compatible-http"
@@ -138,13 +138,13 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 			auditor.AccountClass = "unauthenticated"
 		}
 	default:
-		fmt.Fprintf(stderr, "fak issue audit: --auditor-driver %q, want http, codex, or claude\n", driver)
+		fmt.Fprintf(stderr, "fak-dev issue audit: --auditor-driver %q, want http, codex, or claude\n", driver)
 		return 2
 	}
 	auditor.Driver = driver
 	canonicalAuditor, err := modelroute.ValidateAuditDriverIdentity(driver, auditor, roster.Aliases)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit: %v\n", err)
 		return 2
 	}
 	auditor = canonicalAuditor
@@ -163,7 +163,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		case "codex", "claude":
 			injectedReviewer = newIssueAuditCLIReviewer(driver, auditor)
 		default:
-			fmt.Fprintf(stderr, "fak issue audit: --auditor-driver %q, want http, codex, or claude\n", *auditorDriver)
+			fmt.Fprintf(stderr, "fak-dev issue audit: --auditor-driver %q, want http, codex, or claude\n", *auditorDriver)
 			return 2
 		}
 	}
@@ -182,21 +182,21 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 		RequireObservedAuditorIdentity: driver == "http",
 	}, injectedFetcher, injectedReviewer)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue audit: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit: %v\n", err)
 		if modelroute.IsIndependenceRefusal(err) {
 			return 3
 		}
 		return 1
 	}
 	if err := receipt.Verify(); err != nil {
-		fmt.Fprintf(stderr, "fak issue audit: internal receipt verification failed: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue audit: internal receipt verification failed: %v\n", err)
 		return 1
 	}
 	var ledger *modelroute.AuditReceiptAppendResult
 	if strings.TrimSpace(*ledgerPath) != "" {
 		result, err := modelroute.AppendAuditReceiptLedger(*ledgerPath, receipt)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue audit: append receipt ledger: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit: append receipt ledger: %v\n", err)
 			return 1
 		}
 		ledger = &result
@@ -209,7 +209,7 @@ func runIssueAuditWith(stdout, stderr io.Writer, argv []string, injectedFetcher 
 			payload = issueAuditLedgerOutput{Receipt: receipt, Ledger: *ledger}
 		}
 		if err := enc.Encode(payload); err != nil {
-			fmt.Fprintf(stderr, "fak issue audit: encode receipt: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue audit: encode receipt: %v\n", err)
 			return 1
 		}
 	} else {

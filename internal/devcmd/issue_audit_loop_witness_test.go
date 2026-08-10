@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -9,13 +9,13 @@ import (
 )
 
 // updateAuditLoopCLIWitness regenerates the committed operator-CLI witness from
-// live `fak issue audit-loop` output rather than hand-authoring its bytes:
+// live `fak-dev issue audit-loop` output rather than hand-authoring its bytes:
 //
-//	go test ./cmd/fak -run TestRunIssueAuditLoopCLIWitnessGolden -update-audit-loop-cli-witness
-var updateAuditLoopCLIWitness = flag.Bool("update-audit-loop-cli-witness", false, "regenerate the fak issue audit-loop operator CLI witness golden")
+//	go test ./internal/devcmd -run TestRunIssueAuditLoopCLIWitnessGolden -update-audit-loop-cli-witness
+var updateAuditLoopCLIWitness = flag.Bool("update-audit-loop-cli-witness", false, "regenerate the fak-dev issue audit-loop operator CLI witness golden")
 
 // TestRunIssueAuditLoopCLIWitnessGolden pins the operator front-door for #3856:
-// a captured `fak issue audit-loop` dry-run over a fixture discovery snapshot
+// a captured `fak-dev issue audit-loop` dry-run over a fixture discovery snapshot
 // (plans the batch, names the DARK subject, and writes nothing) beside a
 // read-only `--status` fold of a fresh (empty) durable ledger + cursor. The
 // deep cursor/receipt continuity across resumed ticks is captured by the
@@ -32,9 +32,9 @@ func TestRunIssueAuditLoopCLIWitnessGolden(t *testing.T) {
 	cursor := filepath.Join(dir, "cursor.json")
 
 	var b bytes.Buffer
-	b.WriteString("# fak issue audit-loop — captured operator CLI witness (#3856)\n")
+	b.WriteString("# fak-dev issue audit-loop — captured operator CLI witness (#3856)\n")
 	b.WriteString("#\n")
-	b.WriteString("# Regenerate: go test ./cmd/fak -run TestRunIssueAuditLoopCLIWitnessGolden -update-audit-loop-cli-witness\n")
+	b.WriteString("# Regenerate: go test ./internal/devcmd -run TestRunIssueAuditLoopCLIWitnessGolden -update-audit-loop-cli-witness\n")
 	b.WriteString("#\n")
 	b.WriteString("# The default operator tick is a dry-run: it plans the bounded batch, names the\n")
 	b.WriteString("# ineligible (DARK) subject, and writes neither ledger nor cursor. --status folds\n")
@@ -47,7 +47,7 @@ func TestRunIssueAuditLoopCLIWitnessGolden(t *testing.T) {
 	}); rc != 0 {
 		t.Fatalf("dry-run rc = %d, stderr=%s", rc, stderr.String())
 	}
-	b.WriteString("$ fak issue audit-loop --snapshot audit_loop_snapshot.json --json\n")
+	b.WriteString("$ fak-dev issue audit-loop --snapshot audit_loop_snapshot.json --json\n")
 	b.Write(stdout.Bytes())
 	b.WriteString("\n")
 
@@ -67,7 +67,7 @@ func TestRunIssueAuditLoopCLIWitnessGolden(t *testing.T) {
 	}); rc != 0 {
 		t.Fatalf("status rc = %d, stderr=%s", rc, stderr.String())
 	}
-	b.WriteString("$ fak issue audit-loop --status --json\n")
+	b.WriteString("$ fak-dev issue audit-loop --status --json\n")
 	b.Write(stdout.Bytes())
 
 	got := b.Bytes()

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -167,7 +167,7 @@ func TestRunIssueCohortRoutedViaRunIssue(t *testing.T) {
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
 	})
 	var stdout, stderr bytes.Buffer
-	if code := runIssue(&stdout, &stderr, []string{"cohort", "--from-plan", path, "--json"}); code != 0 {
+	if code := RunIssue(&stdout, &stderr, []string{"cohort", "--from-plan", path, "--json"}); code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(issuecohort.Schema)) {

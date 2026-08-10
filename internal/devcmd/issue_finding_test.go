@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -75,7 +75,7 @@ func TestIssueFindingDryRunCandidatesAreDispatchable(t *testing.T) {
 }
 
 // The witness: a dry-run plan emitted by the adapter is admitted by
-// `fak issue contract --from-plan --live`.
+// `fak-dev issue contract --from-plan --live`.
 func TestIssueFindingPlanAdmittedByIssueContract(t *testing.T) {
 	deps := issueFindingDeps{
 		receipts: []modelroute.IssueAuditReceipt{
@@ -100,7 +100,7 @@ func TestIssueFindingPlanAdmittedByIssueContract(t *testing.T) {
 		"--strict-model-tier", "--strict-scale", "--strict-born-routed", "--json",
 	})
 	if code != 0 {
-		t.Fatalf("fak issue contract rejected the finding plan: exit=%d\nstdout=%s\nstderr=%s", code, cStdout.String(), cStderr.String())
+		t.Fatalf("fak-dev issue contract rejected the finding plan: exit=%d\nstdout=%s\nstderr=%s", code, cStdout.String(), cStderr.String())
 	}
 	var contract issueContractResult
 	if err := json.Unmarshal(cStdout.Bytes(), &contract); err != nil {
@@ -301,7 +301,7 @@ func TestIssueFindingNewEvidenceSameSubjectYieldsSingleCandidate(t *testing.T) {
 }
 
 // A filed finding body must itself re-parse to a dispatchable issue under
-// `fak issue contract --from-issues`, closing the loop that the adapter files
+// `fak-dev issue contract --from-issues`, closing the loop that the adapter files
 // contract-clean issues (not just contract-clean candidate structs).
 func TestIssueFindingRenderedBodyReparsesDispatchable(t *testing.T) {
 	receipt := findingTestReceipt(4700, "sha256:body00001111aaaa", modelroute.CrossAuditRefute, modelroute.AuditSeverityHigh, "r-4700",

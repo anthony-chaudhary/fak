@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ import (
 // candidate whose fanout-<leaf>-<slug> marker key already appears in an
 // existing issue body — so a rerun files zero and spams nothing (#2531).
 // Offline alternatives: file by hand with gh, or wave-plan via
-// `fak issue cohort --from-plan`.
+// `fak-dev issue cohort --from-plan`.
 func runIssueFanout(stdout, stderr io.Writer, argv []string) int {
 	return runIssueFanoutWith(stdout, stderr, argv, nil)
 }
@@ -41,7 +41,7 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	paths := fs.String("paths", "", "comma-separated file trees (default internal/<leaf>/)")
 	areas := fs.String("areas", "", "comma-separated area filter ("+strings.Join(issuefanout.AreaNames(), ",")+")")
 	maxN := fs.Int("max", 0, "cap candidates (0 = full taxonomy; floor "+fmt.Sprint(issuefanout.MinFanout)+")")
-	asJSON := fs.Bool("json", false, "emit the machine-readable fan-out plan (feed to fak issue cohort --from-plan)")
+	asJSON := fs.Bool("json", false, "emit the machine-readable fan-out plan (feed to fak-dev issue cohort --from-plan)")
 	adoption := fs.Bool("adoption", false, "measure the default instead of planning: report which --leaves cleared the fan-out floor vs gaps (exit 1 on any gap)")
 	leaves := fs.String("leaves", "", "with --adoption: comma-separated shipped leaves to audit")
 	markers := fs.String("markers", "", "with --adoption: comma-separated filed fan-out marker keys (fanout-<leaf>-<slug>)")
@@ -58,11 +58,11 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 
 	if *coverage {
 		if fs.NArg() != 0 {
-			fmt.Fprintln(stderr, "fak issue fanout --coverage: takes no positional args (witnesses are gathered from git and gh)")
+			fmt.Fprintln(stderr, "fak-dev issue fanout --coverage: takes no positional args (witnesses are gathered from git and gh)")
 			return 2
 		}
 		if *adoption {
-			fmt.Fprintln(stderr, "fak issue fanout: --coverage and --adoption are alternative meters — --coverage gathers its own witnesses, --adoption takes them via --leaves/--markers")
+			fmt.Fprintln(stderr, "fak-dev issue fanout: --coverage and --adoption are alternative meters — --coverage gathers its own witnesses, --adoption takes them via --leaves/--markers")
 			return 2
 		}
 		return emitFanoutCoverage(stdout, stderr, *since, *repo, *scanCap, *asJSON, fanoutCoverageDeps{gh: gh})
@@ -70,13 +70,13 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 
 	if *adoption {
 		if fs.NArg() != 0 {
-			fmt.Fprintln(stderr, "fak issue fanout --adoption: takes no positional args (pass --leaves and --markers)")
+			fmt.Fprintln(stderr, "fak-dev issue fanout --adoption: takes no positional args (pass --leaves and --markers)")
 			return 2
 		}
 		rep := issuefanout.Adoption(issueFanoutSplit(*leaves), issueFanoutSplit(*markers))
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, rep); err != nil {
-				fmt.Fprintf(stderr, "fak issue fanout: encode json: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue fanout: encode json: %v\n", err)
 				return 1
 			}
 		} else {
@@ -89,7 +89,7 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	}
 
 	if fs.NArg() != 0 || *title == "" || *leaf == "" || *spine == "" {
-		fmt.Fprintln(stderr, "fak issue fanout: --title, --leaf and --spine are required (the spine witness comes first; no spine yet means the spine itself is the issue to file)")
+		fmt.Fprintln(stderr, "fak-dev issue fanout: --title, --leaf and --spine are required (the spine witness comes first; no spine yet means the spine itself is the issue to file)")
 		return 2
 	}
 
@@ -108,30 +108,30 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 		WitnessedEnvelope:  *witnessedEnvelope,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue fanout: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue fanout: %v\n", err)
 		return 2
 	}
 
 	if *live {
 		if *dedupeCap <= 0 {
-			fmt.Fprintln(stderr, "fak issue fanout: --live needs a positive --dedupe-cap — the bounded marker-key scan is the anti-spam contract")
+			fmt.Fprintln(stderr, "fak-dev issue fanout: --live needs a positive --dedupe-cap — the bounded marker-key scan is the anti-spam contract")
 			return 2
 		}
 		var existing []issuefanout.Issue
 		if *existingJSON != "" {
 			b, err := os.ReadFile(*existingJSON)
 			if err != nil {
-				fmt.Fprintf(stderr, "fak issue fanout: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue fanout: %v\n", err)
 				return 2
 			}
 			if err := json.Unmarshal(b, &existing); err != nil {
-				fmt.Fprintf(stderr, "fak issue fanout: --existing-json must contain a JSON list of {number,body}: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue fanout: --existing-json must contain a JSON list of {number,body}: %v\n", err)
 				return 2
 			}
 		} else {
 			existing, err = fetchFanoutExisting(*repo, *dedupeCap, gh)
 			if err != nil {
-				fmt.Fprintf(stderr, "fak issue fanout: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue fanout: %v\n", err)
 				return 2
 			}
 		}
@@ -145,12 +145,12 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 			Runner:    issuefanout.Runner(run),
 		})
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue fanout: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue fanout: %v\n", err)
 			return 2
 		}
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, res); err != nil {
-				fmt.Fprintf(stderr, "fak issue fanout: encode json: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue fanout: encode json: %v\n", err)
 				return 1
 			}
 		} else {
@@ -163,7 +163,7 @@ func runIssueFanoutWith(stdout, stderr io.Writer, argv []string, gh issueCreateR
 	}
 
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, plan, "fak issue fanout")
+		return encodeJSONOrFail(stdout, stderr, plan, "fak-dev issue fanout")
 	}
 	fmt.Fprint(stdout, issuefanout.Render(plan))
 	return 0

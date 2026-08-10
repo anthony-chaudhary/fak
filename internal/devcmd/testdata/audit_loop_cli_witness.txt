@@ -1,12 +1,12 @@
-# fak issue audit-loop — captured operator CLI witness (#3856)
+# fak-dev issue audit-loop — captured operator CLI witness (#3856)
 #
-# Regenerate: go test ./cmd/fak -run TestRunIssueAuditLoopCLIWitnessGolden -update-audit-loop-cli-witness
+# Regenerate: go test ./internal/devcmd -run TestRunIssueAuditLoopCLIWitnessGolden -update-audit-loop-cli-witness
 #
 # The default operator tick is a dry-run: it plans the bounded batch, names the
 # ineligible (DARK) subject, and writes neither ledger nor cursor. --status folds
 # the durable state read-only; a fresh install is a valid empty status, not an error.
 
-$ fak issue audit-loop --snapshot audit_loop_snapshot.json --json
+$ fak-dev issue audit-loop --snapshot audit_loop_snapshot.json --json
 {
   "schema": "fak-crossaudit-loop-report/v1",
   "state": "WAIT",
@@ -37,7 +37,7 @@ $ fak issue audit-loop --snapshot audit_loop_snapshot.json --json
   "ledger_rows": 0
 }
 
-$ fak issue audit-loop --status --json
+$ fak-dev issue audit-loop --status --json
 {
   "schema": "fak.issue-audit-loop-status.v1",
   "ledger_present": false,

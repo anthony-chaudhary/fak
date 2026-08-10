@@ -564,8 +564,6 @@ func main() {
 		// code (#1419): the caller it was missing was THIS arm, not the wrapper.
 		// Dry-run is the default; --live is what files real issues (see ideaScoutUsage).
 		os.Exit(runIdeaScout(os.Stdout, os.Stderr, os.Args[2:]))
-	case "issue":
-		cmdIssue(os.Args[2:])
 	case "complain":
 		cmdComplain(os.Args[2:])
 	case "learning-debt-dispatch":
@@ -604,8 +602,6 @@ func main() {
 		cmdLab(os.Args[2:])
 	case "fleet-trend":
 		cmdFleetTrend(os.Args[2:])
-	case "issue-contract-repair":
-		cmdIssueContractRepair(os.Args[2:])
 	case "popularization-tickets":
 		cmdPopularizationTickets(os.Args[2:])
 	case "readme-visual-audit":

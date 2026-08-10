@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -21,24 +21,24 @@ func runIssueReconcile(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if *file == "" {
-		fmt.Fprintln(stderr, "fak issue reconcile: --file is required")
+		fmt.Fprintln(stderr, "fak-dev issue reconcile: --file is required")
 		return 2
 	}
 	data, err := os.ReadFile(*file)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue reconcile: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue reconcile: %v\n", err)
 		return 1
 	}
 	var snapshot issuecontract.ScopeSnapshot
 	if err = json.Unmarshal(data, &snapshot); err != nil {
-		fmt.Fprintf(stderr, "fak issue reconcile: decode: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue reconcile: decode: %v\n", err)
 		return 2
 	}
 	now := time.Now().UTC()
 	if *nowRaw != "" {
 		now, err = time.Parse(time.RFC3339, *nowRaw)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue reconcile: --now: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue reconcile: --now: %v\n", err)
 			return 2
 		}
 	}

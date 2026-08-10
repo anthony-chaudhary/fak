@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// issueEditResult is the --json shape for `fak issue edit`: the rendered gh argv
+// issueEditResult is the --json shape for `fak-dev issue edit`: the rendered gh argv
 // is always included (even on a dry run) so a caller sees exactly what would run
 // or did run — the same contract as issueCreateResult (issue_create.go:18).
 type issueEditResult struct {
@@ -38,7 +38,7 @@ func runIssueEdit(stdout, stderr io.Writer, argv []string) int {
 // runIssueEditWith is the governed mutation twin of runIssueCreateWith
 // (issue_create.go:42): it shells to `gh issue edit N ...` from the trusted fak
 // binary rather than the model proposing a raw `gh issue edit` via Bash. It is
-// the single apply atom every repair path routes through — `fak issue repair`
+// the single apply atom every repair path routes through — `fak-dev issue repair`
 // and (later) the decompose consumer build gh argv and hand it to this same
 // injected runner, so live edits have one auditable seam and one place tests
 // pin. Unlike create it defaults LIVE (a repair loop wants writes), with
@@ -60,15 +60,15 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue edit: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue edit: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *issue <= 0 {
-		fmt.Fprintln(stderr, "fak issue edit: --issue N (a positive issue number) is required")
+		fmt.Fprintln(stderr, "fak-dev issue edit: --issue N (a positive issue number) is required")
 		return 2
 	}
 	if strings.TrimSpace(*body) != "" && strings.TrimSpace(*bodyFile) != "" {
-		fmt.Fprintln(stderr, "fak issue edit: pass at most one of --body or --body-file")
+		fmt.Fprintln(stderr, "fak-dev issue edit: pass at most one of --body or --body-file")
 		return 2
 	}
 	resolvedBody := *body
@@ -76,7 +76,7 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 	if strings.TrimSpace(*bodyFile) != "" {
 		b, err := os.ReadFile(*bodyFile)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue edit: read --body-file: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue edit: read --body-file: %v\n", err)
 			return 2
 		}
 		resolvedBody = string(b)
@@ -87,7 +87,7 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 	removeLabels := issueFanoutSplit(*removeLabel)
 	haveTitle := strings.TrimSpace(*title) != ""
 	if !haveTitle && !haveBody && len(addLabels) == 0 && len(removeLabels) == 0 {
-		fmt.Fprintln(stderr, "fak issue edit: nothing to change — pass at least one of --title/--body/--body-file/--add-label/--remove-label")
+		fmt.Fprintln(stderr, "fak-dev issue edit: nothing to change — pass at least one of --title/--body/--body-file/--add-label/--remove-label")
 		return 2
 	}
 
@@ -110,11 +110,11 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 		if canonical, ok := repoCanonicalLabels(run, *repo); ok {
 			addLabels, droppedLabels = clampLabelsToCanonical(addLabels, canonical)
 			if len(droppedLabels) > 0 {
-				fmt.Fprintf(stderr, "fak issue edit: dropped %d label(s) not in the repo label set: %s\n",
+				fmt.Fprintf(stderr, "fak-dev issue edit: dropped %d label(s) not in the repo label set: %s\n",
 					len(droppedLabels), strings.Join(droppedLabels, ", "))
 			}
 		} else {
-			fmt.Fprintln(stderr, "fak issue edit: warning: could not fetch repo label set; skipping label clamp")
+			fmt.Fprintln(stderr, "fak-dev issue edit: warning: could not fetch repo label set; skipping label clamp")
 		}
 	}
 
@@ -143,9 +143,9 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 	if *dryRun {
 		result.OK = true
 		if *asJSON {
-			return encodeJSONOrFail(stdout, stderr, result, "fak issue edit")
+			return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue edit")
 		}
-		fmt.Fprintf(stdout, "fak issue edit --dry-run: would run `gh %s`\n", strings.Join(args, " "))
+		fmt.Fprintf(stdout, "fak-dev issue edit --dry-run: would run `gh %s`\n", strings.Join(args, " "))
 		return 0
 	}
 
@@ -155,14 +155,14 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 	if !ok {
 		result.Error = strings.TrimSpace(errOut)
 		if *asJSON {
-			encodeJSONOrFail(stdout, stderr, result, "fak issue edit")
+			encodeJSONOrFail(stdout, stderr, result, "fak-dev issue edit")
 		} else {
-			fmt.Fprintf(stderr, "fak issue edit: gh failed: %s\n", result.Error)
+			fmt.Fprintf(stderr, "fak-dev issue edit: gh failed: %s\n", result.Error)
 		}
 		return 1
 	}
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, result, "fak issue edit")
+		return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue edit")
 	}
 	fmt.Fprintln(stdout, result.URL)
 	return 0

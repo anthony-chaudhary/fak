@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func runIssueDedup(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "fak issue dedup: unexpected argument(s); see fak issue dedup --help")
+		fmt.Fprintln(stderr, "fak-dev issue dedup: unexpected argument(s); see fak-dev issue dedup --help")
 		return 2
 	}
 
@@ -45,14 +45,14 @@ func runIssueDedup(stdout, stderr io.Writer, argv []string) int {
 	if *fromIssues != "" {
 		b, err := readIssueDedupInput(*fromIssues)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue dedup: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue dedup: %v\n", err)
 			return 2
 		}
 		raw = b
 	} else {
 		b, err := fetchIssueDedupBacklog(*limit)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue dedup: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue dedup: %v\n", err)
 			return 1
 		}
 		raw = b
@@ -60,14 +60,14 @@ func runIssueDedup(stdout, stderr io.Writer, argv []string) int {
 
 	issues, err := issuededup.ParseBacklog(raw)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak issue dedup: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev issue dedup: %v\n", err)
 		return 2
 	}
 
 	rep := issuededup.Census(issues, *threshold, *topK)
 
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, rep, "fak issue dedup")
+		return encodeJSONOrFail(stdout, stderr, rep, "fak-dev issue dedup")
 	}
 	fmt.Fprint(stdout, issuededup.RenderCensus(rep))
 	return 0

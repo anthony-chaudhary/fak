@@ -22,7 +22,7 @@ package main
 //
 // Two deliberate refusals, both pointing away from over-claiming:
 //
-//   - It PLANS, it does not FILE. Filing is `fak issue fanout --live`: it wants the
+//   - It PLANS, it does not FILE. Filing is `fak-dev issue fanout --live`: it wants the
 //     tracker, a bounded marker-key dedupe scan and an operator's judgement, and a tick
 //     that opened issues on its own would be a loop redesign, not a call site.
 //   - The leaf comes from the commit's own changed paths, never from the issue's assigned
@@ -44,7 +44,7 @@ import (
 )
 
 // dispatchFanoutLedgerName is the append-only invocation ledger, written inside the runs
-// directory so it lives and dies with the dispatch state it describes. `fak issue fanout`
+// directory so it lives and dies with the dispatch state it describes. `fak-dev issue fanout`
 // folds it per week (issuefanout.FoldWeekly), which is how "was the verb used, without
 // being asked" gets answered from a file instead of an anecdote.
 const dispatchFanoutLedgerName = "issue-fanout.jsonl"

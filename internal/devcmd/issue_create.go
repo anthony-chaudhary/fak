@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -62,28 +62,28 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue create: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue create: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if strings.TrimSpace(*title) == "" {
-		fmt.Fprintln(stderr, "fak issue create: --title is required")
+		fmt.Fprintln(stderr, "fak-dev issue create: --title is required")
 		return 2
 	}
 	if strings.TrimSpace(*body) != "" && strings.TrimSpace(*bodyFile) != "" {
-		fmt.Fprintln(stderr, "fak issue create: pass exactly one of --body or --body-file")
+		fmt.Fprintln(stderr, "fak-dev issue create: pass exactly one of --body or --body-file")
 		return 2
 	}
 	resolvedBody := *body
 	if strings.TrimSpace(*bodyFile) != "" {
 		b, err := os.ReadFile(*bodyFile)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue create: read --body-file: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue create: read --body-file: %v\n", err)
 			return 2
 		}
 		resolvedBody = string(b)
 	}
 	if strings.TrimSpace(resolvedBody) == "" {
-		fmt.Fprintln(stderr, "fak issue create: --body or --body-file is required")
+		fmt.Fprintln(stderr, "fak-dev issue create: --body or --body-file is required")
 		return 2
 	}
 	if !*rawBody {
@@ -94,16 +94,16 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 			TargetEnvelope: *targetEnvelope, WitnessedEnvelope: *witnessedEnvelope,
 		})
 		if err != nil {
-			fmt.Fprintf(stderr, "fak issue create: %v\n", err)
+			fmt.Fprintf(stderr, "fak-dev issue create: %v\n", err)
 			return 2
 		}
 		review := issuecontract.ReviewIssueDraft(issuecontract.IssueDraft{Title: strings.TrimSpace(*title), Body: resolvedBody}, issuecontract.Options{StrictProjectWork: true})
 		if review.ProjectWork.Status != issuecontract.ProjectWorkValid {
-			fmt.Fprintf(stderr, "fak issue create: generated project-work contract is %s: %s\n", review.ProjectWork.Status, strings.Join(review.ProjectWork.Invalid, "; "))
+			fmt.Fprintf(stderr, "fak-dev issue create: generated project-work contract is %s: %s\n", review.ProjectWork.Status, strings.Join(review.ProjectWork.Invalid, "; "))
 			return 2
 		}
 		if review.OperatingEnvelope.Required && review.OperatingEnvelope.Status != issuecontract.EnvelopeMet {
-			fmt.Fprintf(stderr, "fak issue create: generated production operating envelope is %s; gaps=%d invalid=%s\n", review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Gaps), strings.Join(review.OperatingEnvelope.Invalid, "; "))
+			fmt.Fprintf(stderr, "fak-dev issue create: generated production operating envelope is %s; gaps=%d invalid=%s\n", review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Gaps), strings.Join(review.OperatingEnvelope.Invalid, "; "))
 			return 2
 		}
 	}
@@ -122,9 +122,9 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	if *dryRun {
 		result.OK = true
 		if *asJSON {
-			return encodeJSONOrFail(stdout, stderr, result, "fak issue create")
+			return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
 		}
-		fmt.Fprintf(stdout, "fak issue create --dry-run: would run `gh %s`\n", strings.Join(args, " "))
+		fmt.Fprintf(stdout, "fak-dev issue create --dry-run: would run `gh %s`\n", strings.Join(args, " "))
 		return 0
 	}
 
@@ -138,14 +138,14 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	if !ok {
 		result.Error = strings.TrimSpace(errOut)
 		if *asJSON {
-			encodeJSONOrFail(stdout, stderr, result, "fak issue create")
+			encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
 		} else {
-			fmt.Fprintf(stderr, "fak issue create: gh failed: %s\n", result.Error)
+			fmt.Fprintf(stderr, "fak-dev issue create: gh failed: %s\n", result.Error)
 		}
 		return 1
 	}
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, result, "fak issue create")
+		return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
 	}
 	fmt.Fprintln(stdout, result.URL)
 	return 0

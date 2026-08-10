@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -12,11 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/issuecontractrepair"
 )
 
-func cmdIssueContractRepair(argv []string) {
-	os.Exit(runIssueContractRepair(os.Stdout, os.Stderr, argv))
-}
-
-func runIssueContractRepair(stdout, stderr io.Writer, argv []string) int {
+func RunIssueContractRepair(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("issue-contract-repair", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "repo root (default: repo root)")

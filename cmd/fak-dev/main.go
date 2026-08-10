@@ -33,6 +33,16 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunFeature(stdout, stderr, argv[1:])
 	case "capabilities":
 		return devcmd.RunCapabilities(stdout, stderr, argv[1:])
+	case "issue":
+		return devcmd.RunIssue(stdout, stderr, argv[1:])
+	case "issue-contract-repair":
+		return devcmd.RunIssueContractRepair(stdout, stderr, argv[1:])
+	case "project":
+		if len(argv) > 1 && argv[1] == "completion" {
+			return devcmd.RunProjectCompletion(stdout, stderr, argv[2:])
+		}
+		fmt.Fprintln(stderr, "usage: fak-dev project completion [flags]")
+		return 2
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -53,6 +63,9 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")
 	fmt.Fprintln(w, "  capabilities [intent] [flags]         list the repository-development toolbelt")
+	fmt.Fprintln(w, "  issue <subcommand> [flags]             manage repository issue contracts and filing")
+	fmt.Fprintln(w, "  issue-contract-repair [flags]          repair issue candidates into contract shape")
+	fmt.Fprintln(w, "  project completion [flags]             audit project completion from issue evidence")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The serving/guard product surface is the separately buildable 'fak' artifact.")

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -109,11 +109,11 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak issue repair: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak-dev issue repair: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *asJSON && *asMarkdown {
-		fmt.Fprintln(stderr, "fak issue repair: pass at most one of --json or --markdown")
+		fmt.Fprintln(stderr, "fak-dev issue repair: pass at most one of --json or --markdown")
 		return 2
 	}
 
@@ -124,17 +124,17 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 		if strings.TrimSpace(*fromIssues) != "" {
 			raw, err := os.ReadFile(*fromIssues)
 			if err != nil {
-				fmt.Fprintf(stderr, "fak issue repair: read --from-issues: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue repair: read --from-issues: %v\n", err)
 				return 2
 			}
 			if err := json.Unmarshal(raw, &issues); err != nil {
-				fmt.Fprintf(stderr, "fak issue repair: parse --from-issues: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue repair: parse --from-issues: %v\n", err)
 				return 2
 			}
 		} else {
 			fetched, err := issuecontractrepair.FetchOpenIssues(root, issuecontractrepair.DefaultCap)
 			if err != nil {
-				fmt.Fprintf(stderr, "fak issue repair: %v\n", err)
+				fmt.Fprintf(stderr, "fak-dev issue repair: %v\n", err)
 				return 2
 			}
 			issues = fetched
@@ -242,7 +242,7 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 	exit := 0
 	if *live && len(autoApplyRows) > 0 {
 		if len(autoApplyRows) > *maxApply {
-			fmt.Fprintf(stderr, "fak issue repair: --live would write %d issues but --max-apply is %d; re-run with --max-apply %d to proceed\n",
+			fmt.Fprintf(stderr, "fak-dev issue repair: --live would write %d issues but --max-apply is %d; re-run with --max-apply %d to proceed\n",
 				len(autoApplyRows), *maxApply, len(autoApplyRows))
 			return 2
 		}
@@ -263,7 +263,7 @@ func runIssueRepairWith(stdout, stderr io.Writer, argv []string, issues []issuec
 
 	switch {
 	case *asJSON:
-		return encodeJSONOrFail(stdout, stderr, result, "fak issue repair")
+		return encodeJSONOrFail(stdout, stderr, result, "fak-dev issue repair")
 	case *asMarkdown:
 		fmt.Fprint(stdout, renderIssueRepairMarkdown(result))
 	default:
@@ -390,7 +390,7 @@ func renderIssueRepairText(r issueRepairResult) string {
 	if r.Live {
 		mode = "LIVE"
 	}
-	fmt.Fprintf(&b, "fak issue repair (%s) — examined %d, needs repair %d\n",
+	fmt.Fprintf(&b, "fak-dev issue repair (%s) — examined %d, needs repair %d\n",
 		mode, r.Counts.Examined, r.Counts.NeedsRepair)
 	fmt.Fprintf(&b, "  auto-apply %d · applied %d · propose-only %d · refuse %d · defer %d · unsafe %d · failed %d\n",
 		r.Counts.AutoApply, r.Counts.Applied, r.Counts.ProposeOnly, r.Counts.Refuse, r.Counts.Defer, r.Counts.Unsafe, r.Counts.Failed)

@@ -92,7 +92,7 @@ stamp, bands each by where attention is owed (RESIDUAL/UNVERIFIABLE/CLEARED),
 and lists them worst-first. Read-only; --check reports RESIDUAL, it never gates
 a merge.
 
---cohort takes a "fak issue cohort --json" plan and regroups the commits bound
+--cohort takes a "fak-dev issue cohort --json" plan and regroups the commits bound
 to a planned WAVE into one unit per wave — the fleet dispatches by wave, so the
 wave is the unit an operator can actually stop or redirect. Commits with no wave
 binding keep folding by leaf, and every unit states which basis it used
@@ -133,7 +133,7 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
 	check := fs.Bool("check", false, "exit 1 if any forming unit is RESIDUAL (reports; never blocks a merge)")
 	maxFiles := fs.Int("max-files", 20, "file paths listed per unit before folding to a count")
-	cohort := fs.String("cohort", "", "issue-cohort plan `file` (fak issue cohort --json): fold commits bound to a planned wave into one unit per wave")
+	cohort := fs.String("cohort", "", "issue-cohort plan `file` (fak-dev issue cohort --json): fold commits bound to a planned wave into one unit per wave")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -394,7 +394,7 @@ func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 	return buildSteerPRsViewWaves(root, base, head, nil)
 }
 
-// steerPRsCohortWaves projects a `fak issue cohort --json` plan into the overlay's
+// steerPRsCohortWaves projects a `fak-dev issue cohort --json` plan into the overlay's
 // wave bindings (#5040). It reads the EXISTING plan through the existing type —
 // no second planner, no new grouping key: the wave index and its members are the
 // cohort's own, and the join is the issue number a member already carries.
@@ -431,7 +431,7 @@ func steerPRsCohortWaves(path string) ([]steerpr.WaveBinding, error) {
 		}
 	}
 	if len(bindings) == 0 {
-		return nil, fmt.Errorf("cohort plan %s carries no wave member with an issue number — plan the cohort over live issues (`fak issue cohort --from-issues`) so a landed commit's #N can bind to its wave", path)
+		return nil, fmt.Errorf("cohort plan %s carries no wave member with an issue number — plan the cohort over live issues (`fak-dev issue cohort --from-issues`) so a landed commit's #N can bind to its wave", path)
 	}
 	return bindings, nil
 }
