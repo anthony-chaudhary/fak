@@ -7,6 +7,30 @@ import (
 	"testing"
 )
 
+func TestBuildCUDAScriptRejectsIncompleteGoToolchainBeforeNVCC(t *testing.T) {
+	data, err := os.ReadFile("build_cuda.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	preflight := strings.Index(script, "src/encoding/base32/base32.go")
+	nvcc := strings.Index(script, `echo "[cuda] nvcc compile kernels`)
+	if preflight < 0 || nvcc < 0 {
+		t.Fatalf("build_cuda.sh is missing the complete-toolchain preflight or nvcc boundary")
+	}
+	if preflight > nvcc {
+		t.Fatalf("complete-toolchain preflight occurs after the expensive nvcc build")
+	}
+	for _, required := range []string{"src/encoding/base32/base32.go", "src/go/types/api.go"} {
+		if !strings.Contains(script, required) {
+			t.Errorf("build_cuda.sh does not verify %s", required)
+		}
+	}
+	if !strings.Contains(script, "go env GOROOT") || !strings.Contains(script, "incomplete Go toolchain") {
+		t.Error("build_cuda.sh does not resolve and clearly refuse an incomplete GOROOT")
+	}
+}
+
 func TestGPUAcceptanceScriptsResolveCleanEnvironmentToolkit(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join("..", "..", "tools", "run_*_acceptance_on_gpu.sh"))
 	if err != nil {

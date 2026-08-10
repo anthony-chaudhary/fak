@@ -184,6 +184,24 @@ if [ -n "${NCCL_HOME:-}" ]; then
   done
 fi
 
+# Refuse an executable-but-incomplete cached Go toolchain before the expensive nvcc build. A
+# bridge shell can retain $GOROOT/bin/go after a partial module-cache extraction while stdlib
+# source trees are missing; `go version` then succeeds but a later cmd/fak build fails on ordinary
+# packages such as encoding/base32 and go/types (#6128).
+export PATH="/usr/local/go/bin:$PATH"
+export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+if ! command -v go >/dev/null 2>&1; then
+  echo "[cuda] Go 1.26+ is required (no go executable on PATH)" >&2
+  exit 2
+fi
+GO_ROOT="$(go env GOROOT 2>/dev/null || true)"
+for required in src/encoding/base32/base32.go src/go/types/api.go; do
+  if [ -z "$GO_ROOT" ] || [ ! -f "$GO_ROOT/$required" ]; then
+    echo "[cuda] incomplete Go toolchain at ${GO_ROOT:-<unknown>}: missing $required; install a complete Go 1.26+ distribution before the CUDA build" >&2
+    exit 2
+  fi
+done
+
 # GPU arch: default sm_89 (Ada / L4), override via FAK_CUDA_ARCH for A100 (sm_80),
 # H100/H200 (sm_90), or B200/GB200 (sm_100). Accept either "89" or "sm_89".
 echo "[cuda] nvcc compile kernels ($BUILD_ARCHS) ..."
@@ -204,8 +222,6 @@ echo "[cuda] nvcc compile kernels ($BUILD_ARCHS) ..."
   ar rcs libfakcuda.a $objs
   echo "[cuda] built $(ls -la libfakcuda.a | awk '{print $5}') byte libfakcuda.a" )
 
-export PATH="/usr/local/go/bin:$PATH"
-export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 export CGO_ENABLED=1
 export CC="${CC:-/usr/bin/gcc}"
 export CXX="${CXX:-/usr/bin/g++}"
