@@ -391,6 +391,7 @@ func main() {
 	var routingVOIOutput, verifyRoutingVOIPath string
 	var filterToolSchedulerFold, filterToolSchedulerOutput, verifyFilterToolSchedulerPath string
 	var liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, verifyLiveFilterToolPath string
+	var disagreementPacket, disagreementFold, disagreementLive, disagreementOutput, verifyDisagreementPath string
 	var filterToolSchedulerTrials int
 	var routingVOISeed int64
 	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
@@ -500,6 +501,11 @@ func main() {
 	flag.StringVar(&liveFilterToolPacket, "live-filter-tool-packet", "", "frozen semantic packet for live filter/tool matrix")
 	flag.StringVar(&liveFilterToolFold, "live-filter-tool-fold", "", "stabilized fold for live filter/tool matrix")
 	flag.StringVar(&liveFilterToolOutput, "live-filter-tool-output", "", "write live filter/tool scheduler matrix")
+	flag.StringVar(&disagreementPacket, "disagreement-audit-packet", "", "frozen semantic packet for live disagreement audit")
+	flag.StringVar(&disagreementFold, "disagreement-audit-fold", "", "stabilized fold for live disagreement audit")
+	flag.StringVar(&disagreementLive, "disagreement-audit-live", "", "S8o live artifact for disagreement audit")
+	flag.StringVar(&disagreementOutput, "disagreement-audit-output", "", "write live disagreement audit")
+	flag.StringVar(&verifyDisagreementPath, "verify-disagreement-audit", "", "verify a live disagreement audit artifact")
 	flag.StringVar(&verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
 	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
@@ -707,6 +713,33 @@ func main() {
 	}
 	if verifyLiveFilterToolPath != "" {
 		runVerify("verify-live-filter-tool", verifyLiveFilterToolPath, verifyLiveFilterToolMatrix)
+		return
+	}
+	if verifyDisagreementPath != "" {
+		if err := verifyDisagreementAudit(verifyDisagreementPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS: verified %s\n", verifyDisagreementPath)
+		return
+	}
+	if disagreementOutput != "" {
+		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+		if endpoint == "" {
+			endpoint = os.Getenv("OPENAI_BASE_URL")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if disagreementPacket == "" || disagreementFold == "" || disagreementLive == "" {
+			fmt.Fprintln(os.Stderr, "disagreement audit requires packet, fold, and live artifact")
+			os.Exit(2)
+		}
+		if err := runDisagreementAudit(context.Background(), disagreementPacket, disagreementFold, disagreementLive, disagreementOutput, endpoint, apiKey, liveMatrixModel); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS disagreement audit %s\n", disagreementOutput)
 		return
 	}
 	if liveFilterToolOutput != "" {

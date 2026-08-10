@@ -1,0 +1,1066 @@
+{
+  "schema": "fak-microcontext-live-disagreement-audit/1",
+  "created_at": "2026-08-10T18:05:04Z",
+  "model": "gpt-5.6-sol",
+  "packet_sha256": "2889531f4cf83df09f9335a239af76a2539ffc116b70c36ac8af6438c4f274e6",
+  "fold_sha256": "bd7133bafb7e7558623d07ff2f08be832bc136a6bb8c8b4cc42ffeed17a9a611",
+  "live_sha256": "7db5f36b2859623e054d780151eaf61ce399fba3f50c654cf28158216466583a",
+  "blind_prompt_version": "tool-need-blind-v1",
+  "diagnostic_selection": "predeclared six-record diagnostic panel frozen in source before rerun: three highest persistent current_state misses plus three contrasting disagreement records; diagnostic only, never a held-out quality score",
+  "diagnostic_records": [
+    "issue-5363",
+    "issue-5713",
+    "issue-5636",
+    "issue-5245",
+    "issue-5802",
+    "issue-5347"
+  ],
+  "records": [
+    {
+      "record": "issue-5148",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "current_state",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "current_state",
+        "warm/adaptive": "current_state",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 3,
+      "cold_warm_flips": 3,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5154",
+      "gold": "current_state",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "current_state",
+        "cold/adaptive-selective-hedge": "current_state",
+        "cold/adaptive-universal-hedge": "current_state",
+        "cold/fixed-cascade": "current_state",
+        "cold/planner": "read_only",
+        "cold/run-all": "current_state",
+        "warm/adaptive": "current_state",
+        "warm/adaptive-selective-hedge": "current_state",
+        "warm/adaptive-universal-hedge": "current_state",
+        "warm/fixed-cascade": "current_state",
+        "warm/planner": "read_only",
+        "warm/run-all": "current_state"
+      },
+      "errors": 2,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5158",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "none"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 0,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5207",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 0,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5245",
+      "gold": "current_state",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "current_state",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "current_state",
+        "cold/adaptive-selective-hedge": "current_state",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "current_state",
+        "warm/adaptive-selective-hedge": "current_state",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 8,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5347",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "current_state",
+        "cold/adaptive-selective-hedge": "current_state",
+        "cold/adaptive-universal-hedge": "current_state",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "current_state",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "current_state",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 5,
+      "cold_warm_flips": 3,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5363",
+      "gold": "current_state",
+      "gold_votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 12,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5521",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 0,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5525",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "current_state",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "current_state",
+        "warm/adaptive": "current_state",
+        "warm/adaptive-selective-hedge": "current_state",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 4,
+      "cold_warm_flips": 2,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5636",
+      "gold": "current_state",
+      "gold_votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "current_state",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 11,
+      "cold_warm_flips": 1,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5645",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 0,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5672",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 0,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5713",
+      "gold": "current_state",
+      "gold_votes": {
+        "independent-groq-llama": "current_state",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 12,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": false,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5802",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "current_state",
+        "cold/adaptive-universal-hedge": "current_state",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "current_state",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "current_state",
+        "warm/adaptive-universal-hedge": "current_state",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "current_state"
+      },
+      "errors": 6,
+      "cold_warm_flips": 0,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    },
+    {
+      "record": "issue-5859",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "read_only"
+      },
+      "gold_unanimous": true,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "current_state",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "read_only",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 1,
+      "cold_warm_flips": 1,
+      "cross_arm_disagrees": true,
+      "primary_class": "stochastic_variance",
+      "classification_note": "identical cold/warm policy changed prediction"
+    },
+    {
+      "record": "issue-5929",
+      "gold": "read_only",
+      "gold_votes": {
+        "independent-groq-llama": "read_only",
+        "independent-openai-v2": "read_only",
+        "sanctioned-qwen-a": "current_state"
+      },
+      "gold_unanimous": false,
+      "predictions": {
+        "cold/adaptive": "read_only",
+        "cold/adaptive-selective-hedge": "read_only",
+        "cold/adaptive-universal-hedge": "read_only",
+        "cold/fixed-cascade": "read_only",
+        "cold/planner": "read_only",
+        "cold/run-all": "read_only",
+        "warm/adaptive": "read_only",
+        "warm/adaptive-selective-hedge": "read_only",
+        "warm/adaptive-universal-hedge": "current_state",
+        "warm/fixed-cascade": "read_only",
+        "warm/planner": "read_only",
+        "warm/run-all": "read_only"
+      },
+      "errors": 1,
+      "cold_warm_flips": 1,
+      "cross_arm_disagrees": true,
+      "primary_class": "questionable_gold",
+      "classification_note": "majority label has adjudicator disagreement; model/selector error is not identifiable from exact-match alone"
+    }
+  ],
+  "blind_regrades": [
+    {
+      "record": "issue-5148",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "Repository code, tests, and history can establish the missing typed observer and SSE implementation; no mutable external state is required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5154",
+      "tool_need": "current_state",
+      "confidence": 0.98,
+      "rationale": "Actionability is explicitly gated on a measured external-engine MTP-vs-off run and its acceptance counter/scorecard result; repository evidence alone cannot establish that prerequisite or target.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5158",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "The requested code changes and acceptance tests can be established from repository code, tests, and history; no mutable external state is required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5207",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "Repository code and referenced design docs are sufficient to determine the implementation; no mutable deployment, service, or API state is required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5245",
+      "tool_need": "read_only",
+      "confidence": 0.98,
+      "rationale": "Repository code, design docs, and history can establish the bench requirements and implementation; no mutable external state is needed.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5347",
+      "tool_need": "read_only",
+      "confidence": 0.98,
+      "rationale": "Repository code, configuration patterns, and tests can establish whether archive retention is missing and how to implement it; live filesystem state is not required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5363",
+      "tool_need": "read_only",
+      "confidence": 0.98,
+      "rationale": "Repository code, platform-specific credential handling, and tests can establish the required Keychain fallback; live deployment or service state is not necessary.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5521",
+      "tool_need": "read_only",
+      "confidence": 0.98,
+      "rationale": "Repository code, tests, and history can verify whether the commit argument is ignored and determine the required fix; no mutable external state is necessary.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5525",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "The reported observability gap and required fix can be established from repository code, tests, and history; no mutable external state is needed.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5636",
+      "tool_need": "read_only",
+      "confidence": 0.96,
+      "rationale": "The requested producer and integration can be determined from repository code, tests, and docs; live gateway state is runtime input, not needed to establish the implementation work.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5645",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "The requested verifier behavior, fixtures, and proof can be established from repository code, history, and tests; no mutable external state is required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5672",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "The requested validator contracts, fixtures, diagnostics, and property tests can be established from repository code, tests, docs, and history; no mutable external state is required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5713",
+      "tool_need": "read_only",
+      "confidence": 0.94,
+      "rationale": "Repository, upstream source/revision history, documentation, and rerunnable local probes can establish the required research and follow-up work; mutable deployment or service state is not necessary.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5802",
+      "tool_need": "read_only",
+      "confidence": 0.98,
+      "rationale": "The requested grading change can be evaluated from repository code, tests, examples, and history; no mutable external service or deployment state is needed.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5859",
+      "tool_need": "read_only",
+      "confidence": 0.98,
+      "rationale": "The reported lease bug and missing reap behavior can be assessed from repository code, tests, and history; live deployment state is not required.",
+      "status": "completed"
+    },
+    {
+      "record": "issue-5929",
+      "tool_need": "read_only",
+      "confidence": 0.99,
+      "rationale": "The reported divergence, resolution behavior, and required hierarchy inheritance can be established from repository code and history; no mutable external state is needed.",
+      "status": "completed"
+    }
+  ],
+  "paired_diagnostics": [
+    {
+      "record": "issue-5245",
+      "condition": "bounded_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5245",
+      "prompt_tokens": 726,
+      "output_tokens": 156,
+      "cached_tokens": 0,
+      "wall_ms": 5388.843
+    },
+    {
+      "record": "issue-5245",
+      "condition": "no_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 701,
+      "output_tokens": 121,
+      "cached_tokens": 0,
+      "wall_ms": 3230.122
+    },
+    {
+      "record": "issue-5245",
+      "condition": "bounded_receipt",
+      "repeat": 2,
+      "predicted": "current_state",
+      "confidence": 0.97,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5245",
+      "prompt_tokens": 726,
+      "output_tokens": 186,
+      "cached_tokens": 0,
+      "wall_ms": 5119.769
+    },
+    {
+      "record": "issue-5245",
+      "condition": "no_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.97,
+      "status": "completed",
+      "prompt_tokens": 701,
+      "output_tokens": 119,
+      "cached_tokens": 0,
+      "wall_ms": 3769.355
+    },
+    {
+      "record": "issue-5245",
+      "condition": "bounded_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5245",
+      "prompt_tokens": 726,
+      "output_tokens": 108,
+      "cached_tokens": 0,
+      "wall_ms": 14904.478
+    },
+    {
+      "record": "issue-5245",
+      "condition": "no_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 701,
+      "output_tokens": 103,
+      "cached_tokens": 0,
+      "wall_ms": 5137.608
+    },
+    {
+      "record": "issue-5347",
+      "condition": "bounded_receipt",
+      "repeat": 1,
+      "predicted": "current_state",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5347",
+      "prompt_tokens": 648,
+      "output_tokens": 123,
+      "cached_tokens": 0,
+      "wall_ms": 3779.015
+    },
+    {
+      "record": "issue-5347",
+      "condition": "no_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 623,
+      "output_tokens": 95,
+      "cached_tokens": 0,
+      "wall_ms": 5536.854
+    },
+    {
+      "record": "issue-5347",
+      "condition": "bounded_receipt",
+      "repeat": 2,
+      "predicted": "current_state",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5347",
+      "prompt_tokens": 648,
+      "output_tokens": 142,
+      "cached_tokens": 0,
+      "wall_ms": 5222.39
+    },
+    {
+      "record": "issue-5347",
+      "condition": "no_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 623,
+      "output_tokens": 101,
+      "cached_tokens": 0,
+      "wall_ms": 3775.495
+    },
+    {
+      "record": "issue-5347",
+      "condition": "bounded_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.99,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5347",
+      "prompt_tokens": 648,
+      "output_tokens": 100,
+      "cached_tokens": 0,
+      "wall_ms": 10479.684
+    },
+    {
+      "record": "issue-5347",
+      "condition": "no_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 623,
+      "output_tokens": 108,
+      "cached_tokens": 0,
+      "wall_ms": 3122.07
+    },
+    {
+      "record": "issue-5363",
+      "condition": "bounded_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5363",
+      "prompt_tokens": 568,
+      "output_tokens": 133,
+      "cached_tokens": 0,
+      "wall_ms": 7991.845
+    },
+    {
+      "record": "issue-5363",
+      "condition": "no_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 543,
+      "output_tokens": 99,
+      "cached_tokens": 0,
+      "wall_ms": 3425.742
+    },
+    {
+      "record": "issue-5363",
+      "condition": "bounded_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5363",
+      "prompt_tokens": 568,
+      "output_tokens": 127,
+      "cached_tokens": 0,
+      "wall_ms": 6729.193
+    },
+    {
+      "record": "issue-5363",
+      "condition": "no_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 543,
+      "output_tokens": 102,
+      "cached_tokens": 0,
+      "wall_ms": 4725.669
+    },
+    {
+      "record": "issue-5363",
+      "condition": "bounded_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5363",
+      "prompt_tokens": 568,
+      "output_tokens": 101,
+      "cached_tokens": 0,
+      "wall_ms": 3053.365
+    },
+    {
+      "record": "issue-5363",
+      "condition": "no_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 543,
+      "output_tokens": 104,
+      "cached_tokens": 0,
+      "wall_ms": 3333.792
+    },
+    {
+      "record": "issue-5636",
+      "condition": "bounded_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "gh://api/repos/anthony-chaudhary/fak/issues/5636",
+      "prompt_tokens": 632,
+      "output_tokens": 140,
+      "cached_tokens": 0,
+      "wall_ms": 5905.96
+    },
+    {
+      "record": "issue-5636",
+      "condition": "no_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.97,
+      "status": "completed",
+      "prompt_tokens": 606,
+      "output_tokens": 135,
+      "cached_tokens": 0,
+      "wall_ms": 4842.344
+    },
+    {
+      "record": "issue-5636",
+      "condition": "bounded_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "gh://api/repos/anthony-chaudhary/fak/issues/5636",
+      "prompt_tokens": 632,
+      "output_tokens": 186,
+      "cached_tokens": 0,
+      "wall_ms": 8396.187
+    },
+    {
+      "record": "issue-5636",
+      "condition": "no_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 606,
+      "output_tokens": 87,
+      "cached_tokens": 0,
+      "wall_ms": 4500.789
+    },
+    {
+      "record": "issue-5636",
+      "condition": "bounded_receipt",
+      "repeat": 3,
+      "predicted": "current_state",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "gh://api/repos/anthony-chaudhary/fak/issues/5636",
+      "prompt_tokens": 632,
+      "output_tokens": 145,
+      "cached_tokens": 0,
+      "wall_ms": 4489.303
+    },
+    {
+      "record": "issue-5636",
+      "condition": "no_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.96,
+      "status": "completed",
+      "prompt_tokens": 606,
+      "output_tokens": 117,
+      "cached_tokens": 0,
+      "wall_ms": 3823.02
+    },
+    {
+      "record": "issue-5713",
+      "condition": "bounded_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.96,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5713",
+      "prompt_tokens": 536,
+      "output_tokens": 140,
+      "cached_tokens": 0,
+      "wall_ms": 4976.123
+    },
+    {
+      "record": "issue-5713",
+      "condition": "no_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 511,
+      "output_tokens": 139,
+      "cached_tokens": 0,
+      "wall_ms": 5982.913
+    },
+    {
+      "record": "issue-5713",
+      "condition": "bounded_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.96,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5713",
+      "prompt_tokens": 536,
+      "output_tokens": 128,
+      "cached_tokens": 0,
+      "wall_ms": 3686.602
+    },
+    {
+      "record": "issue-5713",
+      "condition": "no_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.97,
+      "status": "completed",
+      "prompt_tokens": 511,
+      "output_tokens": 157,
+      "cached_tokens": 0,
+      "wall_ms": 4177.209
+    },
+    {
+      "record": "issue-5713",
+      "condition": "bounded_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "https://api.github.com/repos/anthony-chaudhary/fak/issues/5713",
+      "prompt_tokens": 536,
+      "output_tokens": 145,
+      "cached_tokens": 0,
+      "wall_ms": 6858.29
+    },
+    {
+      "record": "issue-5713",
+      "condition": "no_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 511,
+      "output_tokens": 105,
+      "cached_tokens": 0,
+      "wall_ms": 4371.163
+    },
+    {
+      "record": "issue-5802",
+      "condition": "bounded_receipt",
+      "repeat": 1,
+      "predicted": "current_state",
+      "confidence": 0.97,
+      "status": "completed",
+      "tool_url": "gh://api/repos/anthony-chaudhary/fak/issues/5802",
+      "prompt_tokens": 613,
+      "output_tokens": 144,
+      "cached_tokens": 0,
+      "wall_ms": 3973.921
+    },
+    {
+      "record": "issue-5802",
+      "condition": "no_receipt",
+      "repeat": 1,
+      "predicted": "read_only",
+      "confidence": 0.99,
+      "status": "completed",
+      "prompt_tokens": 587,
+      "output_tokens": 84,
+      "cached_tokens": 0,
+      "wall_ms": 6940.278
+    },
+    {
+      "record": "issue-5802",
+      "condition": "bounded_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "tool_url": "gh://api/repos/anthony-chaudhary/fak/issues/5802",
+      "prompt_tokens": 613,
+      "output_tokens": 97,
+      "cached_tokens": 0,
+      "wall_ms": 3308.356
+    },
+    {
+      "record": "issue-5802",
+      "condition": "no_receipt",
+      "repeat": 2,
+      "predicted": "read_only",
+      "confidence": 0.98,
+      "status": "completed",
+      "prompt_tokens": 587,
+      "output_tokens": 82,
+      "cached_tokens": 0,
+      "wall_ms": 3141.122
+    },
+    {
+      "record": "issue-5802",
+      "condition": "bounded_receipt",
+      "repeat": 3,
+      "predicted": "current_state",
+      "confidence": 0.97,
+      "status": "completed",
+      "tool_url": "gh://api/repos/anthony-chaudhary/fak/issues/5802",
+      "prompt_tokens": 613,
+      "output_tokens": 214,
+      "cached_tokens": 0,
+      "wall_ms": 7117.308
+    },
+    {
+      "record": "issue-5802",
+      "condition": "no_receipt",
+      "repeat": 3,
+      "predicted": "read_only",
+      "confidence": 0.99,
+      "status": "completed",
+      "prompt_tokens": 587,
+      "output_tokens": 85,
+      "cached_tokens": 0,
+      "wall_ms": 2680.057
+    }
+  ],
+  "counts": {
+    "cross_arm_disagreement": 9,
+    "paired_condition_changes": 6,
+    "questionable_gold": 15,
+    "records_with_cold_warm_flip": 6,
+    "records_with_stable_receipt_effect": 0,
+    "stochastic_variance": 1
+  },
+  "verdict": "no_pre_answer_signal",
+  "limits": [
+    "Fifteen of sixteen S8o test labels are non-unanimous majority gold, so exact-match cannot uniquely identify model or selector error.",
+    "The blind regrade uses the same live model family and is evidence about repeatability, not independent ground truth.",
+    "S8o adaptive arms fetched the bounded GitHub receipt before classification; they do not implement pre-answer tool admission.",
+    "Paired diagnostics estimate receipt conditioning and stochasticity on a post-hoc diagnostic panel; they do not tune or rescore the held-out matrix.",
+    "Mutable GitHub receipts are timestamped only by this artifact creation time; state may differ from S8o."
+  ]
+}

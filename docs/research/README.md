@@ -88,3 +88,5 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [S8m: three-adjudicator tool-routing gold stabilization](micro-context-s8m-tool-gold.md)
 - [S8n: filter/tool micro-window scheduler](micro-context-s8n-filter-tool-scheduler.md)
 - [S8o: live quality-qualified filter/tool scheduler](micro-context-s8o-live-filter-tool-scheduler.md)
+
+- [S8p live scheduler disagreement audit](micro-context-s8p-disagreement-audit.md) — blinded error atlas finds disputed gold and no stable pre-answer admission signal; records `not-yet`.

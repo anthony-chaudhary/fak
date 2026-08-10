@@ -120,8 +120,16 @@ func fetchIssueReceipt(ctx context.Context, r semanticRecord) (string, string, e
 		UpdatedAt string `json:"updated_at"`
 		Locked    bool   `json:"locked"`
 	}
-	if e = json.Unmarshal(b, &x); e != nil {
-		return "", req.URL.String(), e
+	if e = json.Unmarshal(b, &x); e != nil || x.State == "" {
+		// A shared transport may return a successful but empty/truncated body. Use
+		// the same authenticated bounded read fallback as rate-limit responses.
+		cmd := exec.CommandContext(ctx, "gh", "api", "repos/anthony-chaudhary/fak/issues/"+fmt.Sprint(r.Number), "--jq", "{state:.state,updated_at:.updated_at,locked:.locked}")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, ge := cmd.Output()
+		if ge != nil {
+			return "", req.URL.String(), fmt.Errorf("github decode %v; gh fallback: %w", e, ge)
+		}
+		return strings.TrimSpace(string(out)), "gh://api/repos/anthony-chaudhary/fak/issues/" + fmt.Sprint(r.Number), nil
 	}
 	out, _ := json.Marshal(x)
 	return string(out), req.URL.String(), nil
