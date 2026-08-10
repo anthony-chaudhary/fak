@@ -33,8 +33,14 @@ type Leaf struct {
 	Dependents           []string        `json:"dependents,omitempty"`
 	TransitiveDependents []string        `json:"transitive_dependents"`
 	BlastRadius          int             `json:"blast_radius"`
+	BlastPaths           []BlastPath     `json:"blast_paths"`
 	ViolationEdges       []ViolationEdge `json:"violation_edges,omitempty"`
 	Violations           []string        `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
+}
+
+type BlastPath struct {
+	Dependent string   `json:"dependent"`
+	Path      []string `json:"path"`
 }
 
 type Hotspot struct {
@@ -158,8 +164,12 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	}
 	for i := range allLeaves {
 		sort.Strings(allLeaves[i].Dependents)
-		allLeaves[i].TransitiveDependents = transitiveDependents(allLeaves[i].Name, allLeaves, byName)
-		allLeaves[i].BlastRadius = len(allLeaves[i].TransitiveDependents)
+		allLeaves[i].BlastPaths = blastPaths(allLeaves[i].Name, allLeaves, byName)
+		allLeaves[i].TransitiveDependents = make([]string, len(allLeaves[i].BlastPaths))
+		for j, path := range allLeaves[i].BlastPaths {
+			allLeaves[i].TransitiveDependents[j] = path.Dependent
+		}
+		allLeaves[i].BlastRadius = len(allLeaves[i].BlastPaths)
 		if len(allLeaves[i].Dependents) > 0 {
 			report.Hotspots = append(report.Hotspots, Hotspot{Name: allLeaves[i].Name, FanIn: len(allLeaves[i].Dependents)})
 		}
@@ -208,26 +218,32 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	return report, nil
 }
 
-func transitiveDependents(name string, leaves []Leaf, byName map[string]int) []string {
-	seen := map[string]struct{}{name: {}}
-	pending := append([]string(nil), leaves[byName[name]].Dependents...)
+func blastPaths(name string, leaves []Leaf, byName map[string]int) []BlastPath {
+	paths := map[string][]string{name: {name}}
+	pending := []string{name}
 	for len(pending) > 0 {
-		dependent := pending[0]
+		current := pending[0]
 		pending = pending[1:]
-		if _, ok := seen[dependent]; ok {
-			continue
-		}
-		seen[dependent] = struct{}{}
-		if i, ok := byName[dependent]; ok {
-			pending = append(pending, leaves[i].Dependents...)
+		dependents := append([]string(nil), leaves[byName[current]].Dependents...)
+		sort.Strings(dependents)
+		for _, dependent := range dependents {
+			if _, ok := paths[dependent]; ok {
+				continue
+			}
+			paths[dependent] = append(append([]string(nil), paths[current]...), dependent)
+			pending = append(pending, dependent)
 		}
 	}
-	delete(seen, name)
-	out := make([]string, 0, len(seen))
-	for dependent := range seen {
-		out = append(out, dependent)
+	delete(paths, name)
+	dependents := make([]string, 0, len(paths))
+	for dependent := range paths {
+		dependents = append(dependents, dependent)
 	}
-	sort.Strings(out)
+	sort.Strings(dependents)
+	out := make([]BlastPath, 0, len(dependents))
+	for _, dependent := range dependents {
+		out = append(out, BlastPath{Dependent: dependent, Path: paths[dependent]})
+	}
 	return out
 }
 

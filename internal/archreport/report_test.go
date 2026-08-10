@@ -136,14 +136,22 @@ import _ "github.com/anthony-chaudhary/fak/internal/beta"
 	if got, want := byName["abi"].TransitiveDependents, []string{"alpha", "beta", "gamma"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("abi transitive dependents=%v want=%v", got, want)
 	}
+	wantPaths := []BlastPath{
+		{Dependent: "alpha", Path: []string{"abi", "alpha"}},
+		{Dependent: "beta", Path: []string{"abi", "beta"}},
+		{Dependent: "gamma", Path: []string{"abi", "beta", "gamma"}},
+	}
+	if got := byName["abi"].BlastPaths; !reflect.DeepEqual(got, wantPaths) {
+		t.Fatalf("abi blast paths=%v want=%v", got, wantPaths)
+	}
 	if got := byName["abi"].BlastRadius; got != 3 {
 		t.Fatalf("abi blast radius=%d want=3", got)
 	}
 	if got, want := byName["beta"].TransitiveDependents, []string{"alpha", "gamma"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("beta transitive dependents=%v want=%v", got, want)
 	}
-	if got := byName["delta"].TransitiveDependents; got == nil || len(got) != 0 || byName["delta"].BlastRadius != 0 {
-		t.Fatalf("delta transitive dependents=%v blast radius=%d", got, byName["delta"].BlastRadius)
+	if got := byName["delta"].TransitiveDependents; got == nil || len(got) != 0 || byName["delta"].BlastRadius != 0 || byName["delta"].BlastPaths == nil || len(byName["delta"].BlastPaths) != 0 {
+		t.Fatalf("delta transitive dependents=%v blast radius=%d blast paths=%v", got, byName["delta"].BlastRadius, byName["delta"].BlastPaths)
 	}
 
 	scoped, err := Analyze(root, "abi")

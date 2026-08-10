@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/archreport"
@@ -130,6 +131,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 				fmt.Fprint(stdout, "]")
 			}
 			fmt.Fprintln(stdout)
+			if *leaf != "" && len(l.BlastPaths) > 0 {
+				fmt.Fprintln(stdout, "    blast paths:")
+				for _, path := range l.BlastPaths {
+					fmt.Fprintf(stdout, "      %s: %s\n", path.Dependent, strings.Join(path.Path, " -> "))
+				}
+			}
 		}
 	}
 	return 0

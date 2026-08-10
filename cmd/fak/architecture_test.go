@@ -54,19 +54,22 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 func TestRunArchitectureTextNamesDependentsAndBlastRadius(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
-var tier=map[string]int{"leaf":1,"caller":1}
+var tier=map[string]int{"leaf":1,"caller":1,"top":1}
 var tierName=[]string{"root","primitive"}
 `)
 	mustWriteArchitectureFile(t, root, "internal/leaf/leaf.go", "package leaf\n")
 	mustWriteArchitectureFile(t, root, "internal/caller/caller.go", `package caller
 import _ "github.com/anthony-chaudhary/fak/internal/leaf"
 `)
+	mustWriteArchitectureFile(t, root, "internal/top/top.go", `package top
+import _ "github.com/anthony-chaudhary/fak/internal/caller"
+`)
 	var out, errOut bytes.Buffer
 	code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "leaf"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"dependents=[caller]", "blast-radius=1"} {
+	for _, want := range []string{"dependents=[caller]", "blast-radius=2", "caller: leaf -> caller", "top: leaf -> caller -> top"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output does not name %q: %s", want, out.String())
 		}
