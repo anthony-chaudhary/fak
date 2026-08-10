@@ -177,13 +177,19 @@ fak architecture --leaf archreport
 
 # Stable machine-readable form for automation.
 fak architecture --leaf archreport --json
+
+# Privacy-safe adoption fold (ISO-week counts; no paths, hostnames, or leaf names).
+fak architecture --usage
+fak architecture --usage --json
 ```
 
 The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly). Hotspots are sorted by direct fan-in descending, then leaf name.
 
 The command does not run Git, execute package code, or mutate the workspace. It parses `internal/architest/architest_test.go` plus non-test Go import blocks. Malformed contracts or source files refuse with a recovery action. A stale tier declaration is a diagnostic—not a global outage—so healthy full and scoped queries remain usable.
 
-Exit codes: `0` report emitted; `1` workspace/contract/source inspection failed; `2` flag or positional-argument misuse.
+Each report invocation appends a `fak-architecture-usage/1` row under the user cache (`$XDG_CACHE_HOME/fak/architecture-usage.jsonl`, or the platform equivalent). Rows contain only timestamp, full/scoped mode, text/JSON format, outcome, and aggregate diagnostic/violation counts—never workspace paths, hostnames, usernames, leaf names, or error text. `FAK_ARCHITECTURE_USAGE_FILE=PATH` overrides the location; `off` disables recording. `--usage` folds rows into ISO-week counts, with JSON schema `fak-architecture-usage-summary/1`.
+
+Exit codes: `0` report or usage fold emitted; `1` workspace/contract/source/ledger inspection failed; `2` flag or positional-argument misuse.
 
 The `session`, `signal`, and `ps` verbs are the front door to out-of-band control
 of a session that is **already running** — steer, redirect, pause, resume, cancel,

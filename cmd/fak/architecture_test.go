@@ -69,3 +69,40 @@ var tierName=[]string{"root","primitive","foundation-composite"}
 		}
 	}
 }
+
+func TestArchitectureRecordsUsageAndFoldsWeeks(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"leaf":1}
+var tierName=[]string{"root","primitive"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/leaf/leaf.go", "package leaf\n")
+	ledger := filepath.Join(t.TempDir(), "usage.jsonl")
+	t.Setenv("FAK_ARCHITECTURE_USAGE_FILE", ledger)
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "leaf", "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runArchitecture(&out, &errOut, []string{"--usage", "--json"}); code != 0 {
+		t.Fatalf("usage code=%d stderr=%s", code, errOut.String())
+	}
+	var got struct {
+		Schema string                 `json:"schema"`
+		Weeks  []archreport.UsageWeek `json:"weeks"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != "fak-architecture-usage-summary/1" || len(got.Weeks) != 1 || got.Weeks[0].Invocations != 1 || got.Weeks[0].Scoped != 1 || got.Weeks[0].JSON != 1 || got.Weeks[0].OK != 1 {
+		t.Fatalf("summary=%+v", got)
+	}
+	raw, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), root) || strings.Contains(string(raw), `"leaf"`) {
+		t.Fatalf("usage ledger leaked workspace or leaf: %s", raw)
+	}
+}
