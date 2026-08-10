@@ -59,6 +59,123 @@ import _ "github.com/anthony-chaudhary/fak/internal/mid"
 	}
 }
 
+func TestDependencyCyclesClassifyStronglyConnectedComponents(t *testing.T) {
+	leaves := []Leaf{
+		{Name: "a", Dependencies: []string{"b"}},
+		{Name: "b", Dependencies: []string{"a", "c"}},
+		{Name: "c", Dependencies: []string{"d"}},
+		{Name: "d", Dependencies: []string{"c", "e"}},
+		{Name: "e", Dependencies: []string{"f"}},
+		{Name: "f"},
+		{Name: "self", Dependencies: []string{"self"}},
+		{Name: "z"},
+	}
+	byName := map[string]int{"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "f": 5, "self": 6, "z": 7}
+	want := []DependencyCycle{
+		{Members: []string{"a", "b"}, Edges: []DependencyCycleEdge{{From: "a", To: "b"}, {From: "b", To: "a"}}},
+		{Members: []string{"c", "d"}, Edges: []DependencyCycleEdge{{From: "c", To: "d"}, {From: "d", To: "c"}}},
+		{Members: []string{"self"}, Edges: []DependencyCycleEdge{{From: "self", To: "self"}}},
+	}
+	for range 100 {
+		if got := dependencyCycles(leaves, byName); !reflect.DeepEqual(got, want) {
+			t.Fatalf("dependency cycles=%+v want=%+v", got, want)
+		}
+	}
+}
+
+func TestDependencyCycleConcurrentDeterminism(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":1,"b":1}
+var tierName=[]string{"root","primitive"}
+`)
+	writeArchitectureFixture(t, root, "internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	writeArchitectureFixture(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/a"
+`)
+	wantReport, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := wantReport.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 16
+	results := make(chan []byte, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			report, err := Analyze(root, "")
+			if err != nil {
+				t.Errorf("Analyze: %v", err)
+				return
+			}
+			raw, err := report.JSON()
+			if err != nil {
+				t.Errorf("JSON: %v", err)
+				return
+			}
+			results <- raw
+		}()
+	}
+	wg.Wait()
+	close(results)
+	for got := range results {
+		if !bytes.Equal(got, want) {
+			t.Fatalf("non-deterministic cycle report\nwant:\n%s\ngot:\n%s", want, got)
+		}
+	}
+}
+
+func TestAnalyzeDependencyCycleScopedParity(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"chain":1,"self":1,"z":0}
+var tierName=[]string{"root","primitive","mechanism"}
+`)
+	writeArchitectureFixture(t, root, "internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	writeArchitectureFixture(t, root, "internal/b/b.go", `package b
+import (_ "github.com/anthony-chaudhary/fak/internal/a"; _ "github.com/anthony-chaudhary/fak/internal/chain")
+`)
+	writeArchitectureFixture(t, root, "internal/chain/chain.go", `package chain
+import _ "github.com/anthony-chaudhary/fak/internal/z"
+`)
+	writeArchitectureFixture(t, root, "internal/self/self.go", `package self
+import _ "github.com/anthony-chaudhary/fak/internal/self"
+`)
+	writeArchitectureFixture(t, root, "internal/z/z.go", "package z\n")
+	whole, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := Analyze(root, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected Leaf
+	for _, leaf := range whole.Leaves {
+		if leaf.Name == "a" {
+			selected = leaf
+		}
+	}
+	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0], selected) {
+		t.Fatalf("scoped leaf=%+v whole leaf=%+v", scoped.Leaves, selected)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(selected.DependencyCycle, want) {
+		t.Fatalf("cycle membership=%v want=%v", selected.DependencyCycle, want)
+	}
+	if len(whole.DependencyCycles) != 2 || len(scoped.DependencyCycles) != 1 || !reflect.DeepEqual(scoped.DependencyCycles[0].Members, []string{"a", "b"}) {
+		t.Fatalf("whole cycles=%+v scoped cycles=%+v", whole.DependencyCycles, scoped.DependencyCycles)
+	}
+}
+
 func TestRedundantDependenciesExposeDeterministicAlternatePaths(t *testing.T) {
 	leaves := []Leaf{
 		{Name: "a", Dependencies: []string{"b", "c", "d", "z"}},

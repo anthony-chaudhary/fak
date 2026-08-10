@@ -37,6 +37,7 @@ type Leaf struct {
 	DependencyPaths        []DependencyPath      `json:"dependency_paths"`
 	DependencyDominators   []DependencyDominator `json:"dependency_dominators"`
 	RedundantDependencies  []RedundantDependency `json:"redundant_dependencies"`
+	DependencyCycle        []string              `json:"dependency_cycle"`
 	Dependents             []string              `json:"dependents,omitempty"`
 	TransitiveDependents   []string              `json:"transitive_dependents"`
 	BlastRadius            int                   `json:"blast_radius"`
@@ -153,6 +154,16 @@ type LateralComponent struct {
 	EdgeCount   int      `json:"edge_count"`
 }
 
+type DependencyCycle struct {
+	Members []string              `json:"members"`
+	Edges   []DependencyCycleEdge `json:"edges"`
+}
+
+type DependencyCycleEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type ArchitectureEdge struct {
 	From         string `json:"from"`
 	FromTier     int    `json:"from_tier"`
@@ -212,6 +223,7 @@ type Report struct {
 	DependencyHotspots        []DependencyHotspot        `json:"dependency_hotspots,omitempty"`
 	BlastHotspots             []BlastHotspot             `json:"blast_hotspots,omitempty"`
 	Edges                     []ArchitectureEdge         `json:"edges,omitempty"`
+	DependencyCycles          []DependencyCycle          `json:"dependency_cycles,omitempty"`
 	RootwardLayerSkips        []RootwardLayerSkip        `json:"rootward_layer_skips,omitempty"`
 	LateralComponents         []LateralComponent         `json:"lateral_components,omitempty"`
 	LateralBridges            []LateralBridge            `json:"lateral_bridges,omitempty"`
@@ -349,6 +361,12 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 		}
 	}
+	report.DependencyCycles = dependencyCycles(allLeaves, byName)
+	for _, cycle := range report.DependencyCycles {
+		for _, member := range cycle.Members {
+			allLeaves[byName[member]].DependencyCycle = append([]string(nil), cycle.Members...)
+		}
+	}
 	for i := range allLeaves {
 		sort.Strings(allLeaves[i].Dependents)
 		allLeaves[i].DependencyPaths = dependencyPaths(allLeaves[i].Name, allLeaves, byName)
@@ -441,6 +459,13 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		report.FanOutHotspots = nil
 		report.DependencyHotspots = nil
 		report.BlastHotspots = nil
+		cycles := report.DependencyCycles[:0]
+		for _, cycle := range report.DependencyCycles {
+			if slices.Contains(cycle.Members, onlyLeaf) {
+				cycles = append(cycles, cycle)
+			}
+		}
+		report.DependencyCycles = cycles
 		edges := report.Edges[:0]
 		for _, edge := range report.Edges {
 			if edge.From == onlyLeaf {
@@ -1209,6 +1234,87 @@ func lateralComponents(edges []ArchitectureEdge, tiers map[string]int, names []s
 		}
 		return strings.Join(out[i].Members, "\x00") < strings.Join(out[j].Members, "\x00")
 	})
+	return out
+}
+
+func dependencyCycles(leaves []Leaf, byName map[string]int) []DependencyCycle {
+	index := 0
+	indices, lowlink := map[string]int{}, map[string]int{}
+	onStack := map[string]bool{}
+	var stack []string
+	var components [][]string
+	var visit func(string)
+	visit = func(node string) {
+		indices[node], lowlink[node] = index, index
+		index++
+		stack = append(stack, node)
+		onStack[node] = true
+		dependencies := append([]string(nil), leaves[byName[node]].Dependencies...)
+		sort.Strings(dependencies)
+		for _, dependency := range dependencies {
+			if _, ok := byName[dependency]; !ok {
+				continue
+			}
+			if _, seen := indices[dependency]; !seen {
+				visit(dependency)
+				lowlink[node] = min(lowlink[node], lowlink[dependency])
+			} else if onStack[dependency] {
+				lowlink[node] = min(lowlink[node], indices[dependency])
+			}
+		}
+		if lowlink[node] != indices[node] {
+			return
+		}
+		var component []string
+		for {
+			last := len(stack) - 1
+			member := stack[last]
+			stack = stack[:last]
+			onStack[member] = false
+			component = append(component, member)
+			if member == node {
+				break
+			}
+		}
+		sort.Strings(component)
+		components = append(components, component)
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, seen := indices[name]; !seen {
+			visit(name)
+		}
+	}
+	var out []DependencyCycle
+	for _, members := range components {
+		memberSet := map[string]struct{}{}
+		for _, member := range members {
+			memberSet[member] = struct{}{}
+		}
+		var edges []DependencyCycleEdge
+		for _, from := range members {
+			for _, to := range leaves[byName[from]].Dependencies {
+				if _, ok := memberSet[to]; ok {
+					edges = append(edges, DependencyCycleEdge{From: from, To: to})
+				}
+			}
+		}
+		sort.Slice(edges, func(i, j int) bool {
+			if edges[i].From != edges[j].From {
+				return edges[i].From < edges[j].From
+			}
+			return edges[i].To < edges[j].To
+		})
+		if len(members) == 1 && len(edges) == 0 {
+			continue
+		}
+		out = append(out, DependencyCycle{Members: members, Edges: edges})
+	}
+	sort.Slice(out, func(i, j int) bool { return lexicalStringsLess(out[i].Members, out[j].Members) })
 	return out
 }
 

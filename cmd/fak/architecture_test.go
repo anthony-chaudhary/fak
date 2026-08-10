@@ -51,6 +51,33 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 	}
 }
 
+func TestArchitectureTextRendersDependencyCycles(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"z":0}
+var tierName=[]string{"root","primitive","mechanism"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	mustWriteArchitectureFile(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/a"
+`)
+	mustWriteArchitectureFile(t, root, "internal/z/z.go", "package z\n")
+	var whole, scoped, errOut bytes.Buffer
+	if code := runArchitecture(&whole, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("whole code=%d stderr=%s", code, errOut.String())
+	}
+	if code := runArchitecture(&scoped, &errOut, []string{"--workspace", root, "--leaf", "a"}); code != 0 {
+		t.Fatalf("scoped code=%d stderr=%s", code, errOut.String())
+	}
+	for output, want := range map[string]string{whole.String(): "dependency cycles (directed strongly connected components):", scoped.String(): "dependency cycle members=[a b]"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output %q missing %q", output, want)
+		}
+	}
+}
+
 func TestArchitectureTextRendersRedundantDependencies(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

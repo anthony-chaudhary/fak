@@ -117,6 +117,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	for _, diagnostic := range report.Diagnostics {
 		fmt.Fprintf(stdout, "  diagnostic %-24s leaf=%s: %s; recovery: %s\n", diagnostic.Kind, diagnostic.Leaf, diagnostic.Message, diagnostic.Recovery)
 	}
+	if *leaf == "" && len(report.DependencyCycles) > 0 {
+		fmt.Fprintln(stdout, "  dependency cycles (directed strongly connected components):")
+		for _, cycle := range report.DependencyCycles {
+			fmt.Fprintf(stdout, "    members=%v edges=%d\n", cycle.Members, len(cycle.Edges))
+		}
+	}
 	if *leaf == "" && len(report.Hotspots) > 0 {
 		fmt.Fprintln(stdout, "  hotspots (direct fan-in):")
 		for _, hotspot := range report.Hotspots {
@@ -212,6 +218,9 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 				for _, path := range l.DependencyPaths {
 					fmt.Fprintf(stdout, "      %s: %s\n", path.Dependency, strings.Join(path.Path, " -> "))
 				}
+			}
+			if *leaf != "" && len(l.DependencyCycle) > 0 {
+				fmt.Fprintf(stdout, "    dependency cycle members=%v\n", l.DependencyCycle)
 			}
 			if *leaf != "" && len(l.DependencyDominators) > 0 {
 				fmt.Fprintln(stdout, "    mandatory dependency seams:")
