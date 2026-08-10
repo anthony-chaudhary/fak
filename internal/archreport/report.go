@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,6 +53,14 @@ type BlastHotspot struct {
 	Name        string `json:"name"`
 	BlastRadius int    `json:"blast_radius"`
 	MaxHops     int    `json:"max_hops"`
+}
+
+type LateralComponent struct {
+	Tier        int      `json:"tier"`
+	TierName    string   `json:"tier_name"`
+	Members     []string `json:"members"`
+	MemberCount int      `json:"member_count"`
+	EdgeCount   int      `json:"edge_count"`
 }
 
 type ArchitectureEdge struct {
@@ -100,6 +109,7 @@ type Report struct {
 	Hotspots             []Hotspot          `json:"hotspots,omitempty"`
 	BlastHotspots        []BlastHotspot     `json:"blast_hotspots,omitempty"`
 	Edges                []ArchitectureEdge `json:"edges,omitempty"`
+	LateralComponents    []LateralComponent `json:"lateral_components,omitempty"`
 	Diagnostics          []Diagnostic       `json:"diagnostics,omitempty"`
 	SinkCandidates       []SinkCandidate    `json:"sink_candidates,omitempty"`
 	Violations           int                `json:"violations"`
@@ -196,6 +206,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 		return report.Edges[i].To < report.Edges[j].To
 	})
+	report.LateralComponents = lateralComponents(report.Edges, tiers, names)
 	for i := range allLeaves {
 		liveViolations := allLeaves[i].ViolationEdges[:0]
 		for _, edge := range allLeaves[i].ViolationEdges {
@@ -275,6 +286,13 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 		}
 		report.Edges = edges
+		components := report.LateralComponents[:0]
+		for _, component := range report.LateralComponents {
+			if slices.Contains(component.Members, onlyLeaf) {
+				components = append(components, component)
+			}
+		}
+		report.LateralComponents = components
 		report.SinkCandidates = nil
 		diagnostics := report.Diagnostics[:0]
 		for _, diagnostic := range report.Diagnostics {
@@ -293,6 +311,83 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 	}
 	return report, nil
+}
+
+func lateralComponents(edges []ArchitectureEdge, tiers map[string]int, names []string) []LateralComponent {
+	adjacency := map[string]map[string]struct{}{}
+	for _, edge := range edges {
+		if edge.Direction != "lateral" {
+			continue
+		}
+		if adjacency[edge.From] == nil {
+			adjacency[edge.From] = map[string]struct{}{}
+		}
+		if adjacency[edge.To] == nil {
+			adjacency[edge.To] = map[string]struct{}{}
+		}
+		adjacency[edge.From][edge.To] = struct{}{}
+		adjacency[edge.To][edge.From] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var out []LateralComponent
+	starts := make([]string, 0, len(adjacency))
+	for name := range adjacency {
+		starts = append(starts, name)
+	}
+	sort.Strings(starts)
+	for _, start := range starts {
+		if _, ok := seen[start]; ok {
+			continue
+		}
+		pending, members := []string{start}, []string{}
+		seen[start] = struct{}{}
+		for len(pending) > 0 {
+			current := pending[0]
+			pending = pending[1:]
+			members = append(members, current)
+			next := make([]string, 0, len(adjacency[current]))
+			for neighbor := range adjacency[current] {
+				next = append(next, neighbor)
+			}
+			sort.Strings(next)
+			for _, neighbor := range next {
+				if _, ok := seen[neighbor]; !ok {
+					seen[neighbor] = struct{}{}
+					pending = append(pending, neighbor)
+				}
+			}
+		}
+		sort.Strings(members)
+		memberSet := map[string]struct{}{}
+		for _, member := range members {
+			memberSet[member] = struct{}{}
+		}
+		edgeCount := 0
+		for _, edge := range edges {
+			if edge.Direction == "lateral" {
+				_, from := memberSet[edge.From]
+				_, to := memberSet[edge.To]
+				if from && to {
+					edgeCount++
+				}
+			}
+		}
+		tier := tiers[start]
+		out = append(out, LateralComponent{Tier: tier, TierName: tierName(names, tier), Members: members, MemberCount: len(members), EdgeCount: edgeCount})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MemberCount != out[j].MemberCount {
+			return out[i].MemberCount > out[j].MemberCount
+		}
+		if out[i].EdgeCount != out[j].EdgeCount {
+			return out[i].EdgeCount > out[j].EdgeCount
+		}
+		if out[i].Tier != out[j].Tier {
+			return out[i].Tier < out[j].Tier
+		}
+		return strings.Join(out[i].Members, "\x00") < strings.Join(out[j].Members, "\x00")
+	})
+	return out
 }
 
 func blastPaths(name string, leaves []Leaf, byName map[string]int) []BlastPath {

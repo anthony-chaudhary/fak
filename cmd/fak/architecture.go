@@ -129,6 +129,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %-22s radius=%d max-hops=%d\n", hotspot.Name, hotspot.BlastRadius, hotspot.MaxHops)
 		}
 	}
+	if len(report.LateralComponents) > 0 {
+		fmt.Fprintln(stdout, "  lateral components (same-tier coupling):")
+		for _, component := range report.LateralComponents {
+			fmt.Fprintf(stdout, "    %-22s members=%d edges=%d %v\n", component.TierName, component.MemberCount, component.EdgeCount, component.Members)
+		}
+	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {
 		fmt.Fprintln(stdout, "  sink candidates (declared tier above import floor):")
 		for _, candidate := range report.SinkCandidates {

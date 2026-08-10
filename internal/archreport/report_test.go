@@ -10,6 +10,64 @@ import (
 	"testing"
 )
 
+func TestAnalyzeDerivesDeterministicLateralComponents(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2,"d":2,"x":3,"y":3,"alone":2}
+var tierName=[]string{"zero","primitive","foundation-composite","mechanism"}
+`)
+	write("internal/a/a.go", `package a
+import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/c")
+`)
+	write("internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/c/c.go", `package c
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
+	write("internal/d/d.go", "package d\n")
+	write("internal/x/x.go", `package x
+import _ "github.com/anthony-chaudhary/fak/internal/y"
+`)
+	write("internal/y/y.go", "package y\n")
+	write("internal/alone/alone.go", "package alone\n")
+	r, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []LateralComponent{
+		{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, MemberCount: 4, EdgeCount: 4},
+		{Tier: 3, TierName: "mechanism", Members: []string{"x", "y"}, MemberCount: 2, EdgeCount: 1},
+	}
+	if !reflect.DeepEqual(r.LateralComponents, want) {
+		t.Fatalf("components=%+v want=%+v", r.LateralComponents, want)
+	}
+	scoped, err := Analyze(root, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scoped.LateralComponents, want[:1]) {
+		t.Fatalf("scoped=%+v", scoped.LateralComponents)
+	}
+	alone, err := Analyze(root, "alone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alone.LateralComponents) != 0 {
+		t.Fatalf("alone=%+v", alone.LateralComponents)
+	}
+}
+
 func TestAnalyzeTypesEveryLiveArchitectureEdgeDirection(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

@@ -76,6 +76,30 @@ import _ "github.com/anthony-chaudhary/fak/internal/caller"
 	}
 }
 
+func TestArchitectureTextRendersLateralComponents(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"a":2,"b":2,"c":2}
+var tierName=[]string{"zero","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/a/a.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/b"
+`)
+	mustWriteArchitectureFile(t, root, "internal/b/b.go", `package b
+import _ "github.com/anthony-chaudhary/fak/internal/c"
+`)
+	mustWriteArchitectureFile(t, root, "internal/c/c.go", "package c\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"lateral components (same-tier coupling):", "foundation-composite   members=3 edges=2 [a b c]"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
 func TestArchitectureTextSummarizesTypedEdgeDirections(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
