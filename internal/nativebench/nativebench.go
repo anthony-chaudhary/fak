@@ -137,6 +137,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native AST lint for cache-warmth context-elision reasoning is covered; forced-miss, witness-chain, provenance, determinism, and aggregate gate capabilities remain separate debt",
 	},
 	{
+		Leaf: "internal/vcachestar", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"provider_cache_telemetry_reconciliation"},
+		Reason:       "native provider cache-read reconciliation, false-warm demotion, divergence location, and confirmed-only cost booking are covered; preflight and star planning remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -486,6 +491,25 @@ var contracts = []Contract{{
 			{Name: "golangci-lint custom analyzer", Class: NextBest, Source: "https://golangci-lint.run/docs/plugins/go-plugins/"},
 		},
 		Witness: "../../docs/benchmarks/CACHE-HONESTY-LINT-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "provider_cache_telemetry_reconciliation",
+		NativePath: "internal/vcachestar/star.go",
+		Workload:   "same believed-warm old/new prefix segments and bytes, zero provider cache-read telemetry, uncached-token count, exact divergence oracle, demotion requirement, and confirmed-only cost booking across every arm",
+		Metrics:    []string{"demotion_accuracy", "alarm_accuracy", "divergence_segment_error", "divergence_token_error", "divergence_byte_error", "booked_uncached_tokens", "rebate_tokens", "latency_ns", "cpu_seconds", "peak_rss_bytes", "telemetry_bytes", "network_bytes", "storage_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "trust warm manifest and modeled savings", Class: TunedBaseline, Source: "internal/vcachestar/compare.go"},
+			{Name: "fak + Anthropic prompt caching", Class: FirstClassIntegration, Integration: "anthropic", Source: "internal/provider"},
+			{Name: "fak + OpenAI prompt caching", Class: FirstClassIntegration, Integration: "openai", Source: "internal/provider"},
+			{Name: "fak + Gemini context caching", Class: FirstClassIntegration, Integration: "gemini", Source: "internal/provider"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "Prometheus recording and alert rules", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/"},
+			{Name: "Datadog monitors", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/"},
+			{Name: "LangSmith traces", Class: NextBest, Source: "https://docs.smith.langchain.com/observability"},
+		},
+		Witness:      "../../docs/benchmarks/CACHE-TELEMETRY-RECONCILIATION-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"anthropic", "openai", "gemini", "prometheus", "opentelemetry"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
