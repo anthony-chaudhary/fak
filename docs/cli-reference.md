@@ -164,6 +164,27 @@ else — repo-workflow verbs, scorecards, benches, dispatch/loop plumbing — is
 lists every verb with its tier. The bare dev spellings below still work today
 (the `fak dev` namespace is compatibility-first); `fak dev` is the canonical form.
 
+### `fak architecture`
+
+`architecture` is the read-only query surface for the same tier declarations and Go import graph enforced by `internal/architest`; it does not maintain a second package taxonomy.
+
+```bash
+# Whole graph: tier counts, direct fan-in hotspots, violations, and diagnostics.
+fak architecture
+
+# One leaf: declared tier, import-derived floor, dependencies, and direct dependents.
+fak architecture --leaf archreport
+
+# Stable machine-readable form for automation.
+fak architecture --leaf archreport --json
+```
+
+The JSON schema is `fak-architecture/1`. A full report includes `tiers`, `leaves`, `hotspots`, `diagnostics`, and the upward `violations` count. A leaf distinguishes `dependencies` (what it imports) from `dependents` (what imports it directly). Hotspots are sorted by direct fan-in descending, then leaf name.
+
+The command does not run Git, execute package code, or mutate the workspace. It parses `internal/architest/architest_test.go` plus non-test Go import blocks. Malformed contracts or source files refuse with a recovery action. A stale tier declaration is a diagnostic—not a global outage—so healthy full and scoped queries remain usable.
+
+Exit codes: `0` report emitted; `1` workspace/contract/source inspection failed; `2` flag or positional-argument misuse.
+
 The `session`, `signal`, and `ps` verbs are the front door to out-of-band control
 of a session that is **already running** — steer, redirect, pause, resume, cancel,
 terminate, throttle, budget, priority. That closed vocabulary, what each op may
@@ -174,6 +195,7 @@ specified in [`docs/operator-control-plane.md`](operator-control-plane.md).
 fak dev       [<verb> ...]                             # list the dev tier, or run a dev verb (canonical spelling)
 fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
 fak preflight --tool create_user --args '{"_positional":["alice"]}'   # rung-only check
+fak architecture [--leaf NAME] [--json]              # inspect the enforced internal tier/import graph
 fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> report.json (the ns gate)
 fak ablate    --sweep vdso                             # N-arm self-ablation: one frozen trace, feature on/off, deltas off the kernel counters
 fak ablate    --rungs --trace TRACE.json               # per-rung attribution: replay a frozen turnbench trace, mask one adjudicator rung per arm, diff the kernel counters (--rungs=grammar,ifc-sink restricts; default suite turntax-airline)
