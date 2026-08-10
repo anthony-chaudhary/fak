@@ -36,7 +36,7 @@ func TestMCPCapabilitiesEmptyQueryListsToolbelt(t *testing.T) {
 	for _, c := range resp.Cards {
 		names[c.Name] = true
 	}
-	for _, want := range []string{"memory-driver:recall", "memory-driver:compact", "fak index lane", "fak_changes", "dos_arbitrate"} {
+	for _, want := range []string{"memory-driver:recall", "memory-driver:compact", "fak_changes", "dos_arbitrate"} {
 		if !names[want] {
 			t.Fatalf("fak_capabilities empty query missing %s; got %v", want, names)
 		}

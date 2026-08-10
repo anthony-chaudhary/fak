@@ -31,7 +31,7 @@ func TestLoadManyAttributesBothRoots(t *testing.T) {
 	rootA := writeLaneRepo(t, "alpha", "the alpha lane")
 	rootB := writeLaneRepo(t, "beta", "the beta lane")
 
-	mc, err := LoadMany([]string{rootA, rootB}, Options{})
+	mc, err := LoadMany([]string{rootA, rootB}, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatalf("LoadMany: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestLoadManyAttributesBothRoots(t *testing.T) {
 func TestLoadManyQueryRanksUnion(t *testing.T) {
 	rootA := writeLaneRepo(t, "alpha", "the alpha lane")
 	rootB := writeLaneRepo(t, "beta", "the beta lane")
-	mc, err := LoadMany([]string{rootA, rootB}, Options{})
+	mc, err := LoadMany([]string{rootA, rootB}, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatalf("LoadMany: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestLoadManySkipsBadRoot(t *testing.T) {
 	rootA := writeLaneRepo(t, "alpha", "the alpha lane")
 	missing := filepath.Join(t.TempDir(), "no-such-repo")
 
-	mc, err := LoadMany([]string{rootA, missing}, Options{})
+	mc, err := LoadMany([]string{rootA, missing}, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatalf("LoadMany should tolerate a bad root, got: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestLoadManySkipsBadRoot(t *testing.T) {
 	}
 
 	// Every root bad -> fatal (nothing to query).
-	if _, err := LoadMany([]string{missing}, Options{}); err == nil {
+	if _, err := LoadMany([]string{missing}, Options{DevLoader: testDevLoader}); err == nil {
 		t.Error("LoadMany with only bad roots should error")
 	}
 }
@@ -123,7 +123,7 @@ func TestLoadManySkipsBadRoot(t *testing.T) {
 func TestSingleRootBackCompat(t *testing.T) {
 	rootA := writeLaneRepo(t, "alpha", "the alpha lane")
 
-	cat, err := Load(rootA, Options{})
+	cat, err := Load(rootA, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestSingleRootBackCompat(t *testing.T) {
 	for _, c := range cat.Cards(PlaneDev) {
 		single[c.Name] = true
 	}
-	mc, err := LoadMany([]string{rootA}, Options{})
+	mc, err := LoadMany([]string{rootA}, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatalf("LoadMany one root: %v", err)
 	}

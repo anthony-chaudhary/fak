@@ -14,7 +14,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -109,14 +108,41 @@ type ToolDescriptor struct {
 	InputSchema json.RawMessage
 }
 
+// DevLeaf, DevDoc, DevClaim, and DevVerb are an optional, data-only repository
+// catalog supplied by fak-dev. Keeping these records here preserves the shared query
+// engine without importing the repository-development index into the runtime graph.
+type DevLeaf struct{ Name, Tree, Desc string }
+type DevDoc struct{ Title, Path, Blurb string }
+type DevClaim struct {
+	Tag, Text string
+	Lanes     []string
+}
+type DevVerb struct {
+	Name, Synopsis, Lane string
+	Aliases              []string
+}
+type DevCatalog struct {
+	Leaves []DevLeaf
+	Docs   []DevDoc
+	Claims []DevClaim
+	Verbs  []DevVerb
+}
+
+// DevLoader is the optional repository-development seam. Runtime callers leave it nil;
+// fak-dev installs a loader before querying. The function type avoids any runtime import
+// of internal/devindex while preserving the existing data-rich query behavior.
+type DevLoader func(root string) (*DevCatalog, error)
+
 type Options struct {
-	Tools    []ToolDescriptor
-	CapCards []capindex.CapCard
+	Tools     []ToolDescriptor
+	CapCards  []capindex.CapCard
+	Dev       *DevCatalog
+	DevLoader DevLoader
 }
 
 type Catalog struct {
 	root     string
-	dev      *devindex.Catalog
+	dev      *DevCatalog
 	tools    []ToolDescriptor
 	capCards []capindex.CapCard
 	caps     *capindex.Catalog
@@ -124,13 +150,15 @@ type Catalog struct {
 
 func Load(root string, opt Options) (*Catalog, error) {
 	if strings.TrimSpace(root) == "" {
-		root = devindex.FindRoot(".")
+		root = "."
 	}
-	c := &Catalog{root: root, tools: append([]ToolDescriptor(nil), opt.Tools...)}
-	if dev, err := devindex.Load(root); err == nil {
+	c := &Catalog{root: root, dev: opt.Dev, tools: append([]ToolDescriptor(nil), opt.Tools...)}
+	if c.dev == nil && opt.DevLoader != nil {
+		dev, err := opt.DevLoader(root)
+		if err != nil && len(opt.Tools) == 0 && len(opt.CapCards) == 0 {
+			return nil, err
+		}
 		c.dev = dev
-	} else if len(opt.Tools) == 0 && len(opt.CapCards) == 0 {
-		return nil, err
 	}
 	c.capCards = append(loadRootCapCards(root, &c.caps), opt.CapCards...)
 	sort.Slice(c.tools, func(i, j int) bool { return c.tools[i].Name < c.tools[j].Name })
@@ -335,48 +363,48 @@ func (c *Catalog) devCards() []FeatureCard {
 		}
 		out = append(out, card("dev-leaf", "leaf:"+l.Name, summary,
 			[]string{"dev", "leaf", "lane", l.Name, "commit", "stamp"},
-			"fak index leaf "+l.Name, EffectRead, "", "devindex", digestOf(l),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "leaf", l.Name}, Executed: false}))
+			"fak-dev index leaf "+l.Name, EffectRead, "", "devindex", digestOf(l),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "leaf", l.Name}, Executed: false}))
 	}
 	for _, d := range c.dev.Docs {
 		out = append(out, card("dev-doc", "doc:"+d.Title, strmatch.FirstTrimmed(d.Blurb, d.Path),
 			[]string{"dev", "doc", "docs", "index", d.Path},
 			d.Path, EffectRead, "", "devindex", digestOf(d),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "docs", d.Title}, Executed: false}))
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "docs", d.Title}, Executed: false}))
 	}
 	for _, cl := range c.dev.Claims {
 		out = append(out, card("dev-claim", "claim:"+shortName(cl.Text), cl.Text,
 			append([]string{"dev", "claim", "claims", strings.ToLower(cl.Tag)}, cl.Lanes...),
-			"fak index claims "+strings.Join(cl.Lanes, " "), EffectRead, "", "devindex", digestOf(cl),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "claims", strings.Join(cl.Lanes, " ")}, Executed: false}))
+			"fak-dev index claims "+strings.Join(cl.Lanes, " "), EffectRead, "", "devindex", digestOf(cl),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "claims", strings.Join(cl.Lanes, " ")}, Executed: false}))
 	}
-	for _, v := range c.dev.Verbs() {
+	for _, v := range c.dev.Verbs {
 		tags := append([]string{"dev", "cli", "verb", v.Lane}, v.Aliases...)
-		out = append(out, card("cli-verb", "fak "+v.Name, v.Synopsis, tags,
-			"fak "+v.Name, EffectRead, "", "devindex", digestOf(v),
-			RequestShape{Route: "cli", Command: []string{"fak", v.Name, "--help"}, Executed: false}))
+		out = append(out, card("cli-verb", "fak-dev "+v.Name, v.Synopsis, tags,
+			"fak-dev "+v.Name, EffectRead, "", "devindex", digestOf(v),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", v.Name, "--help"}, Executed: false}))
 	}
 	return out
 }
 
 func (c *Catalog) devSurfaceCards() []FeatureCard {
 	return []FeatureCard{
-		card("dev-query", "fak index lane", "resolve a path to its owning lane and suggested commit stamp",
+		card("dev-query", "fak-dev index lane", "resolve a path to its owning lane and suggested commit stamp",
 			[]string{"dev", "index", "lane", "commit", "stamp", "path", "owner"},
-			"fak index lane <path>", EffectRead, "", "devindex", digestOf("index-lane"),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "lane", "<path>"}, Executed: false}),
-		card("dev-query", "fak index docs", "search the curated INDEX.md doc map by query",
+			"fak-dev index lane <path>", EffectRead, "", "devindex", digestOf("index-lane"),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "lane", "<path>"}, Executed: false}),
+		card("dev-query", "fak-dev index docs", "search the curated INDEX.md doc map by query",
 			[]string{"dev", "index", "docs", "doc", "documentation"},
-			"fak index docs <query>", EffectRead, "", "devindex", digestOf("index-docs"),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "docs", "<query>"}, Executed: false}),
-		card("dev-query", "fak index claims", "search the CLAIMS.md honesty ledger by capability, lane, or token",
+			"fak-dev index docs <query>", EffectRead, "", "devindex", digestOf("index-docs"),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "docs", "<query>"}, Executed: false}),
+		card("dev-query", "fak-dev index claims", "search the CLAIMS.md honesty ledger by capability, lane, or token",
 			[]string{"dev", "index", "claims", "shipped", "simulated", "stub"},
-			"fak index claims <query>", EffectRead, "", "devindex", digestOf("index-claims"),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "claims", "<query>"}, Executed: false}),
-		card("dev-query", "fak index verbs", "search fak's live CLI verb catalog",
+			"fak-dev index claims <query>", EffectRead, "", "devindex", digestOf("index-claims"),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "claims", "<query>"}, Executed: false}),
+		card("dev-query", "fak-dev index verbs", "search fak's live CLI verb catalog",
 			[]string{"dev", "index", "verbs", "cli", "command"},
-			"fak index verbs <query>", EffectRead, "", "devindex", digestOf("index-verbs"),
-			RequestShape{Route: "cli", Command: []string{"fak", "index", "verbs", "<query>"}, Executed: false}),
+			"fak-dev index verbs <query>", EffectRead, "", "devindex", digestOf("index-verbs"),
+			RequestShape{Route: "cli", Command: []string{"fak-dev", "index", "verbs", "<query>"}, Executed: false}),
 	}
 }
 

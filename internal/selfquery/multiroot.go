@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
 // MultiCatalog is the cross-repo fan-out over N single-root Catalogs (#3435, epic
@@ -47,7 +45,7 @@ func (e RootLoadError) Unwrap() error { return e.Err }
 //
 //   - Roots are resolved to absolute paths and de-duplicated (querying the same
 //     checkout twice would double-report every card). An empty entry resolves to
-//     the ambient repo root (devindex.FindRoot).
+//     the the current directory.
 //   - A root that fails to load is SKIPPED and recorded in Skipped(), never fatal
 //     (the GQL do-not: no serial .unwrap()-per-repo panic).
 //   - Only the FIRST (primary) root receives the caller's live-plane Options. The
@@ -67,7 +65,7 @@ func LoadMany(roots []string, opt Options) (*MultiCatalog, error) {
 	for _, r := range roots {
 		root := strings.TrimSpace(r)
 		if root == "" {
-			root = devindex.FindRoot(".")
+			root = "."
 		}
 		if abs, err := filepath.Abs(root); err == nil {
 			root = abs
@@ -76,9 +74,11 @@ func LoadMany(roots []string, opt Options) (*MultiCatalog, error) {
 			continue
 		}
 		seen[root] = true
-		perRoot := Options{}
+		perRoot := Options{DevLoader: opt.DevLoader}
 		if !primaryTaken {
 			perRoot = opt
+		} else if opt.Dev != nil {
+			perRoot.Dev = opt.Dev
 		}
 		cat, err := Load(root, perRoot)
 		if err != nil {

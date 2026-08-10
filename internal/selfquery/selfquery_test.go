@@ -14,6 +14,42 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/memq"
 )
 
+func testDevCatalog() *DevCatalog {
+	return &DevCatalog{
+		Leaves: []DevLeaf{{Name: "gateway", Tree: "internal/gateway/**", Desc: "gateway surface"}, {Name: "cmd", Tree: "cmd/**", Desc: "command shells"}},
+		Docs:   []DevDoc{{Title: "Gateway guide", Path: "docs/gateway.md", Blurb: "MCP and gateway docs."}},
+		Claims: []DevClaim{{Tag: "SHIPPED", Text: "internal/gateway exposes MCP tools.", Lanes: []string{"gateway"}}},
+		Verbs:  []DevVerb{{Name: "index", Synopsis: "query repository index", Lane: "devcmd"}, {Name: "feature", Synopsis: "query feature catalog", Lane: "devcmd"}},
+	}
+}
+
+func testDevLoader(root string) (*DevCatalog, error) {
+	body, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	if err != nil {
+		return nil, err
+	}
+	dev := testDevCatalog()
+	text := string(body)
+	for _, lane := range []string{"alpha", "beta"} {
+		if strings.Contains(text, lane+" =") {
+			dev.Leaves = []DevLeaf{{Name: lane, Tree: "internal/" + lane + "/**", Desc: "the " + lane + " lane"}}
+		}
+	}
+	if index, err := os.ReadFile(filepath.Join(root, "INDEX.md")); err == nil {
+		for _, line := range strings.Split(string(index), "\n") {
+			if !strings.HasPrefix(line, "- [") {
+				continue
+			}
+			close := strings.Index(line, "](")
+			endPath := strings.Index(line, ")")
+			if close > 2 && endPath > close {
+				dev.Docs = append(dev.Docs, DevDoc{Title: line[3:close], Path: line[close+2 : endPath]})
+			}
+		}
+	}
+	return dev, nil
+}
+
 func writeRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -69,7 +105,7 @@ func TestQueryDefaultCapAndExplicitAll(t *testing.T) {
 	for i := range tools {
 		tools[i] = ToolDescriptor{Name: fmt.Sprintf("common_tool_%03d", i), Description: "the common agent tool for a task and the system", InputSchema: json.RawMessage(`{"type":"object"}`)}
 	}
-	cat, err := Load(writeRepo(t), Options{Tools: tools})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: tools})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +134,7 @@ func TestQueryDefaultCapAndExplicitAll(t *testing.T) {
 }
 
 func TestQueryMemoryReturnsToolsAndDrivers(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +161,7 @@ func TestQueryMemoryReturnsToolsAndDrivers(t *testing.T) {
 }
 
 func TestEveryRegisteredMemoryDriverHasFeatureCard(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +190,7 @@ func TestDynamicallyRegisteredMemoryDriverHasFeatureCard(t *testing.T) {
 		},
 	})
 
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,18 +200,13 @@ func TestDynamicallyRegisteredMemoryDriverHasFeatureCard(t *testing.T) {
 	}
 }
 
-func TestEveryIndexedVerbHasFeatureCard(t *testing.T) {
-	root := writeRepo(t)
-	cat, err := Load(root, Options{Tools: testTools()})
+func TestEveryInjectedDevVerbHasFeatureCard(t *testing.T) {
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := namesOf(cat.Cards(PlaneDev))
-	for _, v := range cat.dev.Verbs() {
-		want := "fak " + v.Name
-		if !names[want] {
-			t.Fatalf("indexed fak verb %q missing from self-feature catalog", v.Name)
-		}
+	if !namesOf(cat.Cards(PlaneDev))["fak-dev index"] {
+		t.Fatal("injected fak-dev verb missing from self-feature catalog")
 	}
 }
 
@@ -186,7 +217,7 @@ func TestCapindexCardsAreLoweredWhenProvided(t *testing.T) {
 		Tags:      []string{"memory", "skill"},
 		CardBytes: []byte(`{"name":"memory-helper"}`),
 	}
-	cat, err := Load(writeRepo(t), Options{Tools: testTools(), CapCards: []capindex.CapCard{capCard}})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools(), CapCards: []capindex.CapCard{capCard}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +259,7 @@ Faulted capability body.
 	if err := os.WriteFile(skillPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cat, err := Load(root, Options{Tools: testTools()})
+	cat, err := Load(root, Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,11 +296,11 @@ func TestStableOrderingAndSourceAttribution(t *testing.T) {
 	}
 	toolsB := []ToolDescriptor{toolsA[1], toolsA[0]}
 
-	catA, err := Load(writeRepo(t), Options{Tools: toolsA, CapCards: capsA})
+	catA, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: toolsA, CapCards: capsA})
 	if err != nil {
 		t.Fatal(err)
 	}
-	catB, err := Load(writeRepo(t), Options{Tools: toolsB, CapCards: capsB})
+	catB, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: toolsB, CapCards: capsB})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +315,7 @@ func TestStableOrderingAndSourceAttribution(t *testing.T) {
 		sources[c.Name] = c.Source
 	}
 	for name, want := range map[string]string{
-		"fak index lane":       "devindex",
+		"fak-dev index lane":   "devindex",
 		"memory-driver:recall": "memq",
 		"aa_tool":              "gateway.tools",
 		"skill:alpha":          "capindex",
@@ -296,7 +327,7 @@ func TestStableOrderingAndSourceAttribution(t *testing.T) {
 }
 
 func TestAssumptionConfidenceFeatureCard(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +367,7 @@ func TestAssumptionConfidenceFeatureCard(t *testing.T) {
 // the "grounded in a real call site" half of the issue: a caller (or `fak feature
 // query`) can find selfquery.ShouldAsk without already knowing the file exists.
 func TestAskPolicyFeatureCard(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +403,7 @@ func TestAskPolicyFeatureCard(t *testing.T) {
 }
 
 func TestQueryClarificationBrokerTurnsMissingContextIntoBoundedQuestion(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +471,7 @@ func TestStaleClarificationDefaultsToRefreshSource(t *testing.T) {
 }
 
 func TestDetailFaultsOnlySelectedSchemaOrPlan(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +497,7 @@ func TestDetailFaultsOnlySelectedSchemaOrPlan(t *testing.T) {
 }
 
 func TestLightweightQueryDoesNotInlineSchemasOrPlans(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +518,7 @@ func TestLightweightQueryDoesNotInlineSchemasOrPlans(t *testing.T) {
 }
 
 func TestMemoryMutationDetailExplainsWithoutExecution(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +535,7 @@ func TestMemoryMutationDetailExplainsWithoutExecution(t *testing.T) {
 }
 
 func TestQueryIndexDocsUsesDevIndexSource(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +555,7 @@ func TestQueryIndexDocsUsesDevIndexSource(t *testing.T) {
 }
 
 func TestQueryCommitStampPointsAtIndexLane(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,13 +563,13 @@ func TestQueryCommitStampPointsAtIndexLane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Cards) != 1 || resp.Cards[0].Name != "fak index lane" {
-		t.Fatalf("commit stamp top card = %v, want fak index lane", sortedNames(resp.Cards))
+	if len(resp.Cards) != 1 || resp.Cards[0].Name != "fak-dev index lane" {
+		t.Fatalf("commit stamp top card = %v, want fak-dev index lane", sortedNames(resp.Cards))
 	}
 }
 
 func TestEmptyQueryFailsClosed(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +579,7 @@ func TestEmptyQueryFailsClosed(t *testing.T) {
 }
 
 func TestOrdinaryToolCardReturnsAdjudicationRequestShape(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}

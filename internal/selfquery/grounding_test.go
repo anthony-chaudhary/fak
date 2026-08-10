@@ -9,7 +9,7 @@ import "testing"
 // reference existence pre-apply, from the index, not from any agent's narration) and
 // that the index carries enough to decide.
 func TestScanPatchGroundsImportsAgainstIndex(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

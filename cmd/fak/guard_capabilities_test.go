@@ -10,7 +10,7 @@ func TestPrintGuardCapabilitiesNoteMentionsMCPToolWhenRegistered(t *testing.T) {
 	var buf bytes.Buffer
 	printGuardCapabilitiesNote(&buf, guardMCPInstall{Applied: true, URL: "http://127.0.0.1:4567/mcp"})
 	out := buf.String()
-	if !strings.Contains(out, "fak capabilities") || !strings.Contains(out, "fak_capabilities") {
+	if !strings.Contains(out, "fak-dev capabilities") || !strings.Contains(out, "fak_capabilities") {
 		t.Fatalf("capabilities note missing CLI/MCP mention: %q", out)
 	}
 }
@@ -19,7 +19,7 @@ func TestPrintGuardCapabilitiesNoteOmitsMCPToolWhenNotRegistered(t *testing.T) {
 	var buf bytes.Buffer
 	printGuardCapabilitiesNote(&buf, guardMCPInstall{Applied: false})
 	out := buf.String()
-	if !strings.Contains(out, "fak capabilities") {
+	if !strings.Contains(out, "fak-dev capabilities") {
 		t.Fatalf("capabilities note missing CLI mention: %q", out)
 	}
 	if strings.Contains(out, "fak_capabilities MCP tool") {

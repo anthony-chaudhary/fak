@@ -169,7 +169,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"fak MCP context value allowed", "mcp__fak__fak_context_value", `{}`, abi.VerdictAllow},
 		{"fak MCP effectful memory run remains denied by default", "mcp__fak__fak_memory_run", `{"driver":"recall","apply":true}`, abi.VerdictDeny},
 		// ...but the READ-ONLY form is the one the kernel's own capability catalog hands
-		// the agent (`fak capabilities` emits every memory-driver card as a ready
+		// the agent (`fak-dev capabilities` emits every memory-driver card as a ready
 		// fak_memory_run with apply=false) and the one guard-sessionstart's first-turn
 		// affordance names. Withholding the whole NAME denied that too — and pruned the
 		// tool DEFINITION as never-admitted, so the agent could not even see the verb the
@@ -264,7 +264,7 @@ func TestGuardDefaultPolicyKeepsArgGatedVerbsAdvertised(t *testing.T) {
 	}
 	floor := rt.Adjudicator
 	if floor.NeverAdmits("mcp__fak__fak_memory_run") {
-		t.Errorf("the shipped floor marks mcp__fak__fak_memory_run as never-admitted, so the gateway prunes its tool DEFINITION — but apply=false is admitted and the same binary advertises the verb in guard-sessionstart and `fak capabilities`")
+		t.Errorf("the shipped floor marks mcp__fak__fak_memory_run as never-admitted, so the gateway prunes its tool DEFINITION — but apply=false is admitted and the same binary advertises the verb in guard-sessionstart and `fak-dev capabilities`")
 	}
 	// The control: a name the floor genuinely never admits is still droppable, so
 	// this test cannot pass by disabling pruning wholesale.

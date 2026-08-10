@@ -29,6 +29,10 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunBackend(stdout, stderr, argv[1:])
 	case "catchup":
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
+	case "feature":
+		return devcmd.RunFeature(stdout, stderr, argv[1:])
+	case "capabilities":
+		return devcmd.RunCapabilities(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -47,6 +51,8 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  orient [env] --paths GLOB             show repository conventions and live ownership")
 	fmt.Fprintln(w, "  backend scaffold NAME --lane LANE     generate a repository compute backend")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
+	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")
+	fmt.Fprintln(w, "  capabilities [intent] [flags]         list the repository-development toolbelt")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The serving/guard product surface is the separately buildable 'fak' artifact.")

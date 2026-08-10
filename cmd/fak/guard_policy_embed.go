@@ -61,7 +61,7 @@ const guardResourceSampleInterval = 2 * time.Second
 // is admitted the same way, but ARG-GATED rather than name-gated: the effectful write
 // (apply=true) keeps its pinned deny, while the read-only default (apply absent/false) is
 // allowed. Withholding the whole NAME over-blocked, because apply=false is the form the
-// kernel's own capability catalog hands the agent — `fak capabilities` emits every
+// kernel's own capability catalog hands the agent — `fak-dev capabilities` emits every
 // memory-driver card as a ready fak_memory_run (apply=false), and guard-sessionstart's
 // first-turn affordance names the verb outright — so the floor was denying, and then
 // PRUNING the definition of, a tool it had just told the agent to call. An operator

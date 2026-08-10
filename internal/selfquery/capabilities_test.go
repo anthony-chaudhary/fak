@@ -3,7 +3,7 @@ package selfquery
 import "testing"
 
 func TestCapabilitiesEmptyQueryListsStableToolbelt(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -14,7 +14,7 @@ func TestCapabilitiesEmptyQueryListsStableToolbelt(t *testing.T) {
 	names := namesOf(resp.Cards)
 	for _, want := range []string{
 		"memory-driver:recall", "memory-driver:clean", "memory-driver:compact",
-		"fak index lane", "fak index docs", "fak index claims", "fak index verbs",
+		"fak-dev index lane", "fak-dev index docs", "fak-dev index claims", "fak-dev index verbs",
 		"fak_changes", "dos_arbitrate",
 	} {
 		if !names[want] {
@@ -31,7 +31,7 @@ func TestCapabilitiesEmptyQueryListsStableToolbelt(t *testing.T) {
 }
 
 func TestCapabilitiesCompactIntentRanksHygieneFamilyTogether(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestCapabilitiesCompactIntentRanksHygieneFamilyTogether(t *testing.T) {
 }
 
 func TestCapabilitiesMemoryCardCarriesReadyMemoryRunCall(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestCapabilitiesMemoryCardCarriesReadyMemoryRunCall(t *testing.T) {
 }
 
 func TestCapabilitiesLimitCapsResults(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestCapabilitiesLimitCapsResults(t *testing.T) {
 }
 
 func TestCapabilitiesNegativeLimitFailsClosed(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestCapabilitiesNegativeLimitFailsClosed(t *testing.T) {
 }
 
 func TestCapabilitiesKernelVerbCardsAreReadOnly(t *testing.T) {
-	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	cat, err := Load(writeRepo(t), Options{DevLoader: testDevLoader, Tools: testTools()})
 	if err != nil {
 		t.Fatal(err)
 	}

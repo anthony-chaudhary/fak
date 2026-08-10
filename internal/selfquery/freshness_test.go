@@ -112,7 +112,7 @@ func writeFreshnessRepo(t *testing.T) string {
 // checkable step: the query surface stamps SUPERSEDED_BY / FRESH derived from
 // dated-note timestamps, without filtering or re-ordering.
 func TestQueryStampsSupersessionRung(t *testing.T) {
-	cat, err := Load(writeFreshnessRepo(t), Options{})
+	cat, err := Load(writeFreshnessRepo(t), Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestQueryStampsSupersessionRung(t *testing.T) {
 // by the same rankCards call the query uses, before any freshness stamping.
 func TestFreshnessDoesNotChangeRanking(t *testing.T) {
 	root := writeFreshnessRepo(t)
-	cat, err := Load(root, Options{})
+	cat, err := Load(root, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestStalenessByKeyMarksDeletedCitedFile(t *testing.T) {
 // and STALE outranks the SUPERSEDED_BY it would otherwise carry.
 func TestQueryStampsStaleRungAfterDeletion(t *testing.T) {
 	root := writeFreshnessRepo(t)
-	cat, err := Load(root, Options{})
+	cat, err := Load(root, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestQueryStampsStaleRungAfterDeletion(t *testing.T) {
 // precomputed rungs as the ranked list; without that, `--detail` would hand back
 // an unhedged superseded card while the list above it was correctly marked.
 func TestQueryDetailCardCarriesFreshnessRung(t *testing.T) {
-	cat, err := Load(writeFreshnessRepo(t), Options{})
+	cat, err := Load(writeFreshnessRepo(t), Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func writeLoneNoteRepo(t *testing.T) string {
 func TestMultiRootFreshnessStaysScopedPerRoot(t *testing.T) {
 	twoNote := writeFreshnessRepo(t) // June + July -> June is superseded
 	loneNote := writeLoneNoteRepo(t) // June alone  -> nothing supersedes it
-	mc, err := LoadMany([]string{twoNote, loneNote}, Options{})
+	mc, err := LoadMany([]string{twoNote, loneNote}, Options{DevLoader: testDevLoader})
 	if err != nil {
 		t.Fatalf("LoadMany: %v", err)
 	}

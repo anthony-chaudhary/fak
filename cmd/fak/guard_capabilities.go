@@ -14,13 +14,13 @@ import (
 // static Printf, gated only on --quiet.
 
 // printGuardCapabilitiesNote tells the wrapped agent, once per session, that
-// `fak capabilities` / fak_capabilities exists: the narrower, memory-forward
-// twin of fak_feature_query (memq drivers, fak index * verbs, and the kernel
+// `fak-dev capabilities` / fak_capabilities exists: the narrower, memory-forward
+// twin of fak_feature_query (memq drivers, fak-dev index * verbs, and the kernel
 // shared-path verbs), each card carrying the exact call to make.
 func printGuardCapabilitiesNote(w io.Writer, mcpInstall guardMCPInstall) {
 	if mcpInstall.Applied {
-		fmt.Fprintf(w, "fak guard: self-describe — `fak capabilities [<intent>]` or the fak_capabilities MCP tool lists the memory-forward toolbelt (memq drivers, fak index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make\n")
+		fmt.Fprintf(w, "fak guard: self-describe — `fak-dev capabilities [<intent>]` or the fak_capabilities MCP tool lists the memory-forward toolbelt (memq drivers, fak-dev index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make\n")
 		return
 	}
-	fmt.Fprintf(w, "fak guard: self-describe — `fak capabilities [<intent>]` lists the memory-forward toolbelt (memq drivers, fak index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make\n")
+	fmt.Fprintf(w, "fak guard: self-describe — `fak-dev capabilities [<intent>]` lists the memory-forward toolbelt (memq drivers, fak-dev index * verbs, fak_changes/dos_arbitrate), each card carrying the exact call to make\n")
 }
