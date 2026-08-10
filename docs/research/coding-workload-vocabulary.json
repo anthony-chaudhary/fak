@@ -1,0 +1,1308 @@
+{
+  "antipatterns": [
+    {
+      "aliases": [
+        "patch overfitting",
+        "test overfitting"
+      ],
+      "definition": "The change satisfies the checks it was optimized against and breaks untested but intended behavior.",
+      "detector": "A held-out oracle disagrees with the optimized oracle.",
+      "id": "ap.oracle-overfit",
+      "name": "Oracle Overfit",
+      "provenance": "borrowed",
+      "sources": [
+        "s.apr-overfitting"
+      ]
+    },
+    {
+      "aliases": [
+        "test gaming",
+        "check tampering"
+      ],
+      "definition": "The gate is weakened, narrowed or deleted so that it passes.",
+      "detector": "The diff touches the check and the check's strictness decreased.",
+      "id": "ap.oracle-laundering",
+      "name": "Oracle Laundering",
+      "provenance": "adapted",
+      "sources": [
+        "s.apr-overfitting",
+        "s.mast"
+      ]
+    },
+    {
+      "aliases": [
+        "quiet descoping"
+      ],
+      "definition": "Delivered work covers less than was asked and the report does not say so.",
+      "detector": "A requested acceptance item has neither an artifact nor an explicit deferral.",
+      "id": "ap.silent-scope-narrowing",
+      "name": "Silent Scope Narrowing",
+      "provenance": "adapted",
+      "sources": [
+        "s.mast"
+      ]
+    },
+    {
+      "aliases": [
+        "claim without witness"
+      ],
+      "definition": "Done is declared with no verification step executed.",
+      "detector": "No gate invocation appears in the trace.",
+      "id": "ap.unverified-completion",
+      "name": "Unverified Completion",
+      "provenance": "borrowed",
+      "sources": [
+        "s.mast"
+      ]
+    },
+    {
+      "aliases": [
+        "early stop"
+      ],
+      "definition": "The run ends before producing the information needed to close the task.",
+      "detector": "Handoff conditions are unmet at exit.",
+      "id": "ap.premature-termination",
+      "name": "Premature Termination",
+      "provenance": "borrowed",
+      "sources": [
+        "s.mast"
+      ]
+    },
+    {
+      "aliases": [
+        "step repetition",
+        "thrash loop"
+      ],
+      "definition": "Equivalent actions repeat without changing observable state.",
+      "detector": "Repeated action/observation pairs above a threshold.",
+      "id": "ap.no-progress-oscillation",
+      "name": "No-Progress Oscillation",
+      "provenance": "borrowed",
+      "sources": [
+        "s.mast"
+      ]
+    },
+    {
+      "aliases": [
+        "hallucinated citation"
+      ],
+      "definition": "A cited file, symbol or source does not exist, or does not support the claim made of it.",
+      "detector": "The reference resolver fails, or the resolved target contradicts the claim.",
+      "id": "ap.confabulated-reference",
+      "name": "Confabulated Reference",
+      "provenance": "adapted",
+      "sources": [
+        "s.mast",
+        "s.oracle-problem"
+      ]
+    },
+    {
+      "aliases": [
+        "benchmark artifact",
+        "unsolvable items"
+      ],
+      "definition": "The measuring instrument, not the system, explains the score.",
+      "detector": "A human re-screen of the items changes the ranking.",
+      "id": "ap.benchmark-validity-drift",
+      "name": "Benchmark Validity Drift",
+      "provenance": "adapted",
+      "sources": [
+        "s.swe-bench-verified"
+      ]
+    },
+    {
+      "aliases": [
+        "mega-commit"
+      ],
+      "definition": "A sweep is attempted as one atomic change at a scale where it cannot land.",
+      "detector": "The change cannot pass presubmit as a single unit.",
+      "id": "ap.atomicity-overreach",
+      "name": "Atomicity Overreach",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-at-google-lsc"
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "id": "ax.workload-shape",
+      "name": "Workload shape",
+      "question": "What is the job, and what artifact counts as done?",
+      "values": "the wp.* patterns"
+    },
+    {
+      "id": "ax.orchestration-topology",
+      "name": "Orchestration topology",
+      "question": "How is the work arranged across steps, agents and turns?",
+      "values": "single interactive loop; fixed staged pipeline; fan-out/fan-in; tree search; human-in-the-loop"
+    },
+    {
+      "id": "ax.verification-strategy",
+      "name": "Verification strategy",
+      "question": "What evidence closes the loop?",
+      "values": "executable oracle; derived/pinned oracle; relational (metamorphic) oracle; held-out oracle; independent judge; citation resolution; none"
+    },
+    {
+      "id": "ax.failure-mode",
+      "name": "Failure mode",
+      "question": "How does it degrade into a plausible wrong answer?",
+      "values": "the ap.* antipatterns"
+    }
+  ],
+  "canonical_catalog": "internal/worktype/pattern_catalog.go",
+  "conflations": [
+    {
+      "axes_conflated": [
+        "ax.workload-shape",
+        "ax.orchestration-topology"
+      ],
+      "claim": "Multi-agent (or fan-out, or pipeline) is a workload pattern.",
+      "counterexample": "wp.mechanical-sweep runs as a single scripted pass and as a per-shard fan-out; goal, done-artifact, oracle and dominant failure mode (ap.atomicity-overreach) are identical in both. Agentless solves the issue-resolution shape with a fixed localize/repair/validate pipeline rather than an agent loop.",
+      "id": "cf.shape-is-topology",
+      "sources": [
+        "s.agentless",
+        "s.swe-at-google-lsc"
+      ],
+      "verdict": "rejected"
+    },
+    {
+      "axes_conflated": [
+        "ax.workload-shape",
+        "ax.verification-strategy"
+      ],
+      "claim": "If it has no test, it is not real engineering work.",
+      "counterexample": "wp.comprehension-report has no executable oracle by construction; its verification strategy is citation resolution. A fully test-green wp.issue-to-patch result can still be wrong: patches passing the available tests can overfit them and break untested desired functionality. Test-green is neither necessary nor sufficient.",
+      "id": "cf.shape-is-verification",
+      "sources": [
+        "s.apr-overfitting",
+        "s.oracle-problem"
+      ],
+      "verdict": "rejected"
+    },
+    {
+      "axes_conflated": [
+        "ax.workload-shape"
+      ],
+      "claim": "Bisect (or localization, or review) is a workload.",
+      "counterexample": "sp.history-bisection appears inside wp.issue-to-patch, inside wp.perf-under-invariant (the git bisect manual names benchmark movement as a target property) and inside wp.env-remediation. A move reusable across shapes cannot itself be the shape.",
+      "id": "cf.subpattern-as-pattern",
+      "sources": [
+        "s.git-bisect"
+      ],
+      "verdict": "rejected"
+    },
+    {
+      "axes_conflated": [
+        "ax.workload-shape",
+        "ax.orchestration-topology"
+      ],
+      "claim": "The Workflow Patterns catalogue already names these workloads.",
+      "counterexample": "Workflow patterns are control-flow constructs for comparing workflow management systems. Parallel Split describes a mechanical code sweep and a document-translation pipeline identically, because it is silent about what the work is and what makes it correct. It is the right vocabulary for ax.orchestration-topology and the wrong one for ax.workload-shape.",
+      "id": "cf.workflow-patterns-transfer",
+      "sources": [
+        "s.workflow-patterns"
+      ],
+      "verdict": "rejected"
+    },
+    {
+      "axes_conflated": [
+        "ax.workload-shape",
+        "ax.verification-strategy"
+      ],
+      "claim": "Refactor to fix the bug.",
+      "counterexample": "wp.behavior-preserving-restructure asserts observable behavior is unchanged; wp.issue-to-patch asserts exactly one observable behavior changed. A change doing both has no single passing oracle: the pin fails at the fixed site and the repair witness cannot distinguish fixed from moved. The expand/migrate/contract discipline exists because the phases stay separate and the code is never broken between them.",
+      "id": "cf.repair-is-restructure",
+      "sources": [
+        "s.parallel-change"
+      ],
+      "verdict": "rejected"
+    },
+    {
+      "axes_conflated": [
+        "ax.workload-shape",
+        "ax.failure-mode"
+      ],
+      "claim": "A red build is a bug in the program.",
+      "counterexample": "SWE-bench Verified screening found environments that were difficult to set up reliably, causing unit tests to fail regardless of the solution, alongside over-specific tests and under-specified issues. Those are wp.env-remediation and ap.benchmark-validity-drift, not defects in the program under test; routing them to wp.issue-to-patch produces edits to correct code.",
+      "id": "cf.environment-is-logic",
+      "sources": [
+        "s.swe-bench-verified"
+      ],
+      "verdict": "rejected"
+    }
+  ],
+  "corpus_access_date": "2026-08-10",
+  "counts": {
+    "antipatterns": 9,
+    "axes": 4,
+    "conflations": 6,
+    "mechanisms": 10,
+    "patterns": 11,
+    "sources": 24,
+    "subpatterns": 22
+  },
+  "demotion_evidence": "Retire an element when annotators cannot separate it from a neighbour without inventing a criterion absent from this artifact. Demote the whole proposal if a survey published after 2026-08-10 supplies an equivalent axis split with broader evidence; then borrow it and keep only the new-synthesis entries that survive.",
+  "generation": "gen/next",
+  "id_mapping_note": "Canonical shipped detectors use wp.* for workload patterns and sp.* for reusable moves; this proposal corpus is source evidence and must be adapted explicitly.",
+  "invalidating_assumptions": [
+    "The four axes are assumed independent. If workload shape predicts orchestration topology strongly enough across real trajectories that topology carries no additional information, ax.orchestration-topology is a derived attribute and the four-axis claim is wrong.",
+    "The four new-synthesis elements (wp.env-remediation, wp.comprehension-report, sp.blast-radius-scoping, sp.citation-binding) are assumed genuinely unnamed. They rest on a corpus verified at abstract granularity by one worker on one day; a full-text sweep, or literature outside the surveyed streams, could show any of them is a rename.",
+    "Sources are assumed to say what their abstracts say. Verification did not reach full text (WebFetch refused at this host's capability floor). Any attribution the full paper contradicts invalidates that row of the evidence table."
+  ],
+  "issue": 6209,
+  "maturity": "hypothesis",
+  "mechanisms": [
+    {
+      "definition": "Run untrusted code and observe its effects.",
+      "enables": [
+        "sp.reproduce-first",
+        "sp.execute-observe-repair",
+        "sp.generate-and-filter"
+      ],
+      "id": "mx.execution-sandbox",
+      "name": "Execution sandbox"
+    },
+    {
+      "definition": "Select and run checks, reporting per-check status.",
+      "enables": [
+        "sp.reproduce-first",
+        "sp.behavior-pinning",
+        "sp.held-out-oracle"
+      ],
+      "id": "mx.test-runner",
+      "name": "Test runner"
+    },
+    {
+      "definition": "Per-test coverage or execution traces.",
+      "enables": [
+        "sp.spectrum-localization"
+      ],
+      "id": "mx.coverage-spectra",
+      "name": "Coverage spectra"
+    },
+    {
+      "definition": "Addressable revisions with checkout and diff.",
+      "enables": [
+        "sp.history-bisection",
+        "sp.rule-then-sweep"
+      ],
+      "id": "mx.vcs-history",
+      "name": "Version-control history"
+    },
+    {
+      "definition": "AST/symbol index over the repository.",
+      "enables": [
+        "sp.structured-code-search",
+        "sp.hierarchical-localization",
+        "sp.graft-search"
+      ],
+      "id": "mx.program-index",
+      "name": "Program index"
+    },
+    {
+      "definition": "Apply and revert a diff safely.",
+      "enables": [
+        "sp.rule-then-sweep",
+        "sp.execute-observe-repair"
+      ],
+      "id": "mx.patch-applier",
+      "name": "Patch applier"
+    },
+    {
+      "definition": "Exclusive claim over a declared file region.",
+      "enables": [
+        "sp.blast-radius-scoping"
+      ],
+      "id": "mx.write-lease",
+      "name": "Write lease"
+    },
+    {
+      "definition": "Bounded, observable step and token accounting.",
+      "enables": [
+        "sp.execute-observe-repair",
+        "sp.budgeted-exploration"
+      ],
+      "id": "mx.step-budget",
+      "name": "Step budget"
+    },
+    {
+      "definition": "A second model or human that never sees author-side rationale.",
+      "enables": [
+        "sp.independent-adjudication",
+        "sp.escalation-checkpoint"
+      ],
+      "id": "mx.judge-channel",
+      "name": "Judge channel"
+    },
+    {
+      "definition": "Resolve a citation to its target and compare.",
+      "enables": [
+        "sp.citation-binding"
+      ],
+      "id": "mx.reference-resolver",
+      "name": "Reference resolver"
+    }
+  ],
+  "parent_issue": 6208,
+  "patterns": [
+    {
+      "aliases": [
+        "issue resolution",
+        "bug fix",
+        "test-suite-based program repair"
+      ],
+      "definition": "Turn a reported defect into a change that alters exactly the reported behavior.",
+      "exclude_when": "No prior defect claim; or the check itself is the deliverable.",
+      "id": "wp.issue-to-patch",
+      "include_when": "A defect claim exists and the done-artifact is a diff.",
+      "name": "Issue-to-Patch Repair",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-bench",
+        "s.apr-bibliography",
+        "s.autocoderover"
+      ]
+    },
+    {
+      "aliases": [
+        "feature implementation",
+        "NL-to-code"
+      ],
+      "definition": "Add an externally visible capability described in prose while preserving existing behavior.",
+      "exclude_when": "The capability exists but misbehaves (that is wp.issue-to-patch).",
+      "id": "wp.spec-to-feature",
+      "include_when": "The described capability does not exist yet.",
+      "name": "Specification-to-Feature Construction",
+      "provenance": "adapted",
+      "sources": [
+        "s.swe-bench",
+        "s.agentless",
+        "s.grounded-copilot"
+      ]
+    },
+    {
+      "aliases": [
+        "refactoring",
+        "cleanup",
+        "modularization"
+      ],
+      "definition": "Change internal structure while asserting that observable behavior is unchanged.",
+      "exclude_when": "Any observable output is intended to change.",
+      "id": "wp.behavior-preserving-restructure",
+      "include_when": "The success oracle is that nothing observable changed.",
+      "name": "Behavior-Preserving Restructuring",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-at-google-lsc",
+        "s.parallel-change"
+      ]
+    },
+    {
+      "aliases": [
+        "large-scale change (LSC)",
+        "codemod",
+        "migration sweep"
+      ],
+      "definition": "Apply one verified rewrite rule across many sites that cannot land as a single atomic change.",
+      "exclude_when": "One site, or per-site human judgment is required.",
+      "id": "wp.mechanical-sweep",
+      "include_when": "The rule is decidable per site and site count dominates the cost.",
+      "name": "Mechanical Fleet-Wide Sweep",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-at-google-lsc"
+      ]
+    },
+    {
+      "aliases": [
+        "expand-and-contract",
+        "parallel change",
+        "strangler migration"
+      ],
+      "definition": "Change an interface incompatibly while its consumers keep working throughout.",
+      "exclude_when": "No consumer outside the change's own footprint.",
+      "id": "wp.interface-migration",
+      "include_when": "Consumers exist and cannot be updated atomically.",
+      "name": "Interface Migration Under Live Consumers",
+      "provenance": "borrowed",
+      "sources": [
+        "s.parallel-change",
+        "s.strangler-fig"
+      ]
+    },
+    {
+      "aliases": [
+        "build fix",
+        "dependency bump",
+        "make it run"
+      ],
+      "definition": "Restore a runnable build/test environment when the defect is in the environment, not the program.",
+      "exclude_when": "Program logic is wrong under one toolchain (that is wp.issue-to-patch).",
+      "id": "wp.env-remediation",
+      "include_when": "The failure reproduces with no program logic being wrong.",
+      "name": "Environment and Dependency Remediation",
+      "provenance": "new-synthesis",
+      "sources": [
+        "s.swe-bench-verified",
+        "s.swe-bench"
+      ]
+    },
+    {
+      "aliases": [
+        "test writing",
+        "coverage raise",
+        "property authoring"
+      ],
+      "definition": "Produce the check itself: tests, properties, metamorphic relations or fixtures.",
+      "exclude_when": "A failing test written as a step toward a fix (that is sp.reproduce-first).",
+      "id": "wp.oracle-construction",
+      "include_when": "The delivered artifact is the check.",
+      "name": "Oracle Construction",
+      "provenance": "adapted",
+      "sources": [
+        "s.oracle-problem",
+        "s.metamorphic-survey",
+        "s.codet"
+      ]
+    },
+    {
+      "aliases": [
+        "code archaeology",
+        "investigation",
+        "how does X work"
+      ],
+      "definition": "Answer a question about a system; the deliverable is a cited explanation, not a diff.",
+      "exclude_when": "A diff is required for success.",
+      "id": "wp.comprehension-report",
+      "include_when": "No source mutation is required for success.",
+      "name": "Comprehension and Explanation Report",
+      "provenance": "new-synthesis",
+      "sources": [
+        "s.swe-agent",
+        "s.oracle-problem"
+      ]
+    },
+    {
+      "aliases": [
+        "bug triage",
+        "assignment",
+        "prioritization"
+      ],
+      "definition": "Decide what happens to an item - route, assign, dedupe, defer - without changing the program.",
+      "exclude_when": "The deliverable is the fix itself.",
+      "id": "wp.triage-and-route",
+      "include_when": "The deliverable is a decision about an item.",
+      "name": "Triage and Routing",
+      "provenance": "borrowed",
+      "sources": [
+        "s.who-should-fix"
+      ]
+    },
+    {
+      "aliases": [
+        "code review",
+        "patch-correctness assessment"
+      ],
+      "definition": "Judge a proposed change and its evidence, returning a verdict and findings.",
+      "exclude_when": "The same actor also authored the change.",
+      "id": "wp.change-adjudication",
+      "include_when": "Input is a candidate change plus its evidence.",
+      "name": "Change Adjudication",
+      "provenance": "adapted",
+      "sources": [
+        "s.apr-overfitting",
+        "s.mast"
+      ]
+    },
+    {
+      "aliases": [
+        "optimization",
+        "tuning",
+        "performance-regression hunt"
+      ],
+      "definition": "Move a measured quantity while a behavior pin holds.",
+      "exclude_when": "Accepted on a plausibility argument with no measurement.",
+      "id": "wp.perf-under-invariant",
+      "include_when": "Success requires a measurement against a named baseline.",
+      "name": "Performance Optimization Under Invariant",
+      "provenance": "adapted",
+      "sources": [
+        "s.git-bisect",
+        "s.oracle-problem"
+      ]
+    }
+  ],
+  "promotion_evidence": "Two independent annotators classify a sample of this repository's trajectories using only the published inclusion/exclusion criteria and reach substantial agreement on ax.workload-shape without consulting each other, AND at least one downstream consumer (dispatch classifier, report schema or issue template) reads the wp.*/sp.* identifiers instead of re-deriving its own names.",
+  "provenance_labels": {
+    "adapted": "Concept is cited; the name, boundary or scope is ours.",
+    "borrowed": "Name and concept both come from a cited source and are adopted unchanged.",
+    "new-synthesis": "No cited source names this element; the citation supports only its ingredients."
+  },
+  "report": "docs/research/coding-workload-vocabulary.md",
+  "schema": "fak.workload-vocabulary.v1",
+  "sources": [
+    {
+      "accessed": "2026-08-10",
+      "authors": "W. M. P. van der Aalst, A. H. M. ter Hofstede, B. Kiepuszewski, A. P. Barros",
+      "id": "s.workflow-patterns",
+      "kind": "journal",
+      "title": "Workflow Patterns",
+      "url": "https://doi.org/10.1023/A:1022883727209",
+      "venue": "Distributed and Parallel Databases 14, 5-51",
+      "year": 2003
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "A. Zeller, R. Hildebrandt",
+      "id": "s.delta-debugging",
+      "kind": "journal",
+      "title": "Simplifying and Isolating Failure-Inducing Input",
+      "url": "https://doi.org/10.1109/32.988498",
+      "venue": "IEEE Transactions on Software Engineering 28(2), 183-200",
+      "year": 2002
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "E. T. Barr, M. Harman, P. McMinn, M. Shahbaz, S. Yoo",
+      "id": "s.oracle-problem",
+      "kind": "journal",
+      "title": "The Oracle Problem in Software Testing: A Survey",
+      "url": "https://doi.org/10.1109/TSE.2014.2372785",
+      "venue": "IEEE Transactions on Software Engineering 41(5), 507-525",
+      "year": 2015
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "S. Segura, G. Fraser, A. B. Sanchez, A. Ruiz-Cortes",
+      "id": "s.metamorphic-survey",
+      "kind": "journal",
+      "title": "A Survey on Metamorphic Testing",
+      "url": "https://doi.org/10.1109/TSE.2016.2532875",
+      "venue": "IEEE Transactions on Software Engineering 42(9), 805-824",
+      "year": 2016
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "W. E. Wong, R. Gao, Y. Li, R. Abreu, F. Wotawa",
+      "id": "s.fault-localization-survey",
+      "kind": "journal",
+      "title": "A Survey on Software Fault Localization",
+      "url": "https://doi.org/10.1109/TSE.2016.2521368",
+      "venue": "IEEE Transactions on Software Engineering 42(8), 707-740",
+      "year": 2016
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "M. Monperrus",
+      "id": "s.apr-bibliography",
+      "kind": "journal",
+      "title": "Automatic Software Repair: A Bibliography",
+      "url": "https://doi.org/10.1145/3105906",
+      "venue": "ACM Computing Surveys 51(1), Article 17",
+      "year": 2018
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "E. K. Smith, E. T. Barr, C. Le Goues, Y. Brun",
+      "id": "s.apr-overfitting",
+      "kind": "conference",
+      "title": "Is the cure worse than the disease? Overfitting in automated program repair",
+      "url": "https://doi.org/10.1145/2786805.2786825",
+      "venue": "ESEC/FSE 2015, 532-543",
+      "year": 2015
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "E. T. Barr, Y. Brun, P. Devanbu, M. Harman, F. Sarro",
+      "id": "s.plastic-surgery",
+      "kind": "conference",
+      "title": "The Plastic Surgery Hypothesis",
+      "url": "https://doi.org/10.1145/2635868.2635898",
+      "venue": "FSE 2014, 306-317",
+      "year": 2014
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "J. Anvik, L. Hiew, G. C. Murphy",
+      "id": "s.who-should-fix",
+      "kind": "conference",
+      "title": "Who Should Fix This Bug?",
+      "url": "https://doi.org/10.1145/1134285.1134336",
+      "venue": "ICSE 2006, 361-370",
+      "year": 2006
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, K. Narasimhan",
+      "id": "s.swe-bench",
+      "kind": "conference",
+      "title": "SWE-bench: Can Language Models Resolve Real-World GitHub Issues?",
+      "url": "https://arxiv.org/abs/2310.06770",
+      "venue": "ICLR 2024",
+      "year": 2024
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "OpenAI",
+      "id": "s.swe-bench-verified",
+      "kind": "industry-report",
+      "title": "Introducing SWE-bench Verified",
+      "url": "https://openai.com/index/introducing-swe-bench-verified/",
+      "venue": "OpenAI research blog, 13 August 2024",
+      "year": 2024
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan, O. Press",
+      "id": "s.swe-agent",
+      "kind": "conference",
+      "title": "SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering",
+      "url": "https://arxiv.org/abs/2405.15793",
+      "venue": "NeurIPS 2024",
+      "year": 2024
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "C. S. Xia, Y. Deng, S. Dunn, L. Zhang",
+      "id": "s.agentless",
+      "kind": "preprint",
+      "title": "Agentless: Demystifying LLM-based Software Engineering Agents",
+      "url": "https://arxiv.org/abs/2407.01489",
+      "venue": "arXiv:2407.01489",
+      "year": 2024
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "Y. Zhang, H. Ruan, Z. Fan, A. Roychoudhury",
+      "id": "s.autocoderover",
+      "kind": "conference",
+      "title": "AutoCodeRover: Autonomous Program Improvement",
+      "url": "https://arxiv.org/abs/2404.05427",
+      "venue": "ISSTA 2024",
+      "year": 2024
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, Y. Cao",
+      "id": "s.react",
+      "kind": "conference",
+      "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+      "url": "https://arxiv.org/abs/2210.03629",
+      "venue": "ICLR 2023",
+      "year": 2023
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "N. Shinn, F. Cassano, B. Labash, A. Gopinath, K. Narasimhan, S. Yao",
+      "id": "s.reflexion",
+      "kind": "conference",
+      "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
+      "url": "https://arxiv.org/abs/2303.11366",
+      "venue": "NeurIPS 2023",
+      "year": 2023
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "B. Chen, F. Zhang, A. Nguyen, D. Zan, Z. Lin, J.-G. Lou, W. Chen",
+      "id": "s.codet",
+      "kind": "conference",
+      "title": "CodeT: Code Generation with Generated Tests",
+      "url": "https://arxiv.org/abs/2207.10397",
+      "venue": "ICLR 2023",
+      "year": 2023
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "M. Cemri, M. Z. Pan, S. Yang, et al.",
+      "id": "s.mast",
+      "kind": "preprint",
+      "title": "Why Do Multi-Agent LLM Systems Fail?",
+      "url": "https://arxiv.org/abs/2503.13657",
+      "venue": "arXiv:2503.13657",
+      "year": 2025
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "E. Horvitz",
+      "id": "s.mixed-initiative",
+      "kind": "conference",
+      "title": "Principles of Mixed-Initiative User Interfaces",
+      "url": "https://doi.org/10.1145/302979.303030",
+      "venue": "CHI 1999, 159-166",
+      "year": 1999
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "S. Barke, M. B. James, N. Polikarpova",
+      "id": "s.grounded-copilot",
+      "kind": "journal",
+      "title": "Grounded Copilot: How Programmers Interact with Code-Generating Models",
+      "url": "https://doi.org/10.1145/3586030",
+      "venue": "Proceedings of the ACM on Programming Languages 7(OOPSLA1)",
+      "year": 2023
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "T. Winters, T. Manshreck, H. Wright",
+      "id": "s.swe-at-google-lsc",
+      "kind": "book-chapter",
+      "title": "Software Engineering at Google, Chapter 22: Large-Scale Changes",
+      "url": "https://abseil.io/resources/swe-book/html/ch22.html",
+      "venue": "O'Reilly Media",
+      "year": 2020
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "D. Sato",
+      "id": "s.parallel-change",
+      "kind": "practitioner-reference",
+      "title": "Parallel Change",
+      "url": "https://martinfowler.com/bliki/ParallelChange.html",
+      "venue": "martinfowler.com bliki, 13 May 2014",
+      "year": 2014
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "M. Fowler",
+      "id": "s.strangler-fig",
+      "kind": "practitioner-reference",
+      "title": "Strangler Fig Application",
+      "url": "https://martinfowler.com/bliki/StranglerFigApplication.html",
+      "venue": "martinfowler.com bliki",
+      "year": 2004
+    },
+    {
+      "accessed": "2026-08-10",
+      "authors": "Git project",
+      "id": "s.git-bisect",
+      "kind": "primary-documentation",
+      "title": "git-bisect(1)",
+      "url": "https://git-scm.com/docs/git-bisect",
+      "venue": "Git reference manual",
+      "year": 2026
+    }
+  ],
+  "status": "proposal",
+  "subpatterns": [
+    {
+      "aliases": [
+        "failing-test-first",
+        "repro harness"
+      ],
+      "definition": "Build a deterministic check that fails now and would pass on success, before editing.",
+      "exclude_when": "The claim is about structure or prose, not behavior.",
+      "id": "sp.reproduce-first",
+      "include_when": "A behavioral claim can be executed.",
+      "mechanisms": [
+        "mx.execution-sandbox",
+        "mx.test-runner"
+      ],
+      "name": "Reproduce First",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-bench",
+        "s.apr-bibliography"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.spec-to-feature",
+        "wp.oracle-construction"
+      ]
+    },
+    {
+      "aliases": [
+        "delta debugging",
+        "test-case reduction",
+        "shrinking"
+      ],
+      "definition": "Shrink a failing input while the failure is preserved, down to a 1-minimal remainder.",
+      "exclude_when": "The failure depends on unreproducible external state.",
+      "id": "sp.input-minimization",
+      "include_when": "The failure is input-triggered and re-runnable.",
+      "mechanisms": [
+        "mx.execution-sandbox"
+      ],
+      "name": "Input Minimization",
+      "provenance": "borrowed",
+      "sources": [
+        "s.delta-debugging"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.env-remediation"
+      ]
+    },
+    {
+      "aliases": [
+        "git bisect",
+        "regression hunt"
+      ],
+      "definition": "Binary-search revisions for the first commit at which a monotone property flips.",
+      "exclude_when": "The property is not decidable at an arbitrary revision.",
+      "id": "sp.history-bisection",
+      "include_when": "History is navigable and the property is testable per revision.",
+      "mechanisms": [
+        "mx.vcs-history",
+        "mx.execution-sandbox"
+      ],
+      "name": "History Bisection",
+      "provenance": "borrowed",
+      "sources": [
+        "s.git-bisect"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.perf-under-invariant",
+        "wp.env-remediation"
+      ]
+    },
+    {
+      "aliases": [
+        "spectrum-based fault localization",
+        "suspiciousness ranking"
+      ],
+      "definition": "Rank suspect code by coverage difference between passing and failing runs.",
+      "exclude_when": "No executable suite exists.",
+      "id": "sp.spectrum-localization",
+      "include_when": "A suite with both passing and failing runs exists.",
+      "mechanisms": [
+        "mx.coverage-spectra",
+        "mx.test-runner"
+      ],
+      "name": "Spectrum Localization",
+      "provenance": "borrowed",
+      "sources": [
+        "s.fault-localization-survey",
+        "s.autocoderover"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.perf-under-invariant"
+      ]
+    },
+    {
+      "aliases": [
+        "staged localization",
+        "localization funnel"
+      ],
+      "definition": "Narrow file to class/function to edit site in fixed stages, with no interactive loop.",
+      "exclude_when": "Localization needs feedback from execution.",
+      "id": "sp.hierarchical-localization",
+      "include_when": "The repo is large and each stage is cheap.",
+      "mechanisms": [
+        "mx.program-index"
+      ],
+      "name": "Hierarchical Localization",
+      "provenance": "borrowed",
+      "sources": [
+        "s.agentless"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.comprehension-report"
+      ]
+    },
+    {
+      "aliases": [
+        "AST search",
+        "symbol retrieval"
+      ],
+      "definition": "Retrieve context through program structure (AST/symbols) rather than text similarity.",
+      "exclude_when": "The artifact is prose or opaque data.",
+      "id": "sp.structured-code-search",
+      "include_when": "A parseable program representation is available.",
+      "mechanisms": [
+        "mx.program-index"
+      ],
+      "name": "Structured Code Search",
+      "provenance": "borrowed",
+      "sources": [
+        "s.autocoderover"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.comprehension-report",
+        "wp.spec-to-feature"
+      ]
+    },
+    {
+      "aliases": [
+        "plastic surgery",
+        "donor search",
+        "reuse-first"
+      ],
+      "definition": "Look for existing in-repo code that already implements the change before writing new code.",
+      "exclude_when": "The change is genuinely novel to the repository.",
+      "id": "sp.graft-search",
+      "include_when": "The change plausibly resembles code already present.",
+      "mechanisms": [
+        "mx.program-index"
+      ],
+      "name": "Graft Search",
+      "provenance": "borrowed",
+      "sources": [
+        "s.plastic-surgery"
+      ],
+      "used_by": [
+        "wp.spec-to-feature",
+        "wp.issue-to-patch"
+      ]
+    },
+    {
+      "aliases": [
+        "parallel change",
+        "expand-and-contract"
+      ],
+      "definition": "Add the new interface, move consumers, then delete the old one - never broken in between.",
+      "exclude_when": "A single atomic change is already safe.",
+      "id": "sp.expand-migrate-contract",
+      "include_when": "Consumers cannot be moved atomically.",
+      "mechanisms": [
+        "mx.patch-applier",
+        "mx.test-runner"
+      ],
+      "name": "Expand, Migrate, Contract",
+      "provenance": "borrowed",
+      "sources": [
+        "s.parallel-change"
+      ],
+      "used_by": [
+        "wp.interface-migration",
+        "wp.behavior-preserving-restructure"
+      ]
+    },
+    {
+      "aliases": [
+        "strangler fig",
+        "gradual legacy replacement"
+      ],
+      "definition": "Put a facade in front of the old path, redirect call sites incrementally, then remove the old path.",
+      "exclude_when": "The old component can be switched off at once.",
+      "id": "sp.facade-and-drain",
+      "include_when": "The old component must keep serving during replacement.",
+      "mechanisms": [
+        "mx.patch-applier"
+      ],
+      "name": "Facade and Drain",
+      "provenance": "borrowed",
+      "sources": [
+        "s.strangler-fig"
+      ],
+      "used_by": [
+        "wp.interface-migration",
+        "wp.mechanical-sweep"
+      ]
+    },
+    {
+      "aliases": [
+        "codemod-then-verify",
+        "sharded LSC"
+      ],
+      "definition": "Validate the rewrite rule on a small sample, then apply and verify shard by shard.",
+      "exclude_when": "Sites need individual judgment.",
+      "id": "sp.rule-then-sweep",
+      "include_when": "The rule is mechanical and the sites are many.",
+      "mechanisms": [
+        "mx.patch-applier",
+        "mx.vcs-history",
+        "mx.test-runner"
+      ],
+      "name": "Rule Then Sweep",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-at-google-lsc"
+      ],
+      "used_by": [
+        "wp.mechanical-sweep",
+        "wp.behavior-preserving-restructure"
+      ]
+    },
+    {
+      "aliases": [
+        "characterization test",
+        "golden master",
+        "approval test"
+      ],
+      "definition": "Capture current observable behavior as a check before changing anything.",
+      "exclude_when": "Current behavior is the defect.",
+      "id": "sp.behavior-pinning",
+      "include_when": "Current behavior is trusted and re-observable.",
+      "mechanisms": [
+        "mx.test-runner",
+        "mx.execution-sandbox"
+      ],
+      "name": "Behavior Pinning",
+      "provenance": "adapted",
+      "sources": [
+        "s.oracle-problem"
+      ],
+      "used_by": [
+        "wp.behavior-preserving-restructure",
+        "wp.perf-under-invariant",
+        "wp.mechanical-sweep"
+      ]
+    },
+    {
+      "aliases": [
+        "metamorphic testing",
+        "relational oracle"
+      ],
+      "definition": "Assert a relation between outputs of related inputs when no expected output is known.",
+      "exclude_when": "A concrete expected output is available.",
+      "id": "sp.metamorphic-relation",
+      "include_when": "Expected output is unavailable but a relation is known.",
+      "mechanisms": [
+        "mx.test-runner",
+        "mx.execution-sandbox"
+      ],
+      "name": "Metamorphic Relation",
+      "provenance": "borrowed",
+      "sources": [
+        "s.metamorphic-survey",
+        "s.oracle-problem"
+      ],
+      "used_by": [
+        "wp.oracle-construction",
+        "wp.issue-to-patch"
+      ]
+    },
+    {
+      "aliases": [
+        "sample-and-rank",
+        "dual execution agreement"
+      ],
+      "definition": "Sample many candidates and keep those surviving an executable filter or cross-agreement.",
+      "exclude_when": "Each candidate is expensive or unverifiable.",
+      "id": "sp.generate-and-filter",
+      "include_when": "Candidates are cheap and a filter is executable.",
+      "mechanisms": [
+        "mx.execution-sandbox",
+        "mx.step-budget"
+      ],
+      "name": "Generate and Filter",
+      "provenance": "borrowed",
+      "sources": [
+        "s.codet"
+      ],
+      "used_by": [
+        "wp.spec-to-feature",
+        "wp.issue-to-patch"
+      ]
+    },
+    {
+      "aliases": [
+        "agent loop",
+        "reason-act loop",
+        "self-debug"
+      ],
+      "definition": "Run, read the actual observation, patch, repeat under an explicit step budget.",
+      "exclude_when": "Feedback is absent, delayed, or systematically misleading.",
+      "id": "sp.execute-observe-repair",
+      "include_when": "Execution feedback is available and cheap.",
+      "mechanisms": [
+        "mx.execution-sandbox",
+        "mx.patch-applier",
+        "mx.step-budget"
+      ],
+      "name": "Execute, Observe, Repair",
+      "provenance": "borrowed",
+      "sources": [
+        "s.react",
+        "s.swe-agent"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.env-remediation",
+        "wp.spec-to-feature"
+      ]
+    },
+    {
+      "aliases": [
+        "reflection memory",
+        "verbal reinforcement"
+      ],
+      "definition": "Carry a written failure summary into the next attempt instead of re-sampling blind.",
+      "exclude_when": "The failure signal cannot be attributed to a step.",
+      "id": "sp.verbal-retrospective",
+      "include_when": "Attempts are repeatable and failures are describable.",
+      "mechanisms": [
+        "mx.step-budget"
+      ],
+      "name": "Verbal Retrospective",
+      "provenance": "borrowed",
+      "sources": [
+        "s.reflexion"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.spec-to-feature"
+      ]
+    },
+    {
+      "aliases": [
+        "blind review",
+        "judge panel"
+      ],
+      "definition": "A verifier that did not author the change judges it, with author-side rationale withheld.",
+      "exclude_when": "The available check is a total decidable oracle.",
+      "id": "sp.independent-adjudication",
+      "include_when": "The change's correctness is contestable.",
+      "mechanisms": [
+        "mx.judge-channel"
+      ],
+      "name": "Independent Adjudication",
+      "provenance": "adapted",
+      "sources": [
+        "s.mast",
+        "s.apr-overfitting"
+      ],
+      "used_by": [
+        "wp.change-adjudication",
+        "wp.issue-to-patch"
+      ]
+    },
+    {
+      "aliases": [
+        "held-out tests",
+        "unseen regression suite"
+      ],
+      "definition": "Reserve a check that the producing step never saw and never optimized against.",
+      "exclude_when": "Every available check must guide production.",
+      "id": "sp.held-out-oracle",
+      "include_when": "A check can be withheld without blocking production.",
+      "mechanisms": [
+        "mx.test-runner"
+      ],
+      "name": "Held-Out Oracle",
+      "provenance": "adapted",
+      "sources": [
+        "s.apr-overfitting",
+        "s.swe-bench-verified"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.change-adjudication"
+      ]
+    },
+    {
+      "aliases": [
+        "agent-computer interface design",
+        "harness design"
+      ],
+      "definition": "Change the tools and affordances the agent acts through, not the prompt or the model.",
+      "exclude_when": "Failures trace to missing knowledge.",
+      "id": "sp.interface-shaping",
+      "include_when": "Failures trace to action/observation format.",
+      "mechanisms": [
+        "mx.execution-sandbox",
+        "mx.program-index"
+      ],
+      "name": "Interface Shaping",
+      "provenance": "borrowed",
+      "sources": [
+        "s.swe-agent"
+      ],
+      "used_by": [
+        "wp.issue-to-patch",
+        "wp.comprehension-report",
+        "wp.mechanical-sweep"
+      ]
+    },
+    {
+      "aliases": [
+        "write lease",
+        "lane scoping"
+      ],
+      "definition": "Declare the write footprint before editing so concurrent work provably cannot collide.",
+      "exclude_when": "A single serialized writer.",
+      "id": "sp.blast-radius-scoping",
+      "include_when": "More than one worker can write the tree.",
+      "mechanisms": [
+        "mx.write-lease"
+      ],
+      "name": "Blast-Radius Scoping",
+      "provenance": "new-synthesis",
+      "sources": [
+        "s.mast",
+        "s.swe-at-google-lsc"
+      ],
+      "used_by": [
+        "wp.mechanical-sweep",
+        "wp.interface-migration"
+      ]
+    },
+    {
+      "aliases": [
+        "mixed-initiative handoff",
+        "human-in-the-loop gate"
+      ],
+      "definition": "Hand control to a human at a named decision boundary, not at a step-count limit.",
+      "exclude_when": "The decision is cheap and reversible.",
+      "id": "sp.escalation-checkpoint",
+      "include_when": "The decision's cost is asymmetric and its outcome uncertain.",
+      "mechanisms": [
+        "mx.judge-channel"
+      ],
+      "name": "Escalation Checkpoint",
+      "provenance": "borrowed",
+      "sources": [
+        "s.mixed-initiative"
+      ],
+      "used_by": [
+        "wp.change-adjudication",
+        "wp.triage-and-route",
+        "wp.interface-migration"
+      ]
+    },
+    {
+      "aliases": [
+        "provenance binding",
+        "file:line citation"
+      ],
+      "definition": "Bind every assertion to a resolvable pointer that is checked apart from the assertion.",
+      "exclude_when": "The deliverable is executable and self-checking.",
+      "id": "sp.citation-binding",
+      "include_when": "The deliverable is prose or a report.",
+      "mechanisms": [
+        "mx.reference-resolver"
+      ],
+      "name": "Citation Binding",
+      "provenance": "new-synthesis",
+      "sources": [
+        "s.oracle-problem",
+        "s.mast"
+      ],
+      "used_by": [
+        "wp.comprehension-report",
+        "wp.triage-and-route",
+        "wp.change-adjudication"
+      ]
+    },
+    {
+      "aliases": [
+        "explore-then-accelerate",
+        "option sampling"
+      ],
+      "definition": "Spend a bounded budget in explicit explore mode before committing to one option.",
+      "exclude_when": "The next step is already known (accelerate mode).",
+      "id": "sp.budgeted-exploration",
+      "include_when": "The approach is genuinely unknown.",
+      "mechanisms": [
+        "mx.step-budget"
+      ],
+      "name": "Budgeted Exploration",
+      "provenance": "borrowed",
+      "sources": [
+        "s.grounded-copilot"
+      ],
+      "used_by": [
+        "wp.spec-to-feature",
+        "wp.comprehension-report"
+      ]
+    }
+  ],
+  "verification_method": "Title, authors, venue, year and identifier of each source checked on 2026-08-10 against indexed publisher/preprint metadata and abstract text. Direct page fetch was unavailable (WebFetch refused at the host capability floor), so verification granularity is metadata and abstract, not full text.",
+  "version": "0.1.0",
+  "witnessed_envelope": "The cited corpus as of 2026-08-10. A defensible vocabulary proposal, not a claim of field-wide consensus and not a maintained fak contract."
+}
