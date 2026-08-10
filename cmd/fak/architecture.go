@@ -17,6 +17,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("architecture", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("workspace", "", "workspace root (defaults to current directory)")
+	baseline := fs.String("baseline-workspace", "", "compare a baseline workspace to --workspace/current")
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
@@ -25,6 +26,14 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
+		return 2
+	}
+	if *usage && *baseline != "" {
+		fmt.Fprintln(stderr, "fak architecture: --usage cannot be combined with --baseline-workspace")
+		return 2
+	}
+	if *leaf != "" && *baseline != "" {
+		fmt.Fprintln(stderr, "fak architecture: --leaf cannot be combined with --baseline-workspace")
 		return 2
 	}
 	if *usage {
@@ -41,6 +50,19 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		*root = cwd
+	}
+	if *baseline != "" {
+		before, err := archreport.Analyze(*baseline, "")
+		if err != nil {
+			fmt.Fprintf(stderr, "fak architecture: baseline: %v\n", err)
+			return 1
+		}
+		after, err := archreport.Analyze(*root, "")
+		if err != nil {
+			fmt.Fprintf(stderr, "fak architecture: workspace: %v\n", err)
+			return 1
+		}
+		return writeArchitectureDiff(stdout, stderr, archreport.Diff(before, after), *jsonOut)
 	}
 	usagePath, usagePathErr := archreport.UsagePath()
 	mode, format := "full", "text"
@@ -137,6 +159,41 @@ func runArchitectureUsage(stdout, stderr io.Writer, jsonOut bool) int {
 	}
 	for _, week := range weeks {
 		fmt.Fprintf(stdout, "%s invocations=%d full=%d scoped=%d text=%d json=%d ok=%d error=%d\n", week.Week, week.Invocations, week.Full, week.Scoped, week.Text, week.JSON, week.OK, week.Error)
+	}
+	return 0
+}
+
+func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff, jsonOut bool) int {
+	if jsonOut {
+		raw, err := diff.JSON()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak architecture: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(raw))
+		return 0
+	}
+	fmt.Fprintf(stdout, "architecture diff: %d change(s)\n", diff.Changes())
+	for _, leaf := range diff.AddedLeaves {
+		fmt.Fprintf(stdout, "  + leaf %s\n", leaf)
+	}
+	for _, leaf := range diff.RemovedLeaves {
+		fmt.Fprintf(stdout, "  - leaf %s\n", leaf)
+	}
+	for _, change := range diff.TierChanges {
+		fmt.Fprintf(stdout, "  ~ tier %s %s(%d) -> %s(%d)\n", change.Leaf, change.BeforeName, change.Before, change.AfterName, change.After)
+	}
+	for _, edge := range diff.AddedEdges {
+		fmt.Fprintf(stdout, "  + edge %s -> %s\n", edge.From, edge.To)
+	}
+	for _, edge := range diff.RemovedEdges {
+		fmt.Fprintf(stdout, "  - edge %s -> %s\n", edge.From, edge.To)
+	}
+	for _, edge := range diff.IntroducedViolations {
+		fmt.Fprintf(stdout, "  ! introduced violation %s\n", edge)
+	}
+	for _, edge := range diff.ResolvedViolations {
+		fmt.Fprintf(stdout, "  resolved violation %s\n", edge)
 	}
 	return 0
 }

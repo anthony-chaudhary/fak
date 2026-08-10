@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -104,5 +105,45 @@ var tierName=[]string{"root","primitive"}
 	}
 	if strings.Contains(string(raw), root) || strings.Contains(string(raw), `"leaf"`) {
 		t.Fatalf("usage ledger leaked workspace or leaf: %s", raw)
+	}
+}
+
+func TestArchitectureBaselineWorkspaceDiff(t *testing.T) {
+	before, after := t.TempDir(), t.TempDir()
+	mustWriteArchitectureFile(t, before, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"abi":0,"leaf":1}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, before, "internal/abi/abi.go", "package abi\n")
+	mustWriteArchitectureFile(t, before, "internal/leaf/leaf.go", "package leaf\n")
+	mustWriteArchitectureFile(t, after, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"abi":0,"leaf":2,"added":2}
+var tierName=[]string{"root","primitive","foundation-composite"}
+`)
+	mustWriteArchitectureFile(t, after, "internal/abi/abi.go", "package abi\n")
+	mustWriteArchitectureFile(t, after, "internal/leaf/leaf.go", `package leaf
+import _ "github.com/anthony-chaudhary/fak/internal/added"
+`)
+	mustWriteArchitectureFile(t, after, "internal/added/added.go", "package added\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--baseline-workspace", before, "--workspace", after, "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var got archreport.ReportDiff
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != archreport.DiffSchema || got.Changes() != 3 || !reflect.DeepEqual(got.AddedLeaves, []string{"added"}) || len(got.TierChanges) != 1 || !reflect.DeepEqual(got.AddedEdges, []archreport.EdgeChange{{From: "leaf", To: "added"}}) {
+		t.Fatalf("diff=%+v", got)
+	}
+}
+
+func TestWriteArchitectureDiffEmpty(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, archreport.ReportDiff{Schema: archreport.DiffSchema}, false); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if out.String() != "architecture diff: 0 change(s)\n" {
+		t.Fatalf("output=%q", out.String())
 	}
 }
