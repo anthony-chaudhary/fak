@@ -3,6 +3,7 @@ package archreport
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 )
@@ -60,6 +61,19 @@ type BlastImpact struct {
 	Path      []string `json:"path"`
 }
 
+type LateralArticulationPointChange struct {
+	Tier                int        `json:"tier"`
+	TierName            string     `json:"tier_name"`
+	Name                string     `json:"name"`
+	BeforeFragments     [][]string `json:"before_fragments"`
+	AfterFragments      [][]string `json:"after_fragments"`
+	BeforeFragmentCount int        `json:"before_fragment_count"`
+	AfterFragmentCount  int        `json:"after_fragment_count"`
+	BeforeCouplingPairs int        `json:"before_coupling_pairs"`
+	AfterCouplingPairs  int        `json:"after_coupling_pairs"`
+	Delta               int        `json:"delta"`
+}
+
 type LateralBridgeChange struct {
 	Tier                int      `json:"tier"`
 	TierName            string   `json:"tier_name"`
@@ -92,33 +106,36 @@ type BlastPathChange struct {
 }
 
 type ReportDiff struct {
-	Schema                     string                    `json:"schema"`
-	Verdict                    string                    `json:"verdict"`
-	AddedLeaves                []string                  `json:"added_leaves,omitempty"`
-	RemovedLeaves              []string                  `json:"removed_leaves,omitempty"`
-	TierChanges                []TierChange              `json:"tier_changes,omitempty"`
-	AddedEdges                 []EdgeChange              `json:"added_edges,omitempty"`
-	RemovedEdges               []EdgeChange              `json:"removed_edges,omitempty"`
-	IntroducedTypedEdges       []ArchitectureEdge        `json:"introduced_typed_edges,omitempty"`
-	ResolvedTypedEdges         []ArchitectureEdge        `json:"resolved_typed_edges,omitempty"`
-	IntroducedLateralCouplings []LateralCoupling         `json:"introduced_lateral_couplings,omitempty"`
-	ResolvedLateralCouplings   []LateralCoupling         `json:"resolved_lateral_couplings,omitempty"`
-	IntroducedLateralBridges   []LateralBridge           `json:"introduced_lateral_bridges,omitempty"`
-	ResolvedLateralBridges     []LateralBridge           `json:"resolved_lateral_bridges,omitempty"`
-	LateralBridgeChanges       []LateralBridgeChange     `json:"lateral_bridge_changes,omitempty"`
-	FanInChanges               []FanInChange             `json:"fan_in_changes,omitempty"`
-	BlastRadiusChanges         []BlastRadiusChange       `json:"blast_radius_changes,omitempty"`
-	IntroducedBlastImpacts     []BlastImpact             `json:"introduced_blast_impacts,omitempty"`
-	ResolvedBlastImpacts       []BlastImpact             `json:"resolved_blast_impacts,omitempty"`
-	BlastPathChanges           []BlastPathChange         `json:"blast_path_changes,omitempty"`
-	TierGapChanges             []TierGapChange           `json:"tier_gap_changes,omitempty"`
-	IntroducedViolationEdges   []ViolationEdge           `json:"introduced_violation_edges,omitempty"`
-	ResolvedViolationEdges     []ViolationEdge           `json:"resolved_violation_edges,omitempty"`
-	ViolationDistanceChanges   []ViolationDistanceChange `json:"violation_distance_changes,omitempty"`
-	IntroducedViolations       []string                  `json:"introduced_violations,omitempty"` // Compatibility projection.
-	ResolvedViolations         []string                  `json:"resolved_violations,omitempty"`   // Compatibility projection.
-	IntroducedDiagnostics      []Diagnostic              `json:"introduced_diagnostics,omitempty"`
-	ResolvedDiagnostics        []Diagnostic              `json:"resolved_diagnostics,omitempty"`
+	Schema                              string                           `json:"schema"`
+	Verdict                             string                           `json:"verdict"`
+	AddedLeaves                         []string                         `json:"added_leaves,omitempty"`
+	RemovedLeaves                       []string                         `json:"removed_leaves,omitempty"`
+	TierChanges                         []TierChange                     `json:"tier_changes,omitempty"`
+	AddedEdges                          []EdgeChange                     `json:"added_edges,omitempty"`
+	RemovedEdges                        []EdgeChange                     `json:"removed_edges,omitempty"`
+	IntroducedTypedEdges                []ArchitectureEdge               `json:"introduced_typed_edges,omitempty"`
+	ResolvedTypedEdges                  []ArchitectureEdge               `json:"resolved_typed_edges,omitempty"`
+	IntroducedLateralCouplings          []LateralCoupling                `json:"introduced_lateral_couplings,omitempty"`
+	ResolvedLateralCouplings            []LateralCoupling                `json:"resolved_lateral_couplings,omitempty"`
+	IntroducedLateralBridges            []LateralBridge                  `json:"introduced_lateral_bridges,omitempty"`
+	ResolvedLateralBridges              []LateralBridge                  `json:"resolved_lateral_bridges,omitempty"`
+	LateralBridgeChanges                []LateralBridgeChange            `json:"lateral_bridge_changes,omitempty"`
+	IntroducedLateralArticulationPoints []LateralArticulationPoint       `json:"introduced_lateral_articulation_points,omitempty"`
+	ResolvedLateralArticulationPoints   []LateralArticulationPoint       `json:"resolved_lateral_articulation_points,omitempty"`
+	LateralArticulationPointChanges     []LateralArticulationPointChange `json:"lateral_articulation_point_changes,omitempty"`
+	FanInChanges                        []FanInChange                    `json:"fan_in_changes,omitempty"`
+	BlastRadiusChanges                  []BlastRadiusChange              `json:"blast_radius_changes,omitempty"`
+	IntroducedBlastImpacts              []BlastImpact                    `json:"introduced_blast_impacts,omitempty"`
+	ResolvedBlastImpacts                []BlastImpact                    `json:"resolved_blast_impacts,omitempty"`
+	BlastPathChanges                    []BlastPathChange                `json:"blast_path_changes,omitempty"`
+	TierGapChanges                      []TierGapChange                  `json:"tier_gap_changes,omitempty"`
+	IntroducedViolationEdges            []ViolationEdge                  `json:"introduced_violation_edges,omitempty"`
+	ResolvedViolationEdges              []ViolationEdge                  `json:"resolved_violation_edges,omitempty"`
+	ViolationDistanceChanges            []ViolationDistanceChange        `json:"violation_distance_changes,omitempty"`
+	IntroducedViolations                []string                         `json:"introduced_violations,omitempty"` // Compatibility projection.
+	ResolvedViolations                  []string                         `json:"resolved_violations,omitempty"`   // Compatibility projection.
+	IntroducedDiagnostics               []Diagnostic                     `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics                 []Diagnostic                     `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -186,6 +203,19 @@ func Diff(before, after Report) ReportDiff {
 	for key, bridge := range beforeBridges {
 		if _, ok := afterBridges[key]; !ok {
 			out.ResolvedLateralBridges = append(out.ResolvedLateralBridges, bridge)
+		}
+	}
+	beforePoints, afterPoints := lateralArticulationPointSet(before), lateralArticulationPointSet(after)
+	for key, point := range afterPoints {
+		if beforePoint, ok := beforePoints[key]; !ok {
+			out.IntroducedLateralArticulationPoints = append(out.IntroducedLateralArticulationPoints, point)
+		} else if beforePoint.CouplingPairs != point.CouplingPairs || beforePoint.FragmentCount != point.FragmentCount || !reflect.DeepEqual(beforePoint.Fragments, point.Fragments) {
+			out.LateralArticulationPointChanges = append(out.LateralArticulationPointChanges, LateralArticulationPointChange{Tier: point.Tier, TierName: point.TierName, Name: point.Name, BeforeFragments: beforePoint.Fragments, AfterFragments: point.Fragments, BeforeFragmentCount: beforePoint.FragmentCount, AfterFragmentCount: point.FragmentCount, BeforeCouplingPairs: beforePoint.CouplingPairs, AfterCouplingPairs: point.CouplingPairs, Delta: point.CouplingPairs - beforePoint.CouplingPairs})
+		}
+	}
+	for key, point := range beforePoints {
+		if _, ok := afterPoints[key]; !ok {
+			out.ResolvedLateralArticulationPoints = append(out.ResolvedLateralArticulationPoints, point)
 		}
 	}
 	for name, a := range afterLeaves {
@@ -269,6 +299,9 @@ func Diff(before, after Report) ReportDiff {
 	sortLateralBridges(out.IntroducedLateralBridges)
 	sortLateralBridges(out.ResolvedLateralBridges)
 	sortLateralBridgeChanges(out.LateralBridgeChanges)
+	sortLateralArticulationPoints(out.IntroducedLateralArticulationPoints)
+	sortLateralArticulationPoints(out.ResolvedLateralArticulationPoints)
+	sortLateralArticulationPointChanges(out.LateralArticulationPointChanges)
 	sortFanInChanges(out.FanInChanges)
 	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortBlastImpacts(out.IntroducedBlastImpacts)
@@ -277,7 +310,7 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -301,6 +334,57 @@ func blastImpactSet(source string, leaf Leaf) map[string]BlastImpact {
 		out[source+"\x00"+path.Dependent] = impact
 	}
 	return out
+}
+
+func lateralArticulationPointSet(r Report) map[string]LateralArticulationPoint {
+	out := make(map[string]LateralArticulationPoint, len(r.LateralArticulationPoints))
+	for _, point := range r.LateralArticulationPoints {
+		out[fmt.Sprintf("%d\x00%s", point.Tier, point.Name)] = point
+	}
+	return out
+}
+func sortLateralArticulationPoints(points []LateralArticulationPoint) {
+	sort.Slice(points, func(i, j int) bool {
+		if points[i].CouplingPairs != points[j].CouplingPairs {
+			return points[i].CouplingPairs > points[j].CouplingPairs
+		}
+		if points[i].FragmentCount != points[j].FragmentCount {
+			return points[i].FragmentCount > points[j].FragmentCount
+		}
+		if points[i].Tier != points[j].Tier {
+			return points[i].Tier < points[j].Tier
+		}
+		return points[i].Name < points[j].Name
+	})
+}
+func sortLateralArticulationPointChanges(changes []LateralArticulationPointChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if (changes[i].Delta > 0) != (changes[j].Delta > 0) {
+			return changes[i].Delta > 0
+		}
+		im, jm := changes[i].Delta, changes[j].Delta
+		if im < 0 {
+			im = -im
+		}
+		if jm < 0 {
+			jm = -jm
+		}
+		if im != jm {
+			return im > jm
+		}
+		if changes[i].Tier != changes[j].Tier {
+			return changes[i].Tier < changes[j].Tier
+		}
+		return changes[i].Name < changes[j].Name
+	})
+}
+func hasIncreasedLateralArticulationPointImpact(changes []LateralArticulationPointChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func lateralBridgeSet(r Report) map[string]LateralBridge {

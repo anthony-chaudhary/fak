@@ -6,6 +6,29 @@ import (
 	"testing"
 )
 
+func TestDiffLateralArticulationPointChangesPreserveIdentityAndImpact(t *testing.T) {
+	introduced := LateralArticulationPoint{Tier: 2, TierName: "foundation-composite", Name: "new", Fragments: [][]string{{"a"}, {"b", "c"}}, FragmentCount: 2, CouplingPairs: 2}
+	resolved := LateralArticulationPoint{Tier: 2, TierName: "foundation-composite", Name: "gone", FragmentCount: 2, CouplingPairs: 1}
+	beforeStable := LateralArticulationPoint{Tier: 3, TierName: "mechanism", Name: "seam", Fragments: [][]string{{"x"}, {"y"}}, FragmentCount: 2, CouplingPairs: 1}
+	afterStable := LateralArticulationPoint{Tier: 3, TierName: "mechanism", Name: "seam", Fragments: [][]string{{"x", "z"}, {"y", "q"}}, FragmentCount: 2, CouplingPairs: 4}
+	diff := Diff(Report{LateralArticulationPoints: []LateralArticulationPoint{resolved, beforeStable}}, Report{LateralArticulationPoints: []LateralArticulationPoint{introduced, afterStable}})
+	if !reflect.DeepEqual(diff.IntroducedLateralArticulationPoints, []LateralArticulationPoint{introduced}) || !reflect.DeepEqual(diff.ResolvedLateralArticulationPoints, []LateralArticulationPoint{resolved}) {
+		t.Fatalf("diff=%+v", diff)
+	}
+	want := LateralArticulationPointChange{Tier: 3, TierName: "mechanism", Name: "seam", BeforeFragments: beforeStable.Fragments, AfterFragments: afterStable.Fragments, BeforeFragmentCount: 2, AfterFragmentCount: 2, BeforeCouplingPairs: 1, AfterCouplingPairs: 4, Delta: 3}
+	if !reflect.DeepEqual(diff.LateralArticulationPointChanges, []LateralArticulationPointChange{want}) || diff.Verdict != "regression" || diff.Changes() != 0 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+func TestDiffResolvedAndDecreasedLateralArticulationPointsRemainClean(t *testing.T) {
+	before := Report{LateralArticulationPoints: []LateralArticulationPoint{{Tier: 2, Name: "seam", CouplingPairs: 4, FragmentCount: 2, Fragments: [][]string{{"a", "b"}, {"c", "d"}}}, {Tier: 2, Name: "gone", CouplingPairs: 1}}}
+	after := Report{LateralArticulationPoints: []LateralArticulationPoint{{Tier: 2, Name: "seam", CouplingPairs: 1, FragmentCount: 2, Fragments: [][]string{{"a"}, {"c"}}}}}
+	diff := Diff(before, after)
+	if diff.Verdict != "clean" || len(diff.ResolvedLateralArticulationPoints) != 1 || len(diff.LateralArticulationPointChanges) != 1 || diff.LateralArticulationPointChanges[0].Delta != -3 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffLateralBridgeChangesPreserveIdentityAndImpact(t *testing.T) {
 	introduced := LateralBridge{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", CouplingPairs: 6, LeftSide: []string{"a", "x"}, RightSide: []string{"b", "y", "z"}}
 	resolved := LateralBridge{Tier: 2, TierName: "foundation-composite", Left: "c", Right: "d", CouplingPairs: 2}

@@ -22,7 +22,7 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 	leaf := fs.String("leaf", "", "report one internal leaf")
 	jsonOut := fs.Bool("json", false, "emit fak-architecture/1 JSON")
 	usage := fs.Bool("usage", false, "fold architecture invocations by ISO week")
-	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length|introduced-lateral-edges|introduced-lateral-couplings|introduced-or-increased-lateral-bridges")
+	failOn := fs.String("fail-on", "", "comparison gate: introduced-violations|introduced-diagnostics|increased-tier-gap|increased-violation-distance|increased-blast-radius|introduced-blast-impacts|increased-blast-path-length|introduced-lateral-edges|introduced-lateral-couplings|introduced-or-increased-lateral-bridges|introduced-or-increased-lateral-articulation-points")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -30,8 +30,8 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak architecture: pass no positional arguments")
 		return 2
 	}
-	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" && *failOn != "introduced-lateral-edges" && *failOn != "introduced-lateral-couplings" && *failOn != "introduced-or-increased-lateral-bridges" {
-		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, or introduced-or-increased-lateral-bridges)\n", *failOn)
+	if *failOn != "" && *failOn != "introduced-violations" && *failOn != "introduced-diagnostics" && *failOn != "increased-tier-gap" && *failOn != "increased-violation-distance" && *failOn != "increased-blast-radius" && *failOn != "introduced-blast-impacts" && *failOn != "increased-blast-path-length" && *failOn != "introduced-lateral-edges" && *failOn != "introduced-lateral-couplings" && *failOn != "introduced-or-increased-lateral-bridges" && *failOn != "introduced-or-increased-lateral-articulation-points" {
+		fmt.Fprintf(stderr, "fak architecture: invalid --fail-on %q (want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, or introduced-or-increased-lateral-articulation-points)\n", *failOn)
 		return 2
 	}
 	if *failOn != "" && *baseline == "" {
@@ -282,6 +282,15 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, change := range diff.LateralBridgeChanges {
 		fmt.Fprintf(stdout, "  ~ lateral-bridge %s--%s coupling-pairs %d -> %d (%+d)\n", change.Left, change.Right, change.BeforeCouplingPairs, change.AfterCouplingPairs, change.Delta)
 	}
+	for _, point := range diff.IntroducedLateralArticulationPoints {
+		fmt.Fprintf(stdout, "  ! introduced lateral-articulation-point %s tier=%s(%d) fragments=%d coupling-pairs=%d\n", point.Name, point.TierName, point.Tier, point.FragmentCount, point.CouplingPairs)
+	}
+	for _, point := range diff.ResolvedLateralArticulationPoints {
+		fmt.Fprintf(stdout, "  resolved lateral-articulation-point %s tier=%s(%d) fragments=%d coupling-pairs=%d\n", point.Name, point.TierName, point.Tier, point.FragmentCount, point.CouplingPairs)
+	}
+	for _, change := range diff.LateralArticulationPointChanges {
+		fmt.Fprintf(stdout, "  ~ lateral-articulation-point %s fragments %d -> %d coupling-pairs %d -> %d (%+d)\n", change.Name, change.BeforeFragmentCount, change.AfterFragmentCount, change.BeforeCouplingPairs, change.AfterCouplingPairs, change.Delta)
+	}
 	for _, change := range diff.TierGapChanges {
 		fmt.Fprintf(stdout, "  ~ tier-gap %s floor %d -> %d, gap %d -> %d (%+d)\n", change.Leaf, change.BeforeFloor, change.AfterFloor, change.BeforeGap, change.AfterGap, change.Delta)
 	}
@@ -334,6 +343,8 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 			fmt.Fprintln(stdout, "  remediation: remove the lateral bridge that joined the pair or extract their shared seam downward; comparison is baseline -> workspace")
 		} else if failOn == "introduced-or-increased-lateral-bridges" {
 			fmt.Fprintln(stdout, "  remediation: remove the articulation bridge or extract the shared seam downward to reduce induced coupling; comparison is baseline -> workspace")
+		} else if failOn == "introduced-or-increased-lateral-articulation-points" {
+			fmt.Fprintln(stdout, "  remediation: remove the package convergence seam or extract its shared responsibility downward; comparison is baseline -> workspace")
 		} else {
 			fmt.Fprintln(stdout, "  remediation: restore the prior endpoint tiers or remove/invert the upward edge; comparison is baseline -> workspace")
 		}
@@ -392,6 +403,16 @@ func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 			return true
 		}
 		for _, change := range diff.LateralBridgeChanges {
+			if change.Delta > 0 {
+				return true
+			}
+		}
+		return false
+	case "introduced-or-increased-lateral-articulation-points":
+		if len(diff.IntroducedLateralArticulationPoints) > 0 {
+			return true
+		}
+		for _, change := range diff.LateralArticulationPointChanges {
 			if change.Delta > 0 {
 				return true
 			}

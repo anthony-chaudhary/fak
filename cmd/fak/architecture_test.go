@@ -529,9 +529,29 @@ func TestArchitectureLateralBridgePolicyIgnoresResolvedAndDecreased(t *testing.T
 	}
 }
 
+func TestArchitectureLateralArticulationPointPolicyGatesIntroducedAndIncreased(t *testing.T) {
+	tests := []archreport.ReportDiff{{IntroducedLateralArticulationPoints: []archreport.LateralArticulationPoint{{Name: "new", CouplingPairs: 3}}}, {LateralArticulationPointChanges: []archreport.LateralArticulationPointChange{{Name: "seam", BeforeCouplingPairs: 1, AfterCouplingPairs: 4, Delta: 3}}}}
+	for _, diff := range tests {
+		var out, errOut bytes.Buffer
+		if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-or-increased-lateral-articulation-points"); code != 3 {
+			t.Fatalf("code=%d output=%s", code, out.String())
+		}
+		if !strings.Contains(out.String(), "remove the package convergence seam") {
+			t.Fatalf("output=%q", out.String())
+		}
+	}
+}
+func TestArchitectureLateralArticulationPointPolicyIgnoresResolvedAndDecreased(t *testing.T) {
+	diff := archreport.ReportDiff{ResolvedLateralArticulationPoints: []archreport.LateralArticulationPoint{{Name: "gone"}}, LateralArticulationPointChanges: []archreport.LateralArticulationPointChange{{Name: "seam", Delta: -2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-or-increased-lateral-articulation-points"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, or introduced-or-increased-lateral-bridges") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, or introduced-or-increased-lateral-articulation-points") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
