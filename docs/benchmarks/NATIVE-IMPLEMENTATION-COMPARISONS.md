@@ -30,6 +30,7 @@ The command discovers every production Go leaf directly beneath `internal/` and 
 | tool filtering | `internal/gateway/mcp_defer.go` | all schemas, provider cache enabled | retrieval-based selection (ToolRAG class) | task success, tool recall, input tokens, TTFT, total cost |
 | context compression | `internal/headroom/native.go` | full history, provider cache enabled | LongLLMLingua | task success, retained-fact recall, input tokens, latency, total cost |
 | prefix KV reuse | `internal/radixkv/radixkv.go` | prefix caching disabled | SGLang RadixAttention, plus `fak + llm-d` | output equivalence, prefix hit rate, TTFT, throughput, KV bytes, total cost |
+| model routing | `internal/modelroute/modelroute.go` | fixed strongest model | RouteLLM, plus separate `fak + LiteLLM`, `fak + OpenRouter`, and `fak + Portkey` arms | task success, route quality, latency, tokens, RSS, total cost |
 | tokenization | `internal/tokenizer/tokenizer.go` | exhaustive adjacent-pair BPE | llama.cpp tokenizer, plus `fak + Hugging Face tokenizers` | exact token IDs, decode round-trip, throughput, latency, RSS, initialization, total cost |
 
 All currently have missing witnesses, which is why `--check` fails. The registry is in `internal/nativebench`; new native capabilities must be added there with their alternatives before their benchmark obligation can be considered covered.

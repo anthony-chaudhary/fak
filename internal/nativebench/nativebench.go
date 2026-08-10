@@ -78,6 +78,11 @@ type Report struct {
 
 var leafClassifications = []LeafClassification{
 	{
+		Leaf: "internal/modelroute", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"model_routing"},
+		Reason:       "modelroute implements per-aspect selection and ensembles plus manifest validation and live reload; routing is contracted separately",
+	},
+	{
 		Leaf: "internal/gateway", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"tool_filtering"},
 		Reason:       "gateway hosts several wire/runtime capabilities; tool filtering is one separately contracted capability",
@@ -148,6 +153,20 @@ var leafClassifications = []LeafClassification{
 }
 
 var contracts = []Contract{
+	{
+		Capability: "model_routing",
+		NativePath: "internal/modelroute/modelroute.go",
+		Workload:   "same prompts, candidate models, task-quality grader, concurrency, warmup, and provider conditions across every arm",
+		Metrics:    []string{"task_success", "route_quality", "latency_ms", "input_tokens", "output_tokens", "peak_rss_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "fixed strongest model (tuned no-routing baseline)", Class: TunedBaseline, Source: "internal/modelroute/compare.go"},
+			{Name: "RouteLLM", Class: NextBest, Source: "https://github.com/lm-sys/RouteLLM"},
+			{Name: "fak + LiteLLM Router", Class: FirstClassIntegration, Integration: "litellm", Source: "docs/integrations/litellm.md"},
+			{Name: "fak + OpenRouter routing", Class: FirstClassIntegration, Integration: "openrouter", Source: "docs/integrations/openrouter.md"},
+			{Name: "fak + Portkey router", Class: FirstClassIntegration, Integration: "portkey", Source: "docs/integrations/portkey.md"},
+		},
+		Integrations: []string{"litellm", "openrouter", "portkey"},
+	},
 	{
 		Capability: "tokenization",
 		NativePath: "internal/tokenizer/tokenizer.go",
