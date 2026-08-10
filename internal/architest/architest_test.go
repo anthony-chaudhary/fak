@@ -729,6 +729,38 @@ func TestEveryPackageDeclaresTier(t *testing.T) {
 // into a higher one â€” fix the dependency direction (usually: invert it through a
 // registration seam, or move the shared type down into the foundation), do not relax the
 // tier table to admit it.
+func staleTierDeclarations(report archreport.Report) []archreport.Diagnostic {
+	var stale []archreport.Diagnostic
+	for _, diagnostic := range report.Diagnostics {
+		if diagnostic.Kind == archreport.DiagnosticStaleTierDeclaration {
+			stale = append(stale, diagnostic)
+		}
+	}
+	return stale
+}
+
+func TestTierDeclarationsAreLive(t *testing.T) {
+	internal := internalDir(t)
+	report, err := archreport.Analyze(filepath.Dir(internal), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range staleTierDeclarations(report) {
+		t.Errorf("tier declaration for internal/%s is stale: %s; recovery: %s", diagnostic.Leaf, diagnostic.Message, diagnostic.Recovery)
+	}
+}
+
+func TestTierDeclarationsAreLiveUsesReportedDiagnostics(t *testing.T) {
+	report := archreport.Report{Diagnostics: []archreport.Diagnostic{
+		{Kind: archreport.DiagnosticStaleTierDeclaration, Leaf: "gone", Recovery: "remove its tier row"},
+		{Kind: "source-parse-error", Leaf: "broken"},
+	}}
+	got := staleTierDeclarations(report)
+	if len(got) != 1 || got[0].Leaf != "gone" || got[0].Recovery != "remove its tier row" {
+		t.Fatalf("stale diagnostics=%+v", got)
+	}
+}
+
 func TestNoUpwardImports(t *testing.T) {
 	internal := internalDir(t)
 	report, err := archreport.Analyze(filepath.Dir(internal), "")

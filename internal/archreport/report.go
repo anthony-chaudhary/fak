@@ -15,6 +15,8 @@ import (
 
 const modulePrefix = "github.com/anthony-chaudhary/fak/internal/"
 
+const DiagnosticStaleTierDeclaration = "stale-tier-declaration"
+
 type Tier struct {
 	Level  int    `json:"level"`
 	Name   string `json:"name"`
@@ -98,7 +100,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		if _, err := os.Stat(dir); err != nil {
 			if os.IsNotExist(err) {
 				report.Diagnostics = append(report.Diagnostics, Diagnostic{
-					Kind:     "stale-tier-declaration",
+					Kind:     DiagnosticStaleTierDeclaration,
 					Leaf:     name,
 					Message:  fmt.Sprintf("declared package directory %s does not exist", dir),
 					Recovery: "create the package or remove its stale tier declaration",

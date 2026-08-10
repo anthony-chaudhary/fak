@@ -328,7 +328,7 @@ var tierName=[]string{"root","primitive","foundation-composite"}
 		t.Fatalf("healthy leaves suppressed: %+v", full.Leaves)
 	}
 	wantDiagnostic := Diagnostic{
-		Kind:     "stale-tier-declaration",
+		Kind:     DiagnosticStaleTierDeclaration,
 		Leaf:     "stale",
 		Message:  "declared package directory " + filepath.Join(root, "internal", "stale") + " does not exist",
 		Recovery: "create the package or remove its stale tier declaration",
