@@ -76,10 +76,6 @@ func gateScopes() []gateScopeRow {
 		{"PRIOR_ART", "gate_priorart.go", SeamPreCommit, ClassLandsTree, ""},
 		{"BARE_COMMIT_SWEEP", "gate_barecommitsweep.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PARALLEL_FABRIC_NUDGE", "gate_microcontext_nudge.go", SeamPreCommit, ClassLandsTree, ""},
-		// GIT_HYGIENE_BYPASS reads only the staged added lines (no fileProbe), so the wrapper is a
-		// no-op for it today — but LANDS_TREE is still the honest class: what it judges is the diff
-		// this commit lands, and classifying it WORKTREE_BY_DESIGN would owe a reason it does not have.
-		{"GIT_HYGIENE_BYPASS", "gate_githygiene.go", SeamPreCommit, ClassLandsTree, ""},
 		// CONCEPT_FRESHNESS is the prior art for this whole ticket inside fak: it already scores
 		// HEAD-plus-your-pathspec via conceptcatalog.CheckGitTree (#5534/#5829) and says so in the
 		// refusal text it prints. Listed LANDS_TREE because that is what it judges; the wrapper is

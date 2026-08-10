@@ -138,15 +138,6 @@ func HygieneGates() []HygieneGate {
 		// tools/demo_command_audit.py, which `make hygiene` already runs green over the real
 		// tree, so the gate lands clean and only a NEW stale demo-command reference can red it.
 		{"DEMO_COMMAND", gateDemoCommandTree, false, false},
-		// SCRATCH_MARK is DefaultOff for the same reason DEAD_CODE and SWALLOWED_ERROR are: the
-		// tree carries known debt the gate would red the shared trunk against. Eight zz_* probes
-		// reached the tracked tree, and one — internal/agent/zz_redact_probe_testadequacy_test.go,
-		// on trunk since 2026-07-28 — says DELETE BEFORE RETURNING in its own second line. This
-		// is the audit sweep (`fak hygiene --gates SCRATCH_MARK`) that proves the retirement; it
-		// flips DefaultOff:false once the tree reads zero. The STAGED twin in PreCommitGates is
-		// what actually holds the line, and it needs no ratchet because it scopes to newly added
-		// files — no existing debt can trip it.
-		{"SCRATCH_MARK", gateScratchMarkTree, true, false},
 		// BROWSER_CONTRACT (issue #928 A5) ships default-ON: it is a faithful port of
 		// tools/demo_browser_contract.py, which `make hygiene` already runs green over the real
 		// tree, so the gate lands clean and only NEW browser-demo metadata drift (a moved default
