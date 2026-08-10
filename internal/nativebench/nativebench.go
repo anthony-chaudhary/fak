@@ -107,6 +107,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native trailing-window cache-reuse regression gate is covered; ledger I/O and aggregate cache-value scoring remain separate capability debt",
 	},
 	{
+		Leaf: "internal/vcachecal", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"cache_budget_concentration_allocation"},
+		Reason:       "native concentration-weighted shared cache-budget allocation is covered; warmth estimation, probing, fitting, prediction error, and resume calibration remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -359,6 +364,22 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/CACHE-REUSE-TREND-GATE-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "cache_budget_concentration_allocation",
+		NativePath: "internal/vcachecal/allocation.go",
+		Workload:   "same 1200-byte budget, top-K one, concentrated/flat/unmeasured buckets, demand weights, deterministic conservation, and independent allocation oracle across every arm",
+		Metrics:    []string{"allocation_quality", "captured_value", "budget_conservation", "starved_buckets", "allocation_latency_ms", "throughput_allocations_per_second", "cache_bytes", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "equal-share cache allocation", Class: TunedBaseline, Source: "internal/vcachecal/compare.go"},
+			{Name: "request-volume proportional allocation", Class: TunedBaseline, Source: "internal/vcachecal/compare.go"},
+			{Name: "fak + LMCache", Class: FirstClassIntegration, Integration: "lmcache", Source: "internal/cachemeta/lmcache_transfer.go"},
+			{Name: "fak + Mooncake", Class: FirstClassIntegration, Integration: "mooncake", Source: "internal/cachemeta/mooncake_transfer.go"},
+			{Name: "vLLM cache-aware routing", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/serving/parallelism_scaling/"},
+			{Name: "SGLang HiCache and cache-aware scheduling", Class: NextBest, Source: "https://docs.sglang.ai/advanced_features/hicache.html"},
+		},
+		Witness:      "../../docs/benchmarks/CACHE-BUDGET-CONCENTRATION-ALLOCATION-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"lmcache", "mooncake"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
