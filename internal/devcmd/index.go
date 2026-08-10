@@ -130,6 +130,8 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 
 	case "ownership":
 		return indexOwnership(stdout, stderr, rootDir, args, *asJSON)
+	case "policy", "enforce":
+		return runIndexPolicy(stdout, stderr, rootDir, args, *asJSON)
 	case "graph":
 		if len(args) != 0 {
 			fmt.Fprintln(stderr, "usage: fak index graph [--json]")

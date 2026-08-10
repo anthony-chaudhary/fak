@@ -76,6 +76,10 @@ func gateScopes() []gateScopeRow {
 		{"PRIOR_ART", "gate_priorart.go", SeamPreCommit, ClassLandsTree, ""},
 		{"BARE_COMMIT_SWEEP", "gate_barecommitsweep.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PARALLEL_FABRIC_NUDGE", "gate_microcontext_nudge.go", SeamPreCommit, ClassLandsTree, ""},
+		// GIT_HYGIENE_BYPASS reads only the staged added lines (no fileProbe), so the wrapper is a
+		// no-op for it today — but LANDS_TREE is still the honest class: what it judges is the diff
+		// this commit lands, and classifying it WORKTREE_BY_DESIGN would owe a reason it does not have.
+		{"GIT_HYGIENE_BYPASS", "gate_githygiene.go", SeamPreCommit, ClassLandsTree, ""},
 		// CONCEPT_FRESHNESS is the prior art for this whole ticket inside fak: it already scores
 		// HEAD-plus-your-pathspec via conceptcatalog.CheckGitTree (#5534/#5829) and says so in the
 		// refusal text it prints. Listed LANDS_TREE because that is what it judges; the wrapper is
@@ -102,11 +106,9 @@ func gateScopes() []gateScopeRow {
 		{"TIER_DECLARED", "gate_tierdeclared.go", SeamHygiene, ClassTreeTwin,
 			"whole-tree hygiene twin of UNTIERED_LEAF, which IS scoped — the commit-boundary refusal is the staged one"},
 		{"BRAND_CONSISTENCY", "gate_brandconsistency.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep"},
-		{"BARE_DEV_SPELLING", "gate_baredevspelling.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (DefaultOff migration ratchet)"},
 		{"SWALLOWED_ERROR", "gate_swallowederror.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (DefaultOff migration ratchet)"},
 		{"GOD_FILE_GROWTH", "gate_godfile.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep against a frozen baseline"},
 		{"NEW_PYTHON_TOOL", "gate_pythongate.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep against a frozen baseline"},
-		{"VERB_UNTIERED", "gate_verbtier.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep over cmd/fak/main.go's dispatch"},
 		{"DEMO_COMMAND", "gate_democommand.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (reads the Makefile and demo sources off disk by design)"},
 		{"BROWSER_CONTRACT", "gate_browsercontract.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (reads browser-demo metadata off disk by design)"},
 	}

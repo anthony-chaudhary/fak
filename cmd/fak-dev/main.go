@@ -42,6 +42,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  index ownership [--json] [--root PATH]  audit runtime/dev command ownership and dependency leaks")
+	fmt.Fprintln(w, "  index policy [--json] [--root PATH]     enforce dev ownership at the repository boundary")
 	fmt.Fprintln(w, "  wiki <structure|verify|fresh|score>    audit the repository documentation wiki")
 	fmt.Fprintln(w, "  orient [env] --paths GLOB             show repository conventions and live ownership")
 	fmt.Fprintln(w, "  backend scaffold NAME --lane LANE     generate a repository compute backend")

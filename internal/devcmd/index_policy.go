@@ -1,19 +1,21 @@
-package hooks
+package devcmd
 
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
 
-// gate_baredevspelling.go — C4 of epic #2228 (#2233): the reusable audit sweep that
+// index policy owns the reusable repository-boundary audit that
 // finds every BARE dev-tier spelling (`fak <devverb>`) still living in an in-repo
 // caller surface, so the migration to the canonical `fak dev <verb>` form has a
-// witness instead of a one-off grep, and the C5 enforcement flip breaks nothing we own.
+// witness instead of a one-off grep. It belongs to fak-dev, not the serving runtime hooks.
 //
 // The classification authority is C1's tier table (internal/devindex.TierOf), NOT a
 // second copy of the verb list: a token is a bare dev spelling iff TierOf resolves it
@@ -126,21 +128,18 @@ func bareDevScanMode(p string) (mode string, ok bool) {
 }
 
 // gateBareDevSpellingTree is the DefaultOff `fak hygiene --gates BARE_DEV_SPELLING` gate.
-func gateBareDevSpellingTree(t *TrackedTree) ([]Finding, error) {
-	return bareDevSpellingFindings(t, parseBareDevAllowlist(bareDevAllowlistRaw)), nil
-}
 
 // bareDevSpellingFindings is the pure sweep, taking the allowlist as a parameter so the
 // scope/classification/allowlist rules are unit-testable without the embedded file.
-func bareDevSpellingFindings(t *TrackedTree, allow bareDevAllowlist) []Finding {
-	var findings []Finding
-	for _, f := range t.Paths {
+func bareDevSpellingFindings(root string, paths []string, allow bareDevAllowlist) []indexPolicyFinding {
+	var findings []indexPolicyFinding
+	for _, f := range paths {
 		mode, ok := bareDevScanMode(f)
 		if !ok || allow.allows(f) {
 			continue
 		}
-		body, ok := t.FileBytes(f)
-		if !ok {
+		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		if err != nil {
 			continue
 		}
 		inFence := false
@@ -164,11 +163,11 @@ func bareDevSpellingFindings(t *TrackedTree, allow bareDevAllowlist) []Finding {
 				if tier, known := devindex.TierOf(verb); !known || tier != devindex.TierDev {
 					continue // frontdoor / unknown / the `dev` namespace token itself
 				}
-				findings = append(findings, Finding{
-					Gate:   "BARE_DEV_SPELLING",
+				findings = append(findings, indexPolicyFinding{
+					Reason: "BARE_DEV_SPELLING",
 					File:   f,
 					Line:   i + 1,
-					Detail: fmt.Sprintf("bare dev spelling %q — migrate to \"fak dev %s\" (#2233 C4), or add %q to internal/hooks/bare_dev_allowlist.txt with a one-line reason", "fak "+verb, verb, f),
+					Detail: fmt.Sprintf("bare dev spelling %q — migrate to \"fak dev %s\" (#2233 C4), or add %q to internal/devcmd/bare_dev_allowlist.txt with a one-line reason", "fak "+verb, verb, f),
 				})
 			}
 		}
