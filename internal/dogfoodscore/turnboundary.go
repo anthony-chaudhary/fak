@@ -1,6 +1,11 @@
 package dogfoodscore
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
 
 // TurnBoundaryResult is the pre-final decision for one transcript. A fresh
 // harness Stop-hook failure refuses success narration until the agent handles
@@ -10,9 +15,17 @@ type TurnBoundaryResult struct {
 	FreshFailure bool   `json:"fresh_stop_hook_failure"`
 	Reason       string `json:"reason"`
 	HarnessLine  string `json:"harness_line,omitempty"`
+	// Reachable reports whether a transcript was actually read. False means the
+	// check is unwitnessed, not clean — AllowFinal stays true because there is
+	// nothing to refuse on, but the caller must not read that as a green.
+	Reachable  bool   `json:"transcript_reachable"`
+	Transcript string `json:"transcript,omitempty"`
 }
 
-const turnBoundaryStopFailure = "fresh Stop-hook failure follows the latest assistant turn; handle it before final success narration"
+const (
+	turnBoundaryStopFailure = "fresh Stop-hook failure follows the latest assistant turn; handle it before final success narration"
+	turnBoundaryUnreachable = "no transcript reachable from here — the pre-final check is unwitnessed, not clean"
+)
 
 // CheckTurnBoundary scans the current transcript at the point immediately
 // before final copy is emitted. It fails closed when a genuine harness
@@ -46,4 +59,46 @@ func CheckTurnBoundary(raw []byte) TurnBoundaryResult {
 		result.HarnessLine = failureLine
 	}
 	return result
+}
+
+// CheckTurnBoundaryLatest runs the pre-final check against the newest transcript
+// for this workspace. This is the seam a session calls at its OWN turn boundary,
+// before final success copy is emitted, instead of learning about the conflation
+// from a scorecard run after the narration already landed.
+func CheckTurnBoundaryLatest(opts Options) TurnBoundaryResult {
+	path := latestTranscript(opts.normalize())
+	if path == "" {
+		return TurnBoundaryResult{AllowFinal: true, Reason: turnBoundaryUnreachable}
+	}
+	result := CheckTurnBoundary(readFile(path))
+	result.Reachable = true
+	result.Transcript = path
+	return result
+}
+
+// latestTranscript picks the most recently modified transcript across this
+// workspace's Claude project roots — the live session's, at the moment the check
+// runs. Empty when none is reachable.
+func latestTranscript(opts Options) string {
+	best := ""
+	var bestMod time.Time
+	for _, root := range transcriptRoots(opts) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			if mod := info.ModTime().UTC(); best == "" || mod.After(bestMod) {
+				best, bestMod = filepath.Join(root, entry.Name()), mod
+			}
+		}
+	}
+	return best
 }
