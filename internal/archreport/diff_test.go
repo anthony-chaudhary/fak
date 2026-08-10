@@ -6,6 +6,29 @@ import (
 	"testing"
 )
 
+func TestCompareBlastRadiusChangesRankRegressionsWithoutDoubleCounting(t *testing.T) {
+	before := Report{Leaves: []Leaf{{Name: "deep", BlastRadius: 1}, {Name: "small", BlastRadius: 2}, {Name: "improved", BlastRadius: 5}}}
+	after := Report{Leaves: []Leaf{{Name: "deep", BlastRadius: 5}, {Name: "small", BlastRadius: 3}, {Name: "improved", BlastRadius: 1}}}
+	diff := Diff(before, after)
+	want := []BlastRadiusChange{{Leaf: "deep", Before: 1, After: 5, Delta: 4}, {Leaf: "small", Before: 2, After: 3, Delta: 1}, {Leaf: "improved", Before: 5, After: 1, Delta: -4}}
+	if !reflect.DeepEqual(diff.BlastRadiusChanges, want) {
+		t.Fatalf("blast radius changes=%+v want=%+v", diff.BlastRadiusChanges, want)
+	}
+	if diff.Verdict != "regression" {
+		t.Fatalf("verdict=%q want regression", diff.Verdict)
+	}
+	if diff.Changes() != 0 {
+		t.Fatalf("changes=%d; derived blast-radius view must not double-count edges", diff.Changes())
+	}
+}
+
+func TestCompareBlastRadiusContractionRemainsClean(t *testing.T) {
+	diff := Diff(Report{Leaves: []Leaf{{Name: "leaf", BlastRadius: 3}}}, Report{Leaves: []Leaf{{Name: "leaf", BlastRadius: 1}}})
+	if diff.Verdict != "clean" || len(diff.BlastRadiusChanges) != 1 || diff.BlastRadiusChanges[0].Delta != -2 {
+		t.Fatalf("diff=%+v", diff)
+	}
+}
+
 func TestDiffNamesEveryArchitectureChangeDeterministically(t *testing.T) {
 	before := Report{Leaves: []Leaf{
 		{Name: "alpha", DeclaredTier: 1, DeclaredTierName: "primitive", Dependencies: []string{"abi", "old"}, ViolationEdges: []ViolationEdge{{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "old", ToTier: 2, ToTierName: "foundation-composite", TierDistance: 1}}, Violations: []string{"alpha -> old"}},

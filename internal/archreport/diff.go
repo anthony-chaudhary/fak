@@ -45,6 +45,13 @@ type FanInChange struct {
 	Delta  int    `json:"delta"`
 }
 
+type BlastRadiusChange struct {
+	Leaf   string `json:"leaf"`
+	Before int    `json:"before"`
+	After  int    `json:"after"`
+	Delta  int    `json:"delta"`
+}
+
 type ReportDiff struct {
 	Schema                   string                    `json:"schema"`
 	Verdict                  string                    `json:"verdict"`
@@ -54,6 +61,7 @@ type ReportDiff struct {
 	AddedEdges               []EdgeChange              `json:"added_edges,omitempty"`
 	RemovedEdges             []EdgeChange              `json:"removed_edges,omitempty"`
 	FanInChanges             []FanInChange             `json:"fan_in_changes,omitempty"`
+	BlastRadiusChanges       []BlastRadiusChange       `json:"blast_radius_changes,omitempty"`
 	TierGapChanges           []TierGapChange           `json:"tier_gap_changes,omitempty"`
 	IntroducedViolationEdges []ViolationEdge           `json:"introduced_violation_edges,omitempty"`
 	ResolvedViolationEdges   []ViolationEdge           `json:"resolved_violation_edges,omitempty"`
@@ -105,6 +113,9 @@ func Diff(before, after Report) ReportDiff {
 		if beforeFanIn != afterFanIn {
 			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: beforeFanIn, After: afterFanIn, Delta: afterFanIn - beforeFanIn})
 		}
+		if b, ok := beforeLeaves[name]; ok && b.BlastRadius != a.BlastRadius {
+			out.BlastRadiusChanges = append(out.BlastRadiusChanges, BlastRadiusChange{Leaf: name, Before: b.BlastRadius, After: a.BlastRadius, Delta: a.BlastRadius - b.BlastRadius})
+		}
 	}
 	for name, b := range beforeLeaves {
 		if _, ok := afterLeaves[name]; !ok && len(b.Dependents) > 0 {
@@ -149,10 +160,11 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.AddedEdges)
 	sortEdges(out.RemovedEdges)
 	sortFanInChanges(out.FanInChanges)
+	sortBlastRadiusChanges(out.BlastRadiusChanges)
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) {
 		out.Verdict = "regression"
 	}
 	return out
@@ -215,6 +227,25 @@ func sortDiagnostics(diagnostics []Diagnostic) {
 	})
 }
 
+func sortBlastRadiusChanges(changes []BlastRadiusChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if (changes[i].Delta > 0) != (changes[j].Delta > 0) {
+			return changes[i].Delta > 0
+		}
+		iMagnitude, jMagnitude := changes[i].Delta, changes[j].Delta
+		if iMagnitude < 0 {
+			iMagnitude = -iMagnitude
+		}
+		if jMagnitude < 0 {
+			jMagnitude = -jMagnitude
+		}
+		if iMagnitude != jMagnitude {
+			return iMagnitude > jMagnitude
+		}
+		return changes[i].Leaf < changes[j].Leaf
+	})
+}
+
 func sortFanInChanges(changes []FanInChange) {
 	sort.Slice(changes, func(i, j int) bool {
 		iGrowth, jGrowth := changes[i].Delta > 0, changes[j].Delta > 0
@@ -256,6 +287,15 @@ func sortTierGapChanges(changes []TierGapChange) {
 }
 
 func hasIncreasedTierGap(changes []TierGapChange) bool {
+	for _, change := range changes {
+		if change.Delta > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasIncreasedBlastRadius(changes []BlastRadiusChange) bool {
 	for _, change := range changes {
 		if change.Delta > 0 {
 			return true

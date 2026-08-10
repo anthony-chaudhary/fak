@@ -273,9 +273,30 @@ func TestArchitectureViolationDistancePolicyIgnoresOtherRegressions(t *testing.T
 	}
 }
 
+func TestArchitectureFailOnIncreasedBlastRadius(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", BlastRadiusChanges: []archreport.BlastRadiusChange{{Leaf: "shared", Before: 2, After: 5, Delta: 3}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-blast-radius"); code != 3 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	for _, want := range []string{"blast-radius shared 2 -> 5 (+3)", "remove/invert the new dependency path", "baseline -> workspace"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
+func TestArchitectureBlastRadiusPolicyIgnoresOtherRegressionsAndContractions(t *testing.T) {
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "new", To: "edge"}}, BlastRadiusChanges: []archreport.BlastRadiusChange{{Leaf: "better", Delta: -2}}}
+	var out, errOut bytes.Buffer
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-blast-radius"); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+}
+
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, or increased-violation-distance") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, or increased-blast-radius") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
