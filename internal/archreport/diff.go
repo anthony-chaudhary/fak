@@ -38,19 +38,21 @@ type FanInChange struct {
 }
 
 type ReportDiff struct {
-	Schema                string          `json:"schema"`
-	Verdict               string          `json:"verdict"`
-	AddedLeaves           []string        `json:"added_leaves,omitempty"`
-	RemovedLeaves         []string        `json:"removed_leaves,omitempty"`
-	TierChanges           []TierChange    `json:"tier_changes,omitempty"`
-	AddedEdges            []EdgeChange    `json:"added_edges,omitempty"`
-	RemovedEdges          []EdgeChange    `json:"removed_edges,omitempty"`
-	FanInChanges          []FanInChange   `json:"fan_in_changes,omitempty"`
-	TierGapChanges        []TierGapChange `json:"tier_gap_changes,omitempty"`
-	IntroducedViolations  []string        `json:"introduced_violations,omitempty"`
-	ResolvedViolations    []string        `json:"resolved_violations,omitempty"`
-	IntroducedDiagnostics []Diagnostic    `json:"introduced_diagnostics,omitempty"`
-	ResolvedDiagnostics   []Diagnostic    `json:"resolved_diagnostics,omitempty"`
+	Schema                   string          `json:"schema"`
+	Verdict                  string          `json:"verdict"`
+	AddedLeaves              []string        `json:"added_leaves,omitempty"`
+	RemovedLeaves            []string        `json:"removed_leaves,omitempty"`
+	TierChanges              []TierChange    `json:"tier_changes,omitempty"`
+	AddedEdges               []EdgeChange    `json:"added_edges,omitempty"`
+	RemovedEdges             []EdgeChange    `json:"removed_edges,omitempty"`
+	FanInChanges             []FanInChange   `json:"fan_in_changes,omitempty"`
+	TierGapChanges           []TierGapChange `json:"tier_gap_changes,omitempty"`
+	IntroducedViolationEdges []ViolationEdge `json:"introduced_violation_edges,omitempty"`
+	ResolvedViolationEdges   []ViolationEdge `json:"resolved_violation_edges,omitempty"`
+	IntroducedViolations     []string        `json:"introduced_violations,omitempty"` // Compatibility projection.
+	ResolvedViolations       []string        `json:"resolved_violations,omitempty"`   // Compatibility projection.
+	IntroducedDiagnostics    []Diagnostic    `json:"introduced_diagnostics,omitempty"`
+	ResolvedDiagnostics      []Diagnostic    `json:"resolved_diagnostics,omitempty"`
 }
 
 func Diff(before, after Report) ReportDiff {
@@ -111,17 +113,21 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedDiagnostics = append(out.ResolvedDiagnostics, diagnostic)
 		}
 	}
-	beforeViolations, afterViolations := violationSet(before), violationSet(after)
-	for edge := range afterViolations {
-		if !beforeViolations[edge] {
-			out.IntroducedViolations = append(out.IntroducedViolations, edge)
+	beforeViolations, afterViolations := violationEdgeSet(before), violationEdgeSet(after)
+	for key, edge := range afterViolations {
+		if _, ok := beforeViolations[key]; !ok {
+			out.IntroducedViolationEdges = append(out.IntroducedViolationEdges, edge)
 		}
 	}
-	for edge := range beforeViolations {
-		if !afterViolations[edge] {
-			out.ResolvedViolations = append(out.ResolvedViolations, edge)
+	for key, edge := range beforeViolations {
+		if _, ok := afterViolations[key]; !ok {
+			out.ResolvedViolationEdges = append(out.ResolvedViolationEdges, edge)
 		}
 	}
+	sortViolationEdges(out.IntroducedViolationEdges)
+	sortViolationEdges(out.ResolvedViolationEdges)
+	out.IntroducedViolations = violationStrings(out.IntroducedViolationEdges)
+	out.ResolvedViolations = violationStrings(out.ResolvedViolationEdges)
 	sort.Strings(out.AddedLeaves)
 	sort.Strings(out.RemovedLeaves)
 	sort.Slice(out.TierChanges, func(i, j int) bool { return out.TierChanges[i].Leaf < out.TierChanges[j].Leaf })
@@ -129,18 +135,16 @@ func Diff(before, after Report) ReportDiff {
 	sortEdges(out.RemovedEdges)
 	sortFanInChanges(out.FanInChanges)
 	sortTierGapChanges(out.TierGapChanges)
-	sort.Strings(out.IntroducedViolations)
-	sort.Strings(out.ResolvedViolations)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolations) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) {
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) {
 		out.Verdict = "regression"
 	}
 	return out
 }
 
 func (d ReportDiff) Changes() int {
-	return len(d.AddedLeaves) + len(d.RemovedLeaves) + len(d.TierChanges) + len(d.AddedEdges) + len(d.RemovedEdges) + len(d.IntroducedViolations) + len(d.ResolvedViolations) + len(d.IntroducedDiagnostics) + len(d.ResolvedDiagnostics)
+	return len(d.AddedLeaves) + len(d.RemovedLeaves) + len(d.TierChanges) + len(d.AddedEdges) + len(d.RemovedEdges) + len(d.IntroducedViolationEdges) + len(d.ResolvedViolationEdges) + len(d.IntroducedDiagnostics) + len(d.ResolvedDiagnostics)
 }
 func (d ReportDiff) JSON() ([]byte, error) { return json.MarshalIndent(d, "", "  ") }
 func leafIndex(r Report) map[string]Leaf {
@@ -160,15 +164,16 @@ func edgeSet(r Report) map[string]EdgeChange {
 	}
 	return out
 }
-func violationSet(r Report) map[string]bool {
-	out := map[string]bool{}
-	for _, l := range r.Leaves {
-		for _, e := range l.Violations {
-			out[e] = true
+func violationEdgeSet(r Report) map[string]ViolationEdge {
+	out := map[string]ViolationEdge{}
+	for _, leaf := range r.Leaves {
+		for _, edge := range leaf.ViolationEdges {
+			out[edge.From+"\x00"+edge.To] = edge
 		}
 	}
 	return out
 }
+
 func sortEdges(edges []EdgeChange) {
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From != edges[j].From {

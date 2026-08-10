@@ -781,7 +781,9 @@ func TestNoUpwardImports(t *testing.T) {
 func reportViolationEdges(report archreport.Report) []string {
 	var edges []string
 	for _, leaf := range report.Leaves {
-		edges = append(edges, leaf.Violations...)
+		for _, edge := range leaf.ViolationEdges {
+			edges = append(edges, edge.String())
+		}
 	}
 	sort.Strings(edges)
 	return edges
@@ -789,7 +791,7 @@ func reportViolationEdges(report archreport.Report) []string {
 
 func TestReportedAndEnforcedUpwardEdgesStayIdentical(t *testing.T) {
 	report := archreport.Report{Leaves: []archreport.Leaf{
-		{Name: "primitive", Violations: []string{"primitive -> composite", "primitive -> mechanism"}},
+		{Name: "primitive", ViolationEdges: []archreport.ViolationEdge{{From: "primitive", To: "composite"}, {From: "primitive", To: "mechanism"}}},
 		{Name: "composer"},
 	}}
 	got := reportViolationEdges(report)

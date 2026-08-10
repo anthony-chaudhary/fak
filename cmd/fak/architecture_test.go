@@ -173,12 +173,12 @@ func TestWriteArchitectureDiffEmpty(t *testing.T) {
 }
 
 func TestArchitectureFailOnIntroducedViolations(t *testing.T) {
-	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolations: []string{"primitive -> composite"}}
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "primitive", FromTierName: "primitive", To: "composite", ToTierName: "foundation-composite"}}, IntroducedViolations: []string{"primitive -> composite"}}
 	var out, errOut bytes.Buffer
 	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-violations"); code != 3 {
 		t.Fatalf("code=%d output=%s", code, out.String())
 	}
-	for _, want := range []string{"verdict=regression", "introduced violation primitive -> composite", "remediation:", "baseline -> workspace"} {
+	for _, want := range []string{"verdict=regression", "introduced violation primitive(primitive) -> composite(foundation-composite)", "remediation:", "baseline -> workspace"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q missing %q", out.String(), want)
 		}
@@ -204,7 +204,7 @@ func TestArchitectureFailOnIntroducedDiagnostics(t *testing.T) {
 }
 
 func TestArchitectureDiagnosticPolicyIgnoresViolationOnlyRegression(t *testing.T) {
-	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolations: []string{"a -> b"}}
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "a", To: "b"}}, IntroducedViolations: []string{"a -> b"}}
 	var out, errOut bytes.Buffer
 	if code := writeArchitectureDiff(&out, &errOut, diff, false, "introduced-diagnostics"); code != 0 {
 		t.Fatalf("code=%d output=%s", code, out.String())
@@ -225,7 +225,7 @@ func TestArchitectureFailOnIncreasedTierGap(t *testing.T) {
 }
 
 func TestArchitectureTierGapPolicyIgnoresOtherRegressions(t *testing.T) {
-	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolations: []string{"a -> b"}, IntroducedDiagnostics: []archreport.Diagnostic{{Kind: "stale", Leaf: "gone"}}, TierGapChanges: []archreport.TierGapChange{{Leaf: "better", Delta: -1}}}
+	diff := archreport.ReportDiff{Schema: archreport.DiffSchema, Verdict: "regression", IntroducedViolationEdges: []archreport.ViolationEdge{{From: "a", To: "b"}}, IntroducedViolations: []string{"a -> b"}, IntroducedDiagnostics: []archreport.Diagnostic{{Kind: "stale", Leaf: "gone"}}, TierGapChanges: []archreport.TierGapChange{{Leaf: "better", Delta: -1}}}
 	var out, errOut bytes.Buffer
 	if code := writeArchitectureDiff(&out, &errOut, diff, false, "increased-tier-gap"); code != 0 {
 		t.Fatalf("code=%d output=%s", code, out.String())

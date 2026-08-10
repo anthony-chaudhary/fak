@@ -52,7 +52,8 @@ import _ "github.com/anthony-chaudhary/fak/internal/primitive"
 			c = l
 		}
 	}
-	if len(p.Violations) != 1 || p.ImportFloor != 2 {
+	wantEdge := ViolationEdge{From: "primitive", FromTier: 1, FromTierName: "primitive", To: "composite", ToTier: 2, ToTierName: "foundation-composite"}
+	if len(p.ViolationEdges) != 1 || p.ViolationEdges[0] != wantEdge || !reflect.DeepEqual(p.Violations, []string{"primitive -> composite"}) || p.ImportFloor != 2 {
 		t.Fatalf("primitive=%+v", p)
 	}
 	if len(c.Violations) != 0 || c.ImportFloor != 1 {
@@ -430,5 +431,41 @@ func writeArchitectureFixture(t *testing.T, root, path, body string) {
 	}
 	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAnalyzeSortsTypedViolationEdgesAndKeepsStringCompatibility(t *testing.T) {
+	root := t.TempDir()
+	writeArchitectureFixture(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"alpha":1,"zeta":3,"beta":2}
+var tierName=[]string{"root","primitive","foundation-composite","mechanism"}
+`)
+	writeArchitectureFixture(t, root, "internal/alpha/alpha.go", `package alpha
+import (
+ _ "github.com/anthony-chaudhary/fak/internal/zeta"
+ _ "github.com/anthony-chaudhary/fak/internal/beta"
+)
+`)
+	writeArchitectureFixture(t, root, "internal/zeta/zeta.go", "package zeta\n")
+	writeArchitectureFixture(t, root, "internal/beta/beta.go", "package beta\n")
+	r, err := Analyze(root, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ViolationEdge{
+		{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "beta", ToTier: 2, ToTierName: "foundation-composite"},
+		{From: "alpha", FromTier: 1, FromTierName: "primitive", To: "zeta", ToTier: 3, ToTierName: "mechanism"},
+	}
+	if len(r.Leaves) != 1 || !reflect.DeepEqual(r.Leaves[0].ViolationEdges, want) || !reflect.DeepEqual(r.Leaves[0].Violations, []string{"alpha -> beta", "alpha -> zeta"}) {
+		t.Fatalf("report=%+v", r)
+	}
+	raw, err := r.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"violation_edges"`, `"from_tier_name"`, `"violations"`} {
+		if !bytes.Contains(raw, []byte(key)) {
+			t.Fatalf("JSON missing %s: %s", key, raw)
+		}
 	}
 }

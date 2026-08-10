@@ -117,10 +117,17 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	for _, l := range report.Leaves {
-		if *leaf != "" || len(l.Violations) > 0 {
+		if *leaf != "" || len(l.ViolationEdges) > 0 {
 			fmt.Fprintf(stdout, "  %-24s declared=%s(%d) floor=%s(%d) gap=%d deps=%v dependents=%v", l.Name, l.DeclaredTierName, l.DeclaredTier, l.ImportFloorName, l.ImportFloor, l.TierGap, l.Dependencies, l.Dependents)
-			if len(l.Violations) > 0 {
-				fmt.Fprintf(stdout, " violations=%v", l.Violations)
+			if len(l.ViolationEdges) > 0 {
+				fmt.Fprint(stdout, " violations=[")
+				for i, edge := range l.ViolationEdges {
+					if i > 0 {
+						fmt.Fprint(stdout, ", ")
+					}
+					fmt.Fprintf(stdout, "%s(%s) -> %s(%s)", edge.From, edge.FromTierName, edge.To, edge.ToTierName)
+				}
+				fmt.Fprint(stdout, "]")
 			}
 			fmt.Fprintln(stdout)
 		}
@@ -213,11 +220,11 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 	for _, change := range diff.FanInChanges {
 		fmt.Fprintf(stdout, "  ~ fan-in %s %d -> %d (%+d)\n", change.Leaf, change.Before, change.After, change.Delta)
 	}
-	for _, edge := range diff.IntroducedViolations {
-		fmt.Fprintf(stdout, "  ! introduced violation %s\n", edge)
+	for _, edge := range diff.IntroducedViolationEdges {
+		fmt.Fprintf(stdout, "  ! introduced violation %s(%s) -> %s(%s)\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName)
 	}
-	for _, edge := range diff.ResolvedViolations {
-		fmt.Fprintf(stdout, "  resolved violation %s\n", edge)
+	for _, edge := range diff.ResolvedViolationEdges {
+		fmt.Fprintf(stdout, "  resolved violation %s(%s) -> %s(%s)\n", edge.From, edge.FromTierName, edge.To, edge.ToTierName)
 	}
 	for _, diagnostic := range diff.IntroducedDiagnostics {
 		fmt.Fprintf(stdout, "  ! introduced diagnostic %s leaf=%s: %s; recovery: %s\n", diagnostic.Kind, diagnostic.Leaf, diagnostic.Message, diagnostic.Recovery)
@@ -241,7 +248,7 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 func architectureFailOnMatched(diff archreport.ReportDiff, failOn string) bool {
 	switch failOn {
 	case "introduced-violations":
-		return len(diff.IntroducedViolations) > 0
+		return len(diff.IntroducedViolationEdges) > 0
 	case "introduced-diagnostics":
 		return len(diff.IntroducedDiagnostics) > 0
 	case "increased-tier-gap":

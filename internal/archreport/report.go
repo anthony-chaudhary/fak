@@ -23,21 +23,33 @@ type Tier struct {
 	Leaves int    `json:"leaves"`
 }
 type Leaf struct {
-	Name             string   `json:"name"`
-	DeclaredTier     int      `json:"declared_tier"`
-	DeclaredTierName string   `json:"declared_tier_name"`
-	ImportFloor      int      `json:"import_floor"`
-	ImportFloorName  string   `json:"import_floor_name"`
-	TierGap          int      `json:"tier_gap"`
-	Dependencies     []string `json:"dependencies"`
-	Dependents       []string `json:"dependents,omitempty"`
-	Violations       []string `json:"violations,omitempty"`
+	Name             string          `json:"name"`
+	DeclaredTier     int             `json:"declared_tier"`
+	DeclaredTierName string          `json:"declared_tier_name"`
+	ImportFloor      int             `json:"import_floor"`
+	ImportFloorName  string          `json:"import_floor_name"`
+	TierGap          int             `json:"tier_gap"`
+	Dependencies     []string        `json:"dependencies"`
+	Dependents       []string        `json:"dependents,omitempty"`
+	ViolationEdges   []ViolationEdge `json:"violation_edges,omitempty"`
+	Violations       []string        `json:"violations,omitempty"` // Compatibility projection; use ViolationEdges.
 }
 
 type Hotspot struct {
 	Name  string `json:"name"`
 	FanIn int    `json:"fan_in"`
 }
+
+type ViolationEdge struct {
+	From         string `json:"from"`
+	FromTier     int    `json:"from_tier"`
+	FromTierName string `json:"from_tier_name"`
+	To           string `json:"to"`
+	ToTier       int    `json:"to_tier"`
+	ToTierName   string `json:"to_tier_name"`
+}
+
+func (e ViolationEdge) String() string { return e.From + " -> " + e.To }
 
 type SinkCandidate struct {
 	Name             string `json:"name"`
@@ -117,20 +129,21 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		if name == "abi" {
 			floor = 0
 		}
-		var violations []string
+		var violationEdges []ViolationEdge
 		for _, dep := range deps {
 			if level, ok := tiers[dep]; ok {
 				if level > floor {
 					floor = level
 				}
 				if level > declared {
-					violations = append(violations, name+" -> "+dep)
+					violationEdges = append(violationEdges, ViolationEdge{From: name, FromTier: declared, FromTierName: tierName(names, declared), To: dep, ToTier: level, ToTierName: tierName(names, level)})
 				}
 			}
 		}
-		sort.Strings(violations)
+		sortViolationEdges(violationEdges)
+		violations := violationStrings(violationEdges)
 		byName[name] = len(allLeaves)
-		allLeaves = append(allLeaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), TierGap: declared - floor, Dependencies: deps, Violations: violations})
+		allLeaves = append(allLeaves, Leaf{Name: name, DeclaredTier: declared, DeclaredTierName: tierName(names, declared), ImportFloor: floor, ImportFloorName: tierName(names, floor), TierGap: declared - floor, Dependencies: deps, ViolationEdges: violationEdges, Violations: violations})
 	}
 	for _, importer := range allLeaves {
 		for _, dependency := range importer.Dependencies {
@@ -179,7 +192,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		report.Diagnostics = diagnostics
 	}
 	for _, leaf := range report.Leaves {
-		report.Violations += len(leaf.Violations)
+		report.Violations += len(leaf.ViolationEdges)
 	}
 	return report, nil
 }
@@ -276,4 +289,24 @@ func tierName(names []string, level int) string {
 		return names[level]
 	}
 	return "unknown"
+}
+
+func sortViolationEdges(edges []ViolationEdge) {
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].From != edges[j].From {
+			return edges[i].From < edges[j].From
+		}
+		return edges[i].To < edges[j].To
+	})
+}
+
+func violationStrings(edges []ViolationEdge) []string {
+	if len(edges) == 0 {
+		return nil
+	}
+	out := make([]string, len(edges))
+	for i, edge := range edges {
+		out[i] = edge.String()
+	}
+	return out
 }
