@@ -84,6 +84,7 @@ for level,target,body in rows:
 print(json.dumps(out))`
 	nb, _ := json.Marshal(names)
 	cmd := exec.Command("python", "-c", script, filepath.Clean(path), string(nb))
+	configureDispatchHelperCommand(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
