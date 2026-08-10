@@ -33,7 +33,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/demoui"
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/issuefanout"
 )
 
@@ -172,7 +172,7 @@ func selfcheck() int {
 		if !strings.HasPrefix(cand.Key, "fanout-issuefanout-") {
 			c.Notef("candidate key %q lacks the marker-key prefix fanout-issuefanout-", cand.Key)
 		}
-		if issuecontract.ReviewCandidate(cand, issuecontract.Options{}).Dispatchability == issuecontract.Dispatchable {
+		if issuepolicy.ReviewCandidate(cand, issuepolicy.Options{}).Dispatchability == issuepolicy.Dispatchable {
 			dispatchable++
 		} else {
 			c.Notef("candidate %s is not dispatchable", cand.Key)

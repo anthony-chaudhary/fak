@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/issuefanout"
 )
 
@@ -51,8 +51,8 @@ func TestPlanIsDeterministicAndDispatchable(t *testing.T) {
 		if !strings.HasPrefix(c.Key, "fanout-issuefanout-") {
 			t.Errorf("candidate key %q lacks marker-key prefix", c.Key)
 		}
-		if got := issuecontract.ReviewCandidate(c, issuecontract.Options{}).Dispatchability; got != issuecontract.Dispatchable {
-			t.Errorf("candidate %s dispatchability = %q, want %q", c.Key, got, issuecontract.Dispatchable)
+		if got := issuepolicy.ReviewCandidate(c, issuepolicy.Options{}).Dispatchability; got != issuepolicy.Dispatchable {
+			t.Errorf("candidate %s dispatchability = %q, want %q", c.Key, got, issuepolicy.Dispatchable)
 		}
 	}
 	plan2, err := issuefanout.Build(demoSpine())
