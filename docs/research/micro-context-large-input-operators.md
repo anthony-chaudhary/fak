@@ -157,6 +157,8 @@ all meaning-bearing inputs.
 
 ## Filters and tool calls are first-class stages
 
+The same bounded decision seam can choose the next computation across both categories: run a deterministic filter, open a semantic window, call an allowlisted read tool, widen, stop, or escalate. The selector proposes a typed stage; the kernel retains authority, dependencies, budgets, and cancellation semantics. See [Micro-window routing across filters and tool calls](micro-context-filter-tool-routing.md) and executable follow-up [#6105](https://github.com/anthony-chaudhary/fak/issues/6105).
+
 ### Filter selection
 
 A model should not replace a cheap predicate. The ladder is:
