@@ -2576,6 +2576,16 @@
           "category": "incidental",
           "reason": "Local context with plugin timeout; not a context-management capability",
           "token": "callCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture receipt reason for cancellation before effect dispatch; not a new context-management concept.",
+          "token": "context_cancelled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local test context used to model cancellation after dispatch; not a context abstraction.",
+          "token": "postCtx"
         }
       ],
       "id": "context-ctx",
@@ -2627,7 +2637,9 @@
         "recordGuardCompactionWitness",
         "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
-        "takeCompactionContract"
+        "takeCompactionContract",
+        "context_cancelled",
+        "postCtx"
       ],
       "min_files": 3,
       "name": "Context-management family",

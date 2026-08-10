@@ -83,6 +83,7 @@ Each rung must run end to end before the next is treated as real.
 | S8b | **Observed fixture:** bounded read-only tool enrichment (#6031) | [request/receipt/restart witness](micro-context-s8b-tool-enrichment.md) |
 | S8c | **Observed fixture:** provenance-preserving hierarchical fold (#6032) | [fold-tree/property/invalidation witness](micro-context-s8c-provenance-fold.md) |
 | S8d | **Simulated fixture:** tuned-baseline falsification spine (#6100; parent #6033 remains open) | [five-pipeline decision-boundary harness](micro-context-s8d-falsification-spine.md) |
+| S8e | **Observed controlled fixture:** effectful stages bound to witnessed receipts (#6034) | [effect journal/read-back state machine](micro-context-s8e-effect-receipts.md) |
 
 Promotion requires a captured artifact at every rung. A synthetic rate is never promoted
 as inference throughput. An inference token rate is never promoted as useful agent work.

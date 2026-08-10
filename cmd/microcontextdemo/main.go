@@ -383,6 +383,8 @@ func main() {
 	var provenanceFoldSelfcheck bool
 	var falsificationOutput, verifyFalsificationPath string
 	var falsificationSelfcheck bool
+	var effectBatchOutput, verifyEffectBatchPath string
+	var effectBatchSelfcheck bool
 	var fairnessOutput, verifyFairnessPath string
 	var gradeInput, gradeOutput, verifyGradePath string
 	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
@@ -442,6 +444,9 @@ func main() {
 	flag.BoolVar(&falsificationSelfcheck, "falsification-selfcheck", false, "run the tuned-baseline falsification benchmark")
 	flag.StringVar(&falsificationOutput, "falsification-output", "", "write the falsification benchmark artifact")
 	flag.StringVar(&verifyFalsificationPath, "verify-falsification", "", "verify a captured falsification artifact")
+	flag.BoolVar(&effectBatchSelfcheck, "effect-batch-selfcheck", false, "run the witnessed effect-batch proof")
+	flag.StringVar(&effectBatchOutput, "effect-batch-output", "", "write the effect-batch proof artifact")
+	flag.StringVar(&verifyEffectBatchPath, "verify-effect-batch", "", "verify a captured effect-batch artifact")
 	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
 	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
 	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
@@ -470,6 +475,17 @@ func main() {
 	if gradeOutput != "" {
 		if err := writeHealthGrade(gradeInput, gradeOutput); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if verifyEffectBatchPath != "" {
+		runVerify("verify-effect-batch", verifyEffectBatchPath, verifyEffectBatchArtifact)
+		return
+	}
+	if effectBatchSelfcheck {
+		if err := runEffectBatchSelfcheck(effectBatchOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "effect-batch selfcheck: %v\n", err)
 			os.Exit(1)
 		}
 		return
