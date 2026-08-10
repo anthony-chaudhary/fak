@@ -142,6 +142,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native provider cache-read reconciliation, false-warm demotion, divergence location, and confirmed-only cost booking are covered; preflight and star planning remain separate capability debt",
 	},
 	{
+		Leaf: "internal/vcachescore", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"default_cache_readiness_gate"},
+		Reason:       "native default-cache readiness gate over cold-path correctness, versioned usefulness, separated evidence provenance, and unsupported active paths is covered; aggregate scoring, economics, activation, and index planning remain separate debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -510,6 +515,23 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/CACHE-TELEMETRY-RECONCILIATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"anthropic", "openai", "gemini", "prometheus", "opentelemetry"},
+	},
+	{
+		Capability: "default_cache_readiness_gate",
+		NativePath: "internal/vcachescore/readiness.go",
+		Workload:   "same five ordered readiness reports covering fully witnessed readiness, provider-only evidence, wrong plane provenance, unsupported active-cache capability, and cold-path failure with exact verdict and reason-class oracle",
+		Metrics:    []string{"true_ready", "true_blocked", "false_ready", "false_blocked", "reason_mismatches", "latency_ns", "throughput_cases_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "network_bytes", "storage_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "usefulness-score threshold only", Class: TunedBaseline, Source: "internal/vcachescore/compare.go"},
+			{Name: "fak + Prometheus", Class: FirstClassIntegration, Integration: "prometheus", Source: "gateway /metrics"},
+			{Name: "fak + OpenTelemetry", Class: FirstClassIntegration, Integration: "opentelemetry", Source: "internal/otel"},
+			{Name: "OPA/Rego", Class: NextBest, Source: "https://www.openpolicyagent.org/docs/latest/policy-language/"},
+			{Name: "Prometheus rules", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/"},
+			{Name: "Datadog monitors", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/"},
+			{Name: "LangSmith evaluations", Class: NextBest, Source: "https://docs.smith.langchain.com/evaluation"},
+		},
+		Witness:      "../../docs/benchmarks/DEFAULT-CACHE-READINESS-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
