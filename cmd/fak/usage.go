@@ -100,7 +100,6 @@ const usageCoreText = `usage:
                  index/worktree and reports either empty_net_diff (cached diff would be
                  empty), clean_merge with changed files, or conflicts with the files named.
                  Exit 0 clean preview, 2 usage, 3 conflicts predicted, 1 git/internal.)
-  fak whats-changed --paths P [--paths P ...] [--since REF] [--dir DIR] [--json]
                 (PEER CODE-DIFF READOUT: list commits and changed files under the supplied
                  pathspecs since the session/base ref, so an agent sees peer edits to its
                  target paths before colliding late. Defaults --since from

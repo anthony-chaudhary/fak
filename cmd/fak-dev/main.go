@@ -29,6 +29,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunBackend(stdout, stderr, argv[1:])
 	case "catchup":
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
+	case "whats-changed":
+		return devcmd.RunWhatsChanged(stdout, stderr, argv[1:])
 	case "feature":
 		return devcmd.RunFeature(stdout, stderr, argv[1:])
 	case "capabilities":
@@ -61,6 +63,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  orient [env] --paths GLOB             show repository conventions and live ownership")
 	fmt.Fprintln(w, "  backend scaffold NAME --lane LANE     generate a repository compute backend")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
+	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")
 	fmt.Fprintln(w, "  capabilities [intent] [flags]         list the repository-development toolbelt")
 	fmt.Fprintln(w, "  issue <subcommand> [flags]             manage repository issue contracts and filing")

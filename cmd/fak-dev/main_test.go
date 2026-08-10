@@ -121,6 +121,25 @@ func TestOrientExecutesThroughDevelopmentArtifact(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesWhatsChangedUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"whats-changed", "--since", "HEAD"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "--paths is required") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+func TestRuntimeSourceDoesNotDispatchWhatsChanged(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "fak", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(src, []byte(`case "whats-changed":`)) {
+		t.Fatal("runtime fak still dispatches dev-owned whats-changed")
+	}
+}
 func TestRuntimeSourceDoesNotDispatchBackend(t *testing.T) {
 	mainPath := filepath.Join(devindex.FindRoot("."), "cmd", "fak", "main.go")
 	body, err := os.ReadFile(mainPath)

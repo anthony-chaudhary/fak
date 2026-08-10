@@ -656,8 +656,6 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		}))
 	case "merge":
 		cmdMerge(args)
-	case "whats-changed":
-		cmdWhatsChanged(args)
 	case "affected":
 		cmdAffected(args)
 	case "blast":
