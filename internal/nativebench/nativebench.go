@@ -112,6 +112,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native concentration-weighted shared cache-budget allocation is covered; warmth estimation, probing, fitting, prediction error, and resume calibration remain separate capability debt",
 	},
 	{
+		Leaf: "internal/vcachewarm", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"dedicated_cache_warming"},
+		Reason:       "native dedicated cache-warm planning and provider-readback accounting are covered; fanout concurrency and formula helpers remain separate capability debt",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -380,6 +385,24 @@ var contracts = []Contract{{
 		},
 		Witness:      "../../docs/benchmarks/CACHE-BUDGET-CONCENTRATION-ALLOCATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"lmcache", "mooncake"},
+	},
+	{
+		Capability: "dedicated_cache_warming",
+		NativePath: "internal/vcachewarm/warm.go",
+		Workload:   "same five profitable/refused/automatic warm cases, prefix fingerprints, capability and tool guards, two-read fanout, and independent decision/readback oracle across every arm",
+		Metrics:    []string{"decision_accuracy", "useful_warms", "wasted_warms", "cache_read_tokens", "cache_write_tokens", "planning_latency_ms", "ttft_ms", "throughput_requests_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "storage_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "demand-only fills without dedicated warming", Class: TunedBaseline, Source: "internal/vcachewarm/compare.go"},
+			{Name: "fak + Anthropic prompt caching", Class: FirstClassIntegration, Integration: "anthropic", Source: "gateway Anthropic adapter"},
+			{Name: "fak + Gemini CachedContent", Class: FirstClassIntegration, Integration: "gemini", Source: "internal/gemini"},
+			{Name: "fak + OpenAI automatic prefix caching", Class: FirstClassIntegration, Integration: "openai", Source: "gateway OpenAI adapter"},
+			{Name: "fak + LMCache", Class: FirstClassIntegration, Integration: "lmcache", Source: "internal/cachemeta/lmcache_transfer.go"},
+			{Name: "fak + Mooncake", Class: FirstClassIntegration, Integration: "mooncake", Source: "internal/cachemeta/mooncake_transfer.go"},
+			{Name: "vLLM automatic prefix caching", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/design/prefix_caching/"},
+			{Name: "SGLang HiCache", Class: NextBest, Source: "https://docs.sglang.ai/advanced_features/hicache.html"},
+		},
+		Witness:      "../../docs/benchmarks/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"anthropic", "gemini", "openai", "lmcache", "mooncake"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
