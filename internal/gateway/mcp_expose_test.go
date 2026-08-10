@@ -55,11 +55,11 @@ func TestCompileToolExposeAllow(t *testing.T) {
 	}
 
 	// Comma-split within one entry + surrounding whitespace: both names honored.
-	pred, err := compileToolExposeAllow([]string{" fak_capabilities , fak_index_docs "})
+	pred, err := compileToolExposeAllow([]string{" fak_capabilities , fak_feature_query "})
 	if err != nil {
 		t.Fatalf("comma expose: %v", err)
 	}
-	for _, name := range []string{"fak_capabilities", "fak_index_docs"} {
+	for _, name := range []string{"fak_capabilities", "fak_feature_query"} {
 		if !pred(name) {
 			t.Errorf("comma expose: %q should be allowed", name)
 		}
@@ -68,18 +68,18 @@ func TestCompileToolExposeAllow(t *testing.T) {
 		t.Error("comma expose: fak_syscall must NOT be allowed")
 	}
 
-	// Glob matches the whole fak_index_ family but not a sibling.
-	pred, err = compileToolExposeAllow([]string{"fak_index_*"})
+	// Glob matches the runtime context family but not a sibling.
+	pred, err = compileToolExposeAllow([]string{"fak_context_*"})
 	if err != nil {
 		t.Fatalf("glob expose: %v", err)
 	}
-	for _, name := range []string{"fak_index_lane", "fak_index_freshness", "fak_index_work"} {
+	for _, name := range []string{"fak_context_change", "fak_context_restore", "fak_context_spans"} {
 		if !pred(name) {
-			t.Errorf("glob expose: %q should match fak_index_*", name)
+			t.Errorf("glob expose: %q should match fak_context_*", name)
 		}
 	}
 	if pred("fak_capabilities") {
-		t.Error("glob expose: fak_capabilities must not match fak_index_*")
+		t.Error("glob expose: fak_capabilities must not match fak_context_*")
 	}
 
 	// A pattern matching NO known tool fails loud (typo protection).
@@ -95,16 +95,9 @@ func TestCompileToolExposeAllow(t *testing.T) {
 }
 
 func TestExposeAllowlistFiltersDiscoveryAndGuardsCall(t *testing.T) {
-	srv := newExposeServer(t, "fak_tools_search", "fak_index_*")
+	srv := newExposeServer(t, "fak_tools_search")
 	want := map[string]bool{
-		"fak_tools_search":    true,
-		"fak_index_lane":      true,
-		"fak_index_leaves":    true,
-		"fak_index_docs":      true,
-		"fak_index_claims":    true,
-		"fak_index_verbs":     true,
-		"fak_index_work":      true,
-		"fak_index_freshness": true,
+		"fak_tools_search": true,
 	}
 
 	// 1. tools/list advertises ONLY the allowlisted set.
@@ -162,13 +155,6 @@ func TestExposeEmptyExposesFullSurface(t *testing.T) {
 		"fak_context_spans",
 		"fak_context_value",
 		"fak_feature_query",
-		"fak_index_claims",
-		"fak_index_docs",
-		"fak_index_freshness",
-		"fak_index_lane",
-		"fak_index_leaves",
-		"fak_index_verbs",
-		"fak_index_work",
 		"fak_memory_drivers",
 		"fak_memory_explain",
 		"fak_memory_run",
@@ -197,6 +183,20 @@ func TestExposeEmptyExposesFullSurface(t *testing.T) {
 	if _, rerr := srv.handleMethod(context.Background(), "tools/call",
 		json.RawMessage(`{"name":"fak_syscall","arguments":{"tool":"allow_x"}}`)); rerr != nil {
 		t.Fatalf("no-allowlist fak_syscall must dispatch, got rpc error %v", rerr.Message)
+	}
+}
+
+func TestRuntimeGatewayDoesNotExposeDevelopmentIndexTools(t *testing.T) {
+	srv := newExposeServer(t)
+	for _, name := range toolsListNames(t, srv) {
+		if strings.HasPrefix(name, "fak_index_") {
+			t.Fatalf("runtime gateway exposed development index tool %q", name)
+		}
+	}
+	_, rerr := srv.handleMethod(context.Background(), "tools/call",
+		json.RawMessage(`{"name":"fak_index_docs","arguments":{"query":"gateway"}}`))
+	if rerr == nil || rerr.Message != "unknown tool: fak_index_docs" {
+		t.Fatalf("development tool call = %v, want unknown-tool refusal", rerr)
 	}
 }
 

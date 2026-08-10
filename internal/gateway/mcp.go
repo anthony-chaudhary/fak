@@ -423,38 +423,6 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ToolsSearchRequest](p.Arguments, "fak_tools_search", func(req ToolsSearchRequest) (any, error) {
 			return s.toolsSearch(req)
 		})
-	case "fak_index_lane":
-		return mcpDecodeCall[IndexLaneRequest](p.Arguments, "fak_index_lane", func(req IndexLaneRequest) (any, error) {
-			return s.indexLane(req)
-		})
-	case "fak_index_leaves":
-		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_leaves", func(req IndexSearchRequest) (any, error) {
-			return s.indexLeaves(req)
-		})
-	case "fak_index_docs":
-		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_docs", func(req IndexSearchRequest) (any, error) {
-			return s.indexDocs(req)
-		})
-	case "fak_index_claims":
-		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_claims", func(req IndexSearchRequest) (any, error) {
-			return s.indexClaims(req)
-		})
-	case "fak_index_verbs":
-		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_verbs", func(req IndexSearchRequest) (any, error) {
-			return s.indexVerbs(req)
-		})
-	case "fak_index_work":
-		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_work", func(req IndexSearchRequest) (any, error) {
-			return s.indexWork(req)
-		})
-	case "fak_index_freshness":
-		return mcpDecodeCall[IndexFreshnessRequest](p.Arguments, "fak_index_freshness", func(req IndexFreshnessRequest) (any, error) {
-			return s.indexFreshness(req)
-		})
-	case "fak_trajquery":
-		return mcpDecodeCall[TrajQueryRequest](p.Arguments, "fak_trajquery", func(req TrajQueryRequest) (any, error) {
-			return s.trajQuery(req)
-		})
 	case "fak_feature_query":
 		return mcpDecodeCall[FeatureQueryRequest](p.Arguments, "fak_feature_query", func(req FeatureQueryRequest) (any, error) {
 			return s.featureQuery(req)
@@ -831,48 +799,6 @@ func toolDescriptors() []map[string]any {
     "detail_level": {"type": "string", "enum": ["name", "description", "full"], "description": "level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}
   }
 }`),
-		},
-		// #1292 closure binding: fak_index_lane through fak_index_work below are
-		// the C5 ask ("expose the self-index as fak_index* MCP tools ... through
-		// the same gateway it routes tool calls through"), covered end-to-end by
-		// TestMCPIndexToolsMirrorDevIndex (mcp_index_test.go). The shipping
-		// commits (30c577a7 and its predecessors) cited #1292 in prose but never
-		// carried a `Fixes` trailer, so the issue stayed open past the work
-		// landing. No behavior change here.
-		{
-			"name":        "fak_index_lane",
-			"description": "Resolve one path or a batch of paths to the repo lane that owns them, plus the suggested (fak <leaf>) commit stamp. Mirrors `fak index lane` for MCP clients.",
-			"inputSchema": indexLaneInputSchema,
-		},
-		{
-			"name":        "fak_index_leaves",
-			"description": "List or search the repo's declared leaves/packages from the dev index, including shipped/stub/simulated claim rollups.",
-			"inputSchema": indexSearchInputSchema,
-		},
-		{
-			"name":        "fak_index_docs",
-			"description": "Search indexed docs by query and return matching paths/snippets so an MCP client can load the right local documentation.",
-			"inputSchema": indexSearchInputSchema,
-		},
-		{
-			"name":        "fak_index_claims",
-			"description": "Search CLAIMS.md entries by query and return the tagged shipped/simulated/stub claims with their inferred lanes.",
-			"inputSchema": indexSearchInputSchema,
-		},
-		{
-			"name":        "fak_index_verbs",
-			"description": "Search CLI verbs from the dev index, including aliases and descriptions, so an MCP client can discover the local fak command surface.",
-			"inputSchema": indexSearchInputSchema,
-		},
-		{
-			"name":        "fak_index_work",
-			"description": "The selection surface: list the repo's named issue views (.github/issue-views.json) with the default 'what should I work on' view and each view's gh issue-search query, so an MCP client can pick the right dispatchable backlog. Optional query filters the views by slug/title/note.",
-			"inputSchema": indexSearchInputSchema,
-		},
-		{
-			"name":        "fak_index_freshness",
-			"description": "Report every way the dev self-index disagrees with the tree: undeclared leaves, dead INDEX.md doc links, CLI verbs missing from the catalog, orphaned dated notes, and dead llms.txt links. Read-only; an empty result means the index is fresh. Mirrors `fak index freshness` for MCP clients.",
-			"inputSchema": indexFreshnessInputSchema,
 		},
 		{
 			"name":        "fak_feature_query",
