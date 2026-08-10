@@ -30,6 +30,7 @@ var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "refactorverify", Owner: OwnerDev, Rationale: "verifies repository code-motion refactors preserve declarations"},
 	{Path: moduleInternalPrefix + "sessiondiag", Owner: OwnerDev, Rationale: "diagnoses development-agent Codex session failures and log pressure"},
 	{Path: moduleInternalPrefix + "toolcoverage", Owner: OwnerDev, Rationale: "audits repository tool test coverage and load-bearing references"},
+	{Path: moduleInternalPrefix + "workflowaudit", Owner: OwnerDev, Rationale: "audits repository CI workflow refs and generated documentation"},
 	{Path: moduleInternalPrefix + "planaudit", Owner: OwnerDev, Rationale: "audits repository plan documents for drift"},
 	{Path: moduleInternalPrefix + "issuesync", Owner: OwnerDev, Rationale: "synchronizes fak repository GitHub issues"},
 	{Path: moduleInternalPrefix + "wiki", Owner: OwnerDev, Rationale: "audits repository documentation structure, citations, freshness, and coverage"},

@@ -254,8 +254,6 @@ func main() {
 		cmdInit(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
-	case "workflow-audit":
-		cmdWorkflowAudit(os.Args[2:])
 	case "slack":
 		cmdSlack(os.Args[2:])
 	case "chatops":

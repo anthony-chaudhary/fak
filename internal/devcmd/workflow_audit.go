@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 // fak workflow-audit -- classify every git-branch / tag reference in .github/workflows
 // against the branch-role contract (#1697 / #1701), so the dev->main front-door migration
@@ -25,11 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/workflowaudit"
 )
 
-func cmdWorkflowAudit(argv []string) {
-	os.Exit(runWorkflowAudit(os.Stdout, os.Stderr, argv))
-}
-
-func runWorkflowAudit(stdout, stderr io.Writer, argv []string) int {
+func RunWorkflowAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak workflow-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the full audit as JSON (workflowaudit.Report)")
