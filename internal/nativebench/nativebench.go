@@ -177,6 +177,11 @@ var leafClassifications = []LeafClassification{{
 		Reason:       "native self-contained compiled ABI freeze and real adjudicator verdict-matrix conformance suite",
 	},
 	{
+		Leaf: "internal/covmatrix", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"model_backend_precision_coverage_matrix"},
+		Reason:       "covmatrix also builds scorecard payloads and source-drift guards; exhaustive family/backend/precision classification and stale declaration reporting are contracted together",
+	},
+	{
 		Leaf: "internal/computeadmit", Disposition: DispositionMultiCapability,
 		Capabilities: []string{"compute_region_admission"},
 		Reason:       "native compute-region taxonomy and live-lease collision admission",
@@ -660,6 +665,25 @@ var contracts = []Contract{{
 			{Name: "Cedar policy validator and tests", Class: NextBest, Source: "https://docs.cedarpolicy.com/"},
 		},
 		Witness: "../../docs/benchmarks/COMPILED-CONFORMANCE-ALTERNATIVES-2026-08-10.md",
+	},
+	{
+		Capability: "model_backend_precision_coverage_matrix",
+		NativePath: "internal/covmatrix/covmatrix.go",
+		Workload:   "same declared model families, CPU/CUDA/Metal/Vulkan backends, precision cross-product, support oracle, and stale-declaration oracle across every arm",
+		Metrics:    []string{"cell_classification_accuracy", "undefined_cells", "stale_cells", "false_cells", "latency_ms", "throughput_cells_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "network_bytes", "operator_seconds", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "hand-maintained support table lookup", Class: TunedBaseline, Source: "internal/covmatrix/compare.go"},
+			{Name: "CUDA runtime witness", Class: FirstClassIntegration, Integration: "cuda", Source: "internal/covmatrix/compare.go"},
+			{Name: "Metal runtime witness", Class: FirstClassIntegration, Integration: "metal", Source: "internal/covmatrix/compare.go"},
+			{Name: "Vulkan runtime witness", Class: FirstClassIntegration, Integration: "vulkan", Source: "internal/covmatrix/compare.go"},
+			{Name: "vLLM supported-model matrix", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/models/supported_models.html"},
+			{Name: "llama.cpp backend and quantization matrix", Class: NextBest, Source: "https://github.com/ggml-org/llama.cpp"},
+			{Name: "Hugging Face Optimum hardware compatibility", Class: NextBest, Source: "https://huggingface.co/docs/optimum/index"},
+			{Name: "ONNX Runtime execution-provider matrix", Class: NextBest, Source: "https://onnxruntime.ai/docs/execution-providers/"},
+			{Name: "TensorRT-LLM support matrix", Class: NextBest, Source: "https://github.com/NVIDIA/TensorRT-LLM"},
+		},
+		Witness:      "../../docs/benchmarks/MODEL-BACKEND-PRECISION-COVERAGE-ALTERNATIVES-2026-08-10.md",
+		Integrations: []string{"cuda", "metal", "vulkan"},
 	},
 	{
 		Capability: "worker_launch_latency_summary",
