@@ -635,17 +635,19 @@ func TestArchitectureLateralResilientPairPolicyIgnoresGain(t *testing.T) {
 	}
 }
 
-func TestArchitectureLateralEdgeConnectivityWitnessPolicy(t *testing.T) {
+func TestArchitectureLateralEdgeConnectivityPartitionPolicy(t *testing.T) {
 	diff := archreport.ReportDiff{LateralEdgeConnectivityChanges: []archreport.LateralEdgeConnectivityChange{{
 		Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", BeforeCut: 3, AfterCut: 2, Delta: -1,
-		BeforeCutEdges: []archreport.LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}, {Left: "a", Right: "d"}},
-		AfterCutEdges:  []archreport.LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}},
+		BeforeCutEdges:   []archreport.LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}, {Left: "a", Right: "d"}},
+		AfterCutEdges:    []archreport.LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}},
+		BeforeSourceSide: []string{"a"}, BeforeSinkSide: []string{"b", "c", "d"},
+		AfterSourceSide: []string{"a", "c"}, AfterSinkSide: []string{"b", "d"},
 	}}}
 	var out, errOut bytes.Buffer
 	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity"); code != 3 {
 		t.Fatalf("code=%d output=%s", code, out.String())
 	}
-	for _, want := range []string{"lateral-edge-connectivity tier=foundation-composite(2) a <=> b cut 3 -> 2 (-1)", "witnesses [a--b a--c a--d] -> [a--b a--c]", "edge-disjoint same-tier path"} {
+	for _, want := range []string{"lateral-edge-connectivity tier=foundation-composite(2) a <=> b cut 3 -> 2 (-1)", "witnesses [a--b a--c a--d] -> [a--b a--c]", "partitions [a]|[b c d] -> [a c]|[b d]", "edge-disjoint same-tier path"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q missing %q", out.String(), want)
 		}

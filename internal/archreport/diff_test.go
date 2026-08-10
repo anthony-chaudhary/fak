@@ -6,24 +6,28 @@ import (
 	"testing"
 )
 
-func TestDiffLateralEdgeConnectivityWitnessesExposeStablePairCutDrift(t *testing.T) {
+func TestDiffLateralEdgeConnectivityPartitionsExposeStablePairCutDrift(t *testing.T) {
 	oldAB := []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}, {Left: "a", Right: "d"}}
 	newAB := []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}}
 	oldAC := []LateralCutEdge{{Left: "a", Right: "c"}, {Left: "b", Right: "c"}}
 	newAC := []LateralCutEdge{{Left: "a", Right: "c"}, {Left: "b", Right: "c"}, {Left: "c", Right: "d"}}
-	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 3, CutEdges: oldAB}, {Left: "a", Right: "c", Cut: 2, CutEdges: oldAC}}}}}
-	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2, CutEdges: newAB}, {Left: "a", Right: "c", Cut: 3, CutEdges: newAC}}}}}
+	oldSource, oldSink := []string{"a"}, []string{"b", "c", "d"}
+	newSource, newSink := []string{"a", "c"}, []string{"b", "d"}
+	before := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 3, CutEdges: oldAB, SourceSide: oldSource, SinkSide: oldSink}, {Left: "a", Right: "c", Cut: 2, CutEdges: oldAC, SourceSide: []string{"a"}, SinkSide: []string{"b", "c", "d"}}}}}}
+	after := Report{LateralBiconnectedBlocks: []LateralBiconnectedBlock{{Tier: 2, TierName: "foundation-composite", Members: []string{"a", "b", "c", "d"}, PairCuts: []LateralCriticalPair{{Left: "a", Right: "b", Cut: 2, CutEdges: newAB, SourceSide: newSource, SinkSide: newSink}, {Left: "a", Right: "c", Cut: 3, CutEdges: newAC, SourceSide: []string{"a", "b"}, SinkSide: []string{"c", "d"}}}}}}
 	diff := Diff(before, after)
 	want := []LateralEdgeConnectivityChange{
-		{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", BeforeCut: 3, AfterCut: 2, Delta: -1, BeforeCutEdges: oldAB, AfterCutEdges: newAB},
-		{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "c", BeforeCut: 2, AfterCut: 3, Delta: 1, BeforeCutEdges: oldAC, AfterCutEdges: newAC},
+		{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "b", BeforeCut: 3, AfterCut: 2, Delta: -1, BeforeCutEdges: oldAB, AfterCutEdges: newAB, BeforeSourceSide: oldSource, BeforeSinkSide: oldSink, AfterSourceSide: newSource, AfterSinkSide: newSink},
+		{Tier: 2, TierName: "foundation-composite", Left: "a", Right: "c", BeforeCut: 2, AfterCut: 3, Delta: 1, BeforeCutEdges: oldAC, AfterCutEdges: newAC, BeforeSourceSide: []string{"a"}, BeforeSinkSide: []string{"b", "c", "d"}, AfterSourceSide: []string{"a", "b"}, AfterSinkSide: []string{"c", "d"}},
 	}
 	if !reflect.DeepEqual(diff.LateralEdgeConnectivityChanges, want) || diff.Verdict != "regression" || diff.Changes() != 0 {
 		t.Fatalf("diff=%+v", diff)
 	}
 	oldAB[0].Left = "mutated"
 	newAB[0].Left = "mutated"
-	if got := diff.LateralEdgeConnectivityChanges[0]; got.BeforeCutEdges[0].Left != "a" || got.AfterCutEdges[0].Left != "a" {
+	oldSource[0] = "mutated"
+	newSink[0] = "mutated"
+	if got := diff.LateralEdgeConnectivityChanges[0]; got.BeforeCutEdges[0].Left != "a" || got.AfterCutEdges[0].Left != "a" || got.BeforeSourceSide[0] != "a" || got.AfterSinkSide[0] != "b" {
 		t.Fatalf("diff aliases input witnesses: %+v", got)
 	}
 }

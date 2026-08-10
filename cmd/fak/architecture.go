@@ -311,7 +311,7 @@ func writeArchitectureDiff(stdout, stderr io.Writer, diff archreport.ReportDiff,
 		fmt.Fprintf(stdout, "  ! resolved lateral-resilient-pair tier=%s(%d) %s <=> %s\n", pair.TierName, pair.Tier, pair.Left, pair.Right)
 	}
 	for _, change := range diff.LateralEdgeConnectivityChanges {
-		fmt.Fprintf(stdout, "  ~ lateral-edge-connectivity tier=%s(%d) %s <=> %s cut %d -> %d (%+d) witnesses %s -> %s\n", change.TierName, change.Tier, change.Left, change.Right, change.BeforeCut, change.AfterCut, change.Delta, architectureCutEdges(change.BeforeCutEdges), architectureCutEdges(change.AfterCutEdges))
+		fmt.Fprintf(stdout, "  ~ lateral-edge-connectivity tier=%s(%d) %s <=> %s cut %d -> %d (%+d) witnesses %s -> %s partitions %v|%v -> %v|%v\n", change.TierName, change.Tier, change.Left, change.Right, change.BeforeCut, change.AfterCut, change.Delta, architectureCutEdges(change.BeforeCutEdges), architectureCutEdges(change.AfterCutEdges), change.BeforeSourceSide, change.BeforeSinkSide, change.AfterSourceSide, change.AfterSinkSide)
 	}
 	for _, change := range diff.TierGapChanges {
 		fmt.Fprintf(stdout, "  ~ tier-gap %s floor %d -> %d, gap %d -> %d (%+d)\n", change.Leaf, change.BeforeFloor, change.AfterFloor, change.BeforeGap, change.AfterGap, change.Delta)
