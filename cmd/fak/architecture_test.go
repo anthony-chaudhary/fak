@@ -76,6 +76,30 @@ import _ "github.com/anthony-chaudhary/fak/internal/caller"
 	}
 }
 
+func TestArchitectureTextRendersBlastHotspots(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"base":1,"middle":1,"top":1}
+var tierName=[]string{"root","primitive"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/base/base.go", "package base\n")
+	mustWriteArchitectureFile(t, root, "internal/middle/middle.go", `package middle
+import _ "github.com/anthony-chaudhary/fak/internal/base"
+`)
+	mustWriteArchitectureFile(t, root, "internal/top/top.go", `package top
+import _ "github.com/anthony-chaudhary/fak/internal/middle"
+`)
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"blast hotspots (transitive impact):", "base                   radius=2 max-hops=2", "middle                 radius=1 max-hops=1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+}
+
 func TestArchitectureTextNamesStaleDeclarationRecovery(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

@@ -48,6 +48,12 @@ type Hotspot struct {
 	FanIn int    `json:"fan_in"`
 }
 
+type BlastHotspot struct {
+	Name        string `json:"name"`
+	BlastRadius int    `json:"blast_radius"`
+	MaxHops     int    `json:"max_hops"`
+}
+
 type ViolationEdge struct {
 	From         string `json:"from"`
 	FromTier     int    `json:"from_tier"`
@@ -81,6 +87,7 @@ type Report struct {
 	Tiers                []Tier          `json:"tiers"`
 	Leaves               []Leaf          `json:"leaves"`
 	Hotspots             []Hotspot       `json:"hotspots,omitempty"`
+	BlastHotspots        []BlastHotspot  `json:"blast_hotspots,omitempty"`
 	Diagnostics          []Diagnostic    `json:"diagnostics,omitempty"`
 	SinkCandidates       []SinkCandidate `json:"sink_candidates,omitempty"`
 	Violations           int             `json:"violations"`
@@ -170,6 +177,15 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			allLeaves[i].TransitiveDependents[j] = path.Dependent
 		}
 		allLeaves[i].BlastRadius = len(allLeaves[i].BlastPaths)
+		if allLeaves[i].BlastRadius > 0 {
+			maxHops := 0
+			for _, path := range allLeaves[i].BlastPaths {
+				if hops := len(path.Path) - 1; hops > maxHops {
+					maxHops = hops
+				}
+			}
+			report.BlastHotspots = append(report.BlastHotspots, BlastHotspot{Name: allLeaves[i].Name, BlastRadius: allLeaves[i].BlastRadius, MaxHops: maxHops})
+		}
 		if len(allLeaves[i].Dependents) > 0 {
 			report.Hotspots = append(report.Hotspots, Hotspot{Name: allLeaves[i].Name, FanIn: len(allLeaves[i].Dependents)})
 		}
@@ -191,6 +207,15 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		}
 		return report.Hotspots[i].Name < report.Hotspots[j].Name
 	})
+	sort.Slice(report.BlastHotspots, func(i, j int) bool {
+		if report.BlastHotspots[i].BlastRadius != report.BlastHotspots[j].BlastRadius {
+			return report.BlastHotspots[i].BlastRadius > report.BlastHotspots[j].BlastRadius
+		}
+		if report.BlastHotspots[i].MaxHops != report.BlastHotspots[j].MaxHops {
+			return report.BlastHotspots[i].MaxHops > report.BlastHotspots[j].MaxHops
+		}
+		return report.BlastHotspots[i].Name < report.BlastHotspots[j].Name
+	})
 	if onlyLeaf == "" {
 		report.Leaves = allLeaves
 	} else {
@@ -198,6 +223,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			report.Leaves = []Leaf{allLeaves[i]}
 		}
 		report.Hotspots = nil
+		report.BlastHotspots = nil
 		report.SinkCandidates = nil
 		diagnostics := report.Diagnostics[:0]
 		for _, diagnostic := range report.Diagnostics {

@@ -111,6 +111,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %-22s %d\n", hotspot.Name, hotspot.FanIn)
 		}
 	}
+	if *leaf == "" && len(report.BlastHotspots) > 0 {
+		fmt.Fprintln(stdout, "  blast hotspots (transitive impact):")
+		for _, hotspot := range report.BlastHotspots {
+			fmt.Fprintf(stdout, "    %-22s radius=%d max-hops=%d\n", hotspot.Name, hotspot.BlastRadius, hotspot.MaxHops)
+		}
+	}
 	if *leaf == "" && len(report.SinkCandidates) > 0 {
 		fmt.Fprintln(stdout, "  sink candidates (declared tier above import floor):")
 		for _, candidate := range report.SinkCandidates {

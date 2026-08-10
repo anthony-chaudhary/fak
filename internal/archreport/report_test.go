@@ -120,6 +120,10 @@ import _ "github.com/anthony-chaudhary/fak/internal/beta"
 	if !reflect.DeepEqual(r.Hotspots, wantHotspots) {
 		t.Fatalf("hotspots=%+v want=%+v", r.Hotspots, wantHotspots)
 	}
+	wantBlastHotspots := []BlastHotspot{{Name: "abi", BlastRadius: 3, MaxHops: 2}, {Name: "beta", BlastRadius: 2, MaxHops: 1}}
+	if !reflect.DeepEqual(r.BlastHotspots, wantBlastHotspots) {
+		t.Fatalf("blast hotspots=%+v want=%+v", r.BlastHotspots, wantBlastHotspots)
+	}
 	byName := map[string]Leaf{}
 	for _, leaf := range r.Leaves {
 		byName[leaf.Name] = leaf
@@ -161,8 +165,8 @@ import _ "github.com/anthony-chaudhary/fak/internal/beta"
 	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0].Dependents, []string{"alpha", "beta"}) || !reflect.DeepEqual(scoped.Leaves[0].TransitiveDependents, []string{"alpha", "beta", "gamma"}) || scoped.Leaves[0].BlastRadius != 3 {
 		t.Fatalf("scoped=%+v", scoped)
 	}
-	if len(scoped.Hotspots) != 0 {
-		t.Fatalf("scoped hotspots=%+v", scoped.Hotspots)
+	if len(scoped.Hotspots) != 0 || len(scoped.BlastHotspots) != 0 {
+		t.Fatalf("scoped hotspots=%+v blast hotspots=%+v", scoped.Hotspots, scoped.BlastHotspots)
 	}
 	if scoped.Violations != 0 {
 		t.Fatalf("scoped violations=%d", scoped.Violations)
