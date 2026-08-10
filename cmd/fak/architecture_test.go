@@ -51,6 +51,39 @@ func mustWriteArchitectureFile(t *testing.T, root, path, body string) {
 	}
 }
 
+func TestArchitectureTextRendersRootwardLayerSkips(t *testing.T) {
+	root := t.TempDir()
+	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"top":3,"mid":2,"low":1,"root":0}
+var tierName=[]string{"root","primitive","foundation","mechanism"}
+`)
+	mustWriteArchitectureFile(t, root, "internal/top/top.go", `package top
+import (_ "github.com/anthony-chaudhary/fak/internal/root"; _ "github.com/anthony-chaudhary/fak/internal/mid")
+`)
+	mustWriteArchitectureFile(t, root, "internal/mid/mid.go", `package mid
+import _ "github.com/anthony-chaudhary/fak/internal/low"
+`)
+	mustWriteArchitectureFile(t, root, "internal/low/low.go", "package low\n")
+	mustWriteArchitectureFile(t, root, "internal/root/root.go", "package root\n")
+	var out, errOut bytes.Buffer
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"rootward layer skips (legal abstraction bypasses):", "top(mechanism:3) -> root(root:0) distance=3 skipped-tiers=2"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q missing %q", out.String(), want)
+		}
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "mid"}); code != 0 {
+		t.Fatalf("scoped code=%d stderr=%s", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "rootward layer skips") {
+		t.Fatalf("mid leaked top skip: %s", out.String())
+	}
+}
+
 func TestArchitectureTextRendersDependencyAndFanOutHotspots(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest

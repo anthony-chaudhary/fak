@@ -151,6 +151,17 @@ type ArchitectureEdge struct {
 	Direction    string `json:"direction"`
 }
 
+type RootwardLayerSkip struct {
+	From         string `json:"from"`
+	FromTier     int    `json:"from_tier"`
+	FromTierName string `json:"from_tier_name"`
+	To           string `json:"to"`
+	ToTier       int    `json:"to_tier"`
+	ToTierName   string `json:"to_tier_name"`
+	TierDistance int    `json:"tier_distance"`
+	SkippedTiers int    `json:"skipped_tiers"`
+}
+
 type ViolationEdge struct {
 	From         string `json:"from"`
 	FromTier     int    `json:"from_tier"`
@@ -188,6 +199,7 @@ type Report struct {
 	DependencyHotspots        []DependencyHotspot        `json:"dependency_hotspots,omitempty"`
 	BlastHotspots             []BlastHotspot             `json:"blast_hotspots,omitempty"`
 	Edges                     []ArchitectureEdge         `json:"edges,omitempty"`
+	RootwardLayerSkips        []RootwardLayerSkip        `json:"rootward_layer_skips,omitempty"`
 	LateralComponents         []LateralComponent         `json:"lateral_components,omitempty"`
 	LateralBridges            []LateralBridge            `json:"lateral_bridges,omitempty"`
 	LateralArticulationPoints []LateralArticulationPoint `json:"lateral_articulation_points,omitempty"`
@@ -280,6 +292,9 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 				direction = "upward"
 			}
 			report.Edges = append(report.Edges, ArchitectureEdge{From: leaf.Name, FromTier: leaf.DeclaredTier, FromTierName: leaf.DeclaredTierName, To: dep, ToTier: toTier, ToTierName: tierName(names, toTier), TierDelta: delta, Direction: direction})
+			if direction == "rootward" && -delta > 1 {
+				report.RootwardLayerSkips = append(report.RootwardLayerSkips, RootwardLayerSkip{From: leaf.Name, FromTier: leaf.DeclaredTier, FromTierName: leaf.DeclaredTierName, To: dep, ToTier: toTier, ToTierName: tierName(names, toTier), TierDistance: -delta, SkippedTiers: -delta - 1})
+			}
 		}
 	}
 	sort.Slice(report.Edges, func(i, j int) bool {
@@ -287,6 +302,18 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			return report.Edges[i].From < report.Edges[j].From
 		}
 		return report.Edges[i].To < report.Edges[j].To
+	})
+	sort.Slice(report.RootwardLayerSkips, func(i, j int) bool {
+		if report.RootwardLayerSkips[i].SkippedTiers != report.RootwardLayerSkips[j].SkippedTiers {
+			return report.RootwardLayerSkips[i].SkippedTiers > report.RootwardLayerSkips[j].SkippedTiers
+		}
+		if report.RootwardLayerSkips[i].TierDistance != report.RootwardLayerSkips[j].TierDistance {
+			return report.RootwardLayerSkips[i].TierDistance > report.RootwardLayerSkips[j].TierDistance
+		}
+		if report.RootwardLayerSkips[i].From != report.RootwardLayerSkips[j].From {
+			return report.RootwardLayerSkips[i].From < report.RootwardLayerSkips[j].From
+		}
+		return report.RootwardLayerSkips[i].To < report.RootwardLayerSkips[j].To
 	})
 	report.LateralComponents = lateralComponents(report.Edges, tiers, names)
 	report.LateralBridges = lateralBridges(report.Edges, report.LateralComponents)
@@ -406,6 +433,13 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 		}
 		report.Edges = edges
+		skips := report.RootwardLayerSkips[:0]
+		for _, skip := range report.RootwardLayerSkips {
+			if skip.From == onlyLeaf {
+				skips = append(skips, skip)
+			}
+		}
+		report.RootwardLayerSkips = skips
 		blocks := report.LateralBiconnectedBlocks[:0]
 		for _, block := range report.LateralBiconnectedBlocks {
 			if slices.Contains(block.Members, onlyLeaf) {

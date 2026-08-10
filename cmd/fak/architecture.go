@@ -141,6 +141,12 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stdout, "    %-22s radius=%d max-hops=%d\n", hotspot.Name, hotspot.BlastRadius, hotspot.MaxHops)
 		}
 	}
+	if len(report.RootwardLayerSkips) > 0 {
+		fmt.Fprintln(stdout, "  rootward layer skips (legal abstraction bypasses):")
+		for _, skip := range report.RootwardLayerSkips {
+			fmt.Fprintf(stdout, "    %s(%s:%d) -> %s(%s:%d) distance=%d skipped-tiers=%d\n", skip.From, skip.FromTierName, skip.FromTier, skip.To, skip.ToTierName, skip.ToTier, skip.TierDistance, skip.SkippedTiers)
+		}
+	}
 	if len(report.LateralComponents) > 0 {
 		fmt.Fprintln(stdout, "  lateral components (same-tier coupling):")
 		for _, component := range report.LateralComponents {

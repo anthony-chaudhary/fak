@@ -10,6 +10,55 @@ import (
 	"testing"
 )
 
+func TestRootwardLayerSkipsExposeLegalTierBypasses(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/architest/architest_test.go", `package architest
+var tier=map[string]int{"top":4,"high":3,"mid":2,"low":1,"root":0,"peer":4}
+var tierName=[]string{"root","primitive","foundation","mechanism","policy"}
+`)
+	write("internal/top/top.go", `package top
+import (_ "github.com/anthony-chaudhary/fak/internal/root"; _ "github.com/anthony-chaudhary/fak/internal/low"; _ "github.com/anthony-chaudhary/fak/internal/high"; _ "github.com/anthony-chaudhary/fak/internal/peer")
+`)
+	write("internal/high/high.go", `package high
+import _ "github.com/anthony-chaudhary/fak/internal/root"
+`)
+	write("internal/low/low.go", `package low
+import _ "github.com/anthony-chaudhary/fak/internal/mid"
+`)
+	for _, leaf := range []string{"mid", "root", "peer"} {
+		write("internal/"+leaf+"/"+leaf+".go", "package "+leaf+"\n")
+	}
+	report, err := Analyze(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []RootwardLayerSkip{
+		{From: "top", FromTier: 4, FromTierName: "policy", To: "root", ToTier: 0, ToTierName: "root", TierDistance: 4, SkippedTiers: 3},
+		{From: "high", FromTier: 3, FromTierName: "mechanism", To: "root", ToTier: 0, ToTierName: "root", TierDistance: 3, SkippedTiers: 2},
+		{From: "top", FromTier: 4, FromTierName: "policy", To: "low", ToTier: 1, ToTierName: "primitive", TierDistance: 3, SkippedTiers: 2},
+	}
+	if !reflect.DeepEqual(report.RootwardLayerSkips, want) {
+		t.Fatalf("skips=%+v want=%+v", report.RootwardLayerSkips, want)
+	}
+	scoped, err := Analyze(root, "top")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scoped.RootwardLayerSkips, []RootwardLayerSkip{want[0], want[2]}) {
+		t.Fatalf("scoped=%+v", scoped.RootwardLayerSkips)
+	}
+}
+
 func TestDependencyHotspotsRankForwardBurdenAndOmitScopedTables(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

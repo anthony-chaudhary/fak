@@ -932,3 +932,19 @@ Supported chat input is the deliberately content-free `fak.scrubbed-chat/1` form
 
 Research basis and vocabulary proposal: [`research/coding-workload-vocabulary.md`](research/coding-workload-vocabulary.md). Machine companion: [`research/coding-workload-vocabulary.json`](research/coding-workload-vocabulary.json).
 
+
+## `fak workpattern` — named coding-workload catalog and miners
+
+`fak workpattern` is the offline front door for the versioned coding-workload vocabulary. It separates goal-shaped **patterns** from reusable ordered **subpatterns**, and reports only evidence supported by explicit detectors.
+
+```bash
+fak workpattern list --json
+fak workpattern source --source . --json
+fak workpattern trajectory --trajectory turns.jsonl --json
+fak workpattern trajectory --chat scrubbed-chat.json --json
+fak workpattern report --source . --trajectory turns.jsonl --json
+```
+
+The JSON schema is `fak.workpattern-report/1`; it includes catalog/detector versions, input digests, findings, and abstentions. Source findings carry source ranges. Trajectory findings carry trace/turn ranges and reasons. Default output excludes prompt, message, and tool-argument bodies. `--include-excerpts` is explicit opt-in and remains redacted/truncated by the miner. The content-free chat adapter accepts only `fak.scrubbed-chat/1` and fails closed on malformed/unsupported formats.
+
+Research basis: [`research/coding-workload-vocabulary.md`](research/coding-workload-vocabulary.md); machine companion: [`research/coding-workload-vocabulary.json`](research/coding-workload-vocabulary.json). Findings are evidence-backed candidates, not autonomous intent judgments.
