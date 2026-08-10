@@ -100,7 +100,7 @@ import _ "github.com/anthony-chaudhary/fak/internal/c"
 	}
 }
 
-func TestArchitectureTextRendersLateralMinimumCutWitness(t *testing.T) {
+func TestArchitectureTextRendersLateralMinimumCutPartition(t *testing.T) {
 	root := t.TempDir()
 	mustWriteArchitectureFile(t, root, "internal/architest/architest_test.go", `package architest
 var tier=map[string]int{"a":2,"b":2,"c":2}
@@ -118,7 +118,7 @@ import _ "github.com/anthony-chaudhary/fak/internal/c"
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	for _, want := range []string{"a--b cut=2 witness=[a--b a--c]", "b--c cut=2 witness=[a--b b--c]"} {
+	for _, want := range []string{"a--b cut=2 witness=[a--b a--c] partition=[a]|[b c]", "b--c cut=2 witness=[a--b b--c] partition=[b]|[a c]"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("missing %q in output:\n%s", want, stdout.String())
 		}
@@ -133,8 +133,12 @@ import _ "github.com/anthony-chaudhary/fak/internal/c"
 		t.Fatal(err)
 	}
 	wantEdges := []archreport.LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}}
-	if len(report.LateralBiconnectedBlocks) != 1 || !reflect.DeepEqual(report.LateralBiconnectedBlocks[0].PairCuts[0].CutEdges, wantEdges) {
-		t.Fatalf("scoped JSON blocks=%+v want first witness=%+v", report.LateralBiconnectedBlocks, wantEdges)
+	if len(report.LateralBiconnectedBlocks) != 1 {
+		t.Fatalf("scoped JSON blocks=%+v", report.LateralBiconnectedBlocks)
+	}
+	pair := report.LateralBiconnectedBlocks[0].PairCuts[0]
+	if !reflect.DeepEqual(pair.CutEdges, wantEdges) || !reflect.DeepEqual(pair.SourceSide, []string{"a"}) || !reflect.DeepEqual(pair.SinkSide, []string{"b", "c"}) {
+		t.Fatalf("scoped JSON pair=%+v want witness=%+v partition=[a]|[b c]", pair, wantEdges)
 	}
 }
 

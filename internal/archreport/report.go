@@ -61,10 +61,12 @@ type LateralCutEdge struct {
 }
 
 type LateralCriticalPair struct {
-	Left     string           `json:"left"`
-	Right    string           `json:"right"`
-	Cut      int              `json:"cut"`
-	CutEdges []LateralCutEdge `json:"cut_edges"`
+	Left       string           `json:"left"`
+	Right      string           `json:"right"`
+	Cut        int              `json:"cut"`
+	CutEdges   []LateralCutEdge `json:"cut_edges"`
+	SourceSide []string         `json:"source_side"`
+	SinkSide   []string         `json:"sink_side"`
 }
 
 type LateralBiconnectedBlock struct {
@@ -398,8 +400,8 @@ func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, [
 	var allPairs []LateralCriticalPair
 	for i := 0; i < len(members); i++ {
 		for j := i + 1; j < len(members); j++ {
-			cut, cutEdges := unitEdgeMaxFlow(members[i], members[j], edges, memberSet)
-			pair := LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut, CutEdges: cutEdges}
+			cut, cutEdges, sourceSide, sinkSide := unitEdgeMaxFlow(members[i], members[j], edges, memberSet)
+			pair := LateralCriticalPair{Left: members[i], Right: members[j], Cut: cut, CutEdges: cutEdges, SourceSide: sourceSide, SinkSide: sinkSide}
 			allPairs = append(allPairs, pair)
 			if minCut < 0 || cut < minCut {
 				minCut = cut
@@ -412,7 +414,7 @@ func blockEdgeConnectivity(members []string, edges map[string][2]string) (int, [
 	}
 	return minCut, pairs, allPairs
 }
-func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members map[string]struct{}) (int, []LateralCutEdge) {
+func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members map[string]struct{}) (int, []LateralCutEdge, []string, []string) {
 	unique := map[string][2]string{}
 	for _, edge := range edges {
 		left, right := edge[0], edge[1]
@@ -522,7 +524,17 @@ func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members ma
 		}
 		return cutEdges[i].Right < cutEdges[j].Right
 	})
-	return flow, cutEdges
+	sourceSide, sinkSide := make([]string, 0, len(reachable)), make([]string, 0, len(members)-len(reachable))
+	for member := range members {
+		if _, ok := reachable[member]; ok {
+			sourceSide = append(sourceSide, member)
+		} else {
+			sinkSide = append(sinkSide, member)
+		}
+	}
+	sort.Strings(sourceSide)
+	sort.Strings(sinkSide)
+	return flow, cutEdges, sourceSide, sinkSide
 }
 
 func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComponent) []LateralBiconnectedBlock {

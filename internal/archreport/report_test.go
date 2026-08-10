@@ -42,12 +42,15 @@ func TestLateralMinimumCutWitnessIsCanonicalAndDeterministic(t *testing.T) {
 	}
 	want := []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "d"}}
 	for i := 0; i < 20; i++ {
-		cut, witness := unitEdgeMaxFlow("a", "c", cycle, members)
+		cut, witness, sourceSide, sinkSide := unitEdgeMaxFlow("a", "c", cycle, members)
 		if cut != 2 || !reflect.DeepEqual(witness, want) {
 			t.Fatalf("run %d: cut=%d witness=%+v want=%+v", i, cut, witness, want)
 		}
 		if len(witness) != cut {
 			t.Fatalf("run %d: witness cardinality=%d cut=%d", i, len(witness), cut)
+		}
+		if !reflect.DeepEqual(sourceSide, []string{"a"}) || !reflect.DeepEqual(sinkSide, []string{"b", "c", "d"}) {
+			t.Fatalf("run %d: source=%v sink=%v", i, sourceSide, sinkSide)
 		}
 	}
 
@@ -59,11 +62,51 @@ func TestLateralMinimumCutWitnessIsCanonicalAndDeterministic(t *testing.T) {
 			}
 		}
 	}
-	cut, witness := unitEdgeMaxFlow("a", "b", clique, members)
+	cut, witness, sourceSide, sinkSide := unitEdgeMaxFlow("a", "b", clique, members)
 	want = []LateralCutEdge{{Left: "a", Right: "b"}, {Left: "a", Right: "c"}, {Left: "a", Right: "d"}}
 	if cut != 3 || !reflect.DeepEqual(witness, want) {
 		t.Fatalf("K4 cut=%d witness=%+v want=%+v", cut, witness, want)
 	}
+	if !reflect.DeepEqual(sourceSide, []string{"a"}) || !reflect.DeepEqual(sinkSide, []string{"b", "c", "d"}) {
+		t.Fatalf("K4 source=%v sink=%v", sourceSide, sinkSide)
+	}
+}
+
+func TestLateralMinimumCutPartitionCoversMembersAndWitnessCrossings(t *testing.T) {
+	members := map[string]struct{}{"a": {}, "b": {}, "c": {}, "d": {}, "e": {}}
+	edges := map[string][2]string{
+		"ab": {"a", "b"}, "ac": {"a", "c"}, "bc": {"b", "c"},
+		"bd": {"b", "d"}, "cd": {"c", "d"}, "de": {"d", "e"}, "ce": {"c", "e"},
+	}
+	for i := 0; i < 20; i++ {
+		cut, witness, sourceSide, sinkSide := unitEdgeMaxFlow("a", "e", edges, members)
+		if cut != len(witness) || len(sourceSide)+len(sinkSide) != len(members) {
+			t.Fatalf("run %d: cut=%d witness=%v source=%v sink=%v", i, cut, witness, sourceSide, sinkSide)
+		}
+		if !containsString(sourceSide, "a") || containsString(sourceSide, "e") || !containsString(sinkSide, "e") {
+			t.Fatalf("run %d: invalid endpoints source=%v sink=%v", i, sourceSide, sinkSide)
+		}
+		source := map[string]struct{}{}
+		for _, member := range sourceSide {
+			source[member] = struct{}{}
+		}
+		for _, edge := range witness {
+			_, left := source[edge.Left]
+			_, right := source[edge.Right]
+			if left == right {
+				t.Fatalf("run %d: witness edge %+v does not cross source=%v", i, edge, sourceSide)
+			}
+		}
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAnalyzeDerivesLateralBiconnectedBlocks(t *testing.T) {
@@ -108,9 +151,9 @@ import _ "github.com/anthony-chaudhary/fak/internal/z"
 	}
 	trianglePairs := func(a, b, c string) []LateralCriticalPair {
 		return []LateralCriticalPair{
-			{Left: a, Right: b, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: a, Right: c}}},
-			{Left: a, Right: c, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: a, Right: c}}},
-			{Left: b, Right: c, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: b, Right: c}}},
+			{Left: a, Right: b, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: a, Right: c}}, SourceSide: []string{a}, SinkSide: []string{b, c}},
+			{Left: a, Right: c, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: a, Right: c}}, SourceSide: []string{a}, SinkSide: []string{b, c}},
+			{Left: b, Right: c, Cut: 2, CutEdges: []LateralCutEdge{{Left: a, Right: b}, {Left: b, Right: c}}, SourceSide: []string{b}, SinkSide: []string{a, c}},
 		}
 	}
 	abc, cde := trianglePairs("a", "b", "c"), trianglePairs("c", "d", "e")
