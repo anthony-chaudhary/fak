@@ -17,7 +17,7 @@ dispatchworker inspect --registration reg-...
 
 The first command reads all latest registrations and returns counts by lifecycle and launch kind. Filters support `--root-issue`, `--parent`, `--session`, `--thread`, `--pid` plus `--process-start`, `--lane`, `--lease`, and `--witness`. `--observed processes.json` joins independently observed process identities and surfaces every unmatched PID/start pair as `UNREGISTERED_OBSERVED`. The second resolves the selected row to its root and renders the complete descendant tree, in human table form by default or stable JSON with `--json`. `FAK_WITNESS_REF` binds the terminal result to an external proof.
 
-The store is execution identity, not prompt storage: prompts, credentials, and full command lines are deliberately excluded. Restrict the store to its owner (the writer creates directories `0700` and files `0600`). Archive/retention and cross-host integrity are tracked by #6459. Broader thread/process/guard reconciliation consumes this same record in #6430; terminal artifact repair is #6431.
+The store is execution identity, not prompt storage: prompts, credentials, and full command lines are deliberately excluded. Restrict the store to its owner (the writer creates directories `0700` and files `0600`). Archive/retention and cross-host integrity are tracked by #6459. Broader thread/process/guard reconciliation consumes this same record in #6430. The lifecycle contract and dry-run cleanup plan are documented in [`session-lifecycle-reconciliation.md`](session-lifecycle-reconciliation.md); #6431 tracks applying owner-specific terminal repairs.
 
 ## Operator recovery
 

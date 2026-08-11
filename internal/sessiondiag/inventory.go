@@ -147,6 +147,14 @@ type InventoryCounts struct {
 	Registrations sessionregistry.Counts `json:"registrations"`
 }
 
+type CleanupAction struct {
+	Artifact       string `json:"artifact"`
+	Identity       string `json:"identity"`
+	Action         string `json:"action"`
+	Reason         string `json:"reason"`
+	RegistrationID string `json:"registration_id,omitempty"`
+}
+
 type ThreadRecord struct {
 	ID            string `json:"id"`
 	Source        string `json:"source,omitempty"`
@@ -260,18 +268,20 @@ type RegistrationRecord struct {
 	Health               string                `json:"health"`
 }
 type InventoryReport struct {
-	Schema               string                                 `json:"schema"`
-	ObservedAt           string                                 `json:"observed_at"`
-	WindowSeconds        int64                                  `json:"window_seconds"`
-	StaleAfterSeconds    int64                                  `json:"stale_after_seconds"`
-	ReadOnly             bool                                   `json:"read_only"`
-	Sources              InventorySources                       `json:"sources"`
-	Counts               InventoryCounts                        `json:"counts"`
-	Sessions             []SessionRecord                        `json:"sessions"`
-	SpawnEdges           []SpawnEdgeRecord                      `json:"spawn_edges"`
-	Registrations        []RegistrationRecord                   `json:"registrations"`
-	UnregisteredObserved []sessionregistry.UnregisteredObserved `json:"unregistered_observed,omitempty"`
-	Notice               string                                 `json:"notice"`
+	Schema                     string                                 `json:"schema"`
+	ObservedAt                 string                                 `json:"observed_at"`
+	WindowSeconds              int64                                  `json:"window_seconds"`
+	StaleAfterSeconds          int64                                  `json:"stale_after_seconds"`
+	ReadOnly                   bool                                   `json:"read_only"`
+	Sources                    InventorySources                       `json:"sources"`
+	Counts                     InventoryCounts                        `json:"counts"`
+	Sessions                   []SessionRecord                        `json:"sessions"`
+	SpawnEdges                 []SpawnEdgeRecord                      `json:"spawn_edges"`
+	Registrations              []RegistrationRecord                   `json:"registrations"`
+	UnregisteredObserved       []sessionregistry.UnregisteredObserved `json:"unregistered_observed,omitempty"`
+	RegistrationReconciliation []sessionregistry.Reconciliation       `json:"registration_reconciliation,omitempty"`
+	CleanupActions             []CleanupAction                        `json:"cleanup_actions,omitempty"`
+	Notice                     string                                 `json:"notice"`
 }
 
 type processTreeWork struct {
@@ -413,7 +423,10 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 	sortSessions(sessions)
 
 	registrationRecords, unregistered := inventoryRegistrations(in.Registrations, in.Processes)
+	observedRegistrable := observedRegistrationProcesses(in.Processes)
+	reconciliations := sessionregistry.ReconcileStale(in.Registrations, observedRegistrable, now, in.StaleAfter)
 	registrationCounts := sessionregistry.Summarize(in.Registrations, len(unregistered))
+	cleanupActions := buildCleanupActions(sessions, edges, reconciliations)
 
 	counts := InventoryCounts{
 		ByKind:        map[string]int{},
@@ -454,12 +467,14 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 			Registrations:  len(in.Registrations),
 			Errors:         sourceErrors,
 		},
-		Counts:               counts,
-		Sessions:             sessions,
-		SpawnEdges:           edges,
-		Registrations:        registrationRecords,
-		UnregisteredObserved: unregistered,
-		Notice:               "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself",
+		Counts:                     counts,
+		Sessions:                   sessions,
+		SpawnEdges:                 edges,
+		Registrations:              registrationRecords,
+		UnregisteredObserved:       unregistered,
+		RegistrationReconciliation: reconciliations,
+		CleanupActions:             cleanupActions,
+		Notice:                     "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself",
 	}
 }
 
@@ -1061,6 +1076,13 @@ func RenderInventory(w io.Writer, report InventoryReport) {
 			session.Health, session.Kind, threadID, turn, lock, receipt, len(session.ProcessTrees), strings.Join(session.Reasons, ","))
 	}
 	_ = tw.Flush()
+	if len(report.CleanupActions) > 0 {
+		fmt.Fprintln(w, "lifecycle reconciliation (dry-run):")
+		fmt.Fprintln(w, "ARTIFACT\tIDENTITY\tACTION\tREASON")
+		for _, action := range report.CleanupActions {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", action.Artifact, action.Identity, action.Action, action.Reason)
+		}
+	}
 	if len(report.Registrations) > 0 || len(report.UnregisteredObserved) > 0 {
 		fmt.Fprintf(w, "REGISTRATIONS total=%d active=%d terminal=%d unknown=%d unregistered_observed=%d\n", report.Counts.Registrations.Total, report.Counts.Registrations.Active, report.Counts.Registrations.Terminal, report.Counts.Registrations.Unknown, report.Counts.Registrations.UnregisteredObserved)
 		rtw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)

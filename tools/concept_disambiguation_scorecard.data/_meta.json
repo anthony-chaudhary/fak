@@ -1340,6 +1340,11 @@
           "category": "incidental",
           "reason": "Internal environment lookup helper used by child-lineage persistence; not a guard, gate, or policy concept.",
           "token": "firstGuardEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON artifact discriminator in the session lifecycle cleanup plan; the canonical guarded-launch receipt concept is already defined by sessiondiag documentation and schema.",
+          "token": "guard_receipt"
         }
       ],
       "exclude": [
@@ -1465,6 +1470,7 @@
         "guard_bypass",
         "guard_operator_question",
         "guard_output_style",
+        "guard_receipt",
         "guard_split_close_test",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",

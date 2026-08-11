@@ -1042,5 +1042,28 @@
       }
     }
   ],
+  "registration_reconciliation": [
+    {
+      "registration_id": "reg-stale",
+      "from": "active",
+      "to": "lost",
+      "reason": "stale registration has no matching pid plus process_start identity"
+    }
+  ],
+  "cleanup_actions": [
+    {
+      "artifact": "guard_receipt",
+      "identity": "70000001-0000-4000-8000-000000000001",
+      "action": "retain_receipt",
+      "reason": "launch receipt has no joined process identity; it is not liveness"
+    },
+    {
+      "artifact": "registration",
+      "identity": "reg-stale",
+      "action": "append_lost",
+      "reason": "stale registration has no matching pid plus process_start identity",
+      "registration_id": "reg-stale"
+    }
+  ],
   "notice": "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself"
 }
