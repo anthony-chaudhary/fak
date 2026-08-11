@@ -9,6 +9,12 @@ on:
   push:
     branches: [main, master, fak-v0.1]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      go_test_args_json:
+        description: JSON array of arguments passed verbatim to go test
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,7 +30,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  testroute-ci-only:
+    name: testroute CI-only / go test
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    env:
+      GOTOOLCHAIN: auto
+      GO_TEST_ARGS_JSON: ${{ inputs.go_test_args_json }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: validate and execute routed go test
+        shell: bash
+        run: |
+          if ! jq -e 'type == "array" and all(.[]; type == "string")' <<<"$GO_TEST_ARGS_JSON" >/dev/null; then
+            echo "go_test_args_json must be a JSON array of strings" >&2
+            exit 2
+          fi
+          mapfile -t go_test_args < <(jq -r '.[]' <<<"$GO_TEST_ARGS_JSON")
+          go test "${go_test_args[@]}"
   build-vet-test:
+    if: github.event_name != 'workflow_dispatch'
     name: build · vet · test · claims-lint
     runs-on: ubuntu-latest
     env:
@@ -900,6 +929,7 @@ jobs:
   # so this is the reproducible home of the "race-free" claim. See
   # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
   race-detector:
+    if: github.event_name != 'workflow_dispatch'
     name: race detector · go test -race ./...
     runs-on: ubuntu-latest
     env:
