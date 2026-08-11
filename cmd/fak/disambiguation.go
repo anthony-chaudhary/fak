@@ -18,7 +18,7 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -34,8 +34,10 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationProvenance(stdout, stderr, args[1:])
 	case "stale-symbols-self-test":
 		return runDisambiguationStaleSymbolsSelfTest(stdout, stderr, args[1:])
+	case "coverage-self-test":
+		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, ownership, freshness, provenance, or stale-symbols-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
 }
@@ -104,6 +106,34 @@ func runDisambiguationStaleSymbolsSelfTest(stdout, stderr io.Writer, args []stri
 		}
 	} else {
 		fmt.Fprintf(stdout, "stale-symbols-self-test passed=%t fresh=%s stale=%s reason=%s\n", report.Passed, report.Fresh.Verdict, report.Stale.Verdict, report.Stale.ReasonCode)
+	}
+	if !report.Passed {
+		return 1
+	}
+	return 0
+}
+
+func runDisambiguationCoverageSelfTest(stdout, stderr io.Writer, args []string) int {
+	flags := flag.NewFlagSet("disambiguation coverage-self-test", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	jsonOutput := flags.Bool("json", false, "emit structured JSON")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak disambiguation coverage-self-test [--json]")
+		return 2
+	}
+	report := disambiguation.CoverageSelfCheck()
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "disambiguation coverage-self-test: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "coverage-self-test passed=%t detected=%t cleared=%t reason=%s\n", report.Passed, report.Detected, report.Cleared, report.DetectedReason)
 	}
 	if !report.Passed {
 		return 1

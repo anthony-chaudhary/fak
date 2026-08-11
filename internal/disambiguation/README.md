@@ -189,3 +189,36 @@ fak disambiguation stale-symbols-self-test --json
 
 The JSON emits both the initial `fresh` result and the result after deleting the
 fixture declaration (`stale/PUBLIC_SYMBOL_MISSING`).
+
+
+## Coverage inventory
+
+`InventoryCoverage` is the deterministic orphan-term check for agents adding public
+terminology. Call it with the repository's canonical `Index`, an explicit list of
+`PublicTerminologySurface` declarations, and explicit `IncidentalTerm` classifications.
+The first supported surface kind is `go_package`: it inventories exported type, function,
+constant, and variable names from non-test Go files beneath exactly the declared package
+directory. It does not crawl the repository, read private inputs, use the network, or write
+an index.
+
+Every exported candidate must resolve by one of these paths:
+
+- **canonical**: its normalized words are a canonical term/alias, or the canonical entry's
+  public-source provenance names the exact exported Go symbol;
+- **incidental**: the caller supplies the exact symbol and a non-empty reason; or
+- **finding**: JSON reports `MISSING_TERM_CLASSIFICATION`, the declared surface, exact symbol,
+  and normalized candidate term.
+
+Surfaces and findings are sorted, so identical public inputs produce identical JSON. Keep
+surface declarations narrow and reviewed; adding a broad repository heuristic defeats the
+contract by turning implementation churn into terminology noise.
+
+Run the hermetic public CLI witness before changing coverage plumbing:
+
+```text
+fak disambiguation coverage-self-test --json
+```
+
+The witness introduces `NewlyExportedTerm`, observes the stable missing-classification
+reason, classifies it as incidental, and verifies the finding clears. Package callers can
+use the same `CoverageSelfCheck`; neither path introduces a second writer.

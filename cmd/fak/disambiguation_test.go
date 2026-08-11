@@ -294,3 +294,18 @@ func TestRunDisambiguationStaleSymbolsSelfTestJSON(t *testing.T) {
 		t.Fatalf("stale=%+v", report.Stale)
 	}
 }
+
+func TestDisambiguationCoverageSelfTestJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDisambiguation(&stdout, &stderr, []string{"coverage-self-test", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got disambiguation.CoverageSelfCheckReport
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.Passed || !got.Detected || !got.Cleared || got.DetectedReason != disambiguation.CoverageReasonMissingClassification {
+		t.Fatalf("report = %#v", got)
+	}
+}
