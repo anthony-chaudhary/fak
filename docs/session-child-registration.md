@@ -1,12 +1,12 @@
 # Child-agent registration and lineage
 
-Every executable child agent launched by `dispatchworker` is registered durably **before** its process starts. Registration failure is fail-closed: no child work runs without an inspectable row.
+Every executable child agent launched by `dispatchworker` or `fak guard` is registered durably **before** its process starts. Registration failure is fail-closed: no child work runs without an inspectable row.
 
 ## Record and lifecycle
 
 The append-only JSONL store uses schema `fak-child-registration/1`. The default is the OS config directory under `fak/child-registrations.jsonl`; set `FAK_SESSION_REGISTRY` for an explicit shared store. Each latest record carries stable registration, parent, root, task/issue, attempt/resume, lane/lease, runtime/session/thread/process, scope, timestamps, terminal state, reason, and witness identities.
 
-Lifecycle is `registered` (persisted before start) → `active` (PID plus process start time read back) → `completed|failed|cancelled|lost|reaped`. `unknown` is allowed only with a reason. Retries with the same immutable identity are idempotent; conflicting replay and a child whose parent is absent are refused. A child independently receives its own `FAK_REGISTRATION_ID`/`FAK_ATTEMPT_ID`, the parent side as `FAK_PARENT_REGISTRATION_ID`/`FAK_PARENT_ATTEMPT_ID`, and root ancestry as `FAK_ROOT_REGISTRATION_ID`, `FAK_ROOT_OUTCOME`, `FAK_ROOT_ISSUE`, and `FAK_TASK_ID`. A nested launcher uses the current registration as its child's parent, preserving both sides of every edge.
+Lifecycle is `registered` (persisted before start) → `active` (PID plus process start time read back) → `completed|failed|cancelled|lost|reaped`. `unknown` is allowed only with a reason. Retries with the same immutable identity are idempotent; conflicting replay and a child whose parent is absent are refused. `fak guard` registers before the brokered command is started, reads back PID/start after the job boundary is armed, creates a distinct attempt for every budget/crash resume, and terminalizes normal, failed, cancelled/restarted, time-budget, and lost outcomes. A child independently receives its own `FAK_REGISTRATION_ID`/`FAK_ATTEMPT_ID`, the parent side as `FAK_PARENT_REGISTRATION_ID`/`FAK_PARENT_ATTEMPT_ID`, and root ancestry as `FAK_ROOT_REGISTRATION_ID`, `FAK_ROOT_OUTCOME`, `FAK_ROOT_ISSUE`, and `FAK_TASK_ID`. A nested launcher uses the current registration as its child's parent, preserving both sides of every edge.
 
 ## Inspect and trace
 

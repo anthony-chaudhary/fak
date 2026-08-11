@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -693,6 +694,7 @@ type guardChildSpawnMetadata struct {
 	PolicyDigest string
 	Backend      string
 	Envelope     toolprocgate.CapabilityEnvelope
+	RegistryPath string
 }
 
 type guardChildLauncher func(toolprocgate.SpawnGrant) (*exec.Cmd, error)
@@ -746,6 +748,7 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 		PolicyDigest: strings.TrimSpace(policyDigest),
 		Backend:      strings.TrimSpace(backend),
 		Envelope:     env,
+		RegistryPath: sessionregistry.DefaultPath(),
 	}
 }
 
@@ -855,6 +858,11 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	if err != nil {
 		return toolprocgate.SpawnGrant{}, nil, err
 	}
+	reg, err := prepareGuardChildRegistration(meta, grant)
+	if err != nil {
+		return toolprocgate.SpawnGrant{}, nil, err
+	}
+	grant = withGuardRegistrationEnv(grant, reg)
 	if err := guardWindowsArgvPreflight(grant.Argv, guardPromptTransportOS); err != nil {
 		return toolprocgate.SpawnGrant{}, nil, err
 	}
@@ -863,8 +871,10 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	}
 	child, err := launcher(grant)
 	if err != nil {
+		terminalGuardRegistration(reg, sessionregistry.StateFailed, "launch_prepare_failed", "")
 		return toolprocgate.SpawnGrant{}, nil, err
 	}
+	bindGuardRegistration(child, reg)
 	if promptOnStdin {
 		child.Stdin = strings.NewReader(stdinPrompt)
 	}
@@ -1113,6 +1123,8 @@ func guardRestartEnv(ev guardBudgetRestartEvent) [][2]string {
 		{"FAK_RESET_FROM_TRACE", ev.FromTraceID},
 		{"FAK_RESET_TRACE_ID", ev.ToTraceID},
 		{"FAK_SESSION_ID", ev.ToTraceID},
+		{"FAK_RESUME_OF_ATTEMPT_ID", ev.FromTraceID},
+		{"FAK_CHILD_ATTEMPT_ID", ev.ToTraceID},
 		{"FAK_RESET_REASON", ev.Reason},
 	}
 	if ev.SeedFile != "" {

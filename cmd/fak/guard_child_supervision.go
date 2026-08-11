@@ -95,7 +95,22 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
-		runErr := windowgate.RunInNewJob(child)
+		job, startErr := windowgate.StartInNewJob(child)
+		if startErr != nil {
+			terminalGuardChild(child, startErr, "launch_failed")
+			finishGuardChildAndReport(startErr, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
+		if err := startBoundGuardRegistration(child); err != nil {
+			_ = child.Process.Kill()
+			_, _ = child.Process.Wait()
+			_ = job.Close()
+			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
+		runErr := child.Wait()
+		_ = job.Close()
+		terminalGuardChild(child, runErr, "")
 		if rec, parked := guardGoalParked(); parked {
 			fmt.Fprintf(os.Stderr, "fak guard: goal parked outside active context budget until %d; reason=%s; %s; next=%s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()), rec.NextAction)
 			// #5862: a bare `break` here left the loop with NO teardown at all — no
@@ -247,8 +262,16 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		if err := startBoundGuardRegistration(child); err != nil {
+			_ = child.Process.Kill()
+			_, _ = child.Process.Wait()
+			_ = job.Close()
+			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
 		go func() {
 			runErr := child.Wait()
+			terminalGuardChild(child, runErr, "")
 			_ = job.Close()
 			wait <- runErr
 		}()
@@ -316,6 +339,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				if !quiet {
 					fmt.Fprintf(os.Stderr, "fak guard: context budget signal ignored as terminal; goal parked until %d reason=%s %s\n", rec.ParkedUntil, rec.Reason, guardParkProbeStatus(rec, time.Now()))
 				}
+				markGuardChildTerminalIntent(child, "cancelled")
 				stopGuardChild(child, wait, 2*time.Second)
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
@@ -399,6 +423,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			// Let the triggering response finish flushing to the wrapped client before
 			// stopping the process that initiated it.
 			time.Sleep(750 * time.Millisecond)
+			markGuardChildTerminalIntent(child, "restart")
 			stopGuardChild(child, wait, 2*time.Second)
 		case guardChildTimeBudget:
 			// The wall-clock envelope elapsed: stop the wrapped agent and report, rather
@@ -406,6 +431,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", event.Reason, guardTraceID)
 			}
+			markGuardChildTerminalIntent(child, "time_budget")
 			stopGuardChild(child, wait, 2*time.Second)
 			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)

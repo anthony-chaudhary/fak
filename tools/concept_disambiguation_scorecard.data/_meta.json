@@ -1260,6 +1260,86 @@
           "category": "incidental",
           "reason": "Leaf-local typed runtime delegation result required by issue 6255, not a repository guard gate",
           "token": "CaseDelegate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "prepareGuardChildRegistration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "withGuardRegistrationEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "terminalGuardRegistration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "bindGuardRegistration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "startBoundGuardRegistration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "markGuardChildTerminalIntent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "terminalGuardChild"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "guardRegistration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "guardRegistrations"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "guardTerminalIntents"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "startGuardRegistration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "guardLaunchKind"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "guardRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "guardScope"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal child-lineage persistence plumbing for the existing guard spawn boundary; not a new guard, gate, or policy concept.",
+          "token": "FAK_CHILD_ATTEMPT_ID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal environment lookup helper used by child-lineage persistence; not a guard, gate, or policy concept.",
+          "token": "firstGuardEnv"
         }
       ],
       "exclude": [
@@ -1282,6 +1362,7 @@
         "ClaimRuntimeDelegated",
         "CorrectnessGate",
         "DELEGATE",
+        "FAK_CHILD_ATTEMPT_ID",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
@@ -1296,6 +1377,7 @@
         "aggregateLive",
         "aggregateTail",
         "appendGuardCompactionWitnessTo",
+        "bindGuardRegistration",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
         "coreLockLandGate",
@@ -1305,6 +1387,7 @@
         "equalAggregate",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
+        "firstGuardEnv",
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
         "gateGitHygieneBypass",
@@ -1348,6 +1431,7 @@
         "guardKeychainCred",
         "guardKeychainSupported",
         "guardLaunchCoreLockAll",
+        "guardLaunchKind",
         "guardOAuthKeychainSource",
         "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
@@ -1355,6 +1439,10 @@
         "guardOperatorQuestionEscalationSlackText",
         "guardOperatorQuestionNormalizedOrWarn",
         "guardOperatorQuestionOptionLabels",
+        "guardRegistration",
+        "guardRegistrations",
+        "guardRuntime",
+        "guardScope",
         "guardSelfTightenFloorNote",
         "guardSelfTightenOverlayEnv",
         "guardSelfTightenOverlayPath",
@@ -1370,6 +1458,7 @@
         "guardSplitAppleCloseTail",
         "guardSplitAppleTerminalCommand",
         "guardStopHookOperatorQuestionEnvMode",
+        "guardTerminalIntents",
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
@@ -1400,10 +1489,12 @@
         "liveAggregate",
         "loadCacheValueGateBaseline",
         "loadGuardSelfTightenOverlay",
+        "markGuardChildTerminalIntent",
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
         "observer_guard",
+        "prepareGuardChildRegistration",
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
         "readGuardCompactionWitnesses",
@@ -1417,11 +1508,16 @@
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
+        "startBoundGuardRegistration",
+        "startGuardRegistration",
         "summarizeguardstops",
         "tailAggregate",
+        "terminalGuardChild",
+        "terminalGuardRegistration",
         "transform_guard",
         "ungated",
-        "unguarded"
+        "unguarded",
+        "withGuardRegistrationEnv"
       ],
       "min_files": 3,
       "name": "Guard / gate family",
