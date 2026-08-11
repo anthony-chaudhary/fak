@@ -175,6 +175,7 @@ const (
 // with the reason. Being on this list is a claim, and the claim is checkable: each reason
 // asserts the route reaches no planner.
 var epFanoutExemptRoutes = map[string]string{
+	"/": "read-only discovery homepage has no generation or expert work to fan out",
 	// A2A Agent-to-Agent surface (#1019) — a task-record control plane. handleA2ASendMessage
 	// validates a method against the registry and files a task record; no planner call.
 	"/a2a/v1/messages":   epExemptNoDecode,

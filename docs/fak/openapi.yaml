@@ -72,6 +72,24 @@ tags:
     description: Liveness, metrics, diagnostics (`/healthz`, `/metrics`, `/debug/vars`).
 
 paths:
+  /:
+    get:
+      tags: [Operational]
+      summary: Human-readable gateway discovery homepage
+      description: |
+        Self-contained HTML landing page for the loopback URL printed by fak.
+        It identifies the active engine, model, provider, and vDSO posture and
+        links to health, model, A2A agent, metrics, diagnostics, and API docs.
+        No gateway credential or upstream URL is rendered.
+      security: []
+      responses:
+        '200':
+          description: Gateway discovery homepage
+          content:
+            text/html:
+              schema:
+                type: string
+
   # -------------------------------------------------------------------------
   # OpenAI-compatible surface
   # -------------------------------------------------------------------------

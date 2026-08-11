@@ -23,6 +23,7 @@ import (
 // the Python/TypeScript/Go client SDKs are generated from cannot silently drift
 // behind the surface `fak serve` actually exposes.
 var specPathFor = map[string]string{
+	"/": "/",
 	// A2A Agent-to-Agent protocol surface (#1019).
 	"/a2a/v1/messages":   "/a2a/v1/messages",
 	"/a2a/v1/tasks":      "/a2a/v1/tasks",

@@ -51,6 +51,7 @@ type gatewayRoute struct {
 // registration.
 func (s *Server) routeTable() []gatewayRoute {
 	return []gatewayRoute{
+		{"/", s.handleHome},
 		// A2A Agent-to-Agent protocol surface (#1019).
 		{"/a2a/v1/messages", s.handleA2ASendMessage},
 		{"/a2a/v1/tasks", s.handleA2AListTasks},
@@ -415,6 +416,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 //     conventional "metrics open on loopback, gated off-box" posture.
 func authExempt(r *http.Request) bool {
 	if r.URL.Path == "/healthz" {
+		return true
+	}
+	// Human/agent discovery is directly clickable from the loopback URL shown
+	// in the TUI, but remains bearer-gated when the gateway is exposed off-box.
+	if (r.URL.Path == "/" || r.URL.Path == "/a2a/v1/agent-card") && requestFromLoopback(r) {
 		return true
 	}
 	if readScopedPath(r) {
