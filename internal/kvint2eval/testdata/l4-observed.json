@@ -1,0 +1,161 @@
+{
+  "contract_version": "kvint2eval/v1",
+  "artifact": {
+    "id": "kvint2eval-l4-output-aware-slice",
+    "version": "2",
+    "sha256": "653f025b233038a199476e1ed8d0b86f688c52a54b92df6abcdd2263470bae44"
+  },
+  "recipe_artifact": {
+    "id": "arxiv:2608.02691",
+    "version": "v2",
+    "sha256": "6b4f915c212b0b3afaa4b5a8334805ff97e3c1c136c38d6f29d329ad024b9331"
+  },
+  "model": {
+    "id": "synthetic-attention-head",
+    "version": "seed-6260-v2",
+    "sha256": "653f025b233038a199476e1ed8d0b86f688c52a54b92df6abcdd2263470bae44"
+  },
+  "runtime": {
+    "name": "cuda",
+    "version": "12.9",
+    "driver": "580.159.03",
+    "kernel": "kvint2eval-output-aware-v2",
+    "sha256": "2a2afb63578807ac7ad798a864a5084818a2039c1c8a4caa83bf2dbe54716f2c"
+  },
+  "hardware": {
+    "os": "Ubuntu 22.04.5 LTS",
+    "gpu": "NVIDIA L4",
+    "gpu_memory_bytes": 24152809472,
+    "context_tokens": 4096,
+    "kv_heads": 4,
+    "head_dimension": 128,
+    "output_dimension": 128,
+    "seed": 6260
+  },
+  "recipe": {
+    "method": "optr-output-aware-int2",
+    "baseline": "identity-rotation-int2",
+    "bits": 2,
+    "group_size": 128,
+    "key_granularity": "per-token-group",
+    "value_granularity": "per-token-group",
+    "objective": "post-wo-attention-output-nmse"
+  },
+  "evidence": "observed",
+  "metrics": {
+    "candidate_count": 9,
+    "decode_trials": 10,
+    "selected_rotation": 7,
+    "candidates": [
+      {
+        "rotation": 0,
+        "clip_ratio": 0.8,
+        "calibration_milliseconds": 306.837196,
+        "output_nmse_mean": 52.3537316,
+        "output_nmse_stddev": 51.571284,
+        "task_accuracy_mean": 0.1,
+        "task_accuracy_stddev": 0.3,
+        "decode_microseconds_mean": 19907.1976,
+        "decode_microseconds_stddev": 1938.675565
+      },
+      {
+        "rotation": 1,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 331.424727,
+        "output_nmse_mean": 3.00506716,
+        "output_nmse_stddev": 1.52212897,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 19401.4316,
+        "decode_microseconds_stddev": 1324.579433
+      },
+      {
+        "rotation": 2,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 366.074676,
+        "output_nmse_mean": 2.4670171,
+        "output_nmse_stddev": 1.39077108,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 22559.2347,
+        "decode_microseconds_stddev": 1706.194185
+      },
+      {
+        "rotation": 3,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 335.15033,
+        "output_nmse_mean": 2.54088402,
+        "output_nmse_stddev": 2.33479636,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 22417.4913,
+        "decode_microseconds_stddev": 2383.077183
+      },
+      {
+        "rotation": 4,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 348.362917,
+        "output_nmse_mean": 3.95087408,
+        "output_nmse_stddev": 3.73687256,
+        "task_accuracy_mean": 0.9,
+        "task_accuracy_stddev": 0.3,
+        "decode_microseconds_mean": 20334.7737,
+        "decode_microseconds_stddev": 1275.376021
+      },
+      {
+        "rotation": 5,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 286.574164,
+        "output_nmse_mean": 2.1123693,
+        "output_nmse_stddev": 0.735367341,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 20295.672,
+        "decode_microseconds_stddev": 707.819714
+      },
+      {
+        "rotation": 6,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 309.403049,
+        "output_nmse_mean": 2.88083625,
+        "output_nmse_stddev": 1.47694114,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 21260.2439,
+        "decode_microseconds_stddev": 1181.484072
+      },
+      {
+        "rotation": 7,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 319.26752,
+        "output_nmse_mean": 1.95926247,
+        "output_nmse_stddev": 0.431511456,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 19187.1855,
+        "decode_microseconds_stddev": 740.247367
+      },
+      {
+        "rotation": 8,
+        "clip_ratio": 1,
+        "calibration_milliseconds": 286.739339,
+        "output_nmse_mean": 2.55602174,
+        "output_nmse_stddev": 1.19223645,
+        "task_accuracy_mean": 1,
+        "task_accuracy_stddev": 0,
+        "decode_microseconds_mean": 22873.0253,
+        "decode_microseconds_stddev": 1568.676351
+      }
+    ],
+    "transform_milliseconds": 319.26752,
+    "cache_bytes": 1048576,
+    "baseline_output_nmse": 52.3537316,
+    "candidate_output_nmse": 1.95926247,
+    "baseline_task_accuracy": 0.1,
+    "candidate_task_accuracy": 1,
+    "baseline_decode_microseconds": 19907.1976,
+    "candidate_decode_microseconds": 19187.1855
+  },
+  "witness_sha256": "7416fe5688ea6a205ce0612589b6d134217540488f770985c1b1817864f29220"
+}
+

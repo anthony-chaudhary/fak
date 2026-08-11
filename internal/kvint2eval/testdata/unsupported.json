@@ -1,0 +1,13 @@
+{
+  "contract_version": "kvint2eval/v1",
+  "artifact": {"id":"kvint2eval-l4-output-aware-slice","version":"1","sha256":"c42c90c981fea15dc3af1e78abd6c1758ca9175e9229093a099ba38d705d4414"},
+  "recipe_artifact": {"id":"arxiv:2608.02691","version":"v2","sha256":"5d82f12819bce439794e725bd0f6fd4fbb2d574c5d93dc82de9765e226467eef"},
+  "model": {"id":"synthetic-attention-head","version":"deterministic-v1","sha256":"888a1675a5e48c13313794c224ef08a7579a719128f8f63ad499ba7168917f61"},
+  "runtime": {"name":"cuda","version":"12.9","driver":"580.159.03","kernel":"kvint2eval-output-aware-v1","sha256":"db1cb015458c2eaf7e0a581aa7e6b495dc6f1d8881bb3b09b57a83efb3870dce"},
+  "hardware": {"os":"Debian GNU/Linux 12","gpu":"NVIDIA L4","gpu_memory_bytes":24152809472,"context_tokens":4096,"kv_heads":4,"head_dimension":128,"output_dimension":128,"seed":6260},
+  "recipe": {"method":"unknown-rotation","baseline":"identity-rotation-int2","bits":2,"group_size":128,"key_granularity":"per-token-group","value_granularity":"per-token-group","objective":"post-wo-attention-output-nmse"},
+  "evidence":"observed",
+  "metrics": {"transform_milliseconds":0,"cache_bytes":1048576,"baseline_output_nmse":0,"candidate_output_nmse":0,"baseline_task_accuracy":0,"candidate_task_accuracy":0,"baseline_decode_microseconds":1,"candidate_decode_microseconds":1},
+  "witness_sha256":""
+}
+

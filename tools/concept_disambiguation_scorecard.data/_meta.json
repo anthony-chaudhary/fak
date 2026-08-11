@@ -2371,6 +2371,16 @@
           "category": "incidental",
           "reason": "enum sentinel for missing adapter evidence, not a distinct witness-proof concept",
           "token": "ResolutionUnwitnessed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 record-integrity field/helper, not a new proof protocol.",
+          "token": "WitnessSHA256"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 record-integrity field/helper, not a new proof protocol.",
+          "token": "witnessDigest"
         }
       ],
       "id": "witness-proof",
@@ -2405,6 +2415,7 @@
         "WitnessEvidenceStats",
         "WitnessMove",
         "WitnessRoute",
+        "WitnessSHA256",
         "WitnessedProgressFloor",
         "appendGuardCompactionWitnessTo",
         "checkWitness",
@@ -2465,6 +2476,7 @@
         "verifyCheckpointWitness",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessDigest",
         "witnessGitRunner",
         "witnessOutcomeID",
         "witnessScriptedFold",
@@ -4730,6 +4742,31 @@
           "category": "incidental",
           "reason": "Execution recovery enum value, not a planning subsystem concept",
           "token": "RecoveryReplan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 field/reason identifier, not a new cross-kernel concept.",
+          "token": "CandidateOutputNMSE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 measurement field, not a reusable planning concept.",
+          "token": "CandidateTaskAccuracy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 measurement field, not a reusable planning concept.",
+          "token": "BaselineTaskAccuracy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 measurement field, not a reusable planning concept.",
+          "token": "CandidateDecodeMicroseconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 6260 measurement field, not a reusable planning concept.",
+          "token": "BaselineDecodeMicroseconds"
         }
       ],
       "exclude": [
@@ -4741,7 +4778,12 @@
       ],
       "id": "plan",
       "ignore": [
+        "BaselineDecodeMicroseconds",
+        "BaselineTaskAccuracy",
         "BuildSweepPlan",
+        "CandidateDecodeMicroseconds",
+        "CandidateOutputNMSE",
+        "CandidateTaskAccuracy",
         "Candidates",
         "DecodeInterleavePlan",
         "ExplainFilingPlan",
