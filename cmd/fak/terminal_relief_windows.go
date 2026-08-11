@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/terminalrelief"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type terminalReliefProcess struct {
@@ -28,13 +29,26 @@ type terminalReliefSnapshot struct {
 	Processes             []terminalReliefProcess
 }
 
+func newTerminalReliefBackgroundCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd
+}
+
+func newTerminalReliefDetachedCommand(argv []string) *exec.Cmd {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	windowgate.ConfigureDetachedCommand(cmd)
+	cmd.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
+	return cmd
+}
+
 var gatherTerminalReliefSnapshotFn = gatherTerminalReliefSnapshot
 var launchTerminalReliefCommandFn = func(argv []string) error {
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000008 | 0x00000200} // detached + new process group
-	return cmd.Start()
+	return newTerminalReliefDetachedCommand(argv).Start()
 }
-var stopTerminalReliefHostFn = func(pid int) error { return exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").Run() }
+var stopTerminalReliefHostFn = func(pid int) error {
+	return newTerminalReliefBackgroundCommand("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
+}
 
 func cmdTerminalRelief(args []string) { os.Exit(runTerminalRelief(os.Stdout, os.Stderr, args)) }
 func runTerminalRelief(stdout, stderr io.Writer, args []string) int {
@@ -150,7 +164,7 @@ func parseFakInfoCommand(line string) ([]string, bool) {
 }
 func gatherTerminalReliefSnapshot() (terminalReliefSnapshot, error) {
 	script := `$t=Get-Process WindowsTerminal -ErrorAction SilentlyContinue|Sort-Object StartTime|Select-Object -First 1;if(!$t){[pscustomobject]@{pid=0;handles=0;threads=0;processes=@()}|ConvertTo-Json -Depth 4;exit};$p=@(Get-CimInstance Win32_Process|%{[pscustomobject]@{pid=[int]$_.ProcessId;parent_pid=[int]$_.ParentProcessId;name=$_.Name;command_line=[string]$_.CommandLine}});[pscustomobject]@{pid=$t.Id;handles=$t.Handles;threads=$t.Threads.Count;processes=$p}|ConvertTo-Json -Depth 4 -Compress`
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	out, err := newTerminalReliefBackgroundCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).Output()
 	if err != nil {
 		return terminalReliefSnapshot{}, err
 	}

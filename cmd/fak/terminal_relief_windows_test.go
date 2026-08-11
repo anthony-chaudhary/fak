@@ -6,8 +6,34 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
+
+func TestTerminalReliefSpawnModesSuppressConsoleWindows(t *testing.T) {
+	background := newTerminalReliefBackgroundCommand("powershell.exe", "-NoProfile")
+	if background.SysProcAttr == nil || !background.SysProcAttr.HideWindow {
+		t.Fatal("terminal-relief background helper would show a window")
+	}
+	if background.SysProcAttr.CreationFlags&0x08000000 == 0 {
+		t.Fatalf("terminal-relief background helper flags %#x omit CREATE_NO_WINDOW", background.SysProcAttr.CreationFlags)
+	}
+
+	detached := newTerminalReliefDetachedCommand([]string{"fak.exe", "info"})
+	if detached.SysProcAttr == nil || !detached.SysProcAttr.HideWindow {
+		t.Fatal("terminal-relief dashboard relaunch would show a window")
+	}
+	const detachedProcess = 0x00000008
+	if detached.SysProcAttr.CreationFlags&detachedProcess == 0 {
+		t.Fatalf("terminal-relief dashboard flags %#x omit DETACHED_PROCESS", detached.SysProcAttr.CreationFlags)
+	}
+	if detached.SysProcAttr.CreationFlags&0x08000000 != 0 {
+		t.Fatalf("terminal-relief dashboard flags %#x combine mutually exclusive CREATE_NO_WINDOW and DETACHED_PROCESS", detached.SysProcAttr.CreationFlags)
+	}
+	if detached.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP == 0 {
+		t.Fatalf("terminal-relief dashboard flags %#x omit CREATE_NEW_PROCESS_GROUP", detached.SysProcAttr.CreationFlags)
+	}
+}
 
 func TestTerminalReliefBelowThresholdDoesNotAct(t *testing.T) {
 	oldGather, oldLaunch, oldStop := gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn
