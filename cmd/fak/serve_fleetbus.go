@@ -362,7 +362,10 @@ func (a *fleetBusApplier) noMatchDetail(sel fleetbus.Selector) string {
 
 // --- the drain loop -------------------------------------------------------- //
 
-type serveGwBusApplier struct{ srv *gateway.Server }
+type serveGwBusApplier struct {
+	srv  *gateway.Server
+	addr string
+}
 
 func (a serveGwBusApplier) ReloadRoute() (string, bool, error) {
 	if a.srv == nil || a.srv.RouteWatcher() == nil {
@@ -387,6 +390,9 @@ type fleetBusArming struct {
 	// byte-for-byte no-op — see resolveFleetBusDir.
 	busDir     string
 	instanceID string
+	// addr is the configured transport address published on Instance. Empty is
+	// valid for roles/transports with no address.
+	addr string
 	// role is the instance record's role token ("serve", "guard"). Display only.
 	role string
 	// logPrefix is what this binary calls itself on stderr ("fak serve", "fak guard"),
@@ -406,12 +412,20 @@ type fleetBusArming struct {
 // and its tests already call.
 func startFleetBusLoop(ctx context.Context, busDir, instanceID string, interval time.Duration, tbl *session.Table, native bool, gwAppliers ...gwBusApplier) func() {
 	ap := &fleetBusApplier{tbl: tbl, native: native, durability: serveSessionDurability, ctx: ctx}
+	var addr string
 	if len(gwAppliers) != 0 {
 		ap.gateway = gwAppliers[0]
+		// The serve gateway applier already crosses this call boundary. Carry the
+		// transport address on that existing argument rather than inventing a
+		// second loop entry point solely for one presence-record field.
+		if serve, ok := gwAppliers[0].(serveGwBusApplier); ok {
+			addr = serve.addr
+		}
 	}
 	return startFleetBusInstance(ctx, fleetBusArming{
 		busDir:     busDir,
 		instanceID: instanceID,
+		addr:       strings.TrimSpace(addr),
 		role:       "serve",
 		logPrefix:  "fak serve",
 		interval:   interval,
@@ -453,9 +467,9 @@ func startFleetBusInstance(ctx context.Context, arm fleetBusArming) func() {
 		fmt.Fprintf(os.Stderr, "%s: --fleet-bus disabled: %v\n", prefix, err)
 		return func() {}
 	}
-	machine, pid := fleetBusMachine(), os.Getpid()
+	machine, pid := fleetBusMachine(), fleetBusPID()
 	stamp := func(now time.Time) (fleetbus.Instance, *fleetbus.Refusal) {
-		inst, r := fleetbus.NewInstance(arm.instanceID, machine, arm.role, pid, "", arm.ops, now)
+		inst, r := fleetbus.NewInstance(arm.instanceID, machine, arm.role, pid, arm.addr, arm.ops, now)
 		if r != nil {
 			return fleetbus.Instance{}, r
 		}
@@ -533,19 +547,42 @@ func resolveFleetBusDir(sf *serveFlags) string {
 	return defaultFleetBusDir()
 }
 
-func resolveFleetBusID(sf *serveFlags) string {
+func resolveFleetBusIdentity(sf *serveFlags) fleetbus.ServeIdentity {
+	var explicit, addr string
+	var stdio bool
 	if sf.fleetBusID != nil && strings.TrimSpace(*sf.fleetBusID) != "" {
-		return sanitizeBusToken(strings.TrimSpace(*sf.fleetBusID))
+		explicit = sanitizeBusToken(strings.TrimSpace(*sf.fleetBusID))
 	}
-	return defaultFleetBusInstanceID()
+	if sf.addr != nil {
+		addr = strings.TrimSpace(*sf.addr)
+	}
+	if sf.stdio != nil {
+		stdio = *sf.stdio
+	}
+	return fleetbus.ResolveServeIdentity(fleetbus.ServeIdentityRequest{
+		ExplicitID: explicit,
+		Machine:    fleetBusMachine(),
+		Addr:       addr,
+		PID:        fleetBusPID(),
+		Stdio:      stdio,
+	})
 }
 
-// defaultFleetBusInstanceID names this process on the bus. Host+pid is stable for the
-// process lifetime and unique across a box, which is exactly the scope of an instance
-// record; an operator who wants a stable name across restarts passes --fleet-bus-id.
-func defaultFleetBusInstanceID() string {
-	return sanitizeBusToken(fmt.Sprintf("serve-%s-%d", fleetBusMachine(), os.Getpid()))
+func resolveFleetBusID(sf *serveFlags) string {
+	return resolveFleetBusIdentity(sf).ID
 }
+
+// defaultFleetBusInstanceID retains the old no-flags helper for address-less callers.
+// The real serve path calls resolveFleetBusIdentity with its configured transport; an
+// address-less caller necessarily gets the named process-local fallback.
+func defaultFleetBusInstanceID() string {
+	return fleetbus.ResolveServeIdentity(fleetbus.ServeIdentityRequest{
+		Machine: fleetBusMachine(),
+		PID:     fleetBusPID(),
+	}).ID
+}
+
+var fleetBusPID = os.Getpid
 
 func fleetBusMachine() string {
 	host, err := os.Hostname()

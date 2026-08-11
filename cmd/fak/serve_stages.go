@@ -564,8 +564,9 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 	// the server because gateway.Server.ownsSessionLoop is unexported; it decides whether
 	// a fanned `steer` can be delivered at all, and a non-native serve refuses it with the
 	// same STEER_NO_OWNED_LOOP the single-session route refuses a 202 for.
-	stopFleetBus := startFleetBusLoop(ctx, resolveFleetBusDir(sf), resolveFleetBusID(sf),
-		*sf.fleetBusInterval, serveSessions, *sf.native, serveGwBusApplier{srv: rt.srv})
+	fleetIdentity := resolveFleetBusIdentity(sf)
+	stopFleetBus := startFleetBusLoop(ctx, resolveFleetBusDir(sf), fleetIdentity.ID,
+		*sf.fleetBusInterval, serveSessions, *sf.native, serveGwBusApplier{srv: rt.srv, addr: fleetIdentity.Addr})
 	defer stopFleetBus()
 
 	// Everything a finished serve must leave behind, whichever transport served it. The stdio

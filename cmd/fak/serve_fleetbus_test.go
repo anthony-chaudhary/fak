@@ -11,6 +11,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/fleetbus"
@@ -325,8 +326,8 @@ func TestStartFleetBusLoopIsATotalNoOpWhenDisarmed(t *testing.T) {
 // TestResolveFleetBusDirIsOffByDefault — arming a control plane is a thing an operator
 // states, never a default a binary picks up.
 func TestResolveFleetBusDirIsOffByDefault(t *testing.T) {
-	off, dir, id := false, "", ""
-	sf := &serveFlags{fleetBus: &off, fleetBusDir: &dir, fleetBusID: &id}
+	off, stdio, dir, id, addr := false, false, "", "", "127.0.0.1:8080"
+	sf := &serveFlags{fleetBus: &off, fleetBusDir: &dir, fleetBusID: &id, addr: &addr, stdio: &stdio}
 	if got := resolveFleetBusDir(sf); got != "" {
 		t.Fatalf("resolveFleetBusDir with --fleet-bus off = %q, want \"\"", got)
 	}
@@ -339,6 +340,151 @@ func TestResolveFleetBusDirIsOffByDefault(t *testing.T) {
 	}
 	if got := resolveFleetBusID(sf); got == "" || !fleetbusIDIsAToken(got) {
 		t.Fatalf("default instance id %q is not a bus token — Announce would refuse it", got)
+	}
+}
+
+// TestFleetBusIdentitySurvivesRestart is the command-wiring regression for #5824.
+// The package-level identity tests own the derivation envelope; this test proves the
+// real serveFlags resolver feeds that identity into the bus contract.
+func TestFleetBusIdentitySurvivesRestart(t *testing.T) {
+	oldPID := fleetBusPID
+	t.Cleanup(func() { fleetBusPID = oldPID })
+
+	t0 := time.Date(2026, 8, 11, 17, 0, 0, 0, time.UTC)
+	stdio, configured, addr := false, "", "127.0.0.1:8080"
+	sf := &serveFlags{fleetBusID: &configured, addr: &addr, stdio: &stdio}
+
+	pid := 1000
+	fleetBusPID = func() int { return pid }
+	first := resolveFleetBusIdentity(sf)
+	pid = 2000
+	restarted := resolveFleetBusIdentity(sf)
+	if first.ID != restarted.ID {
+		t.Fatalf("same serve address changed identity across restart: first=%q restarted=%q", first.ID, restarted.ID)
+	}
+	if first.Addr != addr || restarted.Addr != addr {
+		t.Fatalf("resolved addresses = %q/%q, want configured %q", first.Addr, restarted.Addr, addr)
+	}
+
+	bus, err := fleetbus.OpenDir(t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenDir: %v", err)
+	}
+	inst1, refusal := fleetbus.NewInstance(first.ID, "box-a", "serve", 1000, first.Addr, nil, t0)
+	if refusal != nil {
+		t.Fatalf("NewInstance boot 1: %v", refusal)
+	}
+	if err := bus.Announce(inst1); err != nil {
+		t.Fatalf("Announce boot 1: %v", err)
+	}
+	d, refusal := fleetbus.NewDirective("identity-test", "terminate", "", fleetbus.Selector{All: true}, 0, "restart witness", t0)
+	if refusal != nil {
+		t.Fatalf("NewDirective: %v", refusal)
+	}
+	if err := bus.Publish(d); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	applied := 0
+	applier := fleetbus.ApplierFunc(func(fleetbus.Directive) fleetbus.Outcome {
+		applied++
+		return fleetbus.OutcomeApplied("test apply", 1)
+	})
+	rep1, err := fleetbus.Drain(bus, inst1, applier, t0.Add(time.Second))
+	if err != nil || rep1.Applied != 1 {
+		t.Fatalf("boot 1 drain = %+v err=%v, want one apply", rep1, err)
+	}
+
+	restartAt := t0.Add(6 * time.Hour)
+	inst2, refusal := fleetbus.NewInstance(restarted.ID, "box-a", "serve", 2000, restarted.Addr, nil, restartAt)
+	if refusal != nil {
+		t.Fatalf("NewInstance boot 2: %v", refusal)
+	}
+	if err := bus.Announce(inst2); err != nil {
+		t.Fatalf("Announce boot 2: %v", err)
+	}
+	roster, err := bus.Instances(restartAt, fleetbus.DefaultInstanceTTL)
+	if err != nil {
+		t.Fatalf("Instances after restart: %v", err)
+	}
+	if len(roster) != 1 || roster[0].PID != 2000 || roster[0].Addr != addr {
+		t.Fatalf("restart roster = %+v, want one refreshed address-bearing row", roster)
+	}
+	rep2, err := fleetbus.Drain(bus, inst2, applier, restartAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("boot 2 drain: %v", err)
+	}
+	if rep2.AlreadyDone != 1 || rep2.Applied != 0 || applied != 1 {
+		t.Fatalf("boot 2 drain = %+v calls=%d, want already_done=1 applied=0 and one total call", rep2, applied)
+	}
+	acks, err := bus.Acks(d.ID)
+	if err != nil || len(acks) != 1 {
+		t.Fatalf("restart acks = %+v err=%v, want one row", acks, err)
+	}
+
+	// The other horn: two simultaneously valid addresses on one machine must not
+	// share the roster row or the O_EXCL apply claim.
+	leftAddr, rightAddr := "127.0.0.1:8081", "127.0.0.1:8082"
+	pid = 3000
+	sf.addr = &leftAddr
+	left := resolveFleetBusIdentity(sf)
+	pid = 4000
+	sf.addr = &rightAddr
+	right := resolveFleetBusIdentity(sf)
+	if left.ID == right.ID {
+		t.Fatalf("simultaneous addresses %q and %q collapsed onto %q", leftAddr, rightAddr, left.ID)
+	}
+}
+
+func TestFleetBusIdentityPreservesExplicitConfiguredName(t *testing.T) {
+	oldPID := fleetBusPID
+	t.Cleanup(func() { fleetBusPID = oldPID })
+	fleetBusPID = func() int { return 1234 }
+
+	stdio, configured, addr := false, "operator-chosen.serve_7", "127.0.0.1:8080"
+	sf := &serveFlags{fleetBusID: &configured, addr: &addr, stdio: &stdio}
+	got := resolveFleetBusIdentity(sf)
+	if got.ID != configured {
+		t.Fatalf("explicit configured identity = %q, want byte-preserved %q", got.ID, configured)
+	}
+	if got.Source != fleetbus.IdentityExplicit || !got.RestartStable {
+		t.Fatalf("explicit identity = %+v, want explicit restart-stable source", got)
+	}
+}
+
+func TestStartFleetBusLoopAnnouncesConfiguredAddress(t *testing.T) {
+	dir := t.TempDir()
+	stop := startFleetBusLoop(context.Background(), dir, "serve-address-witness",
+		time.Hour, &session.Table{}, false, serveGwBusApplier{addr: "127.0.0.1:8080"})
+	t.Cleanup(stop)
+
+	bus, err := fleetbus.OpenDir(dir)
+	if err != nil {
+		t.Fatalf("OpenDir: %v", err)
+	}
+	roster, err := bus.Instances(time.Now(), fleetbus.DefaultInstanceTTL)
+	if err != nil {
+		t.Fatalf("Instances: %v", err)
+	}
+	if len(roster) != 1 || roster[0].Addr != "127.0.0.1:8080" {
+		t.Fatalf("armed roster = %+v, want configured address on the announced Instance", roster)
+	}
+}
+
+func TestFleetBusHelpMatchesDefaultIdentityGuarantee(t *testing.T) {
+	fs, _ := newServeFlagSet()
+	busHelp := fs.Lookup("fleet-bus")
+	idHelp := fs.Lookup("fleet-bus-id")
+	if busHelp == nil || idHelp == nil {
+		t.Fatalf("fleet-bus help registration missing: bus=%v id=%v", busHelp, idHelp)
+	}
+	combined := busHelp.Usage + "\n" + idHelp.Usage
+	if strings.Contains(combined, "default: serve-<host>-<pid>") {
+		t.Fatalf("fleet-bus help still advertises the PID default:\n%s", combined)
+	}
+	for _, want := range []string{"fixed HTTP listen address", "process-local"} {
+		if !strings.Contains(combined, want) {
+			t.Fatalf("fleet-bus help does not state %q guarantee:\n%s", want, combined)
+		}
 	}
 }
 
