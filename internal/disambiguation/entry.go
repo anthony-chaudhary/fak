@@ -77,8 +77,10 @@ type Identity struct {
 // the distinction. Cross-entry existence and symmetry checks belong to the
 // index validator; this record validator guarantees the pair is expressible.
 type Contrast struct {
-	CanonicalTerm string `json:"canonical_term"`
-	Explanation   string `json:"explanation"`
+	CanonicalTerm       string `json:"canonical_term"`
+	Explanation         string `json:"explanation"`
+	RequiredPair        *bool  `json:"required_pair"`
+	ForbiddenConflation *bool  `json:"forbidden_conflation"`
 }
 
 // Scope qualifies which public surface gives the canonical term this meaning.
@@ -163,12 +165,26 @@ func (e Entry) Validate() error {
 	if len(e.Contrasts) == 0 {
 		return errors.New("at least one contrast is required")
 	}
+	seenContrasts := make(map[string]struct{}, len(e.Contrasts))
 	for i, contrast := range e.Contrasts {
 		if err := requireText(fmt.Sprintf("contrasts[%d].canonical_term", i), contrast.CanonicalTerm); err != nil {
 			return err
 		}
+		if contrast.CanonicalTerm == e.Identity.CanonicalTerm {
+			return fmt.Errorf("contrasts[%d].canonical_term must not self-contrast %q", i, contrast.CanonicalTerm)
+		}
+		if _, exists := seenContrasts[contrast.CanonicalTerm]; exists {
+			return fmt.Errorf("duplicate contrast target %q", contrast.CanonicalTerm)
+		}
+		seenContrasts[contrast.CanonicalTerm] = struct{}{}
 		if err := requireText(fmt.Sprintf("contrasts[%d].explanation", i), contrast.Explanation); err != nil {
 			return err
+		}
+		if contrast.RequiredPair == nil {
+			return fmt.Errorf("contrasts[%d].required_pair is required", i)
+		}
+		if contrast.ForbiddenConflation == nil {
+			return fmt.Errorf("contrasts[%d].forbidden_conflation is required", i)
 		}
 	}
 	if err := requireText("scope.kind", e.Scope.Kind); err != nil {

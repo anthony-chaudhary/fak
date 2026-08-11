@@ -97,8 +97,10 @@ func SelfTestEntry() Entry {
 		},
 		Definition: "The fak management boundary that governs model traffic, tool effects, context, and recovery.",
 		Contrasts: []Contrast{{
-			CanonicalTerm: "compute kernel",
-			Explanation:   "An arithmetic routine executed by a processor; it does not govern an agent's tool effects.",
+			CanonicalTerm:       "compute kernel",
+			Explanation:         "An arithmetic routine executed by a processor; it does not govern an agent's tool effects.",
+			RequiredPair:        boolPointer(true),
+			ForbiddenConflation: boolPointer(true),
 		}},
 		Scope: Scope{Kind: "product", Value: "fak"},
 		Owner: Owner{Leaf: "kernel", Lane: "kernel"},

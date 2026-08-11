@@ -26,6 +26,7 @@ func Descriptor() SchemaDescriptor {
 		Required: []string{
 			"schema", "identity", "identity.canonical_term", "identity.aliases",
 			"definition", "contrasts", "contrasts[].canonical_term", "contrasts[].explanation",
+			"contrasts[].required_pair", "contrasts[].forbidden_conflation",
 			"scope", "scope.kind", "scope.value", "owner", "owner.leaf", "owner.lane",
 			"sources", "sources[].kind", "sources[].locator", "sources[].revision",
 			"freshness", "freshness.verdict", "freshness.reason_code", "freshness.checked_at", "freshness.probe",

@@ -10,7 +10,9 @@
   "contrasts": [
     {
       "canonical_term": "compute kernel",
-      "explanation": "An arithmetic routine executed by a processor; it does not govern an agent's tool effects."
+      "explanation": "An arithmetic routine executed by a processor; it does not govern an agent's tool effects.",
+      "required_pair": false,
+      "forbidden_conflation": true
     }
   ],
   "scope": {

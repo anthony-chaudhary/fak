@@ -43,7 +43,35 @@ func NewIndex(entries []Entry) (*Index, error) {
 			index.aliases[alias] = owner
 		}
 	}
+	for _, sourceEntry := range entries {
+		source := sourceEntry.Identity.CanonicalTerm
+		for _, contrast := range sourceEntry.Contrasts {
+			targetEntry, exists := index.canonical[contrast.CanonicalTerm]
+			if !exists {
+				return nil, fmt.Errorf("contrast from %q has unknown canonical target %q", source, contrast.CanonicalTerm)
+			}
+			if !*contrast.RequiredPair {
+				continue
+			}
+			reverse, exists := contrastTo(targetEntry, source)
+			if !exists || !*reverse.RequiredPair {
+				return nil, fmt.Errorf("required contrast pair %q <-> %q is asymmetric", source, contrast.CanonicalTerm)
+			}
+			if *reverse.ForbiddenConflation != *contrast.ForbiddenConflation {
+				return nil, fmt.Errorf("required contrast pair %q <-> %q disagrees on forbidden_conflation", source, contrast.CanonicalTerm)
+			}
+		}
+	}
 	return index, nil
+}
+
+func contrastTo(entry Entry, target string) (Contrast, bool) {
+	for _, contrast := range entry.Contrasts {
+		if contrast.CanonicalTerm == target {
+			return contrast, true
+		}
+	}
+	return Contrast{}, false
 }
 
 func (i *Index) queryCanonical(term string) (Entry, bool) {

@@ -65,8 +65,10 @@ var publicEntries = []Entry{
 		},
 		Definition: "The fak management boundary that governs model traffic, tool effects, context, and recovery.",
 		Contrasts: []Contrast{{
-			CanonicalTerm: "compute kernel",
-			Explanation:   "An arithmetic routine executed by a processor; it does not govern an agent's tool effects.",
+			CanonicalTerm:       "compute kernel",
+			Explanation:         "An arithmetic routine executed by a processor; it does not govern an agent's tool effects.",
+			RequiredPair:        boolPointer(true),
+			ForbiddenConflation: boolPointer(true),
 		}},
 		Scope: Scope{Kind: "product", Value: "fak"},
 		Owner: Owner{Leaf: "kernel", Lane: "kernel"},
@@ -81,6 +83,22 @@ var publicEntries = []Entry{
 			CheckedAt:  "2026-08-11T00:00:00Z",
 			Probe:      "public-seed/1",
 		},
+		Lifecycle: Lifecycle{Class: "current", Rollout: "on"},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "compute kernel", Aliases: []string{}},
+		Definition: "An arithmetic routine executed by a processor.",
+		Contrasts: []Contrast{{
+			CanonicalTerm:       "agent kernel",
+			Explanation:         "The fak management boundary governs agent behavior; it is not a processor arithmetic routine.",
+			RequiredPair:        boolPointer(true),
+			ForbiddenConflation: boolPointer(true),
+		}},
+		Scope:     Scope{Kind: "computing", Value: "processor"},
+		Owner:     Owner{Leaf: "kernel", Lane: "kernel"},
+		Sources:   []SourceWitness{{Kind: "document", Locator: "README.md#how-it-works", Revision: "692e4b57d0"}},
+		Freshness: Freshness{Verdict: "fresh", ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-11T00:00:00Z", Probe: "public-seed/1"},
 		Lifecycle: Lifecycle{Class: "current", Rollout: "on"},
 	},
 }
@@ -101,3 +119,5 @@ func cloneEntry(entry Entry) Entry {
 	entry.Sources = append([]SourceWitness(nil), entry.Sources...)
 	return entry
 }
+
+func boolPointer(value bool) *bool { return &value }

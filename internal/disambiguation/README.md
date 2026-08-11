@@ -45,3 +45,17 @@ version separately. Its nested `entry` is the complete strict schema record,
 including meaning (`definition`), scope, contrasts, owner, public sources, and
 freshness. The reader is stdlib-only and read-only; it is not a second index
 writer and has no private source dependency.
+
+## Pairwise contrasts and forbidden conflations
+
+Each contrast names another canonical entry, carries a non-empty explanation,
+and explicitly records `required_pair` and `forbidden_conflation`. A required
+pair must be declared in both directions and must agree on whether conflation is
+forbidden. Index admission rejects self-contrasts, duplicate or unknown targets,
+and asymmetric required pairs. Querying either a canonical term or an alias
+returns the canonical entry with these contrast fields unchanged; for example,
+`fak disambiguation query "fused agent kernel" --json` exposes the required,
+forbidden `agent kernel` / `compute kernel` distinction.
+
+These are reader-side admission checks over the same public index. They add no
+writer, filesystem access, network access, or private dependency.

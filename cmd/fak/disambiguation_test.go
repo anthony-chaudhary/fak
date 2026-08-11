@@ -119,3 +119,32 @@ func TestRunDisambiguationQueryRejectsUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestRunDisambiguationQueryContrastCLI(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDisambiguation(&stdout, &stderr, []string{"query", "fused agent kernel", "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var got struct {
+		MatchedAlias string `json:"matched_alias"`
+		Entry        struct {
+			Contrasts []struct {
+				CanonicalTerm       string `json:"canonical_term"`
+				Explanation         string `json:"explanation"`
+				RequiredPair        bool   `json:"required_pair"`
+				ForbiddenConflation bool   `json:"forbidden_conflation"`
+			} `json:"contrasts"`
+		} `json:"entry"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode stdout: %v\n%s", err, stdout.String())
+	}
+	if got.MatchedAlias != "fused agent kernel" || len(got.Entry.Contrasts) != 1 {
+		t.Fatalf("unexpected alias contrast response: %+v", got)
+	}
+	contrast := got.Entry.Contrasts[0]
+	if contrast.CanonicalTerm != "compute kernel" || contrast.Explanation == "" || !contrast.RequiredPair || !contrast.ForbiddenConflation {
+		t.Fatalf("contrast = %+v, want explicit required forbidden pair", contrast)
+	}
+}
