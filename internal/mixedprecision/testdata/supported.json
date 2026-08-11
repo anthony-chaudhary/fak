@@ -1,0 +1,12 @@
+{
+  "schema": "mixedprecision/v1",
+  "provenance": {
+    "artifact": {"id":"safetensors","version":"1.0.0","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","uri":"https://example.invalid/model"},
+    "recipe": {"id":"awq","version":"0.2.6","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","uri":"https://example.invalid/recipe"},
+    "runtime": {"id":"vllm","version":"0.10.0","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+  },
+  "modules": [{"name":"model.layers.0.attn","parameters":100},{"name":"model.layers.0.mlp","parameters":200}],
+  "rules": [{"pattern":"model.layers.0.attn","precision":"int8"},{"pattern":"model.layers.0.mlp","precision":"int4"}],
+  "fallback": {"mode":"refuse"},
+  "evidence": [{"kind":"modeled","metric":"estimated_weight_bits","dataset":{"id":"module-inventory","version":"1","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"value":1600,"model_basis":"sum(parameters*assigned_bits); excludes scales, zero-points, padding, and runtime workspace"}]
+}
