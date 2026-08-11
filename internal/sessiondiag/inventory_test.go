@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 var updateInventoryWitness = flag.Bool("update-sessiondiag-witness", false, "regenerate the mixed sessiondiag incident render and JSON witnesses")
@@ -271,6 +273,13 @@ func mixedIncidentFixture(now time.Time) InventoryInput {
 		WriterLocks:   locks,
 		GuardReceipts: receipts,
 		Processes:     processes,
+		Registrations: []sessionregistry.Record{
+			{Schema: sessionregistry.Schema, RegistrationID: "reg-guard-parent", RootRegistrationID: "reg-guard-parent", RootOutcome: "trace child work", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "attempt-parent", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", PID: 104, ProcessStartedAt: now.Add(-8 * time.Minute)}, State: sessionregistry.StateActive, CreatedAt: now.Add(-9 * time.Minute)},
+			{Schema: sessionregistry.Schema, RegistrationID: "reg-headless-child", ParentRegistrationID: "reg-guard-parent", ParentAttemptID: "attempt-parent", RootRegistrationID: "reg-guard-parent", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "attempt-child", LaunchKind: "headless_worker", Identity: sessionregistry.Identity{Runtime: "codex", PID: 132, ProcessStartedAt: now.Add(-5 * time.Minute)}, State: sessionregistry.StateActive, CreatedAt: now.Add(-5 * time.Minute)},
+			{Schema: sessionregistry.Schema, RegistrationID: "reg-nested", ParentRegistrationID: "reg-headless-child", ParentAttemptID: "attempt-child", RootRegistrationID: "reg-guard-parent", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "attempt-nested", LaunchKind: "subagent", Identity: sessionregistry.Identity{Runtime: "claude"}, State: sessionregistry.StateCompleted, CreatedAt: now.Add(-4 * time.Minute), TerminalAt: now.Add(-time.Minute), WitnessRef: "commit:mixed"},
+			{Schema: sessionregistry.Schema, RegistrationID: "reg-resume", ParentRegistrationID: "reg-guard-parent", ParentAttemptID: "attempt-parent", RootRegistrationID: "reg-guard-parent", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "attempt-resume", ResumeOfAttemptID: "attempt-child", LaunchKind: "resume_wrapper", Identity: sessionregistry.Identity{Runtime: "codex"}, State: sessionregistry.StateLost, CreatedAt: now.Add(-3 * time.Minute), TerminalAt: now.Add(-2 * time.Minute), Reason: "parent_crash"},
+			{Schema: sessionregistry.Schema, RegistrationID: "reg-stale", RootRegistrationID: "reg-stale", RootIssue: "6458", AttemptID: "attempt-stale", LaunchKind: "headless_worker", Identity: sessionregistry.Identity{Runtime: "codex", PID: 999, ProcessStartedAt: now.Add(-time.Hour)}, State: sessionregistry.StateActive, CreatedAt: now.Add(-time.Hour)},
+		},
 		SpawnEdges: []SpawnEdgeEvidence{
 			{ParentThreadID: "10000001-0000-4000-8000-000000000001", ChildThreadID: child, Status: "closed"},
 			{ParentThreadID: "90000001-0000-4000-8000-000000000001", ChildThreadID: "90000002-0000-4000-8000-000000000002", Status: "open"},
@@ -309,4 +318,35 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestInventoryJoinsRegistrationLineageAndDetectsUnregisteredProcess(t *testing.T) {
+	now := time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC)
+	in := InventoryInput{Window: time.Hour, StaleAfter: time.Minute, Processes: []ProcessEvidence{{PID: 10, Name: "codex.exe", StartedAt: now.Add(-time.Minute), CommandLine: "codex"}, {PID: 11, Name: "claude.exe", StartedAt: now.Add(-time.Minute), CommandLine: "claude -p"}}, Registrations: []sessionregistry.Record{{Schema: sessionregistry.Schema, RegistrationID: "root", RootRegistrationID: "root", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "a", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", PID: 10, ProcessStartedAt: now.Add(-time.Minute)}, State: sessionregistry.StateActive, CreatedAt: now.Add(-2 * time.Minute)}, {Schema: sessionregistry.Schema, RegistrationID: "child", ParentRegistrationID: "root", ParentAttemptID: "a", RootRegistrationID: "root", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "b", LaunchKind: "subagent", Identity: sessionregistry.Identity{Runtime: "claude"}, State: sessionregistry.StateCompleted, CreatedAt: now.Add(-time.Minute), TerminalAt: now, WitnessRef: "commit:x"}}}
+	got := ReconcileInventory(in, now)
+	if got.Counts.Registrations.Active != 1 || got.Counts.Registrations.Terminal != 1 || got.Counts.Registrations.UnregisteredObserved != 1 {
+		t.Fatalf("counts=%+v", got.Counts.Registrations)
+	}
+	if len(got.Registrations) != 2 || !got.Registrations[0].ProcessMatched || got.Registrations[1].Health != "TERMINAL" {
+		t.Fatalf("registrations=%+v", got.Registrations)
+	}
+	if len(got.UnregisteredObserved) != 1 || got.UnregisteredObserved[0].Process.PID != 11 {
+		t.Fatalf("unregistered=%+v", got.UnregisteredObserved)
+	}
+	var out bytes.Buffer
+	RenderInventory(&out, got)
+	for _, want := range []string{"REGISTRATIONS total=2", "root", "child", "UNREGISTERED_OBSERVED"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("render missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestInventoryPIDReuseRequiresStartIdentity(t *testing.T) {
+	now := time.Now().UTC()
+	in := InventoryInput{Window: time.Hour, StaleAfter: time.Minute, Processes: []ProcessEvidence{{PID: 7, Name: "codex.exe", StartedAt: now}}, Registrations: []sessionregistry.Record{{Schema: sessionregistry.Schema, RegistrationID: "old", RootRegistrationID: "old", AttemptID: "a", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", PID: 7, ProcessStartedAt: now.Add(-time.Hour)}, State: sessionregistry.StateActive, CreatedAt: now.Add(-time.Hour)}}}
+	got := ReconcileInventory(in, now)
+	if got.Registrations[0].ProcessMatched || len(got.UnregisteredObserved) != 1 {
+		t.Fatalf("pid reuse incorrectly matched: %+v %+v", got.Registrations, got.UnregisteredObserved)
+	}
 }

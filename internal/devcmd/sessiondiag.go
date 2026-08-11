@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 type sessionDiagQuery func(string, time.Duration) (sessiondiag.Evidence, error)
@@ -44,6 +45,7 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 	staleAfter := fs.Duration("stale-after", 10*time.Minute, "writer-lock/current-state staleness threshold")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	inventory := fs.Bool("inventory", false, "join current Codex threads, turns, writer locks, processes, guard launch receipts, and spawn edges")
+	registryPath := fs.String("registry", sessionregistry.DefaultPath(), "child registration JSONL path (missing is allowed)")
 	incidentOut := fs.String("incident-out", "", "write one redacted incident envelope (requires --process-id)")
 	processID := fs.Int("process-id", 0, "observed Codex process id")
 	processUUID := fs.String("process-uuid", "", "opaque process UUID")
@@ -55,7 +57,7 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 		return 2
 	}
 	if fs.NArg() != 0 || *since <= 0 || *staleAfter <= 0 {
-		fmt.Fprintln(stderr, "usage: fak dev sessiondiag [--inventory] [--codex-home DIR] [--db PATH] [--since 24h] [--stale-after 10m] [--json]")
+		fmt.Fprintln(stderr, "usage: fak dev sessiondiag [--inventory] [--registry FILE] [--codex-home DIR] [--db PATH] [--since 24h] [--stale-after 10m] [--json]")
 		return 2
 	}
 	if *inventory {
@@ -71,6 +73,12 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 		}
 		input.Window = *since
 		input.StaleAfter = *staleAfter
+		rows, regErr := (sessionregistry.Store{Path: *registryPath}).ReadAll()
+		if regErr == nil {
+			input.Registrations = rows
+		} else if !errors.Is(regErr, os.ErrNotExist) {
+			input.SourceErrors = append(input.SourceErrors, sessiondiag.SourceError{Source: "child_registrations", Code: "READ_FAILED"})
+		}
 		report := sessiondiag.ReconcileInventory(input, observedAt)
 		if *jsonOut {
 			enc := json.NewEncoder(stdout)

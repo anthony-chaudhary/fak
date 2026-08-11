@@ -11,7 +11,8 @@
     "guard_launch_receipts": 7,
     "processes": 30,
     "process_trees": 8,
-    "spawn_edges": 2
+    "spawn_edges": 2,
+    "registrations": 5
   },
   "counts": {
     "total": 12,
@@ -32,7 +33,26 @@
       "STALE_LOCK": 2
     },
     "process_trees": 8,
-    "spawn_edges": 2
+    "spawn_edges": 2,
+    "registrations": {
+      "total": 5,
+      "registered": 0,
+      "active": 3,
+      "terminal": 2,
+      "unknown": 0,
+      "unregistered_observed": 12,
+      "by_state": {
+        "active": 3,
+        "completed": 1,
+        "lost": 1
+      },
+      "by_kind": {
+        "guarded_tui": 1,
+        "headless_worker": 2,
+        "resume_wrapper": 1,
+        "subagent": 1
+      }
+    }
   },
   "sessions": [
     {
@@ -831,6 +851,195 @@
         "state": "unknown"
       },
       "status": "open"
+    }
+  ],
+  "registrations": [
+    {
+      "registration_id": "reg-guard-parent",
+      "root_registration_id": "reg-guard-parent",
+      "root_outcome": "trace child work",
+      "root_issue": "6458",
+      "task_id": "issue-6458",
+      "attempt_id": "attempt-parent",
+      "launch_kind": "guarded_tui",
+      "runtime": "codex",
+      "pid": 104,
+      "process_started_at": "2026-08-11T18:22:00Z",
+      "state": "active",
+      "process_matched": true,
+      "health": "ACTIVE"
+    },
+    {
+      "registration_id": "reg-headless-child",
+      "parent_registration_id": "reg-guard-parent",
+      "parent_attempt_id": "attempt-parent",
+      "root_registration_id": "reg-guard-parent",
+      "root_issue": "6458",
+      "task_id": "issue-6458",
+      "attempt_id": "attempt-child",
+      "launch_kind": "headless_worker",
+      "runtime": "codex",
+      "pid": 132,
+      "process_started_at": "2026-08-11T18:25:00Z",
+      "state": "active",
+      "process_matched": true,
+      "health": "ACTIVE"
+    },
+    {
+      "registration_id": "reg-nested",
+      "parent_registration_id": "reg-headless-child",
+      "parent_attempt_id": "attempt-child",
+      "root_registration_id": "reg-guard-parent",
+      "root_issue": "6458",
+      "task_id": "issue-6458",
+      "attempt_id": "attempt-nested",
+      "launch_kind": "subagent",
+      "runtime": "claude",
+      "process_started_at": "0001-01-01T00:00:00Z",
+      "state": "completed",
+      "witness_ref": "commit:mixed",
+      "process_matched": false,
+      "health": "TERMINAL"
+    },
+    {
+      "registration_id": "reg-resume",
+      "parent_registration_id": "reg-guard-parent",
+      "parent_attempt_id": "attempt-parent",
+      "root_registration_id": "reg-guard-parent",
+      "root_issue": "6458",
+      "task_id": "issue-6458",
+      "attempt_id": "attempt-resume",
+      "resume_of_attempt_id": "attempt-child",
+      "launch_kind": "resume_wrapper",
+      "runtime": "codex",
+      "process_started_at": "0001-01-01T00:00:00Z",
+      "state": "lost",
+      "reason": "parent_crash",
+      "process_matched": false,
+      "health": "TERMINAL"
+    },
+    {
+      "registration_id": "reg-stale",
+      "root_registration_id": "reg-stale",
+      "root_issue": "6458",
+      "attempt_id": "attempt-stale",
+      "launch_kind": "headless_worker",
+      "runtime": "codex",
+      "pid": 999,
+      "process_started_at": "2026-08-11T17:30:00Z",
+      "state": "active",
+      "process_matched": false,
+      "health": "REGISTERED_ACTIVE_NO_PROCESS"
+    }
+  ],
+  "unregistered_observed": [
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 100,
+        "process_started_at": "2026-08-11T18:21:58Z",
+        "runtime": "pwsh"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 101,
+        "process_started_at": "2026-08-11T18:21:59Z",
+        "runtime": "fak"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 110,
+        "process_started_at": "2026-08-11T18:22:58Z",
+        "runtime": "pwsh"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 111,
+        "process_started_at": "2026-08-11T18:22:59Z",
+        "runtime": "fak"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 114,
+        "process_started_at": "2026-08-11T18:23:00Z",
+        "runtime": "codex"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 120,
+        "process_started_at": "2026-08-11T18:23:58Z",
+        "runtime": "pwsh"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 121,
+        "process_started_at": "2026-08-11T18:23:59Z",
+        "runtime": "fak"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 124,
+        "process_started_at": "2026-08-11T18:24:00Z",
+        "runtime": "codex"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 142,
+        "process_started_at": "2026-08-11T18:26:00Z",
+        "runtime": "codex"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 152,
+        "process_started_at": "2026-08-11T18:27:00Z",
+        "runtime": "codex"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 162,
+        "process_started_at": "2026-08-11T18:28:00Z",
+        "runtime": "codex"
+      }
+    },
+    {
+      "verdict": "UNREGISTERED_OBSERVED",
+      "reason": "no registration matches pid plus process_start identity",
+      "process": {
+        "pid": 172,
+        "process_started_at": "2026-08-11T18:29:00Z",
+        "runtime": "codex"
+      }
     }
   ],
   "notice": "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself"

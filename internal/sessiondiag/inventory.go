@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 const InventorySchema = "fak.sessiondiag.inventory.v1"
@@ -115,6 +118,7 @@ type InventoryInput struct {
 	GuardReceipts      []GuardReceiptEvidence
 	Processes          []ProcessEvidence
 	SpawnEdges         []SpawnEdgeEvidence
+	Registrations      []sessionregistry.Record
 	SourceErrors       []SourceError
 	Window             time.Duration
 	StaleAfter         time.Duration
@@ -129,16 +133,18 @@ type InventorySources struct {
 	Processes      int           `json:"processes"`
 	ProcessTrees   int           `json:"process_trees"`
 	SpawnEdges     int           `json:"spawn_edges"`
+	Registrations  int           `json:"registrations"`
 	Errors         []SourceError `json:"errors,omitempty"`
 }
 
 type InventoryCounts struct {
-	Total        int            `json:"total"`
-	Active       int            `json:"active"`
-	ByKind       map[string]int `json:"by_kind"`
-	ByHealth     map[string]int `json:"by_health"`
-	ProcessTrees int            `json:"process_trees"`
-	SpawnEdges   int            `json:"spawn_edges"`
+	Total         int                    `json:"total"`
+	Active        int                    `json:"active"`
+	ByKind        map[string]int         `json:"by_kind"`
+	ByHealth      map[string]int         `json:"by_health"`
+	ProcessTrees  int                    `json:"process_trees"`
+	SpawnEdges    int                    `json:"spawn_edges"`
+	Registrations sessionregistry.Counts `json:"registrations"`
 }
 
 type ThreadRecord struct {
@@ -229,17 +235,43 @@ type SpawnEdgeRecord struct {
 	Status string        `json:"status"`
 }
 
+type RegistrationRecord struct {
+	RegistrationID       string                `json:"registration_id"`
+	ParentRegistrationID string                `json:"parent_registration_id,omitempty"`
+	ParentAttemptID      string                `json:"parent_attempt_id,omitempty"`
+	RootRegistrationID   string                `json:"root_registration_id"`
+	RootOutcome          string                `json:"root_outcome,omitempty"`
+	RootIssue            string                `json:"root_issue,omitempty"`
+	TaskID               string                `json:"task_id,omitempty"`
+	AttemptID            string                `json:"attempt_id"`
+	ResumeOfAttemptID    string                `json:"resume_of_attempt_id,omitempty"`
+	LaunchKind           string                `json:"launch_kind"`
+	Lane                 string                `json:"lane,omitempty"`
+	LeaseID              string                `json:"lease_id,omitempty"`
+	Runtime              string                `json:"runtime"`
+	SessionID            string                `json:"session_id,omitempty"`
+	ThreadID             string                `json:"thread_id,omitempty"`
+	PID                  int                   `json:"pid,omitempty"`
+	ProcessStartedAt     time.Time             `json:"process_started_at,omitempty"`
+	State                sessionregistry.State `json:"state"`
+	Reason               string                `json:"reason,omitempty"`
+	WitnessRef           string                `json:"witness_ref,omitempty"`
+	ProcessMatched       bool                  `json:"process_matched"`
+	Health               string                `json:"health"`
+}
 type InventoryReport struct {
-	Schema            string            `json:"schema"`
-	ObservedAt        string            `json:"observed_at"`
-	WindowSeconds     int64             `json:"window_seconds"`
-	StaleAfterSeconds int64             `json:"stale_after_seconds"`
-	ReadOnly          bool              `json:"read_only"`
-	Sources           InventorySources  `json:"sources"`
-	Counts            InventoryCounts   `json:"counts"`
-	Sessions          []SessionRecord   `json:"sessions"`
-	SpawnEdges        []SpawnEdgeRecord `json:"spawn_edges"`
-	Notice            string            `json:"notice"`
+	Schema               string                                 `json:"schema"`
+	ObservedAt           string                                 `json:"observed_at"`
+	WindowSeconds        int64                                  `json:"window_seconds"`
+	StaleAfterSeconds    int64                                  `json:"stale_after_seconds"`
+	ReadOnly             bool                                   `json:"read_only"`
+	Sources              InventorySources                       `json:"sources"`
+	Counts               InventoryCounts                        `json:"counts"`
+	Sessions             []SessionRecord                        `json:"sessions"`
+	SpawnEdges           []SpawnEdgeRecord                      `json:"spawn_edges"`
+	Registrations        []RegistrationRecord                   `json:"registrations"`
+	UnregisteredObserved []sessionregistry.UnregisteredObserved `json:"unregistered_observed,omitempty"`
+	Notice               string                                 `json:"notice"`
 }
 
 type processTreeWork struct {
@@ -380,11 +412,15 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 	})
 	sortSessions(sessions)
 
+	registrationRecords, unregistered := inventoryRegistrations(in.Registrations, in.Processes)
+	registrationCounts := sessionregistry.Summarize(in.Registrations, len(unregistered))
+
 	counts := InventoryCounts{
-		ByKind:       map[string]int{},
-		ByHealth:     map[string]int{},
-		ProcessTrees: len(trees),
-		SpawnEdges:   len(edges),
+		ByKind:        map[string]int{},
+		ByHealth:      map[string]int{},
+		ProcessTrees:  len(trees),
+		SpawnEdges:    len(edges),
+		Registrations: registrationCounts,
 	}
 	for _, session := range sessions {
 		counts.Total++
@@ -415,12 +451,15 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 			Processes:      len(in.Processes),
 			ProcessTrees:   len(trees),
 			SpawnEdges:     len(edges),
+			Registrations:  len(in.Registrations),
 			Errors:         sourceErrors,
 		},
-		Counts:     counts,
-		Sessions:   sessions,
-		SpawnEdges: edges,
-		Notice:     "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself",
+		Counts:               counts,
+		Sessions:             sessions,
+		SpawnEdges:           edges,
+		Registrations:        registrationRecords,
+		UnregisteredObserved: unregistered,
+		Notice:               "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself",
 	}
 }
 
@@ -946,6 +985,48 @@ func endpointState(
 	return EndpointUnknown
 }
 
+func inventoryRegistrations(rows []sessionregistry.Record, processes []ProcessEvidence) ([]RegistrationRecord, []sessionregistry.UnregisteredObserved) {
+	observed := make([]sessionregistry.ObservedProcess, 0, len(processes))
+	for _, p := range processes {
+		if isAgentProcess(p) {
+			observed = append(observed, sessionregistry.ObservedProcess{PID: p.PID, ProcessStartedAt: p.StartedAt, Runtime: strings.TrimSuffix(strings.ToLower(filepath.Base(p.Name)), ".exe")})
+		}
+	}
+	unregistered := sessionregistry.ReconcileObserved(rows, observed)
+	out := make([]RegistrationRecord, 0, len(rows))
+	for _, r := range rows {
+		matched := false
+		for _, p := range processes {
+			if r.Identity.PID != 0 && r.Identity.PID == p.PID && !r.Identity.ProcessStartedAt.IsZero() && r.Identity.ProcessStartedAt.Equal(p.StartedAt.UTC()) {
+				matched = true
+				break
+			}
+		}
+		health := "RECEIPT_ONLY"
+		switch {
+		case matched && r.State == sessionregistry.StateActive:
+			health = "ACTIVE"
+		case matched:
+			health = "PROCESS_PRESENT"
+		case r.State == sessionregistry.StateActive:
+			health = "REGISTERED_ACTIVE_NO_PROCESS"
+		case r.State == sessionregistry.StateUnknown:
+			health = "UNKNOWN"
+		case r.State == sessionregistry.StateRegistered:
+			health = "REGISTERED_NOT_STARTED"
+		default:
+			health = "TERMINAL"
+		}
+		out = append(out, RegistrationRecord{RegistrationID: r.RegistrationID, ParentRegistrationID: r.ParentRegistrationID, ParentAttemptID: r.ParentAttemptID, RootRegistrationID: r.RootRegistrationID, RootOutcome: r.RootOutcome, RootIssue: r.RootIssue, TaskID: r.TaskID, AttemptID: r.AttemptID, ResumeOfAttemptID: r.ResumeOfAttemptID, LaunchKind: r.LaunchKind, Lane: r.Lane, LeaseID: r.LeaseID, Runtime: r.Identity.Runtime, SessionID: r.Identity.SessionID, ThreadID: r.Identity.ThreadID, PID: r.Identity.PID, ProcessStartedAt: r.Identity.ProcessStartedAt, State: r.State, Reason: r.Reason, WitnessRef: r.WitnessRef, ProcessMatched: matched, Health: health})
+	}
+	return out, unregistered
+}
+func isAgentProcess(p ProcessEvidence) bool {
+	n := strings.ToLower(filepath.Base(p.Name))
+	c := strings.ToLower(p.CommandLine)
+	return strings.Contains(n, "codex") || strings.Contains(n, "claude") || strings.Contains(n, "opencode") || strings.Contains(c, "dispatchworker") || strings.Contains(c, "fak guard")
+}
+
 func RenderInventory(w io.Writer, report InventoryReport) {
 	fmt.Fprintf(w, "CODEX SESSION INVENTORY observed=%s active=%d total=%d process_trees=%d spawn_edges=%d\n",
 		report.ObservedAt, report.Counts.Active, report.Counts.Total, report.Counts.ProcessTrees, report.Counts.SpawnEdges)
@@ -980,6 +1061,18 @@ func RenderInventory(w io.Writer, report InventoryReport) {
 			session.Health, session.Kind, threadID, turn, lock, receipt, len(session.ProcessTrees), strings.Join(session.Reasons, ","))
 	}
 	_ = tw.Flush()
+	if len(report.Registrations) > 0 || len(report.UnregisteredObserved) > 0 {
+		fmt.Fprintf(w, "REGISTRATIONS total=%d active=%d terminal=%d unknown=%d unregistered_observed=%d\n", report.Counts.Registrations.Total, report.Counts.Registrations.Active, report.Counts.Registrations.Terminal, report.Counts.Registrations.Unknown, report.Counts.Registrations.UnregisteredObserved)
+		rtw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(rtw, "REGISTRATION\tPARENT\tROOT\tISSUE\tATTEMPT\tKIND\tPID\tSTATE\tHEALTH\tWITNESS")
+		for _, r := range report.Registrations {
+			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", inventoryValue(r.RegistrationID), inventoryValue(r.ParentRegistrationID), inventoryValue(r.RootRegistrationID), inventoryValue(r.RootIssue), inventoryValue(r.AttemptID), inventoryValue(r.LaunchKind), r.PID, r.State, r.Health, inventoryValue(r.WitnessRef))
+		}
+		for _, u := range report.UnregisteredObserved {
+			fmt.Fprintf(rtw, "UNREGISTERED_OBSERVED\t-\t-\t-\t-\tobserved_process\t%d\t-\t%s\t-\n", u.Process.PID, u.Reason)
+		}
+		_ = rtw.Flush()
+	}
 	if len(report.SpawnEdges) > 0 {
 		fmt.Fprintln(w, "spawn edges:")
 		etw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
@@ -1243,4 +1336,11 @@ func compactAge(seconds int64) string {
 	default:
 		return fmt.Sprintf("%dh", seconds/3600)
 	}
+}
+
+func inventoryValue(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "-"
+	}
+	return v
 }

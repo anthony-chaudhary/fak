@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
+
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 )
 
@@ -145,5 +147,29 @@ func TestRunSessionDiagInventoryJSONAndHumanRender(t *testing.T) {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human render missing %q:\n%s", want, humanOut.String())
 		}
+	}
+}
+
+func TestRunSessionDiagInventoryLoadsRegistrationStore(t *testing.T) {
+	now := time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC)
+	store := sessionregistry.Store{Path: filepath.Join(t.TempDir(), "registry.jsonl")}
+	r, _ := sessionregistry.New(sessionregistry.NewInput{RegistrationID: "root", RootIssue: "6468", TaskID: "issue-6468", AttemptID: "a", LaunchKind: "guarded_tui", Runtime: "codex", Now: now})
+	if err := store.Register(r); err != nil {
+		t.Fatal(err)
+	}
+	q := func(string, time.Duration, time.Time) (sessiondiag.InventoryInput, error) {
+		return sessiondiag.InventoryInput{}, nil
+	}
+	var out, errb bytes.Buffer
+	code := runSessionDiagWith(&out, &errb, []string{"--inventory", "--registry", store.Path, "--json"}, nil, q, func() time.Time { return now })
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+	var got sessiondiag.InventoryReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Sources.Registrations != 1 || len(got.Registrations) != 1 || got.Registrations[0].RootIssue != "6468" {
+		t.Fatalf("report=%+v", got)
 	}
 }

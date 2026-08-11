@@ -13,6 +13,25 @@ FAILED_BUT_LOCKED  resume_wrapper        30000003..0003  failed:invalid_id_prefi
 STALE_LOCK         interactive_tui       60000001..0001  completed                 1h    -        0      TERMINAL_TURN_WITH_WRITER_LOCK
 STALE_LOCK         unknown               60000002..0002  -                         2h    -        0      WRITER_LOCK_OLDER_THAN_STALE_THRESHOLD,WRITER_LOCK_WITHOUT_PROCESS_TREE
 RECEIPT_ONLY       headless_exec_worker  70000001..0001  -                         -     launch   0      LAUNCH_RECEIPT_WITHOUT_PROCESS_OR_LOCK
+REGISTRATIONS total=5 active=3 terminal=2 unknown=0 unregistered_observed=12
+REGISTRATION           PARENT              ROOT              ISSUE  ATTEMPT         KIND              PID  STATE      HEALTH                                                   WITNESS
+reg-guard-parent       -                   reg-guard-parent  6458   attempt-parent  guarded_tui       104  active     ACTIVE                                                   -
+reg-headless-child     reg-guard-parent    reg-guard-parent  6458   attempt-child   headless_worker   132  active     ACTIVE                                                   -
+reg-nested             reg-headless-child  reg-guard-parent  6458   attempt-nested  subagent          0    completed  TERMINAL                                                 commit:mixed
+reg-resume             reg-guard-parent    reg-guard-parent  6458   attempt-resume  resume_wrapper    0    lost       TERMINAL                                                 -
+reg-stale              -                   reg-stale         6458   attempt-stale   headless_worker   999  active     REGISTERED_ACTIVE_NO_PROCESS                             -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  100  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  101  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  110  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  111  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  114  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  120  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  121  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  124  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  142  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  152  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  162  -          no registration matches pid plus process_start identity  -
+UNREGISTERED_OBSERVED  -                   -                 -      -               observed_process  172  -          no registration matches pid plus process_start identity  -
 spawn edges:
 PARENT          CHILD           STATUS  PARENT_STATE  CHILD_STATE
 10000001..0001  80000001..0001  closed  active        completed
