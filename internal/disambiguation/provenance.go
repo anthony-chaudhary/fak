@@ -25,6 +25,7 @@ const (
 	ErrProvenanceRevisionInvalid  = "DISAMBIGUATION_PROVENANCE_REVISION_INVALID"
 	ErrProvenanceCheckedAtInvalid = "DISAMBIGUATION_PROVENANCE_CHECKED_AT_INVALID"
 	ErrProvenanceProbeInvalid     = "DISAMBIGUATION_PROVENANCE_PROBE_IDENTITY_INVALID"
+	ErrProvenanceReferenceInvalid = "DISAMBIGUATION_PROVENANCE_REFERENCE_INVALID"
 )
 
 var (
@@ -73,6 +74,9 @@ func validateSourceProvenance(i int, source SourceWitness) error {
 	}
 	if !probeIdentity.MatchString(source.Probe) {
 		return provenanceError(ErrProvenanceProbeInvalid, prefix+".probe", "must be a stable lowercase public probe identity")
+	}
+	if err := validatePublicReference(prefix+".reference", source.Reference); err != nil {
+		return err
 	}
 	return nil
 }

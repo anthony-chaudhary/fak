@@ -276,3 +276,21 @@ func TestDisambiguationFreshnessSelfCheckJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestRunDisambiguationStaleSymbolsSelfTestJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDisambiguation(&stdout, &stderr, []string{"stale-symbols-self-test", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var report disambiguation.StaleSymbolsSelfCheckReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed || !report.PackagePassed {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.Stale.ReasonCode != disambiguation.FreshnessReasonPublicSymbolMissing {
+		t.Fatalf("stale=%+v", report.Stale)
+	}
+}

@@ -80,6 +80,17 @@ func expectedFreshnessReason(verdict FreshnessVerdict) (string, bool) {
 	}
 }
 
+func validFreshnessReason(verdict FreshnessVerdict, reason string) bool {
+	if verdict == FreshnessStale {
+		switch reason {
+		case FreshnessReasonSourceOutdated, FreshnessReasonPublicSymbolMissing, FreshnessReasonCLIVerbMissing, FreshnessReasonReasonCodeMissing, FreshnessReasonDocAnchorMissing:
+			return true
+		}
+	}
+	expected, ok := expectedFreshnessReason(verdict)
+	return ok && reason == expected
+}
+
 // FreshnessSelfCheckCase is one row of the hermetic four-state package witness.
 type FreshnessSelfCheckCase struct {
 	Verdict    FreshnessVerdict `json:"verdict"`
@@ -122,7 +133,7 @@ func validateFreshness(freshness Freshness) error {
 	if err := requireText("freshness.reason_code", freshness.ReasonCode); err != nil {
 		return err
 	}
-	if freshness.ReasonCode != expectedReason {
+	if !validFreshnessReason(freshness.Verdict, freshness.ReasonCode) {
 		return fmt.Errorf("freshness.reason_code %q does not match verdict %q (want %q)", freshness.ReasonCode, freshness.Verdict, expectedReason)
 	}
 	return validateFreshnessProbeMetadata(FreshnessProbe{Probe: freshness.Probe, CheckedAt: freshness.CheckedAt})

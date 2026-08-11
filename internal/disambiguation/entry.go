@@ -100,11 +100,12 @@ type Owner struct {
 // is repository-relative; Revision, CheckedAt, and Probe make verification
 // reproducible without introducing a private-source dependency.
 type SourceWitness struct {
-	Kind      string `json:"kind"`
-	Locator   string `json:"locator"`
-	Revision  string `json:"revision"`
-	CheckedAt string `json:"checked_at"`
-	Probe     string `json:"probe"`
+	Kind      string           `json:"kind"`
+	Locator   string           `json:"locator"`
+	Revision  string           `json:"revision"`
+	CheckedAt string           `json:"checked_at"`
+	Probe     string           `json:"probe"`
+	Reference *PublicReference `json:"reference,omitempty"`
 }
 
 // Freshness records the last source-check outcome and the public probe that

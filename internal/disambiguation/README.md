@@ -159,3 +159,33 @@ CLI JSON witness with:
 ```text
 fak disambiguation freshness --self-test --json
 ```
+
+
+## Public reference freshness
+
+A source witness may add a `reference` object to cite a repository-visible
+contract inside its existing public provenance locator:
+
+- `go-symbol`: an exported top-level Go declaration in the cited `.go` file;
+- `cli-verb`: a literal public verb dispatched by the cited Go source;
+- `reason-code`: a stable uppercase reason-code literal in cited Go source;
+- `doc-anchor`: a GitHub-style Markdown heading anchor in the cited document.
+
+`ProbePublicReferences(repoRoot, entry)` reads only those repository-relative
+public sources. A present reference is `fresh/SOURCE_CURRENT`; removing it is
+`stale` with `PUBLIC_SYMBOL_MISSING`, `CLI_VERB_MISSING`,
+`REASON_CODE_MISSING`, or `DOCUMENT_ANCHOR_MISSING`. A source that cannot be
+read for reasons other than absence remains `unknown/PROBE_UNAVAILABLE`. Invalid
+entry/provenance/reference evidence remains `invalid/EVIDENCE_MALFORMED` and
+outranks unavailable or stale results, preserving the four-state #6280
+precedence. This is a reader/probe over #6281 provenance, not a writer, registry,
+or private-source integration.
+
+Agents can capture the deterministic package/CLI transition witness with:
+
+```text
+fak disambiguation stale-symbols-self-test --json
+```
+
+The JSON emits both the initial `fresh` result and the result after deleting the
+fixture declaration (`stale/PUBLIC_SYMBOL_MISSING`).
