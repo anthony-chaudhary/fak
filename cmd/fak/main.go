@@ -125,6 +125,8 @@ func main() {
 		cmdToolproc(os.Args[2:])
 	case "stallscan":
 		cmdStallscan(os.Args[2:])
+	case "terminal-relief":
+		cmdTerminalRelief(os.Args[2:])
 	case "schedule-held":
 		cmdScheduleHeld(os.Args[2:])
 	case "learning-observation":

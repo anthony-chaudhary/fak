@@ -379,6 +379,7 @@ var tier = map[string]int{
 	"safesync":         3, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
 	"hostfault":        2, // pure closed host-fault classification vocabulary; stdlib-only, off hot path.
 	"terminalrisk":     2, // pure Windows Terminal crash-risk assessment + settings rewrite.
+	"terminalrelief":   1, // pure pressure/cooldown decision and durable state; Windows actuation stays in cmd/fak.
 	"hostresurrect":    3, // composes host-fault signals with durable guard-session inventory into bounded relaunch requests.
 	"issuestriage":     2, // pure issue-action triage classifier; stdlib-only, off hot path.
 	"wipfence":         3, // pure shared-trunk WIP build-fence text engine; no hot-path dependency.

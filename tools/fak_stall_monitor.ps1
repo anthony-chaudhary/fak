@@ -176,12 +176,22 @@ while ($true) {
     $stallRun = 0
   }
 
+  # Unlike daemon cleanup, terminal pressure needs consecutive observations.
+  # Call the fail-closed actuator on every sample; it acts only after its own
+  # run threshold and cooldown, and dry-runs are available through the verb.
+  if ($AutoMitigate) {
+    & $fak terminal-relief --apply --json 2>&1 | ForEach-Object {
+      Write-Host "[terminal-relief] $_"
+    }
+  }
+
   if ($AutoMitigate -and $stallRun -ge $StallRunToMitigate) {
     $mins = ([DateTime]::Now - $lastMitigate).TotalMinutes
     if ($mins -ge $MitigateCooldownMin) {
       Write-Host "[stall-mon] persistent stalls -> running host_stall_mitigations.ps1 -Apply"
       & pwsh -NoProfile -ExecutionPolicy Bypass -File "$scriptDir\host_stall_mitigations.ps1" -Apply
       $lastMitigate = [DateTime]::Now
+
       $stallRun = 0
     } else {
       Write-Host ("[stall-mon] would mitigate but in cooldown ({0:N0}/{1} min)" -f $mins, $MitigateCooldownMin)
