@@ -360,7 +360,7 @@ var tier = map[string]int{
 	"dormancysim":      2, // deterministic time-travel dormancy harness (#1192): drives dormancy(1)+rehydrate(1) with one injected virtual clock so day/week/month horizon tests run without wall-clock waits; off the hot path.
 	"rehydrate":        2, // horizon-gated re-entry orchestrator (#1181, epic #1178 Phase-2 spine): the CRaC afterRestore analog — a staged Gate that runs strictly more revalidation rungs (COLD_CACHE/STALE_CRED/STALE_RECALL/STALE_LEASE/STALE_PLAN) the longer the image was dormant, refusing admission at the first that does not clear. COMPOSES rungs (the four children supply the checks); imports only dormancy(1)+stdlib, registers nothing, off the hot path. sessionimage.Rehydrate composes a Gate at its boundary.
 	"syspromptmmu":     3, // system-prompt MMU: Rung 1 (#1259) emits fak's ordered base-context plan (SegStable spine + versioned policy floor as []cachemeta.PromptSegment, each content-witnessed); Rung 2 (#1260) is the cache-safe system-block splicer (BuildSystemValue + SpliceSystemOverlay, bytes.Equal(prefix) proven, fail-safe identity). Pure authorship/decision layer: imports cachemeta(1)+promptmmu(1)+stdlib, off the hot path.
-	"devcmd":           3, // fak-dev command implementations; consumes tier-1 devindex and stays off the serving/guard graph.
+	"devcmd":           5, // fak-dev command implementations; integrates the agent/gateway/selfquery surfaces while staying off the serving/guard graph.
 	"devindex":         2,
 	"edittx":           2, // transactional multi-file edit core: snapshots touched files, applies a full-file batch, validates, and rolls back on failure; stdlib-only, off the hot path.
 	"workflowlint":     1, // refutes fak-blind ultracode Workflow scripts (#1494/C4 #1502): pure Lint over the self-index/memory/shared-path concept classes; stdlib-only (embed/regexp/sort/strings), imports nothing internal, off the hot path.
@@ -470,7 +470,7 @@ var tier = map[string]int{
 	"modedebt":              4, // #4416 (epic #4397, permission regimes #2389/#2405): the CONSUMER half of the mode-debt scorer/dispatcher pair. Reads the sibling scorer's scorecard JSON, selects HARD un-lifted permission dials, and maps each onto dogfoodissues(3).ActionItem with a content-stable dedup key, capped at the family --cap. Composer twin of qaprocessscore: imports dogfoodissues(3)+stdlib only, off the hot path.
 	"deploymanifest":        1, // unified fak.toml all-in-one deployment manifest (#3421, epic #3256): typed schema for the eight deployment sections + a fail-closed loader (unknown/typo'd key refuses at load with a closed-vocabulary reason) + the `fak init` minimal-emit bytes; stdlib-only, imports nothing internal, off the hot path.
 	"configguide":           2, // intent-level posture composer over deploymanifest: emits explained minimal fak.toml deltas and validates them through the foundation parser; no runtime side effects.
-	"configsurface":         3, // config discoverability/default/budget scorer (#2938/#2862): composes deploymanifest(1)+configguide(2), stdlib-only, off the hot path.
+	"configsurface":         2, // config discoverability/default/budget scorer (#2938/#2862): composes deploymanifest(1)+configguide(2), stdlib-only, off the hot path.
 	"toolplugin":            2, // typed monotone tool-call plugin host + layered preference resolver (#6045): stdlib-only contract/composer, no direct execution authority beyond its injected Executor, off the hot path.
 	"systemservice":         2, // pure service-manager definition renderer; stdlib-only and off the hot path.
 	"guardcompile":          4,
@@ -516,9 +516,12 @@ var tier = map[string]int{
 	"enumlint":              0, // #5935: pure stdlib Go AST closed-enum discovery, exhaustiveness rules, and counted baseline ratchet; repository I/O is caller-selected.
 	"archreport":            2, // read-only query/report over the architest declaration source and package import graph.
 	"generationctl":         3,
-	"coordinateoperator":    1, // #6055 (epic #6042): the operator VIEW and control surface over the whole agent path — the pure Resolve folding four-layer observations plus scoped/TTL'd operator pins into ONE Report, the status/plan/explain renderers that are all projections of that same Report, and the `fak coordinate` argv surface. Stdlib-only, imports nothing internal (the layer adapters #6047-#6050 publish INTO it via a versioned JSON snapshot, never by import, which is what keeps the surface from climbing the tier ladder behind them). Off the hot path.
 	"quantprov":             1,
 	"cudaarch":              1, // deterministic CUDA architecture compatibility matrix; stdlib-only pure parser/renderer.
+	"cubicquanteval":        1, // pinned-codebook quantization evaluation; stdlib-only leaf.
+	"kvquantquality":        1, // KV quantization quality budgets and witness parser; stdlib-only leaf.
+	"kvvectoreval":          1, // attention-preserving KV vector quantization evaluation; stdlib-only leaf.
+	"qevicteval":            1, // recoverable KV eviction evaluation; stdlib-only leaf.
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
 	"kvquantmeta":           1,
@@ -536,7 +539,7 @@ var tier = map[string]int{
 	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
 	"quantbench":            1, // stdlib-only benchmark evidence contract and adjudication; no runtime kernel.
 	"kvint2eval":            1, // stdlib-only INT2 KV rotation evidence contract; CUDA producer is fixture-only.
-	"codexresume":           1,
+	"codexresume":           2,
 	"disambiguation":        1, // stdlib-only terminology schema, validation, and self-test; no policy or model kernel.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
