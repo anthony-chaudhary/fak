@@ -61,6 +61,20 @@ func containsDisambiguationString(values []string, want string) bool {
 	return false
 }
 
+func TestRunDisambiguationOwnershipSelfTestJSON(t *testing.T) {
+	var out bytes.Buffer
+	if code := runDisambiguation(&out, &out, []string{"ownership", "--self-test", "--json"}); code != 0 {
+		t.Fatalf("exit=%d output=%s", code, out.String())
+	}
+	var report disambiguation.OwnershipSelfCheckReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, out.String())
+	}
+	if !report.OK || !report.AcceptedFixture || !report.RejectedLeaf || !report.RejectedLane {
+		t.Fatalf("ownership selfcheck did not prove accept/reject fixtures: %+v", report)
+	}
+}
+
 func TestRunDisambiguationQueryJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runDisambiguation(&stdout, &stderr, []string{"query", "agent kernel", "--json"})

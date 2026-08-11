@@ -75,6 +75,31 @@ seams. They add no corpus writer, generated index, filesystem/network access, or
 private-source dependency. Alias and graph inputs are bounded so a routine fuzz
 smoke cannot turn cardinality or string width into an accidental resource test.
 
+
+## Ownership and dispatch admission
+
+Every entry's `owner.leaf` and `owner.lane` fields are admission data, not free-form
+labels. Agents discover the authoritative public contracts in these existing places:
+
+- **owner leaf registry:** real public directories under `internal/<leaf>/` and
+  `cmd/<leaf>/`, matching the ship-stamp contract in `AGENTS.md` and
+  `tools/commit_stamp_doctor.py`;
+- **dispatch lane registry:** `dos.toml` `[lanes]` (`concurrent`, `exclusive`,
+  `autopick`) plus `[lanes.trees]`, the workspace manifest used by dispatch and
+  lease tooling.
+
+Generation calls `LoadPublicManifests` and `NewAdmittedIndex`, rejecting an entry
+before output when either target is absent. This reads only public repository
+paths—never private repositories, host configuration, or a second generated
+registry. Run `fak disambiguation ownership --self-test --json`; its report proves
+one accepted fixture and separate rejected leaf/lane fixtures through the public
+CLI seam.
+
+The seed distinctions retain their accountable `kernel` or `disambiguation`
+owner leaves. Their dispatch lanes are `kernel` for the kernel-owned distinction
+and the declared public terminology lane `canon` for disambiguation-owned
+terminology distinctions.
+
 ## Scoped overloaded terms
 
 A canonical token may have multiple entries only when each entry has a distinct, required `scope.kind` + `scope.value` qualifier. Unscoped queries of an overloaded token return `scope required`; callers select an owner with `--scope-kind` and `--scope-value`, and JSON returns the stored scope unchanged. For example:
