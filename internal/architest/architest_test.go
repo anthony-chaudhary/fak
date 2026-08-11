@@ -536,6 +536,7 @@ var tier = map[string]int{
 	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
 	"quantbench":            1, // stdlib-only benchmark evidence contract and adjudication; no runtime kernel.
 	"kvint2eval":            1, // stdlib-only INT2 KV rotation evidence contract; CUDA producer is fixture-only.
+	"codexresume": 1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

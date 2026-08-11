@@ -87,6 +87,8 @@ func main() {
 		cmdSession(os.Args[2:])
 	case "session-audit":
 		cmdSessionAudit(os.Args[2:])
+	case "codex-resume":
+		cmdCodexResume(os.Args[2:])
 	case "sessionjournal":
 		cmdSessionJournal(os.Args[2:])
 	case "tier-calibrate":
