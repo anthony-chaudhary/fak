@@ -22,7 +22,7 @@ func TestGoldenRecordsDistinguishOnlineAndOfflineRotations(t *testing.T) {
 	}{
 		{"quarot offline is artifact-complete", fixture(t, RecipeQuaRot, "arxiv:2404.00456v2", Transform{Name: "residual", Placement: PlacementOffline}), Capabilities{Recipes: map[Recipe][]string{RecipeQuaRot: {"arxiv:2404.00456v2"}}}, OutcomeSupported, ReasonSupported},
 		{"spinquant online delegates without recipe runtime", fixture(t, RecipeSpinQuant, "arxiv:2405.16406v4", Transform{Name: "down-project", Placement: PlacementOnline, Fusion: "hadamard/down-project"}), Capabilities{}, OutcomeDelegate, ReasonRuntimeRequired},
-		{"lightrot online refuses unsupported fusion", fixture(t, RecipeLightRot, "arxiv:2607.27704v1", Transform{Name: "activation", Placement: PlacementOnline, Fusion: "lightrot/activation"}), Capabilities{Recipes: map[Recipe][]string{RecipeLightRot: {"arxiv:2607.27704v1"}}}, OutcomeUnsupported, ReasonUnsupportedFusion},
+		{"lightrot online refuses unsupported fusion", fixture(t, RecipeLightRot, "arxiv:2607.27704v1", Transform{Name: "activation", Placement: PlacementOnline, Fusion: "lightrot/activation"}), Capabilities{Recipes: map[Recipe][]string{RecipeLightRot: {"arxiv:2607.27704v1"}}}, OutcomeUnsupported, ReasonRuntimeTransformUnavailable},
 		{"spinquant online supported when declared", fixture(t, RecipeSpinQuant, "arxiv:2405.16406v4", Transform{Name: "down-project", Placement: PlacementOnline, Fusion: "hadamard/down-project"}), Capabilities{Recipes: map[Recipe][]string{RecipeSpinQuant: {"arxiv:2405.16406v4"}}, Fusions: map[string]bool{"hadamard/down-project": true}}, OutcomeSupported, ReasonSupported},
 	}
 	for _, tc := range cases {
