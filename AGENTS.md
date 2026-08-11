@@ -172,7 +172,12 @@ witness instead of claiming a fix.
 
 Two defaults fire for **any new unit of work** (feature, leaf, verb, demo, process change) —
 full doctrine in [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md), agent
-checklist in the `/spine-fanout` skill:
+checklist in the `/spine-fanout` skill. Before either, pass the
+[Feynman-simple value frame](docs/shift-left-task-organization.md): name **For / Problem /
+Today / Better because** in plain language. Compare against the real next-best alternative,
+not an imagined baseline. If a new operator cannot repeat why the smallest spine should
+improve an observable user outcome, keep scoping; do not compensate with architecture,
+fan-out, or exhaustive proof.
 
 1. **Ship the minimal WORKING end-to-end spine first, in the same session the work starts** —
    the smallest runnable path through the real seam (LCD demo with `-selfcheck` for a

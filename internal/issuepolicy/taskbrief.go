@@ -11,6 +11,10 @@ const TaskBriefSchema = "fak-task-brief-readiness/1"
 var typedUnknownRE = regexp.MustCompile(`(?i)^unknown(?:\s*\((.+)\)|\s*[-�:]\s*(?:reason\s*:\s*)?(.+))$`)
 
 var briefRepairs = map[string]string{
+	"beneficiary":  "in Value, add `For: <person or operator>`",
+	"problem":      "in Value, add `Problem: <observable pain or unmet need>`",
+	"alternative":  "in Value, add `Today: <next-best way they handle it now>`",
+	"advantage":    "in Value, add `Better because: <plain-language reason this spine should win>`",
 	"outcome":      "add an Outcome section naming the observable result",
 	"scope":        "add a Scope / tree section naming in-scope paths and exclusions",
 	"dependencies": "add a Dependencies section naming issue/graph edges or explicitly saying none",
@@ -27,7 +31,12 @@ func AssessIssueBrief(d IssueDraft) BriefReadiness {
 
 func assessIssueBrief(d IssueDraft, c Candidate) BriefReadiness {
 	sections := markdownSections(d.Body)
+	valueFrame := labeledBriefValues(sections["value"])
 	values := map[string]string{
+		"beneficiary":  valueFrame["for"],
+		"problem":      valueFrame["problem"],
+		"alternative":  valueFrame["today"],
+		"advantage":    valueFrame["better because"],
 		"outcome":      firstNonEmpty(sections["outcome"], c.RootPoint, c.WhyNow),
 		"scope":        firstNonEmpty(sections["scope / tree"], sections["scope"], c.InScope),
 		"dependencies": firstNonEmpty(sections["dependencies"], dependencyDeclaration(c)),
@@ -36,8 +45,12 @@ func assessIssueBrief(d IssueDraft, c Candidate) BriefReadiness {
 		"placement":    firstNonEmpty(sections["placement"], placementDeclaration(c)),
 	}
 	enforced := hasBriefVocabulary(sections) || strings.EqualFold(strings.TrimSpace(c.Schema), "fak-task-brief/1")
-	out := BriefReadiness{Ready: true, Enforced: enforced, Fields: make(map[string]BriefField, len(values))}
-	for _, name := range []string{"outcome", "scope", "dependencies", "acceptance", "witness", "placement"} {
+	names := []string{"outcome", "scope", "dependencies", "acceptance", "witness", "placement"}
+	if _, usesValueFrame := sections["value"]; usesValueFrame {
+		names = append([]string{"beneficiary", "problem", "alternative", "advantage"}, names...)
+	}
+	out := BriefReadiness{Ready: true, Enforced: enforced, Fields: make(map[string]BriefField, len(names))}
+	for _, name := range names {
 		field := classifyBriefField(values[name], briefRepairs[name])
 		out.Fields[name] = field
 		if field.Status == "missing" {
@@ -96,4 +109,25 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// labeledBriefValues reads the four deliberately plain-language prompts in a
+// Value section. Keeping them in one section makes the human brief short while
+// preserving machine-checkable decisions at the creation boundary.
+func labeledBriefValues(section string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(section, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(strings.TrimLeft(line, "-*"))
+		label, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		label = strings.ToLower(strings.TrimSpace(label))
+		switch label {
+		case "for", "problem", "today", "better because":
+			out[label] = strings.TrimSpace(value)
+		}
+	}
+	return out
 }

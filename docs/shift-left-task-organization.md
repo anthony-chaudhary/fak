@@ -7,7 +7,9 @@ description: "The human-readable contract for turning a new outcome into dispatc
 
 Use this page when new work is being proposed, split, filed, or handed to an agent. The rule is simple:
 
-> **Move every decision that is already knowable to the task-creation boundary.** A worker should discover the solution, not rediscover the task's intent, ownership, dependencies, done condition, or proof.
+> **Move every decision that is already knowable to the task-creation boundary.** A worker should discover the solution, not rediscover the task's value, intent, ownership, dependencies, done condition, or proof.
+
+The Feynman test is the first gate: explain the work in words a new operator can repeat accurately. Name **who has what problem, how they handle it today, and why the smallest end-to-end change should be better**. Complexity that cannot yet be explained is uncertainty to resolve, not detail to hide behind. “Better” means a witnessed user outcome against the real next-best alternative—not more machinery, more files, or a larger scorecard.
 
 This is an authoring and reading contract over the repository's existing sources of truth. It does not replace GitHub Issues, DOS plans, [`fak issue contract`](agentic-issue-dispatch.md), lane leases, or the [`shared-task/1`](shared-task-record-contract.md) runtime record.
 
@@ -29,8 +31,14 @@ A human queue should lead with **outcome and leaf**. PID, account, token, and he
 At creation time, fill every field that is knowable. Use `unknown(<reason>)` only when the answer genuinely depends on investigation; never use omission to mean unknown.
 
 ```markdown
+## Value
+- For: <the person or operator who benefits>
+- Problem: <observable pain or unmet need>
+- Today: <the real next-best way they handle it now>
+- Better because: <plain-language reason the smallest spine should win>
+
 ## Outcome
-<one sentence describing the operator-visible effect>
+<one sentence describing what becomes observably better for that person>
 
 ## Scope
 - Owns: <lane/tree/API or named surfaces>
@@ -69,32 +77,50 @@ The exact available verbs evolve; `fak help --all` is authoritative. The invaria
 
 `fak issue contract --file CANDIDATE.json --json` and `--from-issues ISSUES.json
 --json` identify schema `fak-task-brief-readiness/1`. Each review's
-`brief_readiness.fields` object reports `outcome`, `scope`, `dependencies`,
-`acceptance`, `witness`, and `placement` as exactly one of:
+`brief_readiness.fields` object reports `beneficiary`, `problem`, `alternative`,
+`advantage`, `outcome`, `scope`, `dependencies`, `acceptance`, `witness`, and
+`placement` as exactly one of:
 
 - `present`;
 - `unknown` with a non-empty `reason`; or
 - `missing` with a concrete `repair_action`.
 
 For the copyable brief above, any `missing` field makes the leaf non-ready and the
-review verdict `needs_brief`. Existing issue contracts that predate this vocabulary
+review verdict `needs_brief`. A `Value` heading opts into all four value checks; this
+keeps legacy issues readable while making newly value-framed work mechanically honest.
+Existing issue contracts that predate this vocabulary
 remain compatible (`brief_readiness.enforced=false`) until migrated; once a brief uses
 `Scope / tree`, `Witness / proof`, or `Placement`, all six fields are enforced.
 
 ## Shift-left checklist for new work
 
-1. **Name the outcome.** Prefer a user/operator effect over a component noun.
-2. **Find the parent and duplicates.** Search open and closed issues before creating another source of truth.
-3. **Ship or name the spine.** Follow [`spine-first-defaults.md`](spine-first-defaults.md); a broad fan-out without an end-to-end witness is planning debt.
-4. **Cut coherent leaves.** One issue should be independently closable and should map to one eventual commit/leaf. Split by acceptance boundary, not by file count.
-5. **Declare ownership and collisions.** Name the lane/tree before a worker starts. Scheduling may choose the worker; it must not invent scope.
-6. **Declare dependencies.** Use explicit `requires`/`unblocks` edges. Parallel-looking work with a hidden prerequisite is serial work described badly.
-7. **Write acceptance before implementation.** Checkboxes describe observable effects. Implementation notes may suggest a path but cannot redefine done.
-8. **Choose the witness.** Visual work needs a captured render; behavior needs a before/after repro; shipped claims need independent commit/effect verification.
-9. **Type uncertainty.** File a decision or investigation leaf when an unknown blocks a contract. Do not bury the unknown in a worker prompt.
-10. **Place the work.** Apply class, priority, generation, milestone, and parent at creation or update time.
-11. **Dispatch only ready leaves.** A worker receives the issue contract plus current lease/attempt state, not an improvised prose brief.
-12. **File discovered follow-ups.** New work becomes a deduplicated issue with a done condition before the run ends; otherwise it does not leave the run.
+1. **Explain the value simply.** Name the beneficiary, observable problem, current next-best alternative, and why the smallest spine should be better. If a new operator cannot repeat it accurately, keep scoping.
+2. **Name the outcome.** Prefer a user/operator effect over a component noun; “build X” is an implementation, not an outcome.
+3. **Find the parent and duplicates.** Search open and closed issues before creating another source of truth.
+4. **Ship or name the spine.** Follow [`spine-first-defaults.md`](spine-first-defaults.md); a broad fan-out without an end-to-end witness is planning debt.
+5. **Cut coherent leaves.** One issue should be independently closable and should map to one eventual commit/leaf. Split by acceptance boundary, not by file count.
+6. **Declare ownership and collisions.** Name the lane/tree before a worker starts. Scheduling may choose the worker; it must not invent scope.
+7. **Declare dependencies.** Use explicit `requires`/`unblocks` edges. Parallel-looking work with a hidden prerequisite is serial work described badly.
+8. **Write acceptance before implementation.** Checkboxes describe observable effects. Implementation notes may suggest a path but cannot redefine done.
+9. **Choose the witness.** Visual work needs a captured render; behavior needs a before/after repro; shipped claims need independent commit/effect verification.
+10. **Type uncertainty.** File a decision or investigation leaf when an unknown blocks a contract. Do not bury the unknown in a worker prompt.
+11. **Place the work.** Apply class, priority, generation, milestone, and parent at creation or update time.
+12. **Dispatch only ready leaves.** A worker receives the issue contract plus current lease/attempt state, not an improvised prose brief.
+13. **File discovered follow-ups.** New work becomes a deduplicated issue with a done condition before the run ends; otherwise it does not leave the run.
+
+## Right proof at the right stage
+
+Shift left does **not** mean putting the release gate before the first runnable path. It means answering each question at the cheapest stage where the answer is reliable:
+
+| Stage | Decide now | Minimum faithful witness | Do not lead with |
+|---|---|---|---|
+| **Proposal** | beneficiary, problem, current alternative, expected advantage, explicit unknowns | a plain-language value frame plus a checked existing-work search | architecture, exhaustive matrices, or unmeasured gain claims |
+| **Spine** | smallest safe end-to-end path that reaches the user outcome | one captured live path or real-object test | broad fan-out while the primary outcome is still “almost there” |
+| **Hardening** | real failure modes and operating envelope exposed by the spine | focused boundary, failure, compatibility, and render witnesses | hypothetical completeness unrelated to the working path |
+| **Optimization** | whether the change beats the tuned next-best alternative net of its costs | reproducible A/B evidence under the same quality and workload constraints | naive baselines or proxy metrics presented as user value |
+| **Release** | supportability, discoverability, rollback, and outcome retention | clean committed-tip gates plus operator read-back | shipping because components exist while the end-to-end effect is unwitnessed |
+
+At every stage ask: **What is the simplest accurate explanation? What is the cheapest witness that could disprove it now? What later proof is intentionally not due yet?** This preserves quality without putting hardening or optimization before value and spine.
 
 ## Readable status, typed status
 
