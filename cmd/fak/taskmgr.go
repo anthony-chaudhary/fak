@@ -32,6 +32,8 @@ func runTask(stdout, stderr io.Writer, argv []string) int {
 		return runTaskDecision(stdout, stderr, argv[1:])
 	case "sample":
 		return runTaskSample(stdout, stderr, argv[1:])
+	case "queue":
+		return runTaskQueue(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		taskUsage(stdout)
 		return 0
@@ -431,6 +433,61 @@ func renderTaskHandoff(r taskHandoffResult) string {
 	return strings.Join(lines, "\n")
 }
 
+func runTaskQueue(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("task queue", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var issuesFile, attemptsFile string
+	var jsonOut, attempts bool
+	fs.StringVar(&issuesFile, "issues-json", "", "gh issue list JSON file (default: read current issues with gh)")
+	fs.StringVar(&attemptsFile, "attempts-json", "", "DOS lane lease JSON file")
+	fs.BoolVar(&jsonOut, "json", false, "emit machine-readable queue including attempts")
+	fs.BoolVar(&attempts, "attempts", false, "drill down into ephemeral attempt telemetry")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	var issueData []byte
+	var err error
+	if issuesFile != "" {
+		issueData, err = os.ReadFile(issuesFile)
+	} else {
+		cmd := exec.Command("gh", "issue", "list", "--state", "all", "--limit", "1000", "--json", "number,title,state,body,labels,milestone")
+		issueData, err = cmd.Output()
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak task queue: read issues: %v\n", err)
+		return 1
+	}
+	var issues []taskmgr.QueueIssue
+	if err := json.Unmarshal(issueData, &issues); err != nil {
+		fmt.Fprintf(stderr, "fak task queue: decode issues: %v\n", err)
+		return 1
+	}
+	var live []taskmgr.Attempt
+	if attemptsFile != "" {
+		data, readErr := os.ReadFile(attemptsFile)
+		if readErr != nil {
+			fmt.Fprintf(stderr, "fak task queue: read attempts: %v\n", readErr)
+			return 1
+		}
+		if err := json.Unmarshal(data, &live); err != nil {
+			fmt.Fprintf(stderr, "fak task queue: decode attempts: %v\n", err)
+			return 1
+		}
+	}
+	q := taskmgr.BuildQueue(issues, live)
+	if jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(q); err != nil {
+			fmt.Fprintf(stderr, "fak task queue: encode: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	taskmgr.RenderQueue(stdout, q, attempts)
+	return 0
+}
+
 func runTaskSample(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("task sample", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -572,6 +629,7 @@ func trimFloat(v float64) string {
 func taskUsage(w io.Writer) {
 	fmt.Fprint(w, `fak task - process-local task-manager snapshot
 
+  fak task queue [--json | --attempts] [--issues-json FILE] [--attempts-json FILE]
   fak task sample [--json] [--task ID] [--title T] [--step ID]
                   [--concept NAME] [--done N --total N --unit UNIT]
   fak task handoff --file HANDOFF.json [--json] [--existing-json FILE]
@@ -580,6 +638,9 @@ func taskUsage(w io.Writer) {
   fak task decision append --task ID --decision STR --rationale STR --evidence-ref REF
                            [--open-thread STR ...] [--log FILE] [--json]
   fak task decision list   --task ID [--limit N] [--log FILE] [--json]
+
+The queue command folds current GitHub issue contracts into one line per leaf. Attempt-only
+telemetry is hidden unless --attempts or --json is selected; --issues-json captures fixtures.
 
 The sample command emits the same snapshot shape a long-running fak process can embed:
 process resources, task/step wall time, concept runtime, progress, and ETA when known.

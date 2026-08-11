@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,5 +74,43 @@ func TestTaskSampleRejectsNegativeProgress(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "non-negative") {
 		t.Fatalf("stderr = %q, want non-negative error", stderr.String())
+	}
+}
+
+func TestTaskQueueCapturedRenderAndJSONDrilldown(t *testing.T) {
+	dir := t.TempDir()
+	issues := `[{
+	  "number":6418,"title":"Parent","state":"CLOSED","body":"## Outcome\nParent done.\n## Witness\nCommit.","labels":[{"name":"priority/P1"},{"name":"gen/now"},{"name":"lane/taskmgr"}]},{
+	  "number":6423,"title":"Readable queue","state":"OPEN","body":"## Parent\n#6418\n## Outcome\nOperators scan leaves.\n## Dependencies\nRequires #6418.\n## Witness\nCaptured render.",
+	  "labels":[{"name":"priority/P1"},{"name":"gen/now"},{"name":"lane/taskmgr"}]
+	}]`
+	attempts := `[{"holder":"issue-6423","pid":4242,"account":"seat-a","token":"secret","heartbeat_at":"now","acquired_at":"earlier","lane":"taskmgr"}]`
+	issuesPath := filepath.Join(dir, "issues.json")
+	attemptsPath := filepath.Join(dir, "attempts.json")
+	if err := os.WriteFile(issuesPath, []byte(issues), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attemptsPath, []byte(attempts), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runTask(&stdout, &stderr, []string{"queue", "--issues-json", issuesPath, "--attempts-json", attemptsPath})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{"#6423 state=active priority=P1 generation=now lane=taskmgr", `title="Readable queue"`, `outcome="Operators scan leaves."`, `requires=#6418`, `witness="Captured render."`, `parent=#6418`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "pid=") || strings.Contains(got, "secret") {
+		t.Fatalf("default leaked attempt:\n%s", got)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runTask(&stdout, &stderr, []string{"queue", "--json", "--issues-json", issuesPath, "--attempts-json", attemptsPath})
+	if code != 0 || !strings.Contains(stdout.String(), `"pid": 4242`) || !strings.Contains(stdout.String(), `"durable_state": "ready"`) {
+		t.Fatalf("json drilldown code=%d stderr=%s out=%s", code, stderr.String(), stdout.String())
 	}
 }
