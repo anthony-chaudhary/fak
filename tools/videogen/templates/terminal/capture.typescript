@@ -1,0 +1,5 @@
+Script started on Thu Jul 30 00:00:01 2026
+-- STEP 01 . prove the shared renderer
+$ tb version --short
+v0.0.0-example
+[rc=0]

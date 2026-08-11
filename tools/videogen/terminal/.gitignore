@@ -1,0 +1,3 @@
+# Accidental `go build` outputs. Run the shared entry point from the repo root:
+# `go run ./tools/videogen`.
+terminal

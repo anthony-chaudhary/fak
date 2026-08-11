@@ -1,0 +1,79 @@
+{
+  "cols": 82,
+  "rows": 23,
+  "pad": 12,
+  "out": "out/fak-hero-values.gif",
+  "mp4": "out/fak-hero-values.mp4",
+  "pacing": {
+    "stepPattern": "^-- ",
+    "cmdPattern": "^\\$ ",
+    "rcPattern": "^\\[rc=",
+    "cardReveal": 0.28,
+    "cardConceptHold": 0.85
+  },
+  "verify": {
+    "minStepSecs": 1.5,
+    "minCmdSecs": 0.35,
+    "minRCSecs": 0.4,
+    "minCardRevealSecs": 0.25,
+    "minConceptHoldSecs": 0.75,
+    "minOpeningSecs": 4.0,
+    "totalSecsMin": 30.0,
+    "totalSecsMax": 58.0,
+    "minChapters": 7,
+    "mp4ToleranceSecs": 0.5
+  },
+  "segments": [
+    {
+      "chapter": "FAK . THE AGENT KERNEL",
+      "cardSecs": 5.0,
+      "card": [
+        "@c ONE CHECKPOINT. SIX COMPOUNDING VALUES.",
+        "",
+        "@w Every tool call crosses fak before it runs.",
+        "",
+        "@d Reuse setup . route models . serve repeats locally",
+        "@d shed stale turns . enforce capability policy . ship proof"
+      ]
+    },
+    {
+      "chapter": "THE PERFORMANCE GATE",
+      "cardSecs": 4.2,
+      "card": [
+        "@c DO THE SHARED WORK ONCE",
+        "",
+        "@w Keep the provider prefix warm across a long session.",
+        "",
+        "@d Less repeated setup . fewer provider round trips . more useful context"
+      ]
+    },
+    {
+      "typescript": "capture.typescript",
+      "timing": "capture.timing",
+      "clear": true
+    },
+    {
+      "chapter": "THE SECURITY FLOOR",
+      "cardSecs": 4.2,
+      "card": [
+        "@c DEFAULT DENY RIDES THE SAME SEAM",
+        "",
+        "@w Structure can refuse a dangerous call before any model is consulted.",
+        "",
+        "@d Not a blanket block: useful permitted work still flows."
+      ]
+    },
+    {
+      "chapter": "ONE KERNEL. LONGER-RUNNING AGENTS.",
+      "cardSecs": 5.0,
+      "card": [
+        "@c CHEAPER . FASTER . CONTROLLED . WITNESSED",
+        "",
+        "@w The performance gate is the product spine.",
+        "@w The security floor comes along at the same checkpoint.",
+        "",
+        "@d github.com/anthony-chaudhary/fak"
+      ]
+    }
+  ]
+}

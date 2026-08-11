@@ -1,0 +1,48 @@
+{
+  "_template": "Copy with: go run ./tools/videogen -new <name>",
+  "cols": 80,
+  "rows": 20,
+  "pad": 10,
+  "out": "out/example.gif",
+  "mp4": "out/example.mp4",
+  "pacing": {
+    "stepPattern": "^-- ",
+    "cmdPattern": "^\\$ ",
+    "rcPattern": "^\\[rc=",
+    "cardReveal": 0.32,
+    "cardConceptHold": 1.0
+  },
+  "verify": {
+    "minStepSecs": 2.0,
+    "minCmdSecs": 0.4,
+    "minRCSecs": 0.5,
+    "minCardRevealSecs": 0.3,
+    "minConceptHoldSecs": 0.8,
+    "minOpeningSecs": 6.0,
+    "totalSecsMin": 10.0,
+    "totalSecsMax": 60.0,
+    "minChapters": 2,
+    "mp4ToleranceSecs": 0.5
+  },
+  "segments": [
+    {
+      "chapter": "TITLE . replace this with the claim",
+      "cardSecs": 2.5,
+      "card": [
+        "@c EXPLAIN ONE CLAIM",
+        "",
+        "@w Replace this card with the path through the system.",
+        "",
+        "@d Then show the terminal evidence that proves it.",
+        "",
+        "@d QUICK GUIDE",
+        "@d Spell out unfamiliar names and acronyms on first use."
+      ]
+    },
+    {
+      "typescript": "capture.typescript",
+      "timing": "capture.timing",
+      "clear": true
+    }
+  ]
+}

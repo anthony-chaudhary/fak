@@ -1,0 +1,31 @@
+Script started on Tue Aug 11 12:00:00 2026
+-- STEP 01 . one checkpoint for every tool call
+$ fak preflight --tool refund_payment --args '{}'
+DENY  POLICY_BLOCK  refused by structure; no model in the loop
+[rc=0]
+-- STEP 02 . useful work still flows
+$ fak preflight --tool search_kb --args '{}'
+ALLOW policy permits read-only knowledge search
+[rc=0]
+-- STEP 03 . repeated work stays local
+$ fak cache explain --request repeat.json
+HIT   exact request served locally
+saved provider round trip and preserved the shared prefix
+[rc=0]
+-- STEP 04 . long sessions keep their working set
+$ fak context plan --budget 128k
+KEEP  active task + shared setup
+SHED  stale turns while provider prefix cache survives
+[rc=0]
+-- STEP 05 . the same seam routes the right model
+$ fak route explain --task tool-call
+LOCAL fast path for known repeats
+SMALL routine adjudication
+LARGE ambiguous reasoning only when needed
+[rc=0]
+-- STEP 06 . proof is part of the product
+$ fak agent --offline --selfcheck
+PASS  injection ignored
+PASS  destructive operation denied
+PASS  customer task still completed
+[rc=0]
