@@ -16,6 +16,8 @@ The task manager is the live, in-process fold: a long-running `fak` front door c
 create a `Manager`, mark tasks and steps as work advances, and expose
 `Manager.Snapshot()` to an operator or health endpoint.
 
+Task intent and live execution are deliberately separate. Author outcome, scope, dependencies, acceptance, witness, and placement first using the [shift-left task-organization contract](shift-left-task-organization.md); this manager then owns ephemeral attempt state. Do not make operators reconstruct a durable leaf contract from PID, heartbeat, budget, lease, or scheduler telemetry.
+
 ## Snapshot model
 
 Each snapshot carries:

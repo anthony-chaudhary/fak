@@ -176,6 +176,7 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 | **When managed context should append or reconstruct the task** | [Query, not chat](query-not-chat.md) — originating-task pin and checkable reseed-versus-append rule |
 | **How to construct model-visible directives** | [Positive-state construction](positive-state-construction.md) — broadcast the target state instead of a negation operand |
 | **How negframe and managed context form one pipeline** | [Shared-workspace positive state](shared-workspace-positive-state.md) — exact gateway emit seam, wired surfaces, and current limits |
+| **How new work becomes readable and dispatchable** (outcome, leaf, attempt, witness; explicit scope, dependencies, acceptance, and placement) | [Shift-left task organization](shift-left-task-organization.md) |
 | **How every new unit of work is scoped and shipped** (applied spine first, then exhaustive proof, measured optimization, and backlog fan-out) | [Spine-first + fan-out defaults](spine-first-defaults.md) |
 | **How agents discover fak features and memory tools** | [Self-feature query spine](notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
