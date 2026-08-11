@@ -289,6 +289,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Org-policy signing, freshness, and key-distribution model (epic #5315, W2 #5320)](docs/notes/RESEARCH-org-policy-signing-model-2026-07-20.md) -- auto-indexed dated note.
 - [Org-policy precedence lattice (epic #5315, R3 #5318)](docs/notes/RESEARCH-org-policy-precedence-2026-07-20.md) -- auto-indexed dated note.
 - [Managed-cache family — own-sessions audit from the durable gateway-usage ledgers](docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md) -- auto-indexed dated note.
+- [Fresh study: inference-serving top 10 @2026-08-11 — two witnessed borrows (#6419/#6422)](docs/notes/FRESH-STUDY-INFERENCE-TOP10-2026-08-11.md) -- refreshed the coordinated 2026-07-18 cohort with the updated deep/ablated study-repo method.
 - [Study: vLLM @b6ff8a2f — witnessed inference/serving borrows (#5261-#5262)](docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md) -- auto-indexed dated note.
 - [Study: SGLang @b8ec5449 — RadixAttention serving engine (#5286-#5288)](docs/notes/CONCEPT-STUDY-SGLANG-2026-07-18.md) -- auto-indexed dated note.
 - [Study: llama.cpp @571d0d54 — CPU/GGUF/offload kernel peer (#5280-#5285)](docs/notes/CONCEPT-STUDY-LLAMACPP-2026-07-18.md) -- auto-indexed dated note.
