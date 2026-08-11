@@ -1,59 +1,65 @@
 package disambiguation
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // Index is an immutable read index over canonical terms and their declared
-// aliases. Construction validates global identity ownership before any query
-// can observe the entries.
+// aliases. A token may have multiple owners only when every owner has a
+// distinct, required scope.
 type Index struct {
-	canonical map[string]Entry
-	aliases   map[string]string
+	canonical map[string][]Entry
+	aliases   map[string][]Entry
 }
 
 // NewIndex constructs a read-only index. Canonical terms and aliases share one
-// exact, case-sensitive namespace: an alias may name exactly one canonical
-// owner and may not hide any canonical term.
+// exact, case-sensitive namespace. Repeated tokens are accepted only when their
+// scope qualifiers are distinct; callers must then use a scoped lookup.
 func NewIndex(entries []Entry) (*Index, error) {
 	index := &Index{
-		canonical: make(map[string]Entry, len(entries)),
-		aliases:   make(map[string]string),
+		canonical: make(map[string][]Entry, len(entries)),
+		aliases:   make(map[string][]Entry),
 	}
-	for i, entry := range entries {
-		if err := entry.Validate(); err != nil {
+	for i, source := range entries {
+		if err := source.Validate(); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
+		entry := cloneEntry(source)
 		term := entry.Identity.CanonicalTerm
-		if _, exists := index.canonical[term]; exists {
-			return nil, fmt.Errorf("duplicate canonical term %q", term)
+		if err := appendScopedOwner(index.canonical, term, entry); err != nil {
+			return nil, fmt.Errorf("canonical term %q: %w", term, err)
 		}
-		index.canonical[term] = cloneEntry(entry)
 	}
-	for _, sourceEntry := range entries {
-		entry := cloneEntry(sourceEntry)
+	for _, source := range entries {
+		entry := cloneEntry(source)
 		owner := entry.Identity.CanonicalTerm
 		for _, alias := range entry.Identity.Aliases {
-			if canonicalOwner, exists := index.canonical[alias]; exists {
-				return nil, fmt.Errorf("alias %q for %q conflicts with canonical term owned by %q", alias, owner, canonicalOwner.Identity.CanonicalTerm)
+			if canonicalOwners := index.canonical[alias]; len(canonicalOwners) != 0 {
+				return nil, fmt.Errorf("alias %q for %q conflicts with canonical term owned by %q", alias, owner, canonicalOwners[0].Identity.CanonicalTerm)
 			}
-			if priorOwner, exists := index.aliases[alias]; exists {
-				return nil, fmt.Errorf("duplicate alias %q claimed by %q and %q", alias, priorOwner, owner)
+			for _, prior := range index.aliases[alias] {
+				if prior.Scope == entry.Scope {
+					if prior.Identity.CanonicalTerm == owner {
+						return nil, fmt.Errorf("duplicate alias %q for %q", alias, owner)
+					}
+					return nil, fmt.Errorf("duplicate alias %q claimed by %q and %q", alias, prior.Identity.CanonicalTerm, owner)
+				}
 			}
-			index.aliases[alias] = owner
+			index.aliases[alias] = append(index.aliases[alias], entry)
 		}
 	}
 	for _, sourceEntry := range entries {
 		source := sourceEntry.Identity.CanonicalTerm
 		for _, contrast := range sourceEntry.Contrasts {
-			targetEntry, exists := index.canonical[contrast.CanonicalTerm]
-			if !exists {
+			targets := index.canonical[contrast.CanonicalTerm]
+			if len(targets) == 0 {
 				return nil, fmt.Errorf("contrast from %q has unknown canonical target %q", source, contrast.CanonicalTerm)
 			}
 			if !*contrast.RequiredPair {
 				continue
 			}
-			reverse, exists := contrastTo(targetEntry, source)
+			if len(targets) > 1 {
+				return nil, fmt.Errorf("required contrast from %q has ambiguous canonical target %q", source, contrast.CanonicalTerm)
+			}
+			reverse, exists := contrastTo(targets[0], source)
 			if !exists || !*reverse.RequiredPair {
 				return nil, fmt.Errorf("required contrast pair %q <-> %q is asymmetric", source, contrast.CanonicalTerm)
 			}
@@ -65,6 +71,16 @@ func NewIndex(entries []Entry) (*Index, error) {
 	return index, nil
 }
 
+func appendScopedOwner(dst map[string][]Entry, token string, entry Entry) error {
+	for _, prior := range dst[token] {
+		if prior.Scope == entry.Scope {
+			return fmt.Errorf("duplicate scope %s=%q", entry.Scope.Kind, entry.Scope.Value)
+		}
+	}
+	dst[token] = append(dst[token], entry)
+	return nil
+}
+
 func contrastTo(entry Entry, target string) (Contrast, bool) {
 	for _, contrast := range entry.Contrasts {
 		if contrast.CanonicalTerm == target {
@@ -74,19 +90,39 @@ func contrastTo(entry Entry, target string) (Contrast, bool) {
 	return Contrast{}, false
 }
 
-func (i *Index) queryCanonical(term string) (Entry, bool) {
-	entry, ok := i.canonical[term]
-	return cloneEntry(entry), ok
+func (i *Index) queryCanonical(term string) (Entry, bool, bool) {
+	entries := i.canonical[term]
+	if len(entries) != 1 {
+		return Entry{}, false, len(entries) > 1
+	}
+	return cloneEntry(entries[0]), true, false
 }
 
 func (i *Index) resolve(term string) (entry Entry, matchedAlias string, ok bool) {
-	if entry, ok = i.queryCanonical(term); ok {
-		return entry, "", true
+	if entry, ok, ambiguous := i.queryCanonical(term); ok || ambiguous {
+		return entry, "", ok
 	}
-	owner, ok := i.aliases[term]
-	if !ok {
+	entries := i.aliases[term]
+	if len(entries) != 1 {
 		return Entry{}, "", false
 	}
-	entry, ok = i.queryCanonical(owner)
-	return entry, term, ok
+	return cloneEntry(entries[0]), term, true
+}
+
+func (i *Index) ambiguous(term string) bool {
+	return len(i.canonical[term]) > 1 || len(i.aliases[term]) > 1
+}
+
+func (i *Index) resolveScoped(term string, scope Scope) (entry Entry, matchedAlias string, ok bool) {
+	for _, candidate := range i.canonical[term] {
+		if candidate.Scope == scope {
+			return cloneEntry(candidate), "", true
+		}
+	}
+	for _, candidate := range i.aliases[term] {
+		if candidate.Scope == scope {
+			return cloneEntry(candidate), term, true
+		}
+	}
+	return Entry{}, "", false
 }

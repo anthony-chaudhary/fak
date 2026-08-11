@@ -148,3 +148,71 @@ func TestRunDisambiguationQueryContrastCLI(t *testing.T) {
 		t.Fatalf("contrast = %+v, want explicit required forbidden pair", contrast)
 	}
 }
+
+func TestRunDisambiguationQuerySelfTestJSONIncludesScopeWitness(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runDisambiguation(&stdout, &stderr, []string{"query", "--self-test", "--json"}); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	var report disambiguation.QuerySelfTestReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.OverloadedTerm != "kernel" || !report.UnscopedAmbiguous {
+		t.Fatalf("scope witness = %#v", report)
+	}
+	want := disambiguation.Scope{Kind: "package", Value: "internal/disambiguation"}
+	if report.Scope != want {
+		t.Fatalf("scope = %#v, want %#v", report.Scope, want)
+	}
+}
+
+func TestRunDisambiguationQueryScopeFlagsRoundTrip(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDisambiguation(&stdout, &stderr, []string{"query", "agent kernel", "--scope-kind", "product", "--scope-value", "fak", "--json"})
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	var response disambiguation.QueryResponse
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	want := disambiguation.Scope{Kind: "product", Value: "fak"}
+	if response.Entry.Scope != want {
+		t.Fatalf("scope = %#v, want %#v", response.Entry.Scope, want)
+	}
+}
+
+func TestRunDisambiguationQueryRejectsPartialScope(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runDisambiguation(&stdout, &stderr, []string{"query", "agent kernel", "--scope-kind", "product"}); code != 2 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "required together") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunDisambiguationQueryOverloadRequiresScope(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runDisambiguation(&stdout, &stderr, []string{"query", "kernel", "--json"}); code != 3 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "scope required") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code := runDisambiguation(&stdout, &stderr, []string{"query", "kernel", "--scope-kind", "package", "--scope-value", "internal/disambiguation", "--json"})
+	if code != 0 {
+		t.Fatalf("scoped code = %d, stderr = %s", code, stderr.String())
+	}
+	var response disambiguation.QueryResponse
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	want := disambiguation.Scope{Kind: "package", Value: "internal/disambiguation"}
+	if response.Entry.Scope != want {
+		t.Fatalf("scope = %#v, want %#v", response.Entry.Scope, want)
+	}
+}

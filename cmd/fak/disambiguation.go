@@ -77,13 +77,26 @@ func runDisambiguationSchema(stdout, stderr io.Writer, args []string) int {
 
 func runDisambiguationQuery(stdout, stderr io.Writer, args []string) int {
 	var jsonOutput, selfTest bool
+	var scope disambiguation.Scope
 	var terms []string
-	for _, arg := range args {
+	for n := 0; n < len(args); n++ {
+		arg := args[n]
 		switch arg {
 		case "--json":
 			jsonOutput = true
 		case "--self-test":
 			selfTest = true
+		case "--scope-kind", "--scope-value":
+			if n+1 >= len(args) {
+				fmt.Fprintf(stderr, "fak disambiguation query: %s requires a value\n", arg)
+				return 2
+			}
+			n++
+			if arg == "--scope-kind" {
+				scope.Kind = args[n]
+			} else {
+				scope.Value = args[n]
+			}
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(stderr, "fak disambiguation query: unknown option %q\n", arg)
@@ -92,9 +105,13 @@ func runDisambiguationQuery(stdout, stderr io.Writer, args []string) int {
 			terms = append(terms, arg)
 		}
 	}
+	if (scope.Kind == "") != (scope.Value == "") {
+		fmt.Fprintln(stderr, "fak disambiguation query: --scope-kind and --scope-value are required together")
+		return 2
+	}
 	if selfTest {
-		if len(terms) != 0 {
-			fmt.Fprintln(stderr, "fak disambiguation query: --self-test does not accept a term")
+		if len(terms) != 0 || scope.Kind != "" {
+			fmt.Fprintln(stderr, "fak disambiguation query: --self-test does not accept a term or scope")
 			return 2
 		}
 		report, err := disambiguation.RunQuerySelfTest()
@@ -112,8 +129,18 @@ func runDisambiguationQuery(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "usage: fak disambiguation query <term> [--json]")
 		return 2
 	}
-	response, err := disambiguation.Resolve(terms[0])
+	var response disambiguation.QueryResponse
+	var err error
+	if scope.Kind != "" {
+		response, err = disambiguation.ResolveScoped(terms[0], scope)
+	} else {
+		response, err = disambiguation.Resolve(terms[0])
+	}
 	if err != nil {
+		if errors.Is(err, disambiguation.ErrScopeRequired) {
+			fmt.Fprintf(stderr, "fak disambiguation query: %v; use --scope-kind and --scope-value\n", err)
+			return 3
+		}
 		if errors.Is(err, disambiguation.ErrCanonicalTermNotFound) {
 			fmt.Fprintf(stderr, "fak disambiguation query: %v\n", err)
 			return 3

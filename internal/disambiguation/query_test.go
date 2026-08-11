@@ -124,3 +124,62 @@ func TestQueryReturnsIndependentRecord(t *testing.T) {
 		t.Fatal("query returned mutable shared seed data")
 	}
 }
+
+func TestOverloadedCanonicalRequiresScopeAndReturnsItUnchanged(t *testing.T) {
+	packageEntry := scopeFixtureEntry("kernel", Scope{Kind: "package", Value: "internal/disambiguation"}, "package kernel")
+	cliEntry := scopeFixtureEntry("kernel", Scope{Kind: "cli", Value: "fak serve"}, "CLI kernel")
+	packageTarget := scopeFixtureEntry("package kernel", packageEntry.Scope, "kernel")
+	cliTarget := scopeFixtureEntry("CLI kernel", cliEntry.Scope, "kernel")
+	index, err := NewIndex([]Entry{packageEntry, cliEntry, packageTarget, cliTarget})
+	if err != nil {
+		t.Fatalf("NewIndex overloaded fixture: %v", err)
+	}
+	if _, _, ok := index.resolve("kernel"); ok || !index.ambiguous("kernel") {
+		t.Fatal("unscoped overloaded lookup accepted; want ambiguity")
+	}
+	got, alias, ok := index.resolveScoped("kernel", packageEntry.Scope)
+	if !ok || alias != "" {
+		t.Fatalf("scoped lookup = (%v, %q), want canonical match", ok, alias)
+	}
+	if got.Scope != packageEntry.Scope {
+		t.Fatalf("scope = %#v, want unchanged %#v", got.Scope, packageEntry.Scope)
+	}
+}
+
+func TestOverloadedCanonicalRejectsDuplicateScope(t *testing.T) {
+	first := scopeFixtureEntry("kernel", Scope{Kind: "package", Value: "internal/disambiguation"}, "package kernel")
+	second := scopeFixtureEntry("kernel", first.Scope, "other kernel")
+	firstTarget := scopeFixtureEntry("package kernel", first.Scope, "kernel")
+	secondTarget := scopeFixtureEntry("other kernel", Scope{Kind: "package", Value: "other"}, "kernel")
+	if _, err := NewIndex([]Entry{first, second, firstTarget, secondTarget}); err == nil || !strings.Contains(err.Error(), "duplicate scope") {
+		t.Fatalf("NewIndex error = %v, want duplicate scope rejection", err)
+	}
+}
+
+func TestQuerySelfTestProvesScopedOverload(t *testing.T) {
+	report, err := RunQuerySelfTest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OverloadedTerm != "kernel" || !report.UnscopedAmbiguous {
+		t.Fatalf("scope witness = %#v, want overloaded ambiguity", report)
+	}
+	want := Scope{Kind: "package", Value: "internal/disambiguation"}
+	if report.Scope != want {
+		t.Fatalf("scope = %#v, want %#v", report.Scope, want)
+	}
+}
+
+func TestPublicOverloadedTermRequiresScope(t *testing.T) {
+	if _, err := Resolve("kernel"); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("Resolve(kernel) error = %v, want ErrScopeRequired", err)
+	}
+	want := Scope{Kind: "cli", Value: "fak"}
+	response, err := ResolveScoped("kernel", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Entry.Scope != want {
+		t.Fatalf("scope = %#v, want unchanged %#v", response.Entry.Scope, want)
+	}
+}

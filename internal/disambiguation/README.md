@@ -74,3 +74,13 @@ only the exported `ParseEntry`, `Entry.Validate`, `NewIndex`, and `Resolve`
 seams. They add no corpus writer, generated index, filesystem/network access, or
 private-source dependency. Alias and graph inputs are bounded so a routine fuzz
 smoke cannot turn cardinality or string width into an accidental resource test.
+
+## Scoped overloaded terms
+
+A canonical token may have multiple entries only when each entry has a distinct, required `scope.kind` + `scope.value` qualifier. Unscoped queries of an overloaded token return `scope required`; callers select an owner with `--scope-kind` and `--scope-value`, and JSON returns the stored scope unchanged. For example:
+
+```text
+fak disambiguation query kernel --scope-kind package --scope-value internal/disambiguation --json
+```
+
+The index remains a single public-source writer. Scope does not broaden source admission or permit private repository, host, credential, or local-path material.
