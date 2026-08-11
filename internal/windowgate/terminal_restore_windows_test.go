@@ -5,33 +5,52 @@ import (
 	"time"
 )
 
-func TestStartTerminalRestorePulsePinsTargetWindow(t *testing.T) {
+func TestStartTerminalRestorePulseRepairsOnlyMinimizedWindow(t *testing.T) {
 	origTerminal := resolveTerminalWindow
 	origRestore := restoreResolvedTerminalWindow
-	defer func() { resolveTerminalWindow = origTerminal; restoreResolvedTerminalWindow = origRestore }()
+	origIconic := isResolvedTerminalWindowIconic
+	defer func() {
+		resolveTerminalWindow = origTerminal
+		restoreResolvedTerminalWindow = origRestore
+		isResolvedTerminalWindowIconic = origIconic
+	}()
+
 	var resolves int
 	resolveTerminalWindow = func() uintptr { resolves++; return 42 }
+	iconic := make(chan bool, 4)
+	iconic <- true
+	iconic <- false
+	iconic <- false
+	isResolvedTerminalWindowIconic = func(hwnd uintptr) bool {
+		if hwnd != 42 {
+			t.Fatalf("iconic check hwnd = %d, want 42", hwnd)
+		}
+		select {
+		case value := <-iconic:
+			return value
+		default:
+			return false
+		}
+	}
 	restored := make(chan uintptr, 4)
 	restoreResolvedTerminalWindow = func(hwnd uintptr) bool { restored <- hwnd; return true }
+
 	StartTerminalRestorePulse(35*time.Millisecond, 10*time.Millisecond)
-	// Count restore calls rather than the buffer length: the select below drains one
-	// per iteration, so len(restored) rarely reaches 2 even after many pulses — a race
-	// that only passed by scheduling fluke. A generous deadline tolerates a loaded box.
-	deadline := time.After(2 * time.Second)
-	for got := 0; got < 2; {
-		select {
-		case <-restored:
-			got++
-		case <-deadline:
-			t.Fatal("pulse did not restore twice")
+	select {
+	case got := <-restored:
+		if got != 42 {
+			t.Fatalf("restored hwnd %d, want 42", got)
 		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pulse did not repair minimized terminal")
+	}
+	time.Sleep(60 * time.Millisecond)
+	select {
+	case got := <-restored:
+		t.Fatalf("visible terminal was re-foregrounded (hwnd %d), stealing operator focus", got)
+	default:
 	}
 	if resolves != 1 {
 		t.Fatalf("terminal resolved %d times, want once", resolves)
-	}
-	for len(restored) > 0 {
-		if got := <-restored; got != 42 {
-			t.Fatalf("restored hwnd %d, want 42", got)
-		}
 	}
 }

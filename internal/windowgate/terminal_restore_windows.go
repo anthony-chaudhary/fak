@@ -21,6 +21,7 @@ var (
 	procEnumWindows              = user32.NewProc("EnumWindows")
 	procGetWindowThreadProcessID = user32.NewProc("GetWindowThreadProcessId")
 	procIsWindowVisible          = user32.NewProc("IsWindowVisible")
+	procIsIconic                 = user32.NewProc("IsIconic")
 	procShowWindowAsync          = user32.NewProc("ShowWindowAsync")
 	procSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
 	procGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
@@ -31,8 +32,9 @@ var (
 )
 
 var (
-	resolveTerminalWindow         = terminalWindow
-	restoreResolvedTerminalWindow = restoreTerminalWindow
+	resolveTerminalWindow          = terminalWindow
+	restoreResolvedTerminalWindow  = restoreTerminalWindow
+	isResolvedTerminalWindowIconic = isTerminalWindowIconic
 )
 
 type processEntry32 struct {
@@ -76,6 +78,14 @@ func terminalWindow() uintptr {
 	return hwnd
 }
 
+func isTerminalWindowIconic(hwnd uintptr) bool {
+	if hwnd == 0 {
+		return false
+	}
+	iconic, _, _ := procIsIconic.Call(hwnd)
+	return iconic != 0
+}
+
 func restoreTerminalWindow(hwnd uintptr) bool {
 	if hwnd == 0 {
 		return false
@@ -103,13 +113,21 @@ func StartTerminalRestorePulse(duration, interval time.Duration) {
 		defer deadline.Stop()
 		tick := time.NewTicker(interval)
 		defer tick.Stop()
-		restoreResolvedTerminalWindow(hwnd)
+		restoreIfMinimized := func() {
+			// Repair only an actual minimize race. Re-foregrounding an already visible
+			// terminal steals focus back from a window the operator deliberately chose
+			// during this startup window, producing a visible focus bounce.
+			if isResolvedTerminalWindowIconic(hwnd) {
+				restoreResolvedTerminalWindow(hwnd)
+			}
+		}
+		restoreIfMinimized()
 		for {
 			select {
 			case <-deadline.C:
 				return
 			case <-tick.C:
-				restoreResolvedTerminalWindow(hwnd)
+				restoreIfMinimized()
 			}
 		}
 	}()
