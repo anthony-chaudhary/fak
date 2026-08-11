@@ -222,3 +222,27 @@ fak disambiguation coverage-self-test --json
 The witness introduces `NewlyExportedTerm`, observes the stable missing-classification
 reason, classifies it as incidental, and verifies the finding clears. Package callers can
 use the same `CoverageSelfCheck`; neither path introduces a second writer.
+
+
+## Incidental classification contract (#6284)
+
+`TermClassification` is the strict public contract for exported local implementation tokens that must count in terminology coverage but must never become canonical glossary/query rows. Build the normal index with `NewClassifiedIndex(entries, classifications)`; this is the same `Index` and the same `InventoryCoverage` writer used for canonical entries, not a second registry or identity path.
+
+An incidental classification has deterministic machine-readable fields:
+
+```json
+{
+  "schema_version": "fak-disambiguation-classification/1",
+  "term": "LocalRetryToken",
+  "classification": "incidental",
+  "reason": "LOCAL_IMPLEMENTATION_TOKEN"
+}
+```
+
+Validation is closed and deterministic: the term must be an exported Go identifier; schema, classification, and reason must be the constants above; duplicate terms and unknown values fail. `Index.Query` remains canonical/alias-only, while `InventoryCoverage` reports the classification and increments `incidental`. Agents can witness both sides with:
+
+```text
+fak disambiguation coverage-self-test --json
+```
+
+A passing report has `covered: true`, `absent_from_query: true`, and the stable classification/reason fields. The older `[]IncidentalTerm` coverage argument remains accepted for compatibility with #6283, but new declarations should use `NewClassifiedIndex` so classification belongs to the shared index.

@@ -39,19 +39,20 @@ type CoverageFinding struct {
 }
 
 type CoverageReport struct {
-	SchemaVersion string                     `json:"schema_version"`
-	Surfaces      []PublicTerminologySurface `json:"surfaces"`
-	Findings      []CoverageFinding          `json:"findings"`
-	Candidates    int                        `json:"candidates"`
-	Canonical     int                        `json:"canonical"`
-	Incidental    int                        `json:"incidental"`
-	OK            bool                       `json:"ok"`
+	SchemaVersion   string                     `json:"schema_version"`
+	Surfaces        []PublicTerminologySurface `json:"surfaces"`
+	Findings        []CoverageFinding          `json:"findings"`
+	Classifications []TermClassification       `json:"classifications"`
+	Candidates      int                        `json:"candidates"`
+	Canonical       int                        `json:"canonical"`
+	Incidental      int                        `json:"incidental"`
+	OK              bool                       `json:"ok"`
 }
 
 // InventoryCoverage checks only explicitly declared public surfaces. Go packages are
 // parsed from the supplied public repository filesystem; no network or private input is used.
 func InventoryCoverage(root fs.FS, surfaces []PublicTerminologySurface, index *Index, incidental []IncidentalTerm) (CoverageReport, error) {
-	report := CoverageReport{SchemaVersion: CoverageSchemaVersion, Surfaces: append([]PublicTerminologySurface(nil), surfaces...), Findings: []CoverageFinding{}}
+	report := CoverageReport{SchemaVersion: CoverageSchemaVersion, Surfaces: append([]PublicTerminologySurface(nil), surfaces...), Findings: []CoverageFinding{}, Classifications: []TermClassification{}}
 	sort.Slice(report.Surfaces, func(i, j int) bool { return report.Surfaces[i].Locator < report.Surfaces[j].Locator })
 	canonical := map[string]bool{}
 	symbols := map[string]bool{}
@@ -69,12 +70,21 @@ func InventoryCoverage(root fs.FS, surfaces []PublicTerminologySurface, index *I
 		}
 	}
 	classified := map[string]bool{}
+	for term, item := range index.incidental {
+		classified[term] = true
+		report.Classifications = append(report.Classifications, item)
+	}
 	for i, item := range incidental {
 		if strings.TrimSpace(item.Term) == "" || strings.TrimSpace(item.Reason) == "" {
 			return report, fmt.Errorf("incidental[%d]: term and reason are required", i)
 		}
+		if classified[item.Term] {
+			return report, fmt.Errorf("incidental[%d] %q: duplicate classification", i, item.Term)
+		}
 		classified[item.Term] = true
+		report.Classifications = append(report.Classifications, TermClassification{SchemaVersion: ClassificationSchemaVersion, Term: item.Term, Classification: ClassificationIncidental, Reason: item.Reason})
 	}
+	sort.Slice(report.Classifications, func(i, j int) bool { return report.Classifications[i].Term < report.Classifications[j].Term })
 	seen := map[string]bool{}
 	for _, surface := range report.Surfaces {
 		if surface.Kind != "go_package" {
@@ -166,11 +176,16 @@ func mustReadFS(root fs.FS, name string) []byte {
 }
 
 type CoverageSelfCheckReport struct {
-	SchemaVersion  string `json:"schema_version"`
-	DetectedReason string `json:"detected_reason"`
-	Detected       bool   `json:"detected"`
-	Cleared        bool   `json:"cleared"`
-	Passed         bool   `json:"passed"`
+	SchemaVersion        string `json:"schema_version"`
+	ClassificationSchema string `json:"classification_schema"`
+	DetectedReason       string `json:"detected_reason"`
+	Classification       string `json:"classification"`
+	ClassificationReason string `json:"classification_reason"`
+	Detected             bool   `json:"detected"`
+	Covered              bool   `json:"covered"`
+	AbsentFromQuery      bool   `json:"absent_from_query"`
+	Cleared              bool   `json:"cleared"`
+	Passed               bool   `json:"passed"`
 }
 
 func CoverageSelfCheck() CoverageSelfCheckReport {
@@ -178,10 +193,18 @@ func CoverageSelfCheck() CoverageSelfCheckReport {
 	index := publicIndex
 	surfaces := []PublicTerminologySurface{{Locator: "public", Kind: "go_package"}}
 	before, beforeErr := InventoryCoverage(fixture, surfaces, index, nil)
-	after, afterErr := InventoryCoverage(fixture, surfaces, index, []IncidentalTerm{{Term: "NewlyExportedTerm", Reason: "fixture-only API name"}})
-	report := CoverageSelfCheckReport{SchemaVersion: CoverageSchemaVersion, DetectedReason: CoverageReasonMissingClassification}
+	classifiedIndex, classifiedErr := NewClassifiedIndex(publicEntries, []TermClassification{{Term: "NewlyExportedTerm", Classification: ClassificationIncidental, Reason: ClassificationReasonLocalImplementation}})
+	after, afterErr := InventoryCoverage(fixture, surfaces, classifiedIndex, nil)
+	_, queryFound, queryAmbiguous := classifiedIndex.queryCanonical("NewlyExportedTerm")
+	report := CoverageSelfCheckReport{
+		SchemaVersion: CoverageSchemaVersion, ClassificationSchema: ClassificationSchemaVersion,
+		DetectedReason: CoverageReasonMissingClassification, Classification: ClassificationIncidental,
+		ClassificationReason: ClassificationReasonLocalImplementation,
+	}
 	report.Detected = beforeErr == nil && len(before.Findings) == 1 && before.Findings[0].Term == "NewlyExportedTerm" && before.Findings[0].Reason == CoverageReasonMissingClassification
-	report.Cleared = afterErr == nil && after.OK && len(after.Findings) == 0 && after.Incidental == 1
-	report.Passed = report.Detected && report.Cleared
+	report.Covered = classifiedErr == nil && afterErr == nil && after.OK && len(after.Findings) == 0 && after.Incidental == 1 && len(after.Classifications) == 1
+	report.AbsentFromQuery = classifiedErr == nil && !queryFound && !queryAmbiguous
+	report.Cleared = report.Covered
+	report.Passed = report.Detected && report.Covered && report.AbsentFromQuery
 	return report
 }

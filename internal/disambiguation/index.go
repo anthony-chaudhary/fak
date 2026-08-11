@@ -6,14 +6,20 @@ import "fmt"
 // aliases. A token may have multiple owners only when every owner has a
 // distinct, required scope.
 type Index struct {
-	canonical map[string][]Entry
-	aliases   map[string][]Entry
+	canonical       map[string][]Entry
+	aliases         map[string][]Entry
+	classifications []TermClassification
+	incidental      map[string]TermClassification
 }
 
 // NewIndex constructs a read-only index. Canonical terms and aliases share one
 // exact, case-sensitive namespace. Repeated tokens are accepted only when their
 // scope qualifiers are distinct; callers must then use a scoped lookup.
 func NewIndex(entries []Entry) (*Index, error) {
+	return NewClassifiedIndex(entries, nil)
+}
+
+func newIndex(entries []Entry) (*Index, error) {
 	index := &Index{
 		canonical: make(map[string][]Entry, len(entries)),
 		aliases:   make(map[string][]Entry),

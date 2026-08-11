@@ -7,7 +7,8 @@
 // therefore needs a new schema version instead of being interpreted as v1. Empty
 // aliases are represented by [] rather than by an absent or null field.
 //
-// The package owns only the record, parser, validation, and hermetic SelfTest. It
-// performs no filesystem or network writes, so the generator added by later work
-// remains the single writer of the derived disambiguation index.
+// The package owns the record, parser, validation, hermetic selfchecks, coverage,
+// and incidental local-token classification contracts. It performs no filesystem
+// or network writes, so the generator remains the single writer of the derived
+// disambiguation index.
 package disambiguation

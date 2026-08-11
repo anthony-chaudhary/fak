@@ -133,7 +133,7 @@ func runDisambiguationCoverageSelfTest(stdout, stderr io.Writer, args []string) 
 			return 1
 		}
 	} else {
-		fmt.Fprintf(stdout, "coverage-self-test passed=%t detected=%t cleared=%t reason=%s\n", report.Passed, report.Detected, report.Cleared, report.DetectedReason)
+		fmt.Fprintf(stdout, "coverage-self-test passed=%t detected=%t covered=%t absent_from_query=%t classification=%s reason=%s\n", report.Passed, report.Detected, report.Covered, report.AbsentFromQuery, report.Classification, report.ClassificationReason)
 	}
 	if !report.Passed {
 		return 1

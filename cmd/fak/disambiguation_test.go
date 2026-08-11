@@ -305,7 +305,10 @@ func TestDisambiguationCoverageSelfTestJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("decode JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.Passed || !got.Detected || !got.Cleared || got.DetectedReason != disambiguation.CoverageReasonMissingClassification {
-		t.Fatalf("report = %#v", got)
+	if !got.Passed || !got.Detected || !got.Covered || !got.AbsentFromQuery || !got.Cleared || got.DetectedReason != disambiguation.CoverageReasonMissingClassification {
+		t.Fatalf("coverage self-test incomplete: %+v", got)
+	}
+	if got.ClassificationSchema != disambiguation.ClassificationSchemaVersion || got.Classification != disambiguation.ClassificationIncidental || got.ClassificationReason != disambiguation.ClassificationReasonLocalImplementation {
+		t.Fatalf("coverage classification contract = %+v", got)
 	}
 }
