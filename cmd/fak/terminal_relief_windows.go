@@ -144,7 +144,7 @@ func terminalReliefFacts(s terminalReliefSnapshot) terminalrelief.Facts {
 }
 func terminalReliefUnsafeProcess(name string) bool {
 	switch name {
-	case "devenv.exe", "emacs.exe", "excel.exe", "notepad.exe", "notepad++.exe", "vim.exe", "winword.exe":
+	case "claude.exe", "codex.exe", "devenv.exe", "emacs.exe", "excel.exe", "notepad.exe", "notepad++.exe", "vim.exe", "winword.exe":
 		return true
 	default:
 		return false

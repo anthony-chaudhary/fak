@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -59,6 +60,53 @@ func TestTerminalReliefBelowThresholdDoesNotAct(t *testing.T) {
 		t.Fatalf("out=%s", out.String())
 	}
 }
+
+func TestTerminalReliefRefusesActiveCodexSession(t *testing.T) {
+	oldGather, oldLaunch, oldStop := gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn
+	defer func() {
+		gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn = oldGather, oldLaunch, oldStop
+	}()
+	gatherTerminalReliefSnapshotFn = func() (terminalReliefSnapshot, error) {
+		return terminalReliefSnapshot{
+			PID: 10, Handles: 12000, Threads: 600,
+			Processes: []terminalReliefProcess{
+				{PID: 11, ParentPID: 10, Name: "OpenConsole.exe"},
+				{PID: 12, ParentPID: 11, Name: "pwsh.exe"},
+				{PID: 13, ParentPID: 12, Name: "fak.exe", CommandLine: `fak.exe guard --interactive codex`},
+				{PID: 14, ParentPID: 13, Name: "codex.exe", CommandLine: `codex.exe`},
+				{PID: 15, ParentPID: 10, Name: "fak.exe", CommandLine: `fak.exe info --interval 2s`},
+			},
+		}, nil
+	}
+	launches, stops := 0, 0
+	launchTerminalReliefCommandFn = func([]string) error { launches++; return nil }
+	stopTerminalReliefHostFn = func(int) error { stops++; return nil }
+	state := filepath.Join(t.TempDir(), "state.json")
+	for i := 0; i < 3; i++ {
+		var out, errOut bytes.Buffer
+		if code := runTerminalRelief(&out, &errOut, []string{"--apply", "--json", "--state", state}); code != 3 {
+			t.Fatalf("run %d code=%d stderr=%s out=%s", i+1, code, errOut.String(), out.String())
+		}
+		var got struct {
+			Verdict string `json:"verdict"`
+			Reason  string `json:"reason"`
+			Apply   bool   `json:"apply"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Verdict != "ABSTAIN" || got.Apply {
+			t.Fatalf("run %d decision=%+v, want fail-closed ABSTAIN", i+1, got)
+		}
+		if !strings.Contains(got.Reason, "codex.exe(pid=14)") {
+			t.Fatalf("run %d reason=%q does not identify active session", i+1, got.Reason)
+		}
+	}
+	if launches != 0 || stops != 0 {
+		t.Fatalf("active session was disturbed: launches=%d stops=%d", launches, stops)
+	}
+}
+
 func TestTerminalReliefPersistentSafeHostRelaunchesThenStops(t *testing.T) {
 	oldGather, oldLaunch, oldStop := gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn
 	defer func() {
