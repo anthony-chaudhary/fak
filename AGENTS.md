@@ -177,7 +177,12 @@ checklist in the `/spine-fanout` skill:
 1. **Ship the minimal WORKING end-to-end spine first, in the same session the work starts** —
    the smallest runnable path through the real seam (LCD demo with `-selfcheck` for a
    user-facing surface; a test driving the real object plus one captured live run for a
-   library/verb). If that is not achievable this session with high confidence, **file the
+   library/verb). **Order the work applied implementation → captured spine witness →
+   exhaustive operating-envelope proof → measured optimization.** Do not lead with a broad
+   comparison matrix, exhaustive edge proving, or component optimization while the primary
+   end-to-end outcome is still "almost there"; those are follow-ons anchored to a working
+   path. Safety and fail-closed behavior needed to run the path remain part of the spine.
+   If that is not achievable this session with high confidence, **file the
    spine itself as the first issue** (`gen/now`, milestoned, missing witness named) — a spine
    is never silently deferred.
 2. **File the follow-on backlog at creation time (3..50+ issues)** — the moment a spine

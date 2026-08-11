@@ -16,7 +16,12 @@ Two defaults for any new unit of work; this skill is the mechanical checklist.
 
 ## Step 2 — the spine gate
 
-Ship the smallest runnable end-to-end path through the REAL seam this session:
+Ship the smallest runnable end-to-end path through the REAL seam this session.
+Before broad proof or optimization, write the outcome in one sentence, connect one
+representative applied path, and capture its command/test result. Then expand the
+failure/edge/platform/concurrency/soak envelope; optimize only after the working
+path provides the real baseline. Do not count a component benchmark, comparison
+matrix, or disconnected mock as the spine.
 
 | Work shape | Minimal spine bar |
 |---|---|
@@ -30,7 +35,15 @@ the body. Never silently defer the spine. Then continue to Step 3 with
 `--spine` set to that issue ref only if a partial witness exists; otherwise
 stop after filing (the fan-out waits for a spine).
 
-## Step 3 — generate the fan-out (3..50+)
+## Step 3 — prove outward from the working spine
+
+Keep the captured spine command/test green while adding the issue's required
+proof envelope. Order the queue: correctness and fail-closed paths, edge cases,
+platform/concurrency/soak evidence, then end-to-end optimization against the real
+baseline. If new evidence breaks the spine, restore the applied path before
+continuing the matrix.
+
+## Step 4 — generate the fan-out (3..50+)
 
 ```bash
 fak issue fanout --title "<feature>" --leaf <leaf> \
@@ -42,7 +55,7 @@ The verb refuses to run without `--spine` — that refusal is Step 2 talking.
 Areas: qa, dogfood, product, observability, integration, docs, release
 (`--areas` filters; `--max` caps, floor 3).
 
-## Step 4 — file the issues
+## Step 5 — file the issues
 
 For each candidate (or each wave): create the GitHub issue with the candidate's
 title and contract sections as the body, **milestone + labels at creation**
@@ -51,7 +64,7 @@ Dedupe first: search existing issues for the `fanout-<leaf>-` marker key and
 comment instead of re-filing. On this host run `gh` through PowerShell, never
 the Bash tool.
 
-## Step 5 — close the loop
+## Step 6 — close the loop
 
 - Link the fan-out issues from the epic/parent; note the spine SHA there.
 - If the session ends with candidates unfiled, commit the plan JSON output into

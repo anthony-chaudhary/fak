@@ -21,7 +21,7 @@
 - Human role map: [`START-HERE.md`](START-HERE.md)
 - Documentation by audience, job, and lifecycle, plus the exhaustive repository map: [`INDEX.md`](INDEX.md)
 - Agent workflow, builds, proofs, commits, and shared-tree rules: [`AGENTS.md`](AGENTS.md)
-- New-work defaults — ship the minimal working spine first, then fan out the hardening backlog with `fak issue fanout` (3 is the floor, not the target): [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md)
+- New-work defaults — ship the applied end-to-end spine first, prove its operating envelope, optimize against it, then fan out the hardening backlog with `fak issue fanout` (3 is the floor, not the target): [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md)
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Claims status (`SHIPPED`, `SIMULATED`, `STUB`): [`CLAIMS.md`](CLAIMS.md)
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)

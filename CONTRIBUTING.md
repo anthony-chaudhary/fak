@@ -211,8 +211,11 @@ change must update the allowlist in the same reviewed change.
 > If you are contributing from a fork, your required checks end at
 > [What your PR needs to pass](#what-your-pr-needs-to-pass); read the rest for context only.
 
-- **Start from the setup route above.** For a subsystem optimization, continue through
-  [`EXTENDING.md`](EXTENDING.md); for an existing package, run its focused tests before
+- **Start from the setup route above, and build the working spine before broad proof or optimization.**
+  For new work, follow [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md): connect
+  the smallest applied end-to-end path, capture its witness, then expand edge/platform/soak
+  coverage and optimize against that real baseline. For a subsystem optimization, continue
+  through [`EXTENDING.md`](EXTENDING.md); for an existing package, run its focused tests before
   the repository-wide gate.
 - **Touching docs? Keep the scorecard honest.** `python tools/docs_scorecard.py --scope
   reachable` grades every reader-reachable doc on five KPIs (freshness, link integrity,
