@@ -522,6 +522,7 @@ var tier = map[string]int{
 	"lightgapport":          1,
 	"kvquantmeta":           1,
 	"quantdetect":           1,
+	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
 	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.

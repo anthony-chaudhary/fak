@@ -70,7 +70,7 @@ stack (the `~60×` vs naive is mentioned only as the thing we *don't* lead with)
 
 ![fak turn-tax efficiency curves](visuals/60-hero-turntax-curves.png)
 
-- **Regenerate:** `python tools/hero_turntax_gen.py` · **data:** `tools/hero_turntax.data.json` · **vector:** [60-hero-turntax-curves.svg](visuals/60-hero-turntax-curves.svg)
+- **Regenerate:** `fak turntax visual` · **data:** `tools/hero_turntax.data.json` · **vector:** [60-hero-turntax-curves.svg](visuals/60-hero-turntax-curves.svg)
 
 ## 61 · Benchmark sweep
 

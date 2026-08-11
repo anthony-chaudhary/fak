@@ -211,6 +211,8 @@ const usageCoreText = `usage:
   fak ablate    --sweep vdso|ttl_1h|uncached_trim[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
                 (self-ablation: replay one frozen trace under N feature configs;
                  one row per arm, deltas off the kernel counters, same-trace guard)
+  fak turntax   visual [--data FILE] [--check]
+                (render/check the checked-in turn-tax SVG from its JSON source of truth)
   fak turntax   --suite NAME [--out turntax-report.json]
                 [--prompt-tokens N --completion-tokens N --turn-latency-ms F]
                 (TURN-TAX A/B: the extra error-code MODEL TURN a SOTA loop fires  - 

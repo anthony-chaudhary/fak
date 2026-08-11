@@ -700,7 +700,11 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		// Hidden internal seam: the ablate arm-mode re-exec child (see cmdAblateArm).
 		cmdAblateArm(args)
 	case "turntax":
-		cmdTurnTax(args)
+		if len(args) > 0 && args[0] == "visual" {
+			cmdTurnTaxVisual(args[1:])
+		} else {
+			cmdTurnTax(args)
+		}
 	case "hooklat":
 		cmdHookLat(args)
 	case "dispatchlat":

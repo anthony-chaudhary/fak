@@ -435,7 +435,7 @@ jobs:
           # the three lab-style headline visuals (BENCHMARK-GALLERY.md): one
           # source-of-truth data.json -> one renderer -> one SVG, drift-gated.
           python tools/hero_matrix_gen.py --check
-          python tools/hero_turntax_gen.py --check
+          go run ./cmd/fak turntax visual --check
           python tools/hero_sweep_gen.py --check
 
       # Docs scorecard: the whole-corpus analogue of the README freshness audit.
