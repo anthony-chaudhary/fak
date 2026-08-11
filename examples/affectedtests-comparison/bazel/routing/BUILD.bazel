@@ -1,0 +1,66 @@
+constraint_setting(name = "test_route")
+
+constraint_value(
+    name = "native_allowed",
+    constraint_setting = ":test_route",
+)
+
+constraint_value(
+    name = "windows_wsl",
+    constraint_setting = ":test_route",
+)
+
+constraint_value(
+    name = "ci_only",
+    constraint_setting = ":test_route",
+)
+
+constraint_value(
+    name = "unavailable",
+    constraint_setting = ":test_route",
+)
+
+platform(
+    name = "probe_native_allowed",
+    constraint_values = [":native_allowed"],
+)
+
+platform(
+    name = "probe_windows_wsl",
+    constraint_values = [":windows_wsl"],
+)
+
+platform(
+    name = "probe_ci_only",
+    constraint_values = [":ci_only"],
+)
+
+platform(
+    name = "probe_unavailable",
+    constraint_values = [":unavailable"],
+)
+
+config_setting(
+    name = "is_native_allowed",
+    constraint_values = [":native_allowed"],
+)
+
+config_setting(
+    name = "is_windows_wsl",
+    constraint_values = [":windows_wsl"],
+)
+
+config_setting(
+    name = "is_ci_only",
+    constraint_values = [":ci_only"],
+)
+
+filegroup(
+    name = "route_effect",
+    srcs = select({
+        ":is_native_allowed": ["native.route"],
+        ":is_windows_wsl": ["wsl.route"],
+        ":is_ci_only": ["ci.route"],
+        "//conditions:default": [],
+    }),
+)

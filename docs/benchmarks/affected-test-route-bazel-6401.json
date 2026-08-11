@@ -1,0 +1,56 @@
+{
+  "schema": "fak-bazel-test-route-witness/1",
+  "issue": 6401,
+  "captured_at": "2026-08-10T22:29:59.8016737-07:00",
+  "scope": "equivalent Bazel platform-constraint selection for the four internal/testroute probes",
+  "toolchain": {
+    "bazelisk_version": "v1.28.1",
+    "bazelisk_package": "@bazel/bazelisk",
+    "bazelisk_package_file_sha256": "45ffea1a7a0971eb0f2bb27019002c2cc851ef784da09facd8234fe742d26706",
+    "bazel_version": "9.2.0",
+    "bazel_binary_sha256": "5fc2f2805b8c697a54732558576938d06bab63aa0f9b6610cc01d2cae0388705",
+    "bazelversion_sha256": "1b9487d55bea47fea50d226cc9c53bc548877ad2a318bac8fbc8b320f429e5c5",
+    "module_sha256": "65de63871349de217cb5802bd07b6ddceeabe0642e68fa35cf3434cd69016d8a",
+    "module_lock_sha256": "38731963ff6d7df650a7355090c4388b7218e064bc75f839531902dc92f98023",
+    "module_dependencies_declared": 0
+  },
+  "command_template": "bazel.exe --batch --output_user_root=<root> cquery //routing:route_effect --platforms=//routing:probe_<probe> --output=files --repository_disable_download",
+  "routes": [
+    {"probe":"native_allowed","expected":"routing/native.route","observed":"routing/native.route","applicable_work":1,"correct":true,"wall_seconds":2.7201349,"cpu_seconds":7.71875,"peak_rss_bytes":336965632,"repository_download_bytes":0},
+    {"probe":"windows_wsl","expected":"routing/wsl.route","observed":"routing/wsl.route","applicable_work":1,"correct":true,"wall_seconds":4.7144866,"cpu_seconds":7.890625,"peak_rss_bytes":336433152,"repository_download_bytes":0},
+    {"probe":"ci_only","expected":"routing/ci.route","observed":"routing/ci.route","applicable_work":1,"correct":true,"wall_seconds":3.9369750,"cpu_seconds":7.578125,"peak_rss_bytes":278994944,"repository_download_bytes":0},
+    {"probe":"unavailable","expected":null,"observed":null,"applicable_work":0,"correct":true,"wall_seconds":3.4025771,"cpu_seconds":7.6875,"peak_rss_bytes":307515392,"repository_download_bytes":0}
+  ],
+  "summary": {
+    "cases": 4,
+    "correct": 4,
+    "false_routes": 0,
+    "accuracy": 1.0,
+    "applicable_precision": 1.0,
+    "applicable_recall": 1.0,
+    "route_wall_seconds_total": 14.7741736,
+    "route_cpu_seconds_total": 30.875,
+    "routes_per_second": 0.2707427,
+    "max_peak_rss_bytes": 336965632
+  },
+  "setup": {
+    "wall_seconds": 13.2416281,
+    "cpu_seconds": 13.890625,
+    "peak_rss_bytes": 294203392,
+    "network_bytes": null,
+    "network_note": "Bazel exposed no transfer-byte counter for the one lock-backed setup fetch; no value inferred.",
+    "operator_elapsed_seconds": 208.7768936
+  },
+  "cost": {
+    "incremental_local_usd": 0.0,
+    "total_usd": 0.0,
+    "provenance": "observed: no paid runner or service invoked",
+    "excluded_unknowns": ["labor rate", "electricity", "hardware amortization"]
+  },
+  "measurement": {
+    "runs_per_route": 1,
+    "mode": "cold Bazel batch process with warmed lock-backed repository cache",
+    "process_tree_poll_interval_ms": 20,
+    "provenance": "wall clock plus Windows process-tree CPU and aggregate working-set sampler reused from shipped issue #6371"
+  }
+}
