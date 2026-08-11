@@ -432,6 +432,11 @@
           "category": "incidental",
           "reason": "Local trajectory detector implementation token; not a new cache concept.",
           "token": "detectCacheWarmReplay"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reflection metadata memo local to quantmeta JSON round-tripping, not an inference or provider cache concept.",
+          "token": "knownKeyCache"
         }
       ],
       "id": "cache",
@@ -546,6 +551,7 @@
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",
+        "knownKeyCache",
         "lastcacherd",
         "liveMatrixPrefixCache",
         "loadCacheValueGateBaseline",
@@ -1761,6 +1767,21 @@
           "category": "incidental",
           "reason": "Exported command entry point required only for cmd/fak-dev dispatch; it preserves the existing session diagnostic and introduces no new session-runtime concept.",
           "token": "RunSessionDiag"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private startup repair helper for malformed Git lease refs; not a session-runtime concept or operator-facing lifecycle state",
+          "token": "ReapMalformedSessionRefs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private repair receipt type for malformed Git lease refs; not a session-runtime concept or durable session descriptor",
+          "token": "MalformedSessionRef"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private atomic loose-ref filesystem helper; not a session-runtime concept or lifecycle transition",
+          "token": "repairMalformedLooseSessionRef"
         }
       ],
       "id": "session-runtime",
@@ -1768,8 +1789,10 @@
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
+        "MalformedSessionRef",
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
+        "ReapMalformedSessionRefs",
         "RunSessionDiag",
         "SchedulerEvents",
         "SchedulerMS",
@@ -1819,6 +1842,7 @@
         "member_sessions",
         "orderRecords",
         "readSessionHandoffBlocks",
+        "repairMalformedLooseSessionRef",
         "repository-read",
         "requireminimaxsession",
         "restartfreshsession",
@@ -2326,6 +2350,16 @@
           "category": "incidental",
           "reason": "private file-existence helper, not a new witness-proof concept",
           "token": "checkWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper name for the fixed provider capture matrix, not a new witness concept",
+          "token": "witnessSet"
+        },
+        {
+          "category": "incidental",
+          "reason": "enum sentinel for missing adapter evidence, not a distinct witness-proof concept",
+          "token": "ResolutionUnwitnessed"
         }
       ],
       "id": "witness-proof",
@@ -2347,6 +2381,7 @@
         "QualityWitness",
         "REVOCABLE",
         "ReceiptsDigest",
+        "ResolutionUnwitnessed",
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
@@ -2422,6 +2457,7 @@
         "witnessGitRunner",
         "witnessOutcomeID",
         "witnessScriptedFold",
+        "witnessSet",
         "witnessStrandedArchiveSuffix",
         "witness_request",
         "witnessable",

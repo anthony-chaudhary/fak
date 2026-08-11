@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
@@ -63,6 +65,12 @@ func runGuardSessionStart(stdout, stderr io.Writer, argv []string) int {
 // fresh same-base-SHA look-ahead lesson beside the reframed affordance (#5207). A nil stdin
 // (the runGuardSessionStart entry) skips the pickup, keeping that path byte-identical.
 func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
+	// Repair only torn ephemeral session refs before any resume/discovery path can
+	// invoke Git with --all. The authoritative session registry remains untouched.
+	// Fail-open here: SessionStart affordances must never wedge a fresh process.
+	if reaped, err := leaseref.NewInDir("").ReapMalformedSessionRefs(context.Background()); err == nil && len(reaped) > 0 {
+		fmt.Fprintf(stderr, "fak: repaired %d malformed session lease ref(s) before resume\n", len(reaped))
+	}
 	fs := flag.NewFlagSet("guard-sessionstart", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	modeFlag := fs.String("mode", os.Getenv(guardSessionStartEnvMode), "off|on")
