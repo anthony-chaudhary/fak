@@ -487,6 +487,8 @@ func main() {
 		cmdTokenDefaultsScorecard(os.Args[2:])
 	case "skill-effectiveness-scorecard":
 		cmdSkillEffectivenessScorecard(os.Args[2:])
+	case "mcp-filter-proof":
+		os.Exit(runMCPFilterProof(os.Stdout, os.Stderr, os.Args[2:]))
 	case "footprint":
 		// The always-sent MCP tool-schema floor scorecard (epic #3229, #3230):
 		// price fak's registered tools/list floor offline via internal/mcpfootprint.

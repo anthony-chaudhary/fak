@@ -99,6 +99,103 @@ func (s *Server) MCPToolFilterStatusSnapshot() MCPToolFilterStatus {
 	return status
 }
 
+// MCPToolSearchSnapshot exposes the same full-registry ranked discovery path as
+// fak_tools_search for offline benchmarks and operator diagnostics. It returns
+// descriptors only; calls still cross the normal MCP guard.
+func (s *Server) MCPToolSearchSnapshot(query, detail string) (ToolsSearchResponse, error) {
+	return s.toolsSearch(ToolsSearchRequest{Query: query, DetailLevel: detail})
+}
+
+// NativeMCPFilterProof evaluates the default arm against the full-list control
+// over a held intent corpus. It is deterministic and offline: task success is
+// defined as discovering the required tool, then confirming the same tool route
+// exists; no model narration is accepted as evidence.
+type NativeMCPFilterProof struct {
+	Schema                  string                     `json:"schema"`
+	Verdict                 string                     `json:"verdict"`
+	Active                  MCPToolFilterStatus        `json:"active"`
+	Control                 MCPToolFilterStatus        `json:"control"`
+	Tasks                   []NativeMCPFilterProofTask `json:"tasks"`
+	TaskSuccessRate         float64                    `json:"task_success_rate"`
+	SearchRecall            float64                    `json:"search_recall"`
+	FirstCallRouteSuccess   float64                    `json:"first_call_route_success"`
+	SecurityParityConfirmed bool                       `json:"security_parity_confirmed"`
+}
+
+type NativeMCPFilterProofTask struct {
+	ID           string `json:"id"`
+	Query        string `json:"query"`
+	RequiredTool string `json:"required_tool"`
+	SearchHit    bool   `json:"search_hit"`
+	RouteExists  bool   `json:"route_exists"`
+	Success      bool   `json:"success"`
+}
+
+func (s *Server) NativeMCPFilterProof() NativeMCPFilterProof {
+	_, active := s.toolsListView()
+	full := s.exposedToolDescriptors()
+	control := active
+	control.Mode, control.Reason = "bypass", "full_list_control"
+	control.ToolsAfter = len(full)
+	control.DescriptorBytesAfter = control.DescriptorBytesBefore
+	control.SavedBytes = 0
+	cases := []struct{ id, query, tool string }{
+		{"memory", "memory drivers", "fak_memory_drivers"},
+		{"context", "change context budget", "fak_context_change"},
+		{"features", "query available features", "fak_feature_query"},
+		{"restore", "restore dropped context", "fak_context_restore"},
+		{"trajectory", "trajectory SQL scoped view", "fak_trajquery"},
+	}
+	routes := make(map[string]bool, len(full))
+	for _, td := range full {
+		if n, _ := td["name"].(string); n != "" {
+			routes[n] = true
+		}
+	}
+	p := NativeMCPFilterProof{Schema: "fak-native-mcp-filter-proof/1", Active: active, Control: control}
+	for _, tc := range cases {
+		names := s.rankToolNamesByIntent(tc.query)
+		hit := len(names) > 0 && names[0] == tc.tool
+		route := routes[tc.tool]
+		p.Tasks = append(p.Tasks, NativeMCPFilterProofTask{ID: tc.id, Query: tc.query, RequiredTool: tc.tool, SearchHit: hit, RouteExists: route, Success: hit && route})
+		if hit {
+			p.SearchRecall++
+		}
+		if route {
+			p.FirstCallRouteSuccess++
+		}
+		if hit && route {
+			p.TaskSuccessRate++
+		}
+	}
+	n := float64(len(p.Tasks))
+	p.SearchRecall /= n
+	p.FirstCallRouteSuccess /= n
+	p.TaskSuccessRate /= n
+	oldExpose := s.exposeAllow
+	s.exposeAllow = func(name string) bool { return name != "fak_memory_run" }
+	hiddenNames := s.rankToolNamesByIntent("run memory compaction")
+	hiddenRoute := false
+	for _, td := range s.exposedToolDescriptors() {
+		if td["name"] == "fak_memory_run" {
+			hiddenRoute = true
+		}
+	}
+	s.exposeAllow = oldExpose
+	p.SecurityParityConfirmed = !hiddenRoute
+	for _, name := range hiddenNames {
+		if name == "fak_memory_run" {
+			p.SecurityParityConfirmed = false
+		}
+	}
+	if active.Mode == "active" && active.SavedBytes > 0 && p.TaskSuccessRate == 1 && p.SecurityParityConfirmed {
+		p.Verdict = "PASS"
+	} else {
+		p.Verdict = "NOT_YET"
+	}
+	return p
+}
+
 func (s *Server) toolsListDescriptors() []map[string]any {
 	tools, _ := s.toolsListView()
 	return tools

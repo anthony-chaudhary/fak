@@ -583,9 +583,11 @@
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta).",
       "roots": [
         "cache"
-      ]
+      ],
+      "tokens": []
     },
     {
+      "classifications": [],
       "id": "attention",
       "ignore": [
         "attentions",
@@ -598,7 +600,8 @@
       "roots": [
         "attention",
         "attn"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -1186,6 +1189,11 @@
           "category": "incidental",
           "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
           "token": "ClaimRuntimeDelegated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Leaf-local typed runtime delegation result required by issue 6255, not a repository guard gate",
+          "token": "CaseDelegate"
         }
       ],
       "exclude": [
@@ -1204,6 +1212,7 @@
         "AggregateErrors",
         "AggregateHBMBytes",
         "CacheValueGateDebtKey",
+        "CaseDelegate",
         "ClaimRuntimeDelegated",
         "CorrectnessGate",
         "DELEGATE",
@@ -1354,7 +1363,8 @@
       "roots": [
         "guard",
         "gate"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -1897,7 +1907,8 @@
         "session",
         "slot",
         "scheduler"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -2477,7 +2488,8 @@
         "refut",
         "revoc",
         "trustepoch"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -2628,7 +2640,8 @@
         "engine",
         "vdso",
         "kernel"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -3086,7 +3099,8 @@
         "posture",
         "adjudicat",
         "preflight"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -3299,6 +3313,11 @@
           "category": "incidental",
           "reason": "Private experiment constant/local/result, not a reusable production capability or context abstraction.",
           "token": "wctx"
+        },
+        {
+          "category": "incidental",
+          "reason": "machine-readable benchmark metric field, not a new context-management concept",
+          "token": "SearchRecall"
         }
       ],
       "id": "context-ctx",
@@ -3308,6 +3327,7 @@
         "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "SearchRecall",
         "appendGuardCompactionWitnessTo",
         "callCtx",
         "cctx",
@@ -3363,7 +3383,8 @@
         "context",
         "recall",
         "compaction"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -3463,7 +3484,8 @@
       "roots": [
         "scorecard",
         "debt"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -3881,12 +3903,29 @@
           "category": "incidental",
           "reason": "Wire reason for one KV-cache tier-edge decision, not support maturity.",
           "token": "KVQUANT_UNSUPPORTED_TRANSITION"
+        },
+        {
+          "category": "incidental",
+          "reason": "Leaf-local typed unsupported result required by issue 6255, not a repository support maturity rung",
+          "token": "CaseUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Leaf-local typed supported result required by issue 6255, not a repository support maturity rung",
+          "token": "CaseSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "boolean benchmark witness field, not a new maturity rung or support concept",
+          "token": "SecurityParityConfirmed"
         }
       ],
       "id": "support-maturity",
       "ignore": [
         "BAD_ACHIEVED_MATURITY",
         "CONFIG_OPINION_UNSUPPORTED",
+        "CaseSupported",
+        "CaseUnsupported",
         "ClaudeKeychainSupported",
         "ConfidenceUnsupported",
         "ConfigDefaultCoverage",
@@ -3902,6 +3941,7 @@
         "ErrUnsupportedFormat",
         "FormatUnsupported",
         "GuideCoverage",
+        "INVALID_EVIDENCE",
         "KVQUANT_SUPPORTED",
         "KVQUANT_UNKNOWN_SCHEME",
         "KVQUANT_UNSUPPORTED_TRANSITION",
@@ -3931,16 +3971,23 @@
         "QUANTPROV_UNSUPPORTED_FORMAT",
         "QUANTPROV_UNSUPPORTED_QUANTIZER",
         "QUANTPROV_UNSUPPORTED_VERSION",
+        "RUNTIME_NATIVE_PROBE_REQUIRED",
         "ReasonSupported",
         "ReasonUnknownScheme",
         "ReasonUnsupportedFormat",
+        "ReasonUnsupportedFusion",
         "ReasonUnsupportedQuantizer",
         "ReasonUnsupportedTransition",
         "ReasonUnsupportedVersion",
         "RunCommitSubjectCoverage",
+        "SUPPORTED_COMBINATION",
+        "SecurityParityConfirmed",
         "SetupParityBlocks",
         "SetupParityReport",
         "SupportsRoutedExpertKQuant",
+        "UNKNOWN_FORMAT",
+        "UNKNOWN_RUNTIME",
+        "UNSUPPORTED_COMBINATION",
         "UNSUPPORTED_FORMAT",
         "VerdictParityOK",
         "VerdictSetupParityClean",
@@ -3990,7 +4037,8 @@
         "supports",
         "targetcoverage",
         "topncoverage",
-        "unsupported"
+        "unsupported",
+        "unsupported_runtime_fusion"
       ],
       "min_files": 3,
       "name": "Support / coverage / correctness / parity / maturity family",
@@ -4001,15 +4049,18 @@
         "correctness",
         "parity",
         "maturity"
-      ]
+      ],
+      "tokens": []
     },
     {
+      "classifications": [],
       "id": "cross-cluster",
       "ignore": [],
       "min_files": 99,
       "name": "Cross-cluster canonical collisions",
       "note": "Curated registry of same-token, two-meaning collisions across UNRELATED packages (Manifest, Verdict, Backend, Observer, Index, Store, Refusal). Each is positioned as TWO distinct rows that draw the line against each other and anchor it in the glossary. roots is empty BY DESIGN: these tokens (manifest/verdict/backend/observer/index/store/refusal) over-match hundreds of unrelated identifiers in their own packages, so this family is hand-curated, never discovered - a discovering root would flood coverage with non-confusable tokens (verdictAllow, indexByte, storeInt32).",
-      "roots": []
+      "roots": [],
+      "tokens": []
     },
     {
       "classifications": [
@@ -4062,7 +4113,8 @@
         "evict",
         "evicted",
         "eviction"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -4190,8 +4242,12 @@
       "id": "decision",
       "ignore": [
         "AddedDecisionOverheadMS",
+        "DecisionAbstain",
+        "DecisionBenchmark",
         "DecisionBoundary",
+        "DecisionDelegate",
         "DecisionMS",
+        "DecisionRefuse",
         "DecisionSamples",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
@@ -4222,7 +4278,8 @@
       "note": "Decision structs across disjoint subsystems: witness adjudication verdict, kernel tool-call explanation trace, scheduler loop admission advisory, shared-task execution state, cachemeta placement, gateway reset, vCache governor, trajctl steer, gardenbundle walk, toolprocgate containment, and dispatch calibration. Ignored incidental helpers: gooddecisionratio (a metric field scoring expert-residency keep/evict decision quality, not a decision concept), appendsteerdecisions (the writer function that persists SteerDecision records to the trajctl ledger, not a decision itself), and kinddecisionsabout (a sessionread query Kind enum filtering assistant decision turns in a transcript, not a fak decision concept).",
       "roots": [
         "decision"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -4449,7 +4506,8 @@
         "RenderItem",
         "Rendered",
         "materialize"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -4662,6 +4720,16 @@
           "category": "incidental",
           "reason": "Local implementation or schema vocabulary for coding-workpattern detection; not a new reusable concept.",
           "token": "motifDetectPlanFanoutReconcile"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deterministic conversion-work JSON field; not a planning concept.",
+          "token": "candidate_evaluations"
+        },
+        {
+          "category": "incidental",
+          "reason": "Execution recovery enum value, not a planning subsystem concept",
+          "token": "RecoveryReplan"
         }
       ],
       "exclude": [
@@ -4690,6 +4758,7 @@
         "PlanResolver",
         "PlanStepDecision",
         "ReconcilePlan",
+        "RecoveryReplan",
         "RemoteDrainCandidate",
         "SinkCandidate",
         "SinkCandidates",
@@ -4700,6 +4769,7 @@
         "candidateID",
         "candidateNote",
         "candidatePaths",
+        "candidate_evaluations",
         "candidate_requires_auth_relevance",
         "candidatemean",
         "candidates",
@@ -4740,7 +4810,8 @@
         "plan",
         "Plan",
         "Candidate"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -4832,7 +4903,8 @@
         "pool",
         "Pool",
         "PoolProfile"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -4857,7 +4929,8 @@
         "layout",
         "Layout",
         "kvLayout"
-      ]
+      ],
+      "tokens": []
     },
     {
       "classifications": [
@@ -5096,31 +5169,38 @@
       "note": "The most overloaded word in the repo: a read-only intent walker (fak superloop) vs a bulk wave launcher (/super-loop) vs a ledger+governor (fak loop) vs a per-turn exit gate (loopgate) vs the benchmark surface (bench-loop) vs the stage-coverage scorecard (loop-index) vs the cross-ledger health fold (loopfleet) vs the process babysitter (bgloop) - plus network loopback, a different domain the root swallows.",
       "roots": [
         "loop"
-      ]
+      ],
+      "tokens": []
     },
     {
+      "classifications": [],
       "id": "vfs",
       "ignore": [],
       "min_files": 99,
       "name": "Agent virtual-filesystem tier family",
       "note": "The six-tier agent-VFS ladder (T0-T5) from docs/explainers/agent-virtual-filesystem.md: the host/VM store the process rides into (T0) vs the mount view fak presents over it (T1) vs the adjudicated read/query surface (T2) vs the expire-by-default scratchpad (T3) vs promoted durable memory (T4) vs the physical KV-cache substrate (T5). roots is empty BY DESIGN: these tiers are a curated conceptual ladder, not a single overloaded token - each is grounded in a distinct fak package/symbol (toolsandbox, pathscope, readengine, scratchpad, memq, kvmmu), and no shared root word spans them, so discovery would find nothing to score. Each tier draws its line against the adjacent tier it is most confused with (truth-duration separates T3 from T4; having-access separates T1 from T2; address-vs-governance separates T5 from T4).",
-      "roots": []
+      "roots": [],
+      "tokens": []
     },
     {
+      "classifications": [],
       "id": "trajectory-control",
       "ignore": [],
       "min_files": 99,
       "name": "Trajectory-control family",
       "note": "The trajectory-control (trajctl) vocabulary from epic #2533 (docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md + docs/observability/trajectory-control.md): the LIVE forward-progress control plane over declared objectives, positioned against five near-siblings it is systematically confused with - fak traj (the RETROSPECTIVE corpus toolkit; trajhook scores a past turn's notability, trajctl scores a live objective's progress), the scorecard family (repo-surface debt, not runs), score-signal (the CI-regression feeder), fak signal steer (one actuator rung trajctl uses), and loopdrive's GOAL.md witness (the binary done-bit trajctl stretches into a curve). roots is empty BY DESIGN, same as vfs: a 'trajctl'/'trajectory' discovery root would swallow the internal/trajectory corpus toolkit's tokens (the very sibling this family disambiguates against) and flood coverage with non-confusable identifiers; each concept is instead grounded in a distinct shipped symbol (trajctl, ScoreRow, witnessStrength, SignalHealthy, SignalDetourOverrun).",
-      "roots": []
+      "roots": [],
+      "tokens": []
     },
     {
+      "classifications": [],
       "id": "dev-tier",
       "ignore": [],
       "min_files": 99,
       "name": "Dev-tier / operator-surface family",
       "note": "The dev-tier / operator-surface vocabulary from epic #2228 (C6, #2235): the operator-heaviness meter now partitions the flat top-level verb surface into frontdoor_verbs + dev_verbs by construction (the continuity witness), classified from the live dispatch switch via internal/devindex. These are the names for that split and its near-siblings under the shared 'dev' root - a frontdoor verb (the product surface, TierFrontdoor) vs a dev verb (the fak dev tooling tier, TierDev) vs the 'fak dev' CLI namespace that gates them vs the dev-ex GitHub routing label vs devindex the catalog that assigns the tier. roots is empty BY DESIGN, same as vfs and trajectory-control: a 'dev' discovery root would swallow hundreds of unrelated identifiers (development, devsession, devbenefit ...) and flood coverage with non-confusable tokens; each concept is instead grounded in a distinct shipped symbol (TierFrontdoor, TierDev, resolveDevVerb, devindex). The honesty fence: a dev verb stays MEASURED in dev_verbs even after its bare spelling is gated behind 'fak dev' - hidden from the front door, not from the meter.",
-      "roots": []
+      "roots": [],
+      "tokens": []
     }
   ]
 }

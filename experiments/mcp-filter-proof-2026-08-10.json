@@ -1,0 +1,68 @@
+{
+  "schema": "fak-native-mcp-filter-proof/1",
+  "verdict": "PASS",
+  "active": {
+    "mode": "active",
+    "reason": "default_on",
+    "tools_before": 19,
+    "tools_after": 4,
+    "descriptor_bytes_before": 20164,
+    "descriptor_bytes_after": 3911,
+    "saved_bytes": 16253
+  },
+  "control": {
+    "mode": "bypass",
+    "reason": "full_list_control",
+    "tools_before": 19,
+    "tools_after": 19,
+    "descriptor_bytes_before": 20164,
+    "descriptor_bytes_after": 20164,
+    "saved_bytes": 0
+  },
+  "tasks": [
+    {
+      "id": "memory",
+      "query": "memory drivers",
+      "required_tool": "fak_memory_drivers",
+      "search_hit": true,
+      "route_exists": true,
+      "success": true
+    },
+    {
+      "id": "context",
+      "query": "change context budget",
+      "required_tool": "fak_context_change",
+      "search_hit": true,
+      "route_exists": true,
+      "success": true
+    },
+    {
+      "id": "features",
+      "query": "query available features",
+      "required_tool": "fak_feature_query",
+      "search_hit": true,
+      "route_exists": true,
+      "success": true
+    },
+    {
+      "id": "restore",
+      "query": "restore dropped context",
+      "required_tool": "fak_context_restore",
+      "search_hit": true,
+      "route_exists": true,
+      "success": true
+    },
+    {
+      "id": "trajectory",
+      "query": "trajectory SQL scoped view",
+      "required_tool": "fak_trajquery",
+      "search_hit": true,
+      "route_exists": true,
+      "success": true
+    }
+  ],
+  "task_success_rate": 1,
+  "search_recall": 1,
+  "first_call_route_success": 1,
+  "security_parity_confirmed": true
+}
