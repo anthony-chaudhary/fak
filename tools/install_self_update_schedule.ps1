@@ -59,12 +59,15 @@ if ($Uninstall) {
   return
 }
 
-# Invoke the repo-local built binary if present (it is rebuilt by `go build` / by this very
-# task), else the installed target, else PATH. Self-update resolves origin/main itself; the
-# explicit --target makes the FLEET binary the swap destination regardless of which fak runs.
+# Bootstrap from the installed target first. `self-update` can replace its own executable
+# safely (including Windows' running-image lock), so this path is both durable and the exact
+# binary whose freshness we are proving. A repo-local tools/.bin build is only a recovery
+# fallback: it is intentionally ephemeral and may disappear after task registration. Pinning
+# the scheduled action to that transient path made every tick fail before self-update ran while
+# Task Scheduler retained an old success result. PATH remains the last-resort bootstrap.
 $fakBin = @(
-  (Join-Path $RepoRoot 'tools\.bin\fak.exe'),
   $Target,
+  (Join-Path $RepoRoot 'tools\.bin\fak.exe'),
   'fak'
 ) | Where-Object { $_ -eq 'fak' -or (Test-Path $_) } | Select-Object -First 1
 if (-not $fakBin) { throw "no fak binary found (looked in $RepoRoot\tools\.bin, $Target, PATH)" }

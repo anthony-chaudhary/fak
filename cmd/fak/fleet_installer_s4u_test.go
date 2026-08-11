@@ -78,3 +78,25 @@ func TestFleetInstallersAreS4UWithStartWhenAvailable(t *testing.T) {
 		t.Run(name, func(t *testing.T) { assertPrincipal(t, name) })
 	}
 }
+
+// TestSelfUpdateScheduleBootstrapsFromDurableTarget pins the updater's first mile.
+// tools/.bin is an ephemeral worker build location: if the scheduled action captures
+// it and that file is later reaped, Task Scheduler never reaches `self-update` and
+// can leave a stale guard binary behind indefinitely. The installed target is durable
+// and self-update already supports replacing its own running image on Windows.
+func TestSelfUpdateScheduleBootstrapsFromDurableTarget(t *testing.T) {
+	path := filepath.Join("..", "..", "tools", "install_self_update_schedule.ps1")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installer: %v", err)
+	}
+	s := string(b)
+	target := strings.Index(s, "$Target,")
+	ephemeral := strings.Index(s, "(Join-Path $RepoRoot 'tools\\.bin\\fak.exe')")
+	if target < 0 || ephemeral < 0 || target > ephemeral {
+		t.Fatal("self-update bootstrap must prefer the durable installed $Target before ephemeral tools/.bin")
+	}
+	if !strings.Contains(s, "-Argument ('/d /s /c \"\"{0}\" self-update --root") {
+		t.Fatal("scheduled action must invoke the resolved durable bootstrap binary")
+	}
+}
