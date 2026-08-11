@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,5 +125,44 @@ func TestSortProcIOByOps(t *testing.T) {
 	got := sortProcIOByOps(in)
 	if got[0].Ops != 99 || got[2].Ops != 1 {
 		t.Fatalf("bad order: %+v", got)
+	}
+}
+
+func TestBoundStallLogRetainsCompleteNewestRecords(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stallscan.jsonl")
+	for i := 0; i < 20; i++ {
+		appendStallJSONL(path, map[string]any{"seq": i, "payload": strings.Repeat("x", 40)}, 400)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > 400 {
+		t.Fatalf("bounded log is %d bytes, want <= 400", len(b))
+	}
+	lines := bytes.Split(bytes.TrimSpace(b), []byte{'\n'})
+	if len(lines) == 0 {
+		t.Fatal("bounded log is empty")
+	}
+	for _, line := range lines {
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("partial JSONL record %q: %v", line, err)
+		}
+	}
+	var newest map[string]any
+	if err := json.Unmarshal(lines[len(lines)-1], &newest); err != nil {
+		t.Fatal(err)
+	}
+	if newest["seq"] != float64(19) {
+		t.Fatalf("newest seq=%v, want 19", newest["seq"])
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "stallscan.jsonl" {
+		t.Fatalf("atomic replacement left residue: %v", entries)
 	}
 }

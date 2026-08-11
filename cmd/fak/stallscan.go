@@ -28,6 +28,7 @@ package main
 // interval below a few seconds or add per-tick enumeration.
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -54,6 +55,7 @@ func runStallscan(stdout, stderr io.Writer, argv []string) int {
 	watch := fs.Bool("watch", false, "run a self-monitor loop: sample, classify, append JSONL, alert on each stall")
 	interval := fs.Duration("interval", 15*time.Second, "sample interval in --watch mode (keep >= a few seconds; enumeration is expensive)")
 	logPath := fs.String("log", "", "rolling JSONL path for --watch (default: <host stall dir>/stallscan.jsonl)")
+	maxBytes := fs.Int64("max-bytes", 16<<20, "maximum watch log size before retaining the newest half (0 disables the bound)")
 	topN := fs.Int("top", 6, "how many top-IO processes to show")
 	once := fs.Bool("once", false, "in --watch mode, take exactly one sample then exit (for tests/cron)")
 	if !parseFlags(fs, argv) {
@@ -61,7 +63,7 @@ func runStallscan(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *watch {
-		return runStallscanWatch(stdout, stderr, *interval, *logPath, *topN, *once)
+		return runStallscanWatch(stdout, stderr, *interval, *logPath, *topN, *once, *maxBytes)
 	}
 
 	// Snapshot mode: one sample, classify, render.
@@ -101,7 +103,7 @@ func stallFingerprint(s stallscan.Sample, v stallscan.Verdict) map[string]any {
 // runStallscanWatch is the self-monitor loop. Cheap by construction: one sample
 // per interval, append one JSONL line, print a one-liner only when the verdict
 // is elevated/stall (calm ticks are logged but not printed, to stay quiet).
-func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath string, topN int, once bool) int {
+func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath string, topN int, once bool, maxBytes int64) int {
 	if interval < 3*time.Second {
 		interval = 3 * time.Second // hard floor: never become the load we measure
 	}
@@ -130,7 +132,7 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		}
 		baseline := updateGrowthBaseline(baseHandles, baseThreads, sample)
 		v := stallscan.ClassifyWithBaseline(baseline, sample, stallscan.DefaultThresholds())
-		appendStallJSONL(logPath, stallFingerprint(sample, v))
+		appendStallJSONL(logPath, stallFingerprint(sample, v), maxBytes)
 		if v.Level != stallscan.LevelCalm {
 			fmt.Fprintf(stdout, "%s  %-8s %-18s %s\n",
 				time.Now().UTC().Format("15:04:05"), v.Level, v.Cause, stallJoinReasons(v.Reasons))
@@ -224,17 +226,55 @@ func stallJoinReasons(rs []string) string {
 
 // appendStallJSONL appends one compact JSON line; best-effort by contract — a
 // failed append must never crash the monitor.
-func appendStallJSONL(path string, rec map[string]any) {
+func appendStallJSONL(path string, rec map[string]any, maxBytes int64) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
-	defer f.Close()
 	b, err := json.Marshal(rec)
-	if err != nil {
-		return
+	if err == nil {
+		_, err = f.Write(append(b, '\n'))
 	}
-	_, _ = f.Write(append(b, '\n'))
+	_ = f.Close()
+	if err == nil && maxBytes > 0 {
+		_ = boundStallLog(path, maxBytes)
+	}
+}
+
+// boundStallLog prevents a long-lived watcher from becoming the resource leak it
+// diagnoses. It preserves complete newest JSONL records via atomic replacement.
+func boundStallLog(path string, maxBytes int64) error {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= maxBytes {
+		return err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	start := len(b) - int(maxBytes/2)
+	if start < 0 {
+		start = 0
+	}
+	if i := bytes.IndexByte(b[start:], '\n'); i >= 0 {
+		start += i + 1
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".stallscan-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err = tmp.Write(b[start:]); err == nil {
+		err = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	if err != nil {
+		return err
+	}
+	_ = os.Remove(path) // Rename cannot replace an existing destination on Windows.
+	return os.Rename(tmpPath, path)
 }
 
 // defaultStallLogPath resolves a durable, host-local rolling log location.
