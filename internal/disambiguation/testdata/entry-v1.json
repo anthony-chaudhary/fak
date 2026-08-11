@@ -27,7 +27,9 @@
     {
       "kind": "document",
       "locator": "README.md#how-it-works",
-      "revision": "fixture"
+      "revision": "fixture",
+      "checked_at": "2026-08-10T00:00:00Z",
+      "probe": "fak-disambiguation-fixture"
     }
   ],
   "freshness": {

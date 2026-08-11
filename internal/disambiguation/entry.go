@@ -96,13 +96,15 @@ type Owner struct {
 	Lane string `json:"lane"`
 }
 
-// SourceWitness identifies one public source supporting the entry. Locator is
-// repository-relative or public-metadata-relative; Revision pins the source
-// state. Source existence and public-safety probes are separate admission rungs.
+// SourceWitness is strict public provenance for one supporting source. Locator
+// is repository-relative; Revision, CheckedAt, and Probe make verification
+// reproducible without introducing a private-source dependency.
 type SourceWitness struct {
-	Kind     string `json:"kind"`
-	Locator  string `json:"locator"`
-	Revision string `json:"revision"`
+	Kind      string `json:"kind"`
+	Locator   string `json:"locator"`
+	Revision  string `json:"revision"`
+	CheckedAt string `json:"checked_at"`
+	Probe     string `json:"probe"`
 }
 
 // Freshness records the last source-check outcome and the public probe that
@@ -202,13 +204,7 @@ func (e Entry) Validate() error {
 		return errors.New("at least one source witness is required")
 	}
 	for i, source := range e.Sources {
-		if err := requireText(fmt.Sprintf("sources[%d].kind", i), source.Kind); err != nil {
-			return err
-		}
-		if err := requireText(fmt.Sprintf("sources[%d].locator", i), source.Locator); err != nil {
-			return err
-		}
-		if err := requireText(fmt.Sprintf("sources[%d].revision", i), source.Revision); err != nil {
+		if err := validateSourceProvenance(i, source); err != nil {
 			return err
 		}
 	}

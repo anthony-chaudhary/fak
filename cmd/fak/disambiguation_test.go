@@ -35,7 +35,7 @@ func TestDisambiguationSchemaSelfTestPublicSeam(t *testing.T) {
 	if !got.CompleteAccepted || len(got.OmissionsRejected) != len(disambiguation.Descriptor().Required) {
 		t.Fatalf("self-test did not exercise complete required-field contract: %+v", got)
 	}
-	for _, required := range []string{"identity.canonical_term", "owner.leaf", "contrasts[].explanation", "sources[].revision", "freshness.probe"} {
+	for _, required := range []string{"identity.canonical_term", "owner.leaf", "contrasts[].explanation", "sources[].revision", "sources[].checked_at", "sources[].probe", "freshness.probe"} {
 		if !containsDisambiguationString(got.OmissionsRejected, required) {
 			t.Fatalf("self-test omitted required rejection %q: %v", required, got.OmissionsRejected)
 		}
@@ -75,6 +75,20 @@ func TestRunDisambiguationOwnershipSelfTestJSON(t *testing.T) {
 	}
 }
 
+func TestRunDisambiguationProvenanceSelfTestJSON(t *testing.T) {
+	var out bytes.Buffer
+	if code := runDisambiguation(&out, &out, []string{"provenance", "--self-test", "--json"}); code != 0 {
+		t.Fatalf("exit=%d output=%s", code, out.String())
+	}
+	var report disambiguation.ProvenanceSelfCheckReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, out.String())
+	}
+	if !report.OK || !report.RoundTrip || !report.RejectedAbsolute || !report.RejectedEscape || !report.RejectedSourceKind {
+		t.Fatalf("provenance selfcheck incomplete: %+v", report)
+	}
+}
+
 func TestRunDisambiguationQueryJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runDisambiguation(&stdout, &stderr, []string{"query", "agent kernel", "--json"})
@@ -90,6 +104,9 @@ func TestRunDisambiguationQueryJSON(t *testing.T) {
 	}
 	if got.Entry.Definition == "" || len(got.Entry.Contrasts) == 0 || got.Entry.Owner.Leaf == "" || len(got.Entry.Sources) == 0 || got.Entry.Freshness.Verdict == "" {
 		t.Fatalf("query JSON omitted contract fields: %#v", got.Entry)
+	}
+	if got.Entry.Sources[0].CheckedAt == "" || got.Entry.Sources[0].Probe == "" {
+		t.Fatalf("query JSON omitted strict provenance: %#v", got.Entry.Sources)
 	}
 }
 

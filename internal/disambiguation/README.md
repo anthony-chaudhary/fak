@@ -111,6 +111,28 @@ fak disambiguation query kernel --scope-kind package --scope-value internal/disa
 The index remains a single public-source writer. Scope does not broaden source admission or permit private repository, host, credential, or local-path material.
 
 
+## Strict public provenance
+
+Every `sources[]` entry is immutable provenance returned unchanged by
+`fak disambiguation query <term> --json`:
+
+- `kind` is one of `document`, `go-source`, `test`, `generated-index`, or
+  `github-metadata`; private repositories, local files, arbitrary URLs, and
+  other unverifiable kinds are refused.
+- `locator` is a normalized slash-separated repository-relative path with an
+  optional `#fragment`; absolute Windows/Unix paths, backslashes, and `..`
+  escapes are refused.
+- `revision` pins the public source state, `checked_at` is canonical UTC RFC
+  3339, and `probe` is the stable lowercase public probe identity.
+
+Provenance admission failures are `ValidationError` values with stable `code`
+and `field` members; use `ValidationCode(err)`, not message parsing. Validation
+walks entries and sources in input order, making the first error deterministic.
+This adds no writer: the existing entry/index writer remains authoritative and
+the dependency boundary remains public fak repository/GitHub evidence only.
+Run `fak disambiguation provenance --self-test --json` for the hermetic CLI
+round-trip plus absolute-path, escaping-path, and private-kind rejection witness.
+
 ## Freshness verdict contract
 
 Agents and JSON consumers get exactly four freshness states. Every state has one

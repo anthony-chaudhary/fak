@@ -30,6 +30,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationOwnership(stdout, stderr, args[1:])
 	case "freshness":
 		return runDisambiguationFreshness(stdout, stderr, args[1:])
+	case "provenance":
+		return runDisambiguationProvenance(stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, ownership, or freshness)\n", args[0])
 		return 2
@@ -164,6 +166,35 @@ func encodeDisambiguationJSON(stdout, stderr io.Writer, value any) int {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(value); err != nil {
 		fmt.Fprintf(stderr, "encode disambiguation JSON: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDisambiguationProvenance(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation provenance", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	selfTest := fs.Bool("self-test", false, "run strict public provenance acceptance and rejection fixtures")
+	jsonOut := fs.Bool("json", false, "emit machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if !*selfTest || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak disambiguation provenance --self-test [--json]")
+		return 2
+	}
+	report := disambiguation.ProvenanceSelfCheck()
+	if *jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "disambiguation provenance: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "disambiguation provenance self-test: ok=%t round_trip=%t reject_absolute=%t reject_escape=%t reject_kind=%t\n", report.OK, report.RoundTrip, report.RejectedAbsolute, report.RejectedEscape, report.RejectedSourceKind)
+	}
+	if !report.OK {
 		return 1
 	}
 	return 0

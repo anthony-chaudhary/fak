@@ -35,7 +35,7 @@ func Descriptor() SchemaDescriptor {
 			"definition", "contrasts", "contrasts[].canonical_term", "contrasts[].explanation",
 			"contrasts[].required_pair", "contrasts[].forbidden_conflation",
 			"scope", "scope.kind", "scope.value", "owner", "owner.leaf", "owner.lane",
-			"sources", "sources[].kind", "sources[].locator", "sources[].revision",
+			"sources", "sources[].kind", "sources[].locator", "sources[].revision", "sources[].checked_at", "sources[].probe",
 			"freshness", "freshness.verdict", "freshness.reason_code", "freshness.checked_at", "freshness.probe",
 			"lifecycle", "lifecycle.class", "lifecycle.rollout",
 		},

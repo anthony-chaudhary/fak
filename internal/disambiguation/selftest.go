@@ -110,6 +110,7 @@ func SelfTestEntry() Entry {
 		Owner: Owner{Leaf: "kernel", Lane: "kernel"},
 		Sources: []SourceWitness{{
 			Kind: "document", Locator: "README.md#how-it-works", Revision: "self-test",
+			CheckedAt: "2026-08-10T00:00:00Z", Probe: "hermetic-self-test",
 		}},
 		Freshness: Freshness{
 			Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT",
