@@ -1,0 +1,81 @@
+{
+  "request": {
+    "contract_version": "qevicteval/v1",
+    "provenance": {
+      "artifact_id": "qevict-bounded-delegated-trace",
+      "artifact_version": "fixture-v1",
+      "artifact_sha256": "eabf43634f78c618d536d2590f5eab93bf7695a284e54d5da640148bc01bdf0d",
+      "recipe_id": "qevict/arxiv-2608.05326v1",
+      "recipe_revision": "v1",
+      "recipe_source": "https://arxiv.org/abs/2608.05326v1",
+      "runtime_id": "qevicteval/trace-replay-v1",
+      "runtime_version": "go1.26-linux-amd64"
+    },
+    "trace": [
+      {
+        "step": 0,
+        "window_id": "recent",
+        "full_bytes": 100,
+        "quantized_bytes": 25,
+        "future_attention_mass": 0.02,
+        "ordinary_evicted": false,
+        "qevict_tier": "full",
+        "reactivated": false
+      },
+      {
+        "step": 1,
+        "window_id": "drifting-history",
+        "full_bytes": 100,
+        "quantized_bytes": 25,
+        "future_attention_mass": 0.4,
+        "ordinary_evicted": true,
+        "qevict_tier": "recoverable",
+        "reactivated": true
+      },
+      {
+        "step": 2,
+        "window_id": "cold-history",
+        "full_bytes": 100,
+        "quantized_bytes": 25,
+        "future_attention_mass": 0.01,
+        "ordinary_evicted": true,
+        "qevict_tier": "deleted",
+        "reactivated": false
+      }
+    ]
+  },
+  "result": {
+    "outcome": "delegate",
+    "reason": "QEVICT_RUNTIME_EVIDENCE_REQUIRED",
+    "decision": "abstain",
+    "metrics": {
+      "ordinary_peak_bytes": 100,
+      "qevict_peak_bytes": 125,
+      "recoverable_tier_bytes": 25,
+      "recovery_read_bytes": 25,
+      "recovery_events": 1,
+      "ordinary_future_missed_mass": 0.41,
+      "qevict_future_missed_mass": 0.01,
+      "avoided_attention_drift": 0.4,
+      "ordinary_latency_ns": 0,
+      "qevict_latency_ns": 0,
+      "recovery_latency_ns": 0,
+      "latency_overhead_ns": 0
+    },
+    "evidence": {
+      "capacity_and_drift": "modeled",
+      "latency": "modeled",
+      "envelope": "bounded trace modeled; latency requires a pinned runtime observation"
+    },
+    "provenance": {
+      "artifact_id": "qevict-bounded-delegated-trace",
+      "artifact_version": "fixture-v1",
+      "artifact_sha256": "eabf43634f78c618d536d2590f5eab93bf7695a284e54d5da640148bc01bdf0d",
+      "recipe_id": "qevict/arxiv-2608.05326v1",
+      "recipe_revision": "v1",
+      "recipe_source": "https://arxiv.org/abs/2608.05326v1",
+      "runtime_id": "qevicteval/trace-replay-v1",
+      "runtime_version": "go1.26-linux-amd64"
+    }
+  }
+}

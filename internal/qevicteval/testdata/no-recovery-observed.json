@@ -1,0 +1,92 @@
+{
+  "request": {
+    "contract_version": "qevicteval/v1",
+    "provenance": {
+      "artifact_id": "qevict-bounded-no-reactivation-trace",
+      "artifact_version": "fixture-v1",
+      "artifact_sha256": "95a834d88ee4a33325bc065506d6559d3ad31d4a9ba65792b505c4b6f54f157b",
+      "recipe_id": "qevict/arxiv-2608.05326v1",
+      "recipe_revision": "v1",
+      "recipe_source": "https://arxiv.org/abs/2608.05326v1",
+      "runtime_id": "qevicteval/trace-replay-v1",
+      "runtime_version": "go1.26-linux-amd64"
+    },
+    "trace": [
+      {
+        "step": 0,
+        "window_id": "recent",
+        "full_bytes": 100,
+        "quantized_bytes": 25,
+        "future_attention_mass": 0.02,
+        "ordinary_evicted": false,
+        "qevict_tier": "full",
+        "reactivated": false
+      },
+      {
+        "step": 1,
+        "window_id": "drifting-history",
+        "full_bytes": 100,
+        "quantized_bytes": 25,
+        "future_attention_mass": 0,
+        "ordinary_evicted": true,
+        "qevict_tier": "recoverable",
+        "reactivated": false
+      },
+      {
+        "step": 2,
+        "window_id": "cold-history",
+        "full_bytes": 100,
+        "quantized_bytes": 25,
+        "future_attention_mass": 0.01,
+        "ordinary_evicted": true,
+        "qevict_tier": "deleted",
+        "reactivated": false
+      }
+    ],
+    "runtime": {
+      "evidence": "observed",
+      "platform": "WSL Linux amd64",
+      "device": "AMD Ryzen 9 9950X CPU",
+      "command": "go test ./internal/qevicteval -run ^$ -bench Benchmark(OrdinaryEviction|QEvictReplay|RecoveryRead)$ -benchtime=100000x -count=5",
+      "captured_at": "2026-08-10T20:00:00-07:00",
+      "runtime_artifact_sha256": "f7506bea881e438501367ca73f1fbce8d8dc83f9f9832e4e8527068d1a480779",
+      "ordinary_latency_ns": 3.302,
+      "qevict_latency_ns": 4.349,
+      "recovery_latency_ns": 0.6407
+    }
+  },
+  "result": {
+    "outcome": "supported",
+    "reason": "QEVICT_NO_RECOVERY_BENEFIT",
+    "decision": "abstain",
+    "metrics": {
+      "ordinary_peak_bytes": 100,
+      "qevict_peak_bytes": 125,
+      "recoverable_tier_bytes": 25,
+      "recovery_read_bytes": 0,
+      "recovery_events": 0,
+      "ordinary_future_missed_mass": 0.01,
+      "qevict_future_missed_mass": 0.01,
+      "avoided_attention_drift": 0,
+      "ordinary_latency_ns": 3.302,
+      "qevict_latency_ns": 4.349,
+      "recovery_latency_ns": 0.6407,
+      "latency_overhead_ns": 1.047
+    },
+    "evidence": {
+      "capacity_and_drift": "modeled",
+      "latency": "observed",
+      "envelope": "WSL Linux amd64; AMD Ryzen 9 9950X CPU; bounded fixture only"
+    },
+    "provenance": {
+      "artifact_id": "qevict-bounded-no-reactivation-trace",
+      "artifact_version": "fixture-v1",
+      "artifact_sha256": "95a834d88ee4a33325bc065506d6559d3ad31d4a9ba65792b505c4b6f54f157b",
+      "recipe_id": "qevict/arxiv-2608.05326v1",
+      "recipe_revision": "v1",
+      "recipe_source": "https://arxiv.org/abs/2608.05326v1",
+      "runtime_id": "qevicteval/trace-replay-v1",
+      "runtime_version": "go1.26-linux-amd64"
+    }
+  }
+}

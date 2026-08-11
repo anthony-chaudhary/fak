@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: github.com/anthony-chaudhary/fak/internal/qevicteval
+cpu: AMD Ryzen 9 9950X 16-Core Processor
+BenchmarkOrdinaryEviction-16    	  100000	         3.187 ns/op
+BenchmarkOrdinaryEviction-16    	  100000	         3.072 ns/op
+BenchmarkOrdinaryEviction-16    	  100000	         3.477 ns/op
+BenchmarkOrdinaryEviction-16    	  100000	         3.381 ns/op
+BenchmarkOrdinaryEviction-16    	  100000	         3.302 ns/op
+BenchmarkQEvictReplay-16        	  100000	         4.112 ns/op
+BenchmarkQEvictReplay-16        	  100000	         4.343 ns/op
+BenchmarkQEvictReplay-16        	  100000	         4.537 ns/op
+BenchmarkQEvictReplay-16        	  100000	         4.375 ns/op
+BenchmarkQEvictReplay-16        	  100000	         4.349 ns/op
+BenchmarkRecoveryRead-16        	  100000	         0.6690 ns/op
+BenchmarkRecoveryRead-16        	  100000	         0.6407 ns/op
+BenchmarkRecoveryRead-16        	  100000	         0.7405 ns/op
+BenchmarkRecoveryRead-16        	  100000	         0.6239 ns/op
+BenchmarkRecoveryRead-16        	  100000	         0.5896 ns/op
+PASS
+ok  	github.com/anthony-chaudhary/fak/internal/qevicteval	0.072s
