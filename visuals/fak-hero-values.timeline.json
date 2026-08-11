@@ -1,0 +1,527 @@
+{
+  "totalSecs": 54.44000000000002,
+  "frames": 47,
+  "skippedUnits": 0,
+  "barMarks": 0,
+  "frameLog": [
+    {
+      "n": 1,
+      "startSecs": 0,
+      "secs": 1.13,
+      "class": "card",
+      "step": 0,
+      "line": "ONE CHECKPOINT. SIX COMPOUNDING VALUES."
+    },
+    {
+      "n": 2,
+      "startSecs": 1.13,
+      "secs": 0.28,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 3,
+      "startSecs": 1.41,
+      "secs": 1.13,
+      "class": "card",
+      "step": 0,
+      "line": "Every tool call crosses fak before it runs."
+    },
+    {
+      "n": 4,
+      "startSecs": 2.54,
+      "secs": 0.28,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 5,
+      "startSecs": 2.8200000000000003,
+      "secs": 0.28,
+      "class": "card",
+      "step": 0,
+      "line": "Reuse setup . route models . serve repeats locally"
+    },
+    {
+      "n": 6,
+      "startSecs": 3.1000000000000005,
+      "secs": 6.13,
+      "class": "card",
+      "step": 0,
+      "line": "shed stale turns . enforce capability policy . ship proof"
+    },
+    {
+      "n": 7,
+      "startSecs": 9.23,
+      "secs": 1.13,
+      "class": "card",
+      "step": 0,
+      "line": "DO THE SHARED WORK ONCE"
+    },
+    {
+      "n": 8,
+      "startSecs": 10.36,
+      "secs": 0.28,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 9,
+      "startSecs": 10.639999999999999,
+      "secs": 1.13,
+      "class": "card",
+      "step": 0,
+      "line": "Keep the provider prefix warm across a long session."
+    },
+    {
+      "n": 10,
+      "startSecs": 11.77,
+      "secs": 0.28,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 11,
+      "startSecs": 12.049999999999999,
+      "secs": 5.33,
+      "class": "card",
+      "step": 0,
+      "line": "Less repeated setup . fewer provider round trips . more useful context"
+    },
+    {
+      "n": 12,
+      "startSecs": 17.38,
+      "secs": 1.6,
+      "class": "step",
+      "step": 1,
+      "line": "-- STEP 01 . one checkpoint for every tool call"
+    },
+    {
+      "n": 13,
+      "startSecs": 18.98,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 1,
+      "line": "$ fak preflight --tool refund_payment --args '{}'"
+    },
+    {
+      "n": 14,
+      "startSecs": 19.48,
+      "secs": 0.13,
+      "class": "out",
+      "step": 1,
+      "line": "DENY  POLICY_BLOCK  refused by structure; no model in the loop"
+    },
+    {
+      "n": 15,
+      "startSecs": 19.61,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 1,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 16,
+      "startSecs": 20.16,
+      "secs": 1.6,
+      "class": "step",
+      "step": 2,
+      "line": "-- STEP 02 . useful work still flows"
+    },
+    {
+      "n": 17,
+      "startSecs": 21.76,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 2,
+      "line": "$ fak preflight --tool search_kb --args '{}'"
+    },
+    {
+      "n": 18,
+      "startSecs": 22.26,
+      "secs": 0.13,
+      "class": "out",
+      "step": 2,
+      "line": "ALLOW policy permits read-only knowledge search"
+    },
+    {
+      "n": 19,
+      "startSecs": 22.39,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 2,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 20,
+      "startSecs": 22.94,
+      "secs": 1.6,
+      "class": "step",
+      "step": 3,
+      "line": "-- STEP 03 . repeated work stays local"
+    },
+    {
+      "n": 21,
+      "startSecs": 24.540000000000003,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 3,
+      "line": "$ fak cache explain --request repeat.json"
+    },
+    {
+      "n": 22,
+      "startSecs": 25.040000000000003,
+      "secs": 0.13,
+      "class": "out",
+      "step": 3,
+      "line": "HIT   exact request served locally"
+    },
+    {
+      "n": 23,
+      "startSecs": 25.17,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 3,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 24,
+      "startSecs": 25.720000000000002,
+      "secs": 1.6,
+      "class": "step",
+      "step": 4,
+      "line": "-- STEP 04 . long sessions keep their working set"
+    },
+    {
+      "n": 25,
+      "startSecs": 27.320000000000004,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 4,
+      "line": "$ fak context plan --budget 128k"
+    },
+    {
+      "n": 26,
+      "startSecs": 27.820000000000004,
+      "secs": 0.13,
+      "class": "out",
+      "step": 4,
+      "line": "KEEP  active task + shared setup"
+    },
+    {
+      "n": 27,
+      "startSecs": 27.950000000000003,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 4,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 28,
+      "startSecs": 28.500000000000004,
+      "secs": 1.6,
+      "class": "step",
+      "step": 5,
+      "line": "-- STEP 05 . the same seam routes the right model"
+    },
+    {
+      "n": 29,
+      "startSecs": 30.100000000000005,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 5,
+      "line": "$ fak route explain --task tool-call"
+    },
+    {
+      "n": 30,
+      "startSecs": 30.600000000000005,
+      "secs": 0.13,
+      "class": "out",
+      "step": 5,
+      "line": "LOCAL fast path for known repeats"
+    },
+    {
+      "n": 31,
+      "startSecs": 30.730000000000004,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 5,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 32,
+      "startSecs": 31.280000000000005,
+      "secs": 1.6,
+      "class": "step",
+      "step": 6,
+      "line": "-- STEP 06 . proof is part of the product"
+    },
+    {
+      "n": 33,
+      "startSecs": 32.88,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 6,
+      "line": "$ fak agent --offline --selfcheck"
+    },
+    {
+      "n": 34,
+      "startSecs": 33.38,
+      "secs": 0.13,
+      "class": "out",
+      "step": 6,
+      "line": "PASS  injection ignored"
+    },
+    {
+      "n": 35,
+      "startSecs": 33.510000000000005,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 6,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 36,
+      "startSecs": 34.06,
+      "secs": 1.13,
+      "class": "card",
+      "step": 6,
+      "line": "DEFAULT DENY RIDES THE SAME SEAM"
+    },
+    {
+      "n": 37,
+      "startSecs": 35.190000000000005,
+      "secs": 0.28,
+      "class": "card",
+      "step": 6
+    },
+    {
+      "n": 38,
+      "startSecs": 35.470000000000006,
+      "secs": 1.13,
+      "class": "card",
+      "step": 6,
+      "line": "Structure can refuse a dangerous call before any model is consulted."
+    },
+    {
+      "n": 39,
+      "startSecs": 36.60000000000001,
+      "secs": 0.28,
+      "class": "card",
+      "step": 6
+    },
+    {
+      "n": 40,
+      "startSecs": 36.88000000000001,
+      "secs": 5.33,
+      "class": "card",
+      "step": 6,
+      "line": "Not a blanket block: useful permitted work still flows."
+    },
+    {
+      "n": 41,
+      "startSecs": 42.21000000000001,
+      "secs": 1.13,
+      "class": "card",
+      "step": 6,
+      "line": "CHEAPER . FASTER . CONTROLLED . WITNESSED"
+    },
+    {
+      "n": 42,
+      "startSecs": 43.34000000000001,
+      "secs": 0.28,
+      "class": "card",
+      "step": 6
+    },
+    {
+      "n": 43,
+      "startSecs": 43.62000000000001,
+      "secs": 0.28,
+      "class": "card",
+      "step": 6,
+      "line": "The performance gate is the product spine."
+    },
+    {
+      "n": 44,
+      "startSecs": 43.90000000000001,
+      "secs": 1.13,
+      "class": "card",
+      "step": 6,
+      "line": "The security floor comes along at the same checkpoint."
+    },
+    {
+      "n": 45,
+      "startSecs": 45.030000000000015,
+      "secs": 0.28,
+      "class": "card",
+      "step": 6
+    },
+    {
+      "n": 46,
+      "startSecs": 45.31000000000002,
+      "secs": 6.13,
+      "class": "card",
+      "step": 6,
+      "line": "github.com/anthony-chaudhary/fak"
+    },
+    {
+      "n": 47,
+      "startSecs": 51.44000000000002,
+      "secs": 3,
+      "class": "tail",
+      "step": 6
+    }
+  ],
+  "segments": [
+    {
+      "index": 0,
+      "kind": "card",
+      "startSecs": 0,
+      "secs": 9.23,
+      "title": "FAK . THE AGENT KERNEL"
+    },
+    {
+      "index": 1,
+      "kind": "card",
+      "startSecs": 9.23,
+      "secs": 8.149999999999999,
+      "title": "THE PERFORMANCE GATE"
+    },
+    {
+      "index": 2,
+      "kind": "replay",
+      "startSecs": 17.38,
+      "secs": 16.680000000000003,
+      "title": "capture.typescript"
+    },
+    {
+      "index": 3,
+      "kind": "card",
+      "startSecs": 34.06,
+      "secs": 8.150000000000006,
+      "title": "THE SECURITY FLOOR"
+    },
+    {
+      "index": 4,
+      "kind": "card",
+      "startSecs": 42.21000000000001,
+      "secs": 9.230000000000011,
+      "title": "ONE KERNEL. LONGER-RUNNING AGENTS."
+    }
+  ],
+  "steps": [
+    {
+      "title": "-- STEP 01 . one checkpoint for every tool call",
+      "startSecs": 17.38,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 02 . useful work still flows",
+      "startSecs": 20.16,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 03 . repeated work stays local",
+      "startSecs": 22.94,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 04 . long sessions keep their working set",
+      "startSecs": 25.720000000000002,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 05 . the same seam routes the right model",
+      "startSecs": 28.500000000000004,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 06 . proof is part of the product",
+      "startSecs": 31.280000000000005,
+      "secs": 2.7799999999999976,
+      "frames": 16
+    }
+  ],
+  "chapters": [
+    {
+      "startSecs": 0,
+      "endSecs": 9.23,
+      "title": "FAK . THE AGENT KERNEL"
+    },
+    {
+      "startSecs": 9.23,
+      "endSecs": 17.38,
+      "title": "THE PERFORMANCE GATE"
+    },
+    {
+      "startSecs": 17.38,
+      "endSecs": 20.16,
+      "title": "-- STEP 01 . one checkpoint for every tool call"
+    },
+    {
+      "startSecs": 20.16,
+      "endSecs": 22.94,
+      "title": "-- STEP 02 . useful work still flows"
+    },
+    {
+      "startSecs": 22.94,
+      "endSecs": 25.720000000000002,
+      "title": "-- STEP 03 . repeated work stays local"
+    },
+    {
+      "startSecs": 25.720000000000002,
+      "endSecs": 28.500000000000004,
+      "title": "-- STEP 04 . long sessions keep their working set"
+    },
+    {
+      "startSecs": 28.500000000000004,
+      "endSecs": 31.280000000000005,
+      "title": "-- STEP 05 . the same seam routes the right model"
+    },
+    {
+      "startSecs": 31.280000000000005,
+      "endSecs": 34.06,
+      "title": "-- STEP 06 . proof is part of the product"
+    },
+    {
+      "startSecs": 34.06,
+      "endSecs": 42.21000000000001,
+      "title": "THE SECURITY FLOOR"
+    },
+    {
+      "startSecs": 42.21000000000001,
+      "endSecs": 54.44000000000002,
+      "title": "ONE KERNEL. LONGER-RUNNING AGENTS."
+    }
+  ],
+  "notableHolds": null,
+  "unitsByClass": {
+    "card": 22,
+    "cmd": 6,
+    "out": 6,
+    "rc": 6,
+    "step": 6,
+    "tail": 1
+  },
+  "secsByClass": {
+    "card": 34.760000000000005,
+    "cmd": 3,
+    "out": 0.78,
+    "rc": 3.3,
+    "step": 9.6,
+    "tail": 3
+  },
+  "minDwellByClass": {
+    "card": 0.28,
+    "cmd": 0.5,
+    "out": 0.13,
+    "rc": 0.55,
+    "step": 1.6,
+    "tail": 3
+  }
+}
