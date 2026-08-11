@@ -59,3 +59,18 @@ forbidden `agent kernel` / `compute kernel` distinction.
 
 These are reader-side admission checks over the same public index. They add no
 writer, filesystem access, network access, or private dependency.
+
+## Fuzzing the public read seams
+
+The normal Go test gate discovers five native fuzz targets in `fuzz_test.go`:
+`FuzzParseEntryMalformed`, `FuzzContrastGraphCycles`,
+`FuzzDuplicateIdentities`, `FuzzUnicodeConfusables`, and
+`FuzzPathologicalAliasSets`. Their deterministic seed corpus runs during every
+ordinary `go test`; bounded mutation can be invoked with, for example,
+`go test ./internal/disambiguation -run '^$' -fuzz FuzzUnicodeConfusables -fuzztime 5s`.
+
+The targets import the package externally (`disambiguation_test`) and exercise
+only the exported `ParseEntry`, `Entry.Validate`, `NewIndex`, and `Resolve`
+seams. They add no corpus writer, generated index, filesystem/network access, or
+private-source dependency. Alias and graph inputs are bounded so a routine fuzz
+smoke cannot turn cardinality or string width into an accidental resource test.
