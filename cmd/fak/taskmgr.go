@@ -451,6 +451,7 @@ func runTaskQueue(stdout, stderr io.Writer, argv []string) int {
 		issueData, err = os.ReadFile(issuesFile)
 	} else {
 		cmd := exec.Command("gh", "issue", "list", "--state", "all", "--limit", "1000", "--json", "number,title,state,body,labels,milestone")
+		configureDispatchHelperCommand(cmd)
 		issueData, err = cmd.Output()
 	}
 	if err != nil {
@@ -467,7 +468,9 @@ func runTaskQueue(stdout, stderr io.Writer, argv []string) int {
 	if attemptsFile != "" {
 		attemptData, err = os.ReadFile(attemptsFile)
 	} else {
-		attemptData, err = exec.Command("dos", "lease-lane", "live").Output()
+		cmd := exec.Command("dos", "lease-lane", "live")
+		configureDispatchHelperCommand(cmd)
+		attemptData, err = cmd.Output()
 	}
 	if err != nil && attemptsFile != "" {
 		fmt.Fprintf(stderr, "fak task queue: read attempts: %v\n", err)

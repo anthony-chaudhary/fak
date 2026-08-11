@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func TestTaskSampleJSON(t *testing.T) {
@@ -112,5 +113,16 @@ func TestTaskQueueCapturedRenderAndJSONDrilldown(t *testing.T) {
 	code = runTask(&stdout, &stderr, []string{"queue", "--json", "--issues-json", issuesPath, "--attempts-json", attemptsPath})
 	if code != 0 || !strings.Contains(stdout.String(), `"pid": 4242`) || !strings.Contains(stdout.String(), `"durable_state": "ready"`) {
 		t.Fatalf("json drilldown code=%d stderr=%s out=%s", code, stderr.String(), stdout.String())
+	}
+}
+
+func TestTaskQueueSuppressesBackgroundHelperWindows(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	rep, err := windowgate.ScanFiles(root, []string{"cmd/fak/taskmgr.go"})
+	if err != nil {
+		t.Fatalf("scan task queue helpers: %v", err)
+	}
+	if len(rep.GoExecs) != 0 {
+		t.Fatalf("task queue helper can flash a Windows console: %v", rep.GoExecs)
 	}
 }
