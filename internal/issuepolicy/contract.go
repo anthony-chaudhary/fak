@@ -236,12 +236,26 @@ type AgentContext struct {
 }
 
 // Review is the closed-vocabulary verdict over a Candidate.
+type BriefField struct {
+	Status       string `json:"status"`
+	Reason       string `json:"reason,omitempty"`
+	RepairAction string `json:"repair_action,omitempty"`
+}
+
+type BriefReadiness struct {
+	Ready         bool                  `json:"ready"`
+	Enforced      bool                  `json:"enforced"`
+	Fields        map[string]BriefField `json:"fields"`
+	RepairActions []string              `json:"repair_actions,omitempty"`
+}
+
 type Review struct {
 	Schema            string                   `json:"schema"`
 	OK                bool                     `json:"ok"`
 	Verdict           string                   `json:"verdict"`
 	Dispatchability   string                   `json:"dispatchability"`
 	Reasons           []string                 `json:"reasons,omitempty"`
+	BriefReadiness    BriefReadiness           `json:"brief_readiness"`
 	MissingFields     []string                 `json:"missing_fields,omitempty"`
 	MissingSections   []string                 `json:"missing_sections,omitempty"`
 	IssueNumber       int                      `json:"issue_number,omitempty"`
@@ -445,6 +459,14 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 	candidate := CandidateFromIssueDraft(d)
 	review := ReviewCandidate(candidate, opt)
+	review.BriefReadiness = assessIssueBrief(d, candidate)
+	if review.BriefReadiness.Enforced && !review.BriefReadiness.Ready {
+		review.OK = false
+		if review.Dispatchability == Dispatchable {
+			review.Verdict = "needs_brief"
+			review.Dispatchability = TriageOnly
+		}
+	}
 	if missingSections := missingRequiredIssueSections(d.Body, candidate); len(missingSections) > 0 {
 		review.OK = false
 		review.MissingSections = missingSections

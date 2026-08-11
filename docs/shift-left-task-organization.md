@@ -65,6 +65,22 @@ fak issue fanout --title <T> --leaf <L> --spine <sha|cmd|doc> --json
 
 The exact available verbs evolve; `fak help --all` is authoritative. The invariant is stable: **classify and validate before dispatch**.
 
+### Machine readiness read-back
+
+`fak issue contract --file CANDIDATE.json --json` and `--from-issues ISSUES.json
+--json` identify schema `fak-task-brief-readiness/1`. Each review's
+`brief_readiness.fields` object reports `outcome`, `scope`, `dependencies`,
+`acceptance`, `witness`, and `placement` as exactly one of:
+
+- `present`;
+- `unknown` with a non-empty `reason`; or
+- `missing` with a concrete `repair_action`.
+
+For the copyable brief above, any `missing` field makes the leaf non-ready and the
+review verdict `needs_brief`. Existing issue contracts that predate this vocabulary
+remain compatible (`brief_readiness.enforced=false`) until migrated; once a brief uses
+`Scope / tree`, `Witness / proof`, or `Placement`, all six fields are enforced.
+
 ## Shift-left checklist for new work
 
 1. **Name the outcome.** Prefer a user/operator effect over a component noun.

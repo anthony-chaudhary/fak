@@ -69,6 +69,7 @@ type issueContractResult struct {
 	CoordinationGroups  []issueContractAgentNoteGroup    `json:"coordination_groups,omitempty"`
 	TemplateRepairPlans []issuepolicy.TemplateRepairPlan `json:"template_repair_plans,omitempty"`
 	Reviews             []issuepolicy.Review             `json:"reviews"`
+	ReadinessSchema     string                           `json:"readiness_schema"`
 }
 
 type issueContractCounts struct {
@@ -205,10 +206,11 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	result := issueContractResult{
-		Schema: "fak.issue-contract-result.v1",
-		Mode:   mode,
-		File:   path,
-		OK:     true,
+		Schema:          "fak.issue-contract-result.v1",
+		Mode:            mode,
+		File:            path,
+		ReadinessSchema: issuepolicy.TaskBriefSchema,
+		OK:              true,
 	}
 	opts := issuepolicy.Options{
 		Live:              *live,
@@ -1232,6 +1234,9 @@ func issueUsage(w io.Writer) {
   fak-dev issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
                      [--strict-model-tier] [--strict-scale]
+                     JSON reviews include brief_readiness: ready/enforced plus outcome,
+                     scope, dependencies, acceptance, witness, and placement fields;
+                     each field is present, unknown(reason), or missing with repair_action.
   fak-dev issue cohort   --from-plan PLAN.json [--json]
   fak-dev issue cohort   --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]

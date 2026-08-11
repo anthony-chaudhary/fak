@@ -100,6 +100,28 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 	}
 }
 
+func TestIssueContractJSONIncludesShiftLeftReadinessSchema(t *testing.T) {
+	body := "## Outcome\n\ntyped readiness\n\n## Scope / tree\n\ninternal/issuepolicy/**\n\n## Dependencies\n\nnone\n\n## Acceptance\n\nJSON fields are typed\n\n## Witness / proof\n\nfocused test\n\n## Placement\n\ngen/now, P1, issuecontract lane\n"
+	payload, _ := json.Marshal([]issuepolicy.IssueDraft{{Number: 6421, Title: "validate briefs", Body: body}})
+	path := filepath.Join(t.TempDir(), "issues.json")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	// This intentionally minimal issue is not a complete legacy dispatch contract,
+	// so the command exits 3 while still returning the readiness read-back.
+	if code := RunIssue(&stdout, &stderr, []string{"contract", "--from-issues", path, "--json"}); code != 3 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got issueContractResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ReadinessSchema != issuepolicy.TaskBriefSchema || !got.Reviews[0].BriefReadiness.Ready || !got.Reviews[0].BriefReadiness.Enforced {
+		t.Fatalf("result=%+v", got)
+	}
+}
+
 func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 	c := completeIssueCandidate()
 	c.OutOfScope = ""
