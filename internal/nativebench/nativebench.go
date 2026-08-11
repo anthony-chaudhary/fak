@@ -76,11 +76,12 @@ type Report struct {
 	Complete  bool       `json:"complete"`
 }
 
-var leafClassifications = []LeafClassification{{
-	Leaf: "internal/cachesweep", Disposition: DispositionMultiCapability,
-	Capabilities: []string{"prefix_cache_budget_sweep"},
-	Reason:       "native prefix-access trace replay across cache budgets with infinite-cache ceiling and ROI knee",
-},
+var leafClassifications = []LeafClassification{{Leaf: "internal/blastradius", Disposition: DispositionCapability, Capabilities: []string{"dependency_blast_radius_lease_issue_intersection"}, Reason: "reverse dependency blast radius intersected with live lease trees and queued issue paths"},
+	{
+		Leaf: "internal/cachesweep", Disposition: DispositionMultiCapability,
+		Capabilities: []string{"prefix_cache_budget_sweep"},
+		Reason:       "native prefix-access trace replay across cache budgets with infinite-cache ceiling and ROI knee",
+	},
 	{
 		Leaf: "internal/guardroute", Disposition: DispositionCapability,
 		Capabilities: []string{"guard_journal_action_routing"},
@@ -352,19 +353,20 @@ var leafClassifications = []LeafClassification{{
 	},
 }
 
-var contracts = []Contract{{
-	Capability: "prefix_cache_budget_sweep",
-	NativePath: "internal/cachesweep/cachesweep.go",
-	Workload:   "same timestamped exact-prefix and divergent-child trace, finite token budgets, unbounded ceiling, write-delay overlay, token-cost assumptions, eviction semantics, and independent reuse oracle across every arm",
-	Metrics:    []string{"hit_correctness", "reuse_ratio", "reused_tokens", "evictions", "roi_knee_error", "simulation_latency_ms", "throughput_accesses_per_second", "cpu_seconds", "peak_rss_bytes", "storage_bytes", "network_bytes", "total_cost"},
-	Alternatives: []Alternative{
-		{Name: "no prefix cache", Class: TunedBaseline, Source: "internal/cachesweep/compare.go"},
-		{Name: "libCacheSim", Class: NextBest, Source: "https://github.com/1a1a11a/libCacheSim"},
-		{Name: "Caffeine simulator", Class: NextBest, Source: "https://github.com/ben-manes/caffeine/wiki/Simulator"},
-		{Name: "Redis or Valkey maxmemory policies", Class: NextBest, Source: "https://redis.io/docs/latest/develop/reference/eviction/"},
+var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_intersection", NativePath: "internal/blastradius/blastradius.go", Workload: "same broken package, reverse dependency graph, lease trees, queued issue paths, and exact affected/excluded oracle", Metrics: []string{"radius_precision", "radius_recall", "lease_hold_precision", "lease_hold_recall", "issue_hold_precision", "issue_hold_recall", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "broken-tree intersection only", Class: TunedBaseline, Source: "internal/blastradius/compare.go"}, {Name: "DOS leases", Class: FirstClassIntegration, Integration: "dos", Source: "internal/blastradius/compare.go"}, {Name: "Bazel query reverse dependencies", Class: NextBest, Source: "https://bazel.build/query/guide"}, {Name: "Pants dependents", Class: NextBest, Source: "https://www.pantsbuild.org"}, {Name: "Nx affected graph", Class: NextBest, Source: "https://nx.dev"}, {Name: "Kubernetes Lease impact labels", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"}}, Witness: "../../docs/benchmarks/BLAST-RADIUS-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"}},
+	{
+		Capability: "prefix_cache_budget_sweep",
+		NativePath: "internal/cachesweep/cachesweep.go",
+		Workload:   "same timestamped exact-prefix and divergent-child trace, finite token budgets, unbounded ceiling, write-delay overlay, token-cost assumptions, eviction semantics, and independent reuse oracle across every arm",
+		Metrics:    []string{"hit_correctness", "reuse_ratio", "reused_tokens", "evictions", "roi_knee_error", "simulation_latency_ms", "throughput_accesses_per_second", "cpu_seconds", "peak_rss_bytes", "storage_bytes", "network_bytes", "total_cost"},
+		Alternatives: []Alternative{
+			{Name: "no prefix cache", Class: TunedBaseline, Source: "internal/cachesweep/compare.go"},
+			{Name: "libCacheSim", Class: NextBest, Source: "https://github.com/1a1a11a/libCacheSim"},
+			{Name: "Caffeine simulator", Class: NextBest, Source: "https://github.com/ben-manes/caffeine/wiki/Simulator"},
+			{Name: "Redis or Valkey maxmemory policies", Class: NextBest, Source: "https://redis.io/docs/latest/develop/reference/eviction/"},
+		},
+		Witness: "../../docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
 	},
-	Witness: "../../docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
-},
 	{
 		Capability: "guard_journal_action_routing", NativePath: "internal/guardroute/guardroute.go", Workload: "same empty, structural-anomaly, below-threshold reason, and at-threshold reason journal folds with exact no-op, finding, or issue action oracle",
 		Metrics:      []string{"action_accuracy", "false_routes", "missed_routes", "severity_accuracy", "latency_ms", "throughput_folds_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"},
