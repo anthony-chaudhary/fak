@@ -523,11 +523,14 @@ var tier = map[string]int{
 	"lightgapport":          1,
 	"kvquantmeta":           1,
 	"quantdetect":           1,
+	"requanteval":           1,
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
 	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
 	"quantlicense":          1, // stdlib-only license-chain contract and evidence gate.
 	"codebookmeta":          1, // stdlib-only quantization codebook metadata and adjudication; no model kernel.
 	"mixedprecision":        1, // layerwise mixed-precision assignment and evidence contract; no runtime kernel.
+	"residualquant":         1, // stdlib-only RRQ metadata/research adjudication; no model kernel.
+	"rotationmeta":          1, // stdlib-only rotation-transform metadata and runtime capability adjudication; no model kernel.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
