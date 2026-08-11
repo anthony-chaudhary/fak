@@ -1,7 +1,9 @@
 package testroute
 
 import (
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -27,10 +29,12 @@ func TestDecide(t *testing.T) {
 			template: []string{"go", "test", ArgsPlaceholder},
 		},
 		{
-			name:     "ci fallback",
-			probe:    Probe{GOOS: "windows", NativeTestAllowed: false, WSLPresent: false, CIReachable: true},
-			kind:     KindCI,
-			template: []string{"gh", "workflow", "run", "ci.yml", ArgsPlaceholder},
+			name:  "ci fallback",
+			probe: Probe{GOOS: "windows", NativeTestAllowed: false, WSLPresent: false, CIReachable: true},
+			kind:  KindCI,
+			template: []string{
+				"gh", "workflow", "run", "ci.yml", "--ref", "main", "-f", "go_test_args_json=" + CIArgsJSONPlaceholder,
+			},
 		},
 		{
 			name:     "unavailable",
@@ -61,5 +65,39 @@ func TestCommandExpandsPlaceholder(t *testing.T) {
 	want := []string{"powershell", "-File", "test.ps1", "-short", "./..."}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %v, want %v", got, want)
+	}
+}
+
+func TestCIOnlyRouteMatchesDispatchContract(t *testing.T) {
+	route := Decide(Probe{GOOS: "windows", CIReachable: true})
+	got := Command(route.CommandTemplate, []string{"-run", "TestName with spaces", "./internal/testroute"})
+	want := []string{
+		"gh", "workflow", "run", "ci.yml", "--ref", "main", "-f",
+		`go_test_args_json=["-run","TestName with spaces","./internal/testroute"]`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+
+	workflowPath := os.Getenv("TESTROUTE_CI_WORKFLOW")
+	if workflowPath == "" {
+		workflowPath = "../../.github/workflows/ci.yml"
+	}
+	workflowBytes, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(workflowBytes)
+	for _, required := range []string{
+		"workflow_dispatch:",
+		"go_test_args_json:",
+		"testroute-ci-only:",
+		"runs-on: ubuntu-24.04",
+		`GO_TEST_ARGS_JSON: ${{ inputs.go_test_args_json }}`,
+		`go test "${go_test_args[@]}"`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("ci.yml lacks executable CI-only route contract %q", required)
+		}
 	}
 }

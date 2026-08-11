@@ -1,5 +1,7 @@
 package testroute
 
+import "encoding/json"
+
 // Kind is the closed set of test execution routes the environment preflight can
 // recommend without doing any probing itself.
 type Kind string
@@ -11,7 +13,10 @@ const (
 	KindUnavailable Kind = "unavailable"
 )
 
-const ArgsPlaceholder = "{go_test_args}"
+const (
+	ArgsPlaceholder       = "{go_test_args}"
+	CIArgsJSONPlaceholder = "{go_test_args_json}"
+)
 
 // Probe is the caller-supplied host evidence. It is deliberately data-only: this
 // package never shells out, checks PATH, reaches the network, or reads the host.
@@ -23,7 +28,7 @@ type Probe struct {
 }
 
 // Route is the pure routing decision. CommandTemplate names the command prefix and
-// includes ArgsPlaceholder where the caller should splice the resolved go-test args.
+// includes an argument placeholder where Command should splice the go-test args.
 type Route struct {
 	Kind            Kind     `json:"kind"`
 	CommandTemplate []string `json:"command_template"`
@@ -50,9 +55,11 @@ func Decide(p Probe) Route {
 	}
 	if p.CIReachable {
 		return Route{
-			Kind:            KindCI,
-			CommandTemplate: []string{"gh", "workflow", "run", "ci.yml", ArgsPlaceholder},
-			Reason:          "local test routes unavailable; use CI as the fallback witness",
+			Kind: KindCI,
+			CommandTemplate: []string{
+				"gh", "workflow", "run", "ci.yml", "--ref", "main", "-f", "go_test_args_json=" + CIArgsJSONPlaceholder,
+			},
+			Reason: "local test routes unavailable; use CI as the fallback witness",
 		}
 	}
 	return Route{
@@ -62,15 +69,23 @@ func Decide(p Probe) Route {
 	}
 }
 
-// Command expands a route template by replacing ArgsPlaceholder with args.
+// Command expands a route template. Native and WSL routes receive args as separate
+// argv entries. The CI route receives one JSON-array workflow input so arguments
+// survive dispatch without shell interpolation.
 func Command(template, args []string) []string {
+	encoded, _ := json.Marshal(args) // []string is always JSON-encodable.
 	out := make([]string, 0, len(template)+len(args))
 	for _, part := range template {
-		if part == ArgsPlaceholder {
+		switch {
+		case part == ArgsPlaceholder:
 			out = append(out, args...)
-			continue
+		case part == CIArgsJSONPlaceholder:
+			out = append(out, string(encoded))
+		case len(part) >= len(CIArgsJSONPlaceholder) && part[len(part)-len(CIArgsJSONPlaceholder):] == CIArgsJSONPlaceholder:
+			out = append(out, part[:len(part)-len(CIArgsJSONPlaceholder)]+string(encoded))
+		default:
+			out = append(out, part)
 		}
-		out = append(out, part)
 	}
 	return out
 }
