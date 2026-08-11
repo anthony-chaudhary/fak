@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Windows unexpected restart incident — 2026-08-10](docs/notes/INCIDENT-WINDOWS-UNEXPECTED-RESTART-2026-08-10.md) -- auto-indexed dated note.
 - [Windows Terminal pressure relief](docs/notes/WINDOWS-TERMINAL-PRESSURE-RELIEF-2026-08-11.md) -- auto-indexed dated note.
 - [FakStallscanWatch — retained pre-crash evidence](docs/notes/STALLSCAN-PRECRASH-WATCH-2026-08-10.md) -- auto-indexed dated note.
 - [Continuous generation control: trajectory, epoch, and steering point](docs/notes/CONTINUOUS-GENERATION-CONTROL-2026-08-10.md) -- auto-indexed dated note.
