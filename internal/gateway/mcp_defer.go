@@ -59,11 +59,15 @@ type MCPToolFilterStatus struct {
 // recovery tool is hidden, no cold tail exists, or emergency ablation is set:
 // a bad optimization must cost tokens, never capabilities.
 func (s *Server) toolsListView() ([]map[string]any, MCPToolFilterStatus) {
+	return s.toolsListViewWithAblation(envEnabled("FAK_ABLATE_MCP_TOOL_FILTER"))
+}
+
+func (s *Server) toolsListViewWithAblation(ablate bool) ([]map[string]any, MCPToolFilterStatus) {
 	full := s.exposedToolDescriptors()
 	resident := full
 	status := MCPToolFilterStatus{Mode: "bypass", Reason: "ablation"}
 
-	if !envEnabled("FAK_ABLATE_MCP_TOOL_FILTER") {
+	if !ablate {
 		hasRecovery := false
 		for _, td := range full {
 			if td["name"] == "fak_tools_search" {
@@ -90,6 +94,13 @@ func (s *Server) toolsListView() ([]map[string]any, MCPToolFilterStatus) {
 	status.DescriptorBytesAfter = len(after)
 	status.SavedBytes = len(before) - len(after)
 	return resident, status
+}
+
+// MCPToolListSnapshot returns the public tools/list view and its aggregate
+// receipt for an explicitly selected A/B arm. It does not mutate process
+// environment, and the descriptors are the same public data served over MCP.
+func (s *Server) MCPToolListSnapshot(fullListControl bool) ([]map[string]any, MCPToolFilterStatus) {
+	return s.toolsListViewWithAblation(fullListControl)
 }
 
 // MCPToolFilterStatusSnapshot reports the same privacy-safe receipt emitted on

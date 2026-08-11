@@ -1,0 +1,95 @@
+{
+  "schema": "fak-native-mcp-filter-live-proof/1",
+  "verdict": "NOT_YET",
+  "provider": "openai-compatible",
+  "model": "llama-3.1-8b-instant",
+  "active": {
+    "mode": "active",
+    "reason": "default_on",
+    "tasks": [
+      {
+        "id": "memory",
+        "required_tool": "fak_memory_drivers",
+        "first_call": "fak_tools_search",
+        "first_call_success": true,
+        "search_used": true,
+        "search_hit": true,
+        "success": false,
+        "failure": "no_post_search_tool_call"
+      },
+      {
+        "id": "context",
+        "required_tool": "fak_context_change",
+        "first_call_success": false,
+        "search_used": false,
+        "search_hit": false,
+        "success": false,
+        "failure": "provider_rejected_tool_call"
+      },
+      {
+        "id": "features",
+        "required_tool": "fak_feature_query",
+        "first_call": "fak_tools_search",
+        "first_call_success": true,
+        "search_used": true,
+        "search_hit": false,
+        "success": false,
+        "failure": "invalid_search_arguments"
+      }
+    ],
+    "task_success_rate": 0,
+    "search_recall": 0.3333333333333333,
+    "first_call_success": 0.6666666666666666,
+    "tools_before": 19,
+    "tools_after": 4,
+    "descriptor_bytes_before": 20164,
+    "descriptor_bytes_after": 3911,
+    "saved_descriptor_bytes": 16253,
+    "bail_reasons": null
+  },
+  "control": {
+    "mode": "bypass",
+    "reason": "ablation",
+    "tasks": [
+      {
+        "id": "memory",
+        "required_tool": "fak_memory_drivers",
+        "first_call_success": false,
+        "search_used": false,
+        "search_hit": false,
+        "success": false,
+        "failure": "provider_request_failed"
+      },
+      {
+        "id": "context",
+        "required_tool": "fak_context_change",
+        "first_call_success": false,
+        "search_used": false,
+        "search_hit": false,
+        "success": false,
+        "failure": "provider_request_failed"
+      },
+      {
+        "id": "features",
+        "required_tool": "fak_feature_query",
+        "first_call_success": false,
+        "search_used": false,
+        "search_hit": false,
+        "success": false,
+        "failure": "provider_request_failed"
+      }
+    ],
+    "task_success_rate": 0,
+    "search_recall": 0,
+    "first_call_success": 0,
+    "tools_before": 19,
+    "tools_after": 19,
+    "descriptor_bytes_before": 20164,
+    "descriptor_bytes_after": 20164,
+    "saved_descriptor_bytes": 0,
+    "bail_reasons": null
+  },
+  "security_parity_confirmed": true,
+  "rollback": "FAK_ABLATE_MCP_TOOL_FILTER=1",
+  "note": "Held synthetic tool-selection tasks; success means the model selected the required real MCP route, not that a side-effecting tool was executed."
+}
