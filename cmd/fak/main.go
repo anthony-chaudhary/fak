@@ -67,6 +67,8 @@ func main() {
 		cmdAPIHost(os.Args[2:])
 	case "question-ledger":
 		cmdQuestionLedger(os.Args[2:])
+	case "disambiguation":
+		cmdDisambiguation(os.Args[2:])
 	case "trunk-build-probe":
 		cmdTrunkBuildProbe(os.Args[2:])
 	case "godsplit-plan":

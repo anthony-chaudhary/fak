@@ -2381,6 +2381,11 @@
           "category": "incidental",
           "reason": "Issue 6260 record-integrity field/helper, not a new proof protocol.",
           "token": "witnessDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Hermetic fixture reason code, not a public proof concept",
+          "token": "SOURCE_WITNESSED"
         }
       ],
       "id": "witness-proof",
@@ -2403,6 +2408,7 @@
         "REVOCABLE",
         "ReceiptsDigest",
         "ResolutionUnwitnessed",
+        "SOURCE_WITNESSED",
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
@@ -3011,6 +3017,11 @@
           "category": "incidental",
           "reason": "experiment report row type, not a reusable policy capability",
           "token": "naturalPolicySummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Schema enum type name, not a public capability concept",
+          "token": "RolloutPosture"
         }
       ],
       "exclude": [
@@ -3039,6 +3050,7 @@
         "RetryPolicy",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
+        "RolloutPosture",
         "RunCIPreflight",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
