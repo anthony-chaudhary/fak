@@ -520,8 +520,9 @@ var tier = map[string]int{
 	"cudaarch":              1, // deterministic CUDA architecture compatibility matrix; stdlib-only pure parser/renderer.
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
-	"kvquantmeta": 1,
-	"quantdetect": 1,
+	"kvquantmeta":           1,
+	"quantdetect":           1,
+	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
