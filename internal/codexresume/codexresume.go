@@ -21,6 +21,10 @@ const (
 	OutcomeExited                Outcome = "process_exited"
 	OutcomeCompleted             Outcome = "completed"
 	OutcomeCompletedReclaimed    Outcome = "completed_process_reclaimed"
+	OutcomeTurnFailed            Outcome = "turn_failed"
+	OutcomeTurnFailedReclaimed   Outcome = "turn_failed_process_reclaimed"
+	OutcomeRefused               Outcome = "resume_refused"
+	OutcomeCheckOnly             Outcome = "check_only"
 	OutcomeExplicitCancelled     Outcome = "explicit_cancelled"
 	OutcomeUpstreamInterrupted   Outcome = "upstream_interrupted"
 	OutcomeStalledBeforeTerminal Outcome = "process_stalled_before_terminal"
@@ -41,19 +45,36 @@ type Config struct {
 
 // Result is safe to serialize: it contains no prompt, command, or transcript body.
 type Result struct {
-	Outcome       Outcome `json:"outcome"`
-	ProcessExit   bool    `json:"process_exit"`
-	ExitCode      int     `json:"exit_code,omitempty"`
-	TaskStarted   bool    `json:"task_started"`
-	UsefulWork    bool    `json:"useful_work_reached"`
-	TaskCompleted bool    `json:"task_completed"`
-	Interrupted   bool    `json:"interrupted"`
-	ForcedReclaim bool    `json:"forced_reclaim"`
-	DurationMS    int64   `json:"duration_ms"`
+	ThreadID          string           `json:"thread_id,omitempty"`
+	Preflight         *PreflightResult `json:"preflight,omitempty"`
+	Outcome           Outcome          `json:"outcome"`
+	ProcessExit       bool             `json:"process_exit"`
+	ExitCode          int              `json:"exit_code,omitempty"`
+	LaunchPID         int              `json:"launch_pid"`
+	TurnID            string           `json:"turn_id,omitempty"`
+	TurnStatus        string           `json:"turn_status,omitempty"`
+	TurnError         *TurnError       `json:"turn_error,omitempty"`
+	TaskStarted       bool             `json:"task_started"`
+	UsefulWork        bool             `json:"useful_work_reached"`
+	TaskCompleted     bool             `json:"task_completed"`
+	Interrupted       bool             `json:"interrupted"`
+	ForcedReclaim     bool             `json:"forced_reclaim"`
+	WriterLockCleanup string           `json:"writer_lock_cleanup,omitempty"`
+	DurationMS        int64            `json:"duration_ms"`
 }
 
 type rolloutState struct {
-	started, useful, completed, interrupted bool
+	started, useful, completed, failed, terminal, interrupted bool
+	turnID                                                    string
+	turnError                                                 *TurnError
+}
+
+// TurnError is the provider-authored terminal error attached to task_complete.
+// It deliberately carries no prompt, command, or transcript body.
+type TurnError struct {
+	Type    string `json:"type,omitempty"`
+	Message string `json:"message"`
+	Status  int    `json:"status,omitempty"`
 }
 
 // Run launches exactly one process and trusts the append-only rollout terminal,
@@ -99,6 +120,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err := cmd.Start(); err != nil {
 		return Result{}, fmt.Errorf("codexresume: start: %w", err)
 	}
+	launchPID := cmd.Process.Pid
 	var copies sync.WaitGroup
 	copies.Add(2)
 	go func() { defer copies.Done(); _, _ = io.Copy(writerOrDiscard(cfg.Stdout), stdout) }()
@@ -111,7 +133,11 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	var state rolloutState
-	finish := func(r Result) Result { r.DurationMS = time.Since(startedAt).Milliseconds(); return r }
+	finish := func(r Result) Result {
+		r.LaunchPID = launchPID
+		r.DurationMS = time.Since(startedAt).Milliseconds()
+		return r
+	}
 	for {
 		select {
 		case waitErr := <-exitCh:
@@ -122,11 +148,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			if cmd.ProcessState != nil {
 				r.ExitCode = cmd.ProcessState.ExitCode()
 			}
-			if state.completed {
-				r.Outcome = OutcomeCompleted
-			} else {
-				r.Outcome = OutcomeExited
-			}
+			r.Outcome = outcomeFromState(state, false)
 			if waitErr != nil && r.ExitCode == 0 {
 				return finish(r), waitErr
 			}
@@ -138,7 +160,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 				_ = killOwnedProcessTree(cmd)
 				return Result{}, scanErr
 			}
-			if state.completed {
+			if state.terminal {
 				t := time.NewTimer(cfg.Drain)
 				select {
 				case waitErr := <-exitCh:
@@ -146,7 +168,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 					copies.Wait()
 					r := resultFromState(state)
 					r.ProcessExit = true
-					r.Outcome = OutcomeCompleted
+					r.Outcome = outcomeFromState(state, false)
 					if cmd.ProcessState != nil {
 						r.ExitCode = cmd.ProcessState.ExitCode()
 					}
@@ -159,7 +181,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 					<-exitCh
 					copies.Wait()
 					r := resultFromState(state)
-					r.Outcome = OutcomeCompletedReclaimed
+					r.Outcome = outcomeFromState(state, true)
 					r.ForcedReclaim = true
 					return finish(r), nil
 				case <-ctx.Done():
@@ -195,7 +217,43 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 }
 
 func resultFromState(s rolloutState) Result {
-	return Result{TaskStarted: s.started, UsefulWork: s.useful, TaskCompleted: s.completed, Interrupted: s.interrupted}
+	status := ""
+	switch {
+	case s.completed:
+		status = "completed"
+	case s.failed:
+		status = "failed"
+	case s.interrupted:
+		status = "interrupted"
+	case s.started:
+		status = "running"
+	}
+	return Result{
+		TurnID:        s.turnID,
+		TurnStatus:    status,
+		TurnError:     s.turnError,
+		TaskStarted:   s.started,
+		UsefulWork:    s.useful,
+		TaskCompleted: s.completed,
+		Interrupted:   s.interrupted,
+	}
+}
+
+func outcomeFromState(s rolloutState, reclaimed bool) Outcome {
+	switch {
+	case s.completed && reclaimed:
+		return OutcomeCompletedReclaimed
+	case s.completed:
+		return OutcomeCompleted
+	case s.failed && reclaimed:
+		return OutcomeTurnFailedReclaimed
+	case s.failed:
+		return OutcomeTurnFailed
+	case s.interrupted:
+		return OutcomeUpstreamInterrupted
+	default:
+		return OutcomeExited
+	}
 }
 func writerOrDiscard(w io.Writer) io.Writer {
 	if w == nil {
@@ -225,8 +283,13 @@ func scanRollout(path string, offset int64) (rolloutState, error) {
 	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for sc.Scan() {
 		var row struct {
-			Type    string                        `json:"type"`
-			Payload struct{ Type, Reason string } `json:"payload"`
+			Type    string `json:"type"`
+			Payload struct {
+				Type   string          `json:"type"`
+				Reason string          `json:"reason"`
+				TurnID string          `json:"turn_id"`
+				Error  json.RawMessage `json:"error"`
+			} `json:"payload"`
 		}
 		if json.Unmarshal(sc.Bytes(), &row) != nil {
 			continue
@@ -234,15 +297,22 @@ func scanRollout(path string, offset int64) (rolloutState, error) {
 		if row.Type == "event_msg" {
 			switch row.Payload.Type {
 			case "task_started":
-				s.started = true
+				s = rolloutState{started: true, turnID: row.Payload.TurnID}
 				s.interrupted = false
 			case "task_complete":
 				if s.started {
-					s.completed = true
+					s.terminal = true
+					if turnErr := parseTurnError(row.Payload.Error); turnErr != nil {
+						s.failed = true
+						s.turnError = turnErr
+					} else {
+						s.completed = true
+					}
 				}
 			case "turn_aborted":
 				if s.started && row.Payload.Reason == "interrupted" {
 					s.interrupted = true
+					s.terminal = true
 				}
 			}
 		}
@@ -251,4 +321,36 @@ func scanRollout(path string, offset int64) (rolloutState, error) {
 		}
 	}
 	return s, sc.Err()
+}
+
+func parseTurnError(raw json.RawMessage) *TurnError {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var outer struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Status  int    `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &outer); err != nil {
+		return &TurnError{Message: string(raw)}
+	}
+	out := &TurnError{Type: outer.Type, Message: outer.Message, Status: outer.Status}
+	if outer.Message == "" {
+		out.Message = string(raw)
+		return out
+	}
+	var nested struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Status int `json:"status"`
+	}
+	if json.Unmarshal([]byte(outer.Message), &nested) == nil && nested.Error.Message != "" {
+		out.Type = nested.Error.Type
+		out.Message = nested.Error.Message
+		out.Status = nested.Status
+	}
+	return out
 }

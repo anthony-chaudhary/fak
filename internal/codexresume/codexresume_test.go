@@ -28,10 +28,13 @@ func TestResumeHelperProcess(t *testing.T) {
 		}
 	}
 	mode, path := args[sep+1], args[sep+2]
-	appendRow := func(typ, sub, reason string) {
+	appendPayload := func(typ string, payload map[string]any) {
 		f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		defer f.Close()
-		_ = json.NewEncoder(f).Encode(map[string]any{"type": typ, "payload": map[string]any{"type": sub, "reason": reason}})
+		_ = json.NewEncoder(f).Encode(map[string]any{"type": typ, "payload": payload})
+	}
+	appendRow := func(typ, sub, reason string) {
+		appendPayload(typ, map[string]any{"type": sub, "reason": reason, "turn_id": "turn-helper"})
 	}
 	appendRow("event_msg", "task_started", "")
 	switch mode {
@@ -44,6 +47,15 @@ func TestResumeHelperProcess(t *testing.T) {
 		time.Sleep(time.Hour)
 	case "interrupted":
 		appendRow("event_msg", "turn_aborted", "interrupted")
+		time.Sleep(time.Hour)
+	case "failed-hung":
+		appendPayload("event_msg", map[string]any{
+			"type":    "task_complete",
+			"turn_id": "turn-helper",
+			"error": map[string]any{
+				"message": `{"type":"error","error":{"type":"invalid_request_error","message":"Invalid input[3].id: call_legacy. Expected an ID that begins with fc."},"status":400}`,
+			},
+		})
 		time.Sleep(time.Hour)
 	case "stalled":
 		time.Sleep(time.Hour)
@@ -73,23 +85,38 @@ func TestRunNormalExit(t *testing.T) {
 	}
 }
 func TestRunReclaimsCompletedHungProcess(t *testing.T) {
-	r := runHelper(t, "completed-hung", time.Second)
+	r := runHelper(t, "completed-hung", 10*time.Second)
 	if r.Outcome != OutcomeCompletedReclaimed || !r.ForcedReclaim || !r.UsefulWork || !r.TaskCompleted {
 		t.Fatalf("result=%+v", r)
 	}
 }
 func TestRunTypesUpstreamInterrupted(t *testing.T) {
-	r := runHelper(t, "interrupted", 120*time.Millisecond)
-	if r.Outcome != OutcomeStalledBeforeTerminal || !r.Interrupted || !r.ForcedReclaim {
+	r := runHelper(t, "interrupted", 10*time.Second)
+	if r.Outcome != OutcomeUpstreamInterrupted || !r.Interrupted || !r.ForcedReclaim {
 		t.Fatalf("result=%+v", r)
 	}
 }
 func TestRunTypesPreTerminalStall(t *testing.T) {
-	r := runHelper(t, "stalled", 120*time.Millisecond)
+	r := runHelper(t, "stalled", 10*time.Second)
 	if r.Outcome != OutcomeStalledBeforeTerminal || !r.ForcedReclaim || !r.TaskStarted {
 		t.Fatalf("result=%+v", r)
 	}
 }
+
+func TestRunDoesNotTreatFailedTaskCompleteAsSuccess(t *testing.T) {
+	r := runHelper(t, "failed-hung", 10*time.Second)
+	if r.Outcome != OutcomeTurnFailedReclaimed || !r.ForcedReclaim || r.TaskCompleted || r.TurnStatus != "failed" {
+		t.Fatalf("result=%+v", r)
+	}
+	if r.TurnError == nil || r.TurnError.Status != 400 || r.TurnError.Type != "invalid_request_error" {
+		t.Fatalf("turn error=%+v", r.TurnError)
+	}
+	const exact = "Invalid input[3].id: call_legacy. Expected an ID that begins with fc."
+	if r.TurnError.Message != exact {
+		t.Fatalf("message=%q want=%q", r.TurnError.Message, exact)
+	}
+}
+
 func TestRunRequiresInputs(t *testing.T) {
 	_, e := Run(context.Background(), Config{})
 	if e == nil {
