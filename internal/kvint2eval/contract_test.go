@@ -11,7 +11,7 @@ func TestProjectionDispatchsAndUnknownRefuses(t *testing.T) {
 	cases := []struct {
 		name   string
 		want   Disposition
-		reason DecisionCode
+		reason VerdictCode
 	}{
 		{"modeled-delegate.json", Dispatch, ProjectionNeedsRun},
 		{"unsupported.json", Refuse, MethodRefuse},
