@@ -164,9 +164,9 @@ func (c FeatureConfig) Descriptor() map[string]string {
 }
 
 // childEnv renders this config's env-gated toggles as KEY=VALUE strings to splice onto
-// a child process's environment (the rung-2 re-exec). Each FAK_* var is set to "1" when
-// the feature is on and "0" when off, so the child's process-start read sees the arm's
-// intent deterministically (no "unset means default" ambiguity across arms).
+// a child process's environment (the rung-2 re-exec). Each concept supplies the exact
+// ON and OFF values understood by its production reader, so process-start reads see the
+// arm's intent deterministically even when an empty value represents one arm.
 func (c FeatureConfig) childEnv() []string {
 	keys := make([]string, 0, len(c.EnvFeatures))
 	for f := range c.EnvFeatures {
@@ -175,14 +175,15 @@ func (c FeatureConfig) childEnv() []string {
 	sort.Strings(keys)
 	out := make([]string, 0, len(keys))
 	for _, f := range keys {
-		v := "0"
-		if c.EnvFeatures[f] == "on" {
-			v = "1"
-		}
 		concept, ok := registeredConcept(f)
-		if ok && concept.EnvVar != "" {
-			out = append(out, concept.EnvVar+"="+v)
+		if !ok || concept.EnvVar == "" || concept.EnvArms == nil {
+			continue
 		}
+		v := concept.EnvArms.Off
+		if c.EnvFeatures[f] == "on" {
+			v = concept.EnvArms.On
+		}
+		out = append(out, concept.EnvVar+"="+v)
 	}
 	return out
 }

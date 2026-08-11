@@ -16,9 +16,19 @@ type GateResult struct {
 // Concept describes one independently sweepable fak concept. Owning packages may
 // register concepts from init; duplicate or malformed registrations panic so a typo
 // cannot silently alter an experiment.
+// EnvArmContract declares the exact values an env-gated production reader
+// accepts for the two ablation arms. Enabled mirrors that reader's value dialect;
+// Register uses it to reject contracts whose values do not actually flip state.
+type EnvArmContract struct {
+	On      string
+	Off     string
+	Enabled func(string) bool
+}
+
 type Concept struct {
 	Token        string
 	EnvVar       string
+	EnvArms      *EnvArmContract
 	Runtime      func(bool)
 	StreamXform  bool
 	PrefixStable bool
@@ -45,6 +55,19 @@ func Register(c Concept) {
 	}
 	if c.EnvVar != "" && c.Runtime != nil {
 		panic(fmt.Sprintf("ablate: concept %q has both EnvVar and Runtime", c.Token))
+	}
+	if c.EnvVar != "" {
+		if c.EnvArms == nil || c.EnvArms.Enabled == nil {
+			panic(fmt.Sprintf("ablate: env concept %q has no arm contract", c.Token))
+		}
+		if c.EnvArms.Enabled(c.EnvArms.Off) {
+			panic(fmt.Sprintf("ablate: env concept %q OFF value %q enables its reader", c.Token, c.EnvArms.Off))
+		}
+		if !c.EnvArms.Enabled(c.EnvArms.On) {
+			panic(fmt.Sprintf("ablate: env concept %q ON value %q disables its reader", c.Token, c.EnvArms.On))
+		}
+	} else if c.EnvArms != nil {
+		panic(fmt.Sprintf("ablate: runtime concept %q has an env arm contract", c.Token))
 	}
 	if c.Owner != "fak" && c.Owner != "provider" {
 		panic(fmt.Sprintf("ablate: concept %q has invalid owner %q", c.Token, c.Owner))
@@ -82,18 +105,35 @@ func registeredConcept(token string) (Concept, bool) {
 }
 
 func registerBuiltins() {
-	env := map[string]string{
-		FeatureNormgate: "FAK_NORMGATE", FeatureRadix: "FAK_INKERNEL_RADIX", FeatureCompressor: "FAK_COMPRESSOR",
-		FeatureIFC: "FAK_IFC", FeatureGitgate: "FAK_GITGATE", FeatureCtxplanSeam: "FAK_CTXPLAN_SEAM",
-		FeatureWireScreen: "FAK_WIRE_SCREEN", FeatureWireRedact: "FAK_WIRE_REDACT",
-		FeatureBreakpointPlan: "FAK_ABLATE_BP_PLAN", FeatureTTL1H: "FAK_ABLATE_TTL_1H",
-		FeaturePrefixGuard: "FAK_ABLATE_PREFIX_GUARD", FeatureUncachedTrim: "FAK_ABLATE_UNCACHED_TRIM",
-		FeatureNegframeReframe: "FAK_ABLATE_NEGFRAME_REFRAME",
+	defaultOn := &EnvArmContract{On: "", Off: "off", Enabled: func(v string) bool { return !strings.EqualFold(strings.TrimSpace(v), "off") }}
+	presenceInverted := &EnvArmContract{On: "", Off: "off", Enabled: func(v string) bool { return strings.TrimSpace(v) == "" }}
+	defaultOff := &EnvArmContract{On: "1", Off: "0", Enabled: defaultOffEnabled}
+	env := map[string]struct {
+		variable string
+		arms     *EnvArmContract
+	}{
+		FeatureNormgate: {"FAK_NORMGATE", defaultOn}, FeatureRadix: {"FAK_INKERNEL_RADIX", defaultOn},
+		FeatureCompressor: {"FAK_COMPRESSOR", presenceInverted}, FeatureIFC: {"FAK_IFC", defaultOn},
+		FeatureGitgate: {"FAK_GITGATE", defaultOn}, FeatureCtxplanSeam: {"FAK_CTXPLAN_SEAM", &EnvArmContract{On: "on", Off: "off", Enabled: defaultOffEnabled}},
+		FeatureWireScreen:     {"FAK_WIRE_SCREEN", &EnvArmContract{On: "heuristic", Off: "", Enabled: func(v string) bool { return strings.TrimSpace(v) == "heuristic" }}},
+		FeatureWireRedact:     {"FAK_WIRE_REDACT", &EnvArmContract{On: "pii", Off: "", Enabled: func(v string) bool { return strings.TrimSpace(v) == "pii" }}},
+		FeatureBreakpointPlan: {"FAK_ABLATE_BP_PLAN", defaultOff}, FeatureTTL1H: {"FAK_ABLATE_TTL_1H", defaultOff},
+		FeaturePrefixGuard: {"FAK_ABLATE_PREFIX_GUARD", defaultOff}, FeatureUncachedTrim: {"FAK_ABLATE_UNCACHED_TRIM", defaultOff},
+		FeatureNegframeReframe: {"FAK_ABLATE_NEGFRAME_REFRAME", defaultOff},
 	}
 	Register(Concept{Token: FeatureVDSO, Runtime: func(bool) {}, Owner: "fak", Reversible: true, PrefixStable: true})
 	registerCacheLevers()
-	for token, variable := range env {
-		Register(Concept{Token: token, EnvVar: variable, Owner: "fak", Reversible: true, PrefixStable: true})
+	for token, gate := range env {
+		Register(Concept{Token: token, EnvVar: gate.variable, EnvArms: gate.arms, Owner: "fak", Reversible: true, PrefixStable: true})
+	}
+}
+
+func defaultOffEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 

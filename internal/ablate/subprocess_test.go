@@ -26,8 +26,8 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 // fakeArmRunner stands in for execArmRunner so the suite never spawns the real binary.
 // It runs the single-arm core IN-PROCESS via RunOneArm, then SIMULATES the one thing an
 // in-process run cannot do for an env-gated feature: the child's process-start read of
-// FAK_NORMGATE. A real child re-exec'd with FAK_NORMGATE=1 quarantines on the normgate
-// path; a child with FAK_NORMGATE=0 does not. The fake reflects exactly that env effect
+// FAK_NORMGATE. The production reader is default-on and disables only for the literal "off"; the
+// fake reflects exactly that env effect
 // into the arm's Quarantines counter, so the test can prove the env knob CHANGED the
 // path — the rung-2 acceptance criterion — without a subprocess.
 func fakeArmRunner(ctx context.Context, bin string, c FeatureConfig, traceJSON []byte) (AblationRun, error) {
@@ -40,9 +40,9 @@ func fakeArmRunner(ctx context.Context, bin string, c FeatureConfig, traceJSON [
 		return AblationRun{}, err
 	}
 	// Model the env-gated normgate effect the way a re-exec'd child would surface it:
-	// the child env carries FAK_NORMGATE=1 iff this arm turned normgate on.
+	// the production reader enables every value except the literal "off".
 	for _, kv := range c.childEnv() {
-		if kv == "FAK_NORMGATE=1" {
+		if kv == "FAK_NORMGATE=" {
 			run.Arm.Quarantines += int64(len(tr.Calls)) // normgate quarantined every call
 		}
 	}
@@ -304,8 +304,8 @@ func TestChildEnv_RendersFakVarsDeterministically(t *testing.T) {
 	c.apply(FeatureRadix, false)
 	got := c.childEnv()
 	// childEnv sorts by sweep TOKEN: "normgate" < "radix", so FAK_NORMGATE then
-	// FAK_INKERNEL_RADIX, each rendered =1 (on) / =0 (off).
-	want := []string{"FAK_NORMGATE=1", "FAK_INKERNEL_RADIX=0"}
+	// FAK_INKERNEL_RADIX, each rendered in its production reader's dialect.
+	want := []string{"FAK_NORMGATE=", "FAK_INKERNEL_RADIX=off"}
 	if len(got) != len(want) {
 		t.Fatalf("childEnv = %v, want %v", got, want)
 	}

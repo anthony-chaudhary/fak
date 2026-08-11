@@ -65,6 +65,7 @@ func registerCacheLevers() {
 		Register(Concept{
 			Token:        l.Name(),
 			EnvVar:       "FAK_" + envToken(l.Name()),
+			EnvArms:      &EnvArmContract{On: "1", Off: "0", Enabled: defaultOffEnabled},
 			Owner:        l.Owner(),
 			Reversible:   true,
 			StreamXform:  true,
