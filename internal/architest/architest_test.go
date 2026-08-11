@@ -530,6 +530,7 @@ var tier = map[string]int{
 	"quantlicense":          1, // stdlib-only license-chain contract and evidence gate.
 	"codebookmeta":          1, // stdlib-only quantization codebook metadata and adjudication; no model kernel.
 	"mixedprecision":        1, // layerwise mixed-precision assignment and evidence contract; no runtime kernel.
+	"quantmatrix":           1, // stdlib-only public quantization support/delegation registry and docs parser; no model kernel.
 	"residualquant":         1, // stdlib-only RRQ metadata/research adjudication; no model kernel.
 	"rotationmeta":          1, // stdlib-only rotation-transform metadata and runtime capability adjudication; no model kernel.
 	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
