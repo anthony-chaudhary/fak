@@ -1,0 +1,72 @@
+{
+  "schema": "fak.codebookmeta/v1",
+  "provenance": {
+    "artifact_id": "sha256:model-artifact",
+    "artifact_digest": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "recipe_id": "org.example/quantize",
+    "recipe_version": "1.3.0",
+    "recipe_digest": {
+      "algorithm": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "runtime_id": "org.example/runtime",
+    "runtime_version": "2.4.1",
+    "model_id": "org.example/model",
+    "model_revision": "0123456789abcdef"
+  },
+  "codebook": {
+    "kind": "nf4",
+    "id": "nf4-canonical-v1",
+    "version": "1",
+    "entries": [
+      -1,
+      -0.6961928009986877,
+      -0.5250730514526367,
+      -0.39491748809814453,
+      -0.28444138169288635,
+      -0.18477343022823334,
+      -0.09105003625154495,
+      0,
+      0.07958029955625534,
+      0.16093020141124725,
+      0.24611230194568634,
+      0.33791524171829224,
+      0.44070982933044434,
+      0.5626170039176941,
+      0.7229568362236023,
+      1
+    ],
+    "digest": {
+      "algorithm": "sha256",
+      "value": "412fc3799dcacf3226009e18fdd9049be7c93fbadf46d63beb26fae7863fcf44"
+    }
+  },
+  "packing": {
+    "id": "nibble-lsb",
+    "version": "1",
+    "bits_per_index": 4,
+    "byte_order": "little",
+    "indices_per_word": 2
+  },
+  "decode_requirements": {
+    "codebook_placement": "per-tensor",
+    "scale_type": "float32",
+    "group_size": 64,
+    "required_features": [
+      "per-block-scale"
+    ]
+  },
+  "evaluations": [
+    {
+      "kind": "observed",
+      "claim": "descriptor round-tripped through codebookmeta",
+      "metric": "round_trip_equal",
+      "value": 1,
+      "unit": "boolean",
+      "witness": "TestFixtureRoundTripsAndPinsProvenance"
+    }
+  ]
+}

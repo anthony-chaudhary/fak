@@ -426,6 +426,7 @@ var tier = map[string]int{
 	"waiting":               2, // R3 waiting-on-human queue (#2272, epic #2269): pure fold over loopmgr's loop-event ledger turning each blocked-on-operator notify into one kernel object with age, held resources, deadline, and the safe default that fires on expiry; ack-closure honestly fenced not_yet pending the R2 escalation packet (#2271); imports loopmgr(1), off the hot path.
 	"chatopsdetach":         1, // detached-execution decision kernel for chatops act verbs (#2265, epic #2259 C5): the pure fold that routes an inbound act verb + its guarded-dispatch admission verdict to dispatch-once / re-ack / structured-refuse over a command-nonce spool, plus the stall-to-blockers escalation judge. State in, decision out; imports nothing internal, off the hot path — the seam the (not-yet-landed) chatops door binds to.
 	"godfileceiling":        2,
+	"microscaleeval":        1,
 	"microagent":            5,
 	"sessionsearch":         3, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
 	"taskgraph":             3, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
@@ -525,6 +526,7 @@ var tier = map[string]int{
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
 	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
 	"quantlicense":          1, // stdlib-only license-chain contract and evidence gate.
+	"codebookmeta":          1, // stdlib-only quantization codebook metadata and adjudication; no model kernel.
 	"mixedprecision":        1, // layerwise mixed-precision assignment and evidence contract; no runtime kernel.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
