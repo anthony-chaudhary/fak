@@ -463,13 +463,18 @@ func runTaskQueue(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	var live []taskmgr.Attempt
+	var attemptData []byte
 	if attemptsFile != "" {
-		data, readErr := os.ReadFile(attemptsFile)
-		if readErr != nil {
-			fmt.Fprintf(stderr, "fak task queue: read attempts: %v\n", readErr)
-			return 1
-		}
-		if err := json.Unmarshal(data, &live); err != nil {
+		attemptData, err = os.ReadFile(attemptsFile)
+	} else {
+		attemptData, err = exec.Command("dos", "lease-lane", "live").Output()
+	}
+	if err != nil && attemptsFile != "" {
+		fmt.Fprintf(stderr, "fak task queue: read attempts: %v\n", err)
+		return 1
+	}
+	if err == nil {
+		if err := json.Unmarshal(attemptData, &live); err != nil {
 			fmt.Fprintf(stderr, "fak task queue: decode attempts: %v\n", err)
 			return 1
 		}

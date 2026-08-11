@@ -76,6 +76,9 @@ func BuildQueue(issues []QueueIssue, attempts []Attempt) Queue {
 		for _, attempt := range attempts {
 			if attemptIssue(attempt.Holder) == issue.Number {
 				leaf.Attempts = append(leaf.Attempts, attempt)
+				if leaf.Lane == "" {
+					leaf.Lane = attempt.Lane
+				}
 			}
 		}
 		if leaf.DurableState == "ready" && len(leaf.Attempts) > 0 {
@@ -149,7 +152,7 @@ func witnessText(body string) string {
 		return s
 	}
 	if s := section(body, "Definition of done"); s != "" {
-		return s
+		return "definition-of-done"
 	}
 	return "unknown"
 }
@@ -174,7 +177,13 @@ func firstRef(s string) int {
 	return 0
 }
 func attemptIssue(holder string) int {
-	m := issueRefRE.FindStringSubmatch(strings.ReplaceAll(holder, "issue-", "#"))
+	for _, prefix := range []string{"issue-", "codex-", "#"} {
+		if i := strings.LastIndex(holder, prefix); i >= 0 {
+			holder = "#" + holder[i+len(prefix):]
+			break
+		}
+	}
+	m := issueRefRE.FindStringSubmatch(holder)
 	if len(m) < 2 {
 		return 0
 	}
