@@ -24,6 +24,7 @@ type debugVarsResponse struct {
 	VCache           *debugVCacheVars           `json:"vcache,omitempty"`
 	CacheAttribution *debugCacheAttributionVars `json:"cache_attribution,omitempty"`
 	ManagedCache     *debugManagedCacheVars     `json:"managed_cache,omitempty"`
+	TokenSavings     debugTokenSavingsVars      `json:"token_savings"`
 	// ShrinkLevers is the #5493 prompt-shrink-lever posture: which of the three levers are
 	// configured ON, and which of those the wire this gateway actually built can run. It sits
 	// beside ManagedCache because it answers the same class of question for a different lever
@@ -603,6 +604,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
 		ManagedCache:     managedCacheVars(s.cacheTTL1H, s.provider, m.adjudicationSummary()),
+		TokenSavings:     s.tokenSavingsVars(m.adjudicationSummary()),
 		ShrinkLevers: shrinkLeverVars(s.anthropicPassthrough(), s.dualRoutesLocalModels(), s.provider,
 			s.compactHistoryBudget, s.elideStaleReads, s.deferColdTools),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),

@@ -1021,3 +1021,39 @@ func (c *latencyCounter) observe(seconds float64) {
 		}
 	}
 }
+
+// observeStaleElide records one eligible stale-read elision attempt using only
+// bounded reason enums and aggregate counts. No path, content, or trace is kept.
+func (m *gatewayMetrics) observeStaleElide(reason string, elided, shedBytes int) {
+	if m == nil {
+		return
+	}
+	m.staleElideMu.Lock()
+	defer m.staleElideMu.Unlock()
+	if reason == agent.StaleReasonNone && elided > 0 && shedBytes > 0 {
+		m.staleElideTurns++
+		m.staleElideReads += uint64(elided)
+		m.staleElideBytes += uint64(shedBytes)
+		return
+	}
+	if reason == "" {
+		reason = "identity"
+	}
+	if m.staleElideBails == nil {
+		m.staleElideBails = make(map[string]uint64)
+	}
+	m.staleElideBails[reason]++
+}
+
+func (m *gatewayMetrics) staleElideSnapshot() (turns, reads, bytes uint64, bails map[string]uint64) {
+	if m == nil {
+		return 0, 0, 0, nil
+	}
+	m.staleElideMu.Lock()
+	defer m.staleElideMu.Unlock()
+	bails = make(map[string]uint64, len(m.staleElideBails))
+	for reason, count := range m.staleElideBails {
+		bails[reason] = count
+	}
+	return m.staleElideTurns, m.staleElideReads, m.staleElideBytes, bails
+}

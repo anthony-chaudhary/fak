@@ -92,6 +92,13 @@ func (s *Server) toolsListView() ([]map[string]any, MCPToolFilterStatus) {
 	return resident, status
 }
 
+// MCPToolFilterStatusSnapshot reports the same privacy-safe receipt emitted on
+// tools/list, for the unified /debug/vars operator surface.
+func (s *Server) MCPToolFilterStatusSnapshot() MCPToolFilterStatus {
+	_, status := s.toolsListView()
+	return status
+}
+
 func (s *Server) toolsListDescriptors() []map[string]any {
 	tools, _ := s.toolsListView()
 	return tools

@@ -103,6 +103,8 @@ and [what fak is not](../explainers/what-fak-is-not.md) for the honest fence.
 
 ## Witnesses
 
+- [Token-saving observability](token-savings-observability.md) — live active/ready/bypassed receipts, measured effects, and rollback controls for the default-on saving stack.
+
 - [GLM-5.2 full-size serving witness](glm52-full-size-serving-witness.md) — the
   reproducible runbook behind issue #413: standing up a full-size GLM-5.2 serve and
   capturing the evidence that it ran.

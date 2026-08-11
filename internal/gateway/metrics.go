@@ -221,6 +221,13 @@ type gatewayMetrics struct {
 	deferStandDownTurns   uint64
 	deferStandDownReasons map[string]uint64
 
+	// Aggregate-only stale-read elision receipts; never paths or content.
+	staleElideMu    sync.Mutex
+	staleElideTurns uint64
+	staleElideReads uint64
+	staleElideBytes uint64
+	staleElideBails map[string]uint64
+
 	// toolRefMu guards the tool_reference SANITIZE accumulators (a correctness transform, not a
 	// cache saving): the client's INTERNAL `tool_reference` blocks — emitted inside a ToolSearch
 	// tool_result — are not a valid Anthropic tool_result.content type, so a body carrying one is

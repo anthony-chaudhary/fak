@@ -984,6 +984,7 @@ func (s *Server) maybeElideStaleReads(req *agent.AnthropicMessagesRequest, trace
 	}
 	out, outcome := agent.ElideStaleReadsWithOutcome(req.Raw)
 	req.Raw = out
+	s.metrics.observeStaleElide(outcome.Reason, outcome.Elided, outcome.ShedBytes)
 	for _, r := range outcome.Restores {
 		s.stashRestore(trace, r.ID, r.Excerpt, r.Bytes)
 	}
