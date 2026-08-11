@@ -4537,6 +4537,11 @@
           "category": "incidental",
           "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
           "token": "RenderCeilings"
+        },
+        {
+          "category": "incidental",
+          "reason": "Formatting helper for the task queue CLI, not a new repository concept",
+          "token": "RenderQueue"
         }
       ],
       "id": "render-materialize",
@@ -4550,6 +4555,7 @@
         "RenderFacet",
         "RenderFidelity",
         "RenderKind",
+        "RenderQueue",
         "RenderReopen",
         "RenderSegment",
         "RenderStop",
