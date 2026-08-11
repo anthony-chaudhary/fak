@@ -524,6 +524,7 @@ var tier = map[string]int{
 	"quantdetect":           1,
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
 	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
+	"quantlicense":          1, // stdlib-only license-chain contract and evidence gate.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
