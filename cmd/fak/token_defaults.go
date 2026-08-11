@@ -210,6 +210,16 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 			witnessed: true, blocker: "", flag: "(structural)", gated: false, noted: true, locked: true,
 		},
 		{
+			key: "mcptoolfilter", label: "mcptoolfilter — native MCP tools/list cold-schema filtering",
+			class: "bounded", on: strings.Contains(read("internal/gateway/mcp_defer.go"), "Native filtering is default-on"),
+			witnessed: exists("internal/gateway/mcp_filter_ab_test.go"), blocker: blockerIf(!exists("internal/gateway/mcp_filter_ab_test.go"), "unwitnessed"), flag: "FAK_ABLATE_MCP_TOOL_FILTER=1", gated: false, noted: true, locked: true,
+		},
+		{
+			key: "defercoldtools", label: "defercoldtools — outbound Anthropic cold-tool schema deferral",
+			class: "bounded", on: strings.Contains(gateway, "const DefaultDeferColdTools = true") && bothWire(`fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools`),
+			witnessed: exists("internal/gateway/tooldefer_default_on_test.go"), blocker: blockerIf(!exists("internal/gateway/tooldefer_default_on_test.go"), "unwitnessed"), flag: "--defer-cold-tools", gated: false, noted: true, locked: true,
+		},
+		{
 			key: "vdso", label: "vdso — vDSO dedup fast path (collapse identical calls)",
 			class: "lossless", on: strings.Contains(serve, `fs.Bool("vdso", true`) && reVDSOTrue.MatchString(guard),
 			witnessed: true, blocker: "", flag: "--vdso", gated: false, noted: true, locked: true,
@@ -458,7 +468,7 @@ description: "fak's deterministic token-saving-defaults scorecard: which stackin
 
 <!-- token-defaults-scorecard · process: fak token-defaults-scorecard --markdown -->
 
-The question a cost-conscious operator asks the moment they run ` + "`fak guard -- claude`" + ` / ` + "`fak serve`" + `: **of every token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (` + "`cmd/fak/guard.go`" + `, ` + "`cmd/fak/serve.go`" + `, the ` + "`Default*`" + ` constants in ` + "`internal/gateway/gateway.go`" + `, and ` + "`internal/gateway/messages.go`" + `) by ` + "`fak token-defaults-scorecard`" + ` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
+The question a cost-conscious operator asks the moment they run ` + "`fak guard -- claude`" + ` / ` + "`fak serve`" + `: **of every default-stack token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (` + "`cmd/fak/guard.go`" + `, ` + "`cmd/fak/serve.go`" + `, the ` + "`Default*`" + ` constants in ` + "`internal/gateway/gateway.go`" + `, and ` + "`internal/gateway/messages.go`" + `) by ` + "`fak token-defaults-scorecard`" + ` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
 
 Budget size is governed separately by the [long-context defaults doctrine](../long-context-defaults.md): the advertised context window is a hard cap, not a target, and resident budgets should be labeled as witnessed, observed, modeled, or fallback.
 

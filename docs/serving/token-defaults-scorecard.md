@@ -7,7 +7,7 @@ description: "fak's deterministic token-saving-defaults scorecard: which stackin
 
 <!-- token-defaults-scorecard · process: fak token-defaults-scorecard --markdown -->
 
-The question a cost-conscious operator asks the moment they run `fak guard -- claude` / `fak serve`: **of every token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (`cmd/fak/guard.go`, `cmd/fak/serve.go`, the `Default*` constants in `internal/gateway/gateway.go`, and `internal/gateway/messages.go`) by `fak token-defaults-scorecard` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
+The question a cost-conscious operator asks the moment they run `fak guard -- claude` / `fak serve`: **of every default-stack token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (`cmd/fak/guard.go`, `cmd/fak/serve.go`, the `Default*` constants in `internal/gateway/gateway.go`, and `internal/gateway/messages.go`) by `fak token-defaults-scorecard` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
 
 Budget size is governed separately by the [long-context defaults doctrine](../long-context-defaults.md): the advertised context window is a hard cap, not a target, and resident budgets should be labeled as witnessed, observed, modeled, or fallback.
 
@@ -19,7 +19,7 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 |---|---|
 | **Token-defaults-debt (total HARD defects)** | **0** |
 | Composite score | 100.0/100 (grade A) |
-| Savers stacked on by default | 7/7 |
+| Savers stacked on by default | 9/9 |
 | Groups | stack 100 · honesty 100 · regression 100 · parity 100 |
 | Advisory (soft) signals | 0 |
 
@@ -31,6 +31,8 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 |---|---|:--:|:--:|---|---|:--:|:--:|:--:|
 | provider_cache — provider prompt-cache prefix (byte-faithful passthrough) | lossless | **ON** | ✓ | — | `(structural)` | · | ✓ | ✓ |
 | toolfloor — tool-floor pruning (drop provably-unreachable tool defs) | lossless | **ON** | ✓ | — | `(structural)` | · | ✓ | ✓ |
+| mcptoolfilter — native MCP tools/list cold-schema filtering | bounded | **ON** | ✓ | — | `FAK_ABLATE_MCP_TOOL_FILTER=1` | · | ✓ | ✓ |
+| defercoldtools — outbound Anthropic cold-tool schema deferral | bounded | **ON** | ✓ | — | `--defer-cold-tools` | · | ✓ | ✓ |
 | vdso — vDSO dedup fast path (collapse identical calls) | lossless | **ON** | ✓ | — | `--vdso` | · | ✓ | ✓ |
 | compacthistory — history compaction (drop the un-cacheable middle past the budget) | bounded | **ON** | ✓ | — | `--compact-history-budget` | · | ✓ | ✓ |
 | elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail) | bounded | **ON** | ✓ | — | `--elide-result-bytes` | · | ✓ | ✓ |
@@ -41,13 +43,13 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| stack | `stacking_depth` | 100 | 0 | 7/7 token-saving methods stacked on by default out of the box |
+| stack | `stacking_depth` | 100 | 0 | 9/9 token-saving methods stacked on by default out of the box |
 | stack | `lossless_stack` | 100 | 0 | 3/3 lossless savers on by default |
-| stack | `high_value_defaults` | 100 | 0 | 4/4 demonstrably-safe bounded-loss savers on by default |
+| stack | `high_value_defaults` | 100 | 0 | 6/6 demonstrably-safe bounded-loss savers on by default |
 | honesty | `witness_status` | 100 | 0 | no off-by-default high-value savers remain — every bounded-loss saver defaults on |
 | honesty | `dark_lever_gated` | 100 | 0 | 0/0 off-by-default levers carry a documented gate |
-| honesty | `default_notes` | 100 | 0 | 4/4 on-by-default bounded savers carry an honest loss note |
-| regression | `default_on_locked` | 100 | 0 | 7/7 on-by-default savers pinned by a regression sentinel |
+| honesty | `default_notes` | 100 | 0 | 6/6 on-by-default bounded savers carry an honest loss note |
+| regression | `default_on_locked` | 100 | 0 | 9/9 on-by-default savers pinned by a regression sentinel |
 | parity | `entrypoint_parity` | 100 | 0 | front doors agree + servewiring verdicts track the real defaults |
 
 ## Token-defaults-debt work-list

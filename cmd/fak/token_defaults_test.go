@@ -136,11 +136,11 @@ func TestTokenDefaultsSnapshotFresh(t *testing.T) {
 // default that contradicts the binary.
 func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
 	c := collectTokenDefaultsScorecard("../..")["corpus"].(map[string]any)
-	if got := c["stacked_on"].(int); got != 7 {
-		t.Errorf("stacked_on derived = %d, want 7 (7/7 safe savers on by default)", got)
+	if got := c["stacked_on"].(int); got != 9 {
+		t.Errorf("stacked_on derived = %d, want 9 (9/9 safe savers on by default)", got)
 	}
-	if got := c["levers_total"].(int); got != 7 {
-		t.Errorf("levers_total = %d, want 7", got)
+	if got := c["levers_total"].(int); got != 9 {
+		t.Errorf("levers_total = %d, want 9", got)
 	}
 	on := map[string]bool{}
 	gated := map[string]bool{}
