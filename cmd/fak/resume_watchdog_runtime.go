@@ -13,12 +13,37 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/codexresume"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+type rwCodexCompletion struct {
+	Session string
+	Result  codexresume.Result
+}
+
+func rwLoadCodexCompletions(plan []resume.WatchdogPlanRow) []rwCodexCompletion {
+	var out []rwCodexCompletion
+	for _, p := range plan {
+		if rwHarness(p) != "codex" || strings.TrimSpace(p.ResultFile) == "" {
+			continue
+		}
+		raw, err := os.ReadFile(p.ResultFile)
+		if err != nil {
+			continue
+		}
+		var result codexresume.Result
+		if json.Unmarshal(raw, &result) != nil {
+			continue
+		}
+		out = append(out, rwCodexCompletion{Session: p.Session, Result: result})
+	}
+	return out
+}
 
 func rwWatchdogStatusLedger(regDir string) string {
 	return filepath.Join(regDir, "resume_watchdog_status.jsonl")
@@ -302,7 +327,30 @@ func rwRefreshRegistry(regDir, claudeExe string, windowH float64, probeMode stri
 // Windows (the CREATE_NO_WINDOW discipline every fak background spawn takes).
 var rwSpawnResumeLaunch = rwSpawnResume
 
+func rwHarness(p resume.WatchdogPlanRow) string {
+	switch strings.ToLower(strings.TrimSpace(p.Harness)) {
+	case "codex", "codex_exec":
+		return "codex"
+	default:
+		return "claude"
+	}
+}
+
+func rwCodexResumeArgv(fakExe string, p resume.WatchdogPlanRow) []string {
+	return []string{fakExe, "codex-resume", "--json", "--rollout", p.Rollout, "--cwd", rwResumeCWD(p), "--prompt-file", p.GoalFile, "--result-file", p.ResultFile, p.Session}
+}
+
+func validateCodexResumeCoordinates(p resume.WatchdogPlanRow) error {
+	if strings.TrimSpace(p.Session) == "" || strings.TrimSpace(p.Rollout) == "" || strings.TrimSpace(p.GoalFile) == "" || strings.TrimSpace(p.ResultFile) == "" {
+		return fmt.Errorf("codex resume requires session, rollout, goal_file, and result_file")
+	}
+	return nil
+}
+
 func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string, carry ...resume.DriveCarryRow) launchBrokerAttempt {
+	if rwHarness(p) == "codex" {
+		return newLaunchBrokerAttempt("resume_watchdog", "codex", rwCodexResumeArgv(fakExe, p), envMap(resume.CodexWatchdogChildEnv(os.Environ())), rwResumeCWD(p))
+	}
 	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(fakExe, claudeExe, p.Session, postureArgs, carry...),
 		rwResumeChildEnv(p.Session, resumeCfg), rwResumeCWD(p))
 }
@@ -368,7 +416,11 @@ func rwResumeCWD(p resume.WatchdogPlanRow) string {
 }
 
 func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
-	if claudeExe == "" {
+	if rwHarness(p) == "codex" {
+		if err := validateCodexResumeCoordinates(p); err != nil {
+			return 0, err
+		}
+	} else if claudeExe == "" {
 		return 0, fmt.Errorf("no claude binary (set FLEET_CLAUDE_EXE)")
 	}
 	wd := firstString(grant.CWD, rwResumeCWD(p))
@@ -389,6 +441,9 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	// attempt built (rwResumeBrokerAttempt); this bare form is only a defensive fallback for an
 	// (unreachable on the live path) empty grant, so it deliberately stays posture-free.
 	argv := rwResumeArgv("", claudeExe, p.Session, nil)
+	if rwHarness(p) == "codex" {
+		argv = rwCodexResumeArgv("fak", p)
+	}
 	if len(grant.Argv) > 0 {
 		argv = grant.Argv
 	}
@@ -405,6 +460,9 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	// Same base + cache-affinity carry as the broker attempt (#4140), so even the
 	// defensive empty-grant fallback keeps the transcript's warm route.
 	cmd.Env = envSliceFromMap(rwResumeChildEnv(p.Session, resumeCfg))
+	if rwHarness(p) == "codex" {
+		cmd.Env = resume.CodexWatchdogChildEnv(os.Environ())
+	}
 	if len(grant.Env) > 0 {
 		cmd.Env = envSliceFromMap(grant.Env)
 	}

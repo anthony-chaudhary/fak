@@ -135,6 +135,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	plan := rwLoadPlan(planPath)
 	ledgerPath := filepath.Join(regDir, "resume_ledger.jsonl")
 	backoffHistory := rwBackoffHistory(ledgerPath)
+	for _, completed := range rwLoadCodexCompletions(plan) {
+		r := completed.Result
+		rwAppendLedger(ledgerPath, map[string]any{"ts": rwNowISO(), "session": completed.Session, "harness": "codex", "phase": "terminal", "outcome": r.Outcome, "useful_work": r.UsefulWork, "task_completed": r.TaskCompleted, "process_exit": r.ProcessExit, "forced_reclaim": r.ForcedReclaim, "duration_ms": r.DurationMS})
+	}
 	rwBoundWatchdogArtifacts(logDir, ledgerPath, time.Now())
 	if targetedPlan != "" {
 		// Fail closed (#2367): a targeted run must consume the exact plan the operator
@@ -305,7 +309,13 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 					sid8, humanIdle(ev.TranscriptIdleSeconds))
 			}
 		}
-		d := resume.DecideWatchdogRow(p, guards, hist, outcome)
+		effective := guards
+		if rwHarness(p) == "codex" {
+			// Codex exec sessions are not Anthropic seats and have no CLAUDE_CONFIG_DIR.
+			// Their explicit targeted-plan coordinates are the admission contract.
+			effective.WorkerAccounts = nil
+		}
+		d := resume.DecideWatchdogRow(p, effective, hist, outcome)
 		nextMove := sessionctl.Move{
 			Kind: sessionctl.MoveHalt, Render: sessionctl.RenderStop, Session: sessionctl.SessionAutonomous,
 			Gate: string(d.Action), Source: "resume-watchdog", Reason: d.Reason,
@@ -406,7 +416,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 			"resume_account": p.ResumeAccount, "rehomed": p.Rehomed,
 			"project": p.Project, "pid": pid, "cause": p.Disp,
 			"phase": "launched", "attempt": attempt, "signature": signature,
-			"resume_anchor": anchor,
+			"resume_anchor": anchor, "harness": rwHarness(p),
+		}
+		if rwHarness(p) == "codex" {
+			row["result_file"] = p.ResultFile
 		}
 		rwAppendLedger(ledgerPath, row)
 		// #4139/#4216: record the OS-relaunch reset transaction — the transcript-UUID-keyed
@@ -414,17 +427,21 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		// next to the launched ledger row, so a hidden relaunch is no longer invisible to the
 		// reset-transaction audit chain. The pure constructor (#4139) carries no clock and leaves
 		// TS ""; the shell stamps the write time here, mirroring the drivestate store's discipline.
-		relaunchReset := resume.NewRelaunchResetRow(p, attempt)
-		relaunchReset.TS = rwNowISO()
-		rwAppendLedger(rwRelaunchResetLedger(regDir), relaunchReset)
+		if rwHarness(p) != "codex" {
+			relaunchReset := resume.NewRelaunchResetRow(p, attempt)
+			relaunchReset.TS = rwNowISO()
+			rwAppendLedger(rwRelaunchResetLedger(regDir), relaunchReset)
+		}
 		// #4140: record the cache route this relaunch carried (RelaunchCacheAffinityEnv on the
 		// child env, derived from the transcript UUID) into its own durable, append-only store,
 		// so an operator can audit which warm route a relaunch used and the fold
 		// (rwLoadRelaunchAffinity) gives launch plumbing a last-row-wins lookup. Same TS
 		// discipline as the reset row: the pure constructor carries no clock, the shell stamps.
-		relaunchAffinity := resume.NewRelaunchAffinityRow(p.Session)
-		relaunchAffinity.TS = rwNowISO()
-		rwAppendLedger(rwRelaunchAffinityLedger(regDir), relaunchAffinity)
+		if rwHarness(p) != "codex" {
+			relaunchAffinity := resume.NewRelaunchAffinityRow(p.Session)
+			relaunchAffinity.TS = rwNowISO()
+			rwAppendLedger(rwRelaunchAffinityLedger(regDir), relaunchAffinity)
+		}
 		// A3 (#4114): refresh the durable uuid<->trace identity row for the just-resumed UUID
 		// so its newest row names the account the resume re-homed onto. The resumed child can
 		// never self-record this — WatchdogChildEnv strips CLAUDE_CODE_SESSION_ID from its env
@@ -432,7 +449,9 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		// the watchdog, which still holds the UUID as p.Session, records it here. Best-effort
 		// and inherently live-only — this block runs only past the live spawn above, mirroring
 		// the ledger-append gating.
-		rwRefreshResumeIdentity(regDir, p)
+		if rwHarness(p) != "codex" {
+			rwRefreshResumeIdentity(regDir, p)
+		}
 		history[p.Session] = append(hist, resume.Attempt{UnixSeconds: time.Now().Unix(), Phase: "launched"})
 		launched++
 		note("  RESUMED %s acct=%s pid=%d (attempt %d/%d; re-eligible only if it fails recoverably)",

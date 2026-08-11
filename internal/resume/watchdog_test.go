@@ -1,6 +1,8 @@
 package resume
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -410,5 +412,28 @@ func TestResolveWatchdogProbeMode(t *testing.T) {
 	}
 	if got := ResolveWatchdogProbeMode("", true); got != "stale" {
 		t.Fatalf("empty setting behaves as auto, got %q", got)
+	}
+}
+
+func TestWatchdogPlanRowCodexHarnessRoundTrip(t *testing.T) {
+	want := WatchdogPlanRow{Session: "thread", Harness: "codex", CWD: "/repo", Rollout: "rollout.jsonl", GoalFile: "goal.txt", ResultFile: "result.json"}
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got WatchdogPlanRow
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%+v want=%+v", got, want)
+	}
+}
+
+func TestCodexWatchdogChildEnvDropsClaudeHarnessAndKeepsCodexHome(t *testing.T) {
+	got := CodexWatchdogChildEnv([]string{"ANTHROPIC_BASE_URL=http://parent", "CLAUDE_CONFIG_DIR=/claude", "CLAUDE_CODE_SESSION_ID=parent", "CODEX_HOME=/codex", "PATH=/bin"})
+	want := []string{"CODEX_HOME=/codex", "PATH=/bin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%q want=%q", got, want)
 	}
 }

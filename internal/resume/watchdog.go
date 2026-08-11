@@ -74,6 +74,15 @@ type WatchdogPlanRow struct {
 	// result); a cleanly-completed trailing answer is not a partial turn. Nil/empty
 	// (unreadable transcript, nothing pending) leaves the replay-safety gate inert.
 	PartialBlocks []EmittedBlock `json:"partial_blocks,omitempty"`
+
+	// Harness is explicit because a resume actuator must never infer the provider from
+	// prompt prose or an executable basename. Empty remains the legacy Claude default.
+	Harness string `json:"harness,omitempty"`
+	// Rollout and GoalFile are Codex-only continuation coordinates. GoalFile contains
+	// operator-authored continuation data and keeps prompt text out of argv/launch ledgers.
+	Rollout    string `json:"rollout,omitempty"`
+	GoalFile   string `json:"goal_file,omitempty"`
+	ResultFile string `json:"result_file,omitempty"`
 }
 
 // ResumeTarget is the config dir a launch must pin CLAUDE_CONFIG_DIR to: the re-home
@@ -272,6 +281,27 @@ func WatchdogChildEnv(environ []string, configDir string) []string {
 		out = append(out, kv)
 	}
 	return append(out, "CLAUDE_CONFIG_DIR="+configDir)
+}
+
+// CodexWatchdogChildEnv prevents a fresh Codex process from inheriting Claude gateway,
+// Claude seat, or parent harness identity while preserving CODEX_HOME and provider auth.
+func CodexWatchdogChildEnv(environ []string) []string {
+	drop := map[string]bool{
+		"ANTHROPIC_API_KEY": true, "ANTHROPIC_AUTH_TOKEN": true, "ANTHROPIC_BASE_URL": true,
+		"CLAUDE_CONFIG_DIR": true, "CLAUDE_CODE_SESSION_ID": true, "CLAUDE_CODE_CHILD_SESSION": true,
+		"JOB_SUPERVISED_WORKER": true,
+	}
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		key := kv
+		if at := strings.IndexByte(kv, '='); at >= 0 {
+			key = kv[:at]
+		}
+		if !drop[key] {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // --- the stale resume-took latch (#2368) --------------------------------------------
