@@ -5,7 +5,12 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 func TestResolveBackendFlagBeatsEnvBeatsDefault(t *testing.T) {
@@ -174,4 +179,58 @@ func indexOf(xs []string, want string) int {
 		}
 	}
 	return -1
+}
+
+func TestLaunchRegisteredPersistsBeforeRunnerAndTerminalizes(t *testing.T) {
+	store := sessionregistry.Store{Path: filepath.Join(t.TempDir(), "registry.jsonl")}
+	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: "child", AttemptID: "attempt", LaunchKind: "headless_worker", Runtime: "claude", Lane: "docs", Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	runner := func(_ []string, _ string, gotEnv map[string]string) launchResult {
+		called = true
+		if gotEnv["FAK_REGISTRATION_ID"] != "child" {
+			t.Fatalf("child env registration=%q", gotEnv["FAK_REGISTRATION_ID"])
+		}
+		rows, err := store.ReadAll()
+		if err != nil || len(rows) != 1 || rows[0].State != sessionregistry.StateRegistered {
+			t.Fatalf("pre-start readback rows=%+v err=%v", rows, err)
+		}
+		return launchResult{ReturnCode: 0}
+	}
+	got := launchRegistered([]string{"claude"}, ".", map[string]string{"FAK_WITNESS_REF": "commit:abc"}, runner, 0, false, &launchRegistration{Store: store, Record: rec})
+	if got.ReturnCode != 0 || !called {
+		t.Fatalf("result=%+v called=%v", got, called)
+	}
+	rows, err := store.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].State != sessionregistry.StateCompleted || rows[0].WitnessRef != "commit:abc" {
+		t.Fatalf("rows=%+v", rows)
+	}
+}
+
+func TestLaunchRegisteredFailsClosedWhenParentMissing(t *testing.T) {
+	store := sessionregistry.Store{Path: filepath.Join(t.TempDir(), "registry.jsonl")}
+	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: "child", ParentRegistrationID: "missing", RootRegistrationID: "root", AttemptID: "attempt", LaunchKind: "subagent", Runtime: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	got := launchRegistered([]string{"claude"}, ".", nil, func([]string, string, map[string]string) launchResult { called = true; return launchResult{} }, 0, false, &launchRegistration{Store: store, Record: rec})
+	if got.ReturnCode != 2 || called || !strings.Contains(got.Error, "worker not started") {
+		t.Fatalf("result=%+v called=%v", got, called)
+	}
+}
+
+func TestRegisteredChildEnvExposesBothSidesOfEdge(t *testing.T) {
+	r := sessionregistry.Record{RegistrationID: "child", ParentRegistrationID: "parent", ParentAttemptID: "parent-attempt", RootRegistrationID: "root", RootOutcome: "outcome", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "child-attempt"}
+	got := registeredChildEnv(map[string]string{"KEEP": "yes"}, r)
+	for k, want := range map[string]string{"KEEP": "yes", "FAK_REGISTRATION_ID": "child", "FAK_ATTEMPT_ID": "child-attempt", "FAK_PARENT_REGISTRATION_ID": "parent", "FAK_PARENT_ATTEMPT_ID": "parent-attempt", "FAK_ROOT_REGISTRATION_ID": "root", "FAK_ROOT_OUTCOME": "outcome", "FAK_ROOT_ISSUE": "6458", "FAK_TASK_ID": "issue-6458"} {
+		if got[k] != want {
+			t.Fatalf("%s=%q want %q", k, got[k], want)
+		}
+	}
 }

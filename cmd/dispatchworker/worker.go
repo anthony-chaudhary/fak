@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 const (
@@ -174,34 +175,102 @@ type runnerFunc func(command []string, cwd string, env map[string]string) launch
 // output inline. Mirrors dispatch_worker.launch: a missing exe -> 127, a timeout
 // -> 124. No-timeout (bounded=false) runs unbounded.
 func launch(command []string, cwd string, env map[string]string, runner runnerFunc, timeout time.Duration, bounded bool) launchResult {
+	return launchRegistered(command, cwd, env, runner, timeout, bounded, nil)
+}
+
+type launchRegistration struct {
+	Store  sessionregistry.Store
+	Record sessionregistry.Record
+}
+
+func launchRegistered(command []string, cwd string, env map[string]string, runner runnerFunc, timeout time.Duration, bounded bool, registration *launchRegistration) launchResult {
 	if runner != nil {
-		return runner(command, cwd, env)
+		if registration != nil {
+			if err := registration.Store.Register(registration.Record); err != nil {
+				return launchResult{ReturnCode: 2, Error: "child registration persist failed (worker not started): " + err.Error()}
+			}
+			env = registeredChildEnv(env, registration.Record)
+		}
+		result := runner(command, cwd, env)
+		if registration != nil {
+			state, reason := sessionregistry.StateCompleted, ""
+			if result.ReturnCode != 0 {
+				state, reason = sessionregistry.StateFailed, fmt.Sprintf("worker_exit_%d", result.ReturnCode)
+			}
+			if _, err := registration.Store.Terminal(registration.Record.RegistrationID, state, reason, env["FAK_WITNESS_REF"], time.Now().UTC()); err != nil {
+				result.ReturnCode = 2
+				result.Error = "terminal registration update failed: " + err.Error()
+			}
+		}
+		return result
 	}
 	resolved := append([]string(nil), command...)
 	if len(resolved) > 0 {
 		resolved[0] = resolveExe(resolved[0])
 	}
-
 	ctx := context.Background()
 	cancel := func() {}
 	if bounded {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
-
 	cmd := newLaunchCmd(ctx, resolved, cwd, env)
-	err := cmd.Run()
-	if bounded && ctx.Err() == context.DeadlineExceeded {
-		return launchResult{ReturnCode: 124, Timeout: true, Stderr: "timeout"}
-	}
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); !ok {
-			// could not start (not found / not executable)
-			return launchResult{ReturnCode: 127, Error: err.Error(), Stderr: err.Error()}
+	if registration != nil {
+		if err := registration.Store.Register(registration.Record); err != nil {
+			return launchResult{ReturnCode: 2, Error: "child registration persist failed (worker not started): " + err.Error()}
 		}
-		return launchResult{ReturnCode: cmd.ProcessState.ExitCode()}
+		cmd.Env = procguard.EnvSlice(registeredChildEnv(env, registration.Record))
 	}
-	return launchResult{ReturnCode: 0}
+	started := time.Now().UTC()
+	err := cmd.Start()
+	if err == nil && registration != nil {
+		if _, regErr := registration.Store.Start(registration.Record.RegistrationID, cmd.Process.Pid, started); regErr != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			_, _ = registration.Store.Terminal(registration.Record.RegistrationID, sessionregistry.StateFailed, "start_readback_failed", "", time.Now().UTC())
+			return launchResult{ReturnCode: 2, Error: "child start read-back failed; worker terminated: " + regErr.Error()}
+		}
+	}
+	if err == nil {
+		err = cmd.Wait()
+	}
+	result := launchResult{}
+	if bounded && ctx.Err() == context.DeadlineExceeded {
+		result = launchResult{ReturnCode: 124, Timeout: true, Stderr: "timeout"}
+	} else if err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			result = launchResult{ReturnCode: 127, Error: err.Error(), Stderr: err.Error()}
+		} else {
+			result = launchResult{ReturnCode: cmd.ProcessState.ExitCode()}
+		}
+	}
+	if registration != nil {
+		state, reason := sessionregistry.StateCompleted, ""
+		if result.ReturnCode != 0 {
+			state, reason = sessionregistry.StateFailed, fmt.Sprintf("worker_exit_%d", result.ReturnCode)
+		}
+		if _, regErr := registration.Store.Terminal(registration.Record.RegistrationID, state, reason, env["FAK_WITNESS_REF"], time.Now().UTC()); regErr != nil {
+			result.ReturnCode = 2
+			result.Error = "terminal registration update failed: " + regErr.Error()
+		}
+	}
+	return result
+}
+
+func registeredChildEnv(base map[string]string, r sessionregistry.Record) map[string]string {
+	out := map[string]string{}
+	for k, v := range base {
+		out[k] = v
+	}
+	out["FAK_REGISTRATION_ID"] = r.RegistrationID
+	out["FAK_ATTEMPT_ID"] = r.AttemptID
+	out["FAK_PARENT_REGISTRATION_ID"] = r.ParentRegistrationID
+	out["FAK_PARENT_ATTEMPT_ID"] = r.ParentAttemptID
+	out["FAK_ROOT_REGISTRATION_ID"] = r.RootRegistrationID
+	out["FAK_ROOT_OUTCOME"] = r.RootOutcome
+	out["FAK_ROOT_ISSUE"] = r.RootIssue
+	out["FAK_TASK_ID"] = r.TaskID
+	return out
 }
 
 // newLaunchCmd builds the *exec.Cmd for one real worker launch with the

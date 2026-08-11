@@ -1858,6 +1858,11 @@
           "category": "incidental",
           "reason": "Private atomic loose-ref filesystem helper; not a session-runtime concept or lifecycle transition",
           "token": "repairMalformedLooseSessionRef"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package import and registry path name for the child-lineage implementation, not a competing operator session-runtime concept.",
+          "token": "sessionregistry"
         }
       ],
       "id": "session-runtime",
@@ -1946,6 +1951,7 @@
         "session_compaction_thrash",
         "session_registry_recovery",
         "sessionids",
+        "sessionregistry",
         "sessions",
         "sessionsaudited",
         "simulateScheduler",
@@ -2452,6 +2458,11 @@
           "category": "incidental",
           "reason": "Hermetic fixture reason code, not a public proof concept",
           "token": "SOURCE_WITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment transport for an external witness reference; it does not define a new witness or proof class.",
+          "token": "FAK_WITNESS_REF"
         }
       ],
       "id": "witness-proof",
@@ -2460,6 +2471,7 @@
         "Attestation",
         "ClaimUnwitnessedCount",
         "CoreLockWitnessTrailer",
+        "FAK_WITNESS_REF",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
         "GoldDigest",

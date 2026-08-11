@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **191** (clarity 15 + coverage 176) |
+| **Disambiguation-debt (drive to 0)** | **196** (clarity 15 + coverage 181) |
 | **Crystal-clear concepts (and climbing)** | **440** crystal of 2153 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2308 / 2484** (92.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2308 / 2489** (92.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2831 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.0/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.9/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2153 concepts - score 89.0/100 (grade B) - disambiguation-debt 191
+concept-disambiguation chart - 2153 concepts - score 88.9/100 (grade B) - disambiguation-debt 196
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 440
@@ -62,14 +62,14 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 52 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ##########################.. 388/425
+  guard-gate       ##########################.. 388/426
   plan             ##########################.. 319/344
+  session-runtime  #########################... 213/235
   policy-capability #########################... 154/175
-  session-runtime  #########################... 213/234
+  render-materialize ##########################.. 177/192
   cache            ###########################. 261/275
   context-ctx      ##########################.. 202/216
-  render-materialize ##########################.. 177/190
-  witness-proof    ##########################.. 140/150
+  witness-proof    ##########################.. 140/152
   gateway-engine   ###########################. 169/176
   loop             ##########################.. 77/84
   evict            #########################... 49/55
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 92.9%  (2308/2484 confusable tokens positioned)
+namespace coverage  [##############################..] 92.7%  (2308/2489 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -2442,14 +2442,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 388 | 425 | 37 |
+| guard-gate | 388 | 426 | 38 |
 | plan | 319 | 344 | 25 |
+| session-runtime | 213 | 235 | 22 |
 | policy-capability | 154 | 175 | 21 |
-| session-runtime | 213 | 234 | 21 |
+| render-materialize | 177 | 192 | 15 |
 | cache | 261 | 275 | 14 |
 | context-ctx | 202 | 216 | 14 |
-| render-materialize | 177 | 190 | 13 |
-| witness-proof | 140 | 150 | 10 |
+| witness-proof | 140 | 152 | 12 |
 | gateway-engine | 169 | 176 | 7 |
 | loop | 77 | 84 | 7 |
 | evict | 49 | 55 | 6 |
