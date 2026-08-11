@@ -39,9 +39,10 @@ jobs:
       # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
       # `go` fetch it if the runner's Go is older.
       GOTOOLCHAIN: auto
-      # Bound package/compiler fan-out below the hosted runner process ceiling.
+      # Serialize package/compiler fan-out below the hosted runner process ceiling.
       # This changes no package set, test semantics, job name, or release check.
-      GOFLAGS: "-p=2"
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
     defaults:
       run:
         working-directory: .
