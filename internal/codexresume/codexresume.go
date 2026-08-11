@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Outcome is the typed boundary result of one headless resume process.
@@ -78,7 +79,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("codexresume: baseline rollout: %w", err)
 	}
-	cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
+	cmd := windowgate.Command(cfg.Command[0], cfg.Command[1:]...)
 	cmd.Dir = cfg.Dir
 	if cfg.Env != nil {
 		cmd.Env = cfg.Env
