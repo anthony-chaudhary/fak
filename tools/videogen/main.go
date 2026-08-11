@@ -69,6 +69,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
 	cmd.Dir = moduleDir
+	configureDispatchSpawn(cmd)
 	if ffmpeg != "" {
 		cmd.Env = append(os.Environ(), "VIDEOGEN_FFMPEG="+ffmpeg)
 	}
