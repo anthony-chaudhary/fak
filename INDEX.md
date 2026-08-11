@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [FakStallscanWatch — retained pre-crash evidence](docs/notes/STALLSCAN-PRECRASH-WATCH-2026-08-10.md) -- auto-indexed dated note.
 - [Continuous generation control: trajectory, epoch, and steering point](docs/notes/CONTINUOUS-GENERATION-CONTROL-2026-08-10.md) -- auto-indexed dated note.
 - [RESEARCH: feature gates in fak — what exists, what doesn't, and what to build](docs/notes/RESEARCH-feature-gates-2026-08-09.md) -- auto-indexed dated note.
 - [Per-claim benchmark witness granularity — decision for #3431](docs/notes/PER-CLAIM-BENCHMARK-WITNESS-GRANULARITY-2026-08-09.md) -- auto-indexed dated note.
