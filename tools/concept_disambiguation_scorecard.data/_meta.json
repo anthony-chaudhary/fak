@@ -3208,6 +3208,11 @@
           "category": "incidental",
           "reason": "Schema enum type name, not a public capability concept",
           "token": "RolloutPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Lifecycle-adapter wire payload local to process-forest negotiation, not a general policy capability type.",
+          "token": "CapabilityDocument"
         }
       ],
       "exclude": [
@@ -3217,6 +3222,7 @@
       "ignore": [
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
+        "CapabilityDocument",
         "CapabilitySnapshot",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
@@ -4133,6 +4139,11 @@
           "category": "incidental",
           "reason": "Typed lifecycle acknowledgement state local to fleetbus, not a capability maturity level.",
           "token": "AckUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed adapter invocation result local to lifecycle negotiation, not a support maturity rung.",
+          "token": "ResultUnsupported"
         }
       ],
       "id": "support-maturity",
@@ -4195,6 +4206,7 @@
         "ReasonUnsupportedQuantizer",
         "ReasonUnsupportedTransition",
         "ReasonUnsupportedVersion",
+        "ResultUnsupported",
         "RunCommitSubjectCoverage",
         "SUPPORTED_COMBINATION",
         "SecurityParityConfirmed",

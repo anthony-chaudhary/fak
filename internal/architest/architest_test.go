@@ -547,6 +547,7 @@ var tier = map[string]int{
 	"disambiguation":        1, // stdlib-only terminology schema, validation, and self-test; no policy or model kernel.
 	"sessionregistry":       1, // stdlib-only durable child-lineage record and read-back; no runtime kernel.
 	"processforest":         1, // stdlib-only durable logical process-forest identity, ancestry, adoption, and deterministic snapshots.
+	"lifecycleadapter":      1, // stdlib-only process-forest adapter capability negotiation and bounded invocation contract.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
