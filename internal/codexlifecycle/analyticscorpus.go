@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -83,6 +84,16 @@ type Finding struct {
 	Action string `json:"action"`
 }
 
+// ResumeCohort measures metadata-grounded fresh headless goal continuations.
+type ResumeCohort struct {
+	Started           int            `json:"started"`
+	UsefulWorkReached int            `json:"useful_work_reached"`
+	Completed         int            `json:"completed"`
+	Crashed           int            `json:"crashed"`
+	Superseded        int            `json:"superseded"`
+	FailureReasons    map[string]int `json:"failure_reasons,omitempty"`
+}
+
 // AnalyticsCorpus is the whole-store #4767 report.
 type AnalyticsCorpus struct {
 	Root       string `json:"root"`
@@ -107,7 +118,8 @@ type AnalyticsCorpus struct {
 	SleepPolls   int64 `json:"sleep_polls"`
 	StallGaps    int64 `json:"stall_gaps"`
 
-	Findings []Finding `json:"findings,omitempty"`
+	Findings            []Finding    `json:"findings,omitempty"`
+	FreshHeadlessResume ResumeCohort `json:"fresh_headless_resume"`
 }
 
 // HardFailureCount counts calls in classes that belong in a failure ranking.
@@ -128,10 +140,11 @@ func ScanAnalyticsCorpus(root string, opt ScanOptions, topN int) (AnalyticsCorpu
 		topN = 10
 	}
 	c := AnalyticsCorpus{
-		Root:     root,
-		Outcomes: map[Outcome]int{},
-		Classes:  map[ToolClass]int{},
-		ByTool:   map[string]*ToolAgg{},
+		Root:                root,
+		Outcomes:            map[Outcome]int{},
+		Classes:             map[ToolClass]int{},
+		ByTool:              map[string]*ToolAgg{},
+		FreshHeadlessResume: ResumeCohort{FailureReasons: map[string]int{}},
 	}
 	reasons := map[ReasonRow]int{}
 	var durations, ttfts []float64
@@ -167,6 +180,9 @@ func ScanAnalyticsCorpus(root string, opt ScanOptions, topN int) (AnalyticsCorpu
 			continue
 		}
 		c.Sessions++
+		if isFreshHeadlessResume(meta, records) {
+			foldResumeCohort(&c.FreshHeadlessResume, ra)
+		}
 		c.ToolCalls += ra.Calls
 		for _, o := range ra.Outcomes {
 			c.Classes[o.Class]++
@@ -239,6 +255,51 @@ func ScanAnalyticsCorpus(root string, opt ScanOptions, topN int) (AnalyticsCorpu
 
 	c.Findings = corpusFindings(c)
 	return c, nil
+}
+
+// isFreshHeadlessResume uses only structured rollout metadata and the harness-owned
+// goal continuation envelope. codex_exec proves a non-interactive headless process;
+// the envelope proves this fresh process continues an existing durable goal.
+func isFreshHeadlessResume(meta Meta, recs []ARecord) bool {
+	if !strings.EqualFold(meta.Originator, "codex_exec") || !strings.EqualFold(meta.Source, "exec") {
+		return false
+	}
+	for _, r := range recs {
+		if r.GoalContinuation {
+			return true
+		}
+	}
+	return false
+}
+
+func foldResumeCohort(c *ResumeCohort, ra RolloutAnalytics) {
+	for _, task := range ra.Tasks {
+		c.Started++
+		useful := false
+		for class, n := range task.Classes {
+			if n > 0 && (class == ToolOK || class == ToolExpectedNegative) {
+				useful = true
+				break
+			}
+		}
+		if useful {
+			c.UsefulWorkReached++
+		}
+		switch task.Outcome {
+		case Complete:
+			c.Completed++
+		case Superseded:
+			c.Superseded++
+		case Aborted, ProcessDeath:
+			c.Crashed++
+			stage := "before_useful_work"
+			if useful {
+				stage = "after_useful_work"
+			}
+			reason := string(task.Outcome)
+			c.FailureReasons[stage+":"+reason]++
+		}
+	}
 }
 
 // findingMin is the repetition floor for a corpus-level finding: below it a cause

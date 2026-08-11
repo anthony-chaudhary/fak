@@ -228,16 +228,17 @@ const headBytes = 256
 
 // ARecord is one retained, body-free analytics record from a rollout.
 type ARecord struct {
-	Kind       string // task_started | task_complete | turn_aborted | function_call | function_call_output | token_count | compacted
-	TS         time.Time
-	TurnID     string
-	CallID     string
-	Tool       string
-	Head       string   // bounded command head (classification only; corpus reports never export it)
-	Targets    []string // apply_patch file targets, paths only
-	Env        Envelope
-	Reason     string
-	DurationMS int64
+	Kind             string // task_started | task_complete | turn_aborted | function_call | function_call_output | token_count | compacted
+	TS               time.Time
+	TurnID           string
+	CallID           string
+	Tool             string
+	Head             string   // bounded command head (classification only; corpus reports never export it)
+	Targets          []string // apply_patch file targets, paths only
+	Env              Envelope
+	Reason           string
+	DurationMS       int64
+	GoalContinuation bool // structured harness envelope; no prompt body retained
 }
 
 // ReadAnalyticsRollout streams one rollout and returns its Meta plus body-free
@@ -259,20 +260,28 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			Timestamp string `json:"timestamp"`
 			Type      string `json:"type"`
 			Payload   struct {
-				Type          string          `json:"type"`
-				TurnID        string          `json:"turn_id"`
-				Reason        string          `json:"reason"`
-				DurationMS    int64           `json:"duration_ms"`
-				ID            string          `json:"id"`
-				AltID         string          `json:"session_id"`
-				ModelProvider string          `json:"model_provider"`
-				CLIVersion    string          `json:"cli_version"`
-				CWD           string          `json:"cwd"`
-				CallID        string          `json:"call_id"`
-				Name          string          `json:"name"`
-				Arguments     string          `json:"arguments"`
-				Input         string          `json:"input"`
-				Output        json.RawMessage `json:"output"`
+				Type          string `json:"type"`
+				TurnID        string `json:"turn_id"`
+				Reason        string `json:"reason"`
+				DurationMS    int64  `json:"duration_ms"`
+				ID            string `json:"id"`
+				AltID         string `json:"session_id"`
+				ModelProvider string `json:"model_provider"`
+				CLIVersion    string `json:"cli_version"`
+				CWD           string `json:"cwd"`
+				Originator    string `json:"originator"`
+				Source        string `json:"source"`
+				ThreadSource  string `json:"thread_source"`
+				Role          string `json:"role"`
+				Content       []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+				CallID    string          `json:"call_id"`
+				Name      string          `json:"name"`
+				Arguments string          `json:"arguments"`
+				Input     string          `json:"input"`
+				Output    json.RawMessage `json:"output"`
 			} `json:"payload"`
 		}
 		if json.Unmarshal([]byte(line), &rec) != nil {
@@ -286,14 +295,25 @@ func ReadAnalyticsRollout(r io.Reader) (Meta, []ARecord, error) {
 			}
 			haveMeta = true
 			meta = Meta{
-				RolloutID:  firstNonEmpty(rec.Payload.ID, rec.Payload.AltID),
-				Provider:   strings.TrimSpace(rec.Payload.ModelProvider),
-				CLIVersion: strings.TrimSpace(rec.Payload.CLIVersion),
-				CWD:        strings.TrimSpace(rec.Payload.CWD),
+				RolloutID:    firstNonEmpty(rec.Payload.ID, rec.Payload.AltID),
+				Provider:     strings.TrimSpace(rec.Payload.ModelProvider),
+				CLIVersion:   strings.TrimSpace(rec.Payload.CLIVersion),
+				CWD:          strings.TrimSpace(rec.Payload.CWD),
+				Originator:   strings.TrimSpace(rec.Payload.Originator),
+				Source:       strings.TrimSpace(rec.Payload.Source),
+				ThreadSource: strings.TrimSpace(rec.Payload.ThreadSource),
 			}
 		case kindCompacted:
 			out = append(out, ARecord{Kind: kindCompacted, TS: ts})
 		case "response_item":
+			if rec.Payload.Type == "message" && rec.Payload.Role == "user" {
+				for _, item := range rec.Payload.Content {
+					if item.Type == "input_text" && strings.Contains(item.Text, "<codex_"+"internal_"+`context source="goal">`) {
+						out = append(out, ARecord{Kind: "goal_continuation", TS: ts, GoalContinuation: true})
+						break
+					}
+				}
+			}
 			switch rec.Payload.Type {
 			case kindToolCall, "custom_tool_call":
 				head, targets := callHead(rec.Payload.Name, firstNonEmpty(rec.Payload.Arguments, rec.Payload.Input))

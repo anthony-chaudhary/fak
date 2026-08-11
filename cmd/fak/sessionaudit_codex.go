@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/codexlifecycle"
@@ -28,7 +29,7 @@ func runSessionAuditCodex(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "rollout store root (default ~/.codex/sessions, honoring CODEX_HOME)")
 	cwdFilter := fs.String("cwd", "", "keep only rollouts whose session cwd matches this path")
 	here := fs.Bool("here", false, "shorthand: --cwd <current working directory>")
-	freshMins := fs.Int("fresh-mins", 120, "a rollout younger than this is treated as possibly live")
+	freshMins := fs.Int("fresh-mins", 120, "a rollout younger than this is treated as possibly live; seven-day audit: fak session-audit codex --json --here --fresh-mins 10080 --top 30 --max 500")
 	top := fs.Int("top", 10, "ranked critical-path outliers to keep")
 	max := fs.Int("max", 0, "cap scanned rollouts, newest first (0 = all)")
 	if !parseFlags(fs, argv) {
@@ -85,6 +86,19 @@ func runSessionAuditCodex(stdout, stderr io.Writer, argv []string) int {
 func writeCodexCorpusText(w io.Writer, c codexlifecycle.AnalyticsCorpus) {
 	fmt.Fprintf(w, "codex corpus — root=%s sessions=%d unreadable=%d\n", c.Root, c.Sessions, c.Unreadable)
 	fmt.Fprintf(w, "tasks=%d completed=%d tool_calls=%d\n", c.Tasks, c.Completed, c.ToolCalls)
+	r := c.FreshHeadlessResume
+	fmt.Fprintf(w, "fresh_headless_resume started=%d useful_work=%d completed=%d crashed=%d superseded=%d\n",
+		r.Started, r.UsefulWorkReached, r.Completed, r.Crashed, r.Superseded)
+	if len(r.FailureReasons) > 0 {
+		keys := make([]string, 0, len(r.FailureReasons))
+		for reason := range r.FailureReasons {
+			keys = append(keys, reason)
+		}
+		sort.Strings(keys)
+		for _, reason := range keys {
+			fmt.Fprintf(w, "  resume_failure %-42s %d\n", reason, r.FailureReasons[reason])
+		}
+	}
 	fmt.Fprintf(w, "duration_s  n=%-6d p50=%-8.1f p90=%-8.1f p95=%-8.1f p99=%-8.1f max=%.1f\n",
 		c.Duration.N, c.Duration.P50, c.Duration.P90, c.Duration.P95, c.Duration.P99, c.Duration.Max)
 	fmt.Fprintf(w, "ttft_s      n=%-6d p50=%-8.1f p90=%-8.1f p95=%-8.1f p99=%-8.1f max=%.1f\n",

@@ -34,10 +34,13 @@ import (
 // child look like the same parent session (the same trap cmd/fak's
 // applyCodexLoopSessionMeta guards).
 type Meta struct {
-	RolloutID  string `json:"rollout_id,omitempty"`
-	Provider   string `json:"provider,omitempty"`    // model_provider, e.g. "fak" / "openai"
-	CLIVersion string `json:"cli_version,omitempty"` // e.g. "0.144.4"
-	CWD        string `json:"cwd,omitempty"`
+	RolloutID    string `json:"rollout_id,omitempty"`
+	Provider     string `json:"provider,omitempty"`    // model_provider, e.g. "fak" / "openai"
+	CLIVersion   string `json:"cli_version,omitempty"` // e.g. "0.144.4"
+	CWD          string `json:"cwd,omitempty"`
+	Originator   string `json:"originator,omitempty"`
+	Source       string `json:"source,omitempty"`
+	ThreadSource string `json:"thread_source,omitempty"`
 }
 
 // ProviderVersion is the table axis #4785 reports against ("fak 0.144.1").

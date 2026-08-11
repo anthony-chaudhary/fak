@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,6 +72,42 @@ func TestScanAnalyticsCorpus_TypedTotalsReconcile(t *testing.T) {
 		if o.Session == "" || o.TurnID == "" {
 			t.Errorf("outlier missing stable ids: %+v", o)
 		}
+	}
+}
+
+func TestAnalyticsCorpus_FreshHeadlessResumeCohort(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	goal := `{"timestamp":"2026-08-10T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">continue</codex_internal_context>"}]}}`
+	headlessMeta := `{"timestamp":"2026-08-10T10:00:00Z","type":"session_meta","payload":{"id":"resume","cwd":"C:\\work\\fak","originator":"codex_exec","source":"exec","thread_source":"user"}}`
+
+	// A stale headless continuation dies before any successful tool result.
+	writeRollout(t, dir, "crash.jsonl", now.Add(-2*time.Hour),
+		headlessMeta, goal,
+		`{"timestamp":"2026-08-10T10:00:02Z","type":"event_msg","payload":{"type":"task_started","turn_id":"crash"}}`)
+
+	// A second continuation reaches useful work and completes.
+	writeRollout(t, dir, "success.jsonl", now.Add(-2*time.Hour),
+		headlessMeta, goal,
+		`{"timestamp":"2026-08-10T10:01:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"ok"}}`,
+		`{"timestamp":"2026-08-10T10:01:01Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","call_id":"c1","arguments":"{}"}}`,
+		`{"timestamp":"2026-08-10T10:01:02Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Process exited with code 0"}}`,
+		`{"timestamp":"2026-08-10T10:01:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"ok"}}`)
+	// Interactive goal continuation is explicitly outside the headless cohort.
+	writeRollout(t, dir, "interactive.jsonl", now.Add(-2*time.Hour),
+		strings.Replace(headlessMeta, "codex_exec", "codex-tui", 1), goal,
+		`{"timestamp":"2026-08-10T10:02:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"tui"}}`)
+
+	got, err := ScanAnalyticsCorpus(dir, ScanOptions{Now: now, FreshWithin: time.Hour}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := got.FreshHeadlessResume
+	if c.Started != 2 || c.UsefulWorkReached != 1 || c.Completed != 1 || c.Crashed != 1 || c.Superseded != 0 {
+		t.Fatalf("cohort = %+v", c)
+	}
+	if c.FailureReasons["before_useful_work:process_death"] != 1 {
+		t.Fatalf("failure reasons = %#v", c.FailureReasons)
 	}
 }
 
