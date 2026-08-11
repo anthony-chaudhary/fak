@@ -29,6 +29,8 @@ comparison in [fak vs vLLM, SGLang & provider KV caching](../../fak-vs-alternati
 It is part of Dimension D of the
 [concept-popularization epic](../../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 
+
+For a focused comparison of two engines and the local-versus-fleet composition, see [TensorRT-LLM vs SGLang: where fak fits](../../explainers/tensorrt-llm-vs-sglang-and-fak.md).
 ## What vLLM and SGLang are for
 
 An inference server serves tokens. Given a model and a prompt, it prefills, decodes, and

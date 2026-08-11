@@ -28,6 +28,7 @@
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
 - Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
+- TensorRT-LLM vs SGLang and how fak fronts fleet or local inference: [`docs/explainers/tensorrt-llm-vs-sglang-and-fak.md`](docs/explainers/tensorrt-llm-vs-sglang-and-fak.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
 - Running that same `fak guard` seam **server-side** — a hosted harness (Claude Code / Codex / a CI runner) governed unattended in a container, with no TTY, a mounted hash-chained audit journal, a cost cap, and a supervised-restart lifecycle; the complement to the local-dev framing above and to [`docs/integrations/embed-in-your-product.md`](docs/integrations/embed-in-your-product.md) (which governs your own direct API call): [`docs/guard-server-side-client.md`](docs/guard-server-side-client.md)
