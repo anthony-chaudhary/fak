@@ -437,6 +437,61 @@
           "category": "incidental",
           "reason": "Reflection metadata memo local to quantmeta JSON round-tripping, not an inference or provider cache concept.",
           "token": "knownKeyCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "cacheStats"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "observeTurnCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "formatTurnDebugStatsWithBudgetAndCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "turnCacheSample"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "turnCacheHistory"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "turnCacheSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "turnCacheStatsMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "turnCacheStats"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "summarizeTurnCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "formatTurnCacheSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
+          "token": "formatTurnCachePair"
         }
       ],
       "id": "cache",
@@ -479,6 +534,7 @@
         "builtinCacheLevers",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheStats",
         "cacheValueGateFactsFromReport",
         "cache_bytes",
         "cache_creation_span",
@@ -545,6 +601,9 @@
         "droppedcachedtokens",
         "fakcachevalueinputpermtokusd",
         "flushcache",
+        "formatTurnCachePair",
+        "formatTurnCacheSummary",
+        "formatTurnDebugStatsWithBudgetAndCache",
         "identityCacheLever",
         "inferCacheCreationTokensHeadOnly",
         "inferCacheCreationTokensMessagePrefix",
@@ -563,6 +622,7 @@
         "non_cache_fingerprint",
         "normalizedSchemaCacheCap",
         "normalizedSchemaCacheLen",
+        "observeTurnCache",
         "observecachettlupgrade",
         "prefixcachehits",
         "prefixcachequeries",
@@ -574,7 +634,13 @@
         "runCacheValueGateScore",
         "selectorCacheKey",
         "strongMatrixCache",
+        "summarizeTurnCache",
         "tokencache",
+        "turnCacheHistory",
+        "turnCacheSample",
+        "turnCacheStats",
+        "turnCacheStatsMu",
+        "turnCacheSummary",
         "uncached",
         "usercachedir"
       ],

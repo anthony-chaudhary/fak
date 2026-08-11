@@ -679,3 +679,41 @@ func TestChatCompletionsDebugStatsEmitsOnePayloadFreeLine(t *testing.T) {
 		}
 	}
 }
+
+// TestTurnCacheSummary pins the per-turn operator history requested by guard: the latest line
+// identifies current and previous turns and folds the complete successful-turn session into
+// average, median, high, and low values. Both percent and net token-equivalent stay visible so a
+// percentage improvement cannot hide a token-volume regression (or vice versa).
+func TestTurnCacheSummary(t *testing.T) {
+	s := &Server{}
+	for _, sample := range []turnCacheSample{{pct: 10, tok: 100}, {pct: 30, tok: 300}, {pct: 20, tok: 200}, {pct: 40, tok: 400}} {
+		s.observeTurnCache(sample.pct, sample.tok)
+	}
+	got := formatTurnCacheSummary(summarizeTurnCache(s.turnCacheStats.samples))
+	want := " cache_stats=turn:4,current:400tok/40%,previous:200tok/20%,avg:250tok/25%,median:250tok/25%,high:400tok/40%,low:100tok/10%"
+	if got != want {
+		t.Fatalf("cache summary = %q, want %q", got, want)
+	}
+}
+
+func TestRenderTurnDebugStatsCarriesPerTurnCacheHistory(t *testing.T) {
+	var lines []string
+	s := &Server{metrics: newGatewayMetrics(time.Now()), debugStatsf: func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}}
+	s.renderTurnDebugStats("turn-1", "anthropic_messages", true, "end_turn", 20, 5, 60, 20, false)
+	s.renderTurnDebugStats("turn-2", "anthropic_messages", true, "end_turn", 100, 5, 0, 0, false)
+	if len(lines) != 2 {
+		t.Fatalf("rendered %d lines, want 2: %#v", len(lines), lines)
+	}
+	for _, want := range []string{"cache_stats=turn:1", "current:49tok/49%", "previous:n/a", "avg:49tok/49%", "median:49tok/49%", "high:49tok/49%", "low:49tok/49%"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("first line %q missing %q", lines[0], want)
+		}
+	}
+	for _, want := range []string{"cache_stats=turn:2", "current:0tok/0%", "previous:49tok/49%", "avg:24tok/24%", "median:24tok/24%", "high:49tok/49%", "low:0tok/0%"} {
+		if !strings.Contains(lines[1], want) {
+			t.Errorf("second line %q missing %q", lines[1], want)
+		}
+	}
+}

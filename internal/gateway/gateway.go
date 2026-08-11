@@ -569,7 +569,8 @@ type Config struct {
 	Logf func(format string, args ...any)
 	// DebugStatsf is the OPTIONAL per-turn human debug sink (#793). When non-nil, every
 	// served turn renders ONE compact, payload-free line — request/cache_read/cache_creation
-	// tokens, the compaction action, and the resetScore SHADOW health (one of the five
+	// tokens plus current/previous/average/median/high/low session cache savings, the
+	// compaction action, and the resetScore SHADOW health (one of the five
 	// healthy_cache/cache_decay/stale_prefix/cooldown/unknown_provider states) — so an
 	// operator can watch turn-by-turn cache & compaction behavior live. nil (the default)
 	// emits nothing; it is independent of Logf (the JSON --log stream), so --debug-stats
@@ -1257,8 +1258,10 @@ type Server struct {
 	version                  string
 	logf                     func(format string, args ...any)
 	debugStatsf              func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
-	feed                     *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
-	sessionFeed              *sessionFeed                     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
+	turnCacheStatsMu         sync.Mutex
+	turnCacheStats           turnCacheHistory // successful-turn cache economics rendered by fak-turn
+	feed                     *coherenceFeed   // the cross-agent "what changed" feed (vdso coherence bus)
+	sessionFeed              *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics                  *gatewayMetrics
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the

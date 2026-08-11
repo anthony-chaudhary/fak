@@ -34,6 +34,7 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -236,7 +237,9 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	// unusually expensive" on the same line they already watch — absent (formatExpenseField
 	// returns "") until the volume crosses the warn line, like the nudge=/safety= fields.
 	expense, haveExpense := s.peekCtxExpense(trace)
-	line := formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety)
+	proof := vcacheProofFromCounters(uint64(maxNonNeg(prompt)), uint64(maxNonNeg(cacheRead)), uint64(maxNonNeg(cacheCreate)))
+	cacheStats := s.observeTurnCache(proof.SavedPct, proof.SavedTokenEquiv)
+	line := formatTurnDebugStatsWithBudgetAndCache(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, cacheStats, safety)
 	past := compactionBudgetPast(prompt, completion, cacheRead, cacheCreate, s.compactHistoryBudget)
 	escalation := s.observePastCompact(trace, past, compacted)
 	s.debugStatsf("%s", line+formatPastCompactEscalation(escalation)+formatHarnessCoherenceField(sum.HarnessRewrites, sum.QuarantineAtRisk)+formatExpenseField(expense, haveExpense))
@@ -355,11 +358,75 @@ func formatTurnDebugError(trace, wire, reason string, elapsed time.Duration) str
 //
 // wire/stream/completion are retained in the signature (the JSON --log and callers carry them)
 // but are intentionally not rendered on this glanceable line.
+type turnCacheSample struct{ pct, tok float64 }
+type turnCacheHistory struct{ samples []turnCacheSample }
+type turnCacheSummary struct {
+	Count                                            int
+	CurrentPct, CurrentTok, PreviousPct, PreviousTok float64
+	AveragePct, AverageTok, MedianPct, MedianTok     float64
+	HighestPct, HighestTok, LowestPct, LowestTok     float64
+}
+
+func (s *Server) observeTurnCache(pct, tok float64) turnCacheSummary {
+	s.turnCacheStatsMu.Lock()
+	defer s.turnCacheStatsMu.Unlock()
+	s.turnCacheStats.samples = append(s.turnCacheStats.samples, turnCacheSample{pct: pct, tok: tok})
+	return summarizeTurnCache(s.turnCacheStats.samples)
+}
+
+func summarizeTurnCache(samples []turnCacheSample) turnCacheSummary {
+	if len(samples) == 0 {
+		return turnCacheSummary{}
+	}
+	out := turnCacheSummary{Count: len(samples), CurrentPct: samples[len(samples)-1].pct, CurrentTok: samples[len(samples)-1].tok}
+	if len(samples) > 1 {
+		out.PreviousPct, out.PreviousTok = samples[len(samples)-2].pct, samples[len(samples)-2].tok
+	}
+	pcts, toks := make([]float64, len(samples)), make([]float64, len(samples))
+	out.HighestPct, out.LowestPct, out.HighestTok, out.LowestTok = samples[0].pct, samples[0].pct, samples[0].tok, samples[0].tok
+	for i, sample := range samples {
+		pcts[i], toks[i] = sample.pct, sample.tok
+		out.AveragePct += sample.pct
+		out.AverageTok += sample.tok
+		out.HighestPct, out.LowestPct = max(out.HighestPct, sample.pct), min(out.LowestPct, sample.pct)
+		out.HighestTok, out.LowestTok = max(out.HighestTok, sample.tok), min(out.LowestTok, sample.tok)
+	}
+	out.AveragePct /= float64(len(samples))
+	out.AverageTok /= float64(len(samples))
+	sort.Float64s(pcts)
+	sort.Float64s(toks)
+	out.MedianPct, out.MedianTok = medianFloat64(pcts), medianFloat64(toks)
+	return out
+}
+
+func medianFloat64(sorted []float64) float64 {
+	mid := len(sorted) / 2
+	if len(sorted)%2 != 0 {
+		return sorted[mid]
+	}
+	return (sorted[mid-1] + sorted[mid]) / 2
+}
+
+func formatTurnCacheSummary(s turnCacheSummary) string {
+	previous := "n/a"
+	if s.Count > 1 {
+		previous = formatTurnCachePair(s.PreviousPct, s.PreviousTok)
+	}
+	return fmt.Sprintf(" cache_stats=turn:%d,current:%s,previous:%s,avg:%s,median:%s,high:%s,low:%s", s.Count, formatTurnCachePair(s.CurrentPct, s.CurrentTok), previous, formatTurnCachePair(s.AveragePct, s.AverageTok), formatTurnCachePair(s.MedianPct, s.MedianTok), formatTurnCachePair(s.HighestPct, s.HighestTok), formatTurnCachePair(s.LowestPct, s.LowestTok))
+}
+func formatTurnCachePair(pct, tok float64) string {
+	return HumanTokenEquiv(tok) + "tok/" + strconv.FormatFloat(pct, 'f', 0, 64) + "%"
+}
+
 func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, d ResetDecision, have bool, safetyOpt ...turnSafetyDelta) string {
 	return formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, 0, d, have, safetyOpt...)
 }
 
 func formatTurnDebugStatsWithBudget(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, compactBudget int, d ResetDecision, have bool, safetyOpt ...turnSafetyDelta) string {
+	return formatTurnDebugStatsWithBudgetAndCache(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, compactBudget, d, have, turnCacheSummary{}, safetyOpt...)
+}
+
+func formatTurnDebugStatsWithBudgetAndCache(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, compactBudget int, d ResetDecision, have bool, cacheStats turnCacheSummary, safetyOpt ...turnSafetyDelta) string {
 	if finish == "" {
 		finish = "unknown"
 	}
@@ -415,6 +482,9 @@ func formatTurnDebugStatsWithBudget(trace, wire string, stream bool, finish stri
 		}
 	} else {
 		b.WriteString(" prov=0 tok fak=0 tok")
+	}
+	if cacheStats.Count > 0 {
+		b.WriteString(formatTurnCacheSummary(cacheStats))
 	}
 	fmt.Fprintf(&b, " cache=%s compact=%s finish=%s", health, compact, debugField(finish))
 	if nudge := formatCompactionBudgetNudge(prompt, completion, cacheRead, cacheCreate, compactBudget); nudge != "" {
