@@ -1012,6 +1012,10 @@ func printBreakEven(w io.Writer, r *turnbench.BreakEvenReport) {
 // adjudicator denies, and MMU quarantines for each arm  -  the real turn-use-vs-now
 // measurement the static bench could not produce.
 func cmdAgent(argv []string) {
+	if len(argv) > 0 && argv[0] == "checkpoint" {
+		cmdAgentCheckpoint(argv[1:])
+		return
+	}
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
