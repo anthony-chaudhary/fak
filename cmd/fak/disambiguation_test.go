@@ -60,3 +60,45 @@ func containsDisambiguationString(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestRunDisambiguationQueryJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDisambiguation(&stdout, &stderr, []string{"query", "agent kernel", "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var got disambiguation.QueryResponse
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode query JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Schema != disambiguation.QuerySchemaVersion || got.Entry.Identity.CanonicalTerm != "agent kernel" {
+		t.Fatalf("query response = %#v", got)
+	}
+	if got.Entry.Definition == "" || len(got.Entry.Contrasts) == 0 || got.Entry.Owner.Leaf == "" || len(got.Entry.Sources) == 0 || got.Entry.Freshness.Verdict == "" {
+		t.Fatalf("query JSON omitted contract fields: %#v", got.Entry)
+	}
+}
+
+func TestRunDisambiguationQuerySelfTestJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDisambiguation(&stdout, &stderr, []string{"query", "--self-test", "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var got disambiguation.QuerySelfTestReport
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode self-test JSON: %v", err)
+	}
+	if !got.Complete || got.CanonicalTerm != "agent kernel" || got.Schema != disambiguation.QuerySchemaVersion {
+		t.Fatalf("self-test report = %#v", got)
+	}
+}
+
+func TestRunDisambiguationQueryRejectsAliasAndUnknown(t *testing.T) {
+	for _, term := range []string{"fused agent kernel", "unknown"} {
+		var stdout, stderr bytes.Buffer
+		if code := runDisambiguation(&stdout, &stderr, []string{"query", term, "--json"}); code != 3 {
+			t.Errorf("query %q exit = %d, want 3; stderr = %q", term, code, stderr.String())
+		}
+	}
+}
