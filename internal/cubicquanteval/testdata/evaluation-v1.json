@@ -1,0 +1,29 @@
+{
+  "schema_version": "fak.cubicquanteval.fixture/v1",
+  "artifact": {
+    "id": "arxiv:2608.06763v1",
+    "uri": "https://arxiv.org/abs/2608.06763v1",
+    "sha256": "245a523fd1b06203c123e6b03c39ed8e3cef107dd7cc33917b280511e71c9df0"
+  },
+  "recipe": {
+    "id": "cubicquant-bounded-reconstruction-v1",
+    "revision": "1",
+    "seed": 42,
+    "samples_per_case": 384,
+    "group_size": 128,
+    "bit_widths": [1,2,3,4,5,6,7,8],
+    "distributions": ["uniform", "gaussian", "laplace"],
+    "cubic_shape_step": 0.25,
+    "scale_steps": 17
+  },
+  "runtime": {
+    "id": "fak/internal/cubicquanteval",
+    "revision": "contract-v1",
+    "delegate": "cpu-go-stdlib"
+  },
+  "model": {
+    "id": "synthetic-reference-distributions",
+    "revision": "splitmix64-boxmuller-inversecdf-v1",
+    "weights_sha256": "none"
+  }
+}
