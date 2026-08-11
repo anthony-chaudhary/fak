@@ -1,0 +1,15 @@
+{
+  "operation": "use_existing",
+  "metadata": {
+    "schema": "quantpolicy.metadata/v1",
+    "artifact_id": "sha256:fixture-q4",
+    "precision": {"name": "int4", "bits": 4},
+    "format": {"id": "gguf", "version": "3"},
+    "provenance": {
+      "artifact": {"kind": "witnessed", "reference": "artifact-manifest.json#sha256:fixture-q4"},
+      "recipe": {"kind": "witnessed", "reference": "recipe.json#awq-fixture-v1"},
+      "runtime_delegation": {"kind": "witnessed", "reference": "runtime.json#llama.cpp-v1"},
+      "hardware_envelope": {"kind": "measured", "reference": "run.json#linux-amd64-cpu"}
+    }
+  }
+}

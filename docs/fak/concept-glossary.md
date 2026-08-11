@@ -2148,3 +2148,10 @@ FakWitnessArgKey (internal/gateway/proxy_fill_witness.go) is the reserved wire k
 Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading.
 
 **Distinct from:** aggregateAnswers is the benchmark answer payload; guard-corpus is a policy-test corpus and grade-candidates are scorecard candidates, not expected benchmark facts.
+
+
+### quantpolicy
+
+Structural policy constraints over quantization capability metadata, including precision bounds, exact approved artifact formats, provenance requirements, and conversion permission.
+
+**Distinct from:** Unlike the general capability floor, quantpolicy decides whether one declared quantized artifact operation satisfies caller-supplied constraints; it neither selects nor runs a quantizer, conversion, runtime, or model kernel.

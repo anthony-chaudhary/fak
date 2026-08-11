@@ -1,0 +1,15 @@
+{
+  "operation": "use_existing",
+  "metadata": {
+    "schema": "quantpolicy.metadata/v1",
+    "artifact_id": "sha256:fixture-q4-private",
+    "precision": {"name": "int4", "bits": 4},
+    "format": {"id": "private-container", "version": "1"},
+    "provenance": {
+      "artifact": {"kind": "witnessed", "reference": "artifact-manifest.json#sha256:fixture-q4-private"},
+      "recipe": {"kind": "witnessed", "reference": "recipe.json#private-fixture-v1"},
+      "runtime_delegation": {"kind": "witnessed", "reference": "runtime.json#private-runtime-v1"},
+      "hardware_envelope": {"kind": "measured", "reference": "run.json#linux-amd64-cpu"}
+    }
+  }
+}

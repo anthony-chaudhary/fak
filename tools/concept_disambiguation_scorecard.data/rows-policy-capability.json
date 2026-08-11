@@ -7,7 +7,7 @@
       "kind": "concept",
       "definition": "The deployable, declarative authorization layer that defines exactly which tools an agent may call by name, loaded as a JSON manifest at runtime.",
       "distinction": "The abstract authorization INTENT - NOT the policy manifest (its on-disk JSON) and NOT the adjudicator (the enforcer that consults it).",
-      "distinct_from": ["policy-manifest", "adjudicator"],
+      "distinct_from": ["policy-manifest", "adjudicator", "quantpolicy"],
       "aliases": [],
       "grounding": "capability",
       "grounding_kind": "claims",

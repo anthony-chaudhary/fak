@@ -1,0 +1,16 @@
+{
+  "schema": "quantpolicy.policy/v1",
+  "min_precision_bits": 2,
+  "max_precision_bits": 8,
+  "approved_formats": [
+    {"id": "gguf", "version": "3"},
+    {"id": "safetensors-awq", "version": "1"}
+  ],
+  "provenance": {
+    "artifact": {"required": true, "approved_kinds": ["witnessed"]},
+    "recipe": {"required": true, "approved_kinds": ["witnessed"]},
+    "runtime_delegation": {"required": true, "approved_kinds": ["witnessed"]},
+    "hardware_envelope": {"required": true, "approved_kinds": ["measured"]}
+  },
+  "conversion": "refuse"
+}

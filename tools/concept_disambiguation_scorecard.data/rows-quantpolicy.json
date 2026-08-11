@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "quantpolicy",
+      "canonical": "quantpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Structural policy constraints over quantization capability metadata, including precision bounds, exact approved artifact formats, provenance requirements, and conversion permission.",
+      "distinction": "Unlike the general capability floor, quantpolicy decides whether one declared quantized artifact operation satisfies caller-supplied constraints; it neither selects nor runs a quantizer, conversion, runtime, or model kernel.",
+      "distinct_from": [
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "quantpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
