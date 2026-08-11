@@ -20,15 +20,17 @@ type Endpoint struct {
 // Link is one directed transfer capability. Reverse traffic requires a second
 // link and may use a different transport, cost, bandwidth, or CPU path.
 type Link struct {
-	ID                      string            `json:"id"`
-	From                    string            `json:"from"`
-	To                      string            `json:"to"`
-	Transport               string            `json:"transport"`
-	Cost                    uint64            `json:"cost,omitempty"`
-	LatencyNanos            uint64            `json:"latency_nanos,omitempty"`
-	BandwidthBytesPerSecond uint64            `json:"bandwidth_bytes_per_second,omitempty"`
-	CPUPath                 string            `json:"cpu_path,omitempty"`
-	Labels                  map[string]string `json:"labels,omitempty"`
+	ID                                string            `json:"id"`
+	From                              string            `json:"from"`
+	To                                string            `json:"to"`
+	Transport                         string            `json:"transport"`
+	Cost                              uint64            `json:"cost,omitempty"`
+	LatencyNanos                      uint64            `json:"latency_nanos,omitempty"`
+	BandwidthBytesPerSecond           uint64            `json:"bandwidth_bytes_per_second,omitempty"`
+	ReservableBandwidthBytesPerSecond uint64            `json:"reservable_bandwidth_bytes_per_second,omitempty"`
+	SharedResourceID                  string            `json:"shared_resource_id,omitempty"`
+	CPUPath                           string            `json:"cpu_path,omitempty"`
+	Labels                            map[string]string `json:"labels,omitempty"`
 }
 
 // Graph is a composable inventory. It deliberately has no built-in storage or
