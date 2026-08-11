@@ -1,0 +1,6 @@
+{
+  "schema": "fak.quantwatch.snapshot/v99",
+  "query_time": "2026-08-10T12:00:00Z",
+  "query": "quantization",
+  "sources": []
+}

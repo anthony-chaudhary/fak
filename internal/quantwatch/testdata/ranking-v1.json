@@ -1,0 +1,67 @@
+{
+  "schema": "fak.quantwatch.snapshot/v1",
+  "query_time": "2026-08-10T12:00:00Z",
+  "query": "weight activation quantization",
+  "sources": [
+    {
+      "kind": "arxiv",
+      "name": "arxiv-offline",
+      "records": [
+        {
+          "id": "arxiv:2608.00002",
+          "title": "Activation-Aware Weight Quantization Update",
+          "url": "https://arxiv.org/abs/2608.00002",
+          "published_at": "2026-08-09T00:00:00Z",
+          "adoption": 12,
+          "tags": ["weight", "activation", "quantization"],
+          "claims": {
+            "artifact": {"status": "unknown", "detail": "metadata does not establish a runnable artifact"},
+            "recipe": {"status": "reported", "detail": "paper metadata reports a quantization recipe"},
+            "runtime_delegation": {"status": "unknown", "detail": "no runtime was exercised"},
+            "hardware_envelope": {"status": "unknown", "detail": "no hardware result was measured by this watchlist"}
+          }
+        },
+        {
+          "id": "arxiv:2607.99999",
+          "title": "Codebook Quantization for Language Models",
+          "url": "https://arxiv.org/abs/2607.99999",
+          "published_at": "2026-08-01T00:00:00Z",
+          "adoption": 35,
+          "tags": ["codebook", "quantization"],
+          "claims": {
+            "artifact": {"status": "unknown"}, "recipe": {"status": "reported"},
+            "runtime_delegation": {"status": "unknown"}, "hardware_envelope": {"status": "unknown"}
+          }
+        }
+      ]
+    },
+    {
+      "kind": "ecosystem_release",
+      "name": "github-offline",
+      "records": [
+        {
+          "id": "github:acme/quant-runtime:v2.1.0",
+          "title": "quant-runtime v2.1.0",
+          "url": "https://github.com/acme/quant-runtime/releases/tag/v2.1.0",
+          "published_at": "2026-08-08T00:00:00Z",
+          "adoption": 90,
+          "tags": ["runtime", "weight", "quantization"],
+          "claims": {
+            "artifact": {"status": "reported", "detail": "release metadata names an artifact; fak did not download or execute it"},
+            "recipe": {"status": "unknown"},
+            "runtime_delegation": {"status": "reported", "detail": "execution would delegate to the named external runtime"},
+            "hardware_envelope": {"status": "unknown", "detail": "no hardware result was measured by this watchlist"}
+          }
+        },
+        {
+          "id": "arxiv:2608.00002",
+          "title": "Mirror: Activation-Aware Weight Quantization Update",
+          "url": "https://example.invalid/mirror/2608.00002",
+          "published_at": "2026-08-09T00:00:00Z",
+          "adoption": 1,
+          "tags": ["quantization"]
+        }
+      ]
+    }
+  ]
+}

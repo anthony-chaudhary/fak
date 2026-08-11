@@ -183,6 +183,8 @@ func main() {
 		cmdSnapshot(os.Args[2:])
 	case "traj":
 		cmdTraj(os.Args[2:])
+	case "quantwatch":
+		cmdQuantwatch(os.Args[2:])
 	case "workpattern":
 		if err := cmdWorkpattern(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "fak workpattern:", err)

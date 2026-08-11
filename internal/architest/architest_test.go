@@ -531,6 +531,7 @@ var tier = map[string]int{
 	"mixedprecision":        1, // layerwise mixed-precision assignment and evidence contract; no runtime kernel.
 	"residualquant":         1, // stdlib-only RRQ metadata/research adjudication; no model kernel.
 	"rotationmeta":          1, // stdlib-only rotation-transform metadata and runtime capability adjudication; no model kernel.
+	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
