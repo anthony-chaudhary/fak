@@ -8,12 +8,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
@@ -252,9 +255,12 @@ type launchParams struct {
 // launchRunResult is the exec seam result. Stderr carries a bounded tail only, so the
 // fallback classifier can inspect startup failures without retaining a whole agent session.
 type launchRunResult struct {
-	Code     int
-	Stderr   string
-	Duration time.Duration
+	Code               int
+	Stderr             string
+	Duration           time.Duration
+	RegistrationID     string
+	AttemptID          string
+	RootRegistrationID string
 }
 
 // accountsLaunchRun is the exec seam: it spawns the resolved argv with the seat's
@@ -458,7 +464,10 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintln(stdout, strings.Join(launchArgv, " "))
 		return 0
 	}
-	res := accountsLaunchRun(stdout, stderr, launchArgv, launchEnv)
+	res := runRegisteredAccountsChild(stdout, stderr, launchArgv, launchEnv, "")
+	if res.Code == 2 && res.Stderr != "" {
+		fmt.Fprintln(stderr, "fak accounts launch:", res.Stderr)
+	}
 	lastTried := p.model
 	if chain, ok := modelFallbackChain(command, p); ok {
 		// Walk the fallback chain: after each unavailable startup, try the next model until one
@@ -490,7 +499,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied fallback launch: %s\n", fallbackGrant.Reason)
 				return 1
 			}
-			res = accountsLaunchRun(stdout, stderr, fallbackGrant.Argv, envSliceFromMap(fallbackGrant.Env))
+			res = runRegisteredAccountsChild(stdout, stderr, fallbackGrant.Argv, envSliceFromMap(fallbackGrant.Env), res.AttemptID)
 			tried = fallback
 			if res.Code == 0 {
 				break
@@ -947,6 +956,70 @@ func launchSeatServable(h accounts.Home, _ time.Time) bool {
 	return h.Active() && h.EnabledOrDefault()
 }
 
+func runRegisteredAccountsChild(stdout, stderr io.Writer, argv, env []string, resumeOf string) launchRunResult {
+	runtime, agent := accountsAgentRuntime(argv)
+	if !agent {
+		return accountsLaunchRun(stdout, stderr, argv, env)
+	}
+	m := envMapFromStrings(env)
+	attempt := strings.TrimSpace(m["FAK_CHILD_ATTEMPT_ID"])
+	if attempt == "" {
+		attempt = "accounts-" + runtime + "-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
+	}
+	parent := firstGuardEnv(m, "FAK_REGISTRATION_ID", "FAK_PARENT_REGISTRATION_ID")
+	parentAttempt := firstGuardEnv(m, "FAK_ATTEMPT_ID", "FAK_PARENT_ATTEMPT_ID")
+	root := firstGuardEnv(m, "FAK_ROOT_REGISTRATION_ID")
+	if parent != "" && root == "" {
+		root = parent
+	}
+	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: m["FAK_CHILD_REGISTRATION_ID"], ParentRegistrationID: parent, ParentAttemptID: parentAttempt, RootRegistrationID: root, RootOutcome: m["FAK_ROOT_OUTCOME"], RootIssue: firstGuardEnv(m, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstGuardEnv(m, "FAK_TASK_ID", "DISPATCH_ISSUE"), AttemptID: attempt, ResumeOfAttemptID: resumeOf, LaunchKind: "external_account_launch", Scope: []string{m["PWD"]}, Lane: firstGuardEnv(m, "FAK_LANE", "DISPATCH_LANE"), LeaseID: m["FAK_LEASE_ID"], Runtime: runtime, SessionID: m["FAK_SESSION_ID"], ThreadID: m["FAK_THREAD_ID"], HostID: firstGuardEnv(m, "COMPUTERNAME", "HOSTNAME")})
+	if err != nil {
+		return launchRunResult{Code: 2, Stderr: "child registration refused: " + err.Error()}
+	}
+	store := sessionregistry.Store{Path: accountsRegistryPath(m)}
+	if err = store.Register(rec); err != nil {
+		return launchRunResult{Code: 2, Stderr: "child registration persist failed (child not started): " + err.Error()}
+	}
+	m["FAK_SESSION_REGISTRY"] = store.Path
+	m["FAK_REGISTRATION_ID"] = rec.RegistrationID
+	m["FAK_ATTEMPT_ID"] = rec.AttemptID
+	m["FAK_PARENT_REGISTRATION_ID"] = rec.ParentRegistrationID
+	m["FAK_PARENT_ATTEMPT_ID"] = rec.ParentAttemptID
+	m["FAK_ROOT_REGISTRATION_ID"] = rec.RootRegistrationID
+	m["FAK_ROOT_OUTCOME"] = rec.RootOutcome
+	m["FAK_ROOT_ISSUE"] = rec.RootIssue
+	m["FAK_TASK_ID"] = rec.TaskID
+	res := accountsLaunchRun(stdout, stderr, argv, envSliceFromMap(m))
+	res.RegistrationID = rec.RegistrationID
+	res.AttemptID = rec.AttemptID
+	res.RootRegistrationID = rec.RootRegistrationID
+	state, reason := sessionregistry.StateCompleted, ""
+	if res.Code != 0 {
+		state, reason = sessionregistry.StateFailed, fmt.Sprintf("worker_exit_%d", res.Code)
+	}
+	_, _ = store.Terminal(rec.RegistrationID, state, reason, m["FAK_WITNESS_REF"], time.Now().UTC())
+	return res
+}
+func accountsAgentRuntime(argv []string) (string, bool) {
+	if len(argv) == 0 {
+		return "", false
+	}
+	for _, a := range argv {
+		n := strings.ToLower(strings.TrimSuffix(filepath.Base(a), filepath.Ext(a)))
+		switch n {
+		case "codex", "claude", "opencode":
+			return n, true
+		}
+	}
+	return "", false
+}
+func accountsRegistryPath(env map[string]string) string {
+	if p := strings.TrimSpace(env["FAK_SESSION_REGISTRY"]); p != "" {
+		return p
+	}
+	return sessionregistry.DefaultPath()
+}
+
 // execLaunchChild spawns argv[0] with argv[1:] under env, wiring the child to the real
 // terminal (an interactive agent owns stdin/stdout/stderr), and returns its exit code.
 // A non-exec error (binary not found, etc.) is surfaced and mapped to 1.
@@ -961,8 +1034,21 @@ func execLaunchChild(_, stderr io.Writer, argv, env []string) launchRunResult {
 	errTail.max = 64 << 10
 	cmd.Stdin, cmd.Stdout = os.Stdin, os.Stdout
 	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
-	start := time.Now()
-	if err := cmd.Run(); err != nil {
+	start := time.Now().UTC()
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(stderr, "fak accounts launch: %v\n", err)
+		return launchRunResult{Code: 1, Stderr: errTail.String(), Duration: time.Since(start)}
+	}
+	if m := envMapFromStrings(env); strings.TrimSpace(m["FAK_REGISTRATION_ID"]) != "" {
+		store := sessionregistry.Store{Path: accountsRegistryPath(m)}
+		if _, err := store.Start(m["FAK_REGISTRATION_ID"], cmd.Process.Pid, start); err != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+			fmt.Fprintf(stderr, "fak accounts launch: child start read-back failed: %v\n", err)
+			return launchRunResult{Code: 2, Stderr: errTail.String(), Duration: time.Since(start), RegistrationID: m["FAK_REGISTRATION_ID"]}
+		}
+	}
+	if err := cmd.Wait(); err != nil {
 		dur := time.Since(start)
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
