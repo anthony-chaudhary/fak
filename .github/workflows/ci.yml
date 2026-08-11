@@ -60,6 +60,9 @@ jobs:
       # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
       # `go` fetch it if the runner's Go is older. Job-level so every step sees it.
       GOTOOLCHAIN: auto
+      # Bound package/compiler fan-out below the hosted runner process ceiling.
+      # This changes no package set, test semantics, job name, or release check.
+      GOFLAGS: "-p=2"
     defaults:
       run:
         working-directory: .
@@ -934,6 +937,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: auto
+      # Keep race compilation under the same hosted-runner process ceiling.
+      GOFLAGS: "-p=2"
       # Set explicitly so the job FAILS LOUDLY if it ever lands on a cgo-less
       # image, instead of silently building a non-instrumented (race-blind) binary.
       CGO_ENABLED: "1"
