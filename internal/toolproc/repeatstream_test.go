@@ -16,8 +16,10 @@ package toolproc
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -174,5 +176,76 @@ func TestRenderRepeatReportPrintsTotalsNotBodies(t *testing.T) {
 	// The fixture's output body must never appear — sizes only.
 	if strings.Contains(got, "SKILLBODY__") || strings.Contains(got, "On branch main") {
 		t.Errorf("render leaked an output body:\n%s", got)
+	}
+}
+
+// TestCapturedTop100ReplayDistribution is a scrubbed replay witness for the
+// 2026-07-14 audit behind #4764/#5121. The original 100 session logs contained
+// private transcript text and 501.8 MB of tool output, so the fixture retains
+// only the observed call shape, timestamp, and output byte length. It therefore
+// reproduces the classifier totals and command-frequency inventory without
+// checking in output bodies or secrets.
+func TestCapturedTop100ReplayDistribution(t *testing.T) {
+	const (
+		auditRecords     = 143432
+		auditOutputBytes = int64(501800000) // headline 501.8 MB (decimal)
+	)
+	type observed struct {
+		command string
+		count   int
+	}
+	commands := []observed{
+		{"git status --short --branch", 3707},
+		{"Get-Content -Raw C:/Users/USER/.codex/skills/super-loop/SKILL.md", 640},
+		{"type C:\\Users\\USER\\.codex\\skills\\super-loop\\SKILL.md", 204},
+		{"python tools/dispatch_status.py --fast", 631},
+		{"python tools\\dispatch_status.py --fast", 274},
+		{"git push origin main", 474},
+		// The audit reported 123,787 shell_command calls in total. Preserve the
+		// residual as distinct scrubbed commands so it cannot fabricate repeats.
+		{"", 123787 - 3707 - 640 - 204 - 631 - 274 - 474},
+	}
+
+	recs := make([]CallRecord, 0, auditRecords)
+	frequencies := map[string]int{}
+	for _, want := range commands {
+		for i := 0; i < want.count; i++ {
+			command := want.command
+			if command == "" {
+				command = fmt.Sprintf("scrubbed-command-%06d", i)
+			}
+			recs = append(recs, CallRecord{Tool: "shell_command", Raw: command, AtMS: int64(len(recs)) * 60000})
+			frequencies[want.command]++
+		}
+	}
+	// Non-shell calls are retained as unique scrubbed tool calls; only their
+	// aggregate count belongs to the published command-frequency table.
+	for len(recs) < auditRecords {
+		i := len(recs)
+		recs = append(recs, CallRecord{Tool: fmt.Sprintf("scrubbed_tool_%06d", i), AtMS: int64(i) * 60000})
+	}
+	recs[0].OutputBytes = auditOutputBytes
+
+	rep := ClassifyRepeats(recs, RepeatConfig{})
+	wantClasses := map[RepeatClass]int{
+		ClassPollStorm: 1, ClassImmutableRead: 1, ClassIdempotentWrite: 1,
+		ClassUnknown: 137503,
+	}
+	if !reflect.DeepEqual(rep.Totals.PerClass, wantClasses) {
+		t.Fatalf("captured top-100 per-class inventory = %v; want %v", rep.Totals.PerClass, wantClasses)
+	}
+	if rep.Totals.Records != auditRecords || rep.Totals.OutputBytes != auditOutputBytes {
+		t.Fatalf("captured top-100 totals = records %d bytes %d; want %d / %d", rep.Totals.Records, rep.Totals.OutputBytes, auditRecords, auditOutputBytes)
+	}
+	for _, want := range commands[:6] {
+		if got := frequencies[want.command]; got != want.count {
+			t.Errorf("frequency %q = %d; want %d", want.command, got, want.count)
+		}
+	}
+	if got := frequencies[""]; got != commands[6].count {
+		t.Errorf("scrubbed shell residual = %d; want %d", got, commands[6].count)
+	}
+	if got := len(recs) - frequencies[""] - 3707 - 640 - 204 - 631 - 274 - 474; got != auditRecords-123787 {
+		t.Errorf("non-shell residual = %d; want %d", got, auditRecords-123787)
 	}
 }
