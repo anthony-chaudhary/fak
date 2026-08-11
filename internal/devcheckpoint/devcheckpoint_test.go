@@ -1,4 +1,4 @@
-package agentcheckpoint
+package devcheckpoint
 
 import (
 	"bufio"
@@ -56,7 +56,7 @@ func TestAppendWritesOneDurableJSONLRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "nested", "agent-status.jsonl")
+	path := filepath.Join(t.TempDir(), "nested", "dev-status.jsonl")
 	if err := Append(path, record); err != nil {
 		t.Fatal(err)
 	}

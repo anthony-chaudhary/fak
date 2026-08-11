@@ -1,5 +1,5 @@
-// Package agentcheckpoint records concise, durable agent progress milestones.
-package agentcheckpoint
+// Package devcheckpoint records concise, durable agent progress milestones.
+package devcheckpoint
 
 import (
 	"encoding/json"

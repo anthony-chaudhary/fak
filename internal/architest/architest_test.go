@@ -75,7 +75,7 @@ var tier = map[string]int{
 	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchckpt":            1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
-	"agentcheckpoint":      1, // append-only agent milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
+	"devcheckpoint":        1, // append-only developer milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
 	"benchlineagegate":     2, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"conceptbench":         2, // dos-refereed conceptbench grader (#2732): maps a concept + transcript + fixture to a referee-sourced verdict; imports taskmgr(1)+hooks(1), off the hot path.
 	"cachevalueledger":     2, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
