@@ -59,7 +59,7 @@ func TestDeferMCPToolsBootstrapList(t *testing.T) {
 		t.Fatalf("deferred tools/list unexpectedly includes the cold tool fak_memory_drivers; got %v", names)
 	}
 	// The bootstrap is strictly smaller than the full registry (the whole point).
-	full := toolsListNames(t, newDeferServer(t, false))
+	full := newDeferServer(t, false).exposedToolDescriptors()
 	if len(names) >= len(full) {
 		t.Fatalf("bootstrap list (%d) is not smaller than the full registry (%d)", len(names), len(full))
 	}
@@ -68,17 +68,57 @@ func TestDeferMCPToolsBootstrapList(t *testing.T) {
 
 // TestDeferMCPToolsDefaultFullList: default (deferral off) tools/list returns the
 // full registry — no regression for a server that has not opted in.
-func TestDeferMCPToolsDefaultFullList(t *testing.T) {
-	srv := newDeferServer(t, false)
-	names := toolsListNames(t, srv)
-	if !hasToolName(names, "fak_memory_drivers") {
-		t.Fatalf("default tools/list should contain the full registry incl. fak_memory_drivers; got %v", names)
+func TestDeferMCPToolsDefaultOnReceipt(t *testing.T) {
+	s := &Server{}
+	got, receipt := s.toolsListView()
+	if receipt.Mode != "active" || receipt.Reason != "default_on" {
+		t.Fatalf("receipt=%+v want active/default_on", receipt)
+	}
+	if receipt.ToolsAfter != len(got) || receipt.ToolsBefore <= receipt.ToolsAfter {
+		t.Fatalf("receipt counts=%+v got=%d", receipt, len(got))
+	}
+	if receipt.SavedBytes <= 0 || receipt.DescriptorBytesBefore-receipt.DescriptorBytesAfter != receipt.SavedBytes {
+		t.Fatalf("receipt byte proof invalid: %+v", receipt)
 	}
 }
 
-// TestDeferredToolStillSearchable: a cold tool absent from a deferred tools/list
-// is still surfaced by fak_tools_search, ranked through the selfquery catalog —
-// so the model can fault its schema back in on demand.
+func TestDeferMCPToolsAblationFailsOpen(t *testing.T) {
+	t.Setenv("FAK_ABLATE_MCP_TOOL_FILTER", "1")
+	s := &Server{}
+	got, receipt := s.toolsListView()
+	if receipt.Mode != "bypass" || receipt.Reason != "ablation" {
+		t.Fatalf("receipt=%+v want bypass/ablation", receipt)
+	}
+	if len(got) != len(s.exposedToolDescriptors()) || receipt.SavedBytes != 0 {
+		t.Fatalf("ablation did not restore full list: %+v", receipt)
+	}
+}
+
+func TestDeferMCPToolsHiddenRecoveryFailsOpen(t *testing.T) {
+	s := &Server{exposeAllow: func(name string) bool { return name != "fak_tools_search" }}
+	got, receipt := s.toolsListView()
+	if receipt.Mode != "bypass" || receipt.Reason != "recovery_tool_hidden" {
+		t.Fatalf("receipt=%+v want bypass/recovery_tool_hidden", receipt)
+	}
+	if len(got) != len(s.exposedToolDescriptors()) || receipt.SavedBytes != 0 {
+		t.Fatalf("hidden recovery path did not fail open: %+v", receipt)
+	}
+}
+
+func TestToolsListExposesFilterReceipt(t *testing.T) {
+	s := &Server{}
+	result, rerr := s.handleMethod(context.Background(), "tools/list", nil)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	m := result.(map[string]any)
+	meta := m["_meta"].(map[string]any)
+	receipt := meta["fak/tool_filter"].(MCPToolFilterStatus)
+	if receipt.Mode != "active" || receipt.SavedBytes <= 0 {
+		t.Fatalf("wire receipt=%+v", receipt)
+	}
+}
+
 func TestDeferredToolStillSearchable(t *testing.T) {
 	srv := newDeferServer(t, true)
 	resp, err := srv.toolsSearch(ToolsSearchRequest{Query: "memory drivers", DetailLevel: "name"})

@@ -188,10 +188,14 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		// toolsListDescriptors is the resident bootstrap view when deferral is on
-		// (#3231), else the full exposed registry (the default) — byte-for-byte
-		// the pre-#3231 surface.
-		return mcpCacheHint(map[string]any{"tools": s.toolsListDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
+		// Native schema filtering is default-on, but fails open whenever its
+		// recovery path is unavailable. The receipt lets operators distinguish
+		// real savings from a safe bailout without parsing logs.
+		tools, filter := s.toolsListView()
+		return mcpCacheHint(map[string]any{
+			"tools": tools,
+			"_meta": map[string]any{"fak/tool_filter": filter},
+		}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "tools/call":
 		return s.callTool(ctx, params)
 	case "resources/list":

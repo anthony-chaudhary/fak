@@ -17,12 +17,13 @@ package gateway
 // Deferral composes UNDER --expose: it filters the already-exposed set, so a
 // tool hidden by the allowlist never reappears in the bootstrap or the search.
 //
-// Default OFF (Config.DeferMCPTools / FAK_DEFER_MCP_TOOLS): the floor reduction
-// depends on the client re-finding a searched tool and on the pin/quarantine
-// guard (#3200), so flipping the default on is gated on that validation. The
-// mechanism is fully built and witnessed here so the flip is a one-line change.
+// Default ON: the recall, first-call, and quarantine gates are now witnessed.
+// FAK_ABLATE_MCP_TOOL_FILTER=1 restores the full list immediately. Filtering
+// also bails out fail-open when fak_tools_search is not exposed, and every
+// tools/list response reports the applied/bypass reason plus measured bytes.
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -40,14 +41,60 @@ var bootstrapToolNames = map[string]bool{
 	"fak_tools_search": true,
 }
 
-// toolsListDescriptors is what tools/list returns. With deferral off (default)
-// it is the full exposed registry — byte-for-byte the pre-#3231 surface. With
-// deferral on it is only the bootstrap view.
-func (s *Server) toolsListDescriptors() []map[string]any {
-	if s != nil && s.deferMCPTools {
-		return s.bootstrapToolDescriptors()
+// MCPToolFilterStatus is the machine-readable proof attached to tools/list.
+// DescriptorBytesBefore/After price the exact JSON descriptor arrays, not a
+// tokenizer estimate; SavedBytes is therefore provider-neutral and auditable.
+type MCPToolFilterStatus struct {
+	Mode                  string `json:"mode"`
+	Reason                string `json:"reason"`
+	ToolsBefore           int    `json:"tools_before"`
+	ToolsAfter            int    `json:"tools_after"`
+	DescriptorBytesBefore int    `json:"descriptor_bytes_before"`
+	DescriptorBytesAfter  int    `json:"descriptor_bytes_after"`
+	SavedBytes            int    `json:"saved_bytes"`
+}
+
+// toolsListView returns resident descriptors and an operator-visible receipt.
+// Native filtering is default-on. It fails OPEN to the full registry when the
+// recovery tool is hidden, no cold tail exists, or emergency ablation is set:
+// a bad optimization must cost tokens, never capabilities.
+func (s *Server) toolsListView() ([]map[string]any, MCPToolFilterStatus) {
+	full := s.exposedToolDescriptors()
+	resident := full
+	status := MCPToolFilterStatus{Mode: "bypass", Reason: "ablation"}
+
+	if !envEnabled("FAK_ABLATE_MCP_TOOL_FILTER") {
+		hasRecovery := false
+		for _, td := range full {
+			if td["name"] == "fak_tools_search" {
+				hasRecovery = true
+				break
+			}
+		}
+		if !hasRecovery {
+			status.Reason = "recovery_tool_hidden"
+		} else if bootstrap := s.bootstrapToolDescriptors(); len(bootstrap) >= len(full) {
+			status.Reason = "no_cold_tools"
+		} else {
+			resident = bootstrap
+			status.Mode = "active"
+			status.Reason = "default_on"
+		}
 	}
-	return s.exposedToolDescriptors()
+
+	before, _ := json.Marshal(full)
+	after, _ := json.Marshal(resident)
+	status.ToolsBefore = len(full)
+	status.ToolsAfter = len(resident)
+	status.DescriptorBytesBefore = len(before)
+	status.DescriptorBytesAfter = len(after)
+	status.SavedBytes = len(before) - len(after)
+	return resident, status
+}
+
+func (s *Server) toolsListDescriptors() []map[string]any {
+	tools, _ := s.toolsListView()
+	return tools
 }
 
 // bootstrapToolDescriptors filters the exposed registry (so --expose is still
