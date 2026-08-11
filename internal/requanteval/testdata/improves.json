@@ -1,0 +1,119 @@
+{
+  "request": {
+    "contract_version": "requanteval/v1",
+    "recipe_version": "requant-arxiv-2608.07019v1-fixed-grid-v1",
+    "runtime_version": "fak-go-reference-cpu/v1",
+    "seed": 6253,
+    "grid": [
+      -1,
+      0,
+      1
+    ],
+    "initial_codes": [
+      0,
+      1
+    ],
+    "target": [
+      -0.8,
+      -0.4
+    ],
+    "hessian": [
+      [
+        1,
+        -0.8
+      ],
+      [
+        -0.8,
+        1
+      ]
+    ],
+    "max_sweeps": 8,
+    "provenance": {
+      "artifact_id": "synthetic-coupled-quadratic",
+      "artifact_version": "v1",
+      "artifact_sha256": "6fe301b665e609df11e09987a2a98e0576c640e864a5ac70bca7158e6ce4d304",
+      "initializer": "round-to-nearest",
+      "initializer_version": "fixture-v1",
+      "source": "internal/requanteval/testdata"
+    },
+    "quality": {
+      "id": "synthetic-linear-probe",
+      "version": "v1",
+      "inputs": [
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "expected": [
+        -0.8,
+        -0.4,
+        -1.2
+      ]
+    }
+  },
+  "result": {
+    "outcome": "supported",
+    "reason": "REQUANT_EVALUATED",
+    "contract_version": "requanteval/v1",
+    "recipe_version": "requant-arxiv-2608.07019v1-fixed-grid-v1",
+    "runtime_version": "fak-go-reference-cpu/v1",
+    "paper_id": "arXiv:2608.07019v1",
+    "paper_sha256": "5505cab5060f170e5e7a03b07fce83682c7af3bb0c3cfbb9cdb5920c220d4beb",
+    "seed": 6253,
+    "grid": [
+      -1,
+      0,
+      1
+    ],
+    "initial_codes": [
+      0,
+      1
+    ],
+    "refined_codes": [
+      1,
+      1
+    ],
+    "metrics": {
+      "initial_mse": 0.164,
+      "final_mse": 0.14400000000000002,
+      "absolute_mse_gain": 0.01999999999999999,
+      "relative_mse_gain": 0.12195121951219505
+    },
+    "quality": {
+      "metric": "synthetic-linear-prediction-mse",
+      "examples": 3,
+      "initial_prediction_mse": 0.08,
+      "final_prediction_mse": 0.7466666666666667,
+      "absolute_gain": -0.6666666666666667
+    },
+    "conversion_cost": {
+      "sweeps": 2,
+      "coordinates_visited": 4,
+      "candidate_evaluations": 8,
+      "accepted_updates": 1
+    },
+    "evidence": "modeled",
+    "hardware_envelope": "none: deterministic objective evaluation; no wall-time, throughput, GPU, or model-quality measurement",
+    "provenance": {
+      "artifact_id": "synthetic-coupled-quadratic",
+      "artifact_version": "v1",
+      "artifact_sha256": "6fe301b665e609df11e09987a2a98e0576c640e864a5ac70bca7158e6ce4d304",
+      "initializer": "round-to-nearest",
+      "initializer_version": "fixture-v1",
+      "source": "internal/requanteval/testdata"
+    },
+    "claim_check": {
+      "verdict": "not-yet",
+      "basis": "fixture MSE is measured by the reference evaluator, but downstream model quality and hardware performance are not observed"
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "request": {
+    "contract_version": "requanteval/v1",
+    "recipe_version": "requant-arxiv-2608.07019v1-fixed-grid-v1",
+    "runtime_version": "cuda-provider/unknown",
+    "seed": 6255,
+    "grid": [
+      -1,
+      0,
+      1
+    ],
+    "initial_codes": [
+      0,
+      1
+    ],
+    "target": [
+      -0.8,
+      -0.4
+    ],
+    "hessian": [
+      [
+        1,
+        -0.8
+      ],
+      [
+        -0.8,
+        1
+      ]
+    ],
+    "max_sweeps": 8,
+    "provenance": {
+      "artifact_id": "synthetic-coupled-quadratic",
+      "artifact_version": "v1",
+      "artifact_sha256": "6fe301b665e609df11e09987a2a98e0576c640e864a5ac70bca7158e6ce4d304",
+      "initializer": "round-to-nearest",
+      "initializer_version": "fixture-v1",
+      "source": "internal/requanteval/testdata"
+    },
+    "quality": {
+      "id": "synthetic-linear-probe",
+      "version": "v1",
+      "inputs": [
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "expected": [
+        -0.8,
+        -0.4,
+        -1.2
+      ]
+    }
+  },
+  "result": {
+    "outcome": "delegate",
+    "reason": "REQUANT_RUNTIME_DELEGATION",
+    "detail": "requested runtime is not the pinned reference CPU evaluator",
+    "contract_version": "requanteval/v1",
+    "recipe_version": "requant-arxiv-2608.07019v1-fixed-grid-v1",
+    "runtime_version": "cuda-provider/unknown",
+    "paper_id": "arXiv:2608.07019v1",
+    "paper_sha256": "5505cab5060f170e5e7a03b07fce83682c7af3bb0c3cfbb9cdb5920c220d4beb",
+    "seed": 6255,
+    "evidence": "modeled",
+    "provenance": {
+      "artifact_id": "synthetic-coupled-quadratic",
+      "artifact_version": "v1",
+      "artifact_sha256": "6fe301b665e609df11e09987a2a98e0576c640e864a5ac70bca7158e6ce4d304",
+      "initializer": "round-to-nearest",
+      "initializer_version": "fixture-v1",
+      "source": "internal/requanteval/testdata"
+    },
+    "claim_check": {
+      "verdict": "not-yet",
+      "basis": "no supported evaluation completed"
+    }
+  }
+}
