@@ -1345,6 +1345,11 @@
           "category": "incidental",
           "reason": "JSON artifact discriminator in the session lifecycle cleanup plan; the canonical guarded-launch receipt concept is already defined by sessiondiag documentation and schema.",
           "token": "guard_receipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleetbus lifecycle-envelope validator local to the process-forest protocol, not a distinct general guard concept.",
+          "token": "LifecycleGate"
         }
       ],
       "exclude": [
@@ -1375,6 +1380,7 @@
         "GATED_UNWITNESSED",
         "GateFlipped",
         "IsAggregate",
+        "LifecycleGate",
         "OutcomeDelegate",
         "ReportedGates",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
@@ -4122,10 +4128,16 @@
           "category": "incidental",
           "reason": "boolean benchmark witness field, not a new maturity rung or support concept",
           "token": "SecurityParityConfirmed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed lifecycle acknowledgement state local to fleetbus, not a capability maturity level.",
+          "token": "AckUnsupported"
         }
       ],
       "id": "support-maturity",
       "ignore": [
+        "AckUnsupported",
         "BAD_ACHIEVED_MATURITY",
         "CONFIG_OPINION_UNSUPPORTED",
         "CaseSupported",
