@@ -524,6 +524,7 @@ var tier = map[string]int{
 	"kvquantmeta":           1,
 	"quantdetect":           1,
 	"requanteval":           1,
+	"lightroteval":          1,
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
 	"fabricmap":             2, // direction-agnostic endpoint/link planner; stdlib-only mechanism.
 	"quantlicense":          1, // stdlib-only license-chain contract and evidence gate.

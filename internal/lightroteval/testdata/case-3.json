@@ -1,0 +1,146 @@
+{
+  "request": {
+    "contract_version": "lightroteval/v1",
+    "bits": 4,
+    "evidence": "modeled",
+    "samples": [
+      [
+        0.1,
+        0.2,
+        0.3,
+        0.4
+      ],
+      [
+        -0.4,
+        -0.3,
+        -0.2,
+        -0.1
+      ],
+      [
+        3,
+        0.1,
+        0.2,
+        0.3
+      ]
+    ],
+    "provenance": {
+      "artifact": {
+        "id": "lightrot-bounded-matrix",
+        "version": "v1",
+        "sha256": "4788bcd7be61e2358761cc3d91a706d14e76fa3cb6a5085f3265b503ad1dba8e",
+        "source": "internal/lightroteval/testdata"
+      },
+      "model": {
+        "id": "synthetic-hidden-state",
+        "revision": "fixture-v1",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "license": "CC0-1.0"
+      },
+      "recipe": {
+        "id": "lightrot",
+        "version": "lightrot-paper-2607.27704/v1",
+        "paper_id": "arXiv:2607.27704",
+        "paper_sha256": "e9e6093c0b0025e0fa40b575c416d8e40cb287d97d434373d6878ec6f3762696",
+        "seed": 6250,
+        "block_size": 4
+      },
+      "runtime": {
+        "id": "fak/lightroteval",
+        "version": "fak-lightroteval-cpu-f64/v1",
+        "backend": "cpu-reference-f64"
+      },
+      "hardware": {
+        "os": "windows",
+        "arch": "amd64",
+        "device": "host-cpu"
+      }
+    }
+  },
+  "result": {
+    "contract_version": "lightroteval/v1",
+    "outcome": "supported",
+    "reason": "LIGHTROT_EVALUATED_MODELED",
+    "evidence": "modeled",
+    "provenance": {
+      "artifact": {
+        "id": "lightrot-bounded-matrix",
+        "version": "v1",
+        "sha256": "4788bcd7be61e2358761cc3d91a706d14e76fa3cb6a5085f3265b503ad1dba8e",
+        "source": "internal/lightroteval/testdata"
+      },
+      "model": {
+        "id": "synthetic-hidden-state",
+        "revision": "fixture-v1",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "license": "CC0-1.0"
+      },
+      "recipe": {
+        "id": "lightrot",
+        "version": "lightrot-paper-2607.27704/v1",
+        "paper_id": "arXiv:2607.27704",
+        "paper_sha256": "e9e6093c0b0025e0fa40b575c416d8e40cb287d97d434373d6878ec6f3762696",
+        "seed": 6250,
+        "block_size": 4
+      },
+      "runtime": {
+        "id": "fak/lightroteval",
+        "version": "fak-lightroteval-cpu-f64/v1",
+        "backend": "cpu-reference-f64"
+      },
+      "hardware": {
+        "os": "windows",
+        "arch": "amd64",
+        "device": "host-cpu"
+      }
+    },
+    "candidates": [
+      {
+        "id": "lightrot",
+        "role": "candidate",
+        "metrics": {
+          "reconstruction_accuracy": 0.995683694422,
+          "mse": 0.003503401361,
+          "max_abs_error": 0.085714285714
+        },
+        "cost": {
+          "preprocess_scalar_ops": 20,
+          "runtime_scalar_ops": 132,
+          "wall_evidence": "modeled"
+        }
+      },
+      {
+        "id": "tuned_rotation",
+        "role": "tuned_rotation_baseline",
+        "metrics": {
+          "reconstruction_accuracy": 0.982660920847,
+          "mse": 0.014073552579,
+          "max_abs_error": 0.2
+        },
+        "cost": {
+          "preprocess_scalar_ops": 128,
+          "runtime_scalar_ops": 132,
+          "wall_evidence": "modeled"
+        }
+      },
+      {
+        "id": "no_rotation",
+        "role": "no_rotation_baseline",
+        "metrics": {
+          "reconstruction_accuracy": 0.979340401458,
+          "mse": 0.016768707483,
+          "max_abs_error": 0.2
+        },
+        "cost": {
+          "preprocess_scalar_ops": 0,
+          "runtime_scalar_ops": 132,
+          "wall_evidence": "modeled"
+        }
+      }
+    ],
+    "claim_check": {
+      "verdict": "not-yet",
+      "scope": "bounded synthetic reconstruction; not downstream model quality or throughput",
+      "baseline": "tuned_rotation and no_rotation"
+    }
+  }
+}
