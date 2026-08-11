@@ -1,0 +1,88 @@
+{
+  "contract_version": "kvquantquality/v1",
+  "fixture_id": "modeled-kv-q4-16384-seed-6257",
+  "seed": 6257,
+  "context_length": 16384,
+  "evidence": "modeled",
+  "artifact": {
+    "name": "synthetic-attention-fixture",
+    "version": "1",
+    "provenance": "repo:testdata/kv-q4-16384.json",
+    "sha256": "f933ff39a89dac1bbcfaba9d22e4c1a45a3a72dbe451e528d2545d70d9b9991e"
+  },
+  "recipe": {
+    "name": "deterministic-kv-rounding",
+    "version": "1",
+    "provenance": "modeled seeded fixture; no model weights or hardware run",
+    "sha256": "ff42a2ea238b76b19c38194f98a57c20788c8e7c0b43ca238806832577bb44f0"
+  },
+  "runtime": {
+    "name": "kvquantquality-evaluator",
+    "version": "kvquantquality/v1",
+    "provenance": "github.com/anthony-chaudhary/fak/internal/kvquantquality",
+    "sha256": "9437db285fac828be0e0ca786aac262bbaf0ab0703cd4422f122086d01fce0d4"
+  },
+  "baseline": {
+    "precision": "bf16",
+    "attention": [
+      [
+        0.7,
+        0.2,
+        0.1
+      ],
+      [
+        0.15,
+        0.35,
+        0.5
+      ]
+    ],
+    "output": [
+      [
+        0.62,
+        0.28,
+        0.1
+      ],
+      [
+        0.18,
+        0.22,
+        0.6
+      ]
+    ],
+    "task_score": 0.91
+  },
+  "candidate": {
+    "precision": "q4_k",
+    "attention": [
+      [
+        0.66,
+        0.22,
+        0.12
+      ],
+      [
+        0.17,
+        0.33,
+        0.5
+      ]
+    ],
+    "output": [
+      [
+        0.58,
+        0.3,
+        0.12
+      ],
+      [
+        0.2,
+        0.24,
+        0.56
+      ]
+    ],
+    "task_score": 0.875
+  },
+  "budget": {
+    "max_row_jsd": 0.004,
+    "max_output_jsd": 0.004,
+    "max_task_drop": 0.02
+  },
+  "expected_outcome": "unsupported",
+  "expected_reason": "quality_budget_exceeded"
+}
