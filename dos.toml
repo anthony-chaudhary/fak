@@ -365,6 +365,7 @@ concurrent = [
   "lightgapport",
   "kvquantmeta",
   "quantdetect",
+  "fp4runtime",
   "codexresume",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
@@ -499,6 +500,7 @@ autopick = [
   "lightgapport",
   "kvquantmeta",
   "quantdetect",
+  "fp4runtime",
   "codexresume",
   # new-leaf:lane
 ]
@@ -1080,6 +1082,7 @@ quantprov = ["internal/quantprov/**"]
 lightgapport = ["internal/lightgapport/**"]
 kvquantmeta = ["internal/kvquantmeta/**"]
 quantdetect = ["internal/quantdetect/**"]
+fp4runtime = ["internal/fp4runtime/**"]
 codexresume = ["internal/codexresume/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]

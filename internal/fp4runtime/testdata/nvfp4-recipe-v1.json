@@ -1,0 +1,6 @@
+{
+  "recipe": "runtime-probed-nvfp4-recipe",
+  "version": "1",
+  "calibration": "public-fixture",
+  "quality_claim": "none"
+}

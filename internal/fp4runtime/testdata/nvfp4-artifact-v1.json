@@ -1,0 +1,8 @@
+{
+  "format": "nvidia-nvfp4",
+  "version": "1.0",
+  "element_format": "e2m1",
+  "scale_format": "ue4m3",
+  "block_size": 16,
+  "payload": "public-metadata-fixture-only"
+}

@@ -528,6 +528,7 @@ var tier = map[string]int{
 	"lightgapport":          1,
 	"kvquantmeta":           1,
 	"quantdetect":           1,
+	"fp4runtime":            1, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"requanteval":           1,
 	"lightroteval":          1,
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.

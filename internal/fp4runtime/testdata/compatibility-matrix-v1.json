@@ -1,0 +1,99 @@
+{
+  "schema": "fak.fp4runtime-matrix/v1",
+  "artifacts": [
+    {
+      "id": "nvidia-nvfp4",
+      "version": "1.0",
+      "element_format": "e2m1",
+      "scale_format": "ue4m3",
+      "block_size": 16
+    },
+    {
+      "id": "ocp-mxfp4",
+      "version": "1.0",
+      "element_format": "e2m1",
+      "scale_format": "e8m0",
+      "block_size": 32
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "tensorrt-llm-pytorch",
+      "version": "support-matrix-2026-08-11"
+    },
+    {
+      "id": "fak-native",
+      "version": "no-fp4-kernel"
+    }
+  ],
+  "architectures": [
+    {"vendor": "nvidia", "id": "sm_80", "class": "ampere"},
+    {"vendor": "nvidia", "id": "sm_89", "class": "ada"},
+    {"vendor": "nvidia", "id": "sm_90", "class": "hopper"},
+    {"vendor": "nvidia", "id": "sm_100", "class": "blackwell"},
+    {"vendor": "nvidia", "id": "sm_103", "class": "blackwell"},
+    {"vendor": "nvidia", "id": "sm_120", "class": "blackwell"}
+  ],
+  "accumulators": [
+    {
+      "id": "fp32-bf16-rne",
+      "product": "fp4-e2m1",
+      "accumulate": "fp32",
+      "output": "bf16",
+      "rounding": "rne"
+    },
+    {
+      "id": "fp16-fp16-rne",
+      "product": "fp4-e2m1",
+      "accumulate": "fp16",
+      "output": "fp16",
+      "rounding": "rne"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "trtllm-nvfp4-sm100-bf16",
+      "artifact_id": "nvidia-nvfp4",
+      "artifact_version": "1.0",
+      "runtime_id": "tensorrt-llm-pytorch",
+      "runtime_version": "support-matrix-2026-08-11",
+      "architecture": "sm_100",
+      "accumulator_id": "fp32-bf16-rne",
+      "mode": "external",
+      "authority": "TensorRT-LLM hardware-precision matrix retrieved 2026-08-11"
+    },
+    {
+      "id": "trtllm-nvfp4-sm103-bf16",
+      "artifact_id": "nvidia-nvfp4",
+      "artifact_version": "1.0",
+      "runtime_id": "tensorrt-llm-pytorch",
+      "runtime_version": "support-matrix-2026-08-11",
+      "architecture": "sm_103",
+      "accumulator_id": "fp32-bf16-rne",
+      "mode": "external",
+      "authority": "TensorRT-LLM hardware-precision matrix retrieved 2026-08-11"
+    },
+    {
+      "id": "trtllm-nvfp4-sm120-bf16",
+      "artifact_id": "nvidia-nvfp4",
+      "artifact_version": "1.0",
+      "runtime_id": "tensorrt-llm-pytorch",
+      "runtime_version": "support-matrix-2026-08-11",
+      "architecture": "sm_120",
+      "accumulator_id": "fp32-bf16-rne",
+      "mode": "external",
+      "authority": "TensorRT-LLM hardware-precision matrix retrieved 2026-08-11"
+    },
+    {
+      "id": "trtllm-mxfp4-sm100-bf16",
+      "artifact_id": "ocp-mxfp4",
+      "artifact_version": "1.0",
+      "runtime_id": "tensorrt-llm-pytorch",
+      "runtime_version": "support-matrix-2026-08-11",
+      "architecture": "sm_100",
+      "accumulator_id": "fp32-bf16-rne",
+      "mode": "external",
+      "authority": "TensorRT-LLM hardware-precision matrix retrieved 2026-08-11"
+    }
+  ]
+}

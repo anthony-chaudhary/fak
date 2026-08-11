@@ -1,0 +1,35 @@
+{
+  "schema": "fak.fp4runtime/v1",
+  "artifact": {
+    "pin": {
+      "id": "nvidia-nvfp4",
+      "version": "1.0",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "element_format": "e2m1",
+    "scale_format": "ue4m3",
+    "block_size": 16
+  },
+  "recipe": {
+    "id": "modelopt-nvfp4",
+    "version": "recipe-2026-08-11",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "runtime": {
+    "id": "tensorrt-llm-pytorch",
+    "version": "support-matrix-2026-08-11",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "gpu": {
+    "vendor": "nvidia",
+    "architecture": "sm_100",
+    "device": "sanctioned-blackwell"
+  },
+  "accumulator": {
+    "id": "fp16-fp16-rne",
+    "product": "fp4-e2m1",
+    "accumulate": "fp16",
+    "output": "fp16",
+    "rounding": "rne"
+  }
+}
