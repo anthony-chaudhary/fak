@@ -1,0 +1,17 @@
+{
+  "name": "app",
+  "sourceRoot": "cmd/app",
+  "projectType": "library",
+  "implicitDependencies": [
+    "b",
+    "c"
+  ],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node cmd/app/test.js"
+      }
+    }
+  }
+}

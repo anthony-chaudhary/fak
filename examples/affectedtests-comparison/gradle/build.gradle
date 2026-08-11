@@ -1,0 +1,6 @@
+allprojects {
+  tasks.register('test') { doLast { println "${project.path} test" } }
+}
+project(':internal:b') { tasks.named('test') { dependsOn ':internal:a:test' } }
+project(':internal:c') { tasks.named('test') { dependsOn ':internal:a:test' } }
+project(':cmd:app') { tasks.named('test') { dependsOn ':internal:b:test', ':internal:c:test' } }

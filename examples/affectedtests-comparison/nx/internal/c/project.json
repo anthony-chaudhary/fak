@@ -1,0 +1,16 @@
+{
+  "name": "c",
+  "sourceRoot": "internal/c",
+  "projectType": "library",
+  "implicitDependencies": [
+    "a"
+  ],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node internal/c/test.js"
+      }
+    }
+  }
+}

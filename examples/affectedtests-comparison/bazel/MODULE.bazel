@@ -1,0 +1,1 @@
+module(name = "affected_tests_diamond", version = "1.0")

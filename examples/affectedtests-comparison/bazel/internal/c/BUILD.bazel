@@ -1,0 +1,3 @@
+load("//:diamond.bzl", "diamond_library", "diamond_test")
+diamond_library(name = "c", deps = ["//internal/a:a"])
+diamond_test(name = "c", deps = [":c"])

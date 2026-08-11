@@ -1,0 +1,71 @@
+{
+  "schema": "fak/affected-test-selection-comparison/1",
+  "issue": 6371,
+  "observed_at": "2026-08-10",
+  "host": {"os": "windows", "arch": "amd64", "measurement_note": "Process-tree wall/CPU/peak-RSS sampled by _scratch/issue-6371/measure-process.ps1; network bytes and hands-on operator time were not instrumented and are null, never inferred."},
+  "graph": {
+    "fixture": "examples/affectedtests-comparison",
+    "nodes": ["internal/a", "internal/b", "internal/c", "cmd/app", "internal/isolated"],
+    "changed": ["internal/a"],
+    "expected": ["internal/a", "internal/b", "internal/c", "cmd/app"],
+    "excluded": ["internal/isolated"]
+  },
+  "arms": [
+    {
+      "name": "fak native", "available": true, "version": "repository binary at bbd0809b883ab0f27906b5fa630ca7f071347805 or later", "fixture": "examples/affectedtests-comparison/go",
+      "selection_command": "fak affected --file internal/a/a.go --list", "execution_command": null,
+      "selected": ["internal/a", "internal/b", "internal/c", "cmd/app"], "true_positive": 4, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0, "missed": [], "extras": [], "tests_run": 0,
+      "selection": {"wall_seconds": 1.7190773, "cpu_seconds": 0.359375, "peak_rss_bytes": 77201408}, "execution": null,
+      "network_bytes": null, "setup_elapsed_seconds": 0, "operator_seconds": null, "license_or_cloud_cost_usd": 0,
+      "microbenchmark": {"samples_ns_per_op": [362.4, 428.5, 506.5], "median_ns_per_op": 428.5, "bytes_per_op": 224, "allocations_per_op": 8}
+    },
+    {
+      "name": "changed-only Go test baseline", "available": true, "version": "go1.26.5 windows/amd64", "fixture": "examples/affectedtests-comparison/go",
+      "selection_command": "changed file path mapped only to ./internal/a", "execution_command": "go test -count=1 ./internal/a",
+      "selected": ["internal/a"], "true_positive": 1, "false_positive": 0, "false_negative": 3, "precision": 1.0, "recall": 0.25, "missed": ["internal/b", "internal/c", "cmd/app"], "extras": [], "tests_run": 1,
+      "selection": null, "execution": {"wall_seconds": 2.273987, "cpu_seconds": 0.640625, "peak_rss_bytes": 61714432},
+      "network_bytes": null, "setup_elapsed_seconds": 0, "operator_seconds": null, "license_or_cloud_cost_usd": 0
+    },
+    {
+      "name": "fak + Go test", "available": true, "version": "fak repository binary plus go1.26.5 windows/amd64", "fixture": "examples/affectedtests-comparison/go",
+      "selection_command": "fak affected --file internal/a/a.go --list", "execution_command": "go test -count=1 ./cmd/app ./internal/a ./internal/b ./internal/c",
+      "selected": ["internal/a", "internal/b", "internal/c", "cmd/app"], "true_positive": 4, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0, "missed": [], "extras": [], "tests_run": 4,
+      "selection": {"wall_seconds": 1.7190773, "cpu_seconds": 0.359375, "peak_rss_bytes": 77201408}, "execution": {"wall_seconds": 2.4106492, "cpu_seconds": 12.734375, "peak_rss_bytes": 299900928},
+      "network_bytes": null, "setup_elapsed_seconds": 0, "operator_seconds": null, "license_or_cloud_cost_usd": 0,
+      "wsl_witness": {"version": "go1.26.5 linux/amd64", "tests_passed": 4, "wall_seconds": 207.32, "user_seconds": 32.74, "system_seconds": 33.70, "peak_rss_kib": 307248, "socket_messages_sent": 0, "socket_messages_received": 0, "note": "cold WSL/toolchain run; not comparable with warmed Windows samples"}
+    },
+    {
+      "name": "Bazel reverse-dependency query + test-work targets", "available": true, "version": "Bazelisk 1.28.1; Bazel 9.2.0", "fixture": "examples/affectedtests-comparison/bazel",
+      "selection_command": "bazelisk --batch query 'rdeps(//..., //internal/a:a)'", "execution_command": "bazelisk --batch build --noshow_progress //internal/a:a_test //internal/b:b_test //internal/c:c_test //cmd/app:app_test",
+      "selected": ["internal/a", "internal/b", "internal/c", "cmd/app"], "true_positive": 4, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0, "missed": [], "extras": [], "tests_run": 4,
+      "selection": {"wall_seconds": 5.8243368, "cpu_seconds": 4.546875, "peak_rss_bytes": 383205376}, "execution": {"wall_seconds": 8.79769, "cpu_seconds": 10.96875, "peak_rss_bytes": 424525824, "cache_hits": 4},
+      "network_bytes": null, "setup_elapsed_seconds": 3, "operator_seconds": null, "license_or_cloud_cost_usd": 0,
+      "note": "Built-in filegroup/genrule fixture avoids an external ruleset. The four _test targets are deterministic test-work markers, not bazel test rules. Query emits node and _test labels; metrics collapse each pair to one project."
+    },
+    {
+      "name": "Pants changed-since", "available": false, "version": "scie-pants 0.13.2 attempted", "fixture": null,
+      "selection_command": null, "execution_command": null, "selected": [], "true_positive": 0, "false_positive": 0, "false_negative": 4, "precision": null, "recall": 0.0, "missed": ["internal/a", "internal/b", "internal/c", "cmd/app"], "extras": [], "tests_run": 0,
+      "selection": null, "execution": null, "network_bytes": null, "setup_elapsed_seconds": 300, "operator_seconds": null, "license_or_cloud_cost_usd": 0,
+      "unavailable_reason": "Release v0.13.2 publishes Linux and macOS assets but no Windows asset. The pinned Linux x86_64 scie (SHA-256 74A1E53BC50D6EF6CE1BC67BD9F7B48E549505E0A2453AD4D5CCBC72B0BEA874) was invoked through WSL with caches redirected under _scratch/issue-6371 and exceeded the bounded 300-second bootstrap. No selection or test result was produced."
+    },
+    {
+      "name": "Nx affected", "available": true, "version": "Nx 23.1.1", "fixture": "examples/affectedtests-comparison/nx",
+      "selection_command": "nx show projects --affected --files=internal/a/value.js", "execution_command": "nx affected -t test --files=internal/a/value.js --outputStyle=static --skip-nx-cache",
+      "selected": ["internal/a", "internal/b", "internal/c", "cmd/app"], "true_positive": 4, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0, "missed": [], "extras": [], "tests_run": 4,
+      "selection": {"wall_seconds": 3.763965, "cpu_seconds": 2.265625, "peak_rss_bytes": 363659264}, "execution": {"wall_seconds": 5.0694812, "cpu_seconds": 2.375, "peak_rss_bytes": 361299968},
+      "network_bytes": null, "setup_elapsed_seconds": 7, "operator_seconds": null, "license_or_cloud_cost_usd": 0,
+      "note": "NX_NO_CLOUD=true; exact nx package and transitive dependency lockfile committed."
+    },
+    {
+      "name": "Gradle configured task closure", "available": true, "version": "Gradle 9.7.0; Eclipse Adoptium JDK 21.0.12+8-LTS", "fixture": "examples/affectedtests-comparison/gradle",
+      "selection_command": "configured :cmd:app:test task dependency closure", "execution_command": "gradle.bat --offline --no-daemon --console=plain :cmd:app:test",
+      "selected": ["internal/a", "internal/b", "internal/c", "cmd/app"], "true_positive": 4, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0, "missed": [], "extras": [], "tests_run": 4,
+      "selection": null, "execution": {"wall_seconds": 9.3376796, "cpu_seconds": 15.140625, "peak_rss_bytes": 491937792},
+      "network_bytes": 0, "setup_elapsed_seconds": null, "operator_seconds": null, "license_or_cloud_cost_usd": 0,
+      "distribution_sha256": "84FBBA45C7F4C64ABC77460E1C00F541E9F960E3C7ED2538F1EDE19EACD873AE", "jdk_zip_sha256": "9BA963EE2371874A74185D18BC7BB2AB9407DF7683300855ED7606E0662321D0",
+      "note": "Gradle core does not infer changed-file impact here; the fixture measures an explicitly configured test-task closure. Offline execution establishes zero benchmark-run network after setup."
+    }
+  ],
+  "cost_note": "All measured executions used local open-source tools and incurred USD 0 license/cloud/compute charges. Total economic cost cannot be stated because hands-on operator time was not instrumented; it is reported as null rather than fabricated.",
+  "raw_evidence": "_scratch/issue-6371 (intentionally uncommitted, workspace-local run archive)"
+}

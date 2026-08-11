@@ -1,0 +1,14 @@
+{
+  "name": "isolated",
+  "sourceRoot": "internal/isolated",
+  "projectType": "library",
+  "implicitDependencies": [],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node internal/isolated/test.js"
+      }
+    }
+  }
+}
