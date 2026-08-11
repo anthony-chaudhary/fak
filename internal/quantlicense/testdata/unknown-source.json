@@ -1,0 +1,10 @@
+{
+  "schema":"quantlicense/v1",
+  "source_weights":{"identity":"example/base@sha256:111","license":{"id":"LicenseRef-Unknown","evidence":"https://example.invalid/source","terms":{"use":"unknown","derive":"allowed"}}},
+  "artifact":{"identity":"example/q4@sha256:222","license":{"id":"LicenseRef-Artifact","evidence":"https://example.invalid/artifact","terms":{"use":"allowed"}},"format":{"name":"gguf","version":"3","license":{"id":"MIT","evidence":"https://example.invalid/format","terms":{"use":"allowed"}}}},
+  "recipe":{"id":"recipe","quantizer":{"name":"q","version":"1","license":{"id":"Apache-2.0","evidence":"https://example.invalid/q","terms":{"use":"allowed"}}}},
+  "runtime":{"name":"r","version":"1","license":{"id":"MIT","evidence":"https://example.invalid/r","terms":{"use":"allowed"}}},
+  "compatibility":{"status":"compatible","evidence":"https://example.invalid/attestation"},
+  "request":{"use":"demo"},
+  "claims":{"artifact":"identified","recipe":"identified","runtime_delegation":"delegated","hardware_envelope":"not measured"}
+}

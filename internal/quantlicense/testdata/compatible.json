@@ -1,0 +1,10 @@
+{
+  "schema":"quantlicense/v1",
+  "source_weights":{"identity":"example/base@sha256:111","license":{"id":"LicenseRef-Source-Permissive","evidence":"https://example.invalid/source-license","terms":{"use":"allowed","derive":"allowed","redistribute":"denied"}}},
+  "artifact":{"identity":"example/base-q4@sha256:222","license":{"id":"LicenseRef-Artifact-Permissive","evidence":"https://example.invalid/artifact-license","terms":{"use":"allowed","derive":"unknown","redistribute":"allowed"}},"format":{"name":"gguf","version":"3","license":{"id":"MIT","evidence":"https://example.invalid/format-license","terms":{"use":"allowed"}}}},
+  "recipe":{"id":"example-q4-recipe@sha256:333","quantizer":{"name":"example-quantizer","version":"1.2.0","license":{"id":"Apache-2.0","evidence":"https://example.invalid/quantizer-license","terms":{"use":"allowed"}}}},
+  "runtime":{"name":"example-runtime","version":"3.0.0","license":{"id":"MIT","evidence":"https://example.invalid/runtime-license","terms":{"use":"allowed"}}},
+  "compatibility":{"status":"compatible","evidence":"https://example.invalid/source-artifact-attestation"},
+  "request":{"use":"demo","redistribute_artifact":true},
+  "claims":{"artifact":"Fixture artifact identity only; no weights are bundled.","recipe":"Named conversion recipe; quality is not asserted.","runtime_delegation":"Execution delegates to example-runtime 3.0.0.","hardware_envelope":"Contract fixture on windows/amd64; no throughput or quality measurement."}
+}
