@@ -89,13 +89,30 @@ func TestRunDisambiguationQuerySelfTestJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("decode self-test JSON: %v", err)
 	}
-	if !got.Complete || got.CanonicalTerm != "agent kernel" || got.Schema != disambiguation.QuerySchemaVersion {
+	if !got.Complete || got.CanonicalTerm != "agent kernel" || got.MatchedAlias != "fused agent kernel" || got.Schema != disambiguation.QuerySchemaVersion {
 		t.Fatalf("self-test report = %#v", got)
 	}
 }
 
-func TestRunDisambiguationQueryRejectsAliasAndUnknown(t *testing.T) {
-	for _, term := range []string{"fused agent kernel", "unknown"} {
+func TestRunDisambiguationQueryAliasReturnsCanonicalIdentityAndMatch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runDisambiguation(&stdout, &stderr, []string{"query", "fused agent kernel", "--json"}); code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var got disambiguation.QueryResponse
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode alias JSON: %v", err)
+	}
+	if got.Entry.Identity.CanonicalTerm != "agent kernel" || got.MatchedAlias != "fused agent kernel" {
+		t.Fatalf("alias response = %#v", got)
+	}
+	if got.Entry.Owner.Leaf == "" || got.Entry.Owner.Lane == "" {
+		t.Fatalf("canonical ownership hidden: %#v", got.Entry.Owner)
+	}
+}
+
+func TestRunDisambiguationQueryRejectsUnknown(t *testing.T) {
+	for _, term := range []string{"Fused Agent Kernel", "unknown"} {
 		var stdout, stderr bytes.Buffer
 		if code := runDisambiguation(&stdout, &stderr, []string{"query", term, "--json"}); code != 3 {
 			t.Errorf("query %q exit = %d, want 3; stderr = %q", term, code, stderr.String())

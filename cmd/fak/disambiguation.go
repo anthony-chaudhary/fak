@@ -105,14 +105,14 @@ func runDisambiguationQuery(stdout, stderr io.Writer, args []string) int {
 		if jsonOutput {
 			return encodeDisambiguationJSON(stdout, stderr, report)
 		}
-		fmt.Fprintf(stdout, "PASS %s: exact canonical term %q returned a complete %s record\n", report.Schema, report.CanonicalTerm, report.EntrySchema)
+		fmt.Fprintf(stdout, "PASS %s: alias %q resolved to canonical term %q with a complete %s record\n", report.Schema, report.MatchedAlias, report.CanonicalTerm, report.EntrySchema)
 		return 0
 	}
 	if len(terms) != 1 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation query <canonical-term> [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation query <term> [--json]")
 		return 2
 	}
-	response, err := disambiguation.Query(terms[0])
+	response, err := disambiguation.Resolve(terms[0])
 	if err != nil {
 		if errors.Is(err, disambiguation.ErrCanonicalTermNotFound) {
 			fmt.Fprintf(stderr, "fak disambiguation query: %v\n", err)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// QuerySchemaVersion identifies the exact canonical-term query response contract.
+// QuerySchemaVersion identifies the canonical-identity query response contract.
 const QuerySchemaVersion = "fak-disambiguation-query/1"
 
 // PublicIndexVersion identifies the immutable public seed set used by this reader.
@@ -15,30 +15,49 @@ const PublicIndexVersion = "public-seed/1"
 // ErrCanonicalTermNotFound reports that an exact canonical-term lookup missed.
 var ErrCanonicalTermNotFound = errors.New("canonical term not found")
 
-// QueryResponse is the versioned, machine-readable result of an exact lookup.
+// QueryResponse is the versioned, machine-readable result of a lookup. Entry
+// always exposes the canonical owner. MatchedAlias is populated only when an
+// exact declared alias selected that owner and preserves the caller's spelling.
 type QueryResponse struct {
 	Schema       string `json:"schema"`
 	IndexVersion string `json:"index_version"`
+	MatchedAlias string `json:"matched_alias,omitempty"`
 	Entry        Entry  `json:"entry"`
 }
 
-// Query performs an exact, case-sensitive lookup of a canonical term. Aliases
-// are deliberately not accepted by this seam: callers cannot silently change
-// which public term owns a meaning.
+// Query performs an exact, case-sensitive lookup of a canonical term. It stays
+// canonical-only so callers that require canonical ownership cannot silently
+// broaden their lookup to aliases.
 func Query(canonicalTerm string) (QueryResponse, error) {
-	entry, ok := publicSeed[canonicalTerm]
+	entry, ok := publicIndex.queryCanonical(canonicalTerm)
 	if !ok {
 		return QueryResponse{}, fmt.Errorf("%w: %q", ErrCanonicalTermNotFound, canonicalTerm)
 	}
+	return queryResponse(entry, ""), nil
+}
+
+// Resolve performs an exact, case-sensitive lookup across canonical terms and
+// declared aliases. The returned entry always carries the canonical identity;
+// MatchedAlias records the exact alias used and is empty for canonical input.
+func Resolve(term string) (QueryResponse, error) {
+	entry, matchedAlias, ok := publicIndex.resolve(term)
+	if !ok {
+		return QueryResponse{}, fmt.Errorf("%w: %q", ErrCanonicalTermNotFound, term)
+	}
+	return queryResponse(entry, matchedAlias), nil
+}
+
+func queryResponse(entry Entry, matchedAlias string) QueryResponse {
 	return QueryResponse{
 		Schema:       QuerySchemaVersion,
 		IndexVersion: PublicIndexVersion,
-		Entry:        cloneEntry(entry),
-	}, nil
+		MatchedAlias: matchedAlias,
+		Entry:        entry,
+	}
 }
 
-var publicSeed = map[string]Entry{
-	"agent kernel": {
+var publicEntries = []Entry{
+	{
 		Schema: EntrySchemaVersion,
 		Identity: Identity{
 			CanonicalTerm: "agent kernel",
@@ -64,6 +83,16 @@ var publicSeed = map[string]Entry{
 		},
 		Lifecycle: Lifecycle{Class: "current", Rollout: "on"},
 	},
+}
+
+var publicIndex = mustNewIndex(publicEntries)
+
+func mustNewIndex(entries []Entry) *Index {
+	index, err := NewIndex(entries)
+	if err != nil {
+		panic(fmt.Sprintf("invalid public disambiguation index: %v", err))
+	}
+	return index
 }
 
 func cloneEntry(entry Entry) Entry {

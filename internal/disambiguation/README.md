@@ -20,16 +20,25 @@ the sole writer. `testdata/entry-v1.json` is a complete public-source fixture;
 `RunSelfTest` accepts it in equivalent typed form and independently removes and
 rejects every required JSON path declared by the schema descriptor.
 
-## Exact canonical-term query
+## Canonical and declared-alias query
 
-The public read seam performs a case-sensitive exact canonical-term lookup; it
-does not resolve aliases or normalize whitespace, so ownership cannot silently
-move between terms:
+The public read seam performs an exact, case-sensitive lookup across canonical
+terms and declared aliases; it never normalizes whitespace or case. Canonical
+input returns the canonical record directly. Alias input returns that same
+complete canonical record and adds `matched_alias` with the exact declared
+alias used, so canonical identity and ownership remain visible:
 
 ```text
 fak disambiguation query "agent kernel" --json
+fak disambiguation query "fused agent kernel" --json
 fak disambiguation query --self-test --json
 ```
+
+`Query` remains the package-level canonical-only seam; `Resolve` is the additive
+alias-aware seam used by the CLI. Index construction rejects duplicate canonical
+terms, duplicate aliases (including repeats under one owner), and aliases that
+collide with any canonical term. These checks are the generation/index boundary:
+ambiguous identity cannot become queryable.
 
 The response contract is `fak-disambiguation-query/1` and names the public seed
 version separately. Its nested `entry` is the complete strict schema record,
