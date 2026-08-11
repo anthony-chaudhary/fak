@@ -48,9 +48,11 @@ $paths = @(
  '\Memory\Demand Zero Faults/sec','\Memory\Transition Faults/sec',
  '\System\Context Switches/sec','\System\System Calls/sec',
  '\Processor(_Total)\% Processor Time','\System\Processor Queue Length',
+ '\Memory\Committed Bytes','\Memory\Commit Limit',
  '\System\Processes','\System\Threads',
  '\Memory\Available MBytes','\PhysicalDisk(_Total)\Current Disk Queue Length'
 )
+$os = Get-CimInstance Win32_OperatingSystem
 $c = Get-Counter -Counter $paths
 $h = @{}
 foreach ($s in $c.CounterSamples) { $h[$s.Path.Split([char]92)[-1]] = [math]::Round($s.CookedValue,2) }
@@ -109,6 +111,11 @@ $top   = $top   | Sort-Object ops     -Descending | Select-Object -First 12
 $topH  = $hlist | Sort-Object handles -Descending | Select-Object -First 12
 $topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
 [pscustomobject]@{
+  timestamp    = (Get-Date).ToUniversalTime().ToString('o')
+  boot_time    = $os.LastBootUpTime.ToUniversalTime().ToString('o')
+  commit_bytes = [uint64]$h['Committed Bytes']
+  commit_limit = [uint64]$h['Commit Limit']
+  available_bytes = [uint64]($h['Available MBytes'] * 1MB)
   faults      = $h['Page Faults/sec']
   hard        = $h['Page Reads/sec']
   demandZero  = $h['Demand Zero Faults/sec']
@@ -158,20 +165,25 @@ type stallTopThread struct {
 }
 
 type stallRaw struct {
-	Faults      float64 `json:"faults"`
-	Hard        float64 `json:"hard"`
-	DemandZero  float64 `json:"demandZero"`
-	Transition  float64 `json:"transition"`
-	Ctxsw       float64 `json:"ctxsw"`
-	Syscalls    float64 `json:"syscalls"`
-	CPUPct      float64 `json:"cpuPct"`
-	CPUQueue    float64 `json:"cpuQueue"`
-	LogicalCPU  int     `json:"logicalCPU"`
-	Procs       int     `json:"procs"`
-	Threads     int     `json:"threads"`
-	AvailMB     int     `json:"availMB"`
-	DiskQ       float64 `json:"diskQ"`
-	HandleTotal int64   `json:"handleTotal"`
+	Timestamp      string  `json:"timestamp"`
+	BootTime       string  `json:"boot_time"`
+	CommitBytes    uint64  `json:"commit_bytes"`
+	CommitLimit    uint64  `json:"commit_limit"`
+	AvailableBytes uint64  `json:"available_bytes"`
+	Faults         float64 `json:"faults"`
+	Hard           float64 `json:"hard"`
+	DemandZero     float64 `json:"demandZero"`
+	Transition     float64 `json:"transition"`
+	Ctxsw          float64 `json:"ctxsw"`
+	Syscalls       float64 `json:"syscalls"`
+	CPUPct         float64 `json:"cpuPct"`
+	CPUQueue       float64 `json:"cpuQueue"`
+	LogicalCPU     int     `json:"logicalCPU"`
+	Procs          int     `json:"procs"`
+	Threads        int     `json:"threads"`
+	AvailMB        int     `json:"availMB"`
+	DiskQ          float64 `json:"diskQ"`
+	HandleTotal    int64   `json:"handleTotal"`
 	// Spawned is the GROSS count of processes born inside the probe's own
 	// snapshot window (PIDs present in the second enumeration and absent from
 	// the first). SpawnKnown is false when the first enumeration came back
@@ -225,7 +237,12 @@ func gatherStallSample(topN int) (stallscan.Sample, string) {
 	if perr != "" {
 		return stallscan.Sample{}, perr
 	}
+	boot, _ := time.Parse(time.RFC3339Nano, raw.BootTime)
 	s := stallscan.Sample{
+		BootTime:               boot,
+		CommitBytes:            raw.CommitBytes,
+		CommitLimit:            raw.CommitLimit,
+		AvailableBytes:         raw.AvailableBytes,
 		TotalFaultsPerSec:      raw.Faults,
 		HardFaultsPerSec:       raw.Hard,
 		DemandZeroFaultsPerSec: raw.DemandZero,

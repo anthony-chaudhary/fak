@@ -24,6 +24,7 @@ package stallscan
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // Sample is one point-in-time reading of the churn-revealing signals. All rates
@@ -52,12 +53,16 @@ type Sample struct {
 	TopCPU                []ProcCPU `json:"top_cpu,omitempty"`
 
 	// Process/thread census + churn since the previous sample.
-	ProcessCount int     `json:"process_count"`
-	ThreadCount  int     `json:"thread_count"`
-	ProcessDelta int     `json:"process_delta"`  // net change in process count vs previous sample
-	SpawnBurst   int     `json:"spawn_burst"`    // processes that appeared since previous sample (gross), if known
-	AvailableMB  int     `json:"available_mb"`   // free RAM; rules OUT memory exhaustion as the cause
-	DiskQueueLen float64 `json:"disk_queue_len"` // current physical-disk queue; rules OUT disk saturation
+	ProcessCount   int       `json:"process_count"`
+	ThreadCount    int       `json:"thread_count"`
+	ProcessDelta   int       `json:"process_delta"`
+	BootTime       time.Time `json:"boot_time,omitempty"`
+	CommitBytes    uint64    `json:"commit_bytes,omitempty"`
+	CommitLimit    uint64    `json:"commit_limit,omitempty"`
+	AvailableBytes uint64    `json:"available_bytes,omitempty"` // net change in process count vs previous sample
+	SpawnBurst     int       `json:"spawn_burst"`               // processes that appeared since previous sample (gross), if known
+	AvailableMB    int       `json:"available_mb"`              // free RAM; rules OUT memory exhaustion as the cause
+	DiskQueueLen   float64   `json:"disk_queue_len"`            // current physical-disk queue; rules OUT disk saturation
 
 	// SpawnWindowSeconds is the wall-clock span SpawnBurst was counted over.
 	//
