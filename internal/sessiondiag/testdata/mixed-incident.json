@@ -1,0 +1,837 @@
+{
+  "schema": "fak.sessiondiag.inventory.v1",
+  "observed_at": "2026-08-11T18:30:00Z",
+  "window_seconds": 3600,
+  "stale_after_seconds": 600,
+  "read_only": true,
+  "sources": {
+    "thread_metadata": 11,
+    "turns": 8,
+    "writer_locks": 10,
+    "guard_launch_receipts": 7,
+    "processes": 30,
+    "process_trees": 8,
+    "spawn_edges": 2
+  },
+  "counts": {
+    "total": 12,
+    "active": 5,
+    "by_kind": {
+      "fak_guarded_tui": 3,
+      "headless_exec_worker": 3,
+      "interactive_tui": 1,
+      "resume_wrapper": 3,
+      "spawned_subagent": 1,
+      "unknown": 1
+    },
+    "by_health": {
+      "ACTIVE": 5,
+      "COMPLETED": 1,
+      "FAILED_BUT_LOCKED": 3,
+      "RECEIPT_ONLY": 1,
+      "STALE_LOCK": 2
+    },
+    "process_trees": 8,
+    "spawn_edges": 2
+  },
+  "sessions": [
+    {
+      "record_id": "thread:10000001-0000-4000-8000-000000000001",
+      "thread": {
+        "id": "10000001-0000-4000-8000-000000000001",
+        "source": "cli",
+        "thread_source": "user",
+        "created_at": "2026-08-11T18:22:00.12Z",
+        "updated_at": "2026-08-11T18:29:50Z"
+      },
+      "latest_turn": {
+        "id": "a0000001-0000-4000-8000-000000000001",
+        "status": "inProgress",
+        "error_present": false,
+        "started_at": "2026-08-11T18:29:00Z"
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:29:40Z",
+        "age_seconds": 20,
+        "proves_liveness": false
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T18:22:12Z",
+        "age_seconds": 468,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:100:1786472518000000000",
+          "root_pid": 100,
+          "codex_pid": 104,
+          "started_at": "2026-08-11T18:21:58Z",
+          "codex_started_at": "2026-08-11T18:22:00Z",
+          "nodes": [
+            {
+              "pid": 100,
+              "name": "pwsh",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:21:58Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 101,
+              "parent_pid": 100,
+              "name": "fak",
+              "role": "guard",
+              "started_at": "2026-08-11T18:21:59Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 102,
+              "parent_pid": 101,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:21:59.5Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 103,
+              "parent_pid": 102,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:21:59.8Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 104,
+              "parent_pid": 103,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:22:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": true,
+          "has_fak_gateway": false,
+          "has_exec": false,
+          "has_resume": false,
+          "command_lines_complete": true,
+          "association": "start_time",
+          "thread_id": "10000001-0000-4000-8000-000000000001",
+          "reasons": [
+            "PROCESS_THREAD_START_TIME_MATCH"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "child_threads": [
+        "80000001-0000-4000-8000-000000000001"
+      ],
+      "kind": "fak_guarded_tui",
+      "health": "ACTIVE",
+      "reasons": [
+        "PROCESS_THREAD_START_TIME_MATCH",
+        "TURN_IN_PROGRESS_WITH_PROCESS"
+      ]
+    },
+    {
+      "record_id": "thread:10000002-0000-4000-8000-000000000002",
+      "thread": {
+        "id": "10000002-0000-4000-8000-000000000002",
+        "source": "cli",
+        "thread_source": "user",
+        "created_at": "2026-08-11T18:23:00.12Z",
+        "updated_at": "2026-08-11T18:29:50Z"
+      },
+      "latest_turn": {
+        "id": "a0000002-0000-4000-8000-000000000002",
+        "status": "completed",
+        "error_present": false,
+        "started_at": "2026-08-11T18:29:00Z",
+        "completed_at": "2026-08-11T18:29:40Z",
+        "duration_ms": 40000
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:29:40Z",
+        "age_seconds": 20,
+        "proves_liveness": false
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T18:23:12Z",
+        "age_seconds": 408,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:110:1786472578000000000",
+          "root_pid": 110,
+          "codex_pid": 114,
+          "started_at": "2026-08-11T18:22:58Z",
+          "codex_started_at": "2026-08-11T18:23:00Z",
+          "nodes": [
+            {
+              "pid": 110,
+              "name": "pwsh",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:22:58Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 111,
+              "parent_pid": 110,
+              "name": "fak",
+              "role": "guard",
+              "started_at": "2026-08-11T18:22:59Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 112,
+              "parent_pid": 111,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:22:59.5Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 113,
+              "parent_pid": 112,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:22:59.8Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 114,
+              "parent_pid": 113,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:23:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": true,
+          "has_fak_gateway": false,
+          "has_exec": false,
+          "has_resume": false,
+          "command_lines_complete": true,
+          "association": "start_time",
+          "thread_id": "10000002-0000-4000-8000-000000000002",
+          "reasons": [
+            "PROCESS_THREAD_START_TIME_MATCH"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "fak_guarded_tui",
+      "health": "ACTIVE",
+      "reasons": [
+        "INTERACTIVE_PROCESS_WAITING_AFTER_COMPLETED_TURN",
+        "PROCESS_THREAD_START_TIME_MATCH"
+      ]
+    },
+    {
+      "record_id": "thread:10000003-0000-4000-8000-000000000003",
+      "thread": {
+        "id": "10000003-0000-4000-8000-000000000003",
+        "source": "cli",
+        "thread_source": "user",
+        "created_at": "2026-08-11T18:24:00.12Z",
+        "updated_at": "2026-08-11T18:29:50Z"
+      },
+      "latest_turn": {
+        "id": "a0000003-0000-4000-8000-000000000003",
+        "status": "completed",
+        "error_present": false,
+        "started_at": "2026-08-11T18:29:00Z",
+        "completed_at": "2026-08-11T18:29:40Z",
+        "duration_ms": 40000
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:29:40Z",
+        "age_seconds": 20,
+        "proves_liveness": false
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T18:24:12Z",
+        "age_seconds": 348,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:120:1786472638000000000",
+          "root_pid": 120,
+          "codex_pid": 124,
+          "started_at": "2026-08-11T18:23:58Z",
+          "codex_started_at": "2026-08-11T18:24:00Z",
+          "nodes": [
+            {
+              "pid": 120,
+              "name": "pwsh",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:23:58Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 121,
+              "parent_pid": 120,
+              "name": "fak",
+              "role": "guard",
+              "started_at": "2026-08-11T18:23:59Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 122,
+              "parent_pid": 121,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:23:59.5Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 123,
+              "parent_pid": 122,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:23:59.8Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 124,
+              "parent_pid": 123,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:24:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": true,
+          "has_fak_gateway": false,
+          "has_exec": false,
+          "has_resume": false,
+          "command_lines_complete": true,
+          "association": "start_time",
+          "thread_id": "10000003-0000-4000-8000-000000000003",
+          "reasons": [
+            "PROCESS_THREAD_START_TIME_MATCH"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "fak_guarded_tui",
+      "health": "ACTIVE",
+      "reasons": [
+        "INTERACTIVE_PROCESS_WAITING_AFTER_COMPLETED_TURN",
+        "PROCESS_THREAD_START_TIME_MATCH"
+      ]
+    },
+    {
+      "record_id": "thread:20000001-0000-4000-8000-000000000001",
+      "thread": {
+        "id": "20000001-0000-4000-8000-000000000001",
+        "source": "exec",
+        "thread_source": "user",
+        "created_at": "2026-08-11T18:25:00.1Z",
+        "updated_at": "2026-08-11T18:29:55Z"
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:29:45Z",
+        "age_seconds": 15,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:130:1786472699900000000",
+          "root_pid": 130,
+          "codex_pid": 132,
+          "started_at": "2026-08-11T18:24:59.9Z",
+          "codex_started_at": "2026-08-11T18:25:00Z",
+          "nodes": [
+            {
+              "pid": 130,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:24:59.9Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 131,
+              "parent_pid": 130,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:24:59.95Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 132,
+              "parent_pid": 131,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:25:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": false,
+          "has_fak_gateway": false,
+          "has_exec": true,
+          "has_resume": false,
+          "command_lines_complete": true,
+          "association": "start_time",
+          "thread_id": "20000001-0000-4000-8000-000000000001",
+          "reasons": [
+            "PROCESS_THREAD_START_TIME_MATCH"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "headless_exec_worker",
+      "health": "ACTIVE",
+      "reasons": [
+        "PROCESS_THREAD_START_TIME_MATCH",
+        "RECENT_THREAD_UPDATE_WITH_PROCESS_AND_LOCK"
+      ]
+    },
+    {
+      "record_id": "thread:20000002-0000-4000-8000-000000000002",
+      "thread": {
+        "id": "20000002-0000-4000-8000-000000000002",
+        "source": "exec",
+        "thread_source": "user",
+        "created_at": "2026-08-11T18:26:00.1Z",
+        "updated_at": "2026-08-11T18:29:55Z"
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:29:45Z",
+        "age_seconds": 15,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:140:1786472759900000000",
+          "root_pid": 140,
+          "codex_pid": 142,
+          "started_at": "2026-08-11T18:25:59.9Z",
+          "codex_started_at": "2026-08-11T18:26:00Z",
+          "nodes": [
+            {
+              "pid": 140,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:25:59.9Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 141,
+              "parent_pid": 140,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:25:59.95Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 142,
+              "parent_pid": 141,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:26:00Z",
+              "command_line_available": false
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": false,
+          "has_fak_gateway": false,
+          "has_exec": true,
+          "has_resume": false,
+          "command_lines_complete": false,
+          "association": "start_time",
+          "thread_id": "20000002-0000-4000-8000-000000000002",
+          "reasons": [
+            "PROCESS_COMMAND_LINE_UNAVAILABLE",
+            "PROCESS_THREAD_START_TIME_MATCH"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "headless_exec_worker",
+      "health": "ACTIVE",
+      "reasons": [
+        "PROCESS_COMMAND_LINE_UNAVAILABLE",
+        "PROCESS_THREAD_START_TIME_MATCH",
+        "RECENT_THREAD_UPDATE_WITH_PROCESS_AND_LOCK"
+      ]
+    },
+    {
+      "record_id": "thread:30000001-0000-4000-8000-000000000001",
+      "thread": {
+        "id": "30000001-0000-4000-8000-000000000001",
+        "source": "cli",
+        "thread_source": "user",
+        "created_at": "2026-08-11T16:30:00Z",
+        "updated_at": "2026-08-11T18:29:00Z"
+      },
+      "latest_turn": {
+        "id": "b0000001-0000-4000-8000-000000000001",
+        "status": "failed",
+        "error_present": true,
+        "error_code": "invalid_id_prefix",
+        "started_at": "2026-08-11T18:27:00Z",
+        "completed_at": "2026-08-11T18:27:05Z",
+        "duration_ms": 5000
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:13:00Z",
+        "age_seconds": 1020,
+        "proves_liveness": false
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T16:30:00Z",
+        "age_seconds": 7200,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:150:1786472819900000000",
+          "root_pid": 150,
+          "codex_pid": 152,
+          "started_at": "2026-08-11T18:26:59.9Z",
+          "codex_started_at": "2026-08-11T18:27:00Z",
+          "nodes": [
+            {
+              "pid": 150,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:26:59.9Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 151,
+              "parent_pid": 150,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:26:59.95Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 152,
+              "parent_pid": 151,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:27:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": false,
+          "has_fak_gateway": false,
+          "has_exec": true,
+          "has_resume": true,
+          "command_lines_complete": true,
+          "association": "explicit_thread_id",
+          "thread_id": "30000001-0000-4000-8000-000000000001",
+          "reasons": [
+            "PROCESS_THREAD_EXPLICIT_COMMAND_HINT"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "resume_wrapper",
+      "health": "FAILED_BUT_LOCKED",
+      "reasons": [
+        "FAILED_TURN_WITH_LIVE_PROCESS_TREE",
+        "FAILED_TURN_WITH_WRITER_LOCK",
+        "PROCESS_THREAD_EXPLICIT_COMMAND_HINT"
+      ]
+    },
+    {
+      "record_id": "thread:30000002-0000-4000-8000-000000000002",
+      "thread": {
+        "id": "30000002-0000-4000-8000-000000000002",
+        "source": "cli",
+        "thread_source": "user",
+        "created_at": "2026-08-11T16:30:00Z",
+        "updated_at": "2026-08-11T18:29:00Z"
+      },
+      "latest_turn": {
+        "id": "b0000002-0000-4000-8000-000000000002",
+        "status": "failed",
+        "error_present": true,
+        "error_code": "invalid_id_prefix",
+        "started_at": "2026-08-11T18:28:00Z",
+        "completed_at": "2026-08-11T18:28:05Z",
+        "duration_ms": 5000
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:13:00Z",
+        "age_seconds": 1020,
+        "proves_liveness": false
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T16:30:00Z",
+        "age_seconds": 7200,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:160:1786472879900000000",
+          "root_pid": 160,
+          "codex_pid": 162,
+          "started_at": "2026-08-11T18:27:59.9Z",
+          "codex_started_at": "2026-08-11T18:28:00Z",
+          "nodes": [
+            {
+              "pid": 160,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:27:59.9Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 161,
+              "parent_pid": 160,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:27:59.95Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 162,
+              "parent_pid": 161,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:28:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": false,
+          "has_fak_gateway": false,
+          "has_exec": true,
+          "has_resume": true,
+          "command_lines_complete": true,
+          "association": "explicit_thread_id",
+          "thread_id": "30000002-0000-4000-8000-000000000002",
+          "reasons": [
+            "PROCESS_THREAD_EXPLICIT_COMMAND_HINT"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "resume_wrapper",
+      "health": "FAILED_BUT_LOCKED",
+      "reasons": [
+        "FAILED_TURN_WITH_LIVE_PROCESS_TREE",
+        "FAILED_TURN_WITH_WRITER_LOCK",
+        "PROCESS_THREAD_EXPLICIT_COMMAND_HINT"
+      ]
+    },
+    {
+      "record_id": "thread:30000003-0000-4000-8000-000000000003",
+      "thread": {
+        "id": "30000003-0000-4000-8000-000000000003",
+        "source": "cli",
+        "thread_source": "user",
+        "created_at": "2026-08-11T16:30:00Z",
+        "updated_at": "2026-08-11T18:29:00Z"
+      },
+      "latest_turn": {
+        "id": "b0000003-0000-4000-8000-000000000003",
+        "status": "failed",
+        "error_present": true,
+        "error_code": "invalid_id_prefix",
+        "started_at": "2026-08-11T18:29:00Z",
+        "completed_at": "2026-08-11T18:29:05Z",
+        "duration_ms": 5000
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T18:13:00Z",
+        "age_seconds": 1020,
+        "proves_liveness": false
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T16:30:00Z",
+        "age_seconds": 7200,
+        "proves_liveness": false
+      },
+      "process_trees": [
+        {
+          "id": "process:170:1786472939900000000",
+          "root_pid": 170,
+          "codex_pid": 172,
+          "started_at": "2026-08-11T18:28:59.9Z",
+          "codex_started_at": "2026-08-11T18:29:00Z",
+          "nodes": [
+            {
+              "pid": 170,
+              "name": "cmd",
+              "role": "wrapper",
+              "started_at": "2026-08-11T18:28:59.9Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 171,
+              "parent_pid": 170,
+              "name": "node",
+              "role": "node",
+              "started_at": "2026-08-11T18:28:59.95Z",
+              "command_line_available": true
+            },
+            {
+              "pid": 172,
+              "parent_pid": 171,
+              "name": "codex",
+              "role": "codex",
+              "started_at": "2026-08-11T18:29:00Z",
+              "command_line_available": true
+            }
+          ],
+          "has_codex": true,
+          "has_fak_guard": false,
+          "has_fak_gateway": false,
+          "has_exec": true,
+          "has_resume": true,
+          "command_lines_complete": true,
+          "association": "explicit_thread_id",
+          "thread_id": "30000003-0000-4000-8000-000000000003",
+          "reasons": [
+            "PROCESS_THREAD_EXPLICIT_COMMAND_HINT"
+          ],
+          "proves_liveness": false
+        }
+      ],
+      "kind": "resume_wrapper",
+      "health": "FAILED_BUT_LOCKED",
+      "reasons": [
+        "FAILED_TURN_WITH_LIVE_PROCESS_TREE",
+        "FAILED_TURN_WITH_WRITER_LOCK",
+        "PROCESS_THREAD_EXPLICIT_COMMAND_HINT"
+      ]
+    },
+    {
+      "record_id": "thread:60000001-0000-4000-8000-000000000001",
+      "thread": {
+        "id": "60000001-0000-4000-8000-000000000001",
+        "source": "cli",
+        "created_at": "2026-08-11T15:30:00Z",
+        "updated_at": "2026-08-11T17:30:00Z"
+      },
+      "latest_turn": {
+        "id": "61000001-0000-4000-8000-000000000001",
+        "status": "completed",
+        "error_present": false,
+        "completed_at": "2026-08-11T17:30:00Z"
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T17:30:00Z",
+        "age_seconds": 3600,
+        "proves_liveness": false
+      },
+      "kind": "interactive_tui",
+      "health": "STALE_LOCK",
+      "reasons": [
+        "TERMINAL_TURN_WITH_WRITER_LOCK"
+      ]
+    },
+    {
+      "record_id": "thread:60000002-0000-4000-8000-000000000002",
+      "thread": {
+        "id": "60000002-0000-4000-8000-000000000002"
+      },
+      "writer_lock": {
+        "evidence_type": "writer_lock",
+        "modified_at": "2026-08-11T16:30:00Z",
+        "age_seconds": 7200,
+        "proves_liveness": false
+      },
+      "kind": "unknown",
+      "health": "STALE_LOCK",
+      "reasons": [
+        "WRITER_LOCK_OLDER_THAN_STALE_THRESHOLD",
+        "WRITER_LOCK_WITHOUT_PROCESS_TREE"
+      ]
+    },
+    {
+      "record_id": "thread:70000001-0000-4000-8000-000000000001",
+      "thread": {
+        "id": "70000001-0000-4000-8000-000000000001",
+        "source": "exec",
+        "created_at": "2026-08-11T18:00:00Z",
+        "updated_at": "2026-08-11T18:00:00Z"
+      },
+      "guard_launch_receipt": {
+        "evidence_type": "launch_receipt",
+        "recorded_at": "2026-08-11T18:01:00Z",
+        "age_seconds": 1740,
+        "proves_liveness": false
+      },
+      "kind": "headless_exec_worker",
+      "health": "RECEIPT_ONLY",
+      "reasons": [
+        "LAUNCH_RECEIPT_WITHOUT_PROCESS_OR_LOCK"
+      ]
+    },
+    {
+      "record_id": "thread:80000001-0000-4000-8000-000000000001",
+      "thread": {
+        "id": "80000001-0000-4000-8000-000000000001",
+        "source": "exec",
+        "thread_source": "subagent",
+        "created_at": "2026-08-11T18:21:00Z",
+        "updated_at": "2026-08-11T18:25:00Z"
+      },
+      "latest_turn": {
+        "id": "81000001-0000-4000-8000-000000000001",
+        "status": "completed",
+        "error_present": false,
+        "completed_at": "2026-08-11T18:25:00Z"
+      },
+      "parent_threads": [
+        "10000001-0000-4000-8000-000000000001"
+      ],
+      "kind": "spawned_subagent",
+      "health": "COMPLETED",
+      "reasons": [
+        "TERMINAL_TURN_WITHOUT_CURRENT_SIGNALS"
+      ]
+    }
+  ],
+  "spawn_edges": [
+    {
+      "parent": {
+        "thread_id": "10000001-0000-4000-8000-000000000001",
+        "state": "active"
+      },
+      "child": {
+        "thread_id": "80000001-0000-4000-8000-000000000001",
+        "state": "completed"
+      },
+      "status": "closed"
+    },
+    {
+      "parent": {
+        "thread_id": "90000001-0000-4000-8000-000000000001",
+        "state": "unknown"
+      },
+      "child": {
+        "thread_id": "90000002-0000-4000-8000-000000000002",
+        "state": "unknown"
+      },
+      "status": "open"
+    }
+  ],
+  "notice": "guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself"
+}

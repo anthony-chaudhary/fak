@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 )
 
 func TestRunSessionDiagCapturedPressure(t *testing.T) {
@@ -92,7 +94,56 @@ func TestRunSessionDiagWritesRedactedIncident(t *testing.T) {
 	if strings.Contains(string(b), dir) {
 		t.Fatalf("path leaked: %s", b)
 	}
-	if st, err := os.Stat(dst); err != nil || st.Mode().Perm()&0077 != 0 {
+	if st, err := os.Stat(dst); err != nil || runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0 {
 		t.Fatalf("incident permissions=%v err=%v", st.Mode(), err)
+	}
+}
+
+func TestRunSessionDiagInventoryJSONAndHumanRender(t *testing.T) {
+	now := time.Date(2026, 8, 11, 18, 30, 0, 0, time.UTC)
+	threadID := "91000001-0000-4000-8000-000000000001"
+	inventoryQuery := func(string, time.Duration, time.Time) (sessiondiag.InventoryInput, error) {
+		return sessiondiag.InventoryInput{
+			Threads: []sessiondiag.ThreadEvidence{{
+				ThreadID: threadID, Source: "cli", ThreadSource: "user",
+				CreatedAt: now.Add(-time.Minute).Add(100 * time.Millisecond), UpdatedAt: now.Add(-time.Second),
+			}},
+			Turns:         []sessiondiag.TurnEvidence{{ThreadID: threadID, TurnID: "92000001-0000-4000-8000-000000000001", Status: "inProgress", StartedAt: now.Add(-time.Minute), RolloutOrdinal: 1}},
+			WriterLocks:   []sessiondiag.WriterLockEvidence{{ThreadID: threadID, ModifiedAt: now.Add(-time.Second)}},
+			GuardReceipts: []sessiondiag.GuardReceiptEvidence{{ThreadID: threadID, RecordedAt: now.Add(-50 * time.Second)}},
+			Processes: []sessiondiag.ProcessEvidence{
+				{PID: 1, Name: "fak.exe", CommandLine: "fak guard codex", StartedAt: now.Add(-62 * time.Second)},
+				{PID: 2, ParentPID: 1, Name: "node.exe", CommandLine: "node codex.js", StartedAt: now.Add(-61 * time.Second)},
+				{PID: 3, ParentPID: 2, Name: "codex.exe", CommandLine: "codex -c model_provider=fak", StartedAt: now.Add(-time.Minute)},
+			},
+		}, nil
+	}
+	pressureQuery := func(string, time.Duration) (sessiondiag.Evidence, error) {
+		return sessiondiag.Evidence{}, errors.New("pressure query must not run in inventory mode")
+	}
+
+	var jsonOut, jsonErr bytes.Buffer
+	code := runSessionDiagWith(&jsonOut, &jsonErr, []string{"--inventory", "--json"}, pressureQuery, inventoryQuery, func() time.Time { return now })
+	if code != 0 || jsonErr.Len() != 0 {
+		t.Fatalf("json code=%d err=%s", code, jsonErr.String())
+	}
+	var report sessiondiag.InventoryReport
+	if err := json.Unmarshal(jsonOut.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Schema != sessiondiag.InventorySchema || report.Counts.Active != 1 ||
+		report.Sessions[0].Kind != sessiondiag.KindGuardedTUI {
+		t.Fatalf("inventory=%s", jsonOut.String())
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	code = runSessionDiagWith(&humanOut, &humanErr, []string{"--inventory"}, pressureQuery, inventoryQuery, func() time.Time { return now })
+	if code != 0 || humanErr.Len() != 0 {
+		t.Fatalf("human code=%d err=%s", code, humanErr.String())
+	}
+	for _, want := range []string{"CODEX SESSION INVENTORY", "active=1", "fak_guarded_tui", "launch receipts", "none is treated as liveness"} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("human render missing %q:\n%s", want, humanOut.String())
+		}
 	}
 }

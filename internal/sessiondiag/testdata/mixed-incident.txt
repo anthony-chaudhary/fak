@@ -1,0 +1,20 @@
+CODEX SESSION INVENTORY observed=2026-08-11T18:30:00Z active=5 total=12 process_trees=8 spawn_edges=2
+health: ACTIVE=5 COMPLETED=1 FAILED_BUT_LOCKED=3 RECEIPT_ONLY=1 STALE_LOCK=2
+kinds:  fak_guarded_tui=3 headless_exec_worker=3 interactive_tui=1 resume_wrapper=3 spawned_subagent=1 unknown=1
+HEALTH             KIND                  THREAD          TURN                      LOCK  RECEIPT  PROCS  REASONS
+ACTIVE             fak_guarded_tui       10000001..0001  inProgress                20s   launch   1      PROCESS_THREAD_START_TIME_MATCH,TURN_IN_PROGRESS_WITH_PROCESS
+ACTIVE             fak_guarded_tui       10000002..0002  completed                 20s   launch   1      INTERACTIVE_PROCESS_WAITING_AFTER_COMPLETED_TURN,PROCESS_THREAD_START_TIME_MATCH
+ACTIVE             fak_guarded_tui       10000003..0003  completed                 20s   launch   1      INTERACTIVE_PROCESS_WAITING_AFTER_COMPLETED_TURN,PROCESS_THREAD_START_TIME_MATCH
+ACTIVE             headless_exec_worker  20000001..0001  -                         15s   -        1      PROCESS_THREAD_START_TIME_MATCH,RECENT_THREAD_UPDATE_WITH_PROCESS_AND_LOCK
+ACTIVE             headless_exec_worker  20000002..0002  -                         15s   -        1      PROCESS_COMMAND_LINE_UNAVAILABLE,PROCESS_THREAD_START_TIME_MATCH,RECENT_THREAD_UPDATE_WITH_PROCESS_AND_LOCK
+FAILED_BUT_LOCKED  resume_wrapper        30000001..0001  failed:invalid_id_prefix  17m   launch   1      FAILED_TURN_WITH_LIVE_PROCESS_TREE,FAILED_TURN_WITH_WRITER_LOCK,PROCESS_THREAD_EXPLICIT_COMMAND_HINT
+FAILED_BUT_LOCKED  resume_wrapper        30000002..0002  failed:invalid_id_prefix  17m   launch   1      FAILED_TURN_WITH_LIVE_PROCESS_TREE,FAILED_TURN_WITH_WRITER_LOCK,PROCESS_THREAD_EXPLICIT_COMMAND_HINT
+FAILED_BUT_LOCKED  resume_wrapper        30000003..0003  failed:invalid_id_prefix  17m   launch   1      FAILED_TURN_WITH_LIVE_PROCESS_TREE,FAILED_TURN_WITH_WRITER_LOCK,PROCESS_THREAD_EXPLICIT_COMMAND_HINT
+STALE_LOCK         interactive_tui       60000001..0001  completed                 1h    -        0      TERMINAL_TURN_WITH_WRITER_LOCK
+STALE_LOCK         unknown               60000002..0002  -                         2h    -        0      WRITER_LOCK_OLDER_THAN_STALE_THRESHOLD,WRITER_LOCK_WITHOUT_PROCESS_TREE
+RECEIPT_ONLY       headless_exec_worker  70000001..0001  -                         -     launch   0      LAUNCH_RECEIPT_WITHOUT_PROCESS_OR_LOCK
+spawn edges:
+PARENT          CHILD           STATUS  PARENT_STATE  CHILD_STATE
+10000001..0001  80000001..0001  closed  active        completed
+90000001..0001  90000002..0002  open    unknown       unknown
+note: guard receipts are launch receipts; writer locks and OS processes are presence signals; none is treated as liveness by itself
