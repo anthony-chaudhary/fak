@@ -109,3 +109,31 @@ fak disambiguation query kernel --scope-kind package --scope-value internal/disa
 ```
 
 The index remains a single public-source writer. Scope does not broaden source admission or permit private repository, host, credential, or local-path material.
+
+
+## Freshness verdict contract
+
+Agents and JSON consumers get exactly four freshness states. Every state has one
+stable reason code; do not infer freshness from timestamps or probe transport
+success alone.
+
+| Verdict | Stable `reason_code` | Meaning |
+|---|---|---|
+| `fresh` | `SOURCE_CURRENT` | The public probe was available and returned valid, current evidence. |
+| `stale` | `SOURCE_OUTDATED` | The public probe was available and returned valid evidence that is not current. |
+| `unknown` | `PROBE_UNAVAILABLE` | The probe could not supply evidence. Unavailability never degrades to `fresh`. |
+| `invalid` | `EVIDENCE_MALFORMED` | Probe metadata or returned evidence was malformed. Malformed evidence is never classified as merely `stale`. |
+
+`EvaluateFreshness` is the single read-only classifier. Its inputs are public
+probe observations; it performs no I/O, reads no private source, and does not
+write or regenerate the index. Existing schema, query, alias, contrast, scope,
+and ownership behavior is unchanged. A `Freshness` value is valid only when its
+verdict and reason-code pair match this table and `checked_at` is canonical
+RFC3339.
+
+Run the package witness with `go test ./internal/disambiguation` and the public
+CLI JSON witness with:
+
+```text
+fak disambiguation freshness --self-test --json
+```

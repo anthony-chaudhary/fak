@@ -10,9 +10,10 @@ import (
 // SelfTestReport is the stable, machine-readable result of exercising the v1
 // contract without filesystem, network, or private-source dependencies.
 type SelfTestReport struct {
-	Schema            string   `json:"schema"`
-	CompleteAccepted  bool     `json:"complete_accepted"`
-	OmissionsRejected []string `json:"omissions_rejected"`
+	Schema            string                   `json:"schema"`
+	CompleteAccepted  bool                     `json:"complete_accepted"`
+	OmissionsRejected []string                 `json:"omissions_rejected"`
+	Freshness         FreshnessSelfCheckReport `json:"freshness"`
 }
 
 // SelfTest is the compact compatibility seam used by package tests and callers.
@@ -31,7 +32,10 @@ func RunSelfTest() (SelfTestReport, error) {
 	if err != nil {
 		return SelfTestReport{}, fmt.Errorf("encode complete record: %w", err)
 	}
-	report := SelfTestReport{Schema: EntrySchemaVersion}
+	report := SelfTestReport{Schema: EntrySchemaVersion, Freshness: FreshnessSelfCheck()}
+	if !report.Freshness.Passed {
+		return report, fmt.Errorf("freshness four-state self-test failed")
+	}
 	if _, err := ParseEntry(completeJSON); err != nil {
 		return report, fmt.Errorf("complete record rejected: %w", err)
 	}

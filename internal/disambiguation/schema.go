@@ -1,18 +1,25 @@
 package disambiguation
 
+// FreshnessReasonDescriptor binds a public verdict to its stable reason code.
+type FreshnessReasonDescriptor struct {
+	Verdict    FreshnessVerdict `json:"verdict"`
+	ReasonCode string           `json:"reason_code"`
+}
+
 // SchemaDescriptor is the public, machine-readable summary of the pinned wire
 // contract. Required uses JSON paths so callers can display or audit the
 // contract without duplicating the Go validator.
 type SchemaDescriptor struct {
-	Schema            string   `json:"schema"`
-	Compatibility     string   `json:"compatibility"`
-	UnknownFields     string   `json:"unknown_fields"`
-	TrailingValues    string   `json:"trailing_values"`
-	Aliases           string   `json:"aliases"`
-	Required          []string `json:"required"`
-	FreshnessVerdicts []string `json:"freshness_verdicts"`
-	LifecycleClasses  []string `json:"lifecycle_classes"`
-	Rollouts          []string `json:"rollouts"`
+	Schema            string                      `json:"schema"`
+	Compatibility     string                      `json:"compatibility"`
+	UnknownFields     string                      `json:"unknown_fields"`
+	TrailingValues    string                      `json:"trailing_values"`
+	Aliases           string                      `json:"aliases"`
+	Required          []string                    `json:"required"`
+	FreshnessVerdicts []string                    `json:"freshness_verdicts"`
+	FreshnessReasons  []FreshnessReasonDescriptor `json:"freshness_reasons"`
+	LifecycleClasses  []string                    `json:"lifecycle_classes"`
+	Rollouts          []string                    `json:"rollouts"`
 }
 
 // Descriptor returns the deterministic v1 contract description.
@@ -33,7 +40,13 @@ func Descriptor() SchemaDescriptor {
 			"lifecycle", "lifecycle.class", "lifecycle.rollout",
 		},
 		FreshnessVerdicts: []string{string(FreshnessFresh), string(FreshnessStale), string(FreshnessUnknown), string(FreshnessInvalid)},
-		LifecycleClasses:  []string{string(LifecycleCurrent), string(LifecycleVersioned), string(LifecycleResearch), string(LifecycleArchived)},
-		Rollouts:          []string{string(RolloutOff), string(RolloutShadow), string(RolloutOn)},
+		FreshnessReasons: []FreshnessReasonDescriptor{
+			{Verdict: FreshnessFresh, ReasonCode: FreshnessReasonSourceCurrent},
+			{Verdict: FreshnessStale, ReasonCode: FreshnessReasonSourceOutdated},
+			{Verdict: FreshnessUnknown, ReasonCode: FreshnessReasonProbeUnavailable},
+			{Verdict: FreshnessInvalid, ReasonCode: FreshnessReasonEvidenceMalformed},
+		},
+		LifecycleClasses: []string{string(LifecycleCurrent), string(LifecycleVersioned), string(LifecycleResearch), string(LifecycleArchived)},
+		Rollouts:         []string{string(RolloutOff), string(RolloutShadow), string(RolloutOn)},
 	}
 }

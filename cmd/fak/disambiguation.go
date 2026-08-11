@@ -28,8 +28,10 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationQuery(stdout, stderr, args[1:])
 	case "ownership":
 		return runDisambiguationOwnership(stdout, stderr, args[1:])
+	case "freshness":
+		return runDisambiguationFreshness(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema or query)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, ownership, or freshness)\n", args[0])
 		return 2
 	}
 }
@@ -162,6 +164,39 @@ func encodeDisambiguationJSON(stdout, stderr io.Writer, value any) int {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(value); err != nil {
 		fmt.Fprintf(stderr, "encode disambiguation JSON: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDisambiguationFreshness(stdout, stderr io.Writer, args []string) int {
+	jsonOutput, selfTest := false, false
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			jsonOutput = true
+		case "--self-test":
+			selfTest = true
+		default:
+			fmt.Fprintf(stderr, "fak disambiguation freshness: unknown option %q\n", arg)
+			return 2
+		}
+	}
+	if !selfTest {
+		fmt.Fprintln(stderr, "usage: fak disambiguation freshness --self-test [--json]")
+		return 2
+	}
+	report := disambiguation.FreshnessSelfCheck()
+	if jsonOutput {
+		if code := encodeDisambiguationJSON(stdout, stderr, report); code != 0 {
+			return code
+		}
+	} else {
+		for _, row := range report.Cases {
+			fmt.Fprintf(stdout, "%s\t%s\t%t\n", row.Verdict, row.ReasonCode, row.Passed)
+		}
+	}
+	if !report.Passed {
 		return 1
 	}
 	return 0

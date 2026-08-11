@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 )
 
 // EntrySchemaVersion is the only entry schema this package understands.
@@ -213,21 +212,7 @@ func (e Entry) Validate() error {
 			return err
 		}
 	}
-	switch e.Freshness.Verdict {
-	case FreshnessFresh, FreshnessStale, FreshnessUnknown, FreshnessInvalid:
-	default:
-		return fmt.Errorf("freshness.verdict %q is not one of fresh, stale, unknown, invalid", e.Freshness.Verdict)
-	}
-	if err := requireText("freshness.reason_code", e.Freshness.ReasonCode); err != nil {
-		return err
-	}
-	if err := requireText("freshness.checked_at", e.Freshness.CheckedAt); err != nil {
-		return err
-	}
-	if _, err := time.Parse(time.RFC3339, e.Freshness.CheckedAt); err != nil {
-		return fmt.Errorf("freshness.checked_at must be RFC3339: %w", err)
-	}
-	if err := requireText("freshness.probe", e.Freshness.Probe); err != nil {
+	if err := validateFreshness(e.Freshness); err != nil {
 		return err
 	}
 	switch e.Lifecycle.Class {

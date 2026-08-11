@@ -230,3 +230,32 @@ func TestRunDisambiguationQueryOverloadRequiresScope(t *testing.T) {
 		t.Fatalf("scope = %#v, want %#v", response.Entry.Scope, want)
 	}
 }
+
+func TestDisambiguationFreshnessSelfCheckJSON(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	if code := runDisambiguation(&stdout, &stderr, []string{"freshness", "--self-test", "--json"}); code != 0 {
+		t.Fatalf("runDisambiguation freshness code=%d stderr=%s", code, stderr.String())
+	}
+	var report disambiguation.FreshnessSelfCheckReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode freshness report: %v\n%s", err, stdout.String())
+	}
+	if !report.Passed || len(report.Cases) != 4 {
+		t.Fatalf("freshness report = %+v", report)
+	}
+	want := []struct {
+		verdict disambiguation.FreshnessVerdict
+		reason  string
+	}{
+		{disambiguation.FreshnessFresh, disambiguation.FreshnessReasonSourceCurrent},
+		{disambiguation.FreshnessStale, disambiguation.FreshnessReasonSourceOutdated},
+		{disambiguation.FreshnessUnknown, disambiguation.FreshnessReasonProbeUnavailable},
+		{disambiguation.FreshnessInvalid, disambiguation.FreshnessReasonEvidenceMalformed},
+	}
+	for i := range want {
+		if got := report.Cases[i]; got.Verdict != want[i].verdict || got.ReasonCode != want[i].reason || !got.Passed {
+			t.Fatalf("case %d = %+v, want %s/%s passed", i, got, want[i].verdict, want[i].reason)
+		}
+	}
+}

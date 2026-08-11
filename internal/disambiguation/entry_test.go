@@ -152,14 +152,15 @@ func TestFreshnessVerdictVocabulary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, verdict := range []FreshnessVerdict{
-		FreshnessFresh,
-		FreshnessStale,
-		FreshnessUnknown,
-		FreshnessInvalid,
+	for verdict, reason := range map[FreshnessVerdict]string{
+		FreshnessFresh:   FreshnessReasonSourceCurrent,
+		FreshnessStale:   FreshnessReasonSourceOutdated,
+		FreshnessUnknown: FreshnessReasonProbeUnavailable,
+		FreshnessInvalid: FreshnessReasonEvidenceMalformed,
 	} {
 		entry := base
 		entry.Freshness.Verdict = verdict
+		entry.Freshness.ReasonCode = reason
 		if err := entry.Validate(); err != nil {
 			t.Fatalf("verdict %q rejected: %v", verdict, err)
 		}
