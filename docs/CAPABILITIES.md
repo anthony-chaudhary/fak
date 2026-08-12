@@ -6,9 +6,13 @@ control long-running sessions without injecting another conversational turn. The
 floor remains shipped and indexed, but it is a supporting property of the same tool-call
 boundary rather than the lead story here.
 
-This page is the short, outcome-first index. For the complete research and design inventory,
-use the [innovations index](INNOVATIONS-INDEX.md); for the full documentation catalog, use
-[docs/INDEX.md](INDEX.md).
+This page is the short, outcome-first index. It is also queryable: from a source checkout,
+`fak-dev capabilities "token savings"` or `fak-dev capabilities "turn control"` returns
+machine-readable capability cards with an exact next command and evidence seam. For the
+complete research and design inventory, use the [innovations index](INNOVATIONS-INDEX.md);
+for the full documentation catalog, use [docs/index.md](index.md).
+
+<a id="turn-savings"></a>
 
 ## Start with the largest avoidable cost: extra turns
 
@@ -20,6 +24,8 @@ removes **turn tax**, not only individual token strings.
 |---|---|---|
 | Turn-tax meter | Attributes avoidable round trips to forced policy retry, deterministic tool work, duplicate/replay work, and other turn kinds. | `go run ./cmd/turntaxdemo -selfcheck`; [turn-tax measurement](../internal/turntaxmeter/) |
 | Fused deterministic work | Completes kernel-known work at the tool boundary instead of paying for another model turn. | [fused-turn architecture](../internal/fusedturn/) |
+<a id="session-control"></a>
+
 | Live turn control | Budgets turns/tokens/context and pauses, resumes, throttles, steers, or stops a served session out of band—without spending a prompt turn to ask the model to control itself. | `fak help session`; [operator control plane](operator-control-plane.md) |
 | Same-trace ablation | Replays one frozen trace with cache levers on/off so savings are attributable rather than anecdotal. | `fak help ablate`; `fak ablate --help` |
 
@@ -28,6 +34,8 @@ The browserless turn-tax demo is the smallest captured spine: its self-check dri
 saved turns. The shipped fixture currently witnesses **9 avoided turns** (5 forced-turn + 4
 elision) in its synthetic airline scenario; that is a reproducible fixture result, not a
 universal workload claim.
+
+<a id="context-reuse"></a>
 
 ## Reuse prompt work instead of repaying for it
 
@@ -39,13 +47,19 @@ universal workload claim.
 | Portable session state | Makes a long-running session inspectable and recoverable rather than forcing a restart from raw transcript. | [session image](notes/PORTABLE-SESSION-IMAGE-AND-SNAPSHOT-2026-06-24.md); `fak help resume` |
 | Cache-value accounting | Reports reused tokens, effective cost, and attributable savings in operator terms. | `fak info --once`; [cache-value rollup](cache-value-rollup.md) |
 
+<a id="model-routing"></a>
+
 ## Spend expensive inference only where it helps
 
 | Capability | What it changes | Try or inspect it |
 |---|---|---|
 | Per-call model routing | Routes calls by task/turn requirements rather than pinning a whole session to one expensive model. | [model routing](model-routing.md); `fak model --help` |
 | Model ladder and acceptance | Separates candidate selection from measured acceptance so a cheaper route is not called a win merely because it is cheaper. | [model operations](model-production-readiness-inventory.md) |
+<a id="savings-observability"></a>
+
 | Token/cache observability | Makes savings visible during operation rather than leaving optimization buried in internal counters. | `fak info --once`; `fak ps`; `fak help ablate` |
+
+<a id="capability-floor"></a>
 
 ## Supporting floor: keep optimization bounded
 

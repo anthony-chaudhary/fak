@@ -110,7 +110,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")
-	fmt.Fprintln(w, "  capabilities [intent] [flags]         list the repository-development toolbelt")
+	fmt.Fprintln(w, "  capabilities [intent] [flags]         query product + repository capabilities by outcome")
 	fmt.Fprintln(w, "  issue <subcommand> [flags]             manage repository issue contracts and filing")
 	fmt.Fprintln(w, "  issue-contract-repair [flags]          repair issue candidates into contract shape")
 	fmt.Fprintln(w, "  project completion [flags]             audit project completion from issue evidence")
