@@ -38,6 +38,10 @@ import (
 )
 
 func cmdGuard(argv []string) {
+	cmdManageCommand("guard", argv)
+}
+
+func cmdManageCommand(commandName string, argv []string) {
 	guardUsageStart = time.Now()
 	guardUsageOnce = new(sync.Once)
 	// `fak guard allow …` is the OPERATOR control surface for the always-allow overlay
@@ -117,7 +121,7 @@ func cmdGuard(argv []string) {
 	var guardCoreLock bool
 	guardCoreLock, argv = guardLaunchCoreLockAll(argv)
 	setGuardCoreLockAll(guardCoreLock)
-	fs := flag.NewFlagSet("guard", flag.ExitOnError)
+	fs := flag.NewFlagSet(commandName, flag.ExitOnError)
 	rotateMode := fs.String("rotate", "", "account rotation: auto|off|<seat> (default auto headless, off interactive)")
 	verbFlagUsage(fs, "guard")
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
@@ -206,7 +210,7 @@ func cmdGuard(argv []string) {
 	fleetBusID := fs.String("fleet-bus-id", "", "with --fleet-bus: this instance's stable bus identity (default: guard-<host>-<pid>). Pass a name to keep one identity across restarts — the id is what the exactly-once apply claim is keyed on, so two live processes sharing one id deliberately share one claim (only one of them applies a given directive).")
 	fleetBusInterval := fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live guard flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	guardHelpAll := guardArgvHasAll(argv)
-	fs.Usage = func() { printGuardUsage(os.Stderr, fs, guardHelpAll) }
+	fs.Usage = func() { printGuardUsage(os.Stderr, fs, commandName, guardHelpAll) }
 	_ = fs.Parse(argv)
 	rotateSet := false
 	fs.Visit(func(f *flag.Flag) {

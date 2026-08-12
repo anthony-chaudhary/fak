@@ -563,6 +563,11 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  [{lane,lane_kind,tree}] so an arbiter on another box SEES the lease;
                  'reap' deletes the expired (reapable) records. VISIBILITY, not atomic
                  acquisition  -  see docs/cli-reference.md)
+  fak manage    [flags] [--] <agent command...>
+                aliases: m (preferred short form), guard (deprecated compatibility name)
+                (primary managed-agent surface: fak m codex or fak manage claude;
+                 includes every historical guard flag and operator subcommand.)
+
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL | --remote-serve HOST[:PORT]|@lab/glm-5.2] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]

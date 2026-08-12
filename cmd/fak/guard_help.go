@@ -237,18 +237,15 @@ func guardFlagCount(fs *flag.FlagSet) int {
 // printGuardUsage prints `fak guard`'s usage: the fixed synopsis/examples,
 // then either the curated common-flag overview or, with all=true (`fak
 // guard -h -all`), the full flag reference grouped into labeled sections.
-func printGuardUsage(w io.Writer, fs *flag.FlagSet, all bool) {
-	fmt.Fprintln(w, "usage: fak guard [flags] -- <agent command...>")
-	fmt.Fprintln(w, "  e.g. fak guard -- claude")
-	fmt.Fprintln(w, "       fak guard --provider openai -- codex")
-	fmt.Fprintln(w, "       fak guard --policy my-floor.json -- claude")
-	// The operator SUBCOMMANDS (not flags), on one shared synopsis line: `allow`
-	// always-allows a tool the floor DEFAULT_DENY'd, out-of-band from the wrapped
-	// agent, and `policy explain|diff` reports the floor's amendment model and its
-	// widen-drift from the shipped floor (both read-only). One line — not one per
-	// verb — is what keeps `fak guard -h` under its screen budget as the subcommand
-	// surface grows; `-h` on each subcommand has the rest.
-	fmt.Fprintln(w, "       fak guard allow <tool> | policy explain|diff   # operator subcommands, out-of-band (-h on each)")
+func printGuardUsage(w io.Writer, fs *flag.FlagSet, commandName string, all bool) {
+	fmt.Fprintf(w, "usage: fak %s [flags] [--] <agent command...>\n", commandName)
+	if commandName == "guard" {
+		fmt.Fprintln(w, "  deprecated: use fak manage (or fak m); guard remains a compatibility alias during sunset")
+	}
+	fmt.Fprintf(w, "  e.g. fak %s claude\n", commandName)
+	fmt.Fprintf(w, "       fak %s --provider openai -- codex\n", commandName)
+	fmt.Fprintf(w, "       fak %s --policy my-floor.json -- claude\n", commandName)
+	fmt.Fprintf(w, "       fak %s allow <tool> | policy explain|diff   # operator subcommands, out-of-band (-h on each)\n", commandName)
 	if all {
 		printGuardAllGrouped(w, fs)
 		printGuardLaunchPostures(w)
@@ -259,7 +256,7 @@ func printGuardUsage(w io.Writer, fs *flag.FlagSet, all bool) {
 	for _, f := range guardCommonFlags {
 		fmt.Fprintf(w, "  --%-14s %s\n", f.name, f.blurb)
 	}
-	fmt.Fprintf(w, "\n%d flags in this build. 'fak guard -h -all' lists every one grouped; docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs))
+	fmt.Fprintf(w, "\n%d flags in this build. 'fak %s -h -all' lists every one grouped; docs/fak/api-reference.md has the deep dive.\n", guardFlagCount(fs), commandName)
 }
 
 // guardArgvHasAll reports whether argv requests the FULL flag reference —
