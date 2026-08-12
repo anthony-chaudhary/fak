@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Context as variable vs addressable context](docs/notes/CONTEXT-AS-VARIABLE-RLM-STUDY-2026-08-12.md) -- auto-indexed dated note.
 - [Maintenance-loop tombstones — 2026-08-12](docs/notes/MAINTENANCE-LOOP-TOMBSTONES-2026-08-12.md) -- auto-indexed dated note.
 - [Windows unexpected restart incident — 2026-08-10](docs/notes/INCIDENT-WINDOWS-UNEXPECTED-RESTART-2026-08-10.md) -- auto-indexed dated note.
 - [Windows Terminal pressure relief](docs/notes/WINDOWS-TERMINAL-PRESSURE-RELIEF-2026-08-11.md) -- auto-indexed dated note.
