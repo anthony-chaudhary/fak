@@ -130,6 +130,23 @@ type DeliveryRecord struct {
 	RedactionCount  int
 	Redactions      []string
 	RedactedMessage string
+
+	// adjudicated is the mint mark: an UNEXPORTED field only Adjudicate sets, and the
+	// reason a record is a capability rather than a plain struct. The exported fields
+	// above must stay exported (the witness path reads them), so nothing stops an outside
+	// caller from writing `DeliveryRecord{Allowed: true, RedactedMessage: raw}` — but no
+	// caller outside this package can set THIS field, so a record the floor never
+	// produced stays structurally distinguishable from one it did. EnsureSendable
+	// (adapter.go) is the reader: a false mark is ErrNotAdjudicated, which is how "the
+	// floor ran" became a checkable property of the value instead of a convention the
+	// call site had to remember.
+	//
+	// It is stamped on EVERY record Adjudicate returns — DENY as well as allow — so the
+	// two failures stay distinct at the adapter boundary: a denied record is refused as
+	// ErrDeliveryDenied ("the floor ran and said no") and never mistaken for
+	// ErrNotAdjudicated ("the floor never ran at all"), which is exactly the pair an
+	// operator debugging a silent non-delivery has to tell apart.
+	adjudicated bool
 }
 
 // Witness renders the record as a single stable line for a delivery-witness ledger or
@@ -163,6 +180,10 @@ func (r DeliveryRecord) Witness() string {
 // witness, and an allowed delivery's secret never leaves under an allowed destination),
 // then applies the allowlist to set the verdict. It is pure: same policy + delivery ->
 // same record, no I/O, no clock.
+//
+// It is also the ONLY producer of a sendable record: the returned value carries the
+// unexported adjudicated mark, which is what lets an adapter (adapter.go) refuse a record
+// that reached it without passing through the floor.
 func (p DeliveryPolicy) Adjudicate(d Delivery) DeliveryRecord {
 	redacted, count, classes := redactSecrets(d.Message)
 	rec := DeliveryRecord{
@@ -171,6 +192,7 @@ func (p DeliveryPolicy) Adjudicate(d Delivery) DeliveryRecord {
 		RedactionCount:  count,
 		Redactions:      classes,
 		RedactedMessage: redacted,
+		adjudicated:     true,
 	}
 	if p.permits(d.Platform, d.Destination) {
 		rec.Allowed = true

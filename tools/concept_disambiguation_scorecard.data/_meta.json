@@ -3225,6 +3225,11 @@
           "category": "incidental",
           "reason": "Lifecycle-adapter wire payload local to process-forest negotiation, not a general policy capability type.",
           "token": "CapabilityDocument"
+        },
+        {
+          "category": "incidental",
+          "reason": "Sentinel error value, not a distinct governed concept: it is the refusal returned by egressfloor.EnsureSendable for a DeliveryRecord that did not come from the already-positioned DeliveryPolicy.Adjudicate, so it names that existing concept's negative case rather than introducing a new one.",
+          "token": "ErrNotAdjudicated"
         }
       ],
       "exclude": [
@@ -3242,6 +3247,7 @@
         "ConfigPostures",
         "DispositionCapability",
         "DispositionMultiCapability",
+        "ErrNotAdjudicated",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "HeldSchedulePolicy",
@@ -5001,6 +5007,11 @@
           "category": "incidental",
           "reason": "Issue 6260 measurement field, not a reusable planning concept.",
           "token": "BaselineDecodeMicroseconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "local struct in cmd/fak/resume_dedup.go carrying one crashed-duplicate row (session, work-key, live owner, settled) for the #3146 tombstone plan; not a fleet-wide plan concept",
+          "token": "dedupCandidate"
         }
       ],
       "exclude": [
@@ -5049,6 +5060,7 @@
         "candidate_requires_auth_relevance",
         "candidatemean",
         "candidates",
+        "dedupCandidate",
         "fitandplanserveggufexpertparallelpathondevice",
         "foldCandidate",
         "hostPlan",
