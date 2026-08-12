@@ -658,12 +658,18 @@ func rwRecordResumeProgress(ledgerPath, mode, sid string, progress rwResumeProgr
 	resumemetrics.ProgressWitnessed()
 }
 
+// rwSoftWatchdog is the tick-spanning soft-watchdog episode tracker (#5287). It is
+// process-wide so a session that stays wedged across many ticks is dumped ONCE per
+// stall episode rather than once per tick, and re-arms the moment its curve moves
+// again or it dies into the hard revive path.
+var rwSoftWatchdog = resume.NewSoftWatchdog(0)
+
 func rwApplyTrajectoryWatchdog(p resume.WatchdogPlanRow, hist []resume.Attempt, scan *rwProcScan, traceByUUID map[string]string, ledgerPath string, live bool) (bool, resume.TrajectoryWatchdogDecision) {
 	anchor := rwResumeAnchor(p.Session)
 	if !anchor.Present || anchor.Curve == nil {
 		return false, resume.TrajectoryWatchdogDecision{}
 	}
-	alive, known := scan.sessionLive(p.Session)
+	cmdline, alive, known := scan.sessionProcess(p.Session)
 	if !known {
 		return false, resume.TrajectoryWatchdogDecision{}
 	}
@@ -672,6 +678,18 @@ func rwApplyTrajectoryWatchdog(p resume.WatchdogPlanRow, hist []resume.Attempt, 
 		if strings.EqualFold(strings.TrimSpace(a.Action), "trajectory_nudge") {
 			nudged = true
 		}
+	}
+	// #5287 soft watchdog (sglang's soft/hard split, clean-room): BEFORE the
+	// intervention core decides anything, capture the alive-but-stalled session's
+	// diagnostic state into the SAME durable session record the decision itself
+	// lands in, so the wedge stays debuggable after the nudge/revive has moved it.
+	// Strictly observe-only: the decision below is byte-identical with or without
+	// this block, the capture is gated behind the soft grace timeout, and a dead
+	// session is left entirely to the hard path.
+	if dump, captured := rwSoftWatchdog.Observe(resume.SoftObservationFromCurve(p.Session, alive, anchor.Curve, cmdline, time.Now().UTC())); captured {
+		row := resume.NewSoftDumpRow(dump, traceByUUID[p.Session])
+		row.TS = rwNowISO()
+		rwAppendLedger(ledgerPath, row)
 	}
 	decision := resume.DecideTrajectoryWatchdog(resume.TrajectoryWatchdogInput{Alive: alive, Signal: anchor.Curve.Signal, NudgeAttempted: nudged})
 	if decision.Action == resume.TrajectoryReviveAnchor {
@@ -743,16 +761,25 @@ type rwProcScan struct {
 // sessionLive reports whether any live process's command line names sid (the
 // `claude --resume <sid>` child), and whether the scan itself succeeded.
 func (s *rwProcScan) sessionLive(sid string) (live, ok bool) {
+	_, live, ok = s.sessionProcess(sid)
+	return live, ok
+}
+
+// sessionProcess is sessionLive plus the matched command line — the only worker-side
+// state the tick's existing snapshot can show, and what the soft watchdog's diagnostic
+// dump records as the stalled session's pending action (#5287). It costs nothing extra:
+// the same lazily-taken scan answers both.
+func (s *rwProcScan) sessionProcess(sid string) (cmdline string, live, ok bool) {
 	s.once.Do(func() { s.cmdlines, s.ok = rwCollectProcCmdlines() })
 	if !s.ok || sid == "" {
-		return false, s.ok
+		return "", false, s.ok
 	}
 	for _, c := range s.cmdlines {
 		if strings.Contains(c, sid) {
-			return true, true
+			return c, true, true
 		}
 	}
-	return false, true
+	return "", false, true
 }
 
 // rwReDeathEvidence gathers the stale-latch facts (#2368) for one planned session:

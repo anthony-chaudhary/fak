@@ -1986,6 +1986,11 @@
           "category": "incidental",
           "reason": "file-local reader in cmd/fak/resume_dedup.go mirroring fleet_resume_watchdog.resume_blocked's operator-settled trim; an implementation helper, not a session-runtime concept",
           "token": "ledgerSettledSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported method on the resume watchdog's per-tick process-table snapshot; returns the matched command line alongside the existing liveness bool, not a new session-runtime concept",
+          "token": "sessionProcess"
         }
       ],
       "id": "session-runtime",
@@ -2073,6 +2078,7 @@
         "serveSessionRegistryScopeLabel",
         "sessionAffinity",
         "sessionNameForBatch",
+        "sessionProcess",
         "sessionRegistryRecoveryStage",
         "session_compaction_thrash",
         "session_registry_recovery",

@@ -66,7 +66,11 @@ type SoftStateDump struct {
 // stalled, and whose stall has outlived the grace window (grace <= 0 selects
 // DefaultSoftStallGrace). Healthy, slow, or drifting sessions capture nothing;
 // a dead session captures nothing because the hard revive path owns it and a
-// dump would race the relaunch instead of explaining a live wedge.
+// dump would race the relaunch instead of explaining a live wedge. A stall
+// carrying no witnessed progress timestamp (zero LastProgressAt) captures
+// nothing either: the soft timeout is the gate, and an unknown stall clock
+// cannot be proven to have elapsed — treating it as infinitely old would dump
+// on every never-scored session and make the diagnostic worthless.
 func DecideSoftStateDump(in SoftWatchdogObservation, grace time.Duration) (SoftStateDump, bool) {
 	if grace <= 0 {
 		grace = DefaultSoftStallGrace
@@ -75,6 +79,9 @@ func DecideSoftStateDump(in SoftWatchdogObservation, grace time.Duration) (SoftS
 		return SoftStateDump{}, false
 	}
 	if in.Signal != trajctl.SignalStall {
+		return SoftStateDump{}, false
+	}
+	if in.LastProgressAt.IsZero() {
 		return SoftStateDump{}, false
 	}
 	elapsed := in.Now.Sub(in.LastProgressAt)
