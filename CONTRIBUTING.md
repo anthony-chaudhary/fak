@@ -83,11 +83,14 @@ not a code failure. Run the tests under WSL if you need them; see the Windows no
 
 ## Connect the change to an operator problem
 
-Before choosing an implementation route, map new work to the canonical
-[problems fak exists to solve](docs/problems-we-solve.md). Name one primary ID (`P1`
-context, `P2` net-true efficiency, `P3` fast adaptation, or `P4` integrated operations)
-and fill **For / Problem / Today / Better because / Witness**. This keeps a leaf, issue, or
-plan anchored to removed operator burden rather than architecture for its own sake. Product
+Before choosing an implementation route, use the canonical
+[problems fak exists to solve](docs/problems-we-solve.md) in its two distinct roles. Classify
+the work's **problem centrality** (`Core`, `Enabling`, `Stewardship`, or `Peripheral`) to
+show how directly it advances fak's connected user problems, then run **all four** P1-P4
+checks—managed context, net-true efficiency, bounded adaptation, and integrated operations.
+Do not pick one P-number as a priority label. Fill **For / Problem / Today / Better because /
+Witness** as well. This keeps a leaf, issue, or plan anchored to removed operator burden
+while infusing the product values through design, implementation, proof, and review. Product
 direction is not shipped evidence: use [`CLAIMS.md`](CLAIMS.md) and the relevant captured
 witness for completion claims.
 
