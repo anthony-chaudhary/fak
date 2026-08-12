@@ -1,7 +1,10 @@
 package main
 
 import (
+	"image"
 	"image/color"
+	"image/draw"
+	"image/png"
 	"math"
 	"os"
 	"path/filepath"
@@ -264,5 +267,71 @@ func TestRenderGIFCreatesAProjectOutputDirectory(t *testing.T) {
 		t.Fatalf("rendered GIF: %v", err)
 	} else if st.Size() == 0 {
 		t.Fatal("rendered GIF is empty")
+	}
+}
+
+func TestDrawVisualLetterboxesProducedImage(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 40; x++ {
+			src.Set(x, y, color.RGBA{R: 240, G: 80, B: 40, A: 255})
+		}
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.Black), image.Point{}, draw.Src)
+	drawVisual(dst, src)
+	if got := dst.RGBAAt(50, 50); got.R < 200 {
+		t.Fatalf("center was not filled from visual: %#v", got)
+	}
+	if got := dst.RGBAAt(50, 10); got != (color.RGBA{A: 255}) {
+		t.Fatalf("letterbox changed: %#v", got)
+	}
+}
+
+func TestRunSegmentsIncludesImageSceneInTimeline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "visual.png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 32, 18))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{Cols: 20, Rows: 8, Pad: 2, Segments: []segment{{Image: path, ImageSecs: 2.25, Chapter: "VISUAL"}}}
+	tm := newTerm(cfg.Cols, cfg.Rows, inconsolata.Regular8x16)
+	tl := newTimeline()
+	runSegments(cfg, tm, tl, func(float64) {})
+	if tm.visual == nil {
+		t.Fatal("image scene did not reach renderer")
+	}
+	if len(tl.Segments) != 1 || tl.Segments[0].Kind != "image" {
+		t.Fatalf("timeline = %#v", tl.Segments)
+	}
+	if tl.Now != 2.25 {
+		t.Fatalf("duration = %v, want 2.25", tl.Now)
+	}
+}
+
+func TestHiresSinkDoesNotCoalesceDifferentVisualScenes(t *testing.T) {
+	dir := t.TempDir()
+	sink, err := newHiresSink(dir, 10, 5, 2, 8, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := newTerm(10, 5, inconsolata.Regular8x16)
+	tm.visual = image.NewRGBA(image.Rect(0, 0, 2, 2))
+	if err := sink.emit(tm, 1); err != nil {
+		t.Fatal(err)
+	}
+	tm.visual = image.NewRGBA(image.Rect(0, 0, 2, 2))
+	if err := sink.emit(tm, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.names) != 2 {
+		t.Fatalf("distinct visual scenes collapsed to %d frame", len(sink.names))
 	}
 }

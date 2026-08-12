@@ -19,7 +19,7 @@
     "minConceptHoldSecs": 0.75,
     "minOpeningSecs": 4.0,
     "totalSecsMin": 30.0,
-    "totalSecsMax": 58.0,
+    "totalSecsMax": 75.0,
     "minChapters": 7,
     "mp4ToleranceSecs": 0.5
   },
@@ -37,15 +37,14 @@
       ]
     },
     {
-      "chapter": "THE PERFORMANCE GATE",
-      "cardSecs": 4.2,
-      "card": [
-        "@c DO THE SHARED WORK ONCE",
-        "",
-        "@w Keep the provider prefix warm across a long session.",
-        "",
-        "@d Less repeated setup . fewer provider round trips . more useful context"
-      ]
+      "chapter": "PAY THE PREFIX ONCE",
+      "image": "../../../../visuals/65-pay-the-prefix-once.png",
+      "imageSecs": 5.2
+    },
+    {
+      "chapter": "THE MANAGED SESSION",
+      "image": "../../../../visuals/06-context-mmu.png",
+      "imageSecs": 5.2
     },
     {
       "typescript": "capture.typescript",
@@ -53,15 +52,14 @@
       "clear": true
     },
     {
-      "chapter": "THE SECURITY FLOOR",
-      "cardSecs": 4.2,
-      "card": [
-        "@c DEFAULT DENY RIDES THE SAME SEAM",
-        "",
-        "@w Structure can refuse a dangerous call before any model is consulted.",
-        "",
-        "@d Not a blanket block: useful permitted work still flows."
-      ]
+      "chapter": "THE TWO-GATE PATH",
+      "image": "../../../../visuals/37-permission-two-gate-path.png",
+      "imageSecs": 5.2
+    },
+    {
+      "chapter": "PROOF, NOT PROMISES",
+      "image": "../../../../visuals/fleet-sweep-03-honest-test.png",
+      "imageSecs": 5.2
     },
     {
       "chapter": "ONE KERNEL. LONGER-RUNNING AGENTS.",

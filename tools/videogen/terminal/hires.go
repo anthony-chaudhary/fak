@@ -131,6 +131,7 @@ type hiresSink struct {
 	w, h       int
 	uni        []*image.Uniform
 	prev       []cell
+	prevVisual image.Image
 	names      []string
 	durs       []float64
 }
@@ -162,6 +163,10 @@ func newHiresSink(dir string, cols, rows, pad, cw, ch int) (*hiresSink, error) {
 func (s *hiresSink) render(t *term) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, s.w, s.h))
 	draw.Draw(img, img.Bounds(), s.uni[cBG], image.Point{}, draw.Src)
+	if t.visual != nil {
+		drawVisual(img, t.visual)
+		return img
+	}
 	for y := 0; y < s.rows; y++ {
 		row := t.cells[y*s.cols : (y+1)*s.cols]
 		for x := 0; x < s.cols; x++ {
@@ -193,7 +198,7 @@ func (s *hiresSink) render(t *term) *image.RGBA {
 // terminal state did not change. Comparing cells rather than pixels is both
 // cheaper and exact: the cell grid fully determines the image.
 func (s *hiresSink) emit(t *term, secs float64) error {
-	if s.prev != nil && cellsEqual(s.prev, t.cells) {
+	if s.prev != nil && s.prevVisual == t.visual && cellsEqual(s.prev, t.cells) {
 		s.durs[len(s.durs)-1] += secs
 		return nil
 	}
@@ -210,6 +215,7 @@ func (s *hiresSink) emit(t *term, secs float64) error {
 		return err
 	}
 	s.prev = append(s.prev[:0], t.cells...)
+	s.prevVisual = t.visual
 	s.names = append(s.names, name)
 	s.durs = append(s.durs, secs)
 	return nil

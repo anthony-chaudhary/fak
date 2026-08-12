@@ -10,6 +10,7 @@ nested Go module so fak's zero-dependency root module stays unchanged. The
 pipeline turns a checked-in terminal transcript, timing stream, and chapter
 cards into:
 
+- visual-first scenes composed from the repo's existing produced PNGs;
 - an animated GIF;
 - a chaptered H.264 MP4;
 - a poster PNG, frame playlist, and machine-checkable timeline; and
@@ -52,7 +53,20 @@ run on a sanctioned node, then return only scrubbed public artifacts.
 ## Design and verification
 
 The renderer is intentionally content-agnostic. `render.json` owns the story,
-chapter cards, pacing thresholds, and output paths. The terminal engine owns
+visual sequence, chapter cards, pacing thresholds, and output paths. Prefer an
+existing produced visual over a prose card whenever the idea already has a
+diagram, chart, product capture, or proof artifact. Add it as a config-relative
+image scene:
+
+```json
+{"chapter":"PAY THE PREFIX ONCE", "image":"../../../../visuals/65-pay-the-prefix-once.png", "imageSecs":5.2}
+```
+
+The renderer letterboxes without cropping and uses the same scene and dwell in
+the GIF and MP4. This makes the repeatable process **produce visual once → cite
+it from one or more video manifests → regenerate and verify**, rather than
+redrawing the same concept as video-only text. PNG is the deterministic render
+input; retain the SVG source beside it when one exists. The terminal engine owns
 ANSI parsing, deterministic bitmap rendering, frame pacing, progress bars,
 MP4 chapters, and effect read-back. Tests cover the root facade and nested
 renderer separately:

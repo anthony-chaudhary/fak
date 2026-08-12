@@ -32,6 +32,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/inconsolata"
@@ -231,7 +232,8 @@ type term struct {
 	face       *basicfont.Face
 	esc        []byte // partial escape sequence
 	inEsc      bool
-	pend       []byte // partial UTF-8 sequence
+	pend       []byte      // partial UTF-8 sequence
+	visual     image.Image // optional produced visual replacing the terminal grid
 }
 
 func newTerm(cols, rows int, face *basicfont.Face) *term {
@@ -391,12 +393,31 @@ func newRenderer(cols, rows, pad int) *renderer {
 	return r
 }
 
+func fitRect(canvas, source image.Rectangle) image.Rectangle {
+	if source.Dx() <= 0 || source.Dy() <= 0 {
+		return canvas
+	}
+	scale := math.Min(float64(canvas.Dx())/float64(source.Dx()), float64(canvas.Dy())/float64(source.Dy()))
+	w, h := int(float64(source.Dx())*scale), int(float64(source.Dy())*scale)
+	x, y := canvas.Min.X+(canvas.Dx()-w)/2, canvas.Min.Y+(canvas.Dy()-h)/2
+	return image.Rect(x, y, x+w, y+h)
+}
+
+func drawVisual(dst draw.Image, src image.Image) {
+	r := fitRect(dst.Bounds(), src.Bounds())
+	xdraw.CatmullRom.Scale(dst, r, src, src.Bounds(), draw.Over, nil)
+}
+
 func (r *renderer) draw(t *term, bg uint8) *image.Paletted {
 	img := image.NewPaletted(image.Rect(0, 0, r.w, r.h), pal)
 	if bg != 0 {
 		for i := range img.Pix {
 			img.Pix[i] = bg
 		}
+	}
+	if t.visual != nil {
+		drawVisual(img, t.visual)
+		return img
 	}
 	d := &font.Drawer{Dst: img}
 	for y := 0; y < r.rows; y++ {
@@ -491,6 +512,10 @@ func crop(src *image.Paletted, r image.Rectangle) *image.Paletted {
 // ── config ───────────────────────────────────────────────────────────────────
 
 type segment struct {
+	// An image segment places an existing produced PNG on the video canvas.
+	// Paths are config-relative, just like transcripts; ImageSecs is its dwell.
+	Image     string  `json:"image"`
+	ImageSecs float64 `json:"imageSecs"`
 	// A card segment: full-screen text, revealed a line at a time and then held
 	// for CardSecs on the completed card.
 	Card     []string `json:"card"`
@@ -823,6 +848,7 @@ func main() {
 	cfg.Out = rel(cfg.Out)
 	cfg.MP4 = rel(cfg.MP4)
 	for i := range cfg.Segments {
+		cfg.Segments[i].Image = rel(cfg.Segments[i].Image)
 		cfg.Segments[i].Typescript = rel(cfg.Segments[i].Typescript)
 		cfg.Segments[i].Timing = rel(cfg.Segments[i].Timing)
 	}
@@ -1039,6 +1065,33 @@ func renderHires(cfg config, dir string, cellW, cellH int) (*timeline, string, e
 // content or on timing — and both get the same timeline.json and chapters.
 func runSegments(cfg config, t *term, tl *timeline, emit func(secs float64)) {
 	for si, seg := range cfg.Segments {
+		if seg.Image != "" {
+			sx := tl.openSegment("image", seg.Chapter)
+			if seg.Chapter != "" {
+				tl.chapter(seg.Chapter)
+			}
+			f, err := os.Open(seg.Image)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "video:", err)
+				os.Exit(1)
+			}
+			img, err := png.Decode(f)
+			_ = f.Close()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "video: decode image:", err)
+				os.Exit(1)
+			}
+			t.visual = img
+			d := seg.ImageSecs
+			if d <= 0 {
+				d = 3.0
+			}
+			tl.mark("image", filepath.Base(seg.Image), d, true)
+			emit(d)
+			tl.closeSegment(sx)
+			continue
+		}
+		t.visual = nil
 		if len(seg.Card) > 0 {
 			sx := tl.openSegment("card", seg.Chapter)
 			if seg.Chapter != "" {

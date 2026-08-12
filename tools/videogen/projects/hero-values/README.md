@@ -13,6 +13,10 @@ routers, summarizers, and policy layers.
 performance work compounds and a default-deny capability floor shares the same
 seam.
 
+This cut reuses the checked-in agent-kernel diagrams for the prefix, context MMU, policy path, and independent-proof witness, with the terminal capture reserved for
+the live behavioral spine. Those image scenes are declared in `render.json`,
+so replacing or reordering a visual is a manifest edit, not one-off video work.
+
 The checked-in transcript is synthetic and intentionally contains no private
 infrastructure, customer data, credentials, or unverified benchmark numbers.
 It is a narrative capture, not a claim that each illustrated command is a
