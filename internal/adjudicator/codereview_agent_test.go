@@ -60,7 +60,7 @@ func TestCodeReviewAgentAllowsReadOnlyWork(t *testing.T) {
 		{"get_pull_request", `{"pr":42}`},      // explicit allow
 		{"list_review_comments", `{"pr":42}`},  // explicit allow
 		{"read_file", `{"path":"main.go"}`},    // explicit allow
-		{"search_code", `{"q":"TODO"}`},        // allow_prefix search_
+		{"search_code", `{"q":"test"}`},        // allow_prefix search_
 		{"find_symbol", `{"name":"New"}`},      // allow_prefix find_
 		{"lookup_owner", `{"path":"main.go"}`}, // allow_prefix lookup_
 	}
