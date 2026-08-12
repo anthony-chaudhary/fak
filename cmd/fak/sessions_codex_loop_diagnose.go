@@ -342,12 +342,36 @@ var codexProgressAckTools = map[string]bool{
 	"update_plan": true,
 }
 
+// codexContentFreeSuccessRE matches the constant envelope an exec/shell host tool emits
+// for a command that SUCCEEDED and printed nothing, as the outcome digest normalizes it
+// (whitespace collapsed to single spaces). It is anchored at both ends and pinned to exit
+// code 0: any byte of real output body, and any non-zero exit, fails the match.
+var codexContentFreeSuccessRE = regexp.MustCompile(`^Exit code: 0(?: Wall time: [0-9.]+ seconds?)? Output:$`)
+
+// codexOutcomeIsContentFreeSuccess reports whether a repeated outcome is a digest
+// COLLISION on a content-free success envelope rather than a repetition. A command that
+// succeeds and prints nothing carries no content to distinguish it, so N wholly unrelated
+// silent successes hash alike and look like one tool answering identically N times. The
+// arguments are what separate the two readings, so distinct-args is still required: a tool
+// re-running the SAME command to silence (ArgsDigestCount < Count) is thrashing and stays
+// a loop signal, and any envelope with output or a non-zero exit is judged normally. (#4278)
+func codexOutcomeIsContentFreeSuccess(o codexRepeatedOutcome) bool {
+	if !codexContentFreeSuccessRE.MatchString(strings.TrimSpace(o.OutputExcerpt)) {
+		return false
+	}
+	return o.Count > 0 && o.ArgsDigestCount >= o.Count
+}
+
 // codexOutcomeIsForwardProgress reports whether a repeated outcome is distinct
 // forward progress rather than a stuck repetition: a constant-ack progress tool
-// whose every call carried a distinct argument digest. A progress tool that
-// re-submits the SAME arguments (ArgsDigestCount < Count) is still thrashing and
-// stays a loop signal, as does any non-progress tool.
+// whose every call carried a distinct argument digest, or a content-free success
+// envelope shared by fully distinct calls. A progress tool that re-submits the SAME
+// arguments (ArgsDigestCount < Count) is still thrashing and stays a loop signal, as
+// does any other non-progress tool.
 func codexOutcomeIsForwardProgress(o codexRepeatedOutcome) bool {
+	if codexOutcomeIsContentFreeSuccess(o) {
+		return true
+	}
 	if !codexProgressAckTools[strings.ToLower(strings.TrimSpace(o.Tool))] {
 		return false
 	}
@@ -375,18 +399,35 @@ func codexTopLoopDrivingOutcome(outcomes []codexRepeatedOutcome) (codexRepeatedO
 // sitting next to a populated repeated-outcome list (and the launch gate can name
 // why a high-traffic progress tool was not fused).
 func applyCodexLoopForwardProgressNote(d *codexLoopDiagnosis) {
-	var progress []string
+	var ack, silent []string
 	for _, o := range d.RepeatedOutcomes {
-		if codexOutcomeIsForwardProgress(o) {
-			progress = append(progress, fmt.Sprintf("%s:%d", o.Tool, o.Count))
+		label := fmt.Sprintf("%s:%d", o.Tool, o.Count)
+		switch {
+		case codexOutcomeIsContentFreeSuccess(o):
+			silent = append(silent, label)
+		case codexOutcomeIsForwardProgress(o):
+			ack = append(ack, label)
 		}
 	}
-	if len(progress) == 0 {
+	if len(ack)+len(silent) == 0 {
 		return
 	}
-	d.Reason = "repeated_progress_tool_no_loop"
-	d.NextAction = "no hard fuse needed: " + strings.Join(progress, ", ") +
-		" repeated a constant acknowledgment across fully distinct arguments (forward planning progress), not a no-progress loop"
+	var why []string
+	if len(ack) > 0 {
+		why = append(why, strings.Join(ack, ", ")+
+			" repeated a constant acknowledgment across fully distinct arguments (forward planning progress)")
+	}
+	if len(silent) > 0 {
+		why = append(why, strings.Join(silent, ", ")+
+			" succeeded silently (exit code 0, empty output) across fully distinct arguments, so the shared digest is an empty-output collision")
+	}
+	// The progress-tool token stays authoritative when both classes are present: it is
+	// the pre-existing, more specific reason for the same "not a no-progress loop" answer.
+	d.Reason = "repeated_content_free_success_no_loop"
+	if len(ack) > 0 {
+		d.Reason = "repeated_progress_tool_no_loop"
+	}
+	d.NextAction = "no hard fuse needed: " + strings.Join(why, "; ") + ", not a no-progress loop"
 }
 
 func classifyCodexLoopDiagnosis(d *codexLoopDiagnosis) {

@@ -245,7 +245,7 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 	// The provider name in session_meta is operator-controlled. Bind the plain
 	// diagnostic path to the same durable guard-launch witness used by the hook,
 	// recent-session report, and pre-spawn launcher gate before classifying it.
-	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, d.SessionID)
+	bindCodexGuardWitness(&d, *codexHome, d.SessionID)
 	gateCode, ok := codexLoopFailOnDiagnosisExitCode(d, *failOn)
 	if !ok {
 		return codexLoopInvalidFailOn(stderr, *failOn)
@@ -397,6 +397,20 @@ func codexGuardWitnessExists(codexHome, sessionID string) bool {
 	return json.Unmarshal(raw, &witness) == nil && witness.Schema == "fak.codex_guard_witness.v1" && witness.SessionID == sessionID
 }
 
+// bindCodexGuardWitness binds the durable guard-launch witness to a freshly parsed
+// diagnosis and RE-CLASSIFIES it. diagnoseCodexLoop must classify from the transcript
+// alone, before any caller has looked the witness up, so the guarded/unguarded branch of
+// classifyCodexLoopDiagnosis always ran with GuardWitnessed=false: a session that DID
+// enter through `fak guard` was handed the direct-provider next action ("launch future
+// Codex sessions through `fak codex`") — advice it had already followed, and that no
+// relaunch could ever clear. The three classifier-owned fields are reset first so the
+// re-run REPLACES the stale verdict instead of appending a second copy of its gaps.
+func bindCodexGuardWitness(d *codexLoopDiagnosis, codexHome, sessionID string) {
+	d.GuardWitnessed = codexGuardWitnessExists(codexHome, sessionID)
+	d.Verdict, d.Reason, d.NextAction, d.ObservabilityGaps = "OK", "", "", nil
+	classifyCodexLoopDiagnosis(d)
+}
+
 func codexLoopFirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -476,11 +490,11 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		return 0
 	}
 	d, diagnoseErr := diagnose(bytes.NewReader(snapshot), resolved)
-	d.GuardWitnessed = codexGuardWitnessExists(*codexHome, sessionID)
 	if diagnoseErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: diagnose: %v (allowing turn; recovery: inspect the rollout JSONL and relaunch with `fak codex`)\n", diagnoseErr)
 		return 0
 	}
+	bindCodexGuardWitness(&d, *codexHome, sessionID)
 	if closeErr != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: close %s: %v\n", resolved, closeErr)
 	}
@@ -689,7 +703,7 @@ func diagnoseNewestCodexLoopForLaunch(codexHome string, sinceHours float64, work
 		if !codexWorkingDirsOverlap(workingDir, d.WorkingDir) {
 			continue
 		}
-		d.GuardWitnessed = codexGuardWitnessExists(home, d.SessionID)
+		bindCodexGuardWitness(&d, home, d.SessionID)
 		rep := codexLaunchReport(home, sinceHours, d)
 		return rep, scan, nil
 	}
@@ -772,7 +786,7 @@ func diagnoseRecentCodexLoopsWith(codexHome string, sinceHours float64, limit in
 		if err != nil {
 			return r, fmt.Errorf("diagnose %s: %w", path, err)
 		}
-		d.GuardWitnessed = codexGuardWitnessExists(home, d.SessionID)
+		bindCodexGuardWitness(&d, home, d.SessionID)
 		r.Diagnoses = append(r.Diagnoses, d)
 		r.Scanned++
 		r.ToolCalls += d.ToolCalls
@@ -1032,7 +1046,7 @@ func diagnoseCurrentCodexLoop(codexHome string) (codexLoopDiagnosis, bool, error
 	// Current-thread consumers include the pre-spawn launcher and dispatch gates.
 	// They must bind the provider metadata to the durable launch witness just like
 	// the explicit and recent-session diagnostic paths do.
-	d.GuardWitnessed = codexGuardWitnessExists(codexHome, d.SessionID)
+	bindCodexGuardWitness(&d, codexHome, d.SessionID)
 	return d, true, nil
 }
 
