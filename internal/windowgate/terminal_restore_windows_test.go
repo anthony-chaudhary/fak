@@ -5,52 +5,51 @@ import (
 	"time"
 )
 
-func TestStartTerminalRestorePulseRepairsOnlyMinimizedWindow(t *testing.T) {
+func stubTerminalRestore(t *testing.T, iconic func(uintptr) bool, restore func(uintptr) bool) {
+	t.Helper()
 	origTerminal := resolveTerminalWindow
 	origRestore := restoreResolvedTerminalWindow
 	origIconic := isResolvedTerminalWindowIconic
-	defer func() {
+	t.Cleanup(func() {
 		resolveTerminalWindow = origTerminal
 		restoreResolvedTerminalWindow = origRestore
 		isResolvedTerminalWindowIconic = origIconic
-	}()
+	})
+	resolveTerminalWindow = func() uintptr { return 42 }
+	isResolvedTerminalWindowIconic = iconic
+	restoreResolvedTerminalWindow = restore
+}
 
-	var resolves int
-	resolveTerminalWindow = func() uintptr { resolves++; return 42 }
-	iconic := make(chan bool, 4)
-	iconic <- true
-	iconic <- false
-	iconic <- false
-	isResolvedTerminalWindowIconic = func(hwnd uintptr) bool {
-		if hwnd != 42 {
-			t.Fatalf("iconic check hwnd = %d, want 42", hwnd)
-		}
-		select {
-		case value := <-iconic:
-			return value
-		default:
-			return false
-		}
+func TestStartTerminalRestorePulseRepairsLaunchMinimizedWindow(t *testing.T) {
+	var restored []uintptr
+	stubTerminalRestore(t, func(uintptr) bool { return true }, func(hwnd uintptr) bool {
+		restored = append(restored, hwnd)
+		return true
+	})
+	StartTerminalRestorePulse(8*time.Second, 500*time.Millisecond)
+	if len(restored) != 1 || restored[0] != 42 {
+		t.Fatalf("restored = %v, want [42]", restored)
 	}
-	restored := make(chan uintptr, 4)
-	restoreResolvedTerminalWindow = func(hwnd uintptr) bool { restored <- hwnd; return true }
+}
 
+func TestStartTerminalRestorePulsePreservesLaterUserMinimize(t *testing.T) {
+	checks := 0
+	restored := make(chan uintptr, 1)
+	stubTerminalRestore(t, func(uintptr) bool {
+		checks++
+		return checks > 1
+	}, func(hwnd uintptr) bool {
+		restored <- hwnd
+		return true
+	})
 	StartTerminalRestorePulse(35*time.Millisecond, 10*time.Millisecond)
-	select {
-	case got := <-restored:
-		if got != 42 {
-			t.Fatalf("restored hwnd %d, want 42", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("pulse did not repair minimized terminal")
-	}
 	time.Sleep(60 * time.Millisecond)
 	select {
-	case got := <-restored:
-		t.Fatalf("visible terminal was re-foregrounded (hwnd %d), stealing operator focus", got)
+	case hwnd := <-restored:
+		t.Fatalf("user-minimized terminal was restored (hwnd %d)", hwnd)
 	default:
 	}
-	if resolves != 1 {
-		t.Fatalf("terminal resolved %d times, want once", resolves)
+	if checks != 1 {
+		t.Fatalf("terminal minimized state checked %d times, want one launch-boundary sample", checks)
 	}
 }

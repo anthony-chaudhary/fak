@@ -95,42 +95,19 @@ func restoreTerminalWindow(hwnd uintptr) bool {
 	return true
 }
 
-// StartTerminalRestorePulse repeatedly restores the owning terminal for a short startup
-// window. A single restore can miss late plugin-load focus/minimize races.
+// StartTerminalRestorePulse repairs a terminal that the just-completed harness
+// launch left minimized. The state is sampled once at this launch boundary: a
+// later transition to minimized is operator intent and must not be undone by a
+// background pulse.
 func StartTerminalRestorePulse(duration, interval time.Duration) {
-	if duration <= 0 {
+	if duration <= 0 || interval <= 0 {
 		return
 	}
-	if interval <= 0 {
-		interval = 500 * time.Millisecond
-	}
-	// Pin the HWND before the child can steal focus or minimize the terminal. Re-resolving
-	// on every tick would select whichever unrelated window became foreground after the
-	// terminal disappeared, making the pulse permanently miss its intended target.
 	hwnd := resolveTerminalWindow()
-	go func() {
-		deadline := time.NewTimer(duration)
-		defer deadline.Stop()
-		tick := time.NewTicker(interval)
-		defer tick.Stop()
-		restoreIfMinimized := func() {
-			// Repair only an actual minimize race. Re-foregrounding an already visible
-			// terminal steals focus back from a window the operator deliberately chose
-			// during this startup window, producing a visible focus bounce.
-			if isResolvedTerminalWindowIconic(hwnd) {
-				restoreResolvedTerminalWindow(hwnd)
-			}
-		}
-		restoreIfMinimized()
-		for {
-			select {
-			case <-deadline.C:
-				return
-			case <-tick.C:
-				restoreIfMinimized()
-			}
-		}
-	}()
+	if hwnd == 0 || !isResolvedTerminalWindowIconic(hwnd) {
+		return
+	}
+	restoreResolvedTerminalWindow(hwnd)
 }
 
 func ancestorPIDs(pid uint32) []uint32 {
