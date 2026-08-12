@@ -174,6 +174,33 @@ func TestLaunchCustomTemplatePreservesArgvBoundaries(t *testing.T) {
 	}
 }
 
+// TestLaunchInteractiveProviderSuppressesStartupWall is the front-door render
+// witness: launch must carry the attended-child fact into guard explicitly. A
+// shim can make stdin look piped, so relying on guard's auto probe regresses to
+// the full startup report before the provider paints its UI.
+func TestLaunchInteractiveProviderSuppressesStartupWall(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	command := fakeLaunchProvider(t, dir)
+	if err := launchshim.Save(launchshim.Config{Default: "claude", Providers: map[string]launchshim.Provider{"claude": {Command: command}}}); err != nil {
+		t.Fatal(err)
+	}
+	old := launchChildRunner
+	defer func() { launchChildRunner = old }()
+	var got []string
+	launchChildRunner = func(_ io.Writer, _ io.Writer, _ string, args []string) int {
+		got = append([]string(nil), args...)
+		return 0
+	}
+	var out, errOut bytes.Buffer
+	if code := runLaunch(&out, &errOut, nil); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	want := []string{"guard", "--banner=animate", "--", command}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("guard argv=%q want %q", got, want)
+	}
+}
 func TestStableLaunchTargetSurvivesSourceReplacement(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "install", "fak.exe")

@@ -115,7 +115,17 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak launch: resolve fak executable: %v\n", err)
 		return 1
 	}
-	guardArgs := append([]string{"guard", "--"}, append([]string{command}, args...)...)
+	guardArgs := []string{"guard"}
+	// The launch front door already knows whether the provider invocation is an
+	// attended UI. Preserve that fact across shims/wrappers: those can make fak's
+	// stdin fail the terminal probe even though Claude/Codex is about to own the
+	// terminal, which made guard's auto mode print the full startup wall. Animate
+	// degrades to the compact three-line render when stderr is not a color TTY.
+	if guardChildInteractive(append([]string{command}, args...)) {
+		guardArgs = append(guardArgs, "--banner=animate")
+	}
+	guardArgs = append(guardArgs, "--", command)
+	guardArgs = append(guardArgs, args...)
 	code := launchChildRunner(stdout, stderr, fak, guardArgs)
 	_ = launchshim.Record(surface, p, "guarded", launchOutcome(code), time.Since(started))
 	return code
