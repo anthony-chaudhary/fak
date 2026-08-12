@@ -10,13 +10,17 @@ import (
 )
 
 type Audit struct {
-	Duration float64         `json:"durationSecs"`
-	Scenes   int             `json:"scenes"`
-	MinType  int             `json:"minTypePx"`
-	CTAStart float64         `json:"ctaStartSecs"`
-	CTAHold  float64         `json:"ctaHoldSecs"`
-	MaxWords int             `json:"maxWordsPerTextRegion"`
-	Checks   map[string]bool `json:"checks"`
+	Duration      float64         `json:"durationSecs"`
+	Scenes        int             `json:"scenes"`
+	MinType       int             `json:"minTypePx"`
+	CTAStart      float64         `json:"ctaStartSecs"`
+	CTAHold       float64         `json:"ctaHoldSecs"`
+	MaxWords      int             `json:"maxWordsPerTextRegion"`
+	SafeMarginPx  int             `json:"safeMarginPx"`
+	LayoutSamples int             `json:"layoutSamples"`
+	MaxTextRight  int             `json:"maxTextRightPx"`
+	MaxTextBottom int             `json:"maxTextBottomPx"`
+	Checks        map[string]bool `json:"checks"`
 }
 
 func audit(c Config) (Audit, error) {
@@ -24,6 +28,21 @@ func audit(c Config) (Audit, error) {
 	if c.Width < 1280 || c.Height < 720 {
 		return a, fmt.Errorf("canvas %dx%d below 1280x720", c.Width, c.Height)
 	}
+	tokenVisual := false
+	for _, scene := range c.Scenes {
+		if strings.HasPrefix(scene.Kind, "token-") {
+			tokenVisual = true
+			break
+		}
+	}
+	if tokenVisual && (c.Width < 1920 || c.Height < 1080) {
+		return a, fmt.Errorf("token visual canvas %dx%d below 1920x1080", c.Width, c.Height)
+	}
+	if tokenVisual && c.FPS < 60 {
+		return a, fmt.Errorf("token visual fps %d below smooth-motion floor 60", c.FPS)
+	}
+	a.SafeMarginPx = int(math.Round(104 * float64(c.Width) / 1280))
+	a.LayoutSamples = len(c.Scenes) * 3
 	if c.FPS < 24 {
 		return a, fmt.Errorf("fps %d below cinematic motion floor 24", c.FPS)
 	}
@@ -82,7 +101,11 @@ func audit(c Config) (Audit, error) {
 	if a.CTAHold < 5 {
 		return a, fmt.Errorf("CTA hold %.1fs below copyability floor 5s", a.CTAHold)
 	}
-	a.Checks = map[string]bool{"duration_18_30s": true, "scene_count_3_6": true, "max_8_words_per_region": true, "cta_by_12s": true, "cta_hold_5s": true, "canvas_720p_plus": true, "motion_24fps_plus": true}
+	a.Checks = map[string]bool{"duration_18_30s": true, "scene_count_3_6": true, "max_8_words_per_region": true, "cta_by_12s": true, "cta_hold_5s": true, "canvas_720p_plus": true, "motion_24fps_plus": true, "text_safe_area_declared": true, "representative_frames_declared": true}
+	if tokenVisual {
+		a.Checks["token_canvas_1080p_plus"] = true
+		a.Checks["token_motion_60fps_plus"] = true
+	}
 	return a, nil
 }
 func writeAudit(path string, a Audit) {

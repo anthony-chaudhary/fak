@@ -60,6 +60,13 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	layoutSamples, maxRight, maxBottom, err := validateLayout(cfg)
+	if err != nil {
+		fail(err)
+	}
+	report.LayoutSamples = layoutSamples
+	report.MaxTextRight = maxRight
+	report.MaxTextBottom = maxBottom
 	if *verify {
 		writeAudit(cfg.Audit, report)
 		fmt.Printf("trailer: verify OK — %.1fs, %d scenes, min type %dpx at %dpx wide\n", report.Duration, len(cfg.Scenes), report.MinType, cfg.Width)

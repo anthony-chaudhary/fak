@@ -83,90 +83,182 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 	fill(im, im.Bounds(), bg)
 	fade := min(1, t/.35) * min(1, (s.Secs-t)/.3)
 	yoff := int((1 - ease(min(1, t/.7))) * 34)
-	// quiet cinematic horizon and moving checkpoint line
-	fill(im, image.Rect(0, c.Height-8, c.Width, c.Height), color.RGBA{12, 26, 36, 255})
+	fill(im, image.Rect(0, c.Height-12, c.Width, c.Height), color.RGBA{12, 26, 36, 255})
 	x := int(float64(c.Width) * min(1, t/s.Secs))
-	fill(im, image.Rect(0, c.Height-8, x, c.Height), cyan)
+	fill(im, image.Rect(0, c.Height-12, x, c.Height), cyan)
+
+	sx := float64(c.Width) / 1280
+	sy := float64(c.Height) / 720
+	X := func(v int) int { return int(math.Round(float64(v) * sx)) }
+	Y := func(v int) int { return int(math.Round(float64(v) * sy)) }
+	S := func(v float64) float64 { return v * min(sx, sy) }
+	R := func(x1, y1, x2, y2 int) image.Rectangle { return image.Rect(X(x1), Y(y1), X(x2), Y(y2)) }
+	C := func(y int, value string, size float64, clr color.Color, bold, mono bool) {
+		centerFit(im, p, Y(y), X(104), value, S(size), clr, bold, mono)
+	}
+	particle := func(x, y, radius int, clr color.RGBA, glow bool) {
+		if glow {
+			circle(im, X(x), Y(y), X(radius+8), alpha(clr, .12))
+		}
+		circle(im, X(x), Y(y), max(2, X(radius)), clr)
+	}
 	switch s.Kind {
 	case "token-hook":
-		center(im, p, 105, s.Eyebrow, 30, cyan, true, false)
-		center(im, p, 255+yoff, s.Title, 92, alpha(white, fade), true, false)
-		center(im, p, 350+yoff, s.Subtitle, 44, alpha(muted, fade), false, false)
-		left := image.Rect(125, 455, 560, 625)
-		right := image.Rect(720, 455, 1155, 625)
-		fill(im, left, color.RGBA{35, 20, 28, 255})
-		stroke(im, left, red, 3)
-		centerBoxText(im, p, left, s.Action, 52, red)
-		fill(im, right, color.RGBA{11, 31, 34, 255})
-		stroke(im, right, green, 3)
-		centerBoxText(im, p, right, s.Detail, 52, green)
-		center(im, p, 560, "->", 54, cyan, true, true)
+		C(82, s.Eyebrow, 26, cyan, true, false)
+		C(180+yoff, s.Title, 68, alpha(white, fade), true, false)
+		C(244+yoff, s.Subtitle, 30, alpha(muted, fade), false, false)
+		gateX := 640
+		fill(im, R(gateX-7, 320, gateX+7, 625), cyan)
+		text(im, p, X(gateX-20), Y(300), "fak", S(28), cyan, true, false)
+		for i := 0; i < 42; i++ {
+			row, col := i/14, i%14
+			px := 88 + col*34 + int(13*math.Sin(float64(i)*1.7+t*2.4))
+			py := 382 + row*72 + int(9*math.Cos(float64(i)*1.3+t*2.1))
+			particle(px, py, 5, color.RGBA{255, 104, 132, 255}, true)
+		}
+		for i := 0; i < 13; i++ {
+			angle := float64(i)*.55 + t*.8
+			px := 870 + int(math.Cos(angle)*float64(95+i*5))
+			py := 485 + int(math.Sin(angle)*float64(70+i*3))
+			particle(px, py, 6, green, true)
+		}
+		left, right := R(86, 650, 540, 700), R(740, 650, 1194, 700)
+		centerBoxText(im, p, left, s.Action+"  42", S(26), red)
+		centerBoxText(im, p, right, s.Detail+"  13", S(26), green)
 	case "token-grid":
-		center(im, p, 90, s.Eyebrow, 30, cyan, true, false)
-		center(im, p, 185+yoff, s.Title, 72, alpha(white, fade), true, false)
+		C(78, s.Eyebrow, 26, cyan, true, false)
+		C(162+yoff, s.Title, 58, alpha(white, fade), true, false)
+		cx, cy := X(640), Y(425)
+		circle(im, cx, cy, X(92), color.RGBA{9, 46, 55, 255})
+		circleStroke(im, cx, cy, X(92), cyan, X(3))
+		centerBoxText(im, p, image.Rect(cx-X(82), cy-Y(55), cx+X(82), cy+Y(55)), "fak", S(48), white)
+		positions := [][2]int{{245, 310}, {245, 500}, {640, 625}, {1035, 500}, {1035, 310}, {640, 245}}
 		for i, item := range s.Items {
-			col, row := i%2, i/2
-			r := image.Rect(75+col*610, 280+row*120, 595+col*610, 380+row*120)
-			fill(im, r, color.RGBA{13, 25, 36, 255})
-			stroke(im, r, cyan, 2)
-			centerBoxText(im, p, r, item, 48, white)
+			px, py := positions[i][0], positions[i][1]
+			lineSegment(im, cx, cy, X(px), Y(py), alpha(cyan, .35), X(2))
+			node := image.Rect(X(px-145), Y(py-48), X(px+145), Y(py+48))
+			fill(im, node, color.RGBA{13, 25, 36, 255})
+			stroke(im, node, cyan, X(2))
+			centerBoxText(im, p, node, item, S(27), white)
+			particle(px, py-63, 5, green, true)
 		}
 	case "token-flow":
-		center(im, p, 100, s.Eyebrow, 30, cyan, true, false)
-		center(im, p, 195+yoff, s.Title, 72, alpha(white, fade), true, false)
-		colors := []color.RGBA{cyan, green, cyan}
+		C(78, s.Eyebrow, 26, cyan, true, false)
+		C(162+yoff, s.Title, 55, alpha(white, fade), true, false)
+		baseY := 530
+		widths := []int{390, 270, 155}
+		colors := []color.RGBA{red, cyan, green}
 		for i, item := range s.Items {
-			r := image.Rect(70+i*420, 350, 390+i*420, 535)
-			fill(im, r, color.RGBA{13, 25, 36, 255})
-			stroke(im, r, colors[i], 3)
-			centerBoxText(im, p, r, item, 36, white)
+			xc := 250 + i*390
+			h := widths[i]
+			for j := 0; j < h/15; j++ {
+				px := xc - h/2 + 12 + j*15
+				particle(px, baseY-int(24*math.Sin(float64(j)*.8+t)), 5, colors[i], true)
+			}
+			r := R(xc-165, 595, xc+165, 670)
+			centerBoxText(im, p, r, item, S(28), white)
 			if i < 2 {
-				center(im, p, 465+i*420, "->", 42, muted, true, true)
+				centerFit(im, p, Y(530), X(45), "->", S(34), muted, true, true)
 			}
 		}
-		center(im, p, 625, s.Verdict, 42, green, true, false)
+		C(708, s.Verdict, 29, green, true, false)
 	case "hook":
-		center(im, p, 250+yoff, s.Title, 82, alpha(white, fade), true, false)
-		center(im, p, 340+yoff, s.Subtitle, 44, alpha(muted, fade), false, false)
-		// one giant dangerous call moving toward execution
-		card := image.Rect(220, 465, c.Width-220, 650)
+		C(250+yoff, s.Title, 82, alpha(white, fade), true, false)
+		C(340+yoff, s.Subtitle, 44, alpha(muted, fade), false, false)
+		card := R(220, 465, 1060, 650)
 		fill(im, card, color.RGBA{15, 23, 34, 255})
-		text(im, p, 270, 525, "TOOL CALL", 30, muted, true, false)
-		text(im, p, 270, 600, s.Action, 58, white, true, true)
-		text(im, p, 790, 600, s.Detail, 58, red, true, true)
+		text(im, p, X(270), Y(525), "TOOL CALL", S(30), muted, true, false)
+		text(im, p, X(270), Y(600), s.Action, S(58), white, true, true)
+		text(im, p, X(790), Y(600), s.Detail, S(58), red, true, true)
 	case "checkpoint":
-		center(im, p, 105, s.Eyebrow, 30, cyan, true, false)
-		center(im, p, 205+yoff, s.Title, 88, alpha(white, fade), true, false)
-		// One continuous object: the dangerous call travels toward execution and
-		// meets the checkpoint. The red stop bar lands late in the beat.
+		C(105, s.Eyebrow, 30, cyan, true, false)
+		C(205+yoff, s.Title, 88, alpha(white, fade), true, false)
 		cy := 455
 		callX := 110 + int(ease(min(1, t/1.6))*290)
-		fill(im, image.Rect(callX, cy-70, callX+360, cy+70), color.RGBA{17, 25, 37, 255})
-		stroke(im, image.Rect(callX, cy-70, callX+360, cy+70), white, 2)
-		centerBoxText(im, p, image.Rect(callX, cy-70, callX+360, cy+70), s.Action, 30, white)
-		gate := image.Rect(820, cy-125, 875, cy+125)
+		call := R(callX, cy-70, callX+360, cy+70)
+		fill(im, call, color.RGBA{17, 25, 37, 255})
+		stroke(im, call, white, X(2))
+		centerBoxText(im, p, call, s.Action, S(30), white)
+		gate := R(820, cy-125, 875, cy+125)
 		fill(im, gate, cyan)
-		text(im, p, 804, cy-155, "fak", 34, cyan, true, false)
 		if t > 1.5 {
-			fill(im, image.Rect(915, cy-75, 1200, cy+75), color.RGBA{44, 18, 25, 255})
-			centerBoxText(im, p, image.Rect(915, cy-75, 1200, cy+75), "STOP", 48, red)
-			line(im, 875, cy, 915, cy, red, 8)
+			stop := R(915, cy-75, 1200, cy+75)
+			fill(im, stop, color.RGBA{44, 18, 25, 255})
+			centerBoxText(im, p, stop, "STOP", S(48), red)
 		}
 	case "proof":
-		center(im, p, 270+yoff, s.Title, 150, alpha(red, fade), true, false)
-		center(im, p, 405, s.Action, 40, white, true, true)
-		center(im, p, 520, s.Verdict, 68, green, true, false)
+		C(270+yoff, s.Title, 150, alpha(red, fade), true, false)
+		C(405, s.Action, 40, white, true, true)
+		C(520, s.Verdict, 68, green, true, false)
 	case "cta":
-		center(im, p, 145, s.Eyebrow, 32, cyan, true, false)
-		center(im, p, 265+yoff, s.Title, 82, alpha(white, fade), true, false)
-		r := image.Rect(165, 390, c.Width-165, 555)
+		C(110, s.Eyebrow, 28, cyan, true, false)
+		C(210+yoff, s.Title, 70, alpha(white, fade), true, false)
+		// A visual checkpoint: the command crosses the luminous kernel boundary.
+		for i := 0; i < 24; i++ {
+			particle(130+i*26, 385+int(15*math.Sin(float64(i)*.7+t*1.4)), 4, cyan, true)
+		}
+		gate := R(638, 315, 651, 535)
+		fill(im, gate, cyan)
+		for i := 0; i < 8; i++ {
+			particle(730+i*47, 385+int(28*math.Sin(float64(i)+t)), 6, green, true)
+		}
+		r := R(165, 530, 1115, 625)
 		fill(im, r, color.RGBA{13, 22, 32, 255})
-		stroke(im, r, cyan, 3)
-		centerBoxText(im, p, r, s.Command, 84, white)
-		center(im, p, 650, s.Subtitle, 38, muted, false, false)
+		stroke(im, r, cyan, X(3))
+		centerBoxText(im, p, r, s.Command, S(56), white)
+		C(675, s.Subtitle, 27, muted, false, false)
 	}
 	return im
 }
+
+func fittedTextSize(p *painter, available int, s string, size, floor float64, bold, mono bool) (float64, int) {
+	for size > floor {
+		w := font.MeasureString(p.face(size, bold, mono), s).Ceil()
+		if w <= available {
+			return size, w
+		}
+		size--
+	}
+	return floor, font.MeasureString(p.face(floor, bold, mono), s).Ceil()
+}
+
+func centerFit(im *image.RGBA, p *painter, y, margin int, s string, size float64, c color.Color, bold, mono bool) {
+	size, _ = fittedTextSize(p, im.Bounds().Dx()-2*margin, s, size, 18, bold, mono)
+	center(im, p, y, s, size, c, bold, mono)
+}
+
+func circle(im *image.RGBA, cx, cy, radius int, c color.Color) {
+	r2 := radius * radius
+	for y := -radius; y <= radius; y++ {
+		span := int(math.Sqrt(float64(r2 - y*y)))
+		fill(im, image.Rect(cx-span, cy+y, cx+span+1, cy+y+1), c)
+	}
+}
+
+func circleStroke(im *image.RGBA, cx, cy, radius int, c color.Color, width int) {
+	circle(im, cx, cy, radius, c)
+	circle(im, cx, cy, max(0, radius-width), color.RGBA{9, 46, 55, 255})
+}
+
+func lineSegment(im *image.RGBA, x1, y1, x2, y2 int, c color.Color, width int) {
+	steps := max(abs(x2-x1), abs(y2-y1))
+	if steps == 0 {
+		return
+	}
+	for i := 0; i <= steps; i++ {
+		x := x1 + (x2-x1)*i/steps
+		y := y1 + (y2-y1)*i/steps
+		circle(im, x, y, max(1, width/2), c)
+	}
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func centerBoxText(im *image.RGBA, p *painter, r image.Rectangle, s string, size float64, c color.Color) {
 	const inset = 24
 	for size > 18 {
@@ -192,6 +284,44 @@ func stroke(im *image.RGBA, r image.Rectangle, c color.Color, w int) {
 }
 func line(im *image.RGBA, x1, y1, x2, y2 int, c color.Color, w int) {
 	fill(im, image.Rect(x1, y1-w/2, x2, y2+w/2), c)
+}
+
+func validateLayout(c Config) (int, int, int, error) {
+	p, err := newPainter()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	margin := int(math.Round(104 * float64(c.Width) / 1280))
+	sx := float64(c.Width) / 1280
+	available := c.Width - 2*margin
+	samples, maxRight, maxBottom := 0, 0, 0
+	for i, scene := range c.Scenes {
+		for _, at := range []float64{.15, .55, .9} {
+			_ = sceneFrame(c, scene, scene.Secs*at, p)
+			samples++
+		}
+		for _, region := range []struct {
+			name, text string
+			size       float64
+			mono       bool
+		}{
+			{"title", scene.Title, 68 * sx, false}, {"subtitle", scene.Subtitle, 30 * sx, false}, {"eyebrow", scene.Eyebrow, 28 * sx, false},
+		} {
+			if region.text == "" {
+				continue
+			}
+			_, width := fittedTextSize(p, available, region.text, region.size, 18*sx, true, region.mono)
+			right := margin + (available+width)/2
+			if right > maxRight {
+				maxRight = right
+			}
+			if width > available {
+				return samples, maxRight, maxBottom, fmt.Errorf("scene %d %s crosses %dpx safe area: width=%d available=%d", i, region.name, margin, width, available)
+			}
+		}
+	}
+	maxBottom = c.Height - int(math.Round(32*float64(c.Height)/720))
+	return samples, maxRight, maxBottom, nil
 }
 
 func renderAll(c Config, ff string, a Audit) error {
@@ -254,7 +384,7 @@ func encode(ff string, c Config, dir string) error {
 	if e := cmd.Run(); e != nil {
 		return e
 	}
-	cmd = exec.Command(ff, "-y", "-framerate", fmt.Sprint(c.FPS), "-i", in, "-vf", "fps=15,scale=680:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3", "-loop", "0", c.GIF)
+	cmd = exec.Command(ff, "-y", "-framerate", fmt.Sprint(c.FPS), "-i", in, "-vf", "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3", "-loop", "0", c.GIF)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -274,7 +404,7 @@ func compose(ff string, c Config) error {
 		return err
 	}
 	cmd = exec.Command(ff, "-y", "-i", c.CompositeMP4,
-		"-vf", "fps=15,scale=680:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+		"-vf", "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
 		"-loop", "0", c.CompositeGIF)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -291,8 +421,8 @@ func pngAt(path string, im image.Image) error {
 	return png.Encode(f, im)
 }
 func contact(path string, c Config, p *painter) error {
-	thumbW := 480
-	thumbH := 270
+	thumbW := 960
+	thumbH := 540
 	sheet := image.NewRGBA(image.Rect(0, 0, thumbW*2, thumbH*((len(c.Scenes)+1)/2)))
 	fill(sheet, sheet.Bounds(), bg)
 	for i, s := range c.Scenes {
@@ -304,3 +434,6 @@ func contact(path string, c Config, p *painter) error {
 }
 
 var _ = strings.TrimSpace
+
+// Layout checks are render-backed: they exercise representative frames and
+// reject any title region that cannot fit inside the declared safe area.

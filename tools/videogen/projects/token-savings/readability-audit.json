@@ -4,7 +4,11 @@
   "minTypePx": 48,
   "ctaStartSecs": 12,
   "ctaHoldSecs": 8,
-  "maxWordsPerTextRegion": 8,
+  "maxWordsPerTextRegion": 7,
+  "safeMarginPx": 156,
+  "layoutSamples": 12,
+  "maxTextRightPx": 1761,
+  "maxTextBottomPx": 1032,
   "checks": {
     "canvas_720p_plus": true,
     "cta_by_12s": true,
@@ -12,6 +16,10 @@
     "duration_18_30s": true,
     "max_8_words_per_region": true,
     "motion_24fps_plus": true,
-    "scene_count_3_6": true
+    "representative_frames_declared": true,
+    "scene_count_3_6": true,
+    "text_safe_area_declared": true,
+    "token_canvas_1080p_plus": true,
+    "token_motion_60fps_plus": true
   }
 }

@@ -1,50 +1,47 @@
 {
-  "width": 1280,
-  "height": 720,
-  "fps": 30,
-  "mp4": "out/fak-token-savings.mp4",
-  "gif": "out/fak-token-savings.gif",
-  "poster": "out/fak-token-savings-poster.png",
-  "contactSheet": "out/review-contact-sheet.png",
-  "audit": "out/readability-audit.json",
-  "appendMP4": "../../../../visuals/fak-hero-values.mp4",
-  "compositeMP4": "../../../../visuals/fak-homepage-hero.mp4",
-  "compositeGIF": "../../../../visuals/fak-homepage-hero.gif",
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "mp4": "../../../../visuals/fak-homepage-hero.mp4",
+  "gif": "../../../../visuals/fak-homepage-hero.gif",
+  "poster": "../../../../visuals/fak-homepage-hero-poster.png",
+  "contactSheet": "review-contact-sheet.png",
+  "audit": "readability-audit.json",
   "scenes": [
     {
       "kind": "token-hook",
       "secs": 4.0,
-      "eyebrow": "TOKEN SAVINGS FIRST",
-      "title": "Stop paying the turn tax.",
-      "subtitle": "Less repeated work. Fewer model calls.",
-      "action": "WITHOUT FAK",
-      "detail": "WITH FAK"
+      "eyebrow": "THE TURN TAX",
+      "title": "Stop paying for the same work.",
+      "subtitle": "Every bright particle is model work.",
+      "action": "REPEATED",
+      "detail": "REUSED"
     },
     {
       "kind": "token-grid",
       "secs": 4.0,
       "eyebrow": "ONE PERFORMANCE CHECKPOINT",
-      "title": "Six ways to spend less.",
+      "title": "Six ways tokens stop leaking.",
       "items": [
-        "Reuse stable prefixes",
-        "Serve repeats locally",
-        "Route each call",
-        "Shed stale turns",
-        "Skip known work",
-        "Reuse live KV"
+        "Stable prefix",
+        "Local repeats",
+        "Right-size model",
+        "Stale turns shed",
+        "Known work skipped",
+        "Live KV reused"
       ]
     },
     {
       "kind": "token-flow",
       "secs": 4.0,
-      "eyebrow": "COMPOUNDING VALUE",
-      "title": "Save this turn and every next turn.",
+      "eyebrow": "THE SAVING COMPOUNDS",
+      "title": "One avoided turn shrinks every next turn.",
       "items": [
         "Skip a model turn",
         "Shrink context",
         "Run longer"
       ],
-      "verdict": "Cheaper. Faster. Still controlled."
+      "verdict": "Less work now. Less context later."
     },
     {
       "kind": "cta",
@@ -52,9 +49,7 @@
       "eyebrow": "KEEP YOUR AGENT",
       "title": "Put fak at the boundary.",
       "command": "fak guard -- claude",
-      "subtitle": "See every tool call checked before it runs."
+      "subtitle": "Performance first. Control at the same checkpoint."
     }
   ]
 }
-
-
