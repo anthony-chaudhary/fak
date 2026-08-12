@@ -407,7 +407,11 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
 		os.Exit(1)
 	}
-	if err := configureServeSessionDurability(serveSessions, "", os.Stderr); err != nil {
+	// The registry this resolves to IS the reach of every fanned lifecycle op: serveSessions is
+	// hydrated from it, and `fak fleet control send --op pause --all` writes through that table.
+	// A hard-coded "" here made --session-registry unreachable, so a serve armed with a private
+	// --fleet-bus-dir still adopted every session on the host and paused peers' work (#5825).
+	if err := configureServeSessionDurability(serveSessions, *sf.sessionRegistry, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
 		os.Exit(1)
 	}

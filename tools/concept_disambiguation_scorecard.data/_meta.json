@@ -1971,6 +1971,16 @@
           "category": "incidental",
           "reason": "Package import and registry path name for the child-lineage implementation, not a competing operator session-runtime concept.",
           "token": "sessionregistry"
+        },
+        {
+          "category": "incidental",
+          "reason": "Process-local record of the already-resolved session-registry path; it names no new concept, it only makes the existing registry scope (defaultSessionRegistryPath / --session-registry) readable after resolution.",
+          "token": "serveSessionRegistryPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Operator-facing rendering of serveSessionRegistryPath; a display helper over an existing concept, introducing no new distinction of its own.",
+          "token": "serveSessionRegistryScopeLabel"
         }
       ],
       "id": "session-runtime",
@@ -2053,6 +2063,8 @@
         "schedulers",
         "scheduling",
         "semantic-window",
+        "serveSessionRegistryPath",
+        "serveSessionRegistryScopeLabel",
         "sessionAffinity",
         "sessionNameForBatch",
         "sessionRegistryRecoveryStage",

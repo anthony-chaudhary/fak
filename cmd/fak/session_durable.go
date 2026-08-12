@@ -40,6 +40,28 @@ type sessionDurability struct {
 
 var serveSessionDurability *sessionDurability
 
+// serveSessionRegistryPath records the registry this process actually resolved to — the
+// SCOPE of every fanned lifecycle op, because the table a `--op pause --all` writes through
+// is hydrated from exactly this file (#5825). It is set by configureServeSessionDurability
+// AFTER default resolution and tilde expansion, so it answers "which sessions can this serve
+// reach" rather than "what did the operator type". "off" is recorded verbatim: an in-memory
+// table is a real scope, distinct from one that was never configured.
+var serveSessionRegistryPath string
+
+// serveSessionRegistryScopeLabel renders that scope for an operator. The empty value must
+// NOT render as an empty path — "no registry" and "not configured yet" are different facts,
+// and #5825 happened because reach was invisible before the write, not after.
+func serveSessionRegistryScopeLabel() string {
+	switch {
+	case serveSessionRegistryPath == "":
+		return "(not configured)"
+	case strings.EqualFold(serveSessionRegistryPath, "off"):
+		return "off (in-memory only)"
+	default:
+		return serveSessionRegistryPath
+	}
+}
+
 type unknownSessionError struct {
 	id string
 }
@@ -77,9 +99,11 @@ func configureServeSessionDurability(tbl *session.Table, path string, stderr io.
 	}
 	if strings.EqualFold(path, "off") {
 		serveSessionDurability = nil
+		serveSessionRegistryPath = "off"
 		return nil
 	}
 	path = pathutil.ExpandTilde(path)
+	serveSessionRegistryPath = path
 	warnf := func(format string, args ...any) {
 		if stderr != nil {
 			fmt.Fprintf(stderr, format+"\n", args...)
