@@ -2169,3 +2169,52 @@ The event-join coordinate a compaction fire shares with the provider usage recor
 The outcome of attempting to bind one compaction fire to the provider usage record sharing its CompactionJoinKey: the joined sample plus whether the binding was PROVEN, left unstamped, or withdrawn because no single usage row matched. It reports the provenance of the provider counters, so an unproven join withdraws them rather than letting an unmatched number stand as evidence.
 
 **Distinct from:** The verdict on the BINDING, not on the compaction: it says whether the provider half may be believed, while the compaction verdict says whether the rewrite paid. CompactionJoinKey is the coordinate looked up; CompactionJoinResult is what the lookup proved.
+
+
+### FAK_RECALL_MMR
+
+The environment gate that arms MMR redundancy suppression inside journal Recall's top-k selection (#3940). Fail-closed: anything that is not an explicit truthy value leaves Recall's committed provenance-recency-relevance-index ordering byte-identical to pre-#3940, so the suppressor can never silently change what a session recalls.
+
+**Distinct from:** Arms the reranker; it does not tune it. FAK_RECALL_MMR_LAMBDA sets the relevance/diversity trade-off once armed, and cmdRecall is the operator verb that reads the index -- this knob only decides whether the diversity term participates at all. It cannot reorder across provenance tiers under any setting.
+
+
+### FAK_RECALL_MMR_LAMBDA
+
+The relevance/diversity trade-off weight for armed MMR recall reranking, in [0,1]: 1 is pure relevance (the rerank becomes a no-op reordering), 0 is pure novelty. Out-of-range values clamp and an unparseable one falls back to 0.7, which keeps relevance dominant so the diversity term breaks near-ties rather than dragging a weak-but-novel row past a strongly relevant one.
+
+**Distinct from:** A weight, not a switch: with FAK_RECALL_MMR unset this value is never read at all. And no setting of it -- including 0, the most diversity-aggressive -- can promote a claim above a witnessed row, because the provenance boundary is structural rather than a competing term in the same sum.
+
+
+### GateFiling
+
+The idea-scout's CONVERSION decision: given the ledger of what the scout already filed and the declared untriaged_cap, GateFiling returns the FilingGate that says whether a live run may create issues at all today. It pauses on stock (more untriaged open filings than the cap) and, as a fail-closed backstop, on a filed-issue index big enough to matter that reports no state.
+
+**Distinct from:** GateFiling decides about the scout's OWN downstream backlog, so it is not a dedup rung (PlanIssues / the filed-stamp index, which decide about one candidate's novelty) and not a threshold like MinScore or MaxIssues (which shape a single day's batch). It is the DECISION function; FilingGate is the record it returns.
+
+
+### FilingGate
+
+The RECORD GateFiling returns and the idea-scout run result carries as filing_gate: the cap in force, the untriaged stock it was measured against, whether filing is paused, and a reason plus an operator-actionable detail. It is what makes a run that filed nothing because of the backlog distinguishable from one that simply found nothing new.
+
+**Distinct from:** FilingGate is the decision RECORD, not the decision function (GateFiling) and not the ledger the decision reads (BacklogStats). It also is not a dedup outcome: a candidate dropped by a dedup rung is reported in dropped/skipped, while a held FilingGate suppresses the whole day's filing however novel the candidates are.
+
+
+### GateUntriagedCap
+
+The FilingGate.Reason a paused idea-scout run carries when the scout's OWN untriaged open filings outnumber the declared untriaged_cap. It is a self-releasing brake: the same run files again as soon as the stock is triaged or closed back under the cap, so re-enablement needs no code change and no operator memory.
+
+**Distinct from:** GateUntriagedCap is the STOCK reason -- the backlog was measured and found too large -- as opposed to GateIndexUnclassified, which fires when the backlog could not be measured at all. Neither is a refusal: the run still gathers, still reports its plan, and still exits 0.
+
+
+### mmrPoolFactor
+
+The multiple of the caller's k that bounds how many already-ranked recall candidates the MMR reranker considers (3x, the borrow's window). Greedy MMR is quadratic in similarity comparisons, so bounding the pool keeps the cost proportional to what the caller actually asked for; candidates past the window keep their baseline order and can only matter when the pool is the whole list.
+
+**Distinct from:** A cost bound on a rerank window, not a set of resources handed out: gradedPool and seatpool name populations something is drawn FROM, while this names how far down an existing ranking the diversity term is allowed to look. Widening it can only change ordering within the window -- never across provenance tiers.
+
+
+### GateIndexUnclassified
+
+The FilingGate.Reason for the fail-closed arm of the idea-scout conversion gate: a filed-issue index larger than the cap that reports no state for any of its rows cannot be shown to be under the cap, so filing pauses rather than treating an unreadable ledger as an empty backlog.
+
+**Distinct from:** GateIndexUnclassified is about the MEASUREMENT being blind, not about the stock being large (GateUntriagedCap). It is also not the scout-index saturation refusal, which exits 2 because the DEDUP guarantee is at risk; this one holds filing while the conversion evidence is missing and lifts by itself once gh returns state again.

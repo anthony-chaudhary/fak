@@ -194,7 +194,8 @@
       "definition": "cmdRecall is the cmd/fak handler for `fak recall` \u2014 the offline session-recall demo that writes a session through the gate, reloads it in a fresh Session, and demonstrates the rung-0/rung-4 poison-refusal guarantees.",
       "distinction": "Not the recall subsystem/concept (recall); it is the one CLI verb that drives a demo over it.",
       "distinct_from": [
-        "recall"
+        "recall",
+        "fakrecallmmr"
       ],
       "aliases": [],
       "grounding": "cmdrecall",

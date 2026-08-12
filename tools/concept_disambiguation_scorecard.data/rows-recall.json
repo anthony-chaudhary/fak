@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "fakrecallmmr",
+      "canonical": "FAK_RECALL_MMR",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The environment gate that arms MMR redundancy suppression inside journal Recall's top-k selection (#3940). Fail-closed: anything that is not an explicit truthy value leaves Recall's committed provenance-recency-relevance-index ordering byte-identical to pre-#3940, so the suppressor can never silently change what a session recalls.",
+      "distinction": "Arms the reranker; it does not tune it. FAK_RECALL_MMR_LAMBDA sets the relevance/diversity trade-off once armed, and cmdRecall is the operator verb that reads the index -- this knob only decides whether the diversity term participates at all. It cannot reorder across provenance tiers under any setting.",
+      "distinct_from": [
+        "x-context-ctx-cmdrecall",
+        "fakrecallmmrlambda"
+      ],
+      "aliases": [],
+      "grounding": "FAK_RECALL_MMR",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fakrecallmmrlambda",
+      "canonical": "FAK_RECALL_MMR_LAMBDA",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The relevance/diversity trade-off weight for armed MMR recall reranking, in [0,1]: 1 is pure relevance (the rerank becomes a no-op reordering), 0 is pure novelty. Out-of-range values clamp and an unparseable one falls back to 0.7, which keeps relevance dominant so the diversity term breaks near-ties rather than dragging a weak-but-novel row past a strongly relevant one.",
+      "distinction": "A weight, not a switch: with FAK_RECALL_MMR unset this value is never read at all. And no setting of it -- including 0, the most diversity-aggressive -- can promote a claim above a witnessed row, because the provenance boundary is structural rather than a competing term in the same sum.",
+      "distinct_from": [
+        "fakrecallmmr"
+      ],
+      "aliases": [],
+      "grounding": "FAK_RECALL_MMR_LAMBDA",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "mmrpoolfactor",
+      "canonical": "mmrPoolFactor",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The multiple of the caller's k that bounds how many already-ranked recall candidates the MMR reranker considers (3x, the borrow's window). Greedy MMR is quadratic in similarity comparisons, so bounding the pool keeps the cost proportional to what the caller actually asked for; candidates past the window keep their baseline order and can only matter when the pool is the whole list.",
+      "distinction": "A cost bound on a rerank window, not a set of resources handed out: gradedPool and seatpool name populations something is drawn FROM, while this names how far down an existing ranking the diversity term is allowed to look. Widening it can only change ordering within the window -- never across provenance tiers.",
+      "distinct_from": [
+        "c729-graded-pool"
+      ],
+      "aliases": [],
+      "grounding": "mmrPoolFactor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

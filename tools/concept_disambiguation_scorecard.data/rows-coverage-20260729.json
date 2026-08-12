@@ -1798,7 +1798,8 @@
       "distinct_from": [
         "c729-placement-candidates",
         "c729-grade-candidates",
-        "c729-grade-capability"
+        "c729-grade-capability",
+        "mmrpoolfactor"
       ],
       "aliases": [],
       "grounding": "gradedPool",

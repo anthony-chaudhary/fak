@@ -243,6 +243,13 @@ func (idx *JournalIndex) Recall(query string, k int) []JournalHit {
 		}
 		return cands[a] < cands[b] // stable: index (recording) order
 	})
+	// #3940: optional MMR redundancy suppression, applied WITHIN each provenance run so a
+	// near-duplicate row loses its top-k slot to a novel one without ever crossing the
+	// trust boundary. Unless mmrEnv is armed this does nothing and the ordering above is
+	// the final one, byte-identical to pre-#3940. See mmr.go.
+	if mmrEnabled() {
+		cands = idx.mmrRerank(cands, scores, mmrLambda(), k)
+	}
 	out := make([]JournalHit, 0, k)
 	for _, i := range cands {
 		if len(out) >= k {
