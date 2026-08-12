@@ -260,9 +260,15 @@ model:
 logvault-drill:
 	./scripts/logvault-restore-drill.sh
 
-# claims-lint: every "- [" line in CLAIMS.md carries exactly one tag.
+# claims-lint (#6218): every "- [" line in CLAIMS.md carries exactly one honesty tag AND a
+# machine-readable EXPOSURE state -- on by default, or gated WITH a stated reason. That is Q6
+# of docs/standards/net-true-value.md, enforced by reusing internal/claimcheck's own Realized
+# type + gradeRealized rule rather than a second vocabulary. The awk tag-counter this replaced
+# could only count tags, so a [SHIPPED] line reading "reproducible now" could silently mean
+# "reproducible now, once you set the right env var"; the go test also EMITS the default-off
+# capability count instead of leaving it to a grep over prose.
 claims-lint:
-	@awk '/^- \[/{n=0; if(index($$0,"[SHIPPED]"))n++; if(index($$0,"[SIMULATED]"))n++; if(index($$0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
+	@go test -count=1 -v -run 'TestCLAIMSLedger' ./internal/claimcheck/
 
 # cache-headline-lint (#1564, cache-frontier Next-50 item 46 "Remove legacy"): a cache
 # "win" headline -- "99% cache", "cache win" -- that omits which PLANE
@@ -351,17 +357,23 @@ index-sync:
 # core.autocrlf=true rewrites .go to CRLF, which `gofmt -l` would flag as a false positive
 # (.gitattributes pins only *.sh/*.golden to LF), so scripts/ci.ps1 deliberately omits this
 # and relies on the WSL `make ci` / CI for the canonical LF check. Fix with `gofmt -w .`.
+#
+# The scan is whole-tree; the REPORT and the exit condition are scoped (#6490). Declare the
+# change under test in GOFMT_OWNED_PATHS (whitespace-separated repo-relative files or
+# directories) and the findings split into two labelled groups: the files this change owns,
+# which FAIL the gate, and pre-existing tree debt from the other sessions sharing this
+# checkout, which is reported as a visible but non-fatal notice. With no scope declared the
+# whole tree is the owned set — the pre-split behavior, preserved as the fallback. Scoping
+# the STYLE check is safe because `build:` / `vet:` stay whole-tree: scoping can hide a
+# stale format, never a real break (the same pairing `fak validate` uses).
+#
+#   make gofmt-check GOFMT_OWNED_PATHS="internal/foo cmd/bar/baz.go"
+#
+# The body lives in scripts/gofmt-check.sh so the gate is runnable and testable on its own
+# (witnessed by internal/hooks/gofmt_check_script_test.go), the way `build:` delegates to
+# scripts/build.sh.
 gofmt-check:
-	@files="$$(git ls-files -co --exclude-standard '*.go')"; \
-	unformatted=""; \
-	if [ -n "$$files" ]; then \
-		unformatted="$$(printf '%s\n' "$$files" | xargs gofmt -l)"; \
-	fi; \
-	if [ -n "$$unformatted" ]; then \
-		echo "gofmt: not formatted (run 'gofmt -w .' from the repo root):"; \
-		echo "$$unformatted"; exit 1; \
-	fi; \
-	echo "gofmt: clean"
+	@sh scripts/gofmt-check.sh
 
 # hygiene: the deterministic, no-network repo-hygiene gates ci.yml runs HARD — doc
 # placement, links, hosted-demo URLs, demo-command refs, browser-demo metadata, file admission, secret shapes —
