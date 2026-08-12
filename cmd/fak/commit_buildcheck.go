@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/buildwitness"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -23,8 +24,11 @@ import (
 // uncommitted (`undefined: X`).
 //
 // Contract:
-//   - FAIL OPEN on infra error (git or the go toolchain unavailable, archive/extract failure):
-//     the gate warns and admits — it never refuses on an inability to check.
+//   - REPORT, never hide, an inability to check (#6006). The gate returns a
+//     safecommit.BuildCheckOutcome, and safecommit.DecideBuildCheck turns it into the
+//     admit/refuse verdict and the build_check object in --json. A static infra failure (git or
+//     the go toolchain unavailable) still fails open; a TIMEOUT no longer does silently — see
+//     internal/safecommit/buildcheck.go for why the two are not the same shrug.
 //   - Never block a PRE-EXISTING trunk red: when the prospective tree is red, the SAME packages
 //     are built at HEAD too; if HEAD is also red the red was not introduced by this commit, so
 //     the gate warns and admits (differential attribution, one extra build on the rare red path).
@@ -79,49 +83,58 @@ func extractUndefinedSymbol(buildOutput string) string {
 	return strings.TrimSpace(sym)
 }
 
-// commitBuildCheckGate decides whether the commit described by paths may land. It returns
-// ok=true to admit (including every fail-open case) or ok=false with reason "COMMITTED_RED" and
-// the compiler detail when THIS commit would turn the committed trunk red.
-func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok bool, reason, detail string) {
+// commitBuildCheckGate runs the gate and reports WHAT IT DID as a safecommit.BuildCheckOutcome
+// plus the diagnostic detail (the compiler transcript, or the error that stopped it). It does
+// not decide the commit's fate: safecommit.DecideBuildCheck owns that, so "the check could not
+// run" is a first-class state on the wire instead of a stderr line the caller never sees
+// (#6006).
+func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
 	pkgs := commitBuildCheckPackages(paths)
 	if len(pkgs) == 0 {
-		return true, "", "" // non-Go commit: nothing to gate
+		return safecommit.BuildCheckNotApplicable, "" // non-Go commit: nothing to gate
 	}
-	failOpen := func(err error) (bool, string, string) {
-		fmt.Fprintf(stderr, "fak commit: build-check skipped: %v\n", err)
-		return true, "", ""
+	// couldNotRun names the skip on stderr AND hands it back typed. Classification is
+	// safecommit's: a missing toolchain is a static property of the host (fails open), an
+	// expired deadline is not.
+	couldNotRun := func(err error) (safecommit.BuildCheckOutcome, string) {
+		outcome := safecommit.ClassifyBuildCheckError(err)
+		fmt.Fprintf(stderr, "fak commit: build-check %s: %v\n", outcome, err)
+		return outcome, err.Error()
 	}
 	if _, err := exec.LookPath("go"); err != nil {
-		return failOpen(err) // toolchain unavailable: cannot check, never refuse
+		return couldNotRun(err) // toolchain unavailable: cannot check
 	}
 	headSHA, err := gitRevParse(root, "HEAD")
 	if err != nil {
-		return failOpen(err)
+		return couldNotRun(err)
 	}
 	prospectiveTree, err := commitProspectiveTree(root, paths)
 	if err != nil {
-		return failOpen(err)
+		return couldNotRun(err)
 	}
 	headTree, err := gitRevParse(root, "HEAD^{tree}")
 	if err != nil {
-		return failOpen(err)
+		return couldNotRun(err)
 	}
 	if prospectiveTree == headTree {
-		return true, "", "" // no effective change: this commit cannot introduce a red
+		// No effective change: this commit cannot introduce a red, so there is nothing to
+		// compile — not a skipped check.
+		return safecommit.BuildCheckNotApplicable, "prospective tree is identical to HEAD"
 	}
 
 	propDir, err := extractCommittedTip(root, prospectiveTree)
 	if err != nil {
-		return failOpen(err)
+		return couldNotRun(err)
 	}
 	defer os.RemoveAll(propDir)
 	propPkgs := commitBuildCheckExistingPackages(propDir, pkgs)
 	if len(propPkgs) == 0 {
-		return true, "", "" // e.g. the commit deletes the package outright: nothing left to compile
+		// e.g. the commit deletes the package outright: nothing left to compile.
+		return safecommit.BuildCheckNotApplicable, "no buildable package remains in the prospective tree"
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
 	if buildOK || commitBuildCheckOnlyUnbuildable(buildDetail) {
-		return true, "", "" // the common fast path: ONE build, green
+		return safecommit.BuildCheckPassed, "" // the common fast path: ONE build, green
 	}
 
 	// The prospective tree is RED. Differential attribution: build the SAME packages at HEAD's
@@ -129,7 +142,7 @@ func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok boo
 	// it here would wedge every commit behind someone else's break, so warn and admit.
 	headDir, err := extractCommittedTip(root, headSHA)
 	if err != nil {
-		return failOpen(err)
+		return couldNotRun(err)
 	}
 	defer os.RemoveAll(headDir)
 	if headPkgs := commitBuildCheckExistingPackages(headDir, pkgs); len(headPkgs) > 0 {
@@ -140,13 +153,47 @@ func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (ok boo
 			// the commit is already admitted; recording never changes that.
 			w := emitTrunkRedWitness(stderr, root, "commit", headSHA, failingPackagesFromBuild(headDetail), extractUndefinedSymbol(headDetail))
 			fmt.Fprint(stderr, trunkRedWitnessNote(w))
-			return true, "", ""
+			return safecommit.BuildCheckHeadRed, headDetail
 		}
 	}
 	if sym := extractUndefinedSymbol(buildDetail); sym != "" {
 		buildDetail = "undefined: " + sym + "\n" + buildDetail
 	}
-	return false, "COMMITTED_RED", buildDetail
+	return safecommit.BuildCheckFailed, buildDetail
+}
+
+// refuseCommitBuildCheck renders a build-gate refusal on both channels and returns the process
+// exit code. The --json branch is the point of #6006: a worker that parses the result object
+// sees the refusal AND the gate's outcome, instead of a stderr line no exit code reflected.
+func refuseCommitBuildCheck(stdout, stderr io.Writer, paths []string, bc safecommit.BuildCheckResult, reason string, asJSON bool) int {
+	code, ok := safecommit.BuildCheckExitCode(reason)
+	if !ok {
+		code = safecommit.ExitRefused
+	}
+	fmt.Fprintf(stderr, "fak commit: %s\n", reason)
+	if d := strings.TrimSpace(bc.Detail); d != "" {
+		fmt.Fprintln(stderr, d)
+	}
+	fmt.Fprintln(stderr, commitBuildCheckAdvice(reason))
+	if asJSON {
+		res := safecommit.ScoreResult(safecommit.Result{Paths: paths, Reason: reason, Detail: bc.Detail, BuildCheck: &bc})
+		if err := writeIndentedJSON(stdout, res); err != nil {
+			fmt.Fprintf(stderr, "fak commit: %v\n", err)
+			return safecommit.ExitPostCommitFailure
+		}
+	}
+	return code
+}
+
+// commitBuildCheckAdvice is the operator sentence for each gate refusal: what it means and the
+// named ways out. Pure, so the wording is testable without git or the go toolchain.
+func commitBuildCheckAdvice(reason string) string {
+	switch reason {
+	case safecommit.ReasonBuildCheckTimeout:
+		return "fak commit: the prospective committed tree was NEVER compiled — the build gate timed out, so nothing here says this commit is green. This is retryable (exit 3): re-run it, or pass --allow-build-check-timeout (env FAK_COMMIT_BUILD_CHECK=allow-timeout) to land it UNCHECKED on purpose, or --no-build-check to skip the gate outright. Both opt-ins are recorded in --json as build_check.failed_open and docked in the commit's score."
+	default:
+		return "fak commit: the prospective committed tree does not compile under default tags — commit refused so the committed trunk stays green. Commit the missing definition too, or fence not-yet-compiling WIP behind //go:build wip_<feature> (see `fak wip fence`), or pass --no-build-check for an intentional multi-commit landing."
+	}
 }
 
 // formatPreexistingRedAdvisory renders the advisory the gate prints when differential attribution

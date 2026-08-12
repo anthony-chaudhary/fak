@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
 // commit_buildcheck_test.go — proves the COMMITTED_RED commit-boundary gate (#4152) reads the
@@ -65,9 +67,9 @@ func TestCommitBuildCheckGate_nonGoCommitSkipsGate(t *testing.T) {
 	// No .go path → no packages → the gate admits without touching git at all (the root need not
 	// even be a repo).
 	var stderr bytes.Buffer
-	ok, reason, detail := commitBuildCheckGate(&stderr, t.TempDir(), []string{"README.md", "docs/x.txt"})
-	if !ok || reason != "" || detail != "" {
-		t.Fatalf("non-Go commit must skip the gate; got ok=%v reason=%q detail=%q", ok, reason, detail)
+	outcome, detail := commitBuildCheckGate(&stderr, t.TempDir(), []string{"README.md", "docs/x.txt"})
+	if outcome != safecommit.BuildCheckNotApplicable || detail != "" {
+		t.Fatalf("non-Go commit must skip the gate; got outcome=%q detail=%q", outcome, detail)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no warnings; got %q", stderr.String())
@@ -152,9 +154,9 @@ func TestCommitBuildCheckGate_introducedRedRefused(t *testing.T) {
 	writeBuildCheckFile(t, repo, "p/caller.go", "package p\n\nfunc Caller() int {\n\treturn missingDef()\n}\n")
 
 	var stderr bytes.Buffer
-	ok, reason, detail := commitBuildCheckGate(&stderr, repo, []string{"p/caller.go"})
-	if ok || reason != "COMMITTED_RED" {
-		t.Fatalf("expected COMMITTED_RED refusal; got ok=%v reason=%q detail=%q stderr=%s", ok, reason, detail, stderr.String())
+	outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/caller.go"})
+	if _, admit, reason := safecommit.DecideBuildCheck(outcome, detail, false); admit || reason != safecommit.ReasonCommittedRed {
+		t.Fatalf("expected COMMITTED_RED refusal; got outcome=%q admit=%v reason=%q detail=%q stderr=%s", outcome, admit, reason, detail, stderr.String())
 	}
 	if !strings.HasPrefix(detail, "undefined: missingDef") {
 		t.Fatalf("detail should headline the undefined symbol; got %q", detail)
@@ -164,17 +166,17 @@ func TestCommitBuildCheckGate_introducedRedRefused(t *testing.T) {
 	// tree, one more path, green verdict.
 	writeBuildCheckFile(t, repo, "p/def.go", "package p\n\nfunc missingDef() int { return 2 }\n")
 	stderr.Reset()
-	ok, reason, detail = commitBuildCheckGate(&stderr, repo, []string{"p/caller.go", "p/def.go"})
-	if !ok {
-		t.Fatalf("definition included: expected admit; got reason=%q detail=%q stderr=%s", reason, detail, stderr.String())
+	outcome, detail = commitBuildCheckGate(&stderr, repo, []string{"p/caller.go", "p/def.go"})
+	if outcome != safecommit.BuildCheckPassed {
+		t.Fatalf("definition included: expected a PASSED gate; got outcome=%q detail=%q stderr=%s", outcome, detail, stderr.String())
 	}
 
 	// Committing only an unchanged path reproduces HEAD's tree exactly — the untracked red
 	// caller.go still on disk must be MASKED, and the gate short-circuits green without building.
 	stderr.Reset()
-	ok, reason, detail = commitBuildCheckGate(&stderr, repo, []string{"p/p.go"})
-	if !ok {
-		t.Fatalf("no-effective-change commit: expected admit; got reason=%q detail=%q stderr=%s", reason, detail, stderr.String())
+	outcome, detail = commitBuildCheckGate(&stderr, repo, []string{"p/p.go"})
+	if outcome != safecommit.BuildCheckNotApplicable {
+		t.Fatalf("no-effective-change commit: expected a not-applicable gate; got outcome=%q detail=%q stderr=%s", outcome, detail, stderr.String())
 	}
 }
 
@@ -193,9 +195,12 @@ func TestCommitBuildCheckGate_preexistingHeadRedFailsOpen(t *testing.T) {
 	writeBuildCheckFile(t, repo, "p/extra.go", "package p\n\nfunc Extra() int { return 3 }\n")
 
 	var stderr bytes.Buffer
-	ok, reason, detail := commitBuildCheckGate(&stderr, repo, []string{"p/extra.go"})
-	if !ok {
-		t.Fatalf("pre-existing HEAD red must fail open; got reason=%q detail=%q stderr=%s", reason, detail, stderr.String())
+	outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/extra.go"})
+	if _, admit, reason := safecommit.DecideBuildCheck(outcome, detail, false); !admit {
+		t.Fatalf("pre-existing HEAD red must fail open; got outcome=%q reason=%q detail=%q stderr=%s", outcome, reason, detail, stderr.String())
+	}
+	if outcome != safecommit.BuildCheckHeadRed {
+		t.Fatalf("pre-existing HEAD red must be reported as %q, not hidden behind a bare admit; got %q", safecommit.BuildCheckHeadRed, outcome)
 	}
 	// The advisory must not stay a silent shrug: it names the shared break (the undefined symbol)
 	// and frames it as needing a fix at its source, aligned with the pre-push gate's TRUNK_ALREADY_RED
@@ -217,8 +222,8 @@ func TestCommitBuildCheckGate_preexistingHeadRedFailsOpen(t *testing.T) {
 	if outside := trunkRedLedgerDefault(); outside != "" && !strings.HasPrefix(outside, repo) {
 		before := trunkRedLedgerLineCount(outside)
 		stderr.Reset()
-		if ok, _, _ := commitBuildCheckGate(&stderr, repo, []string{"p/extra.go"}); !ok {
-			t.Fatalf("second pre-existing-red pass must still fail open")
+		if again, _ := commitBuildCheckGate(&stderr, repo, []string{"p/extra.go"}); again != safecommit.BuildCheckHeadRed {
+			t.Fatalf("second pre-existing-red pass must still fail open; got %q", again)
 		}
 		if after := trunkRedLedgerLineCount(outside); after != before {
 			t.Fatalf("gating %s polluted this repo's ledger %s: %d -> %d row(s)", repo, outside, before, after)

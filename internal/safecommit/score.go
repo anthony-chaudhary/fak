@@ -26,6 +26,15 @@ func resultScore(res Result) (int, []string) {
 	if strings.TrimSpace(res.Reason) == "" {
 		switch {
 		case res.Verified:
+			// A commit admitted WITHOUT its prospective tree ever being compiled is not a
+			// full-credit commit (#6006): the gate the checkpoint bar leans on did not run, so
+			// the grade must differ from one that passed it. 85 lands it a whole GRADE below a
+			// checked commit (B, not A) — the observed timeout landed silently and still graded
+			// A. Docked ahead of the review note because an unrun build gate is the heavier of
+			// the two gaps: a missing reviewer is an opinion, a missing compile is a fact.
+			if note := buildCheckNote(res); note != "" {
+				return 85, []string{"verified commit; " + note}
+			}
 			if res.Review != nil && res.Review.Verdict == modelroute.ReviewUnavailable {
 				return 94, []string{"verified commit; optional review unavailable"}
 			}
@@ -53,6 +62,12 @@ func resultScore(res Result) (int, []string) {
 		return 72, []string{"pre-commit guard prevented a likely stale or ambiguous path commit"}
 	case ReasonCoreSelfModify:
 		return 72, []string{"pre-commit guard refused a hard-self core-lock edit without independent maintenance witness"}
+	case ReasonBuildCheckTimeout:
+		// The gate could not finish and nobody opted into fail-open: nothing landed, but the
+		// same command may well pass next tick — the retryable-contention tier, not a verdict.
+		return 82, []string{"pre-commit build gate could not finish (retryable); no --allow-build-check-timeout opt-in"}
+	case ReasonCommittedRed:
+		return 58, []string{"pre-commit build gate refused a commit that would red the committed trunk"}
 	case ReasonOffTrunk, ReasonMergeInProgress, ReasonNotARepo:
 		return 62, []string{"repository state blocks a safe path-scoped commit"}
 	case ReasonReviewRefuted:
@@ -66,6 +81,15 @@ func resultScore(res Result) (int, []string) {
 	default:
 		return 50, []string{"unclassified safecommit refusal: " + res.Reason}
 	}
+}
+
+// buildCheckNote is the nil-safe lift of BuildCheckScoreNote over a Result: "" when no gate
+// outcome was attached, or when the gate actually compiled the prospective tree.
+func buildCheckNote(res Result) string {
+	if res.BuildCheck == nil {
+		return ""
+	}
+	return BuildCheckScoreNote(*res.BuildCheck)
 }
 
 func resultGrade(score int) string {

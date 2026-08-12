@@ -188,6 +188,12 @@ type Result struct {
 	// reading that says which, and it is recorded on the maintenance decision note.
 	CoreLockWitnessCorrelation string                   `json:"core_lock_witness_correlation,omitempty"`
 	Review                     *modelroute.ReviewResult `json:"review,omitempty"`
+	// BuildCheck is what the COMMITTED_RED prospective-tree compile gate DID (#6006): passed,
+	// failed, or skipped — and, when skipped, whether the commit was admitted anyway. The gate
+	// runs in cmd/fak before the executor, so CommitWith never sets this; the caller attaches
+	// it to the result it emits. Absent means the caller ran no gate at all, which is itself
+	// distinguishable from a gate that ran and passed (buildcheck.go).
+	BuildCheck *BuildCheckResult `json:"build_check,omitempty"`
 	// Velocity is the effect-qualified ship-speed reading (#4241): separate local and
 	// push legs, each scored only after the command's authoritative effect fields
 	// qualify it (Committed&&Verified for local, additionally Pushed for push). It is
