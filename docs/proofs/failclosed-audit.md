@@ -136,6 +136,8 @@ cross-checked against the live registry in code.
 | HARDWARE_TELL | block | fail-open | no local-hardware blocker as a terminal answer |
 | BARE_COMMIT_SWEEP | warn | fail-open | advisory by design (#3615); closes the raw-git bypass |
 | E2E_OVER_MOCKS | warn | fail-open | advisory by design (#2901); asks for a witnessed run |
+| DESKTOP_POPUP_REGRESSION | block | fail-open | candidate-index Go/Python/PowerShell helpers must suppress background console windows |
+| PARALLEL_FABRIC_NUDGE | warn | fail-open | advisory; new parallel-fanout language should name the bounded micro-context fabric |
 | TRUST_WIDENING | warn | fail-open | advisory; flags a widened trust boundary |
 | PRIOR_ART | warn | fail-open | advisory; prints the SOTA reference to cite |
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |

@@ -9,7 +9,7 @@
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
 //
-// The registry has grown well past that Python-era set: PreCommitGates() registers all 17 gates
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 19 gates
 // today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
 // registry and fails when the two disagree, so this sentence cannot quietly decay the way the
 // count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
@@ -121,6 +121,7 @@ func PreCommitGates() []Gate {
 		// FLEET_E2E_GUARD=block to hard-enforce it ("failing the merge otherwise"), or ALLOW_NO_E2E=1
 		// to skip it once.
 		{Name: "E2E_OVER_MOCKS", ModeEnv: "FLEET_E2E_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_E2E", Check: gateE2EOverMocks},
+		{Name: "DESKTOP_POPUP_REGRESSION", EscapeEnv: "FLEET_ALLOW_POPUP", Check: CheckDesktopPopup},
 		// PRIOR_ART is ADVISORY: DefaultMode "warn" so it never blocks a commit out of the box —
 		// it only prints the SOTA reference + a `Prior-art:` suggestion. Set FLEET_PRIORART_GUARD=block
 		// to hard-enforce it, or ALLOW_NO_PRIOR_ART=1 to skip it once. It runs LAST.
