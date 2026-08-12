@@ -101,26 +101,8 @@ func runConceptFreshnessStaged(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak concept freshness:", err)
 		return 1
 	}
+	// Same fold as the worktree surface: a tree-scoped check that could not run has no
+	// verdict to report, and must not encode the result's stale Fresh flag (#5962).
 	res, err := conceptcatalog.CheckGitTree(root, *tree)
-	if *jsonOut {
-		_ = json.NewEncoder(stdout).Encode(res)
-	}
-	if err != nil {
-		fmt.Fprintln(stderr, "fak concept freshness --staged:", err)
-		return 1
-	}
-	if !res.Fresh {
-		if !*jsonOut {
-			fmt.Fprintln(stderr, "stale generated concept artifacts in the staged tree:")
-			for _, p := range res.StalePaths {
-				fmt.Fprintln(stderr, " -", p)
-			}
-			fmt.Fprintln(stderr, "regenerate:", res.Regenerate)
-		}
-		return 1
-	}
-	if !*jsonOut {
-		fmt.Fprintln(stdout, "concept generated artifacts fresh in the staged tree")
-	}
-	return 0
+	return conceptcatalog.RenderFreshness(stdout, stderr, "fak concept freshness --staged", " in the staged tree", res, err, *jsonOut)
 }

@@ -60,61 +60,153 @@ type Drift struct {
 	Reason  string    `json:"reason"`
 }
 
-// CheckFreshness compares the loaded catalog against its live sources on disk and
-// returns every drift finding, sorted (by kind, then subject) for a stable gate
-// message. An empty slice means the index agrees with reality — the green state the
-// gate exists to enforce. It reads only the tree under c.Root; no network.
+// Verdict is a freshness probe's answer, and it carries THREE values rather than two
+// (#5962). "I checked and found no drift" and "I could not check" are both non-stale,
+// yet only the first may be reported as fresh: a probe that hands back the reassuring
+// answer for a detector that never ran is the tool lying to its own operator. Only
+// VerdictStale is evidence of drift, so only it may drive a gate or a self-heal.
+type Verdict string
+
+const (
+	// VerdictFresh: every detector ran and none of them found drift.
+	VerdictFresh Verdict = "fresh"
+	// VerdictStale: at least one detector PROVED drift. The only actionable verdict.
+	VerdictStale Verdict = "stale"
+	// VerdictUnknown: nothing proved drift, but at least one detector could not run,
+	// so the tree may disagree with the index in a way nothing looked at.
+	VerdictUnknown Verdict = "unknown"
+)
+
+// Unchecked is one detector that could not run: which detector, the repo-relative
+// source it needed, and the read error that stopped it. It is deliberately NOT a
+// Drift — an unread source is not evidence that the index disagrees with the tree,
+// and folding it into the drift slice would red a build over a check that never
+// happened. It is what lets a report be non-stale without being fresh.
+type Unchecked struct {
+	Detector DriftKind `json:"detector"`
+	Source   string    `json:"source"`
+	Reason   string    `json:"reason"`
+}
+
+// FreshnessReport is the honest form of the freshness fold: the drift findings AND
+// the detectors that never got to look. CheckFreshness's []Drift cannot express the
+// second, so an empty slice from it means only "no drift was PROVEN" — reading that
+// as "the index agrees with reality" is exactly the confusion this report removes.
+type FreshnessReport struct {
+	Drifts    []Drift     `json:"drifts,omitempty"`
+	Unchecked []Unchecked `json:"unchecked,omitempty"`
+}
+
+// Verdict folds the report to one word. Stale outranks unknown (proven drift is the
+// actionable answer even when some other detector also failed to run) and unknown
+// outranks fresh (an unrun detector may be hiding drift nobody looked for).
+func (r FreshnessReport) Verdict() Verdict {
+	switch {
+	case len(r.Drifts) > 0:
+		return VerdictStale
+	case len(r.Unchecked) > 0:
+		return VerdictUnknown
+	default:
+		return VerdictFresh
+	}
+}
+
+// Fresh reports whether every detector ran and none found drift — the one state a
+// caller may read as "the index is current". It is a method, not a field, so no
+// caller can hand out a report claiming a freshness it did not earn.
+func (r FreshnessReport) Fresh() bool { return r.Verdict() == VerdictFresh }
+
+// CheckFreshness returns the drift findings only, sorted (by kind, then subject) for
+// a stable gate message. An empty slice means NO DRIFT WAS PROVEN — which is not the
+// same as "the index agrees with reality", because a detector whose source could not
+// be read proves nothing at all. Callers that need that distinction (anything that
+// reports a verdict to a human or a machine) must use CheckFreshnessReport and its
+// Verdict; callers that only count proven drift, such as a catch-up score, are right
+// to use this projection. It reads only the tree under c.Root; no network.
+func (c *Catalog) CheckFreshness() []Drift { return c.CheckFreshnessReport().Drifts }
+
+// CheckFreshnessReport compares the loaded catalog against its live sources on disk.
 //
 // It folds five detectors: undeclared leaves, dead INDEX.md doc links, main.go verb
 // cases missing from the C3 manifest, orphaned dated notes, and dead llms.txt links.
-// A source it cannot read (e.g. no main.go) contributes no finding rather than an
-// error — a missing source is the absence of a claim, not a drift. The detail accessors
-// below back each fold and are exported so a gate can report just the category it cares
-// about.
-func (c *Catalog) CheckFreshness() []Drift {
-	var out []Drift
-	for _, leaf := range c.UndeclaredLeaves() {
-		out = append(out, Drift{
+// A source it cannot read still contributes no DRIFT finding — a missing source is
+// the absence of a claim, not a disagreement — but it is now recorded as an
+// Unchecked, so the detector that skipped it can never be mistaken for one that ran
+// and found the tree clean (#5962). The detail accessors below back each fold and are
+// exported so a gate can report just the category it cares about; they keep their
+// drift-only signatures, so a caller that wants the unchecked half asks here.
+func (c *Catalog) CheckFreshnessReport() FreshnessReport {
+	var rep FreshnessReport
+	note := func(u *Unchecked) {
+		if u != nil {
+			rep.Unchecked = append(rep.Unchecked, *u)
+		}
+	}
+
+	leaves, leavesUnchecked := c.undeclaredLeaves()
+	note(leavesUnchecked)
+	for _, leaf := range leaves {
+		rep.Drifts = append(rep.Drifts, Drift{
 			Kind:    DriftUndeclaredLeaf,
 			Subject: leaf,
 			Reason:  "internal/" + leaf + " holds Go files but has no [lanes.trees] lane entry",
 		})
 	}
 	for _, d := range c.DeadDocLinks() {
-		out = append(out, Drift{
+		rep.Drifts = append(rep.Drifts, Drift{
 			Kind:    DriftDeadDocLink,
 			Subject: d.Path,
 			Reason:  "doc-map entry " + d.Title + " points at " + d.Path + " which no longer exists",
 		})
 	}
-	for _, verb := range c.UndeclaredVerbs() {
-		out = append(out, Drift{
+	verbs, verbsUnchecked := c.undeclaredVerbs()
+	note(verbsUnchecked)
+	for _, verb := range verbs {
+		rep.Drifts = append(rep.Drifts, Drift{
 			Kind:    DriftUnknownVerb,
 			Subject: verb,
 			Reason:  `cmd/fak/main.go case "` + verb + `" has no C3 verb-manifest entry`,
 		})
 	}
-	for _, note := range c.OrphanNotes() {
-		out = append(out, Drift{
+	notes, notesUnchecked := c.orphanNotes()
+	note(notesUnchecked)
+	if notesUnchecked != nil && notesUnchecked.Source == "INDEX.md" {
+		// DeadDocLinks walks c.Docs, which Load parsed from this same INDEX.md and
+		// silently left EMPTY when it could not read it (Load degrades a missing
+		// INDEX.md to an empty doc map by design). Without this the doc-link detector
+		// would report zero dead links for a doc map it never had — a false green from
+		// a check that never happened, which is the whole point of this report.
+		note(&Unchecked{Detector: DriftDeadDocLink, Source: notesUnchecked.Source, Reason: notesUnchecked.Reason})
+	}
+	for _, n := range notes {
+		rep.Drifts = append(rep.Drifts, Drift{
 			Kind:    DriftOrphanNote,
-			Subject: note,
-			Reason:  note + " is a dated note under docs/notes/ but is not listed in INDEX.md",
+			Subject: n,
+			Reason:  n + " is a dated note under docs/notes/ but is not listed in INDEX.md",
 		})
 	}
-	for _, link := range c.DeadLLMSLinks() {
-		out = append(out, Drift{
+	links, linksUnchecked := c.deadLLMSLinks()
+	note(linksUnchecked)
+	for _, link := range links {
+		rep.Drifts = append(rep.Drifts, Drift{
 			Kind:    DriftDeadLLMSLink,
 			Subject: link,
 			Reason:  "llms.txt links " + link + " which no longer exists on disk",
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Kind != out[j].Kind {
-			return out[i].Kind < out[j].Kind
+	sort.SliceStable(rep.Drifts, func(i, j int) bool {
+		if rep.Drifts[i].Kind != rep.Drifts[j].Kind {
+			return rep.Drifts[i].Kind < rep.Drifts[j].Kind
 		}
-		return out[i].Subject < out[j].Subject
+		return rep.Drifts[i].Subject < rep.Drifts[j].Subject
 	})
-	return out
+	sort.SliceStable(rep.Unchecked, func(i, j int) bool {
+		if rep.Unchecked[i].Detector != rep.Unchecked[j].Detector {
+			return rep.Unchecked[i].Detector < rep.Unchecked[j].Detector
+		}
+		return rep.Unchecked[i].Source < rep.Unchecked[j].Source
+	})
+	return rep
 }
 
 // UndeclaredLeaves returns the names of internal/<X> directories that hold at least
@@ -125,13 +217,24 @@ func (c *Catalog) CheckFreshness() []Drift {
 // yet reaches the identical verdict (pinned by a live parity test). A leaf declared in
 // [lanes] with no explicit tree is declared, NOT drift; counting only [lanes.trees]
 // keys would falsely flag it. Sorted, deduped.
-func (c *Catalog) UndeclaredLeaves() []string {
+//
+// A tree it cannot read yields no gaps. That is the drift-only view; ask
+// CheckFreshnessReport if you need to tell "no gaps" apart from "never looked".
+func (c *Catalog) UndeclaredLeaves() []string { g, _ := c.undeclaredLeaves(); return g }
+
+// undeclaredLeaves is UndeclaredLeaves plus the reason it could not finish, if any:
+// an unreadable internal/ (nothing was scanned at all) or an unreadable package
+// directory (a leaf that might hold Go files was skipped). First failure wins — one
+// named unchecked source is enough to disqualify a fresh verdict, and the scan keeps
+// going so proven drift elsewhere still outranks it.
+func (c *Catalog) undeclaredLeaves() ([]string, *Unchecked) {
 	dir := filepath.Join(c.Root, "internal")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, &Unchecked{Detector: DriftUndeclaredLeaf, Source: "internal", Reason: err.Error()}
 	}
 	var gaps []string
+	var unchecked *Unchecked
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -140,28 +243,37 @@ func (c *Catalog) UndeclaredLeaves() []string {
 		if c.declared[name] {
 			continue
 		}
-		if !dirHasGoFiles(filepath.Join(dir, e.Name())) {
+		hasGo, readErr := dirHasGoFiles(filepath.Join(dir, e.Name()))
+		if readErr != nil {
+			if unchecked == nil {
+				unchecked = &Unchecked{Detector: DriftUndeclaredLeaf, Source: "internal/" + e.Name(), Reason: readErr.Error()}
+			}
+			continue
+		}
+		if !hasGo {
 			continue // not a Go package (testdata/doc dir): not a leaf
 		}
 		gaps = append(gaps, name)
 	}
 	sort.Strings(gaps)
-	return gaps
+	return gaps, unchecked
 }
 
 // dirHasGoFiles reports whether dir directly contains at least one .go file. It
 // mirrors internal/hooks.dirHasGoFiles so the undeclared-leaf rule matches the gate's.
-func dirHasGoFiles(dir string) bool {
+// The read error is returned rather than folded into a false — "no Go files here" and
+// "could not look" are different answers and only the first is a decision (#5962).
+func dirHasGoFiles(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // DeadDocLinks returns the doc-map entries whose path is a LOCAL repo path (not an
@@ -219,17 +331,34 @@ func isDatedNote(base string) bool {
 // never disagree on an orphan. A missing INDEX.md yields nothing (no map to
 // reconcile against). Sorted, deduped; reads only the tree under c.Root — no git,
 // no network (tier 1).
-func (c *Catalog) OrphanNotes() []string {
+func (c *Catalog) OrphanNotes() []string { n, _ := c.orphanNotes(); return n }
+
+// orphanNotes is OrphanNotes plus the reason it could not finish, if any: an
+// unreadable INDEX.md (there is no map to reconcile against, so no note can be shown
+// reachable) or an unreadable docs/notes subtree (notes that might be orphans were
+// never enumerated). The walk continues past a bad subtree so proven orphans
+// elsewhere are still reported — stale outranks unknown.
+func (c *Catalog) orphanNotes() ([]string, *Unchecked) {
 	idx, err := os.ReadFile(filepath.Join(c.Root, "INDEX.md"))
 	if err != nil {
-		return nil
+		return nil, &Unchecked{Detector: DriftOrphanNote, Source: "INDEX.md", Reason: err.Error()}
 	}
 	text := string(idx)
 	notesDir := filepath.Join(c.Root, "docs", "notes")
 	var out []string
+	var unchecked *Unchecked
 	_ = filepath.WalkDir(notesDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // an unreadable subtree contributes no finding, not an error
+			// An unreadable subtree contributes no finding — but it is recorded, so a
+			// walk that never saw the notes cannot pass for one that saw them all.
+			if unchecked == nil {
+				rel, relErr := filepath.Rel(c.Root, path)
+				if relErr != nil {
+					rel = path
+				}
+				unchecked = &Unchecked{Detector: DriftOrphanNote, Source: filepath.ToSlash(rel), Reason: err.Error()}
+			}
+			return nil
 		}
 		if d.IsDir() {
 			return nil
@@ -248,7 +377,7 @@ func (c *Catalog) OrphanNotes() []string {
 		return nil
 	})
 	sort.Strings(out)
-	return out
+	return out, unchecked
 }
 
 // llmsLinkRE captures every markdown link target `](target)`. llms.txt carries inline
@@ -264,10 +393,15 @@ var llmsLinkRE = regexp.MustCompile(`\]\(([^)]+)\)`)
 // ?query is stripped, and only a .md target is checked. Deduped (by cleaned path),
 // sorted. A missing llms.txt yields nothing — no map to check. Reads only c.Root; no
 // network (tier 1: an external URL is never fetched, only skipped).
-func (c *Catalog) DeadLLMSLinks() []string {
+func (c *Catalog) DeadLLMSLinks() []string { l, _ := c.deadLLMSLinks(); return l }
+
+// deadLLMSLinks is DeadLLMSLinks plus the reason it could not finish: an llms.txt
+// this process cannot read means the answer-engine map was never scanned, which is
+// not the same answer as "every link in it resolves".
+func (c *Catalog) deadLLMSLinks() ([]string, *Unchecked) {
 	b, err := os.ReadFile(filepath.Join(c.Root, "llms.txt"))
 	if err != nil {
-		return nil
+		return nil, &Unchecked{Detector: DriftDeadLLMSLink, Source: "llms.txt", Reason: err.Error()}
 	}
 	seen := map[string]bool{}
 	var dead []string
@@ -294,7 +428,7 @@ func (c *Catalog) DeadLLMSLinks() []string {
 		}
 	}
 	sort.Strings(dead)
-	return dead
+	return dead, nil
 }
 
 // mainCaseRE captures the quoted verb tokens of a `case "a", "b":` line in a Go
@@ -307,10 +441,15 @@ var mainCaseRE = regexp.MustCompile(`"([^"]+)"`)
 // drift (#1293). It parses the dispatch switch out of main.go on disk (read-only);
 // a missing main.go yields no findings (absence of a claim, not a drift). Sorted,
 // deduped, lowercased.
-func (c *Catalog) UndeclaredVerbs() []string {
+func (c *Catalog) UndeclaredVerbs() []string { v, _ := c.undeclaredVerbs(); return v }
+
+// undeclaredVerbs is UndeclaredVerbs plus the reason it could not finish. This is the
+// detector the issue named: an unreadable cmd/fak/main.go used to read as green, so
+// the probe reported "no uncataloged verbs" for a switch it never parsed (#5962).
+func (c *Catalog) undeclaredVerbs() ([]string, *Unchecked) {
 	b, err := os.ReadFile(filepath.Join(c.Root, "cmd", "fak", "main.go"))
 	if err != nil {
-		return nil
+		return nil, &Unchecked{Detector: DriftUnknownVerb, Source: "cmd/fak/main.go", Reason: err.Error()}
 	}
 	known := map[string]bool{}
 	for _, v := range verbManifest {
@@ -325,7 +464,7 @@ func (c *Catalog) UndeclaredVerbs() []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // DispatchVerbs is the exported form of mainDispatchVerbs: the lowercased dispatch

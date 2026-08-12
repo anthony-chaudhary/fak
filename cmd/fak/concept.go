@@ -46,28 +46,11 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintln(stderr, "fak concept freshness: --check=false is unsupported; use: "+conceptcatalog.RegenerateCommand)
 			return 2
 		}
+		// The (result, error) pair is folded by the renderer, never read in order
+		// here: encoding the result first printed `{"fresh":true}` on stdout for a
+		// check that had just failed (#5962).
 		res, e := conceptcatalog.CheckFresh(root)
-		if *jsonOut {
-			_ = json.NewEncoder(stdout).Encode(res)
-		}
-		if e != nil {
-			fmt.Fprintln(stderr, "fak concept freshness:", e)
-			return 1
-		}
-		if !res.Fresh {
-			if !*jsonOut {
-				fmt.Fprintln(stderr, "stale generated concept artifacts:")
-				for _, p := range res.StalePaths {
-					fmt.Fprintln(stderr, " -", p)
-				}
-				fmt.Fprintln(stderr, "regenerate:", res.Regenerate)
-			}
-			return 1
-		}
-		if !*jsonOut {
-			fmt.Fprintln(stdout, "concept generated artifacts fresh")
-		}
-		return 0
+		return conceptcatalog.RenderFreshness(stdout, stderr, "fak concept freshness", "", res, e, *jsonOut)
 	case "generate":
 		cmd := exec.Command("python", filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"), "--workspace", root, "--markdown-dir", filepath.Join(root, "docs", "concept-disambiguation-scorecard"))
 		cmd.Dir = root
