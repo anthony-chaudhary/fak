@@ -19,6 +19,17 @@ package envconfiglint
 //
 // Tracked for relocation by the follow-up issue filed alongside #2863.
 //
+// SECOND OCCURRENCE (#6215) — why this ledger tripled. Everything below the original nine
+// entries landed during the ratchet's SECOND unwatched red: the gate went red again after the
+// first cleanup and stayed red for 1050 trunk advances (FAK_FLEET_BUS, the oldest), so sixteen
+// further non-secret reads shipped against a gate that refused nothing. They are admitted here
+// rather than relocated because the destination surface (#2862) still does not exist, and
+// because the alternative — regenerating baseline.go — would absorb all sixteen silently and
+// destroy the ratchet, the exact failure this file's header warns about. The age itself was
+// the defect, not the reads, so liveness.go now measures it: TestRatchetIsStillGating reds
+// when an offense survives more than one trunk advance, which is the condition every entry
+// below was created under and which nothing previously observed.
+//
 // SCANNER VISIBILITY — why four entries left WITHOUT relocating. ScanGoEnvReads is a regex
 // over os.Getenv/os.LookupEnv taking a STRING-LITERAL argument, so it only sees a read whose
 // name is spelled at the call site. 5b56bfdb8 deduped four such call sites into helpers that
@@ -31,6 +42,14 @@ package envconfiglint
 // the reads are now UNGATED, and nothing stops a new env read from being added behind either
 // helper. Re-add the entry, and prefer a literal call site, if a helper is ever inlined.
 var admittedPostFreeze = []string{
+	// cmd/fak/dispatch_tick_lease_beat.go — overrides os.Hostname() as the identity stamped on
+	// the DOS lane leases the dispatch tick beats, so two workers on one box can hold distinct
+	// lanes. A machine label, not a credential: it authenticates nothing, and its siblings
+	// DISPATCH_LANE / DISPATCH_POOL / DISPATCH_ACCOUNT are already grandfathered.
+	// Relocates to: a `--host-id` flag on `fak dispatch tick`, threaded into
+	// newDispatchLaneBeater instead of re-read from the process env at construction.
+	"DISPATCH_HOST_ID",
+
 	// cmd/fak/guard_negframe_summary.go — the comma-separated ablation-token list that turns
 	// named features OFF for an A/B arm; the negframe token here selects #3546's control arm
 	// by disabling the emit-time reframe pass (default-on treatment otherwise). An experiment
@@ -39,12 +58,35 @@ var admittedPostFreeze = []string{
 	// the token vocabulary `fak ablate` already owns via internal/ablate.
 	"FAK_ABLATE",
 
+	// internal/archreport/usage.go — filesystem path override for the durable per-user
+	// architecture-usage ledger, with the literal value "off" disabling recording entirely. A
+	// location on disk plus a kill switch; it grants access to nothing the process could not
+	// already reach, which is the FAK_FLEET_DIR judgment applied unchanged.
+	// Relocates to: a path argument to UsagePath (a Config field the caller sets), the same
+	// shape FAK_SERVICE_LEDGER_DIR takes below.
+	"FAK_ARCHITECTURE_USAGE_FILE",
+
 	// cmd/fak/chatops.go — the admin roster allowed to drive the door. An identity list, not a
 	// credential (the chatops TOKEN is separate and secret-shaped). Its two siblings
 	// FAK_CHATOPS_BOT_USER and FAK_CHATOPS_CHANNEL are absent because the scan can no longer
 	// see them, not because they relocated — see SCANNER VISIBILITY above. This one stays: it
 	// is still spelled literally, at resolveChatopsAdmins.
 	"FAK_CHATOPS_ADMINS",
+
+	// internal/launchshim/launchshim.go — the launch shim's bypass switch (1/true/yes/on):
+	// when on, EffectiveDirect runs the real binary and skips the shim. A behavior toggle, not
+	// an authorization boundary — the same judgment FAK_SHAREDTASK gets below.
+	// Relocates to: nothing new is needed. EffectiveDirect ALREADY takes both a `flag bool`
+	// argument and a Config.Disabled field; the env arm is a third, redundant input that can
+	// simply be deleted once its callers set one of the two that are passed IN.
+	"FAK_DIRECT",
+
+	// cmd/fak/fleet_control.go — directory override for the fleet control bus, consulted ahead
+	// of the grandfathered FLEET_STATE_DIR sibling it otherwise derives from. A path. This is
+	// the OLDEST outstanding entry (1050 trunk advances at admission) and therefore the read
+	// that dates the second unwatched red; see the SECOND OCCURRENCE note above.
+	// Relocates to: a `--bus-dir` flag on `fak fleet`, beside `--registry-dir`.
+	"FAK_FLEET_BUS",
 
 	// cmd/fak/garden.go — two filesystem paths for the garden tick's growth collect:
 	// FAK_FLEET_DIR overrides the %LOCALAPPDATA%/Fleet root it censuses beyond the repo, and
@@ -55,6 +97,38 @@ var admittedPostFreeze = []string{
 	// FAK_SERVICE_LEDGER_DIR takes below.
 	"FAK_FLEET_DIR",
 	"FAK_GARDEN_GROWTH_LEDGER",
+
+	// The launch shim's three filesystem locations — cmd/fak/launch.go launchBinDir() for the
+	// directory holding installed shim binaries, internal/launchshim/launchshim.go Path() for
+	// the shim's config file, and internal/launchshim/stats.go StatsPath() for its counter file
+	// (which defaults beside Path()). Three paths on disk, no credentials.
+	// Relocate to: a `--bin-dir` flag on `fak launch`, and an explicit path argument to
+	// launchshim.Path/StatsPath set by the launch command — so the shim is TOLD where it lives
+	// once rather than each helper re-deriving it from the process env.
+	"FAK_LAUNCH_BIN",
+	"FAK_LAUNCH_CONFIG",
+	"FAK_LAUNCH_STATS",
+
+	// cmd/fak/learning_observation.go — filesystem path for the learning-observation JSON
+	// store, ahead of its %APPDATA%/fak default. A path.
+	// Relocates to: a `--store` flag on `fak learning-observation`, which already parses flags
+	// per subcommand.
+	"FAK_LEARNING_OBSERVATION_STORE",
+
+	// internal/headroom/lingua.go — the LLMLingua compression sidecar's two settings: the
+	// endpoint URL, and the target compression ratio (0 < r <= 1, default 0.5). An address and
+	// a tuning number; neither authenticates anything. Note LinguaCompressor already carries a
+	// URL FIELD and the env read is only its fallback, so half the relocation exists already.
+	// Relocate to: a TargetRatio field on LinguaCompressor beside URL, and then delete
+	// LinguaURL() so an unset URL is the caller's error rather than a silent env lookup.
+	"FAK_LINGUA_TARGET_RATIO",
+	"FAK_LINGUA_URL",
+
+	// cmd/fak/mcp_filter_proof_live.go — the model id for the live MCP-filter proof run, read
+	// in liveProofDefaults() beside OPENAI_API_KEY. The key is a declared secret and stays in
+	// the environment; a model SELECTOR is a setting and does not.
+	// Relocates to: a `--model` flag on the proof subcommand, defaulting in code.
+	"FAK_MCP_FILTER_PROOF_MODEL",
 
 	// internal/gateway/observer.go — filesystem path for the observer journal.
 	"FAK_OBSERVER_JOURNAL",
@@ -68,6 +142,12 @@ var admittedPostFreeze = []string{
 	// cmd/fak/service.go — env default backing the `fak service status --ledger-dir` flag.
 	"FAK_SERVICE_LEDGER_DIR",
 
+	// internal/sessionregistry/registry.go — path for the child-registration JSONL, ahead of
+	// its %APPDATA%/fak default. A path; its sibling FAK_SESSION_LEDGER_DIR is grandfathered.
+	// Relocates to: Store.Path, which ALREADY EXISTS as a field — the env read only backs the
+	// package-level DefaultPath(), so relocation is "make the caller name the store".
+	"FAK_SESSION_REGISTRY",
+
 	// cmd/fak/sharedtask_endpoint.go — the request-time on/off switch (1/true/yes/on) for the
 	// shared-task co-editing subtree /v1/fak/sharedtask/ under `fak serve`; default off keeps
 	// the endpoint inert for every subcommand. A feature toggle, not an authorization boundary:
@@ -75,6 +155,13 @@ var admittedPostFreeze = []string{
 	// MaxScope, both of which still apply once it is on.
 	// Relocates to: a `--sharedtask` opt-in flag on `fak serve`.
 	"FAK_SHAREDTASK",
+
+	// cmd/fak/guard_sessionstart.go — set to "off" to suppress the independent-tool width hint
+	// appended to the SessionStart additionalContext. A presentation toggle on injected prose;
+	// it gates no access and changes no policy.
+	// Relocates to: a `--tool-width-hint` flag on `fak guard session-start`, beside the
+	// `--managed` flag whose branch already guards this read.
+	"FAK_TOOL_WIDTH_HINT",
 
 	// internal/gateway/messages_stream_warmcontinue.go — arms the #3353 warm-continue resume
 	// path, which replays a mid-stream-died turn's already-delivered text as an assistant
@@ -93,4 +180,30 @@ var admittedPostFreeze = []string{
 	// Relocates to: an exported package default plus a Config field alongside
 	// ProbeLedgerFreshMin's, so both freshness windows move to the config surface together.
 	"FLEET_PROBE_ENTITLEMENT_FRESH_MIN",
+
+	// cmd/fak-dev/windows_setup_plan.go — the Go module-cache root, read (with a $HOME/go
+	// fallback) only to NAME a directory in the Windows Defender exclusion plan. This one is
+	// admitted on a different ground from every entry above: it is the Go toolchain's OWN
+	// ambient variable, the same class as PATH, HOME and LOCALAPPDATA — all grandfathered, and
+	// LOCALAPPDATA is read five lines above it in the same function. fak does not own it and no
+	// fak config surface should claim it.
+	// Relocates to: `go env GOPATH`, which asks the toolchain for its real answer instead of
+	// re-implementing the toolchain's own default. That is a correctness upgrade, not just a
+	// config move — the env var being empty does not mean the toolchain uses $HOME/go.
+	"GOPATH",
+
+	// cmd/fak/mcp_filter_proof_live.go — provider endpoint override for the live proof run,
+	// read in liveProofDefaults() beside OPENAI_API_KEY. Exact sibling of the grandfathered
+	// ANTHROPIC_BASE_URL, and judged the same way: an address is not a credential, and the key
+	// that IS one sits next to it and stays in the environment.
+	// Relocates to: whenever ANTHROPIC_BASE_URL does — the provider endpoints belong on one
+	// config surface together, or neither moves.
+	"OPENAI_BASE_URL",
+
+	// tools/videogen/trailer/main.go — the ffmpeg executable path, used as the DEFAULT VALUE of
+	// the tool's own `-ffmpeg` flag. A path to a binary; the flag that overrides it is already
+	// the config surface.
+	// Relocates to: the trailer JSON the tool loads via `-config`, so the renderer's executable
+	// is declared beside the render settings it belongs with.
+	"VIDEOGEN_FFMPEG",
 }

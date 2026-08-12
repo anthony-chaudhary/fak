@@ -83,6 +83,17 @@
 //     non-secret reads landed anyway — the exact "violations still land and get walked back
 //     later" failure the issue set out to fix, reproduced inside the fix. A ratchet needs its
 //     own liveness witness, not just its rule.
+//   - That prescription went unbuilt and the failure repeated: the gate returned to red and
+//     stayed red for 1050 trunk advances while sixteen more reads landed through it (#6215).
+//     The witness now exists — see liveness.go. The reason it was needed is that the RULE
+//     emits one bit, and two opposite defects share it: a NEW red means an author added a
+//     behavioral read and the gate caught it at the door, while an OLD red means reads are
+//     landing THROUGH a gate nobody is reading. So liveness.go measures the red's AGE in trunk
+//     advances (git's pickaxe over committed history, the same HEAD-only evidence ScanTree
+//     uses) and refuses with ReasonRatchetUnwatched past one advance. Its cost is zero while
+//     the ratchet is green — a clean scan leaves nothing to date — and its own negative
+//     control (TestLivenessAgeLookupIsNotBlind) keeps it from passing vacuously, the same way
+//     TestTreeScannerIsNotVacuous guards the rule.
 //   - Demotion/retirement evidence: when the grandfathered baseline reaches zero AND the
 //     config surface (#2862) is the sole home for behavioral settings, the ratchet has done
 //     its job and can retire to a plain assertion that the baseline is empty.
