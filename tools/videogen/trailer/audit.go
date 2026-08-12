@@ -41,7 +41,7 @@ func audit(c Config) (Audit, error) {
 	if tokenVisual && c.FPS < 60 {
 		return a, fmt.Errorf("token visual fps %d below smooth-motion floor 60", c.FPS)
 	}
-	a.SafeMarginPx = int(math.Round(104 * float64(c.Width) / 1280))
+	a.SafeMarginPx = int(math.Round(140 * float64(c.Width) / 1280))
 	a.LayoutSamples = len(c.Scenes) * 3
 	if c.FPS < 24 {
 		return a, fmt.Errorf("fps %d below cinematic motion floor 24", c.FPS)

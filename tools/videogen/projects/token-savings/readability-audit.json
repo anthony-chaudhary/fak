@@ -5,9 +5,9 @@
   "ctaStartSecs": 12,
   "ctaHoldSecs": 8,
   "maxWordsPerTextRegion": 7,
-  "safeMarginPx": 156,
+  "safeMarginPx": 210,
   "layoutSamples": 12,
-  "maxTextRightPx": 1761,
+  "maxTextRightPx": 1708,
   "maxTextBottomPx": 1032,
   "checks": {
     "canvas_720p_plus": true,

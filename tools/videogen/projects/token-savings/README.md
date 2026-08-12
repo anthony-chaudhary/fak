@@ -24,14 +24,14 @@ and is no longer spliced into the homepage asset.
 `-verify` now does more than count words. It:
 
 - rejects token visuals below 1920x1080 or 60 fps;
-- reserves a 156 px horizontal safe area at 1080p;
+- reserves a 210 px horizontal safe area at 1080p;
 - measures rendered glyph widths and fits every centered headline inside it;
 - renders three representative samples per scene through the real renderer;
 - validates duration, pacing, CTA hold, and text density;
 - writes `readability-audit.json` with the checked resolution, safe margin, and
   sample count.
 
-The committed `review-contact-sheet.png` is a 1920x1080 four-frame proof sheet. The audit also records the furthest measured text edge (`maxTextRightPx`); at 1080p it must remain left of the 1764 px safe-area boundary.
+The committed `review-contact-sheet.png` is a 1920x1080 four-frame proof sheet. The audit also records the furthest measured text edge (`maxTextRightPx`); at 1080p it must remain left of the 1710 px safe-area boundary.
 It should still receive a human/agent visual read, but clipping and resolution
 no longer rely on that reviewer noticing a defect.
 

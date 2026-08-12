@@ -94,7 +94,7 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 	S := func(v float64) float64 { return v * min(sx, sy) }
 	R := func(x1, y1, x2, y2 int) image.Rectangle { return image.Rect(X(x1), Y(y1), X(x2), Y(y2)) }
 	C := func(y int, value string, size float64, clr color.Color, bold, mono bool) {
-		centerFit(im, p, Y(y), X(104), value, S(size), clr, bold, mono)
+		centerFit(im, p, Y(y), X(140), value, S(size), clr, bold, mono)
 	}
 	particle := func(x, y, radius int, clr color.RGBA, glow bool) {
 		if glow {
@@ -291,7 +291,7 @@ func validateLayout(c Config) (int, int, int, error) {
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	margin := int(math.Round(104 * float64(c.Width) / 1280))
+	margin := int(math.Round(140 * float64(c.Width) / 1280))
 	sx := float64(c.Width) / 1280
 	available := c.Width - 2*margin
 	samples, maxRight, maxBottom := 0, 0, 0

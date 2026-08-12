@@ -87,3 +87,26 @@ func TestValidateLayoutSamplesEverySceneAtThreeTimes(t *testing.T) {
 		t.Fatalf("samples=%d", n)
 	}
 }
+
+func TestTokenHeroKeepsWideSafeArea(t *testing.T) {
+	c := Config{Width: 1920, Height: 1080, FPS: 60, Scenes: []Scene{
+		{Kind: "token-hook", Secs: 4, Title: "Stop paying for the same work."},
+		{Kind: "token-grid", Secs: 4, Title: "Six ways tokens stop leaking.", Items: []string{"Stable prefix", "Local repeats", "Right-size model", "Stale turns shed", "Known work skipped", "Live KV reused"}},
+		{Kind: "token-flow", Secs: 4, Title: "One avoided turn shrinks every next turn.", Items: []string{"Skip a model turn", "Shrink context", "Run longer"}},
+		{Kind: "cta", Secs: 8, Title: "Put fak at the boundary.", Command: "fak guard -- claude"},
+	}}
+	a, err := audit(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, right, _, err := validateLayout(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.SafeMarginPx < 210 {
+		t.Fatalf("safe margin=%d, want at least 210", a.SafeMarginPx)
+	}
+	if right > c.Width-a.SafeMarginPx {
+		t.Fatalf("text edge=%d crosses safe boundary=%d", right, c.Width-a.SafeMarginPx)
+	}
+}
