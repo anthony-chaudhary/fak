@@ -52,6 +52,16 @@ type Member struct {
 	// its args (e.g. `go run ./cmd/fak ...`), so a Go-native member can join the
 	// bundle without a python shim.
 	Exec string
+	// ActOnVerdict opts this member into VERDICT-DRIVEN state (#5003). A READ-ONLY
+	// detector reports `ok: true` unconditionally -- reporting IS the pass working --
+	// and carries its finding in `verdict: ACTION`. Interpret derives State from `ok`
+	// alone, so such a member folds to "ok" no matter what it found and PlanTick, which
+	// acts only on "action"/"red", can never reach its registered remediation. With
+	// this set, an ok=true payload whose verdict is ACTION folds to State "action"
+	// while OK stays true -- the condition becomes actionable without gating the
+	// garden red. It is OPT-IN PER MEMBER on purpose: a blanket promotion would newly
+	// arm file-deleting remediations (growthgate) off an advisory verdict.
+	ActOnVerdict bool
 }
 
 // Members is the DEFAULT bundle: the two fast, canonical folds that already
@@ -140,12 +150,18 @@ var Members = []Member{
 		// audit — it reaps NOTHING (reaping stays the explicit `fak leaseref reap` so a
 		// read-only garden fold never mutates lock state). Non-gating: an expired lease is an
 		// advisory ACTION (run reap), not a red. A crashed holder's lapsed lease is surfaced.
-		Key:   "stale_leases",
-		Label: "stale leases",
-		Argv:  []string{"fak", "leaseref", "audit"},
-		Gates: false,
-		Kind:  "envelope",
-		Exec:  "command",
+		//
+		// ActOnVerdict (#5003): the audit always emits ok=true and carries its finding in
+		// verdict:ACTION, so state-from-ok left this member permanently "ok" and the ActReap
+		// trigger registered for it since #1386 unreachable — a backlog of expired session
+		// descriptors (the 7,977-ref accretion in #4990) sat until a human ran the reaper.
+		Key:          "stale_leases",
+		Label:        "stale leases",
+		Argv:         []string{"fak", "leaseref", "audit"},
+		Gates:        false,
+		Kind:         "envelope",
+		Exec:         "command",
+		ActOnVerdict: true,
 	},
 	{
 		// No-desktop-popup rung: the scheduled garden/dispatch/watchdog family must never
@@ -304,6 +320,12 @@ func Interpret(member Member, payload map[string]any, exitCode int, err string) 
 	case member.Gates && !ok:
 		base.State = "red"
 	case !ok:
+		base.State = "action"
+	case member.ActOnVerdict && strings.EqualFold(strings.TrimSpace(verdict), "ACTION"):
+		// Verdict-driven state (#5003): this member is a read-only detector whose ok
+		// flag reports "the pass ran", not "there is nothing to do". Its finding rides
+		// on the verdict, so promote ACTION to an actionable state while OK stays true
+		// -- advisory to Fold (the garden does not go red), visible to PlanTick.
 		base.State = "action"
 	default:
 		base.State = "ok"
