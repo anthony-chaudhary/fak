@@ -1,0 +1,40 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "mp4": "out/fak-hero-values.mp4",
+  "gif": "out/fak-hero-values.gif",
+  "poster": "out/fak-hero-values-poster.png",
+  "contactSheet": "out/review-contact-sheet.png",
+  "audit": "out/readability-audit.json",
+  "scenes": [
+    {
+      "kind": "hook",
+      "secs": 4.0,
+      "title": "Claude can run tools.",
+      "action": "refund_payment",
+      "detail": "$4,800"
+    },
+    {
+      "kind": "checkpoint",
+      "secs": 5.0,
+      "eyebrow": "BEFORE IT RUNS",
+      "title": "fak checks first.",
+      "action": "refund_payment  \u00b7  $4,800"
+    },
+    {
+      "kind": "proof",
+      "secs": 3.0,
+      "title": "BLOCKED",
+      "action": "refund_payment  \u00b7  $4,800",
+      "verdict": "Nothing ran."
+    },
+    {
+      "kind": "cta",
+      "secs": 8.0,
+      "eyebrow": "ONE COMMAND",
+      "title": "Try a guarded session.",
+      "command": "fak guard -- claude"
+    }
+  ]
+}

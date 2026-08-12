@@ -138,3 +138,14 @@ func TestExtractFFmpegFlagNeedsValue(t *testing.T) {
 		t.Fatal("expected missing value error")
 	}
 }
+
+func TestTrailerFlagSelectsModeWithoutReachingRenderer(t *testing.T) {
+	found, got := extractBoolFlag([]string{"-trailer", "-config", "cut.json", "-verify"}, "-trailer")
+	if !found {
+		t.Fatal("trailer flag not found")
+	}
+	want := []string{"-config", "cut.json", "-verify"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}

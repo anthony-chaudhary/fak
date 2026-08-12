@@ -1,0 +1,16 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "mp4": "out/trailer.mp4",
+  "gif": "out/trailer.gif",
+  "poster": "out/poster.png",
+  "contactSheet": "out/review-contact-sheet.png",
+  "audit": "out/readability-audit.json",
+  "scenes": [
+    {"kind":"hook", "secs":4, "title":"Name one urgent problem.", "action":"one concrete action", "detail":"one visible stake"},
+    {"kind":"checkpoint", "secs":4, "eyebrow":"ONE INTERVENTION", "title":"Show what changes.", "action":"same concrete action"},
+    {"kind":"proof", "secs":3, "title":"PROVED", "action":"same concrete action", "verdict":"One visible consequence."},
+    {"kind":"cta", "secs":8, "eyebrow":"ONE COMMAND", "title":"Ask for one action.", "command":"your command here"}
+  ]
+}

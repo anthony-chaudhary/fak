@@ -51,6 +51,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return errors.New("-new needs exactly one lowercase project name")
 	}
 
+	trailer, args := extractBoolFlag(args, "-trailer")
 	callerDir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -64,6 +65,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	moduleDir, err := rendererModule(root)
+	if trailer {
+		moduleDir = filepath.Join(root, "tools", "videogen", "trailer")
+		if st, statErr := os.Stat(filepath.Join(moduleDir, "go.mod")); statErr != nil || st.IsDir() {
+			return fmt.Errorf("trailer renderer is missing from %s", moduleDir)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -85,12 +92,14 @@ const usage = `video renders paced terminal captures into reusable explainers.
 Usage:
   go run ./tools/videogen -new NAME
   go run ./tools/videogen -config FILE -verify
+  go run ./tools/videogen -trailer -config FILE -all [-ffmpeg PATH]
   go run ./tools/videogen -config FILE -all [-ffmpeg PATH]
   command 2>&1 | go run ./tools/videogen \
     -record-typescript FILE.typescript -record-timing FILE.timing
 
 Modes:
   -new NAME              copy the checked terminal template to projects/NAME
+  -trailer               use the cinematic scene renderer and readability gates
   -verify                plan and verify pacing; rasterise nothing
   -all                   write GIF, hi-res frames, chapters, and MP4; verify all
   -record-typescript P   tee stdin to a script(1)-compatible capture
@@ -132,6 +141,19 @@ func repoRoot() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+func extractBoolFlag(args []string, name string) (bool, []string) {
+	out := make([]string, 0, len(args))
+	found := false
+	for _, arg := range args {
+		if arg == name {
+			found = true
+			continue
+		}
+		out = append(out, arg)
+	}
+	return found, out
 }
 
 func extractFFmpegFlag(args []string, callerDir string) ([]string, string, error) {

@@ -41,6 +41,36 @@ command 2>&1 | go run ./tools/videogen \
   -record-typescript capture.typescript -record-timing capture.timing
 ```
 
+
+## Cinematic trailer mode
+
+A README trailer is not a documentation tour. Its one job is conversion: make
+one promise, show one consequence, and hold one action long enough to copy.
+Use the dedicated scene renderer rather than shrinking architecture diagrams
+into frames:
+
+```powershell
+go run ./tools/videogen -trailer `
+  -config tools/videogen/projects/hero-values/trailer.json -verify
+go run ./tools/videogen -trailer `
+  -config tools/videogen/projects/hero-values/trailer.json -all -ffmpeg $ffmpeg
+```
+
+The reusable scene vocabulary is intentionally small: `hook`, `checkpoint`,
+`proof`, and `cta`. Each manifest declares only copy, duration, action, verdict,
+and command; the renderer owns 720p composition, 30 fps motion, embedded fonts,
+contrast, safe areas, MP4/GIF encoding, poster, and contact sheet. `-verify`
+refuses more than six scenes, text regions over eight words, sub-two-second
+beats, trailers outside 18–30 seconds, a CTA after 12 seconds, or a CTA held
+less than five seconds.
+
+Every render emits `review-contact-sheet.png` and `readability-audit.json`.
+Review the sheet at both 680 px (README) and 360 px (phone), ideally with an
+adversarial reviewer that has not seen the manifest. A cut does not pass merely
+because it encodes: the reviewer must be able to state **problem → intervention
+→ proof → command** and transcribe the command at phone width. Keep the review
+prompt and verdict in the project README so later cuts learn from prior misses.
+
 ## Public-safety boundary
 
 Only checked-in, synthetic or already-public command output belongs in this
