@@ -294,3 +294,127 @@ The surviving opportunities are now tracked rather than deferred in prose:
 
 Dependency order:
 `#6518 -> {#6524, #6525, #6526, #6528} -> #6527`.
+
+## Is this “just lazy load”? Page/cache/filter/call clarification (2026-08-12)
+
+**Partly, but “lazy load” names only one transition.** “Context as a variable”
+combines an ergonomic **binding** with a demand-driven dataflow. A correct
+implementation must not collapse the following stages:
+
+| Stage | Input -> output | Does it create new semantic bytes? | Typical cache/identity |
+|---|---|---:|---|
+| bind | name -> immutable source/view identity | no | workspace manifest / resolver |
+| page/fetch | nonresident ref -> the same source bytes resident | no | CAS/blob/page cache |
+| filter/query | source ref + canonical plan -> derived view | yes | derived/materialized-view cache |
+| admit | resident source/view -> model-visible prompt view | no semantic derivation, but serialization may change | resident/prompt plan; provider KV cache is downstream |
+| call | recipe -> call-result snapshot | yes, and may have effects | idempotency/call-outcome cache, then result blob/page cache |
+| refresh | old call snapshot -> new explicitly requested snapshot | yes | never an implicit page fault |
+
+A binding should therefore be **lazy/inert by default**: creating or listing it
+performs no source read, query, call, or prompt admission. A later demand names
+which operation is required. Metadata demand may need no bytes. Source demand
+may page in existing bytes. Query demand may page source bytes and compute a
+new immutable derived view. Prompt demand separately admits selected bytes.
+
+### Relation to fak's existing MMU and context-plan machinery
+
+This is intentionally a layer over existing mechanisms, not a parallel paging
+system:
+
+- [`internal/ctxmmu/mmu.go`](../../internal/ctxmmu/mmu.go) already replaces
+  large/held tool-result bodies with CAS-backed refs and can page the same bytes
+  back under policy. That is source storage/residency.
+- [`internal/ctxplan/pagefault.go`](../../internal/ctxplan/pagefault.go) already
+  models demand page-fault requests and bounded resolution.
+- [`internal/ctxplan/materialize.go`](../../internal/ctxplan/materialize.go)
+  already materializes bounded resident views.
+- [`internal/ctxplan/query.go`](../../internal/ctxplan/query.go) already has a
+  bounded demand-query selection seam.
+- [`internal/ctxplan/plancache.go`](../../internal/ctxplan/plancache.go) caches
+  planning decisions, which is different from caching derived result bytes.
+
+The missing first-class contract is to connect a human/task-scoped name to
+those fetch/materialize/admit stages with exact identities, independent
+budgets, and observable reasons. [#6531](https://github.com/anthony-chaudhary/fak/issues/6531)
+tracks that integration.
+
+### Filtering and caching apply to variables—but at the right identity
+
+A filter does not mutate `tickets`. It creates a new immutable view, for
+example:
+
+```text
+tickets                       -> source snapshot hash S1
+failed = filter(tickets, ...) -> view hash V1, lineage (S1, plan P1)
+```
+
+`failed` may itself be named, paged out, queried again, admitted, shared, or
+evicted. Its cache key must include the complete source snapshot(s), canonical
+plan/operator version, policy/taint identity, and output bounds. Caching only by
+the alias `failed` is incorrect because aliases can be rebound. This is the
+materialized-view contract in [#6525](https://github.com/anthony-chaudhary/fak/issues/6525).
+
+Several caches remain deliberately distinct:
+
+| Cache | Reuses | Must not be confused with |
+|---|---|---|
+| page/blob cache | exact existing source or view bytes | query-result correctness |
+| plan cache | selection/planning decision | materialized result bytes |
+| derived-view cache | source snapshot + query semantics -> immutable view | alias name or provider KV |
+| call/idempotency cache | witnessed execution outcome for a canonical call recipe/scope | paging an existing result |
+| provider KV/prefix cache | model computation for stable serialized prefix | source truth or tool-result cache |
+
+### Relation to calls
+
+A tool/model call can produce a large result that becomes addressable context,
+but dereferencing a variable must **not silently reissue the call**. The safe
+model is:
+
+```text
+call recipe R1 --explicit execution--> call snapshot C1 -> result ref S1
+tickets@rev7 -------------------------------------------> S1
+```
+
+Reading, paging, filtering, or admitting `tickets@rev7` uses S1 and executes
+zero calls. An explicit refresh adjudicates R1 again, possibly reuses a
+witnessed idempotent outcome, and creates C2/S2 plus a new binding revision.
+Only a structurally proven read-only recipe may be deferred until first demand;
+effectful calls can never hide behind lazy dereference. This is tracked in
+[#6532](https://github.com/anthony-chaudhary/fak/issues/6532).
+
+### First-class naming model
+
+Human aliases and machine identities serve different purposes:
+
+```text
+human alias:       tickets
+qualified binding task-42@7:tickets
+kind:              call_snapshot
+immutable target:  sha256:S1
+resolved record:   workspace rev + alias + kind + S1 + policy/taint
+```
+
+Every operation resolves the alias to an exact target before fetch/query/call,
+and provenance/cache keys use that target—not `tickets` or an unresolved
+`latest`. [#6533](https://github.com/anthony-chaudhary/fak/issues/6533) tracks
+the shared naming and conformance contract.
+
+The resulting architecture is:
+
+```text
+#6533 names/identity
+       |
+#6524 workspace bindings
+       |
+#6531 demand lifecycle: bind -> fetch -> materialize -> admit
+       |                 |          |
+       |              ctxmmu     #6518 query
+       |                            |
+       |                         #6525 view cache
+       |                            |
+       +------------------------- #6528 explain/replay
+       |
+#6532 explicit call snapshot/refresh (never implicit on read)
+       |
+#6526 exact aggregation counterfactual -> #6527 optional helper model
+```
