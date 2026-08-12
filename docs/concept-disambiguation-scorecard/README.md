@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **205** (clarity 15 + coverage 190) |
-| **Crystal-clear concepts (and climbing)** | **442** crystal of 2155 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2310 / 2500** (92.4% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **213** (clarity 15 + coverage 198) |
+| **Crystal-clear concepts (and climbing)** | **454** crystal of 2167 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2319 / 2517** (92.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2833 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2845 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 88.7/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.5/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2155 concepts - score 88.7/100 (grade B) - disambiguation-debt 205
+concept-disambiguation chart - 2167 concepts - score 88.5/100 (grade B) - disambiguation-debt 213
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 442
+  * crystal       #######..................... 454
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,50 +41,50 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (69 concept(s); 4 crystal)
   cache            *****************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 41 crystal)
-  context-ctx      ***********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 35 crystal)
+  context-ctx      *************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (194 concept(s); 37 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ************************ooooooooooooooooooooo (45 concept(s); 24 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ************oooooooooooooooooooooooooooooooo (44 concept(s); 12 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 13 crystal)
-  guard-gate       ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (329 concept(s); 88 crystal)
+  guard-gate       *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (332 concept(s); 91 crystal)
   layout           ****ooooooooo      (13 concept(s); 4 crystal)
   loop             ****************************oooooooooooooooooooooooooooooooooooooo (66 concept(s); 28 crystal)
   plan             ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 23 crystal)
-  policy-capability *****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (134 concept(s); 29 crystal)
-  pool             *****oooooooooooooooooooooooooooooo (35 concept(s); 5 crystal)
+  policy-capability *******************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (136 concept(s); 31 crystal)
+  pool             ******oooooooooooooooooooooooooooooo (36 concept(s); 6 crystal)
   render-materialize *****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 5 crystal)
   score-debt       ********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (72 concept(s); 8 crystal)
   session-runtime  *************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (187 concept(s); 25 crystal)
-  support-maturity *****************oooooooooooooooooooooo (39 concept(s); 17 crystal)
+  support-maturity *********************oooooooooooooooooooooo (43 concept(s); 21 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ****************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 52 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       #########################... 387/428
+  guard-gate       #########################... 387/433
   plan             ##########################.. 319/346
   session-runtime  #########################... 213/236
-  policy-capability #########################... 155/176
-  context-ctx      ##########################.. 204/220
-  render-materialize ##########################.. 177/192
+  policy-capability #########################... 157/179
+  context-ctx      ##########################.. 206/222
+  render-materialize ##########################.. 177/193
   cache            ###########################. 261/275
-  witness-proof    ##########################.. 140/152
+  witness-proof    ##########################.. 140/153
   gateway-engine   ###########################. 169/177
   loop             ##########################.. 77/84
   evict            #########################... 49/55
-  support-maturity #########################... 45/50
+  support-maturity #########################... 49/54
   attention        ###########################. 74/76
   decision         ###########################. 52/54
   score-debt       ###########################. 85/87
   layout           ##########################.. 14/15
-  pool             ###########################. 39/40
+  pool             ###########################. 40/41
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 92.4%  (2310/2500 confusable tokens positioned)
+namespace coverage  [#############################...] 92.1%  (2319/2517 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 190
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 191/191
 
-name index: 2833 lookup name(s) -> 2155 concept(s), 61 ambiguous
+name index: 2845 lookup name(s) -> 2167 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **191 / 191** (190 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1500 / 4007 |
+| Boundaries drawn (mutual / total) | 1524 / 4031 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2833 over 2155 concepts |
+| Lookup names indexed | 2845 over 2167 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2155 |
+| Concepts carrying a contrast set | 2167 |
 
 ## The concepts (best verdict first)
 
@@ -214,6 +214,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | context-ctx | **micro-context** - A lightweight logical agent execution context containing only a task delta, bounded mutable state, capabilities, budget, continuation identity, and output contract over an immutable shared agent base. |
 | * | crystal | symbol | context-ctx | **microcontextdemo** - The Go command that runs the synthetic S0 micro-context research spine. |
 | * | crystal | symbol | context-ctx | **MechanismStaleContext** - The closed-vocabulary MechanismClass label for an audit finding whose failure mechanism is acting on stale repository state - overwriting, clobbering, or reverting a peer's newer work, or building on an outdated base. It classifies HOW a change failed cross-model audit, never why. |
+| * | crystal | symbol | context-ctx | **FAK_RECALL_MMR** - The environment gate that arms MMR redundancy suppression inside journal Recall's top-k selection (#3940). Fail-closed: anything that is not an explicit truthy value leaves Recall's committed provenance-recency-relevance-index ordering byte-identical to pre-#3940, so the suppressor can never silently change what a session recalls. |
+| * | crystal | symbol | context-ctx | **FAK_RECALL_MMR_LAMBDA** - The relevance/diversity trade-off weight for armed MMR recall reranking, in [0,1]: 1 is pure relevance (the rerank becomes a no-op reordering), 0 is pure novelty. Out-of-range values clamp and an unparseable one falls back to 0.7, which keeps relevance dominant so the diversity term breaks near-ties rather than dragging a weak-but-novel row past a strongly relevant one. |
 | * | crystal | symbol | context-ctx | **compaction_summary** - Regrowth attribution class for the compacted row's replacement_history: the summary transcript the Codex compactor injects into the fresh window after a fire (#4768), measured by row length only. |
 | * | crystal | symbol | context-ctx | **environment_context** - Upstream Codex marker (<environment_context>) that tags an injected environment header message in rollout transcripts; the #4768 regrowth scanner classifies rows containing it as reinjected instruction payload. |
 | * | crystal | symbol | cross-cluster | **core-image manifest** - internal/recall's Manifest: the persisted core image of a finished session - the page table, the frozen quarantine-clearance state, and a frozen world-version marker, with the bytes themselves living in a sibling cas.json swap device. |
@@ -362,6 +364,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | guard-gate | **guardrail (safety boundary)** - A safety boundary or constraint that prevents an AI system from taking harmful actions; often implemented as policy checks or refusal reasons. |
 | * | crystal | symbol | guard-gate | **agentHookDelegate** - agentHookDelegate is one registered child process for one agent-LIFECYCLE event (PreToolUse/PostToolUse/Stop): the compiled stand-in for a single hooks entry in .claude/settings.json, carrying the event it serves and an Argv resolver that reports whether the delegate is present on this box at all. |
 | * | crystal | symbol | guard-gate | **repoguardArgv** - repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a repo root: the compiled tools/.bin/repoguard if present, else the tools/repo_guard.py source, else NOT-PRESENT. It answers only 'what should be executed here, and does it exist', never whether the guard allows the call. |
+| * | crystal | symbol | guard-gate | **FP4ClaimRuntimeDelegated** - The claim scope in which the checkpoint producer states that execution belongs to an external runtime rather than to whoever reads the metadata. It is a producer ASSERTION carried in the document, and reading it routes the artifact away from in-kernel execution even when every other field would license acceptance. |
+| * | crystal | symbol | guard-gate | **FP4Delegate** - The disposition meaning the FP4 document is readable and self-consistent but execution belongs to someone else -- because the producer said so, or because the declared hardware lacks native FP4 decode/GEMM. fak routes the artifact rather than claiming it can run it. |
+| * | crystal | symbol | guard-gate | **runtime_delegated** - The wire value of the runtime-delegated claim scope: the literal string a producer writes into an FP4 metadata document's claim_scope field to say that execution belongs to an external runtime. Being a wire value, it is part of the artifact's public contract and cannot be renamed without breaking documents already written. |
 | * | crystal | symbol | guard-gate | **AmendGatedWiden** - The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE. |
 | * | crystal | symbol | guard-gate | **GatedAction** - GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action. |
 | * | crystal | symbol | guard-gate | **ParkGatedAction** - ParkGatedAction is the sessionctl blocking park op of the out-of-band operator inbox (#2757): it publishes one GatedAction as an addressable pending action and blocks the calling loop until an operator verdict arrives, the park window elapses, or the context is cancelled, witnessing every outcome on the trace's park Next records at the consume point. |
@@ -434,6 +439,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | policy-capability | **FLEET_POLICY_PATH** - The env var (FLEET_POLICY_PATH) naming a SINGLE fleet dispatch-policy file loaded at tick preflight. |
 | * | crystal | symbol | policy-capability | **checkPolicyFile** - The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier. |
 | * | crystal | symbol | policy-capability | **policyExclusion** - The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision. |
+| * | crystal | symbol | policy-capability | **FP4HardwareCapability** - What the producer says the target device can do natively for FP4: the runtime and accelerator names plus separate native-decode and native-GEMM bits. The two bits are separate because a device can unpack FP4 into a wider type without owning an FP4 tensor-core GEMM, and only the PAIR licenses in-kernel execution. |
+| * | crystal | symbol | policy-capability | **AdjudicateFP4Metadata** - The function that turns an already-parsed FP4 metadata document into one of four typed dispositions -- accept, delegate, abstain, refuse -- with a stable machine-readable reason. It adjudicates against the published NVFP4 and OCP-MXFP4 definitions rather than fak preferences, and there is no fifth implicit 'assume it is fine' path. |
 | * | crystal | symbol | policy-capability | **AdjudicateMemoryWrite (memq)** - memq.AdjudicateMemoryWrite is the deny-by-structure rule set (#2912) that judges a candidate durable memory write by structure alone - size, transient-error phrasing, negative tool-claim, one-off narrative - and returns an AdmissionVerdict whose Reason is from a closed vocabulary, with no model call, clock, or I/O. |
 | * | crystal | config | policy-capability | **ContainmentPolicy (toolprocgate)** - toolprocgate.ContainmentPolicy bounds the blast radius of a console/terminal crash - the per-surface live-agent cap, the surface-quarantine fault threshold, and the fleet-breaker storm thresholds - that DecideContainment folds into a closed containment verdict (ADMIT / REFUSE_COLOCATION / QUARANTINE_SURFACE / BREAKER_OPEN) for a proposed spawn. |
 | * | crystal | config | policy-capability | **AuditIndependencePolicy (modelroute)** - modelroute.AuditIndependencePolicy is the versioned admission policy EvaluateAuditIndependence folds to decide whether an AUDITOR may audit an AUTHOR - its required identity axes, family/provider/harness/endpoint/account diversity knobs, and alias roster - returning a closed ADMIT/REFUSE/UNKNOWN verdict with a closed reason vocabulary. |
@@ -458,6 +465,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
+| * | crystal | symbol | pool | **mmrPoolFactor** - The multiple of the caller's k that bounds how many already-ranked recall candidates the MMR reranker considers (3x, the borrow's window). Greedy MMR is quadratic in similarity comparisons, so bounding the pool keeps the cost proportional to what the caller actually asked for; candidates past the window keep their baseline order and can only matter when the pool is the whole list. |
 | * | crystal | symbol | pool | **PoolCapEnv / FLEET_WORKER_WORKTREE_POOL (warm worktree-pool cap)** - The environment knob bounding the per-worker warm worktree pool: the maximum number of IDLE detached worktrees kept per LANE under the worktree root. Unset, unparsable or negative reads as the default; 0 disables the pool and reproduces the pre-pool create/reap behaviour byte for byte. |
 | * | crystal | symbol | pool | **PoolCap() (resolved worktree-pool cap)** - The resolver that reads PoolCapEnv and returns the effective per-lane idle-worktree cap, failing open to the default on anything unreadable so a typo'd knob can never mean unbounded. Both Prepare and Reap consult it, so the pool is on or off for the whole lifecycle rather than per call site. |
 | * | crystal | symbol | render-materialize | **RenderHealth (git-daily health readout)** - The one-call operator readout for the git-daily health card: it composes the graded card from HealthFacts and projects it through scorecard.Render as a terminal work-list keyed on HealthDebtKey. |
@@ -505,6 +513,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | support-maturity | **TestVerbTierCoverageIsTotal** - The named coverage guarantee (TestVerbTierCoverageIsTotal) referenced by the verb-tier gate: it reds CI when any live dispatch verb resolves to no tier, asserting verb-tier coverage is total. |
 | * | crystal | symbol | support-maturity | **ParityDashboard** - ParityDashboard is the folded, schema-tagged snapshot (internal/metrics/parity_dashboard.go, schema fak-parity-dashboard/1) of fak's SOTA parity performance: one panel per declared metric carrying that metric's full dated history plus its latest direction-aware fak-vs-SOTA verdict, together with an honest publication state. It is pure — it reads no clock and no disk — so its Render() bytes and its OpenMetrics() series are reproducible from the input corpus alone. |
 | * | crystal | symbol | support-maturity | **BuildParityDashboard** - BuildParityDashboard is the total fold (internal/metrics/parity_dashboard.go) from a caller-supplied ParityDashboardInput — declared metric axes plus dated fak-and-SOTA samples in any order — to the ParityDashboard snapshot. It sorts each metric's history ascending by time, derives the latest direction-aware verdict per panel, and resolves the publication state from the supplied public base. |
+| * | crystal | symbol | support-maturity | **FP4ReasonSupported** - The Go constant naming the reason code carried by an accepting FP4 verdict: every field was readable, self-consistent, and named an envelope this build can decode in-kernel. Every verdict carries a reason so a caller never has to parse the prose detail. |
+| * | crystal | symbol | support-maturity | **FP4_SUPPORTED** - The wire value of the accepting FP4 reason code -- the literal string a caller matches on to learn that a metadata document was fully readable and decodable in-kernel. As a stable machine-readable code it is contract surface: callers switch on it instead of parsing the human-readable detail. |
+| * | crystal | symbol | support-maturity | **FP4ReasonUnsupportedCombination** - The Go constant naming the reason for refusing an FP4 document whose field tuple contradicts the fixed definition of the format it names -- for example mxfp4 declared with 16-element blocks. It marks a REFUSAL that no future schema version can turn into an acceptance, because the contradiction is with the published format, not with this build. |
+| * | crystal | symbol | support-maturity | **FP4_UNSUPPORTED_COMBINATION** - The wire value of the unsupported-combination refusal: the literal reason string emitted when an FP4 document's tuple contradicts the published definition of the format it names. Callers match on this code to distinguish a permanently invalid artifact from one this build merely cannot read yet. |
 | * | crystal | symbol | support-maturity | **CoverageEntries** - The modver adapter that lifts a flat {module: statement-coverage-percent} map into the map[string]ScoreEntry that Report.JoinScores consumes, tagging each entry ProvenanceWitnessed because the percent is read off a real go-coverprofile artifact rather than modeled (#2467). |
 | * | crystal | symbol | support-maturity | **CoverageScores** - The modver fold that decodes a go-coverprofile and returns the flat {module: percent} map, statement-WEIGHTED per module (covered statements over total statements across every file mapping to that module) rather than averaged per file, with repeated file+span blocks merged once and a malformed profile returned as an error instead of a partial fold (#2467). |
 | * | crystal | symbol | support-maturity | **ReasonUnsupportedPatch** - Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar. |
@@ -2432,8 +2444,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2507/4007 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2155 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2507/4031 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2167 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2444,23 +2456,23 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 387 | 428 | 41 |
+| guard-gate | 387 | 433 | 46 |
 | plan | 319 | 346 | 27 |
 | session-runtime | 213 | 236 | 23 |
-| policy-capability | 155 | 176 | 21 |
-| context-ctx | 204 | 220 | 16 |
-| render-materialize | 177 | 192 | 15 |
+| policy-capability | 157 | 179 | 22 |
+| context-ctx | 206 | 222 | 16 |
+| render-materialize | 177 | 193 | 16 |
 | cache | 261 | 275 | 14 |
-| witness-proof | 140 | 152 | 12 |
+| witness-proof | 140 | 153 | 13 |
 | gateway-engine | 169 | 177 | 8 |
 | loop | 77 | 84 | 7 |
 | evict | 49 | 55 | 6 |
-| support-maturity | 45 | 50 | 5 |
+| support-maturity | 49 | 54 | 5 |
 | attention | 74 | 76 | 2 |
 | decision | 52 | 54 | 2 |
 | score-debt | 85 | 87 | 2 |
 | layout | 14 | 15 | 1 |
-| pool | 39 | 40 | 1 |
+| pool | 40 | 41 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | trajectory-control | 0 | 0 | 0 |
