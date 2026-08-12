@@ -1981,6 +1981,11 @@
           "category": "incidental",
           "reason": "Operator-facing rendering of serveSessionRegistryPath; a display helper over an existing concept, introducing no new distinction of its own.",
           "token": "serveSessionRegistryScopeLabel"
+        },
+        {
+          "category": "incidental",
+          "reason": "file-local reader in cmd/fak/resume_dedup.go mirroring fleet_resume_watchdog.resume_blocked's operator-settled trim; an implementation helper, not a session-runtime concept",
+          "token": "ledgerSettledSessions"
         }
       ],
       "id": "session-runtime",
@@ -2035,6 +2040,7 @@
         "hedge_loser_slot_released",
         "interactivesession",
         "kernelSession",
+        "ledgerSettledSessions",
         "live-tool",
         "loadSchedulerRecords",
         "matchedSessions",
@@ -4698,6 +4704,11 @@
           "category": "incidental",
           "reason": "Formatting helper for the task queue CLI, not a new repository concept",
           "token": "RenderQueue"
+        },
+        {
+          "category": "incidental",
+          "reason": "file-local human renderer for fak resume dedup output (#3146); one printf block, not a distinct render concept",
+          "token": "renderResumeDedup"
         }
       ],
       "id": "render-materialize",
@@ -4734,6 +4745,7 @@
         "renderGhostReport",
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
+        "renderResumeDedup",
         "renderRunaway",
         "renderShellChoice",
         "renderValidate",
@@ -5012,6 +5024,11 @@
           "category": "incidental",
           "reason": "local struct in cmd/fak/resume_dedup.go carrying one crashed-duplicate row (session, work-key, live owner, settled) for the #3146 tombstone plan; not a fleet-wide plan concept",
           "token": "dedupCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "pure fold in cmd/fak/resume_dedup.go turning stopped.Decisions into the #3146 tombstone list; a file-local helper, not a distinct planning concept",
+          "token": "planResumeDedup"
         }
       ],
       "exclude": [
@@ -5073,6 +5090,7 @@
         "orderLaneCandidatesAged",
         "overlayPlan",
         "planErr",
+        "planResumeDedup",
         "planapproval",
         "planned",
         "plannedcumtok",

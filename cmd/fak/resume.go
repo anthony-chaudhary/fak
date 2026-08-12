@@ -60,6 +60,8 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeSweep(stdout, stderr, argv[1:])
 	case "stopped":
 		return runResumeStopped(stdout, stderr, argv[1:])
+	case "dedup":
+		return runResumeDedup(stdout, stderr, argv[1:])
 	case "status":
 		return runResumeStatus(stdout, stderr, argv[1:])
 	case "self":
@@ -1192,6 +1194,8 @@ func resumeUsage(w io.Writer) {
                    [--include-resumed] [--home DIR] [--reg-dir DIR] [--json]
 
   fak resume stopped [--window-h H] [--home DIR] [--json]
+
+  fak resume dedup [--window-h H] [--home DIR] [--ledger FILE] [--apply] [--json]
 
   fak resume status --store DIR [--ledger FILE] [--max-attempts N] [--all] [--json]
 

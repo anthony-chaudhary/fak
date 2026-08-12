@@ -1313,6 +1313,71 @@ def test_py_and_ps1_name_the_same_drain_knobs():
     assert "FAK_DRAIN_CONTINUOUS" in ps1 and "FAK_DRAIN_MAX" in ps1
 
 
+# ---- crashed-duplicate tombstones written by `fak resume dedup` (#3146) --------
+#
+# The Go actuator (cmd/fak/resume_dedup.go) appends ONE manual_override row per crashed
+# session whose (project, work-key) a LIVE session already owns. This file owns the OTHER
+# half of that contract: the row it writes must make THIS watchdog's resume_blocked()
+# return True -- the same way the 734355cc incident was settled by a hand-written row.
+#
+# DEDUP_TOMBSTONE_LINE is the byte-exact line `fak resume dedup --apply` emits. The Go test
+# TestDedupTombstoneWireShapeIsTheWatchdogHonorShape pins the identical literal, so renaming
+# a field on either side reds one of the two tests instead of silently un-blocking a
+# relaunch the operator believes is tombstoned.
+DEDUP_TOMBSTONE_LINE = (
+    '{"ts":"2026-07-07T12:00:00Z","phase":"skipped","session":"734355cc-dead-beef",'
+    '"account":".claude-w1","project":"C--work-fak","action":"dedup_tombstone",'
+    '"manual_override":true,"reason":"duplicate of live session abcd1234-live owning the '
+    'same work (loop:--lane claude)","work_key":"loop:--lane claude",'
+    '"live_owner":"abcd1234-live","disp":"STOPPED_MIDTURN"}'
+)
+
+
+def test_dedup_tombstone_blocks_the_relaunch(tmp_path, monkeypatch):
+    """The acceptance honor point: after `fak resume dedup --apply`, resume_blocked() is True.
+
+    Staged as the incident actually ran -- the duplicate's last resume died recoverably, so
+    the watchdog was still willing to relaunch it forever -- and then the tombstone lands.
+    """
+    wd = _reload({"FAK_MAX_ATTEMPTS": "8"})
+    row = _jsonmod.loads(DEDUP_TOMBSTONE_LINE)
+    sid = row["session"]
+    p = _write_jsonl(tmp_path, "dup.jsonl",
+                     _asst_err("You've hit your session limit · resets 6am (America/Los_Angeles)"))
+    monkeypatch.setattr(wd, "_newest_transcript", lambda s: p)
+
+    # Before the tombstone: a recoverable death under the cap -> the watchdog relaunches.
+    attempts = [{"phase": "launched", "attempt": 1}]
+    blocked, why = wd.resume_blocked(sid, attempts)
+    assert not blocked, f"precondition: the duplicate is still relaunchable ({why})"
+
+    # After `--apply`: the one appended row settles it at the existing honor point.
+    blocked, why = wd.resume_blocked(sid, attempts + [row])
+    assert blocked and "operator" in why.lower(), \
+        f"a dedup tombstone must block the relaunch, got blocked={blocked} why={why!r}"
+
+    # The tombstone is not itself a resume attempt and never reads as launch pressure, so
+    # writing it can neither burn the retry cap nor trip a rate/spacing window.
+    assert wd.is_resume_attempt_record(row) is False
+    assert row["phase"] in wd.NON_LAUNCH_PHASES
+
+    # A genuinely distinct session is untouched: no tombstone, no block.
+    blocked, why = wd.resume_blocked("distinct-work-sid", attempts)
+    assert not blocked, f"a session with no tombstone must stay relaunchable ({why})"
+
+
+def test_dedup_tombstone_is_lifted_by_a_later_rearm():
+    """Parity with every other settle: a rearm row AFTER the tombstone re-opens the session,
+    so an operator reclaiming a lane is never permanently walled off by a stale dedup."""
+    wd = _reload({})
+    row = _jsonmod.loads(DEDUP_TOMBSTONE_LINE)
+    blocked, _ = wd.resume_blocked(row["session"], [row])
+    assert blocked
+    blocked, _ = wd.resume_blocked(row["session"],
+                                   [row, {"phase": "rearm", "reason": "lane reclaimed"}])
+    assert not blocked, "a rearm after the dedup tombstone must lift it"
+
+
 if __name__ == "__main__":
     import pytest
 

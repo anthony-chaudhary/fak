@@ -95,63 +95,8 @@ Each row carries TWO independent axes (#3800):
 		return 1
 	}
 	now := time.Now().UTC()
-
-	// Account policy: only offered worker accounts enter the triage (the tombstoned /
-	// excluded ones are exactly the seats a resume must not target).
-	workerDirs := workerAccountDirs(home)
-
-	// Driver-liveness evidence for the mid-tool branch (#5440). Taken once, lazily, from the
-	// host process table plus the durable launch record; see resume_stopped_liveness.go for
-	// why only positive evidence ever produces a non-empty value.
-	drivers := newStoppedDriverProbe()
-	livenessWhy := map[string]string{}
-
-	var rows []stopped.Row
-	for acctDir, acct := range workerDirs {
-		proj := filepath.Join(acctDir, "projects")
-		paths, _ := filepath.Glob(filepath.Join(proj, "*", "*.jsonl"))
-		for _, path := range paths {
-			stem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-			if !stoppedUUIDStemRE.MatchString(stem) {
-				continue // subagent/sidecar files — only top-level sessions triage
-			}
-			if strings.HasPrefix(filepath.Base(filepath.Dir(path)), "wf_") {
-				continue // workflow transcript stores are not resumable sessions
-			}
-			fi, err := os.Stat(path)
-			if err != nil {
-				continue
-			}
-			ageMin := now.Sub(fi.ModTime().UTC()).Minutes()
-			if ageMin > *windowH*60 {
-				continue
-			}
-			recs := loadStoppedRecords(path)
-			// The mid-tool tail is ambiguous by construction, so hand the classifier the
-			// observed driver-liveness instead of the LivenessUnknown the Classify wrapper
-			// hard-codes (#5440). live/gone are asserted only when the process table actually
-			// witnessed one; every unwitnessable shape stays LivenessUnknown and defers.
-			live, why := drivers.facts().livenessFor(stem)
-			livenessWhy[stem] = why
-			r := stopped.ClassifyWithLiveness(recs, ageMin, fi.Size()/1024,
-				fi.ModTime().UTC().Format(time.RFC3339), stem, path, live)
-			r.Account = acct
-			r.Project = filepath.Base(filepath.Dir(path))
-			// Work-key for cross-session dedup: the authoritative /goal, /loop lane, or issue
-			// number from the transcript's FIRST user turn (read from the head — the classifier
-			// only saw the noisy tail). Empty when none is found; an empty key never dedups.
-			r.WorkKey = firstTurnWorkKey(path)
-			rows = append(rows, r)
-		}
-	}
-
-	// A reset window still blocks when it has not provably passed; an unparseable reset
-	// is conservatively active (the Python throttle_is_active contract).
-	throttleActive := func(reset string) bool {
-		passed, ok := sessionsignals.ResetPassed(reset, now, now)
-		return !ok || !passed
-	}
-	d := stopped.Decide(rows, throttleActive)
+	rows, drivers, livenessWhy := scanStoppedRows(home, *windowH, now)
+	d := stopped.Decide(rows, stoppedThrottleActive(now))
 
 	if *asJSON {
 		df := drivers.facts()
@@ -194,6 +139,78 @@ Each row carries TWO independent axes (#3800):
 	renderResumeStopped(stdout, d, now, *windowH, stopped.TriageEnforced(os.Getenv("FAK_RESUME_TRIAGE_GATE")),
 		drivers.facts().summary())
 	return 0
+}
+
+// scanStoppedRows walks the offered worker accounts under home and classifies every
+// top-level session transcript touched within the window. It returns the classified rows,
+// the driver probe (so a caller that reports liveness evidence can read the same facts the
+// classification used), and the per-session liveness reason.
+//
+// It is a shared helper rather than inline code because `fak resume dedup` (#3146) must run
+// the EXACT classification `fak resume stopped` runs: the dedup actuator writes a tombstone
+// that stops a relaunch, so a scan that drifted from the triage's could tombstone a session
+// the triage would have resumed. One body, one verdict.
+func scanStoppedRows(home string, windowH float64, now time.Time) ([]stopped.Row, *stoppedDriverProbe, map[string]string) {
+	// Account policy: only offered worker accounts enter the triage (the tombstoned /
+	// excluded ones are exactly the seats a resume must not target).
+	workerDirs := workerAccountDirs(home)
+
+	// Driver-liveness evidence for the mid-tool branch (#5440). Taken once, lazily, from the
+	// host process table plus the durable launch record; see resume_stopped_liveness.go for
+	// why only positive evidence ever produces a non-empty value.
+	drivers := newStoppedDriverProbe()
+	livenessWhy := map[string]string{}
+
+	var rows []stopped.Row
+	for acctDir, acct := range workerDirs {
+		proj := filepath.Join(acctDir, "projects")
+		paths, _ := filepath.Glob(filepath.Join(proj, "*", "*.jsonl"))
+		for _, path := range paths {
+			stem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+			if !stoppedUUIDStemRE.MatchString(stem) {
+				continue // subagent/sidecar files — only top-level sessions triage
+			}
+			if strings.HasPrefix(filepath.Base(filepath.Dir(path)), "wf_") {
+				continue // workflow transcript stores are not resumable sessions
+			}
+			fi, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			ageMin := now.Sub(fi.ModTime().UTC()).Minutes()
+			if ageMin > windowH*60 {
+				continue
+			}
+			recs := loadStoppedRecords(path)
+			// The mid-tool tail is ambiguous by construction, so hand the classifier the
+			// observed driver-liveness instead of the LivenessUnknown the Classify wrapper
+			// hard-codes (#5440). live/gone are asserted only when the process table actually
+			// witnessed one; every unwitnessable shape stays LivenessUnknown and defers.
+			live, why := drivers.facts().livenessFor(stem)
+			livenessWhy[stem] = why
+			r := stopped.ClassifyWithLiveness(recs, ageMin, fi.Size()/1024,
+				fi.ModTime().UTC().Format(time.RFC3339), stem, path, live)
+			r.Account = acct
+			r.Project = filepath.Base(filepath.Dir(path))
+			// Work-key for cross-session dedup: the authoritative /goal, /loop lane, or issue
+			// number from the transcript's FIRST user turn (read from the head — the classifier
+			// only saw the noisy tail). Empty when none is found; an empty key never dedups.
+			r.WorkKey = firstTurnWorkKey(path)
+			rows = append(rows, r)
+		}
+	}
+
+	return rows, drivers, livenessWhy
+}
+
+// stoppedThrottleActive is the reset-window predicate stopped.Decide takes: a window still
+// blocks when it has not provably passed, and an unparseable reset is conservatively active
+// (the Python throttle_is_active contract).
+func stoppedThrottleActive(now time.Time) func(string) bool {
+	return func(reset string) bool {
+		passed, ok := sessionsignals.ResetPassed(reset, now, now)
+		return !ok || !passed
+	}
 }
 
 // resolveFleetUserHome resolves the --home flag for the resume verbs, falling back to the OS
