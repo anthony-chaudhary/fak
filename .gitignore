@@ -880,3 +880,10 @@ docs/dispatch-status.md
 !/.mcp.json
 !/.rules
 !/.windsurfrules
+
+# Video-generation scratch output. Keep project JSON/tools, review proofs, and
+# published final media committable; ignore only regenerable frame/output trees.
+/tools/videogen/projects/*/out/
+/tools/videogen/projects/*/frames/
+/tools/videogen/projects/*/frames-hires/
+/visuals/frames/
