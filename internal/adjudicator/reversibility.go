@@ -37,13 +37,13 @@ type ReversibilityEnvelope struct {
 	// for the SAFE-subset push (a bare `git push` / `git push <remote>` with no branch)
 	// and are empty for every other call — including every dangerous push.
 	//
-	// This is the CLASSIFIER half only. No rung reads these fields yet: the opt-in
-	// actuation half (a Policy.AutoRepairSidestep knob that turns the reversibility
-	// HOLD into an in-flight TRANSFORM) is NOT YET landed. The invariant this half
-	// establishes ahead of it is the one that makes the eventual gate safe to write as
-	// a bare `env.RewriteCommand != ""`: the safe-subset test lives HERE, so a rung
-	// that trusts a non-empty RewriteCommand can never be handed a force/delete/
-	// refspec/named-branch push.
+	// This is the CLASSIFIER half only. The opt-in actuation half (a Policy.AutoRepairSidestep knob that turns the
+	// reversibility HOLD into an in-flight TRANSFORM) is landed in decide.go, where the rung reads RewriteCommand
+	// to perform safe-subset substitutions when auto-repair is opted in.
+	// The invariant this half establishes ahead of it is the one that makes the
+	// eventual gate safe to write as a bare `env.RewriteCommand != ""`:
+	// the safe-subset test lives HERE, so a rung that trusts a non-empty
+	// RewriteCommand can never be handed a force/delete/refspec/named-branch push.
 	RewriteCommand string `json:"rewrite_command,omitempty"`
 	RewriteTool    string `json:"rewrite_tool,omitempty"`
 }
