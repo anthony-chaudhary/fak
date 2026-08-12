@@ -2218,3 +2218,66 @@ The multiple of the caller's k that bounds how many already-ranked recall candid
 The FilingGate.Reason for the fail-closed arm of the idea-scout conversion gate: a filed-issue index larger than the cap that reports no state for any of its rows cannot be shown to be under the cap, so filing pauses rather than treating an unreadable ledger as an empty backlog.
 
 **Distinct from:** GateIndexUnclassified is about the MEASUREMENT being blind, not about the stock being large (GateUntriagedCap). It is also not the scout-index saturation refusal, which exits 2 because the DEDUP guarantee is at risk; this one holds filing while the conversion evidence is missing and lifts by itself once gh returns state again.
+
+
+### FP4ClaimRuntimeDelegated
+
+The claim scope in which the checkpoint producer states that execution belongs to an external runtime rather than to whoever reads the metadata. It is a producer ASSERTION carried in the document, and reading it routes the artifact away from in-kernel execution even when every other field would license acceptance.
+
+**Distinct from:** A scope the document declares, not a verdict fak reaches: FP4Delegate is the disposition the adjudicator returns, and this is one of the inputs that can force it. The other claim scopes (artifact, recipe, measured_hardware) say what the numbers describe; only this one reassigns who runs the model.
+
+
+### FP4Delegate
+
+The disposition meaning the FP4 document is readable and self-consistent but execution belongs to someone else -- because the producer said so, or because the declared hardware lacks native FP4 decode/GEMM. fak routes the artifact rather than claiming it can run it.
+
+**Distinct from:** Distinct from a refusal and from an abstain: delegate asserts the metadata IS understood and valid, and only the executor is elsewhere. Refuse means fak read it and it is wrong; abstain means fak could not read it at all.
+
+
+### runtime_delegated
+
+The wire value of the runtime-delegated claim scope: the literal string a producer writes into an FP4 metadata document's claim_scope field to say that execution belongs to an external runtime. Being a wire value, it is part of the artifact's public contract and cannot be renamed without breaking documents already written.
+
+**Distinct from:** The string on disk, not the Go constant that names it: FP4ClaimRuntimeDelegated is the identifier a fak build compiles against, and this is what a foreign producer -- which has never seen fak's source -- actually emits.
+
+
+### FP4HardwareCapability
+
+What the producer says the target device can do natively for FP4: the runtime and accelerator names plus separate native-decode and native-GEMM bits. The two bits are separate because a device can unpack FP4 into a wider type without owning an FP4 tensor-core GEMM, and only the PAIR licenses in-kernel execution.
+
+**Distinct from:** A declared capability of hardware, not a measurement of it and not a permission: fak never probes the device here, it reads what the document claims. A claim of capability that fak cannot honor produces a delegate, not a refusal.
+
+
+### AdjudicateFP4Metadata
+
+The function that turns an already-parsed FP4 metadata document into one of four typed dispositions -- accept, delegate, abstain, refuse -- with a stable machine-readable reason. It adjudicates against the published NVFP4 and OCP-MXFP4 definitions rather than fak preferences, and there is no fifth implicit 'assume it is fine' path.
+
+**Distinct from:** Adjudicates a document already read; ParseFP4Metadata is the strict reader that produces it, and a parse failure never reaches here. It also decides nothing about a RUN: it says whether these bytes are decodable and by whom, never that a kernel is fast or a speedup is real.
+
+
+### FP4ReasonSupported
+
+The Go constant naming the reason code carried by an accepting FP4 verdict: every field was readable, self-consistent, and named an envelope this build can decode in-kernel. Every verdict carries a reason so a caller never has to parse the prose detail.
+
+**Distinct from:** Names the reason for an ACCEPT specifically, not the disposition itself: the disposition says what to do, the reason says why. Distinct from the delegation and unsupported-combination reasons, which accompany verdicts that decline to run the artifact here.
+
+
+### FP4_SUPPORTED
+
+The wire value of the accepting FP4 reason code -- the literal string a caller matches on to learn that a metadata document was fully readable and decodable in-kernel. As a stable machine-readable code it is contract surface: callers switch on it instead of parsing the human-readable detail.
+
+**Distinct from:** The emitted string, not the Go constant: FP4ReasonSupported is what a fak build compiles against; this is what crosses a process or file boundary and must stay stable across builds.
+
+
+### FP4ReasonUnsupportedCombination
+
+The Go constant naming the reason for refusing an FP4 document whose field tuple contradicts the fixed definition of the format it names -- for example mxfp4 declared with 16-element blocks. It marks a REFUSAL that no future schema version can turn into an acceptance, because the contradiction is with the published format, not with this build.
+
+**Distinct from:** A refusal reason, not an abstention: abstaining says fak could not READ the document (an unknown schema or vocabulary word, which may simply be newer than this binary), while this says fak read it fine and the combination it describes cannot exist.
+
+
+### FP4_UNSUPPORTED_COMBINATION
+
+The wire value of the unsupported-combination refusal: the literal reason string emitted when an FP4 document's tuple contradicts the published definition of the format it names. Callers match on this code to distinguish a permanently invalid artifact from one this build merely cannot read yet.
+
+**Distinct from:** The emitted string rather than the Go constant FP4ReasonUnsupportedCombination, and distinct from the malformed code: malformed means the document contradicts ITSELF, while this means the document is coherent but describes a format combination that does not exist.

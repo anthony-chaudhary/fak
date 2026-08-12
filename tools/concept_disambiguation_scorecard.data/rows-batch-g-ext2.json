@@ -577,7 +577,8 @@
       "distinct_from": [
         "Pool (session)",
         "Pool (polymodel residency)",
-        "x2-pool-workerworktreepoolcapenv"
+        "x2-pool-workerworktreepoolcapenv",
+        "fp4claimruntimedelegated"
       ],
       "aliases": [],
       "grounding": "buildseatpool",
