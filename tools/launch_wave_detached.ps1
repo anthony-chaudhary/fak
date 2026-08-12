@@ -224,6 +224,72 @@ function Invoke-AdmissionGate {
   return $result
 }
 
+function Invoke-AdmissionPlan {
+  # The PLAN-side twin of Invoke-AdmissionGate (#6492). Without it the dry run priced
+  # SEATS only: it reported `granted=4, shortfall=0` while the matching -Launch
+  # dispatched 0/4 because every lane DEFERRED LAUNCH_RATE_EXCEEDED (and, in a second
+  # report, GLOBAL_LAUNCH_CAP for a single lane). The plan was not lying about seats --
+  # it simply never asked the gate the launch self-gates on, so the advertised grant was
+  # not launchable. `launch_admission.py plan` walks that SAME decision across the whole
+  # proposed lane list, statefully, and records NOTHING (planning must not consume launch
+  # budget). Fail-OPEN, exactly like the per-spawn gate: if the gate cannot run we return
+  # failopen and the plan reports the seat grant unmodified rather than wedging.
+  param([string]$RepoRoot, [string[]]$Accounts)
+  $result = [ordered]@{
+    granted = $Accounts.Count; shortfall = 0; retry_after = ''; reasons = @{}
+    lanes = @(); failopen = $false; reason = ''
+  }
+  if (-not $Accounts -or $Accounts.Count -eq 0) { $result.granted = 0; return $result }
+  $py = $null
+  try { $py = Resolve-PythonExe } catch { $py = $null }
+  if (-not $py) {
+    $result.failopen = $true; $result.reason = 'no python for admission gate'; return $result
+  }
+  $gate = Join-Path $RepoRoot 'tools\launch_admission.py'
+  if (-not (Test-Path $gate)) {
+    $result.failopen = $true; $result.reason = "admission gate missing: $gate"; return $result
+  }
+  $gArgs = @($py.Prefix) + @($gate, 'plan')
+  foreach ($a in $Accounts) { $gArgs += @('--account', "$a") }
+  $raw = ''
+  $rc = $null
+  $oldErrorAction = $ErrorActionPreference
+  $hadNativeError = Test-Path variable:PSNativeCommandUseErrorActionPreference
+  $oldNativeError = $null
+  try {
+    # A shortfall is a non-zero (3) exit; without pinning these off, Stop + native error
+    # action would THROW on it and misroute a real answer into the fail-open path.
+    $ErrorActionPreference = 'Continue'
+    if ($hadNativeError) {
+      $oldNativeError = $PSNativeCommandUseErrorActionPreference
+      $PSNativeCommandUseErrorActionPreference = $false
+    }
+    $raw = & $py.Exe @gArgs 2>$null | Out-String
+    $rc = $LASTEXITCODE
+  } catch {
+    $result.failopen = $true; $result.reason = "admission plan error: $_"; return $result
+  } finally {
+    if ($hadNativeError) { $PSNativeCommandUseErrorActionPreference = $oldNativeError }
+    $ErrorActionPreference = $oldErrorAction
+  }
+  if ($rc -ne 0 -and $rc -ne 3) {
+    $result.failopen = $true; $result.reason = "admission plan exit $rc"; return $result
+  }
+  $plan = $null
+  try { $plan = $raw | ConvertFrom-Json } catch { $plan = $null }
+  if (-not $plan -or $null -eq $plan.granted) {
+    $result.failopen = $true; $result.reason = 'admission plan produced no verdict'; return $result
+  }
+  $result.granted = [int]$plan.granted
+  $result.shortfall = [int]$plan.shortfall
+  if ($plan.PSObject.Properties['retry_after'] -and $plan.retry_after) {
+    $result.retry_after = [string]$plan.retry_after
+  }
+  if ($plan.PSObject.Properties['reasons']) { $result.reasons = $plan.reasons }
+  if ($plan.PSObject.Properties['lanes']) { $result.lanes = @($plan.lanes) }
+  return $result
+}
+
 function Invoke-SpawnPacing {
   # Inter-spawn pacing: spread the fan-out so a wave cannot hammer one account in a
   # sub-second burst. Base delay is env-overridable (FAK_LAUNCH_SPAWN_PACING_MS,
@@ -345,7 +411,8 @@ function New-WavePlanPayload {
     [string]$WorkKind,
     [string]$Product,
     [string]$PointerFile,
-    [string]$Reason = ''
+    [string]$Reason = '',
+    [object]$Admission = $null
   )
   $lanes = @()
   $index = 0
@@ -407,6 +474,22 @@ function New-WavePlanPayload {
     preflight = Convert-WavePreflightPublic -Preflight $Preflight
     lanes = $lanes
     reason = $Reason
+  }
+  # #6492: the admission state the -Launch path enforces per spawn, reported by the
+  # plan that precedes it. `granted` above is already the admission-adjusted number, so
+  # this block is the WHY (which lanes deferred, on what reason, until when) rather
+  # than a second, disagreeing answer.
+  if ($null -ne $Admission) {
+    $adm = [ordered]@{
+      granted = [int]$Admission.granted
+      shortfall = [int]$Admission.shortfall
+      retry_after = [string]$Admission.retry_after
+      failopen = [bool]$Admission.failopen
+    }
+    if ($Admission.reason) { $adm['reason'] = [string]$Admission.reason }
+    if ($Admission.reasons) { $adm['reasons'] = $Admission.reasons }
+    if ($Admission.lanes) { $adm['lanes'] = @($Admission.lanes) }
+    $payload['admission'] = $adm
   }
   return $payload
 }
@@ -479,19 +562,38 @@ if (-not $w.ok) {
   throw "account switcher refused the wave: $($w.reason) -- re-login / wait for reset, or pass -AllowTierFallback."
 }
 
+# --- Price the plan through the LAUNCH-ADMISSION gate (#6492) ------------------------
+# A seat grant is not a launch grant. -Launch self-gates every spawn on
+# launch_admission.py, so a plan that skips that gate advertises capacity the launch
+# will refuse (witnessed: plan granted=4 -> dispatched 0/4, all LAUNCH_RATE_EXCEEDED).
+# Ask the SAME gate here, over the same lane list, before printing a single number.
+# Plan-side only: with -Launch the per-spawn gate is the authority (and it is the one
+# that records), so this must not fire twice or consume the wave's launch budget.
+$admissionPlan = $null
+$admissionShortfall = 0
+$plannedGranted = [int]$w.granted
+if (-not $Launch) {
+  $admissionPlan = Invoke-AdmissionPlan -RepoRoot $repoRoot `
+    -Accounts @($w.lanes | ForEach-Object { [string]$_.tag })
+  if (-not $admissionPlan.failopen) {
+    $admissionShortfall = [int]$admissionPlan.shortfall
+    $plannedGranted = [int]$admissionPlan.granted
+  }
+}
+
 # --- Print the plan (always) ----------------------------------------------------------
-$totalShortfall = [int]$w.shortfall + $preflightShortfall
+$totalShortfall = [int]$w.shortfall + $preflightShortfall + $admissionShortfall
 if ($Json) {
   New-WavePlanPayload -Requested $Count -AllocationRequested $allocationCount `
-    -Granted ([int]$w.granted) -Shortfall $totalShortfall `
+    -Granted $plannedGranted -Shortfall $totalShortfall `
     -PreflightShortfall $preflightShortfall -Wave $w -Preflight $wavePreflight `
     -Workspace $Workspace -WorkKind $WorkKind -Product $Product `
-    -PointerFile $PointerFile -Reason $w.reason |
+    -PointerFile $PointerFile -Reason $w.reason -Admission $admissionPlan |
     ConvertTo-Json -Depth 12
   return
 }
 Write-Output ("WAVE PLAN  requested={0}  allocation_requested={1}  granted={2}  shortfall={3}  distinct_pools={4}  target_tier=t{5}" -f `
-  $Count, $allocationCount, $w.granted, $totalShortfall, $w.distinct_pools, $w.target_tier)
+  $Count, $allocationCount, $plannedGranted, $totalShortfall, $w.distinct_pools, $w.target_tier)
 $pfLine = Format-WavePreflightLine -Preflight $wavePreflight
 if ($pfLine) { Write-Output $pfLine }
 Write-Output "  (naive burst would give 1 pool; this wave uses $($w.distinct_pools) distinct pool(s) and $($w.granted) bounded session slot(s))"
@@ -506,6 +608,23 @@ if ($preflightShortfall -gt 0) {
 }
 if ($w.shortfall -gt 0) {
   Write-Output "  note: $($w.shortfall) lane(s) short after preflight -- the roster has no more available session slots at the requested tier."
+}
+# #6492: the launch-rate cooldown the -Launch path would enforce, reported HERE with
+# its retry time -- so the plan's granted number is the launchable one, not a seat
+# count that -Launch will immediately defer to 0.
+if ($null -ne $admissionPlan) {
+  if ($admissionPlan.failopen) {
+    Write-Output "  note: launch-admission plan unavailable ($($admissionPlan.reason)) -- granted shown is the SEAT grant; -Launch may still defer lanes."
+  } elseif ($admissionShortfall -gt 0) {
+    $why = @($admissionPlan.reasons.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ', '
+    $ra = if ($admissionPlan.retry_after) { "; retry after $($admissionPlan.retry_after)" } else { "" }
+    Write-Output "  note: $admissionShortfall lane(s) DEFERRED by the launch-admission gate [$why]$ra -- these would not launch now."
+    foreach ($l in @($admissionPlan.lanes)) {
+      if ($l.verdict -ne 'ADMIT') {
+        Write-Output ("    deferred: {0,-18} {1}  retry_after={2}" -f $l.account, $l.reason, $l.retry_after)
+      }
+    }
+  }
 }
 
 if (-not $Launch) {

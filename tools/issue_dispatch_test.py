@@ -714,6 +714,213 @@ class WaveTest(unittest.TestCase):
             self.assertEqual(rec["seats"], ["acct-0", "acct-1"])
 
 
+class WaveSpawnReadbackTest(unittest.TestCase):
+    """#6492: a wave is WAVED only for children that SURVIVE a bounded read-back.
+
+    Witnessed 2026-08-11: `issue_dispatch.py --wave --live` printed `WAVED (ok)` with
+    four pids while all four children were gone within seconds and their logs were 0
+    bytes — the tick reported Popen success, not worker liveness. These cases pin the
+    demotion end to end: the probe, the typed SPAWN_FAILED record, the terminal on-disk
+    evidence, the released in-flight marker, and the wave verdict itself."""
+
+    class _DeadProc:
+        """A child that has ALREADY exited when the tick reads it back."""
+
+        def __init__(self, pid: int = 7001, returncode: int = 1) -> None:
+            self.pid = pid
+            self._rc = returncode
+
+        def wait(self, timeout=None):     # noqa: ARG002  (bounded wait, returns at once)
+            return self._rc
+
+    class _LiveProc:
+        """A healthy child: still running when the bounded wait elapses."""
+
+        def __init__(self, pid: int = 7002) -> None:
+            self.pid = pid
+
+        def wait(self, timeout=None):
+            raise __import__("subprocess").TimeoutExpired(cmd="claude", timeout=timeout)
+
+    def _spawn(self, mod, proc, runs: Path, lane: str = "tools", probe_s: float = 0.01):
+        with warnings.catch_warnings(), \
+                mock.patch.object(mod.subprocess, "Popen", lambda *a, **k: proc), \
+                mock.patch.object(mod.shutil, "which", lambda x: x):
+            warnings.simplefilter("ignore", ResourceWarning)
+            return mod.spawn_detached(["claude", "-p", "x"], {}, runs.parent, runs,
+                                      lane, probe_s=probe_s)
+
+    def test_dead_child_is_read_back_and_typed_spawn_failed(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+            out = self._spawn(mod, self._DeadProc(returncode=2), runs)
+            early = out["early_exit"]
+            self.assertTrue(early["checked"])
+            self.assertFalse(early["alive"])
+            self.assertEqual(early["returncode"], 2)
+            self.assertTrue(early["silent"])          # 0-byte log: the witnessed shape
+            failure = mod.spawn_failure_record(out, "tools", seat="acct-0")
+            self.assertEqual(failure["verdict"], "SPAWN_FAILED")
+            self.assertEqual(failure["returncode"], 2)
+            self.assertEqual(failure["lane"], "tools")
+            self.assertEqual(failure["seat"], "acct-0")
+            # an empty log is the exec-race signature, not an unattributed failure
+            self.assertEqual(failure["cause"], "exec_race")
+
+    def test_live_child_is_never_demoted_by_a_silent_log(self) -> None:
+        # The whole point of a BOUNDED probe: a healthy worker is silent for many
+        # seconds while the agent starts. Silence from a LIVE pid is not a failure.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+            out = self._spawn(mod, self._LiveProc(), runs)
+            self.assertTrue(out["early_exit"]["alive"])
+            self.assertIsNone(mod.spawn_failure_record(out, "tools"))
+
+    def test_zero_probe_reproduces_the_old_popen_success_report(self) -> None:
+        # The gate is disable-able, and disabling it restores exactly the behaviour
+        # that produced the false WAVED — kept as an explicit operator escape.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+            out = self._spawn(mod, self._DeadProc(), runs, probe_s=0.0)
+            self.assertNotIn("early_exit", out)
+            self.assertIsNone(mod.spawn_failure_record(out, "tools"))
+
+    def test_dead_spawn_is_retired_with_a_terminal_record_and_no_marker(self) -> None:
+        # Done condition 3: the run does not sit on disk as an apparent run. It carries
+        # an explicit terminal failure record, and it stops claiming its lane.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+            out = self._spawn(mod, self._DeadProc(pid=7010), runs, lane="docs")
+            marker = Path(out["inflight"])
+            self.assertTrue(marker.exists())
+            self.assertEqual(mod.busy_lanes(runs, is_alive=lambda pid: True), {"docs"})
+            failure = mod.spawn_failure_record(out, "docs", seat="acct-1")
+            record = mod.retire_failed_spawn(out, failure)
+            self.assertTrue(record.endswith(mod.SPAWN_FAILED_SIDECAR_SUFFIX))
+            rec = json.loads(Path(record).read_text(encoding="utf-8"))
+            self.assertEqual(rec["verdict"], "SPAWN_FAILED")
+            self.assertEqual(rec["lane"], "docs")
+            self.assertEqual(rec["returncode"], 1)
+            # the dead child no longer holds its lane against the next tick
+            self.assertFalse(marker.exists())
+            self.assertEqual(mod.busy_lanes(runs, is_alive=lambda pid: True), set())
+
+    def test_probe_window_is_env_overridable_and_defaults_on(self) -> None:
+        mod = load()
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(mod.WAVE_SPAWN_PROBE_ENV, None)
+            self.assertEqual(mod.wave_spawn_probe_s(),
+                             mod.DEFAULT_WAVE_SPAWN_PROBE_S)
+        self.assertEqual(mod.wave_spawn_probe_s({mod.WAVE_SPAWN_PROBE_ENV: "0"}), 0.0)
+        self.assertEqual(mod.wave_spawn_probe_s({mod.WAVE_SPAWN_PROBE_ENV: "1.5"}), 1.5)
+        # a typo must not silently disable a safety gate
+        self.assertEqual(mod.wave_spawn_probe_s({mod.WAVE_SPAWN_PROBE_ENV: "soon"}),
+                         mod.DEFAULT_WAVE_SPAWN_PROBE_S)
+
+
+class WaveSpawnFailureVerdictTest(unittest.TestCase):
+    """#6492, the tick level: what the wave REPORTS when its children die on launch.
+
+    Borrows WaveTest's stub harness (nothing live is invoked) without inheriting its
+    cases. Reproduces the reported failure directly — every spawn returns a pid, every
+    child is already dead — and pins that the tick no longer calls that a WAVED wave."""
+
+    SPAWN_OK = WaveTest.SPAWN_OK
+    _wire = WaveTest._wire
+
+    @staticmethod
+    def _dead_spawn(rank_pid: int = 9000):
+        """A `_spawn_wave_member` stub whose child died inside the read-back window."""
+        n = {"i": 0}
+
+        def spawn(root, lane, seat, wave_id, rank, size, shortfall, **kw):
+            n["i"] += 1
+            return {"pid": rank_pid + n["i"], "log": f"{lane}.log",
+                    "spawn_failed": {"verdict": "SPAWN_FAILED", "cause": "exec_race",
+                                     "lane": lane, "seat": seat.get("tag"),
+                                     "returncode": 1, "log_bytes": 0, "silent": True}}
+        return spawn
+
+    def test_every_child_dead_is_spawn_failed_not_waved(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]}]
+        with tempfile.TemporaryDirectory() as d:
+            self._wire(mod, seats=[_seat(0), _seat(1)], candidates=cands,
+                       no_spawn=False)
+            mod._spawn_wave_member = self._dead_spawn()
+            p = mod.evaluate_wave(Path(d), max_workers=2, work_kind="engineering",
+                                  live=True)
+            self.assertFalse(p["ok"])                    # was: True
+            self.assertEqual(p["verdict"], "SPAWN_FAILED")   # was: "WAVED"
+            self.assertEqual(p["size"], 0)               # was: 2 (two pids)
+            self.assertEqual(p["lanes"], [])
+            self.assertEqual(p["spawn_failed_count"], 2)
+            self.assertEqual([f["lane"] for f in p["spawn_failed"]], ["tools", "docs"])
+            self.assertIn("no worker survived launch", p["reason"])
+            self.assertIn("SPAWN_FAILED", mod.render_wave(p))
+            # a wave that lost every child leaves no wave sidecar claiming a live wave
+            self.assertFalse((Path(d) / mod.RUNS_DIRNAME /
+                              "dispatch-wave-wave-test.json").exists())
+
+    def test_survivor_is_counted_and_the_dead_lane_is_named_not_hidden(self) -> None:
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]}]
+        with tempfile.TemporaryDirectory() as d:
+            self._wire(mod, seats=[_seat(0), _seat(1)], candidates=cands,
+                       no_spawn=False)
+
+            def spawn(root, lane, seat, wave_id, rank, size, shortfall, **kw):
+                if lane == "tools":
+                    return {"pid": 9101, "log": "tools.log",
+                            "spawn_failed": {"verdict": "SPAWN_FAILED",
+                                             "cause": "stale_cred", "lane": lane,
+                                             "seat": seat.get("tag"), "returncode": 1,
+                                             "log_bytes": 0, "silent": True}}
+                return {"pid": 9102, "log": f"{lane}.log"}
+            mod._spawn_wave_member = spawn
+            p = mod.evaluate_wave(Path(d), max_workers=2, work_kind="engineering",
+                                  live=True)
+            self.assertTrue(p["ok"])
+            self.assertEqual(p["verdict"], "WAVED")
+            self.assertEqual(p["size"], 1)               # only the survivor
+            self.assertEqual(p["lanes"], ["docs"])
+            self.assertEqual(p["spawn_failed_count"], 1)
+            self.assertIn("tools=stale_cred", p["reason"])
+            self.assertIn("died on launch", p["reason"])
+            # the dead lane took its own seat: the survivor did not inherit rank 0's.
+            self.assertEqual(p["seats_used"], ["acct-1"])
+
+    def test_a_dead_spawn_holds_no_lease_so_a_colliding_lane_can_still_run(self) -> None:
+        # A child that never lived must not hold the wave's disjointness lease: the
+        # next candidate on the same tree is free to take the lane.
+        mod = load()
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "tools2", "issues": 8, "tree": ["tools/**"]}]
+        with tempfile.TemporaryDirectory() as d:
+            self._wire(mod, seats=[_seat(0), _seat(1)], candidates=cands,
+                       no_spawn=False)
+
+            def spawn(root, lane, seat, wave_id, rank, size, shortfall, **kw):
+                if lane == "tools":
+                    return {"pid": 9201, "log": "tools.log",
+                            "spawn_failed": {"verdict": "SPAWN_FAILED",
+                                             "cause": "exec_race", "lane": lane,
+                                             "seat": seat.get("tag"), "returncode": 1,
+                                             "log_bytes": 0, "silent": True}}
+                return {"pid": 9202, "log": f"{lane}.log"}
+            mod._spawn_wave_member = spawn
+            p = mod.evaluate_wave(Path(d), max_workers=2, work_kind="engineering",
+                                  live=True)
+            self.assertEqual(p["lanes"], ["tools2"])
+            self.assertEqual(p["spawn_failed_count"], 1)
+
+
 class WaveLaunchCacheTest(unittest.TestCase):
     """#3610 cross-worker floor cache-warm: ONE warm pre-request per wave (not per
     member) primes the byte-identical ~35.8k floor prefix, and a stagger knob spaces

@@ -219,6 +219,125 @@ class AdmitOrDeferSeamTest(unittest.TestCase):
             self.assertEqual(v["reason"], LA.REASON_THROTTLED)
 
 
+class WavePlanAdmissionTest(unittest.TestCase):
+    """#6492: the plan must ask the SAME gate the launch self-gates on.
+
+    Witnessed 2026-08-11: a dry run advertised ``granted=4, shortfall=0``; the matching
+    ``-Launch`` dispatched ``0/4`` with every lane DEFERRED ``LAUNCH_RATE_EXCEEDED``
+    (a second report hit ``GLOBAL_LAUNCH_CAP``). The seats were real -- the plan simply
+    never consulted admission, so it advertised a grant that was not launchable. These
+    cases pin the planner to the launcher's own answer."""
+
+    def test_cooldown_mismatch_plan_grants_zero_not_four(self):
+        # The reported shape: one account already AT its ceiling inside the window,
+        # four lanes proposed onto it. The old planner said 4/4.
+        hist = {".claude-q-netra": [START + timedelta(seconds=i) for i in range(3)]}
+        plan = LA.plan_lanes([".claude-q-netra"] * 4,
+                             now=START + timedelta(seconds=10),
+                             account_launches=hist, global_launches=hist[".claude-q-netra"],
+                             max_per_account=3, window_min=5, global_cap=50)
+        self.assertEqual(plan["requested"], 4)
+        self.assertEqual(plan["granted"], 0)          # was: 4
+        self.assertEqual(plan["shortfall"], 4)        # was: 0
+        self.assertEqual(plan["reasons"], {LA.REASON_RATE: 4})
+        self.assertIsNotNone(plan["retry_after"])     # an honest "come back at"
+        self.assertEqual([l["verdict"] for l in plan["lanes"]], [LA.VERDICT_DEFER] * 4)
+
+    def test_global_cap_mismatch_is_also_planned(self):
+        # The second reported report: fresh accounts, but the FLEET is at its cap.
+        glob = [START + timedelta(seconds=i) for i in range(10)]
+        plan = LA.plan_lanes([f".claude-fresh-{i}" for i in range(3)],
+                             now=START + timedelta(seconds=20),
+                             global_launches=glob,
+                             max_per_account=3, window_min=5, global_cap=10)
+        self.assertEqual(plan["granted"], 0)
+        self.assertEqual(plan["shortfall"], 3)
+        self.assertEqual(plan["reasons"], {LA.REASON_GLOBAL_CAP: 3})
+
+    def test_plan_is_stateful_so_n_lanes_on_one_account_stop_at_the_ceiling(self):
+        # The subtle half of the bug: a stateless per-lane check would ADMIT all 5
+        # (each lane sees an empty ledger). Lane i must see lanes 0..i-1.
+        plan = LA.plan_lanes([".claude-q-netra"] * 5, now=START,
+                             max_per_account=3, window_min=5, global_cap=50)
+        self.assertEqual(plan["granted"], 3)          # exactly the ceiling
+        self.assertEqual(plan["shortfall"], 2)
+        self.assertEqual([l["verdict"] for l in plan["lanes"]],
+                         [LA.VERDICT_ADMIT] * 3 + [LA.VERDICT_DEFER] * 2)
+
+    def test_clear_fleet_still_plans_the_full_grant(self):
+        # The gate must not become a brake: distinct fresh accounts all plan ADMIT.
+        plan = LA.plan_lanes([f".claude-fresh-{i}" for i in range(4)], now=START,
+                             max_per_account=3, window_min=5, global_cap=10)
+        self.assertEqual((plan["granted"], plan["shortfall"]), (4, 0))
+        self.assertEqual(plan["reasons"], {})
+        self.assertIsNone(plan["retry_after"])
+
+    def test_throttled_lane_is_deferred_with_its_reset_as_retry_after(self):
+        reset = "Jun 25, 1pm (America/Los_Angeles)"
+        plan = LA.plan_lanes([".claude-q-netra", ".claude-day24-netra"], now=START,
+                             throttle_resets={".claude-q-netra": reset},
+                             max_per_account=3, window_min=5, global_cap=10)
+        self.assertEqual((plan["granted"], plan["shortfall"]), (1, 1))
+        self.assertEqual(plan["reasons"], {LA.REASON_THROTTLED: 1})
+        self.assertEqual(plan["retry_after"], reset)
+
+    def test_earliest_retry_wins_over_a_later_one(self):
+        self.assertEqual(
+            LA._earliest_retry([None, "2026-06-24T22:09:03Z", "2026-06-24T22:06:03Z"]),
+            "2026-06-24T22:06:03Z")
+
+    def test_plan_reads_the_ledger_and_records_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            for i in range(3):
+                LA.record_launch(led, ".claude-q-netra", START + timedelta(seconds=i))
+            plan = LA.plan_wave([".claude-q-netra", ".claude-day24-netra"],
+                                ledger_path=led, now=START + timedelta(seconds=10),
+                                max_per_account=3, window_min=5, global_cap=50)
+            self.assertEqual(plan["granted"], 1)      # only the clear account
+            self.assertEqual(plan["lanes"][0]["reason"], LA.REASON_RATE)
+            # planning must never consume launch budget
+            acct, glob = LA.load_launches(led, ".claude-day24-netra")
+            self.assertEqual((len(acct), len(glob)), (0, 3))
+
+    def test_plan_agrees_with_the_launchers_own_per_spawn_gate(self):
+        # The anti-drift property: whatever the plan says about lane 0, the launcher's
+        # own admit_or_defer on the same ledger+clock must say too.
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            for i in range(3):
+                LA.record_launch(led, ".claude-q-netra", START + timedelta(seconds=i))
+            now = START + timedelta(seconds=10)
+            plan = LA.plan_wave([".claude-q-netra"], ledger_path=led, now=now,
+                                max_per_account=3, window_min=5, global_cap=50)
+            live = LA.admit_or_defer(".claude-q-netra", ledger_path=led, now=now,
+                                     max_per_account=3, window_min=5, global_cap=50)
+            self.assertEqual(plan["lanes"][0]["verdict"], live["verdict"])
+            self.assertEqual(plan["lanes"][0]["reason"], live["reason"])
+
+    def test_plan_cli_exits_3_on_shortfall_and_0_when_clear(self):
+        import io
+        import contextlib
+        with tempfile.TemporaryDirectory() as d:
+            led = os.path.join(d, "resume_ledger.jsonl")
+            for i in range(3):
+                LA.record_launch(led, ".claude-q-netra", START + timedelta(seconds=i))
+            argv = ["plan", "--ledger", led, "--now", "2026-06-24T22:04:13Z",
+                    "--max-per-account", "3", "--window-min", "5", "--global-cap", "50"]
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = LA.main(argv + ["--account", ".claude-q-netra"])
+            self.assertEqual(rc, 3)                   # not launchable -> non-zero
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["schema"], LA.PLAN_SCHEMA)
+            self.assertEqual(out["shortfall"], 1)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = LA.main(argv + ["--account", ".claude-day24-netra"])
+            self.assertEqual(rc, 0)                   # clear -> the plan is honest
+            self.assertEqual(json.loads(buf.getvalue())["granted"], 1)
+
+
 class LauncherWiringTest(unittest.TestCase):
     """The gate is only useful once a launcher routes THROUGH it (#3552, the #617
     unwired-gate class). Content checks that the wave launcher invokes the gate and
@@ -229,6 +348,14 @@ class LauncherWiringTest(unittest.TestCase):
     def test_wave_launcher_invokes_the_admission_gate(self):
         text = self.WAVE.read_text(encoding="utf-8")
         self.assertIn("launch_admission.py", text)
+
+    def test_wave_plan_consults_admission_before_advertising_a_grant(self):
+        # #6492: the DRY RUN, not just the launch, must route through the gate --
+        # otherwise the plan advertises a grant the launch cannot deliver.
+        text = self.WAVE.read_text(encoding="utf-8")
+        self.assertIn("Invoke-AdmissionPlan", text)
+        self.assertIn("'plan'", text)              # the decide-only verb
+        self.assertIn("admissionShortfall", text)  # folded into the plan's shortfall
 
     def test_wave_launcher_paces_spawns_with_a_jittered_delay(self):
         text = self.WAVE.read_text(encoding="utf-8")

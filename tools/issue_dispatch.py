@@ -87,6 +87,28 @@ INFLIGHT_PREFIX = "inflight-"
 # by a tick that crashed before it could prune, even if the pid was since reused.
 INFLIGHT_TTL_SECONDS = 12 * 3600
 
+# --- #6492: the wave's spawn READ-BACK gate ---------------------------------------
+# A wave used to report WAVED off `subprocess.Popen` returning a pid, and a pid only
+# proves the OS accepted the exec -- not that a worker survived long enough to do any
+# work. Witnessed 2026-08-11: a 4-lane live wave printed `WAVED (ok)` with four pids
+# while all four children were gone within seconds, their logs 0 bytes, and the
+# spawn-failure telemetry still reporting zero failures. The single-issue path already
+# had the answer (issue_resolve_dispatch.probe_spawned_worker): wait a bounded moment
+# and read the child back before claiming it. These knobs are that gate for the wave
+# path. It only ever DEMOTES: a child already dead when we look is typed SPAWN_FAILED
+# with its returncode + log tail instead of being counted as a live member.
+WAVE_SPAWN_PROBE_ENV = "FLEET_WAVE_SPAWN_PROBE_S"
+# Mirrors issue_resolve_dispatch.DEFAULT_SPAWN_PROBE_S -- the same bounded window the
+# per-issue path already pays. 0 disables the gate (back to Popen-success reporting).
+DEFAULT_WAVE_SPAWN_PROBE_S = 5.0
+# The terminal record written next to the log of a child that did not survive the
+# gate. It is what stops an empty `dispatch-<lane>-<stamp>.log` from reading as an
+# apparent run: the runs dir carries an EXPLICIT failure record instead of silence,
+# and dispatch_status.spawn_failed_cause_breakdown folds it as a real failure.
+SPAWN_FAILED_SIDECAR_SUFFIX = ".spawn-failed.json"
+# Mirrors issue_resolve_dispatch.EARLY_EXIT_TAIL_CHARS (bounded evidence, not a dump).
+WAVE_EARLY_EXIT_TAIL_CHARS = 8192
+
 # Mirrors internal/dispatchtick/selfmodify.go's SelfSourceTreePrefixes on the native
 # Go dispatch path. A lane whose tree touches fak's own source risks poisoning
 # ``go build ./...`` for every OTHER concurrently-running agent on the shared trunk
@@ -741,10 +763,141 @@ def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str,
     return env
 
 
+def wave_spawn_probe_s(env: "dict[str, str] | None" = None) -> float:
+    """The bounded read-back window one wave spawn is checked over (#6492).
+
+    Env-overridable (``FLEET_WAVE_SPAWN_PROBE_S``), defaulting to the same window the
+    per-issue path already pays. ``0`` disables the gate, which restores the old
+    Popen-success reporting exactly — kept as an explicit operator escape, never a
+    silent default. An unparseable value falls back to the default rather than
+    disabling a safety gate by typo."""
+    raw = ((env if env is not None else os.environ).get(WAVE_SPAWN_PROBE_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_WAVE_SPAWN_PROBE_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_WAVE_SPAWN_PROBE_S
+
+
+def probe_spawned_child(proc: Any, out_log: Path, wait_s: float) -> dict[str, Any]:
+    """Briefly check whether a just-spawned child died before it could log (#6492).
+
+    Mirrors ``issue_resolve_dispatch.probe_spawned_worker`` — deliberately duplicated
+    rather than imported, because that module imports THIS one (importing it back at
+    spawn time would be an import cycle on the hot path).
+
+    A healthy worker can be silent for many seconds while the agent starts, so a LIVE
+    process with a 0-byte log is not a failure and is never reported as one. The
+    failure witnessable here is narrower and unambiguous: the process has ALREADY
+    exited by the time the bounded wait elapses. FAIL-OPEN: a probe that cannot run
+    (a stub proc, an OS error) reports ``checked=False`` and the spawn stands."""
+    if wait_s <= 0:
+        return {"checked": False}
+    try:
+        returncode = proc.wait(timeout=wait_s)
+    except subprocess.TimeoutExpired:
+        return {"checked": True, "alive": True, "wait_s": wait_s}
+    except (AttributeError, OSError, ValueError):
+        return {"checked": False}
+    try:
+        log_bytes = out_log.stat().st_size
+    except OSError:
+        log_bytes = 0
+    rec: dict[str, Any] = {
+        "checked": True,
+        "alive": False,
+        "wait_s": wait_s,
+        "returncode": returncode,
+        "log_bytes": log_bytes,
+        "silent": log_bytes == 0,
+    }
+    if log_bytes:
+        try:
+            rec["tail"] = out_log.read_text(
+                encoding="utf-8", errors="replace")[-WAVE_EARLY_EXIT_TAIL_CHARS:]
+        except OSError:
+            pass
+    return rec
+
+
+def classify_spawn_failure(early: dict[str, Any]) -> str:
+    """Attribute one early-exit to a cause bucket, reusing the #2635 classifier.
+
+    Lazily imported (``issue_resolve_dispatch`` imports this module) and FAIL-OPEN: if
+    the classifier is unavailable the event is still counted, just as ``unknown`` — a
+    missing attribution must never turn a witnessed failure back into a success."""
+    try:
+        import issue_resolve_dispatch as ird  # noqa: PLC0415  (lazy: import cycle)
+
+        return str(ird.classify_spawn_failed_cause(early))
+    except Exception:   # noqa: BLE001  -- attribution is advisory; the count is not
+        return "unknown"
+
+
+def spawn_failure_record(spawned: dict[str, Any], lane: str,
+                         seat: str | None = None) -> dict[str, Any] | None:
+    """The typed SPAWN_FAILED record for a child that did not survive the read-back
+    gate, or ``None`` when it is still alive (or was never probed).
+
+    ``None`` is the honest answer for an unprobed spawn: absence of a probe is not
+    evidence of death, and this gate only ever demotes on POSITIVE evidence."""
+    early = spawned.get("early_exit") or {}
+    if not early.get("checked") or early.get("alive"):
+        return None
+    return {
+        "verdict": "SPAWN_FAILED",
+        "cause": classify_spawn_failure(early),
+        "lane": lane,
+        "seat": seat,
+        "pid": spawned.get("pid"),
+        "log": spawned.get("log"),
+        "returncode": early.get("returncode"),
+        "log_bytes": early.get("log_bytes"),
+        "silent": bool(early.get("silent")),
+        "tail": early.get("tail") or "",
+        "stamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+
+
+def retire_failed_spawn(spawned: dict[str, Any], failure: dict[str, Any]) -> str | None:
+    """Close out a dead spawn on disk: write the terminal failure record next to its
+    log and drop the in-flight marker it wrote at exec.
+
+    Both halves matter. The record is what stops an empty ``dispatch-<lane>-<stamp>``
+    log from reading as an apparent run — the run is explicitly terminal, with the
+    returncode and tail that killed it. Dropping the marker stops a dead child from
+    holding its lane busy against the NEXT tick. Best-effort: a disk fault never
+    escalates a spawn failure into a tick crash."""
+    written: str | None = None
+    log = spawned.get("log")
+    if log:
+        try:
+            path = Path(str(log)).with_suffix(SPAWN_FAILED_SIDECAR_SUFFIX)
+            path.write_text(json.dumps(failure, indent=2, sort_keys=True),
+                            encoding="utf-8")
+            written = str(path)
+        except (OSError, ValueError):
+            written = None
+    marker = spawned.get("inflight")
+    if marker:
+        try:
+            Path(str(marker)).unlink()
+        except OSError:
+            pass
+    return written
+
+
 def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
                    log_dir: Path, lane: str, guarded: bool = True,
-                   worktree_git: "Callable[..., Any] | None" = None) -> dict[str, Any]:
+                   worktree_git: "Callable[..., Any] | None" = None,
+                   probe_s: float = 0.0) -> dict[str, Any]:
     """Launch the worker DETACHED so it outlives this tick; log to a dated file.
+
+    ``probe_s`` (#6492) is the bounded read-back window: with a positive value the
+    spawn is checked back before it is reported, and a child that has already exited
+    comes back stamped ``early_exit``. It defaults to 0 (no read-back) so every
+    existing caller keeps today's behaviour; the wave path passes the real window.
 
     ``guarded`` records whether THIS worker is fronted by ``fak guard`` so the in-flight
     marker self-describes its guard status; a later tick reads it via
@@ -798,6 +951,10 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     result = {"pid": proc.pid, "log": str(out_log), "inflight": marker}
     if wt_info.get("worktree"):
         result["worktree"] = wt_info["worktree"]
+    # #6492: read the child back before this spawn is reported as a worker.
+    early = probe_spawned_child(proc, out_log, probe_s)
+    if early.get("checked"):
+        result["early_exit"] = early
     return result
 
 
@@ -1281,10 +1438,17 @@ def _wave_env(rank: int, wave_id: str, size: int, shortfall: int) -> dict[str, s
 
 
 def _spawn_wave_member(root: Path, lane: str, seat: dict[str, Any], wave_id: str,
-                       rank: int, size: int, shortfall: int) -> dict[str, Any]:
+                       rank: int, size: int, shortfall: int,
+                       probe_s: float | None = None) -> dict[str, Any]:
     """Launch one wave worker on its seat, stamped with its wave membership. Writes a
     per-worker ``.wave`` sidecar next to the log so the whole wave is enumerable from
-    disk, never from a worker's self-report."""
+    disk, never from a worker's self-report.
+
+    #6492: the spawn is READ BACK over a bounded window before it is reported. A child
+    already dead when we look comes back as a ``spawn_failed`` record (typed
+    SPAWN_FAILED, with cause/returncode/tail), its log is closed out with a terminal
+    failure record, and its in-flight marker is dropped — so a dead child is never
+    counted as a live member and never holds its lane against the next tick."""
     command, launch_command, guarded = _build_launch(root, lane)
     if not launch_command:
         return {"error": f"no command for lane '{lane}'"}
@@ -1293,7 +1457,9 @@ def _spawn_wave_member(root: Path, lane: str, seat: dict[str, Any], wave_id: str
     if guarded:
         dispatch_worker.guard_env_augment(env)
     spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, lane,
-                             guarded=guarded)
+                             guarded=guarded,
+                             probe_s=(wave_spawn_probe_s() if probe_s is None
+                                      else probe_s))
     spawned["guarded"] = guarded
     try:
         Path(spawned["log"]).with_suffix(".wave").write_text(
@@ -1301,6 +1467,14 @@ def _spawn_wave_member(root: Path, lane: str, seat: dict[str, Any], wave_id: str
                         "shortfall": shortfall}, sort_keys=True), encoding="utf-8")
     except OSError:
         pass
+    failure = spawn_failure_record(spawned, lane, seat=seat.get("tag"))
+    if failure:
+        failure["wave_id"] = wave_id
+        failure["rank"] = rank
+        spawned["spawn_failed"] = failure
+        record = retire_failed_spawn(spawned, failure)
+        if record:
+            spawned["spawn_failed_record"] = record
     return spawned
 
 
@@ -1427,11 +1601,18 @@ def _admit_wave_members(root: Path, *, candidates: list[dict[str, Any]],
     agent launches; the walk stops at the first refusal. Returns the tick's admission
     record: the members (spawned when ``live``), the lanes skipped as cross-tick busy,
     the refusal that stopped the walk, and the launch-cache posture.
+
+    #6492: a live spawn only becomes a MEMBER once it survives the read-back gate. A
+    child that is already dead when we look is moved to ``spawn_failed`` instead: it
+    holds no lease, takes no rank, and never counts toward the wave's size — but it
+    DOES consume its attempt and its seat, so one tick cannot re-burn the whole roster
+    retrying lanes behind a seat that is killing children.
     """
     leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
     warm_record: dict[str, Any] | None = None   # #3610 once-per-wave warm latch
     staggered = 0                               # #3610 count of delayed launches
     members: list[dict[str, Any]] = []
+    spawn_failed: list[dict[str, Any]] = []     # #6492 children that died on launch
     skipped_busy: list[str] = []
     baseline_live: int | None = None
     cap_seen: int | None = None
@@ -1444,9 +1625,12 @@ def _admit_wave_members(root: Path, *, candidates: list[dict[str, Any]],
     if not refusal:
         preflight_seed = first_preflight
         for c in candidates:
-            if len(members) >= max_workers:
+            # Attempts, not survivors, bound the walk: a seat whose child died is spent
+            # for this tick, so a failing seat cannot be silently re-drawn.
+            attempts = len(members) + len(spawn_failed)
+            if attempts >= max_workers:
                 break
-            if len(members) >= free_seats:
+            if attempts >= free_seats:
                 if free_seats > 0:
                     refusal = refusal or "SEATS_EXHAUSTED"
                 break
@@ -1487,7 +1671,7 @@ def _admit_wave_members(root: Path, *, candidates: list[dict[str, Any]],
             dec = arbitrate_lane(root, c["lane"], c["tree"], leases)
             if not dec.get("admitted"):
                 continue   # collides with an admitted lane (or kernel error) -> skip
-            rank = len(members)
+            rank = len(members) + len(spawn_failed)
             seat = seat_lanes[rank]
             member: dict[str, Any] = {
                 "lane": c["lane"], "tree": dec["tree"], "issues": c["issues"], "rank": rank,
@@ -1502,27 +1686,57 @@ def _admit_wave_members(root: Path, *, candidates: list[dict[str, Any]],
                 # use. `warm_record is None` is the once-per-wave latch.
                 if warm_floor and warm_record is None:
                     warm_record = warm_floor_prefix(root, live=True)
-                # Space consecutive launches inside the cache TTL. `members` is appended
-                # AFTER the spawn, so a truthy `members` means at least one member is
-                # already out: the delay lands BETWEEN spawns, never before the first.
-                if stagger_s > 0 and members:
+                # Space consecutive launches inside the cache TTL. Both lists are
+                # appended AFTER the spawn, so a truthy `attempts` means at least one
+                # launch is already out: the delay lands BETWEEN spawns, never before
+                # the first (a failed spawn is still a launch that hit the provider).
+                if stagger_s > 0 and attempts:
                     _sleep(stagger_s)
                     staggered += 1
                 member["spawned"] = _spawn_wave_member(
                     root, c["lane"], seat, wave_id, rank, free_seats,
                     int(seats.get("shortfall") or 0))
+                failure = (member["spawned"] or {}).get("spawn_failed")
+                if failure:
+                    # Witnessed dead on read-back: not a member, no lease, no seat
+                    # reuse. The wave reports it as a typed failure instead of a pid.
+                    member["spawn_failed"] = failure
+                    spawn_failed.append(member)
+                    continue
             members.append(member)
             leases.append({"lane": c["lane"], "lane_kind": "cluster", "tree": dec["tree"]})
-    return {"members": members, "skipped_busy": skipped_busy, "refusal": refusal,
+    return {"members": members, "spawn_failed": spawn_failed,
+            "skipped_busy": skipped_busy, "refusal": refusal,
             "preflight_hint": preflight_hint, "last_preflight": last_preflight,
             "cap": cap_seen, "warm_record": warm_record, "staggered": staggered}
+
+
+def _spawn_failure_causes(failures: list[dict[str, Any]]) -> str:
+    """``lane=cause`` for each dead child, in launch order — the one-line evidence
+    summary a verdict carries so an operator reads WHICH lane died of WHAT without
+    opening the per-log terminal records."""
+    return ", ".join(
+        f"{m.get('lane')}={(m.get('spawn_failed') or {}).get('cause') or 'unknown'}"
+        for m in failures)
 
 
 def _apply_wave_verdict(payload: dict[str, Any], root: Path, cand: dict[str, Any], *,
                         size: int, lanes_used: list[str], wave_id: str, live: bool,
                         refusal: str | None, candidates: list[dict[str, Any]],
-                        free_seats: int, seats: dict[str, Any]) -> None:
-    """Stamp the tick's terminal verdict: what the wave did, or why it did nothing."""
+                        free_seats: int, seats: dict[str, Any],
+                        spawn_failed: list[dict[str, Any]] | None = None) -> None:
+    """Stamp the tick's terminal verdict: what the wave did, or why it did nothing.
+
+    #6492: ``size`` counts only children that SURVIVED the read-back gate, so WAVED is
+    a claim about live workers rather than about accepted execs. Children that died on
+    launch are named in the verdict either way — as a caveat on a partly-live wave, or
+    as the wave's own SPAWN_FAILED verdict when none of them survived."""
+    failures = list(spawn_failed or [])
+    failed_note = ""
+    if failures:
+        causes = _spawn_failure_causes(failures)
+        failed_note = (f"; {len(failures)} child(ren) died on launch "
+                       f"[{causes}] and were NOT counted")
     if size > 0:
         payload.update({
             "ok": True,
@@ -1530,9 +1744,19 @@ def _apply_wave_verdict(payload: dict[str, Any], root: Path, cand: dict[str, Any
             "action": "waved" if live else "would_wave",
             "reason": (f"{'spawned' if live else 'would spawn'} {size} worker(s) across "
                        f"pairwise-disjoint lanes {lanes_used} (wave {wave_id})"
-                       + (f"; stopped on {refusal}" if refusal else ""))})
+                       + (f"; stopped on {refusal}" if refusal else "")
+                       + failed_note)})
         if live:
             _write_wave_artifacts(root / RUNS_DIRNAME, payload)
+    elif failures:
+        # Every child this wave launched was already dead when we read it back. That is
+        # a SPAWN_FAILED tick, not a WAVED one and not a bare refusal: the tick DID act,
+        # and the evidence (returncode + log tail per lane) is on disk.
+        payload.update({
+            "ok": False, "verdict": "SPAWN_FAILED", "action": "spawn_failed",
+            "reason": (f"no worker survived launch: {len(failures)} child(ren) exited "
+                       f"inside the read-back window [{_spawn_failure_causes(failures)}]"
+                       + (f"; stopped on {refusal}" if refusal else ""))})
     elif refusal:
         payload.update({"ok": False, "verdict": refusal,
                         "action": "refused",
@@ -1625,6 +1849,7 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
         first_preflight=first_preflight, warm_floor=warm_floor,
         stagger_s=stagger_s)
     members = admitted["members"]
+    spawn_failed = admitted["spawn_failed"]
     refusal = admitted["refusal"]
     if admitted["warm_record"] is not None:
         payload["warm_floor"] = admitted["warm_record"]
@@ -1635,6 +1860,11 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     payload.update({"size": size, "lanes": lanes_used, "members": members,
                     "seats_used": seats_used, "cap": admitted["cap"],
                     "refusal": refusal, "skipped_busy": admitted["skipped_busy"]})
+    # #6492: the launched-but-dead population is always reported (0 when clean) so a
+    # reader never has to infer "no failures" from an absent key. `size` above excludes
+    # them by construction — this is the record of what the wave lost on launch.
+    payload["spawn_failed"] = [m.get("spawn_failed") for m in spawn_failed]
+    payload["spawn_failed_count"] = len(spawn_failed)
     # #3610: the launch-cache posture is always reported (even off/zero) so an auditor
     # reads the knob's live value from the tick record instead of inferring it.
     payload["launch_cache"] = {"warm_floor": bool(warm_floor),
@@ -1647,7 +1877,8 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
 
     _apply_wave_verdict(payload, root, cand, size=size, lanes_used=lanes_used,
                         wave_id=wave_id, live=live, refusal=refusal,
-                        candidates=candidates, free_seats=free_seats, seats=seats)
+                        candidates=candidates, free_seats=free_seats, seats=seats,
+                        spawn_failed=spawn_failed)
     return payload
 
 
@@ -1674,6 +1905,13 @@ def render_wave(p: dict[str, Any]) -> str:
         pid = f" pid={sp.get('pid')}" if sp.get("pid") else ""
         lines.append(f"    [{m.get('rank')}] {str(m.get('lane') or '-'):<12} "
                      f"{m.get('issues')} issues  seat={tag}{pid}")
+    # #6492: dead-on-launch children are printed as loudly as live ones. A wave that
+    # reports only its survivors is how "WAVED (ok)" survived four dead pids.
+    for f in p.get("spawn_failed") or []:
+        f = f or {}
+        lines.append(f"    [x] {str(f.get('lane') or '-'):<12} SPAWN_FAILED "
+                     f"cause={f.get('cause')} rc={f.get('returncode')} "
+                     f"log_bytes={f.get('log_bytes')} seat={f.get('seat') or '-'}")
     # #3610: the launch-cache posture, so an operator reads whether the wave paid N
     # floor cache-writes or 1 write + (N-1) reads without opening the JSON.
     lc = p.get("launch_cache") or {}
