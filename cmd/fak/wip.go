@@ -202,7 +202,12 @@ func wipUsage(w io.Writer) {
       most-decayed-first by BASE DRIFT (commits HEAD has advanced past the checkpoint's
       base) then age; exit 3 if any exist. RECLAIM decays into QUARANTINE as the tree
       moves, so the drift column is that verdict's remaining life — act on the top row
-      first, with 'fak wip land <session>'.
+      first, running the exact argv that row prints: 'fak wip reconcile adopt <session>'
+      for a row nobody holds, 'fak wip reconcile resume <session>' for one this session
+      already claimed, and nothing at all for a row a live peer holds (wait for that
+      claim to finish or lapse). Adopting takes the witnessed claim BEFORE the delta is
+      re-materialized, which is what keeps two successors reading one queue from
+      recovering the same checkpoint twice (#5998).
       With --file-ticket, bind each QUARANTINE orphan to ONE idempotent GitHub tracking
       ticket (keyed by session+start-SHA; a matching ticket already open is reused, not
       duplicated). --dry-run (and an unavailable gh) prints the exact ticket instead of
