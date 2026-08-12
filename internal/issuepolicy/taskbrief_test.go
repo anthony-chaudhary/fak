@@ -45,6 +45,20 @@ func TestShiftLeftTaskBriefReadiness(t *testing.T) {
 			t.Fatalf("readiness = %+v", got.BriefReadiness)
 		}
 	})
+	t.Run("missing whole value frame", func(t *testing.T) {
+		fields := cloneBriefFields(complete)
+		delete(fields, "Value")
+		got := ReviewIssueDraft(IssueDraft{Title: "add typed task briefs", Body: body(fields)}, Options{})
+		if got.BriefReadiness.Ready || got.Dispatchability == Dispatchable {
+			t.Fatalf("review accepted a shift-left brief with no value frame: %+v", got)
+		}
+		for _, name := range []string{"beneficiary", "problem", "alternative", "advantage"} {
+			field := got.BriefReadiness.Fields[name]
+			if field.Status != "missing" || field.RepairAction == "" {
+				t.Fatalf("%s = %+v, want missing with repair", name, field)
+			}
+		}
+	})
 	cases := map[string]string{"outcome": "Outcome", "scope": "Scope / tree", "dependencies": "Dependencies", "acceptance": "Acceptance", "witness": "Witness / proof", "placement": "Placement"}
 	for field, heading := range cases {
 		t.Run("missing "+field, func(t *testing.T) {
@@ -97,6 +111,22 @@ func TestLegacyIssueContractDoesNotEnforceShiftLeftBrief(t *testing.T) {
 	got := ReviewIssueDraft(IssueDraft{Title: "legacy issue", Body: "## Scope\n\ninternal/foo/**\n\n## Definition of done\n\ntest passes\n\n## Witness\n\ngo test ./internal/foo"}, Options{})
 	if got.BriefReadiness.Enforced {
 		t.Fatalf("legacy contract unexpectedly migrated: %+v", got.BriefReadiness)
+	}
+}
+
+// A legacy brief is not enforced, but if it still carries a Value section the
+// four value fields stay reported so making the frame default-on does not
+// silently drop a readout callers already had.
+func TestLegacyValueFrameStillReportsValueFields(t *testing.T) {
+	body := "## Value\n\n- For: a maintainer\n- Problem: no readout\n- Today: read the body\n- Better because: it is checkable\n\n## Scope\n\ninternal/foo/**\n\n## Definition of done\n\ntest passes\n\n## Witness\n\ngo test ./internal/foo"
+	got := ReviewIssueDraft(IssueDraft{Title: "legacy issue with a value frame", Body: body}, Options{})
+	if got.BriefReadiness.Enforced {
+		t.Fatalf("legacy contract unexpectedly migrated: %+v", got.BriefReadiness)
+	}
+	for _, name := range []string{"beneficiary", "problem", "alternative", "advantage"} {
+		if field := got.BriefReadiness.Fields[name]; field.Status != "present" {
+			t.Fatalf("%s = %+v, want present", name, field)
+		}
 	}
 }
 

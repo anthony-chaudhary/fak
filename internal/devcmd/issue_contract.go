@@ -1234,8 +1234,9 @@ func issueUsage(w io.Writer) {
   fak-dev issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
                      [--strict-model-tier] [--strict-scale]
-                     JSON reviews include brief_readiness: ready/enforced plus outcome,
-                     scope, dependencies, acceptance, witness, and placement fields;
+                     JSON reviews include brief_readiness: ready/enforced plus beneficiary,
+                     problem, alternative, advantage, outcome, scope, dependencies,
+                     acceptance, witness, and placement fields;
                      each field is present, unknown(reason), or missing with repair_action.
   fak-dev issue cohort   --from-plan PLAN.json [--json]
   fak-dev issue cohort   --from-issues ISSUES.json [--json]

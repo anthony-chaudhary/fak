@@ -46,7 +46,11 @@ func assessIssueBrief(d IssueDraft, c Candidate) BriefReadiness {
 	}
 	enforced := hasBriefVocabulary(sections) || strings.EqualFold(strings.TrimSpace(c.Schema), "fak-task-brief/1")
 	names := []string{"outcome", "scope", "dependencies", "acceptance", "witness", "placement"}
-	if _, usesValueFrame := sections["value"]; usesValueFrame {
+	// An enforced brief always answers the four value questions, so omitting the
+	// whole Value section fails readiness instead of silently skipping the check.
+	// A legacy brief that still carries a Value section keeps reporting them —
+	// informational only, since readiness is not gated when enforced is false.
+	if _, usesValueFrame := sections["value"]; enforced || usesValueFrame {
 		names = append([]string{"beneficiary", "problem", "alternative", "advantage"}, names...)
 	}
 	out := BriefReadiness{Ready: true, Enforced: enforced, Fields: make(map[string]BriefField, len(names))}
