@@ -172,9 +172,11 @@ witness instead of claiming a fix.
 
 Two defaults fire for **any new unit of work** (feature, leaf, verb, demo, process change) —
 full doctrine in [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md), agent
-checklist in the `/spine-fanout` skill. Before either, select one primary problem ID from
-[`docs/problems-we-solve.md`](docs/problems-we-solve.md) (`P1` context, `P2` net-true
-efficiency, `P3` fast adaptation, or `P4` integrated operations), then pass the
+checklist in the `/spine-fanout` skill. Before either, classify the work's **problem
+centrality** (`Core`, `Enabling`, `Stewardship`, or `Peripheral`) and run all four rows of
+the [`P1`-`P4` problem checklist](docs/problems-we-solve.md): managed context, net-true
+efficiency, bounded adaptation, and integrated operations. These are all-work checks, not
+competing priority buckets or a choose-one ID. Then pass the
 [Feynman-simple value frame](docs/shift-left-task-organization.md): name **For / Problem /
 Today / Better because / Witness** in plain language. Compare against the real next-best alternative,
 not an imagined baseline. If a new operator cannot repeat why the smallest spine should
