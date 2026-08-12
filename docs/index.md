@@ -148,7 +148,7 @@ The dangerous action is refused by structure, before any model interpretation ma
 Then wrap the agent you already run — one command, no rewrite, no key to start:
 
 ```bash
-fak guard -- claude          # or: fak guard --provider openai -- opencode
+fak manage claude           # short: fak m claude; or: fak manage --provider openai -- opencode
 ```
 
 > **Have the source already?** From a clone you can skip the install and run the same

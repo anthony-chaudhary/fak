@@ -8,7 +8,7 @@
 
 fak is one Go binary between an agent and its model/tools. Keep Claude Code, Codex, OpenCode, or your own client—and its UI, login, and model—while fak reuses stable work, compacts long sessions, enforces tool policy, journals activity, and recovers interrupted runs. The same native modules can also compose fleets of small, bounded agents in one process.
 
-> **Start here:** install fak, then run `fak guard -- claude`. No API key or new agent framework is required.
+> **Start here:** install fak, then run `fak manage claude` (or `fak m claude`). No API key or new agent framework is required.
 
 [![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
 
@@ -26,14 +26,14 @@ macOS or Linux (the installer verifies the release SHA-256):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-fak guard -- claude
+fak manage claude                 # short form: fak m claude
 ```
 
 With Go 1.26+, including Windows:
 
 ```bash
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-fak guard --provider openai -- codex     # provider is normally auto-detected
+fak manage --provider openai -- codex    # provider is normally auto-detected
 ```
 
 `guard` starts a private gateway, points the child agent at it, and passes its model wire and credentials through unchanged. Add a capability floor with `--policy examples/dev-agent-policy.json`; opt into API billing with `--api-key-env`; or use local inference with `--local` or `--gguf`. On exit, fak reports reuse, context, and policy decisions.
@@ -62,7 +62,7 @@ These are measured features. On the current 50-turn × 5-agent Qwen2.5-1.5B Q8 w
 
 | Goal | Command | Details |
 |---|---|---|
-| Manage one existing agent | `fak guard -- claude` | [Claude](docs/integrations/claude.md), [Codex](docs/integrations/openai-codex.md), [all hosts](docs/supported/README.md), [policy](POLICY.md) |
+| Manage one existing agent | `fak manage claude` (or `fak m claude`) | [Claude](docs/integrations/claude.md), [Codex](docs/integrations/openai-codex.md), [all hosts](docs/supported/README.md), [policy](POLICY.md) |
 | Expose a shared endpoint | `fak serve --base-url http://localhost:11434/v1 --model qwen2.5:1.5b` | OpenAI, Anthropic, or MCP in front of an existing server; use `--gguf FILE` to stand alone. [Server quickstart](docs/fak/server-quickstart.md) |
 | Prove behavior offline | `fak agent --offline` | Deterministically demonstrates repair, reuse, policy denial, and result quarantine; writes `agent-report.json`. [Walkthrough](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) |
 | Run many bounded agents | `go run ./cmd/microfleetdemo -selfcheck` | Proves 24 agents in one process, four resident at once, with shared base/model state, fair scheduling, hibernation, policy, and egress control. [Concept](docs/concepts/micro-agents.md) · [measured demo](cmd/microfleetdemo/README.md) |

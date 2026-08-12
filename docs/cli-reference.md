@@ -245,7 +245,7 @@ fak ablate    --sweep vdso                             # N-arm self-ablation: on
 fak ablate    --rungs --trace TRACE.json               # per-rung attribution: replay a frozen turnbench trace, mask one adjudicator rung per arm, diff the kernel counters (--rungs=grammar,ifc-sink restricts; default suite turntax-airline)
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
-fak guard     [--session-pressure-gate high,report=pressure.json] -- <agent command>  # wrap a real agent through the kernel; optional recent-session gate refuses high Opus/long-context pressure and can write its JSON action ledger before launch
+fak manage    [--session-pressure-gate high,report=pressure.json] [--] <agent command>  # primary managed-agent front door; short alias: fak m; legacy fak guard remains compatible during sunset
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
 fak ps        [--json] [--watch] [--interval D] [--frames N] [--addr URL] [--key K]   # the read-only process table: one aligned row per live served session (`fak top` is `--watch`)
 fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."   # job control for a running session over the control plane: the OS process-model names, one running session at a time
