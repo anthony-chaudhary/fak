@@ -211,7 +211,7 @@ func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
 	}
 }
 
-func TestNIMCodingSeatsRankAsTierOneOpencode(t *testing.T) {
+func TestLegacyNIMDemoSeatsAreRestrictedFromEngineeringRoutes(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	cfg := filepath.Join(root, "cfg")
@@ -224,8 +224,8 @@ func TestNIMCodingSeatsRankAsTierOneOpencode(t *testing.T) {
 		model   string
 		weight  int
 	}{
-		{"opencode-nim-deepseek-v4-pro", "nim-deepseek-v4-pro", NIMDeepSeekV4ProModel, 30},
-		{"opencode-nim-kimi-k26", "nim-kimi-k26", NIMKimiK26Model, 20},
+		{"opencode-nim-deepseek-v4-pro", "nim-deepseek-v4-pro", NIMDeepSeekV4ProModel, 0},
+		{"opencode-nim-kimi-k26", "nim-kimi-k26", NIMKimiK26Model, 0},
 		{"opencode-nim-glm52", "nim-glm52", NIMGLM52Model, 10},
 	}
 	for _, seat := range seats {
@@ -249,8 +249,12 @@ func TestNIMCodingSeatsRankAsTierOneOpencode(t *testing.T) {
 			t.Fatalf("%s classified as kind/product/tag=%q/%q/%q",
 				seat.account, row.Kind, row.Product, row.Tag)
 		}
-		if row.ModelTier == nil || *row.ModelTier != 1 {
-			t.Errorf("%s tier = %v want 1", seat.account, row.ModelTier)
+		wantTier := TierOther
+		if seat.tag == "nim-glm52" {
+			wantTier = TierFrontier
+		}
+		if row.ModelTier == nil || *row.ModelTier != wantTier {
+			t.Errorf("%s tier = %v want %d", seat.account, row.ModelTier, wantTier)
 		}
 		if derefStr(row.Model) != seat.model {
 			t.Errorf("%s model = %q want %q", seat.account, derefStr(row.Model), seat.model)
@@ -264,8 +268,12 @@ func TestNIMCodingSeatsRankAsTierOneOpencode(t *testing.T) {
 	}
 
 	route := RouteAccount(rows, "implement the feature", "engineering", false, false, "opencode", pol)
-	if !route.OK || route.Account == nil || route.Account.Account != "opencode-nim-deepseek-v4-pro" {
-		t.Fatalf("engineering opencode route = %+v, want deepseek NIM seat first", route)
+	if !route.OK || route.Account == nil || route.Account.Account != "opencode-nim-glm52" {
+		t.Fatalf("engineering opencode route = %+v, want audited frontier seat; legacy API-demo homes must be excluded", route)
+	}
+	explicit := RouteAccount(rows, "literal one-file edit with supplied test", "tier3", false, true, "opencode", pol)
+	if !explicit.OK || explicit.Account == nil || explicit.Account.Account != "opencode-nim-deepseek-v4-pro" {
+		t.Fatalf("explicit tier-3 route = %+v, want restricted legacy API-demo seat", explicit)
 	}
 }
 

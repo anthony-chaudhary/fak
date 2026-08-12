@@ -614,12 +614,12 @@ class FleetAccountsTest(unittest.TestCase):
                 f"_model_tier_from_name({model!r})",
             )
 
-    def test_nim_coding_seats_rank_as_tier1_opencode_workers(self) -> None:
+    def test_legacy_nim_demo_seats_are_restricted_from_engineering_routes(self) -> None:
         seats = [
             ("opencode-nim-deepseek-v4-pro", "nim-deepseek-v4-pro",
-             fleet_accounts.NIM_DEEPSEEK_V4_PRO_MODEL, 30),
+             fleet_accounts.NIM_DEEPSEEK_V4_PRO_MODEL, 0),
             ("opencode-nim-kimi-k26", "nim-kimi-k26",
-             fleet_accounts.NIM_KIMI_K26_MODEL, 20),
+             fleet_accounts.NIM_KIMI_K26_MODEL, 0),
             ("opencode-nim-glm52", "nim-glm52",
              fleet_accounts.NIM_GLM52_MODEL, 10),
         ]
@@ -638,7 +638,8 @@ class FleetAccountsTest(unittest.TestCase):
             self.assertEqual(row["kind"], "worker")
             self.assertEqual(row["product"], "opencode")
             self.assertEqual(row["tag"], tag)
-            self.assertEqual(row["model_tier"], 1)
+            want_tier = 1 if tag == "nim-glm52" else 3
+            self.assertEqual(row["model_tier"], want_tier)
             self.assertEqual(row["model"], model)
             self.assertEqual(row["profile_source"], f"default:nvidia-nim-coding:{tag}")
             self.assertEqual(row["route_weight"], weight)
@@ -646,7 +647,14 @@ class FleetAccountsTest(unittest.TestCase):
         routed = fleet_accounts.route_account(
             rows, "implement the feature", "engineering", product="opencode")
         self.assertTrue(routed["ok"])
-        self.assertEqual(routed["account"]["account"], "opencode-nim-deepseek-v4-pro")
+        self.assertEqual(routed["account"]["account"], "opencode-nim-glm52")
+
+        explicit = fleet_accounts.route_account(
+            rows, "literal one-file edit with supplied test", task_class="tier3",
+            strict_tier=True, product="opencode",
+        )
+        self.assertTrue(explicit["ok"])
+        self.assertEqual(explicit["account"]["account"], "opencode-nim-deepseek-v4-pro")
 
     def test_route_account_defaults_hard_to_tier1_and_light_to_tier2(self) -> None:
         account_dir(self.home, ".claude")

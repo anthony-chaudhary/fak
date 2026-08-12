@@ -1,5 +1,5 @@
 {
-  "_doc": "Account policy for the fleet resume/switcher layer (tools/fleet_accounts.py), applying uniformly to BOTH product families -- Claude (config dirs under the user home, e.g. ~/.claude*) and opencode (config dirs under XDG config home, e.g. ~/.config/opencode*). Copy this to tools/_registry/accounts_policy.json and edit; the live file under _registry/ is gitignored so each host keeps its own roster. 'exclude' substrings are matched against the bare account tag (e.g. 'backup', 'worker-a') and the dir basename; a match tombstones that account so it is never offered as a resume target. 'include_only' (when non-empty) is an allowlist: only listed tags are workers. 'account_profiles' can override model_tier/model/effort by account basename, product:tag, tag, or product. With NO live file present, fleet_accounts.py falls back first to this example, then to its built-in defaults (which already exclude backup/breakglass accounts, infer Claude as tier 1 Opus/xhigh, GLM-5.2 opencode as tier 2, unknowns as tier 3, and recognize the ranked NVIDIA NIM coding seats opencode-nim-deepseek-v4-pro, opencode-nim-kimi-k26, and opencode-nim-glm52 as tier 1 opencode seats).",
+  "_doc": "Account policy for the fleet resume/switcher layer (tools/fleet_accounts.py), applying uniformly to BOTH product families -- Claude (config dirs under the user home, e.g. ~/.claude*) and opencode (config dirs under XDG config home, e.g. ~/.config/opencode*). Copy this to tools/_registry/accounts_policy.json and edit; the live file under _registry/ is gitignored so each host keeps its own roster. 'exclude' substrings are matched against the bare account tag (e.g. 'backup', 'worker-a') and the dir basename; a match tombstones that account so it is never offered as a resume target. 'include_only' (when non-empty) is an allowlist: only listed tags are workers. 'account_profiles' can override model_tier/model/effort by account basename, product:tag, tag, or product. With NO live file present, fleet_accounts.py falls back first to this example, then to its built-in defaults (which already exclude backup/breakglass accounts, infer Claude as tier 1 Opus/xhigh, GLM-5.2 opencode as tier 2, unknowns as tier 3, and restrict the legacy NVIDIA-hosted API-demo homes opencode-nim-deepseek-v4-pro and opencode-nim-kimi-k26 to tier 3 with zero routing preference; opencode-nim-glm52 remains tier 1 pending its own outcome audit).",
   "exclude": ["backup", "breakglass"],
   "include_only": [],
   "notes": {
@@ -17,12 +17,12 @@
       "model": "zai-coding-plan/glm-5.2"
     },
     "opencode:nim-deepseek-v4-pro": {
-      "model_tier": 1,
+      "model_tier": 3,
       "model": "deepseek-ai/deepseek-v4-pro",
       "agent": "opencode"
     },
     "opencode:nim-kimi-k26": {
-      "model_tier": 1,
+      "model_tier": 3,
       "model": "moonshotai/kimi-k2.6",
       "agent": "opencode"
     },
@@ -36,19 +36,19 @@
   "_route_weights_example": {
     "gem7": 10,
     "gem8": -10,
-    "opencode:nim-deepseek-v4-pro": 30,
-    "opencode:nim-kimi-k26": 20,
+    "opencode:nim-deepseek-v4-pro": 0,
+    "opencode:nim-kimi-k26": 0,
     "opencode:nim-glm52": 10
   },
-  "_nvidia_nim_coding_seats": {
-    "ranked_default_order": [
+  "_nvidia_hosted_api_demo_seats": {
+    "restricted_legacy_homes": [
       "opencode-nim-deepseek-v4-pro",
-      "opencode-nim-kimi-k26",
-      "opencode-nim-glm52"
+      "opencode-nim-kimi-k26"
     ],
+    "frontier_pending_audit": ["opencode-nim-glm52"],
     "base_url": "https://integrate.api.nvidia.com/v1",
     "api_key_env": "NVIDIA_API_KEY",
-    "caveat": "moonshotai/kimi-k2.6 is ranked by current coding/agentic benchmark strength but NVIDIA marks the API unsupported after 2026-07-07; set opencode:nim-kimi-k26 to weight 0 or exclude that seat if it is no longer available."
+    "caveat": "Config-home names do not prove the invoked model. DeepSeek V4 Pro and Kimi K2.6 were unavailable during the 2026-08-11 campaign; both homes were used to invoke Nemotron directly through OpenCode and are restricted to explicit tier-3 work. See docs/notes/NVIDIA-NEMO-API-DEMO-FLEET-AUDIT-2026-08-12.md."
   },
   "_route_weights_doc": "route_weights maps an account (basename, product:tag, tag, or product) to an int capacity bias (default 0) for the switcher's tie-break: HIGHER = more room -> preferred EARLIER. The fleet has NO remaining-quota telemetry (an account probe only returns OK/AUTH/LIMIT, never headroom), so the router cannot itself tell which available account has the most quota left -- it otherwise balances purely on live/active SESSION counts. Use route_weights to encode out-of-band knowledge: lift an account you know has room (gem7:+10 above) and/or push a near-capped one down (gem8:-10). This is a SEPARATE map from account_profiles on purpose -- a bare account_profiles entry would clobber the account's inferred model-tier and silently drop it out of routing. With all weights 0 the historical session-count balancing is unchanged.",
   "routing": {

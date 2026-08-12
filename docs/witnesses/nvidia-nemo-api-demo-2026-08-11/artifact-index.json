@@ -1,0 +1,1949 @@
+{
+  "schema": "fak-nvidia-nemo-api-demo-audit/1",
+  "generated_utc": "2026-08-12T17:14:39Z",
+  "campaign": "NVIDIA-hosted Nemo API demo / OpenCode fallback fleet, 2026-08-11..12",
+  "provider": "NVIDIA-hosted API demo endpoint (NVIDIA NIM/API Catalog)",
+  "provider_base_url": "https://integrate.api.nvidia.com/v1",
+  "client_harness": "OpenCode (not Codex and not fak fleet-accounts launch)",
+  "invoked_model": "nvidia/nvidia/nemotron-3-super-120b-a12b",
+  "source_dir": ".goal-runs",
+  "pattern": "*nemotron*",
+  "artifact_count": 263,
+  "artifact_bytes": 30509102,
+  "output_trajectories": 59,
+  "tools": {
+    "calls": 3450,
+    "by_tool": {
+      "bash": 3037,
+      "edit": 35,
+      "glob": 35,
+      "grep": 98,
+      "invalid": 1,
+      "read": 233,
+      "write": 11
+    }
+  },
+  "artifacts": [
+    {
+      "name": "isolated-nemotron-0-20260811-210428977.err.log",
+      "kind": "trajectory-error",
+      "bytes": 60,
+      "sha256": "502f5df9c830b0156f6d44ead7135a5d6315f8504be64875bbcc15501757ad13"
+    },
+    {
+      "name": "isolated-nemotron-0-20260811-210428977.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "isolated-nemotron-0-20260811-210428977.out.log",
+      "kind": "trajectory-output",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-0-20260811-210428977.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "c11a668eb0f6d1fbb39a510125ac4b400d503d624e01696b9d7d1518b73f0e27"
+    },
+    {
+      "name": "isolated-nemotron-0b-20260811-210504058.err.log",
+      "kind": "trajectory-error",
+      "bytes": 102,
+      "sha256": "737a3ff9f2f8812b1463c4f02a3a60ad62032e7bb6320e6e4b6a09496f72a58c"
+    },
+    {
+      "name": "isolated-nemotron-0b-20260811-210504058.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-0b-20260811-210504058.out.log",
+      "kind": "trajectory-output",
+      "bytes": 77954,
+      "sha256": "44dbec1342dc236251487c8374ec9a5109261314b5c895b824723efa7e3e1473",
+      "jsonl_events": 36,
+      "tool_calls": 12,
+      "tool_by_name": {
+        "bash": 12
+      }
+    },
+    {
+      "name": "isolated-nemotron-0b-20260811-210504058.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "c11a668eb0f6d1fbb39a510125ac4b400d503d624e01696b9d7d1518b73f0e27"
+    },
+    {
+      "name": "isolated-nemotron-1-20260811-210429039.err.log",
+      "kind": "trajectory-error",
+      "bytes": 128,
+      "sha256": "f6306b96e1af8eee3ae73b0975351b98e46493405d07223d77b52e8191883f33"
+    },
+    {
+      "name": "isolated-nemotron-1-20260811-210429039.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "isolated-nemotron-1-20260811-210429039.out.log",
+      "kind": "trajectory-output",
+      "bytes": 471413,
+      "sha256": "4056aebd067327bb447fcbe4028d915538cf8f0883ef4b86b9e578c73f90d0be",
+      "jsonl_events": 84,
+      "tool_calls": 28,
+      "tool_by_name": {
+        "bash": 13,
+        "glob": 7,
+        "read": 8
+      }
+    },
+    {
+      "name": "isolated-nemotron-1-20260811-210429039.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "6d5592684a7df88dc8d6bfbc0d4fae9ae07a4efe30dd767c491b2927396a2838"
+    },
+    {
+      "name": "isolated-nemotron-2-20260811-210429065.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-2-20260811-210429065.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "isolated-nemotron-2-20260811-210429065.out.log",
+      "kind": "trajectory-output",
+      "bytes": 599600,
+      "sha256": "7492503eaca34c6d66fbfec7c05376b16cfb52aa1d45dac27cc7cf8fbcab8da4",
+      "jsonl_events": 315,
+      "tool_calls": 105,
+      "tool_by_name": {
+        "bash": 105
+      }
+    },
+    {
+      "name": "isolated-nemotron-2-20260811-210429065.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "ded22447479aedffa81981135ec3b21034b8020600022e91551afc5ae637bc87"
+    },
+    {
+      "name": "isolated-nemotron-3-20260811-210429094.err.log",
+      "kind": "trajectory-error",
+      "bytes": 91,
+      "sha256": "4cd9b7da12fbd4bdf4f393682ddc40e5875b9018e7166812865e0b9bc33905ca"
+    },
+    {
+      "name": "isolated-nemotron-3-20260811-210429094.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "isolated-nemotron-3-20260811-210429094.out.log",
+      "kind": "trajectory-output",
+      "bytes": 266902,
+      "sha256": "615ad091521313e8aa748b5255fc7c34eb7dabd3d083ea9f765e907e5d9721f4",
+      "jsonl_events": 45,
+      "tool_calls": 15,
+      "tool_by_name": {
+        "bash": 11,
+        "grep": 1,
+        "read": 3
+      }
+    },
+    {
+      "name": "isolated-nemotron-3-20260811-210429094.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "3c21ea6a813259e83209c90020d6741f1365e994fe446c081ca487352ef43abb"
+    },
+    {
+      "name": "isolated-nemotron-4-20260811-210429131.err.log.rejected",
+      "kind": "other",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-4-20260811-210429131.in.txt.rejected",
+      "kind": "other",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "isolated-nemotron-4-20260811-210429131.out.log",
+      "kind": "trajectory-output",
+      "bytes": 296377,
+      "sha256": "53d502909b0e91082514b5c36bdccb0be9d92342da032adaebebd02393ba6af4",
+      "jsonl_events": 174,
+      "tool_calls": 58,
+      "tool_by_name": {
+        "bash": 52,
+        "edit": 3,
+        "grep": 1,
+        "read": 2
+      }
+    },
+    {
+      "name": "isolated-nemotron-4-20260811-210429131.pid.rejected",
+      "kind": "other",
+      "bytes": 7,
+      "sha256": "cbb7253019bbf33e98de49c37cb9fae8bea796c32e6ba100a87813eb6de257ea"
+    },
+    {
+      "name": "isolated-nemotron-4-20260811-210429131.worktree.rejected",
+      "kind": "other",
+      "bytes": 83,
+      "sha256": "3ef8e4c54de27e7e767faf73ab888302f4a67143b354202e66bde25c3589afae"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739188.err.log",
+      "kind": "trajectory-error",
+      "bytes": 60,
+      "sha256": "502f5df9c830b0156f6d44ead7135a5d6315f8504be64875bbcc15501757ad13"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739188.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739188.out.log",
+      "kind": "trajectory-output",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739188.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "44e455c5ae8f1f35ec819642fcbd7954b8927c2d23c8d4fb2bda1dbbaed0b0ac"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739188.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "13a608c5a92b1906f2f84eeb65b751e1f1c69e1e34d6d1bc1616b25d47aa830d"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739357.err.log",
+      "kind": "trajectory-error",
+      "bytes": 60,
+      "sha256": "502f5df9c830b0156f6d44ead7135a5d6315f8504be64875bbcc15501757ad13"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739357.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739357.out.log",
+      "kind": "trajectory-output",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739357.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "adb44a943b0c1cd243da82e7b9b39d031b8f0ca9725c709b802e363b71b79902"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739357.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "ded22447479aedffa81981135ec3b21034b8020600022e91551afc5ae637bc87"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739483.err.log",
+      "kind": "trajectory-error",
+      "bytes": 128,
+      "sha256": "f6306b96e1af8eee3ae73b0975351b98e46493405d07223d77b52e8191883f33"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739483.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739483.out.log",
+      "kind": "trajectory-output",
+      "bytes": 10008,
+      "sha256": "80c8986fa891b4b3cb29170b3df43be274cf12b7df9314703ba5a0eb77e4476e",
+      "jsonl_events": 18,
+      "tool_calls": 6,
+      "tool_by_name": {
+        "bash": 6
+      }
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739483.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "2aab5aee09c56b6a69edbf13189854a54c2f7a8c40ac5eb5cfa5c0f7432816ef"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739483.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "3c21ea6a813259e83209c90020d6741f1365e994fe446c081ca487352ef43abb"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739612.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739612.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739612.out.log",
+      "kind": "trajectory-output",
+      "bytes": 25987,
+      "sha256": "cf98cd8666acd644191a2b47371b7813ad8f38e923d3a5b34029754277deabd8",
+      "jsonl_events": 33,
+      "tool_calls": 11,
+      "tool_by_name": {
+        "bash": 11
+      }
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739612.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "deb5cba473dcc8cf5750d312898a9859f80661a5c67b27559d1e7ca3f352f5ab"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095739612.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "cbfcc4d711fbd493a142179d10d39db6e5665470a9322aaf2342372830415e25"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095740460.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095740460.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095740460.out.log",
+      "kind": "trajectory-output",
+      "bytes": 9567,
+      "sha256": "bf3065f3f2428442e548baac3c32ff4cd248c54b8c091ba94fb8190bdb09b93d",
+      "jsonl_events": 17,
+      "tool_calls": 6,
+      "tool_by_name": {
+        "bash": 6
+      }
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095740460.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "5950297e2c9110d6b4c37b0298d68791630dbbbb7c4f8239d33c5d75f375e14e"
+    },
+    {
+      "name": "isolated-nemotron-final-20260812-095740460.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "3ef8e4c54de27e7e767faf73ab888302f4a67143b354202e66bde25c3589afae"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095816194.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095816194.pid",
+      "kind": "pid-marker",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095816194.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095816431.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095816431.pid",
+      "kind": "pid-marker",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095816431.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904617.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904617.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904617.out.log",
+      "kind": "trajectory-output",
+      "bytes": 129920,
+      "sha256": "9907372f25a829a87c429366b50b9fcab67ff0ee4b0f14c296dd1b31bcd42c97",
+      "jsonl_events": 43,
+      "tool_calls": 14,
+      "tool_by_name": {
+        "bash": 14
+      }
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904617.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "5c85b2918df7054da1c1d83954a53fbd591ff0d4d3ff8d0599c6804464214470"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904617.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "df93ea5315cae5fc63021120777650805eb01436f4d6a49cbe933151d86dd747"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904743.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904743.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904743.out.log",
+      "kind": "trajectory-output",
+      "bytes": 109803,
+      "sha256": "3fa688bac8a0710f9c94cb9f4cfa611dd94896c41698f50e230041269ece56db",
+      "jsonl_events": 66,
+      "tool_calls": 22,
+      "tool_by_name": {
+        "bash": 22
+      }
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904743.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "ce83da25c6b468bab17c32677eab518bc7edfb034c0f4774e2c1603acce158e2"
+    },
+    {
+      "name": "isolated-nemotron-finalretry-20260812-095904743.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "fd3d76be8e616a9cea0be96ce152e1b457367f60431854eb0041f0c018527019"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-220659551.err.log",
+      "kind": "trajectory-error",
+      "bytes": 110,
+      "sha256": "b22ddbcfad9d5fec74b7a5172a2291395ed72a6d2ec32a9896f886cdb7eb4ae0"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-220659551.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-220659551.out.log",
+      "kind": "trajectory-output",
+      "bytes": 384356,
+      "sha256": "2d48656b05b6837b0b09ffb8ee07d110a576fd2e475c2d786a4008aac2a4426e",
+      "jsonl_events": 168,
+      "tool_calls": 56,
+      "tool_by_name": {
+        "bash": 56
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-220659551.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-221636715.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-221636715.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-221636715.out.log",
+      "kind": "trajectory-output",
+      "bytes": 124574,
+      "sha256": "465cb7acfaaee956558b4be6bcd1e5486c092fc1a70c3968422bdb58077ad48d",
+      "jsonl_events": 118,
+      "tool_calls": 39,
+      "tool_by_name": {
+        "bash": 39
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-221636715.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222139252.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222139252.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222139252.out.log",
+      "kind": "trajectory-output",
+      "bytes": 296923,
+      "sha256": "087e6231283327413016079417b856236918b16b943add29419666d585ea8cf1",
+      "jsonl_events": 113,
+      "tool_calls": 37,
+      "tool_by_name": {
+        "bash": 37
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222139252.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219014.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219014.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219014.out.log",
+      "kind": "trajectory-output",
+      "bytes": 628943,
+      "sha256": "51aa252334dd11215114db30a2b0d1f88138716a534159796e0281064f676eb7",
+      "jsonl_events": 189,
+      "tool_calls": 63,
+      "tool_by_name": {
+        "bash": 63
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219014.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219085.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219085.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219085.out.log",
+      "kind": "trajectory-output",
+      "bytes": 409156,
+      "sha256": "528ca684c32e9600638e3dafe103834a1fe517e2c55a47ea272c9568e89302f7",
+      "jsonl_events": 162,
+      "tool_calls": 54,
+      "tool_by_name": {
+        "bash": 54
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-222219085.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-223830693.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-223830693.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-223830693.out.log",
+      "kind": "trajectory-output",
+      "bytes": 299256,
+      "sha256": "6e01852e921874701e5937a5849218fa5ad7db8758d6c0a3aefa8f13d9d13c05",
+      "jsonl_events": 54,
+      "tool_calls": 18,
+      "tool_by_name": {
+        "bash": 18
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-223830693.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-224858588.err.log",
+      "kind": "trajectory-error",
+      "bytes": 80,
+      "sha256": "b3e8590e728df462684618cf740c4c42360953e00d2e18e03b43e662acfa394c"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-224858588.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-224858588.out.log",
+      "kind": "trajectory-output",
+      "bytes": 944451,
+      "sha256": "2d52fcc7126b492608d8119b10cf7f734696d3d97c29d61dbf48e125ffb41d0b",
+      "jsonl_events": 342,
+      "tool_calls": 114,
+      "tool_by_name": {
+        "bash": 114
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-224858588.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-225936563.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-225936563.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-225936563.out.log",
+      "kind": "trajectory-output",
+      "bytes": 456062,
+      "sha256": "9f93c9330ec8104ad22c5e42003571d878db6d664fe5ef5c7454f7c43e0a526d",
+      "jsonl_events": 153,
+      "tool_calls": 51,
+      "tool_by_name": {
+        "bash": 51
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-225936563.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038483.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038483.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038483.out.log",
+      "kind": "trajectory-output",
+      "bytes": 1630531,
+      "sha256": "c378969f6b968d7a6c7651c5e3687ef6f4b38c2e757cbdd3e4b9dd47b8c9ad2d",
+      "jsonl_events": 519,
+      "tool_calls": 171,
+      "tool_by_name": {
+        "bash": 171
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038483.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038518.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038518.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038518.out.log",
+      "kind": "trajectory-output",
+      "bytes": 404536,
+      "sha256": "45658053c086c4bc68a353f261904619c6ab9505a35946688ab3a4bd16445c53",
+      "jsonl_events": 147,
+      "tool_calls": 49,
+      "tool_by_name": {
+        "bash": 43,
+        "edit": 2,
+        "read": 4
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-231038518.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-232623509.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-232623509.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-232623509.out.log",
+      "kind": "trajectory-output",
+      "bytes": 465821,
+      "sha256": "80bc11566762181903899a6ca85f348e3e77ff12c2da5b67270cc9821bd456c8",
+      "jsonl_events": 196,
+      "tool_calls": 65,
+      "tool_by_name": {
+        "bash": 65
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-232623509.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-234705752.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-234705752.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-234705752.out.log",
+      "kind": "trajectory-output",
+      "bytes": 754174,
+      "sha256": "b16e79e8ca88fc0c89767e9535cb19566f269c062f2cd62abceb1e1704e40063",
+      "jsonl_events": 555,
+      "tool_calls": 184,
+      "tool_by_name": {
+        "bash": 184
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260811-234705752.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-001745834.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-001745834.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-001745834.out.log",
+      "kind": "trajectory-output",
+      "bytes": 1659460,
+      "sha256": "b23574c51cd4b6c7f0a7ac781597d7a8eaf19e1370cee4513dfe7f1d6865fe2f",
+      "jsonl_events": 469,
+      "tool_calls": 155,
+      "tool_by_name": {
+        "bash": 155
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-001745834.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004824506.err.log",
+      "kind": "trajectory-error",
+      "bytes": 84,
+      "sha256": "d176a6274348e992fdd7940df9af5f36d04778255b9d8064e8a53c4502d5e101"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004824506.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004824506.out.log",
+      "kind": "trajectory-output",
+      "bytes": 366758,
+      "sha256": "9b1265b1afd15a635bdc6ff13dde3a270604cbd930d1c1a05563274695b9183b",
+      "jsonl_events": 123,
+      "tool_calls": 41,
+      "tool_by_name": {
+        "bash": 41
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004824506.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004908606.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004908606.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004908606.out.log",
+      "kind": "trajectory-output",
+      "bytes": 533031,
+      "sha256": "f6ff23c8c454e4607f3c66f718e26e5c0ddd2c2472d2241a4affcf525eea2ef8",
+      "jsonl_events": 363,
+      "tool_calls": 120,
+      "tool_by_name": {
+        "bash": 114,
+        "edit": 1,
+        "write": 5
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-004908606.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037092.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037092.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037092.out.log",
+      "kind": "trajectory-output",
+      "bytes": 511365,
+      "sha256": "aa2dab97bf69dedc3305fb7491a0820c257f0faddfd116d6d3d36ad8952e336f",
+      "jsonl_events": 156,
+      "tool_calls": 51,
+      "tool_by_name": {
+        "bash": 29,
+        "edit": 1,
+        "glob": 3,
+        "grep": 4,
+        "read": 14
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037092.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037181.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037181.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037181.out.log",
+      "kind": "trajectory-output",
+      "bytes": 1406084,
+      "sha256": "e641d4ec47e02dfbb8d6736b368ab7b7895afbb6f0543ae31ebe21e28cbacdc5",
+      "jsonl_events": 301,
+      "tool_calls": 98,
+      "tool_by_name": {
+        "bash": 75,
+        "edit": 1,
+        "grep": 18,
+        "invalid": 1,
+        "read": 3
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-022037181.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136079.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136079.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136079.out.log",
+      "kind": "trajectory-output",
+      "bytes": 438558,
+      "sha256": "ffe0427301ed1c6b427ad3de1720a44fa4c363c56fcebaae537345a45074e6e9",
+      "jsonl_events": 237,
+      "tool_calls": 78,
+      "tool_by_name": {
+        "bash": 78
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136079.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136166.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136166.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136166.out.log",
+      "kind": "trajectory-output",
+      "bytes": 1858555,
+      "sha256": "a8c42f7277dbca3193d02d24b2d6992c66139fcc9a94c9834c58caa94e8d94ad",
+      "jsonl_events": 563,
+      "tool_calls": 185,
+      "tool_by_name": {
+        "bash": 185
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-025136166.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229522.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229522.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229522.out.log",
+      "kind": "trajectory-output",
+      "bytes": 180022,
+      "sha256": "83f79f758ece53bf7045b38a0483748335bcc81465116076a52941d7c9bd38f4",
+      "jsonl_events": 48,
+      "tool_calls": 15,
+      "tool_by_name": {
+        "bash": 15
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229522.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229621.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229621.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229621.out.log",
+      "kind": "trajectory-output",
+      "bytes": 717714,
+      "sha256": "047838b3519f95807ba5b85f76d3a9024dac7ae6482a965d2a4f8b2214605950",
+      "jsonl_events": 235,
+      "tool_calls": 78,
+      "tool_by_name": {
+        "bash": 32,
+        "edit": 3,
+        "glob": 6,
+        "grep": 9,
+        "read": 28
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-035229621.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308254.err.log",
+      "kind": "trajectory-error",
+      "bytes": 160,
+      "sha256": "4984615ee5ad5f73db66c8dc81d14e2f1bea51eb803b62eb6c9bc41376985035"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308254.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308254.out.log",
+      "kind": "trajectory-output",
+      "bytes": 1088293,
+      "sha256": "77dafd5792812175479bdf982deef217711241d6d1a87ee79883a833a493c631",
+      "jsonl_events": 236,
+      "tool_calls": 77,
+      "tool_by_name": {
+        "bash": 29,
+        "edit": 5,
+        "glob": 2,
+        "grep": 15,
+        "read": 26
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308254.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308341.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308341.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308341.out.log",
+      "kind": "trajectory-output",
+      "bytes": 965561,
+      "sha256": "ef83d2bb11b4ba6c795bb4e2acf5d240247a3287049bbdc0f1151f2139b5be86",
+      "jsonl_events": 302,
+      "tool_calls": 100,
+      "tool_by_name": {
+        "bash": 100
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308341.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308430.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308430.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308430.out.log",
+      "kind": "trajectory-output",
+      "bytes": 193336,
+      "sha256": "d923330dcffd601cbcfc47538bb19f8b77a359514fda66b234b0efb656b816c9",
+      "jsonl_events": 210,
+      "tool_calls": 70,
+      "tool_by_name": {
+        "bash": 70
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308430.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308505.err.log",
+      "kind": "trajectory-error",
+      "bytes": 85,
+      "sha256": "390d3f255661e399bbef52bee6438953c1ed016d1221503f1c269f1daa4801fd"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308505.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308505.out.log",
+      "kind": "trajectory-output",
+      "bytes": 751473,
+      "sha256": "6eeaba60ff5976ef83311510f6935a04ff202de274c031f7cf5d951b2e77fce4",
+      "jsonl_events": 171,
+      "tool_calls": 57,
+      "tool_by_name": {
+        "bash": 57
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308505.pid",
+      "kind": "pid-marker",
+      "bytes": 6,
+      "sha256": "54d11baa955574095089d67e754378fae1c2c747f51f4f2334d22a825a69d635"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-045308505.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359904.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359904.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359904.out.log",
+      "kind": "trajectory-output",
+      "bytes": 529031,
+      "sha256": "88622b4be4d73855eb0e7a231de5252cf938e9274f005a6a15fc324b3fac0816",
+      "jsonl_events": 408,
+      "tool_calls": 136,
+      "tool_by_name": {
+        "bash": 136
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359904.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359993.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359993.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359993.out.log",
+      "kind": "trajectory-output",
+      "bytes": 864363,
+      "sha256": "c8018b4eb2d40ac4d2dd92ca2c68501799ec51243e8ebeb96e5d9f765e705eb0",
+      "jsonl_events": 202,
+      "tool_calls": 65,
+      "tool_by_name": {
+        "bash": 65
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055359993.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055400074.err.log",
+      "kind": "trajectory-error",
+      "bytes": 89,
+      "sha256": "a26921b411f2addc293da36b4ab7427d208420de58bd96e0777bc042e49dcd81"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055400074.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055400074.out.log",
+      "kind": "trajectory-output",
+      "bytes": 495759,
+      "sha256": "12bdeb54745c1502f0430d12db2e9857633f1340202c5fadcfb9edb9146a5649",
+      "jsonl_events": 144,
+      "tool_calls": 48,
+      "tool_by_name": {
+        "bash": 32,
+        "edit": 2,
+        "grep": 2,
+        "read": 10,
+        "write": 2
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-055400074.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506749.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506749.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506749.out.log",
+      "kind": "trajectory-output",
+      "bytes": 556390,
+      "sha256": "1968d04dd9f1801651e375df07912bff79923149d3e739aa833052d0bb367b84",
+      "jsonl_events": 307,
+      "tool_calls": 101,
+      "tool_by_name": {
+        "bash": 72,
+        "edit": 2,
+        "glob": 3,
+        "read": 24
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506749.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "c4a7ab226315ad268b47debee4302c036d0db2e2faf702e36e4ef01314bc7094"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506749.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506842.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506842.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506842.out.log",
+      "kind": "trajectory-output",
+      "bytes": 473894,
+      "sha256": "3d0a0f5aec77f546ddf1acd8eb97a4fcfaea0e9cd8d2bacc700d0c3a6cb7a43c",
+      "jsonl_events": 195,
+      "tool_calls": 64,
+      "tool_by_name": {
+        "bash": 43,
+        "edit": 1,
+        "glob": 4,
+        "grep": 2,
+        "read": 11,
+        "write": 3
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506842.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "83cf26ef0e1413b43219f5e5d6fed5054457f022157cd58b5bb2cd6ef1195acc"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506926.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506926.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506926.out.log",
+      "kind": "trajectory-output",
+      "bytes": 386675,
+      "sha256": "3fc1706067760a64553ff1689b20abbf5b4b0f4aa767b8d10761e221436215c7",
+      "jsonl_events": 285,
+      "tool_calls": 94,
+      "tool_by_name": {
+        "bash": 94
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506926.pid",
+      "kind": "pid-marker",
+      "bytes": 7,
+      "sha256": "1a9f824dd6529c35eeab6739ee0188822bbfc42f4fdd52e2b31d90bcea87b957"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075506926.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507012.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507012.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507012.out.log",
+      "kind": "trajectory-output",
+      "bytes": 253895,
+      "sha256": "7204760410df993ae00b88b84727f2771e73180f7a917bb2787d973115173fe3",
+      "jsonl_events": 60,
+      "tool_calls": 19,
+      "tool_by_name": {
+        "bash": 19
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507012.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507104.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507104.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507104.out.log",
+      "kind": "trajectory-output",
+      "bytes": 533032,
+      "sha256": "7b2f0470c0dfcad5e02db5a836df9b9b992f9c596d235ac03258f39b3b0de79f",
+      "jsonl_events": 200,
+      "tool_calls": 66,
+      "tool_by_name": {
+        "bash": 21,
+        "edit": 2,
+        "grep": 19,
+        "read": 24
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual-20260812-075507104.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-manual14-20260811-215942177.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-manual14-20260811-215942177.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-manual14-20260811-215942177.out.log",
+      "kind": "trajectory-output",
+      "bytes": 712463,
+      "sha256": "a6dcad66a004bbc5784dc8d008b27f4f7be706c8820b8b4edbcd6b3664119358",
+      "jsonl_events": 117,
+      "tool_calls": 39,
+      "tool_by_name": {
+        "bash": 12,
+        "edit": 3,
+        "grep": 6,
+        "read": 18
+      }
+    },
+    {
+      "name": "isolated-nemotron-manual14-20260811-215942177.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "276a9e1c78f0ca7b948b689ddd12d204f802aeba10ecfaf71948134779522249"
+    },
+    {
+      "name": "isolated-nemotron-r10-20260811-213156027.err.log",
+      "kind": "trajectory-error",
+      "bytes": 159,
+      "sha256": "f31ed50a8132e4e7cb73ea4a439a71622c8cd291a7aaa1c54b727eac0180c1ff"
+    },
+    {
+      "name": "isolated-nemotron-r10-20260811-213156027.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r10-20260811-213156027.out.log",
+      "kind": "trajectory-output",
+      "bytes": 133870,
+      "sha256": "8c19fd54348f511c8188a367b2083c23f08ccf4019d06866c4e5631dffd92057",
+      "jsonl_events": 75,
+      "tool_calls": 25,
+      "tool_by_name": {
+        "bash": 20,
+        "glob": 2,
+        "grep": 1,
+        "read": 2
+      }
+    },
+    {
+      "name": "isolated-nemotron-r10-20260811-213156027.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "fd3d76be8e616a9cea0be96ce152e1b457367f60431854eb0041f0c018527019"
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857267.err.log",
+      "kind": "trajectory-error",
+      "bytes": 135,
+      "sha256": "9e609c68394c61cfd2bb18c66389ebbb71fb6fbd7028c25431de2e26add88232"
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857267.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857267.out.log",
+      "kind": "trajectory-output",
+      "bytes": 542562,
+      "sha256": "be0cdf65c69b8875880df9a80bd7ca667bff8df766506065fecb0b3e3f59dbba",
+      "jsonl_events": 144,
+      "tool_calls": 48,
+      "tool_by_name": {
+        "bash": 35,
+        "edit": 4,
+        "read": 9
+      }
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857267.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "961c633c36c24ed8e25afea75cce217d483018fe16f658f08e54bda616994acb"
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857696.err.log",
+      "kind": "trajectory-error",
+      "bytes": 159,
+      "sha256": "04118418e26f5252952f6158239d8644120a646f096b2993e7554b75b33d9ae4"
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857696.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857696.out.log",
+      "kind": "trajectory-output",
+      "bytes": 86625,
+      "sha256": "337d191e443615802b12b42003ef51adc7d7922442d25eb4823edeb91ed2560e",
+      "jsonl_events": 57,
+      "tool_calls": 19,
+      "tool_by_name": {
+        "bash": 19
+      }
+    },
+    {
+      "name": "isolated-nemotron-r11-20260811-214857696.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "fd3d76be8e616a9cea0be96ce152e1b457367f60431854eb0041f0c018527019"
+    },
+    {
+      "name": "isolated-nemotron-r12-20260811-215007053.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r12-20260811-215007053.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r12-20260811-215007053.out.log",
+      "kind": "trajectory-output",
+      "bytes": 599593,
+      "sha256": "3ac61c9cd3ba88299d420355533f2952b574edfff1014a868b4144a145b68116",
+      "jsonl_events": 168,
+      "tool_calls": 56,
+      "tool_by_name": {
+        "bash": 56
+      }
+    },
+    {
+      "name": "isolated-nemotron-r12-20260811-215007053.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "17c1a589c7449cb96694f9f824c45c0df263ca0e91e76da7c9ca9168ca3fb114"
+    },
+    {
+      "name": "isolated-nemotron-r13-20260811-215007216.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r13-20260811-215007216.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r13-20260811-215007216.out.log",
+      "kind": "trajectory-output",
+      "bytes": 708719,
+      "sha256": "a8a7d89730d1ac6ed14fc28326fba2aab24e3357209a6227d36db87552462601",
+      "jsonl_events": 192,
+      "tool_calls": 64,
+      "tool_by_name": {
+        "bash": 64
+      }
+    },
+    {
+      "name": "isolated-nemotron-r13-20260811-215007216.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "d519c21f54cbc5398f17750277ff02f2da002f1da36c613786a8fdf7902abaa0"
+    },
+    {
+      "name": "isolated-nemotron-r6-20260811-211259388.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r6-20260811-211259388.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r6-20260811-211259388.out.log",
+      "kind": "trajectory-output",
+      "bytes": 563238,
+      "sha256": "45b4516ce83e2a93e7ce37c0cfdbd2fc24d3ebb7f2b7f5e28e609c64535db4a6",
+      "jsonl_events": 240,
+      "tool_calls": 79,
+      "tool_by_name": {
+        "bash": 33,
+        "edit": 3,
+        "glob": 2,
+        "grep": 11,
+        "read": 30
+      }
+    },
+    {
+      "name": "isolated-nemotron-r6-20260811-211259388.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "3c21ea6a813259e83209c90020d6741f1365e994fe446c081ca487352ef43abb"
+    },
+    {
+      "name": "isolated-nemotron-r7-20260811-211359609.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r7-20260811-211359609.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r7-20260811-211359609.out.log",
+      "kind": "trajectory-output",
+      "bytes": 641991,
+      "sha256": "9be3eeb82ef7f09965c22618e70439d502f81eb09ea2848dccb4a9952a4d0704",
+      "jsonl_events": 225,
+      "tool_calls": 74,
+      "tool_by_name": {
+        "bash": 58,
+        "glob": 3,
+        "grep": 3,
+        "read": 9,
+        "write": 1
+      }
+    },
+    {
+      "name": "isolated-nemotron-r7-20260811-211359609.worktree",
+      "kind": "worktree-marker",
+      "bytes": 83,
+      "sha256": "c11a668eb0f6d1fbb39a510125ac4b400d503d624e01696b9d7d1518b73f0e27"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212200431.err.log.reaped",
+      "kind": "other",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212200431.in.txt.reaped.reaped",
+      "kind": "other",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212200431.out.log.reaped.reaped",
+      "kind": "other",
+      "bytes": 225294,
+      "sha256": "deed308641b1900d0b756dc5a1b253b96223a6dadb6c70d05d046e896794ce19"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212200431.pid.reaped.reaped",
+      "kind": "other",
+      "bytes": 7,
+      "sha256": "69ed87d287a84ddb7e070ffed9392f474aea3098c819117ab9948da16bae0bf7"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212200431.worktree.reaped.reaped",
+      "kind": "other",
+      "bytes": 83,
+      "sha256": "6d5592684a7df88dc8d6bfbc0d4fae9ae07a4efe30dd767c491b2927396a2838"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212229244.err.log.reaped",
+      "kind": "other",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212229244.in.txt.reaped",
+      "kind": "other",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212229244.out.log.reaped",
+      "kind": "other",
+      "bytes": 2056,
+      "sha256": "9907bdeebed84653af0b8c935dd9c9abba767bead8e3b842c8dc47de18a6210a"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212229244.pid.reaped",
+      "kind": "other",
+      "bytes": 7,
+      "sha256": "8b4f5840f28a9dab210b270b8845678493ba127ef4fab51188546b72af57ad3f"
+    },
+    {
+      "name": "isolated-nemotron-r8-20260811-212229244.worktree.reaped",
+      "kind": "other",
+      "bytes": 83,
+      "sha256": "fd3d76be8e616a9cea0be96ce152e1b457367f60431854eb0041f0c018527019"
+    },
+    {
+      "name": "isolated-nemotron-r9-20260811-213055835.err.log.reaped",
+      "kind": "other",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r9-20260811-213055835.in.txt.reaped",
+      "kind": "other",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "isolated-nemotron-r9-20260811-213055835.out.log.reaped",
+      "kind": "other",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "isolated-nemotron-r9-20260811-213055835.pid.reaped",
+      "kind": "other",
+      "bytes": 7,
+      "sha256": "3a0c2810758a26867c8b2eaf8b4e364ee45a0a436825aebce6150e61f5a92d39"
+    },
+    {
+      "name": "isolated-nemotron-r9-20260811-213055835.worktree.reaped",
+      "kind": "other",
+      "bytes": 83,
+      "sha256": "fd3d76be8e616a9cea0be96ce152e1b457367f60431854eb0041f0c018527019"
+    },
+    {
+      "name": "opencode-nemotron-2-20260811-204450115.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "opencode-nemotron-2-20260811-204450115.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "opencode-nemotron-2-20260811-204450115.out.log",
+      "kind": "trajectory-output",
+      "bytes": 360957,
+      "sha256": "9c04036e163eff71a04d571a59970d48a70626c99db30f5aa2988a18eb91decd",
+      "jsonl_events": 84,
+      "tool_calls": 28,
+      "tool_by_name": {
+        "bash": 27,
+        "edit": 1
+      }
+    },
+    {
+      "name": "opencode-nemotron-3-20260811-204450150.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "opencode-nemotron-3-20260811-204450150.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "opencode-nemotron-3-20260811-204450150.out.log",
+      "kind": "trajectory-output",
+      "bytes": 702543,
+      "sha256": "028004b69269572ef10b98920e26952cd8806ce5c970ac92d20abc3338ecc971",
+      "jsonl_events": 93,
+      "tool_calls": 31,
+      "tool_by_name": {
+        "bash": 31
+      }
+    },
+    {
+      "name": "opencode-nemotron-4-20260811-204450173.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "opencode-nemotron-4-20260811-204450173.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3988,
+      "sha256": "6328eb87ae2d8ada171ad482f248463d6b076cd8c19f04842d7dc1e0e5ea69bb"
+    },
+    {
+      "name": "opencode-nemotron-4-20260811-204450173.out.log",
+      "kind": "trajectory-output",
+      "bytes": 615232,
+      "sha256": "c62ff0de1ff2e707f99e7e7e621b2c712cba1f35111521c36487f31fbedad8d7",
+      "jsonl_events": 81,
+      "tool_calls": 27,
+      "tool_by_name": {
+        "bash": 9,
+        "edit": 1,
+        "glob": 3,
+        "grep": 6,
+        "read": 8
+      }
+    },
+    {
+      "name": "opencode-nemotron-a-20260811-204138.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "opencode-nemotron-a-20260811-204138.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "opencode-nemotron-a-20260811-204138.out.log",
+      "kind": "trajectory-output",
+      "bytes": 563583,
+      "sha256": "28e0028eeae4a6194563fedd1cf4935fcbe9f437b36c75aa16d20d6be4e38302",
+      "jsonl_events": 97,
+      "tool_calls": 32,
+      "tool_by_name": {
+        "bash": 32
+      }
+    },
+    {
+      "name": "opencode-nemotron-b-20260811-204138.err.log",
+      "kind": "trajectory-error",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "opencode-nemotron-b-20260811-204138.in.txt",
+      "kind": "prompt-input",
+      "bytes": 3990,
+      "sha256": "94ac636e11370df9e1fc38f86a9f27e95b03e84a0222d093fc94af99fd5ab664"
+    },
+    {
+      "name": "opencode-nemotron-b-20260811-204138.out.log",
+      "kind": "trajectory-output",
+      "bytes": 228883,
+      "sha256": "e97b2e6d171baf9423f53b4369e757ede3aa3c734c22ba8d694da5d04e871985",
+      "jsonl_events": 96,
+      "tool_calls": 32,
+      "tool_by_name": {
+        "bash": 32
+      }
+    }
+  ]
+}

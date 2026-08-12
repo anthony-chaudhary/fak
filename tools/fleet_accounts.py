@@ -173,15 +173,16 @@ NIM_DEEPSEEK_V4_PRO_MODEL = "deepseek-ai/deepseek-v4-pro"
 NIM_KIMI_K26_MODEL = "moonshotai/kimi-k2.6"
 NIM_GLM52_MODEL = "z-ai/glm-5.2"
 
-# Benchmark-ranked NVIDIA NIM coding seats, snapshot 2026-07-06.
+# NVIDIA-hosted API-demo config homes. DeepSeek/Kimi are restricted by the
+# 2026-08-11 outcome audit; GLM retains its prior classification pending audit.
 NIM_CODING_SEAT_PROFILES = {
     "nim-deepseek-v4-pro": {
-        "model_tier": 1,
+        "model_tier": 3,
         "model": NIM_DEEPSEEK_V4_PRO_MODEL,
         "agent": "opencode",
     },
     "nim-kimi-k26": {
-        "model_tier": 1,
+        "model_tier": 3,
         "model": NIM_KIMI_K26_MODEL,
         "agent": "opencode",
     },
@@ -193,8 +194,8 @@ NIM_CODING_SEAT_PROFILES = {
 }
 
 DEFAULT_NIM_CODING_ROUTE_WEIGHTS = {
-    "opencode:nim-deepseek-v4-pro": 30,
-    "opencode:nim-kimi-k26": 20,
+    "opencode:nim-deepseek-v4-pro": 0,
+    "opencode:nim-kimi-k26": 0,
     "opencode:nim-glm52": 10,
 }
 

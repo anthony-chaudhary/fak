@@ -49,21 +49,22 @@ const (
 var OpencodeMarkerFiles = []string{"opencode.json", "opencode.jsonc"}
 
 const (
-	// Benchmark-ranked NVIDIA NIM coding seats, snapshot 2026-07-06.
+	// NVIDIA-hosted API-demo config homes. DeepSeek/Kimi are restricted by the
+	// 2026-08-11 outcome audit; GLM retains its prior classification pending audit.
 	NIMDeepSeekV4ProModel = "deepseek-ai/deepseek-v4-pro"
 	NIMKimiK26Model       = "moonshotai/kimi-k2.6"
 	NIMGLM52Model         = "z-ai/glm-5.2"
 )
 
 var nimCodingSeatProfiles = map[string]ProfileOverride{
-	"nim-deepseek-v4-pro": {ModelTier: 1, Model: NIMDeepSeekV4ProModel, Agent: "opencode"},
-	"nim-kimi-k26":        {ModelTier: 1, Model: NIMKimiK26Model, Agent: "opencode"},
+	"nim-deepseek-v4-pro": {ModelTier: TierOther, Model: NIMDeepSeekV4ProModel, Agent: "opencode"},
+	"nim-kimi-k26":        {ModelTier: TierOther, Model: NIMKimiK26Model, Agent: "opencode"},
 	"nim-glm52":           {ModelTier: 1, Model: NIMGLM52Model, Agent: "opencode"},
 }
 
 var defaultNIMCodingRouteWeights = map[string]int{
-	"opencode:nim-deepseek-v4-pro": 30,
-	"opencode:nim-kimi-k26":        20,
+	"opencode:nim-deepseek-v4-pro": 0,
+	"opencode:nim-kimi-k26":        0,
 	"opencode:nim-glm52":           10,
 }
 
