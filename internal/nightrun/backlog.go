@@ -252,6 +252,37 @@ func witnessTasks() []Task {
 			Manual: true,
 			Doc:    "docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md",
 		},
+		{
+			// The micro-context fabric's scale witness, collected BY THE LOOP instead of by
+			// hand (#5842). The fabric shipped a working spine (`cmd/microcontextdemo`) plus
+			// a quality ledger and a health scorecard, but nothing in the pipeline ever ran
+			// it: every captured artifact under experiments/microcontext/ came from an agent
+			// remembering to invoke it. This row is the ONE seam that makes the default live
+			// in the pipeline — nightrun is a Go tick loop AND a registered member of the
+			// `manage-benchmarks` super loop, so an unattended `run --apply` turn selects and
+			// executes the verb on its own and records the outcome as a durable ledger row.
+			//
+			// Deliberately the SYNTHETIC selfcheck: it is offline (no weights, GPU, dataset,
+			// or credential), so it is feasible on every box in the fleet and cannot go dark
+			// waiting for hardware. Its scope line says so in the artifact — this collects
+			// bounded harness fan-out and shared-base semantics, never model tokens/sec. The
+			// live-endpoint scale points stay operator/credential work, filed separately.
+			ID:     "witness-microcontext-fabric-spine",
+			Title:  "collect the micro-context fabric's 10,000-logical-context spine witness on this box (one immutable shared base, 64 bounded physical workers) — the S0 harness datum the fabric epic #5785 headlines",
+			Source: SourceWitness,
+			Value:  ValueCoverage,
+			// Offline by construction: the selfcheck drives a synthetic endpoint, so an empty
+			// Requires is the honest declaration (every box is capable) rather than a gate
+			// that would strand the datum on GPU/weights availability.
+			Requires:   nil,
+			Run:        "go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64",
+			Acceptance: "a fak-microcontext-spine/1 report with verdict PASS over 10000 logical shards, shared_base_installs=1, and peak_in_flight never above the 64 declared worker slots (the selfcheck exits non-zero if any invariant breaks, so a ledger `collected` row IS the witness)",
+			// A synthetic fan-out re-runs cheaply, so re-check weekly: this is the fabric's
+			// regression tripwire (a spine that stops holding its invariants should surface
+			// within a week, not after the default fortnight).
+			RecheckDays: 7,
+			Doc:         "docs/research/micro-context-fabrics.md",
+		},
 	}
 }
 
