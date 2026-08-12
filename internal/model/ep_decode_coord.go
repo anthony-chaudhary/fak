@@ -169,6 +169,22 @@ func (c *EPDecodeCoordinator) Shutdown() error {
 // entry points byte-identical to today: the hook reads one nil field and returns.
 func (m *Model) SetEPDecodeCoordinator(c *EPDecodeCoordinator) { m.epCoord = c }
 
+// EPDecodeCoordinated reports whether this model decodes through a coordinated EP group —
+// whether every Prefill/Step on its sessions is announced to follower ranks that replay it.
+// It reads the same field epAnnounce does, so it can never disagree with what the forward
+// actually did; it does not latch, so clearing the coordinator clears the answer.
+//
+// The decode driver above this package keys KV PREFIX REUSE off it (#5553). Restoring a
+// cached prefix means rank 0 runs ZERO forwards over the matched tokens, so its next PREFILL
+// is announced at a position the followers' fresh mirrors never computed and epCheckMirror
+// fails closed — correctly, because letting it through would reduce partials computed from
+// different contexts. Reuse must therefore be off exactly while this is true.
+//
+// It is nil-safe on purpose: a planner built before a model finishes loading asks the
+// question with a nil *Model, and answering "coordinated" there would drop prefix reuse for
+// every ordinary single-process serve — which installs no coordinator and reports false.
+func (m *Model) EPDecodeCoordinated() bool { return m != nil && m.epCoord != nil }
+
 // epSeqLen is the sequence position this session's next forward runs at. A device (HAL)
 // session decodes from halKV, every other session from the host KVCache — the coordinated
 // frame must carry whichever one the forward will actually append to, because that is the
