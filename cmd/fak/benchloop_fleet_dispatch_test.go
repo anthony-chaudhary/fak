@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchloop"
 )
 
 func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
@@ -44,6 +47,79 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "witnesses", "abc.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBenchFleetStaleRunningClaimIsReconciledAndMeasured(t *testing.T) {
+	// A dispatcher killed mid-run left its row marked "running" forever: no later
+	// tick would claim it, and the queue reported a cell that nothing was executing
+	// (#6503). The lock read-back returns it to the queue instead.
+	root := t.TempDir()
+	q := filepath.Join(root, ".fak", "bench-fleet", "requests")
+	if err := os.MkdirAll(q, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(q, "stuck.json")
+	req := benchFleetRequest{
+		Schema: "fak.bench-fleet.request.v1", ID: "stuck", Machine: "gcp-g2-l4",
+		Command: "echo ok", State: "running", Attempts: 1,
+		LastAttemptAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
+	}
+	if err := writeBenchFleetRequest(path, req); err != nil {
+		t.Fatal(err)
+	}
+	fake := func(string, ...string) ([]byte, int, error) {
+		return []byte("FAK_BENCH_NODE=fak-cuda-build-l4\nFAK_BENCH_SECONDS=1.5\n"), 0, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--workspace", root, "--json"}, fake); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var report benchFleetDispatchReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Reconciled != 1 || report.Claimed != 1 || report.Succeeded != 1 {
+		t.Fatalf("stale claim not reconciled and rerun: %+v", report)
+	}
+	if report.Utility.Measured != 1 || !report.Utility.Healthy {
+		t.Fatalf("utility=%+v, want one witnessed numeric measurement", report.Utility)
+	}
+	got, err := readBenchFleetRequest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "succeeded" || !got.Measured || got.Attempts != 2 {
+		t.Fatalf("request=%+v", got)
+	}
+	if _, err := os.Stat(path + ".claim"); !os.IsNotExist(err) {
+		t.Fatalf("claim lock left behind: %v", err)
+	}
+}
+
+func TestBenchFleetClaimReadsBackItsOwnDispatcher(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "req.json")
+	host, _ := os.Hostname()
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	if err := os.WriteFile(path+".claim", fmt.Appendf(nil, "%d %s %s\n", os.Getpid(), host, stamp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claim := readBenchFleetClaim(path, benchFleetRequest{})
+	if !claim.Present || !claim.Local || !claim.Alive || claim.PID != os.Getpid() {
+		t.Fatalf("claim=%+v, want this live dispatcher", claim)
+	}
+	if claim.Started.IsZero() {
+		t.Fatalf("claim start not read back: %+v", claim)
+	}
+	if state, _ := benchloop.ReconcileFleetRunning(claim, time.Now().UTC()); state != benchloop.FleetRunning {
+		t.Fatalf("live claim reconciled to %q", state)
+	}
+	if err := os.Remove(path + ".claim"); err != nil {
+		t.Fatal(err)
+	}
+	if claim := readBenchFleetClaim(path, benchFleetRequest{}); claim.Present || claim.Alive {
+		t.Fatalf("missing lock read back as held: %+v", claim)
 	}
 }
 
@@ -189,7 +265,9 @@ func TestBenchFleetWorkstationConnectionFailureWaitsForSession(t *testing.T) {
 		return []byte("ssh: connect to host workstation-node port 22: Connection timed out"), 255, errors.New("exit 255")
 	}
 	var out, errOut bytes.Buffer
-	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 0 {
+	// A tick whose only cell is waiting on an unconfigured session measured nothing,
+	// so it cannot report the scheduler a healthy 0 (#6503).
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 3 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
 	got, err := readBenchFleetRequest(filepath.Join(q, "offline.json"))
@@ -198,6 +276,21 @@ func TestBenchFleetWorkstationConnectionFailureWaitsForSession(t *testing.T) {
 	}
 	if got.State != "waiting_session" {
 		t.Fatalf("state=%s", got.State)
+	}
+	if got.HeldSince == "" || got.HeldReason != "session" {
+		t.Fatalf("hold not typed: %+v", got)
+	}
+	// The held node is not re-dispatched on the next tick.
+	out.Reset()
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 3 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var report benchFleetDispatchReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Claimed != 0 || len(report.Skipped) != 1 || report.Utility.Held != 1 {
+		t.Fatalf("held node re-dispatched: %+v", report)
 	}
 }
 
@@ -224,7 +317,10 @@ func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) 
 		t.Fatalf("state=%s", got.State)
 	}
 	out.Reset()
-	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 0 {
+	// The next tick claims nothing -- and a queue whose only cell is failed is still
+	// not a healthy fleet, so the result stays nonzero instead of reporting 0 because
+	// this tick happened to do no work (#6503).
+	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--queue", q, "--json"}, fake); code != 1 {
 		t.Fatal(code)
 	}
 	var report benchFleetDispatchReport
@@ -233,6 +329,9 @@ func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) 
 	}
 	if report.Claimed != 0 {
 		t.Fatalf("failed request reclaimed: %+v", report)
+	}
+	if report.Utility.Failed != 1 || report.Utility.Successful != 0 || report.Utility.Healthy {
+		t.Fatalf("utility hides the failed cell: %+v", report.Utility)
 	}
 }
 

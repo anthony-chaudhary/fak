@@ -17,6 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchloop"
+	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
 )
 
 type benchFleetWitness struct {
@@ -37,14 +40,28 @@ type benchFleetWitness struct {
 }
 
 type benchFleetDispatchReport struct {
-	Schema     string              `json:"schema"`
-	Queue      string              `json:"queue"`
-	Considered int                 `json:"considered"`
-	Claimed    int                 `json:"claimed"`
-	Succeeded  int                 `json:"succeeded"`
-	Failed     int                 `json:"failed"`
-	Waiting    int                 `json:"waiting"`
-	Witnesses  []benchFleetWitness `json:"witnesses"`
+	Schema     string                 `json:"schema"`
+	Queue      string                 `json:"queue"`
+	Considered int                    `json:"considered"`
+	Claimed    int                    `json:"claimed"`
+	Succeeded  int                    `json:"succeeded"`
+	Failed     int                    `json:"failed"`
+	Waiting    int                    `json:"waiting"`
+	Reconciled int                    `json:"reconciled"`
+	Skipped    []benchFleetSkip       `json:"skipped,omitempty"`
+	Utility    benchloop.FleetUtility `json:"utility"`
+	Witnesses  []benchFleetWitness    `json:"witnesses"`
+}
+
+// benchFleetSkip records a durable queue row this tick deliberately did NOT spend a
+// dispatch on, with the reason an operator reads off the report: a node held on a
+// missing session, a cell inside its failure backoff, or a claim another dispatcher
+// still owns. Before #6503 those rows were re-dispatched every fifteen minutes.
+type benchFleetSkip struct {
+	RequestID string `json:"request_id"`
+	Machine   string `json:"machine"`
+	State     string `json:"state"`
+	Reason    string `json:"reason"`
 }
 
 type benchFleetExec func(name string, args ...string) ([]byte, int, error)
@@ -74,10 +91,9 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 		return 1
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	now := time.Now().UTC()
+	cells := make([]benchloop.FleetCell, 0, len(entries))
 	for _, e := range entries {
-		if report.Claimed >= *max {
-			break
-		}
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
@@ -87,21 +103,41 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 			continue
 		}
 		report.Considered++
-		if req.State != "queued" && !strings.HasPrefix(req.State, "waiting_") {
+		if req.State == benchloop.FleetRunning {
+			// A claim only means something while its owner is alive: reconcile it against
+			// the lock's own pid/host read-back, not against the row's say-so, so a
+			// dispatcher killed mid-run cannot strand the cell in "running" forever.
+			if state, reason := benchloop.ReconcileFleetRunning(readBenchFleetClaim(path, req), now); state != benchloop.FleetRunning {
+				req.State, req.HeldReason = state, reason
+				_ = os.Remove(path + ".claim")
+				_ = writeBenchFleetRequest(path, req)
+				report.Reconciled++
+			}
+		}
+		cell := benchFleetCell(req)
+		dispatch, why := benchloop.ShouldDispatchFleetCell(cell, now)
+		if dispatch && report.Claimed >= *max {
+			dispatch, why = false, "tick dispatch budget reached"
+		}
+		if !dispatch {
+			if why != "" {
+				report.Skipped = append(report.Skipped, benchFleetSkip{RequestID: req.ID, Machine: req.Machine, State: req.State, Reason: why})
+			}
+			cells = append(cells, cell)
 			continue
 		}
 		lock, err := os.OpenFile(path+".claim", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
+			cells = append(cells, cell)
 			continue
 		}
+		host, _ := os.Hostname()
+		_, _ = fmt.Fprintf(lock, "%d %s %s\n", os.Getpid(), host, now.Format(time.RFC3339))
 		lock.Close()
 		report.Claimed++
-		req.State = "running"
+		req.State = benchloop.FleetRunning
 		_ = writeBenchFleetRequest(path, req)
 		witness := executeBenchFleetRequest(*root, req, run)
-		req.State = witness.State
-		_ = writeBenchFleetRequest(path, req)
-		_ = os.Remove(path + ".claim")
 		witnessDir := filepath.Join(filepath.Dir(queue), "witnesses")
 		_ = os.MkdirAll(witnessDir, 0o755)
 		if b, e := json.MarshalIndent(witness, "", "  "); e == nil {
@@ -114,6 +150,10 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 				markBenchFleetRunFailed(&witness, &req, path, "update benchmark catalog", err)
 			}
 		}
+		req = applyBenchFleetOutcome(req, witness)
+		_ = writeBenchFleetRequest(path, req)
+		_ = os.Remove(path + ".claim")
+		cells = append(cells, benchFleetCell(req))
 		report.Witnesses = append(report.Witnesses, witness)
 		switch witness.State {
 		case "succeeded":
@@ -124,15 +164,135 @@ func runBenchFleetDispatchWithExec(stdout, stderr io.Writer, argv []string, run 
 			report.Waiting++
 		}
 	}
+	// The result reports the DURABLE queue, not this tick's luck: a queue whose cells
+	// are all failed or held claims nothing this tick and used to exit 0 for it (#6503).
+	report.Utility = benchloop.SummarizeFleet(cells)
 	if *jsonOut {
 		_ = json.NewEncoder(stdout).Encode(report)
 	} else {
-		fmt.Fprintf(stdout, "bench fleet dispatch: claimed=%d succeeded=%d failed=%d waiting=%d\n", report.Claimed, report.Succeeded, report.Failed, report.Waiting)
+		fmt.Fprintf(stdout, "bench fleet dispatch: claimed=%d succeeded=%d failed=%d waiting=%d reconciled=%d\n", report.Claimed, report.Succeeded, report.Failed, report.Waiting, report.Reconciled)
+		fmt.Fprintf(stdout, "utility: attempted=%d measured=%d held=%d repeated-failures=%d compute=%.0fs result=%d (%s)\n",
+			report.Utility.Attempted, report.Utility.Measured, report.Utility.Held, report.Utility.RepeatedFailures, report.Utility.ComputeSeconds, report.Utility.Result, report.Utility.Reason)
 	}
-	if report.Failed > 0 {
-		return 1
+	return report.Utility.Result
+}
+
+// benchFleetCell projects one durable queue row onto the health rules in
+// internal/benchloop. cmd/fak owns the on-disk JSON; the package owns the decisions.
+func benchFleetCell(req benchFleetRequest) benchloop.FleetCell {
+	return benchloop.FleetCell{
+		Machine: req.Machine, Benchmark: req.Benchmark, State: req.State,
+		HeldReason: req.HeldReason, HeldSince: parseBenchFleetTime(req.HeldSince),
+		LastAttempt: parseBenchFleetTime(req.LastAttemptAt), Attempts: req.Attempts,
+		Failures: req.Failures, Seconds: req.Seconds, Measured: req.Measured,
 	}
-	return 0
+}
+
+// benchFleetQueueCells reads the whole durable request queue under root. Callers
+// that judge the loop as a whole -- the status verb and the install gate -- read the
+// cells rather than a single tick, because one tick that claimed nothing is not
+// evidence that the fleet measured anything.
+func benchFleetQueueCells(root string) []benchloop.FleetCell {
+	queue := filepath.Join(root, ".fak", "bench-fleet", "requests")
+	entries, err := os.ReadDir(queue)
+	if err != nil {
+		return nil
+	}
+	cells := make([]benchloop.FleetCell, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		req, err := readBenchFleetRequest(filepath.Join(queue, e.Name()))
+		if err != nil {
+			continue
+		}
+		cells = append(cells, benchFleetCell(req))
+	}
+	return cells
+}
+
+// applyBenchFleetOutcome folds one execution back into the durable row: the state,
+// the attempt/failure counters the utility report is computed from, the compute the
+// cell has cost so far, and whether the node has ever produced a benchmark number.
+// HeldSince tracks when the current hold was last confirmed, so each re-probe
+// restarts the hold window instead of re-dispatching an unavailable node every tick.
+func applyBenchFleetOutcome(req benchFleetRequest, w benchFleetWitness) benchFleetRequest {
+	req.State = w.State
+	req.Attempts++
+	req.LastAttemptAt = w.FinishedAt
+	req.Seconds += benchFleetWitnessSeconds(w)
+	if _, _, ok := benchloop.FleetMeasurement(w.Output); ok {
+		req.Measured = true
+	}
+	state, gap := benchloop.NormalizeFleetState(w.State)
+	switch state {
+	case benchloop.FleetFailed:
+		req.Failures++
+		req.HeldSince, req.HeldReason = "", ""
+	case benchloop.FleetHeld:
+		req.HeldSince, req.HeldReason = w.FinishedAt, gap
+	default:
+		req.Failures = 0
+		req.HeldSince, req.HeldReason = "", ""
+	}
+	return req
+}
+
+// benchFleetWitnessSeconds is the wall clock one execution spent, used as the
+// compute-cost axis of the utility report. An unparsable pair costs zero rather
+// than poisoning the total.
+func benchFleetWitnessSeconds(w benchFleetWitness) float64 {
+	started, finished := parseBenchFleetTime(w.StartedAt), parseBenchFleetTime(w.FinishedAt)
+	if started.IsZero() || finished.IsZero() || finished.Before(started) {
+		return 0
+	}
+	return finished.Sub(started).Seconds()
+}
+
+// readBenchFleetClaim reads back the lock a running row claims to be held by. The
+// lock carries "<pid> <host> <rfc3339>", so this host can independently disprove a
+// claim its own dead dispatcher left behind; a claim taken elsewhere is judged only
+// by its lease, because a remote pid is not readable from here.
+func readBenchFleetClaim(path string, req benchFleetRequest) benchloop.FleetClaim {
+	claim := benchloop.FleetClaim{Started: parseBenchFleetTime(req.LastAttemptAt)}
+	b, err := os.ReadFile(path + ".claim")
+	if err != nil {
+		return claim
+	}
+	claim.Present = true
+	fields := strings.Fields(string(b))
+	if len(fields) > 0 {
+		claim.PID, _ = strconv.Atoi(fields[0])
+	}
+	if len(fields) > 1 {
+		claim.Host = fields[1]
+	}
+	if len(fields) > 2 {
+		if started := parseBenchFleetTime(fields[2]); !started.IsZero() {
+			claim.Started = started
+		}
+	}
+	if claim.Started.IsZero() {
+		// A lock written before the loop recorded its owner (#6503) carries no stamp,
+		// and its row may carry no attempt time either. The lock's own mtime is the
+		// independent reading that keeps such a claim from being immortal.
+		if info, statErr := os.Stat(path + ".claim"); statErr == nil {
+			claim.Started = info.ModTime().UTC()
+		}
+	}
+	host, _ := os.Hostname()
+	claim.Local = claim.Host != "" && host != "" && strings.EqualFold(claim.Host, host)
+	claim.Alive = claim.Local && dispatchaudit.ProcessAlive(claim.PID)
+	return claim
+}
+
+func parseBenchFleetTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // markBenchFleetRunFailed demotes a run that EXECUTED cleanly but whose post-run

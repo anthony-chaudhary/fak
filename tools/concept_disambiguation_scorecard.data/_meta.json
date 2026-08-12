@@ -492,6 +492,11 @@
           "category": "incidental",
           "reason": "implementation symbol for guard's existing per-turn provider-cache telemetry; not a new cache concept",
           "token": "formatTurnCachePair"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported bound of the closed CacheTier enum in internal/cacheobs/tiers.go: it marks the end of the tier vocabulary so an out-of-range tier can be rejected. Not a cache tier and never reported.",
+          "token": "numCacheTiers"
         }
       ],
       "id": "cache",
@@ -622,6 +627,7 @@
         "non_cache_fingerprint",
         "normalizedSchemaCacheCap",
         "normalizedSchemaCacheLen",
+        "numCacheTiers",
         "observeTurnCache",
         "observecachettlupgrade",
         "prefixcachehits",
@@ -1365,6 +1371,41 @@
           "category": "incidental",
           "reason": "Pure renderer: abbreviates the already-resolved binaryIdentity commit for space-constrained surfaces. Not a governed concept — it is the testable seam of guardShortBuildID, carrying no new gate semantics.",
           "token": "guardShortBuildIDOf"
+        },
+        {
+          "category": "incidental",
+          "reason": "plain data carrier: the per-run output struct of the watchdog audit fold (verdict, exit code, ledger, changed keys); it holds no gate policy of its own",
+          "token": "AuditGateResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal pure fold in internal/watchdoghealth that escalates the meta-watchdog audit verdict by its findings and dedupes them; not a product-level guard surface, it is the leaf behind the existing watchdog-status digest",
+          "token": "AuditGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure fold that rewrites an already-computed spawn verdict when the adjudicating binary is skewed (#6508). Not a new gate: it composes onto the existing preflight ladder exactly as ApplyGateBackpressure does, and is a no-op on any verdict that is not the caller's admit token.",
+          "token": "ApplyGateSkew"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation predicate behind ApplyGateSkew: measured fak-bin provenance in, (refuse, reason) out. Not a governed gate concept — it carries no admission vocabulary of its own and exists so the same rule can be asked by self-update --check and by the dispatch tick.",
+          "token": "GateSkewRefusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported reason-namer for GateSkewRefusal; returns the prose describing which of the three skew states holds, or empty. Purely internal to the refusal above.",
+          "token": "gateSkew"
+        },
+        {
+          "category": "incidental",
+          "reason": "Plain data carrier for the two ALREADY-MEASURED binary identities an admission decision needs (adjudicator + worker guard). A measurement record, not a gate.",
+          "token": "GateProvenance"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct field of GateProvenance: the adjudicating binary's path, carried for the reason line.",
+          "token": "GatePath"
         }
       ],
       "exclude": [
@@ -1382,6 +1423,9 @@
       "ignore": [
         "AggregateErrors",
         "AggregateHBMBytes",
+        "ApplyGateSkew",
+        "AuditGate",
+        "AuditGateResult",
         "CacheValueGateDebtKey",
         "CaseDelegate",
         "ClaimRuntimeDelegated",
@@ -1394,6 +1438,9 @@
         "FLEET_GIT_HYGIENE_GUARD",
         "GATED_UNWITNESSED",
         "GateFlipped",
+        "GatePath",
+        "GateProvenance",
+        "GateSkewRefusal",
         "IsAggregate",
         "LifecycleGate",
         "OutcomeDelegate",
@@ -1418,6 +1465,7 @@
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
         "gateGitHygieneBypass",
+        "gateSkew",
         "gate_test",
         "gate_verbtier",
         "gated",
@@ -2623,6 +2671,16 @@
           "category": "incidental",
           "reason": "the wire spelling of ReasonPopulationUnwitnessed; a reason-code string literal, not a distinct concept",
           "token": "POPULATION_LIFT_UNWITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported cmd/fak adapter: it only projects the phase ids out of the LATEST W3 witnessed-commit-progress ScoreRow that internal/trajctl's commit scorer already wrote, so it proves nothing new and names no new witness kind. The governed concept is the depth frontier in internal/depthadmit; this is the private read that feeds it.",
+          "token": "trajctlWitnessedPhases"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported cmd/fak helper that reads the compute_seconds number out of an already-written bench-fleet witness file; no new concept, just a field accessor for internal/benchloop.SummarizeFleet",
+          "token": "benchFleetWitnessSeconds"
         }
       ],
       "id": "witness-proof",
@@ -2664,6 +2722,7 @@
         "WitnessSHA256",
         "WitnessedProgressFloor",
         "appendGuardCompactionWitnessTo",
+        "benchFleetWitnessSeconds",
         "checkWitness",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
@@ -2718,6 +2777,7 @@
         "setup_not_witnessed",
         "taskQuality",
         "taskSufficient",
+        "trajctlWitnessedPhases",
         "tree_witness",
         "verifyCheckpointWitness",
         "want_witness",
@@ -4216,6 +4276,11 @@
           "category": "incidental",
           "reason": "Typed adapter invocation result local to lifecycle negotiation, not a support maturity rung.",
           "token": "ResultUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum member of TierStatus in internal/cacheobs/tiers.go: a cache tier that has a collector in this build, so its zero counters mean idle rather than absent. A plain enum value, not a governed concept.",
+          "token": "TierStatusSupported"
         }
       ],
       "id": "support-maturity",
@@ -4285,6 +4350,7 @@
         "SetupParityBlocks",
         "SetupParityReport",
         "SupportsRoutedExpertKQuant",
+        "TierStatusSupported",
         "UNKNOWN_FORMAT",
         "UNKNOWN_RUNTIME",
         "UNSUPPORTED_COMBINATION",
@@ -4762,6 +4828,16 @@
           "category": "incidental",
           "reason": "RenderAging is the text formatter for an existing graded set (the aging_wip KPI rows); it introduces no new governed concept, it prints flowmetrics.Report.Aging in the same oldest-first order the fold already produces",
           "token": "RenderAging"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal helper: the single place a freshness (result, error) pair becomes bytes and an exit code for a CLI surface; not a governed rendering concept",
+          "token": "RenderFreshness"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal helper in conceptcatalog: exports a git tree to scratch and returns the generated artifact bytes; not a governed concept",
+          "token": "renderFromGitTree"
         }
       ],
       "id": "render-materialize",
@@ -4775,6 +4851,7 @@
         "RenderDents",
         "RenderFacet",
         "RenderFidelity",
+        "RenderFreshness",
         "RenderKind",
         "RenderQueue",
         "RenderReopen",
@@ -4796,6 +4873,7 @@
         "renderCommitVelocity",
         "renderConcepts",
         "renderFleetControl",
+        "renderFromGitTree",
         "renderGhostReport",
         "renderGitSpawnDelta",
         "renderGitSpawnReport",

@@ -15,6 +15,10 @@
     <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <!-- Disabled until one real node yields a witnessed numeric benchmark (#6503).
+         `fak bench-loop install` refuses to arm this schedule until the durable
+         queue holds such a measurement, so re-enabling by hand skips that gate. -->
+    <Enabled>false</Enabled>
     <IdleSettings>
       <Duration>PT10M</Duration>
       <WaitTimeout>PT1H</WaitTimeout>
@@ -30,10 +34,13 @@
       </Repetition>
     </TimeTrigger>
   </Triggers>
+  <!-- The action runs the committed tick payload directly. conhost.exe --headless
+       returned its own status and hid the dispatcher's, which is how a loop with zero
+       successful witnesses reported Last Result 0 for weeks (#6503). -->
   <Actions Context="Author">
     <Exec>
-      <Command>C:\WINDOWS\System32\conhost.exe</Command>
-      <Arguments>--headless cmd.exe /d /s /c "%LOCALAPPDATA%\Temp\fak-bench-fleet-tick.cmd"</Arguments>
+      <Command>cmd.exe</Command>
+      <Arguments>/d /s /c ""%FAK_WORKSPACE%\tools\scheduled-tasks\fak-bench-fleet-tick.cmd" "%FAK_BIN%" "%FAK_WORKSPACE%""</Arguments>
     </Exec>
   </Actions>
 </Task>

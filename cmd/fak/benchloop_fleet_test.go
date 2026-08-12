@@ -11,7 +11,11 @@ import (
 )
 
 func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the route preflight (#6503) reads the fleet's session
+	// configuration, which this test pins to "nothing is configured".
+	t.Setenv("FAK_BENCH_MAC_HOST", "")
+	t.Setenv("FAK_BENCH_A100_CHANNEL", "")
+	t.Setenv("FAK_BENCH_CPU_SERVER_CHANNEL", "")
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.json")
 	plan := `{"per_machine_next":{
@@ -25,7 +29,7 @@ func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
 	queue := filepath.Join(dir, "queue")
 
 	var out, errOut bytes.Buffer
-	code := runBenchFleet(&out, &errOut, []string{"--apply", "--json", "--plan-json", planPath, "--queue", queue})
+	code := runBenchFleet(&out, &errOut, []string{"--apply", "--json", "--plan-json", planPath, "--queue", queue, "--workspace", dir})
 	if code != 0 {
 		t.Fatalf("first run code=%d stderr=%s", code, errOut.String())
 	}
@@ -36,6 +40,12 @@ func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
 	if got.Machines != 3 || got.Enqueued != 3 || got.Existing != 0 {
 		t.Fatalf("first report=%+v", got)
 	}
+	// None of the three nodes has a configured session or credential, so the plan
+	// enqueues them already held instead of spending a dispatch on each one every
+	// fifteen minutes (#6503).
+	if got.Held != 3 {
+		t.Fatalf("held=%d, want every unconfigured node preflighted as held: %+v", got.Held, got)
+	}
 	entries, err := os.ReadDir(queue)
 	if err != nil {
 		t.Fatal(err)
@@ -44,10 +54,14 @@ func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
 		t.Fatalf("queue entries=%d want 3", len(entries))
 	}
 	classes := map[string]bool{}
+	wantState := map[string]string{"a100": "waiting_credentials", "cpu-server-a": "waiting_credentials", "node-macos-a": "waiting_session"}
 	for _, req := range got.Requests {
 		classes[req.NodeClass] = true
-		if req.State != "queued" {
-			t.Fatalf("state=%s", req.State)
+		if req.State != wantState[req.Machine] {
+			t.Fatalf("%s state=%s, want %s", req.Machine, req.State, wantState[req.Machine])
+		}
+		if req.HeldReason == "" || req.HeldSince == "" {
+			t.Fatalf("%s held without naming the gap: %+v", req.Machine, req)
 		}
 	}
 	for _, class := range []string{"gpu", "cpu", "mac"} {
@@ -58,7 +72,7 @@ func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	code = runBenchFleet(&out, &errOut, []string{"--apply", "--json", "--plan-json", planPath, "--queue", queue})
+	code = runBenchFleet(&out, &errOut, []string{"--apply", "--json", "--plan-json", planPath, "--queue", queue, "--workspace", dir})
 	if code != 0 {
 		t.Fatalf("second run code=%d stderr=%s", code, errOut.String())
 	}

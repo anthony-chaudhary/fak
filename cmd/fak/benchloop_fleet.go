@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchloop"
 )
 
 const benchFleetSchema = "fak.bench-loop.fleet.v1"
@@ -41,6 +43,16 @@ type benchFleetRequest struct {
 	State       string `json:"state"`
 	RequestedAt string `json:"requested_at"`
 	Path        string `json:"path,omitempty"`
+	// Durable dispatch history (#6503). The recurring loop reports its result from
+	// these counters rather than from whatever the current tick happened to claim,
+	// and holds an unavailable node instead of re-dispatching it every fifteen minutes.
+	Attempts      int     `json:"attempts,omitempty"`
+	Failures      int     `json:"failures,omitempty"`
+	LastAttemptAt string  `json:"last_attempt_at,omitempty"`
+	HeldSince     string  `json:"held_since,omitempty"`
+	HeldReason    string  `json:"held_reason,omitempty"`
+	Seconds       float64 `json:"seconds,omitempty"`
+	Measured      bool    `json:"measured,omitempty"`
 }
 type benchFleetReport struct {
 	Schema      string              `json:"schema"`
@@ -50,6 +62,8 @@ type benchFleetReport struct {
 	Machines    int                 `json:"machines"`
 	Enqueued    int                 `json:"enqueued"`
 	Existing    int                 `json:"existing"`
+	Held        int                 `json:"held"`
+	Released    int                 `json:"released"`
 	Requests    []benchFleetRequest `json:"requests"`
 	Next        string              `json:"next"`
 }
@@ -121,11 +135,24 @@ func runBenchFleet(stdout, stderr io.Writer, argv []string) int {
 			if _, err := os.Stat(path); err == nil {
 				req.State = "already_queued"
 				report.Existing++
+				if refreshBenchFleetHold(root, path) {
+					report.Released++
+				}
 			} else if !os.IsNotExist(err) {
 				fmt.Fprintf(stderr, "fak bench-loop fleet: inspect %s: %v\n", path, err)
 				return 1
 			} else {
 				req.State = "queued"
+				// Preflight the node's own session/credential before the cell is ever
+				// dispatched: a node with no configured route is enqueued already held on
+				// the gap it names, so the loop reports a configuration gap instead of
+				// spending a claim on it every fifteen minutes (#6503).
+				if _, _, _, state, routeErr := benchFleetRoute(root, req); routeErr != nil && state != benchloop.FleetRunning {
+					req.State = state
+					_, req.HeldReason = benchloop.NormalizeFleetState(state)
+					req.HeldSince = report.GeneratedAt
+					report.Held++
+				}
 				if err := writeBenchFleetRequest(path, req); err != nil {
 					fmt.Fprintf(stderr, "fak bench-loop fleet: queue %s: %v\n", row.MachineID, err)
 					return 1
@@ -170,10 +197,11 @@ func runBenchFleetStatus(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	type status struct {
-		Schema   string              `json:"schema"`
-		Queue    string              `json:"queue"`
-		Queued   int                 `json:"queued"`
-		Requests []benchFleetRequest `json:"requests"`
+		Schema   string                 `json:"schema"`
+		Queue    string                 `json:"queue"`
+		Queued   int                    `json:"queued"`
+		Utility  benchloop.FleetUtility `json:"utility"`
+		Requests []benchFleetRequest    `json:"requests"`
 	}
 	got := status{Schema: "fak.bench-loop.fleet-status.v1", Queue: filepath.ToSlash(queue)}
 	for _, entry := range entries {
@@ -191,6 +219,11 @@ func runBenchFleetStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	got.Queued = len(got.Requests)
 	sort.Slice(got.Requests, func(i, j int) bool { return got.Requests[i].Machine < got.Requests[j].Machine })
+	cells := make([]benchloop.FleetCell, 0, len(got.Requests))
+	for _, req := range got.Requests {
+		cells = append(cells, benchFleetCell(req))
+	}
+	got.Utility = benchloop.SummarizeFleet(cells)
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -200,8 +233,31 @@ func runBenchFleetStatus(stdout, stderr io.Writer, argv []string) int {
 		for _, req := range got.Requests {
 			fmt.Fprintf(stdout, "- %s: %s (%s)\n", req.Machine, req.Command, req.State)
 		}
+		fmt.Fprintf(stdout, "utility: attempted=%d measured=%d held=%d repeated-failures=%d compute=%.0fs result=%d (%s)\n",
+			got.Utility.Attempted, got.Utility.Measured, got.Utility.Held, got.Utility.RepeatedFailures, got.Utility.ComputeSeconds, got.Utility.Result, got.Utility.Reason)
 	}
+	// status stays a read-only report and always exits 0; the loop's own result is
+	// carried by the dispatch tick, which is what the scheduler runs.
 	return 0
+}
+
+// refreshBenchFleetHold re-preflights an already-queued row: a node that was held on
+// a missing session or credential returns to the queue the moment its route resolves,
+// instead of sitting out the rest of its hold window. It reports whether it released
+// a hold, which the plan report counts so an operator sees the recovery.
+func refreshBenchFleetHold(root, path string) bool {
+	req, err := readBenchFleetRequest(path)
+	if err != nil {
+		return false
+	}
+	if state, _ := benchloop.NormalizeFleetState(req.State); state != benchloop.FleetHeld {
+		return false
+	}
+	if _, _, _, state, routeErr := benchFleetRoute(root, req); routeErr != nil || state != benchloop.FleetRunning {
+		return false
+	}
+	req.State, req.HeldSince, req.HeldReason = "queued", "", ""
+	return writeBenchFleetRequest(path, req) == nil
 }
 
 func loadBenchFleetPlan(root, stamp, python, path string) ([]byte, error) {
@@ -274,7 +330,7 @@ func renderBenchFleet(w io.Writer, r benchFleetReport) {
 	if r.Apply {
 		mode = "APPLIED"
 	}
-	fmt.Fprintf(w, "bench fleet %s: %d nodes, %d queued, %d existing\n", mode, r.Machines, r.Enqueued, r.Existing)
+	fmt.Fprintf(w, "bench fleet %s: %d nodes, %d queued, %d existing, %d held on configuration\n", mode, r.Machines, r.Enqueued, r.Existing, r.Held)
 	for _, x := range r.Requests {
 		fmt.Fprintf(w, "- %-16s %-7s %-14s %s\n", x.Machine, x.NodeClass, x.State, x.Command)
 	}
@@ -287,6 +343,8 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 	interval := fs.Int("interval", 15, "cadence in minutes")
 	task := fs.String("task", "FakBenchmarkFleetLoop", "Windows Scheduled Task name")
 	remove := fs.Bool("remove", false, "remove the Scheduled Task")
+	workspace := fs.String("workspace", ".", "repository root the task benchmarks")
+	force := fs.Bool("force", false, "arm the schedule without a witnessed numeric benchmark")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -310,14 +368,27 @@ func runBenchFleetInstall(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak bench-loop install: executable: %v\n", err)
 		return 1
 	}
-	root, _ := filepath.Abs(".")
-	runner := filepath.Join(os.TempDir(), "fak-bench-fleet-tick.cmd")
-	script := fmt.Sprintf("@echo off\r\n\"%s\" bench-loop fleet --apply --json --workspace \"%s\"\r\nif errorlevel 1 exit /b %%errorlevel%%\r\n\"%s\" bench-loop fleet dispatch --json --workspace \"%s\"\r\n", exe, root, exe, root)
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		fmt.Fprintf(stderr, "fak bench-loop install: runner: %v\n", err)
+	root, err := filepath.Abs(*workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop install: root: %v\n", err)
 		return 1
 	}
-	tr := fmt.Sprintf("cmd.exe /d /s /c \"%s\"", runner)
+	// A recurring loop is only worth arming once one real node has produced a witnessed
+	// benchmark number; before #6503 this schedule re-spent compute on held and failing
+	// cells every fifteen minutes and reported result 0 for it.
+	if ok, why := benchloop.FleetReenableAllowed(benchloop.SummarizeFleet(benchFleetQueueCells(root))); !ok && !*force {
+		fmt.Fprintf(stderr, "fak bench-loop install: refusing to arm %s: %s\n", *task, why)
+		fmt.Fprintln(stderr, "fak bench-loop install: run one node explicitly (`fak bench-loop fleet dispatch`) or pass --force")
+		return 1
+	}
+	// The tick payload is committed tooling, not an ephemeral %TEMP% script that any
+	// cleanup could delete out from under the scheduler (#6503).
+	runner := filepath.Join(root, "tools", "scheduled-tasks", "fak-bench-fleet-tick.cmd")
+	if _, err := os.Stat(runner); err != nil {
+		fmt.Fprintf(stderr, "fak bench-loop install: tick payload: %v\n", err)
+		return 1
+	}
+	tr := fmt.Sprintf("cmd.exe /d /s /c \"\"%s\" \"%s\" \"%s\"\"", runner, exe, root)
 	if !runBenchFleetSchtasks(stderr, root, "/Create", "/TN", *task, "/SC", "MINUTE", "/MO", fmt.Sprint(*interval), "/TR", tr, "/F", "/RL", "LIMITED") {
 		return 1
 	}

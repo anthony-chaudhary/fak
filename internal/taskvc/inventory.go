@@ -123,9 +123,11 @@ var inventory = []Coverage{
 		Task:    "FakBenchmarkFleetLoop",
 		Status:  StatusXML,
 		Capture: "tools/scheduled-tasks/FakBenchmarkFleetLoop.xml",
-		Reason: "launches a generated %TEMP%/fak-bench-fleet-tick.cmd; the tick script is ephemeral " +
-			"and never existed in version control, so a restore rebuilds the schedule but not the " +
-			"script — the loop needs a tracked entrypoint before an installer is possible.",
+		Reason: "runs tools/scheduled-tasks/fak-bench-fleet-tick.cmd, which IS tracked since #6503 " +
+			"promoted the generated %TEMP% payload into the tree, so a restore rebuilds both the " +
+			"schedule and the script. The capture pins the workspace and fak binary as %FAK_WORKSPACE% " +
+			"/%FAK_BIN%, which must be substituted on restore, and stays disabled until one real node " +
+			"yields a witnessed numeric benchmark — `fak bench-loop install` refuses to arm it before that.",
 	},
 	{
 		Task:    "FakMetaSuperloopNight100",
