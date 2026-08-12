@@ -1,0 +1,11 @@
+{
+  "outcome": "refuse",
+  "reasons": [
+    "VLLMQUANT_METHOD_BITS_CONFLICT"
+  ],
+  "claim": "",
+  "artifact_method": "fp8",
+  "candidates": [],
+  "excluded": [],
+  "args": []
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "vllmquant/v1",
+  "artifact": {
+    "model": "example/bnb-4bit",
+    "quant_method": "bitsandbytes",
+    "bits": 4
+  },
+  "server": {
+    "version": "0.6.3",
+    "methods": ["awq", "awq_marlin", "gptq", "gptq_marlin", "bitsandbytes", "fp8"],
+    "compute_capability": "8.0"
+  }
+}

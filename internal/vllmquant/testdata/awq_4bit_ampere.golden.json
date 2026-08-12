@@ -1,0 +1,12 @@
+{
+  "outcome": "delegate",
+  "reasons": ["VLLMQUANT_KERNEL_CHOICE_DELEGATED"],
+  "claim": "runtime-delegated",
+  "artifact_method": "awq",
+  "candidates": [
+    {"method": "awq", "args": ["--quantization", "awq"]},
+    {"method": "awq_marlin", "args": ["--quantization", "awq_marlin"]}
+  ],
+  "excluded": [],
+  "args": []
+}

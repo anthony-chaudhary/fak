@@ -1,0 +1,11 @@
+{
+  "outcome": "abstain",
+  "reasons": [
+    "VLLMQUANT_ARTIFACT_UNDECLARED"
+  ],
+  "claim": "",
+  "artifact_method": "unknown",
+  "candidates": [],
+  "excluded": [],
+  "args": []
+}

@@ -1,0 +1,21 @@
+{
+  "schema": "vllmquant/v1",
+  "artifact": {
+    "model": "public/hqq",
+    "quant_method": "hqq",
+    "bits": 4
+  },
+  "server": {
+    "schema": "vllmquant/v1",
+    "version": "0.6.3",
+    "compute_capability": "8.0",
+    "methods": [
+      "awq",
+      "awq_marlin",
+      "gptq",
+      "gptq_marlin",
+      "bitsandbytes",
+      "fp8"
+    ]
+  }
+}

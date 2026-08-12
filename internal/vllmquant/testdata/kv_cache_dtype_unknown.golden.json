@@ -1,0 +1,11 @@
+{
+  "outcome": "abstain",
+  "reasons": [
+    "VLLMQUANT_KV_CACHE_DTYPE_UNKNOWN"
+  ],
+  "claim": "",
+  "artifact_method": "fp8",
+  "candidates": [],
+  "excluded": [],
+  "args": []
+}

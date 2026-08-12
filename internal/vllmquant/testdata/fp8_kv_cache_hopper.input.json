@@ -1,0 +1,22 @@
+{
+  "schema": "vllmquant/v1",
+  "artifact": {
+    "model": "public/fp8",
+    "quant_method": "fp8",
+    "activation_scheme": "dynamic",
+    "kv_cache_dtype": "fp8_e4m3"
+  },
+  "server": {
+    "schema": "vllmquant/v1",
+    "version": "0.6.3",
+    "compute_capability": "9.0",
+    "methods": [
+      "awq",
+      "awq_marlin",
+      "gptq",
+      "gptq_marlin",
+      "bitsandbytes",
+      "fp8"
+    ]
+  }
+}

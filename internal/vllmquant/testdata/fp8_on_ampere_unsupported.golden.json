@@ -1,0 +1,16 @@
+{
+  "outcome": "unsupported",
+  "reasons": [
+    "VLLMQUANT_CAPABILITY_TOO_LOW"
+  ],
+  "claim": "artifact-described",
+  "artifact_method": "fp8",
+  "candidates": [],
+  "excluded": [
+    {
+      "method": "fp8",
+      "reason": "VLLMQUANT_CAPABILITY_TOO_LOW"
+    }
+  ],
+  "args": []
+}

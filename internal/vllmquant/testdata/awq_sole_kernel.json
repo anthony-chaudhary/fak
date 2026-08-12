@@ -1,0 +1,22 @@
+{
+  "_note": "AWQ 4-bit on a Turing build that compiled only the plain AWQ kernel: one candidate, so no preference is needed to resolve it.",
+  "_want_outcome": "supported",
+  "_want_reason": "VLLMQUANT_ADMITTED",
+  "_want_kernel": "awq",
+  "_want_launch_args": ["--quantization", "awq", "--dtype", "float16"],
+
+  "schema": "vllmquant/v1",
+  "artifact": {
+    "model": "example-awq-4bit",
+    "quant_method": "awq",
+    "weight_bits": 4,
+    "group_size": 128,
+    "symmetric": false
+  },
+  "server": {
+    "version": "0.8.5",
+    "kernels": ["awq"],
+    "compute_capability": 75,
+    "dtype": "float16"
+  }
+}

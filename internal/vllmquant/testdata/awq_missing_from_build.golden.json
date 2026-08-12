@@ -1,0 +1,20 @@
+{
+  "outcome": "unsupported",
+  "reasons": [
+    "VLLMQUANT_METHOD_NOT_IN_BUILD"
+  ],
+  "claim": "artifact-described",
+  "artifact_method": "awq",
+  "candidates": [],
+  "excluded": [
+    {
+      "method": "awq",
+      "reason": "VLLMQUANT_METHOD_NOT_IN_BUILD"
+    },
+    {
+      "method": "awq_marlin",
+      "reason": "VLLMQUANT_METHOD_NOT_IN_BUILD"
+    }
+  ],
+  "args": []
+}

@@ -1,0 +1,11 @@
+{
+  "outcome": "refuse",
+  "reasons": [
+    "VLLMQUANT_GROUP_SIZE_MALFORMED"
+  ],
+  "claim": "",
+  "artifact_method": "gptq",
+  "candidates": [],
+  "excluded": [],
+  "args": []
+}

@@ -1,0 +1,13 @@
+{
+  "outcome": "supported",
+  "reasons": ["VLLMQUANT_ADMITTED"],
+  "claim": "runtime-delegated",
+  "artifact_method": "awq",
+  "candidates": [
+    {"method": "awq", "args": ["--quantization", "awq"]}
+  ],
+  "excluded": [
+    {"method": "awq_marlin", "reason": "VLLMQUANT_METHOD_NOT_IN_BUILD"}
+  ],
+  "args": ["--quantization", "awq"]
+}

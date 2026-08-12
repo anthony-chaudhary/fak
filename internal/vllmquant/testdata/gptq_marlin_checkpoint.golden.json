@@ -1,0 +1,13 @@
+{
+  "outcome": "supported",
+  "reasons": ["VLLMQUANT_ADMITTED"],
+  "claim": "runtime-delegated",
+  "artifact_method": "gptq",
+  "candidates": [
+    {"method": "gptq_marlin", "args": ["--quantization", "gptq_marlin"]}
+  ],
+  "excluded": [
+    {"method": "gptq", "reason": "VLLMQUANT_CHECKPOINT_FORMAT_REPACKED"}
+  ],
+  "args": ["--quantization", "gptq_marlin"]
+}

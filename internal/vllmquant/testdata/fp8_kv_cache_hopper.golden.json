@@ -1,0 +1,26 @@
+{
+  "outcome": "supported",
+  "reasons": [
+    "VLLMQUANT_ADMITTED"
+  ],
+  "claim": "runtime-delegated",
+  "artifact_method": "fp8",
+  "candidates": [
+    {
+      "method": "fp8",
+      "args": [
+        "--quantization",
+        "fp8",
+        "--kv-cache-dtype",
+        "fp8_e4m3"
+      ]
+    }
+  ],
+  "excluded": [],
+  "args": [
+    "--quantization",
+    "fp8",
+    "--kv-cache-dtype",
+    "fp8_e4m3"
+  ]
+}

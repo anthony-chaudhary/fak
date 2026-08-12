@@ -1,0 +1,11 @@
+{
+  "outcome": "abstain",
+  "reasons": [
+    "VLLMQUANT_SERVER_UNDECLARED"
+  ],
+  "claim": "artifact-described",
+  "artifact_method": "awq",
+  "candidates": [],
+  "excluded": [],
+  "args": []
+}

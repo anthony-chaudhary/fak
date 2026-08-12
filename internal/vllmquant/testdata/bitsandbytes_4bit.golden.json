@@ -1,0 +1,11 @@
+{
+  "outcome": "supported",
+  "reasons": ["VLLMQUANT_ADMITTED"],
+  "claim": "runtime-delegated",
+  "artifact_method": "bitsandbytes",
+  "candidates": [
+    {"method": "bitsandbytes", "args": ["--quantization", "bitsandbytes", "--load-format", "bitsandbytes"]}
+  ],
+  "excluded": [],
+  "args": ["--quantization", "bitsandbytes", "--load-format", "bitsandbytes"]
+}

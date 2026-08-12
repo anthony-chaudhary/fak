@@ -1,0 +1,15 @@
+{
+  "schema": "vllmquant/v1",
+  "artifact": {
+    "model": "example/gptq-3bit",
+    "quant_method": "gptq",
+    "bits": 3,
+    "group_size": 128,
+    "sym": true
+  },
+  "server": {
+    "version": "0.6.3",
+    "methods": ["awq", "awq_marlin", "gptq", "gptq_marlin", "bitsandbytes", "fp8"],
+    "compute_capability": "8.0"
+  }
+}

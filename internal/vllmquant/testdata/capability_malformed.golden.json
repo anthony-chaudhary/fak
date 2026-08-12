@@ -1,0 +1,11 @@
+{
+  "outcome": "refuse",
+  "reasons": [
+    "VLLMQUANT_CAPABILITY_MALFORMED"
+  ],
+  "claim": "artifact-described",
+  "artifact_method": "awq",
+  "candidates": [],
+  "excluded": [],
+  "args": []
+}

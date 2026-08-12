@@ -1,0 +1,14 @@
+{
+  "schema": "vllmquant/v1",
+  "artifact": {
+    "model": "example/awq-4bit",
+    "quant_method": "awq",
+    "bits": 4,
+    "group_size": 128
+  },
+  "server": {
+    "version": "0.6.3",
+    "methods": ["awq", "gptq", "bitsandbytes"],
+    "compute_capability": "7.5"
+  }
+}
