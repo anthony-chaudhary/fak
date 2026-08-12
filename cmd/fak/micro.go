@@ -6,7 +6,7 @@ package main
 // a CLI verb consistent with `fak serve`/`guard`/`dispatch`, instead of only a
 // package a test constructs:
 //
-//	fak micro            run ONE microagent end-to-end on the Mock engine.
+//	fak micro            run ONE microagent end-to-end (Mock by default).
 //	fak micro host       boot the in-process host (M2) and run a small fleet.
 //	fak micro … --dry-run   resolve + print the plan (backends, seats, caps) — no spend.
 //
@@ -57,7 +57,9 @@ import (
 // microConfig is the resolved plan for a `fak micro` run: the backends, seats,
 // admission caps, and fleet shape after applying flags > env > file > defaults.
 type microConfig struct {
-	Engine                 string `json:"engine"`                   // model engine seam; only "mock" is supported in-process today.
+	Engine                 string `json:"engine"`                   // model engine seam: mock or a running fak gateway.
+	Gateway                string `json:"gateway,omitempty"`        // fak serve address for engine=gateway.
+	Model                  string `json:"model,omitempty"`          // model requested through the gateway.
 	Isolation              string `json:"isolation"`                // ToolExec backend name (M13): goroutine | subprocess.
 	Seats                  int    `json:"seats"`                    // slot pool K (M6/M20): max concurrent in-flight model calls; 0 ⇒ derive from workers.
 	Workers                int    `json:"workers"`                  // host worker pool K (concurrent Step drivers).
@@ -122,7 +124,9 @@ func cmdMicro(args []string) {
 		nAgents     = fs.Int("n", 0, "number of microagents to run")
 		agentsLong  = fs.Int("agents", 0, "alias for -n")
 		turns       = fs.Int("turns", 0, "model turns each agent takes before retiring")
-		engine      = fs.String("engine", "", "model engine seam (only \"mock\" is supported in-process today)")
+		engine      = fs.String("engine", "", "model engine seam (mock or gateway)")
+		gateway     = fs.String("gateway", "", "running fak serve address for --engine gateway")
+		model       = fs.String("model", "", "model id requested through --engine gateway")
 		admMax      = fs.Int("admission-max-concurrent", 0, "M19 provider concurrency cap; 0 ⇒ unbounded (resolved here, enforced on the served gateway)")
 		admTok      = fs.Int("admission-token-budget", 0, "M19 provider token budget; 0 ⇒ unbounded (resolved here, enforced on the served gateway)")
 		cfgFile     = fs.String("config", "", "load config from a JSON file (lowest non-default precedence)")
@@ -161,6 +165,12 @@ func cmdMicro(args []string) {
 	if set["engine"] {
 		cfg.Engine = *engine
 	}
+	if set["gateway"] {
+		cfg.Gateway = *gateway
+	}
+	if set["model"] {
+		cfg.Model = *model
+	}
 	if set["seats"] {
 		cfg.Seats = *seats
 	}
@@ -197,10 +207,6 @@ func cmdMicro(args []string) {
 	if *dryRun {
 		printMicroPlan(cfg, hostMode, *jsonOut, true)
 		return
-	}
-	if cfg.Engine != "mock" {
-		fmt.Fprintf(os.Stderr, "fak micro: --engine %q not supported in-process yet (only \"mock\"); use --dry-run to inspect the plan\n", cfg.Engine)
-		os.Exit(2)
 	}
 	if err := runMicro(cfg, hostMode, *jsonOut, *traceOut); err != nil {
 		fmt.Fprintf(os.Stderr, "fak micro: %v\n", err)
@@ -259,6 +265,15 @@ func validateMicroConfig(cfg microConfig) error {
 	if !found {
 		return fmt.Errorf("unknown isolation backend %q (registered: %s)", cfg.Isolation, strings.Join(backends, ", "))
 	}
+	if cfg.Engine != "mock" && cfg.Engine != "gateway" {
+		return fmt.Errorf("engine %q is not supported (want mock or gateway)", cfg.Engine)
+	}
+	if cfg.Engine == "gateway" && strings.TrimSpace(cfg.Gateway) == "" {
+		return fmt.Errorf("--gateway is required with --engine gateway")
+	}
+	if cfg.Engine == "gateway" && strings.TrimSpace(cfg.Model) == "" {
+		return fmt.Errorf("--model is required with --engine gateway")
+	}
 	if cfg.Workers < 1 {
 		return fmt.Errorf("--workers must be >= 1 (got %d)", cfg.Workers)
 	}
@@ -314,6 +329,10 @@ func printMicroPlan(cfg microConfig, hostMode, jsonOut, dryRun bool) {
 	}
 	fmt.Printf("fak micro %s — %s\n", microMode(hostMode), banner)
 	fmt.Printf("  engine:                    %s\n", cfg.Engine)
+	if cfg.Engine == "gateway" {
+		fmt.Printf("  fak gateway:               %s\n", gatewayBaseURL(cfg.Gateway))
+		fmt.Printf("  requested model:           %s\n", cfg.Model)
+	}
 	fmt.Printf("  isolation backend:         %s   (registered: %s)\n", cfg.Isolation, strings.Join(microagent.RegisteredBackends(), ", "))
 	fmt.Printf("  seats (slot pool):         %d   (effective: %d)\n", cfg.Seats, cfg.slots())
 	fmt.Printf("  host workers (K):          %d\n", cfg.Workers)
@@ -332,25 +351,28 @@ func microMode(hostMode bool) string {
 	return "run"
 }
 
-// driveMicro drives the real microagent.Host over the Mock planner as the ONE
-// shared gateway seam, wrapped in the cooperative slot scheduler so the seat pool
+// driveMicro drives the real microagent.Host over ONE shared planner (Mock or a
+// running fak gateway), wrapped in the cooperative slot scheduler so the seat pool
 // bounds concurrent model calls. It spawns N agents, each recording its structured
 // span timeline into ONE shared tracer keyed by agent id (#2031), drains them, and
 // reaps the results. The returned tracer is the multiplexed per-agent trace store —
 // separable by id even though every agent ran interleaved in one process.
 func driveMicro(cfg microConfig) (*microSink, *metrics.MicroTracer, []microagent.Result, error) {
-	// The ONE shared gateway: the deterministic offline Mock planner (the same Mock
-	// the offline demo path uses), wrapped in the slot scheduler so no more than
-	// `slots` model calls are ever in flight across the whole fleet.
+	// One scheduler and one session table wrap the ONE shared planner for the
+	// entire host. The gateway engine points that planner at a running fak serve;
+	// the mock engine keeps the deterministic offline path.
+	tbl := session.NewTable()
 	base := microagent.Gateway(agent.NewMockPlanner("mock"))
+	if cfg.Engine == "gateway" {
+		base = agent.NewHTTPPlanner(gatewayBaseURL(cfg.Gateway), cfg.Model, defaultGatewayBearerToken())
+	}
 	sched := microagent.NewScheduler(cfg.slots())
 	defer sched.Close()
-	gw := microagent.NewSchedulingGateway(base, sched)
+	gw := microagent.NewSessionGateway(microagent.NewSchedulingGateway(base, sched), tbl)
 
 	sink := &microSink{counts: map[microagent.EventKind]int{}}
 	tracer := metrics.NewMicroTracer()
 	seat := fmt.Sprintf("slot-pool/%d", cfg.slots())
-	tbl := session.NewTable()
 	h, err := microagent.NewHost(gw, microagent.Config{
 		Workers:  cfg.Workers,
 		Queue:    cfg.Queue,
@@ -474,7 +496,7 @@ func (a *microTurnAgent) Step(ctx context.Context, gw microagent.Gateway) (bool,
 	// Seat leg: every model call draws one seat from the shared slot pool (M6/M20).
 	a.trace(metrics.MicroSpan{Kind: metrics.SpanSeat, Label: "acquire", Seat: a.seat})
 	msg := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("micro %s turn %d", a.id, a.took)}}
-	comp, err := gw.Complete(ctx, msg, nil)
+	comp, err := gw.Complete(microagent.WithTrace(ctx, a.id), msg, nil)
 	if err != nil {
 		a.trace(metrics.MicroSpan{Kind: metrics.SpanStep, Label: fmt.Sprintf("turn %d", a.took), Verdict: "ERROR"})
 		return false, err

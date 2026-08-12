@@ -1,11 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/metrics"
@@ -219,5 +225,70 @@ func TestMicroTraceArgOrdering(t *testing.T) {
 		if _, err := parseMicroTraceArgs(fs, args); err == nil {
 			t.Errorf("parseMicroTraceArgs(%v) = nil error, want a usage error", args)
 		}
+	}
+}
+
+func TestMicroGatewayEngineUsesRealFakKernel(t *testing.T) {
+	var calls atomic.Int32
+	var models sync.Map
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path = %q", r.URL.Path)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		models.Store(req.Model, true)
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"cmpl-real-kernel","model":"kernel-model","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}`)
+	}))
+	defer srv.Close()
+
+	cfg := defaultMicroConfig(false)
+	cfg.Engine = "gateway"
+	cfg.Gateway = srv.URL
+	cfg.Model = "kernel-model"
+	cfg.Agents = 2
+	cfg.Turns = 1
+	cfg.Workers = 2
+	cfg.Seats = 1
+	sink, tracer, results, err := driveMicro(cfg)
+	if err != nil {
+		t.Fatalf("driveMicro gateway: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("real kernel calls = %d, want 2", got)
+	}
+	if _, ok := models.Load("kernel-model"); !ok {
+		t.Fatal("requested model did not reach fak gateway wire")
+	}
+	if len(results) != 2 || sink.count(microagent.EventDone) != 2 {
+		t.Fatalf("results=%d done=%d", len(results), sink.count(microagent.EventDone))
+	}
+	for _, id := range []string{"micro-000", "micro-001"} {
+		trace, ok := tracer.Trace(id)
+		if !ok || trace.Tokens() != 9 {
+			t.Fatalf("%s trace = %#v, ok=%v", id, trace, ok)
+		}
+	}
+}
+
+func TestMicroGatewayEngineRequiresEndpointAndModel(t *testing.T) {
+	cfg := defaultMicroConfig(false)
+	cfg.Engine = "gateway"
+	if err := validateMicroConfig(cfg); err == nil || !strings.Contains(err.Error(), "--gateway") {
+		t.Fatalf("missing gateway error = %v", err)
+	}
+	cfg.Gateway = "localhost:8080"
+	if err := validateMicroConfig(cfg); err == nil || !strings.Contains(err.Error(), "--model") {
+		t.Fatalf("missing model error = %v", err)
 	}
 }

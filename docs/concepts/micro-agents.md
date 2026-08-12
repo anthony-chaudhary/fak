@@ -72,7 +72,9 @@ One agent moves through four states, and the host owns all four:
 
 A parked agent between steps may be hibernated to disk instead of holding a goroutine, and woken byte-identically later.
 
-## Run one micro agent (no key, no model, no GPU)
+## Run one micro agent
+
+### Offline smoke path (no key, no model, no GPU)
 
 Resolve the plan first without spending anything:
 
@@ -131,6 +133,23 @@ The trace makes the lifecycle above literal: one seat acquisition per turn, one 
 
 From a clone, substitute `go run ./cmd/fak` for `fak`. The regression that pins this behavior is `go test ./cmd/fak -run TestMicroRunEndToEndOnMock`.
 
+### Real fak-kernel gateway path
+
+Start the kernel, then point the in-process host at it explicitly:
+
+```bash
+# terminal 1 — the actual fak policy/session/cache gateway
+fak serve --addr 127.0.0.1:8080
+
+# terminal 2 — two goroutine microagents, one shared session table and gateway
+fak micro --engine gateway --gateway 127.0.0.1:8080 --model kernel-model \
+  --agents 2 --workers 2 --seats 1 --turns 1 --trace-out micro-real-kernel.jsonl --json
+```
+
+`--gateway` is normalized to the OpenAI-compatible `/v1/chat/completions` endpoint. Every agent turn carries its agent id into one `microagent.SessionGateway`, which gates and debits one shared `session.Table` around the HTTP call. One cooperative scheduler still bounds calls across the whole host. The kernel may use its deterministic no-upstream planner, a configured provider, or a local model; `engine=gateway` claims only that the microagent crossed the real fak kernel seam, not that weights or a paid provider were involved.
+
+The wire regression is `go test ./cmd/fak -run TestMicroGatewayEngineUsesRealFakKernel`: two agents must make two requests to `/v1/chat/completions`, preserve the requested model, and record provider-reported usage in separate timelines. `TestSessionGatewayConcurrentLoadOneTableRaceClean` separately pins concurrent fan-in through one session table.
+
 ## Micro agent vs. full agent vs. subagent vs. tool call
 
 Four shapes, ordered from most autonomy to least. Pick the least autonomous one that does the job.
@@ -151,11 +170,11 @@ The row that matters for a decision is *runtime unit*. Everything else about a m
 Scope labels here follow [the generation contract](../generation.md). Read this section before quoting anything above as product behavior.
 
 - **Shipped, default path.** `fak guard`, `fak serve`, `fak preflight`, and the dispatch spawn path. These are what runs when you do not type `fak micro`.
-- **Shipped as an explicit option, `gen/second-next`.** The `fak micro` verb and the `internal/microagent` host. Nothing in the default serve, guard, or dispatch path constructs a host â€” a human has to type the verb. The run path is the Mock engine.
+- **Shipped as explicit options, `gen/second-next`.** `fak micro` constructs the `internal/microagent` host. Its default remains deterministic Mock; `--engine gateway --gateway HOST:PORT --model ID` sends every turn through one running fak kernel and one shared session table. `dispatch tick --backend micro` is a separate offline enrollment prototype, not evidence of provider-backed issue resolution.
 - **Test-witnessed package spine, no CLI surface.** The RPC subagent collapse and the adjudication-floor conformance across registered execution backends. Real code with real tests; not a command you can run.
 - **Research, not product behavior.** The micro-*context* fabric work â€” splitting one cached agent base into many bounded logical contexts at 100 / 1,000 / 10,000 scale â€” is a research ladder with dated, scoped witnesses. It is adjacent to micro agents and often confused with them: micro *agents* are loops, micro *contexts* are the bounded slices of cached state those loops could run over. Start at [micro-context fabrics](../research/micro-context-fabrics.md) and treat every claim there as a hypothesis or a scoped observation until a maintained authority adopts it.
 
-Promotion and retirement for the micro-agent host are written down rather than implied: promote once the dispatch path can target the host and a density measurement confirms per-agent process weight was the binding cost; retire it if that measurement shows provider seats dominate, or if the isolation floor demands per-agent operating-system processes anyway.
+Promotion and retirement for the micro-agent host are written down rather than implied: the shared-kernel call seam is now runnable, but promotion to a default issue-resolution backend still requires the paired quality/cost/wall-clock evidence in #2028/#6520. Retire it if that measurement shows provider seats dominate, or if the isolation floor demands per-agent operating-system processes anyway.
 
 ## Where the evidence lives
 
