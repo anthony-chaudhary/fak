@@ -220,3 +220,77 @@ shared checkout because it already contained peer-owned uncommitted changes;
 the issue links this note as the durable reverse route.
 
 
+
+## Concrete meaning: what is “context as a variable”? (clarification 2026-08-12)
+
+It means the long input is **data in an execution environment, referenced by a
+name, rather than text that must all be visible inside every model forward
+pass**.
+
+A simplified interaction looks like this:
+
+```text
+execution environment:
+    context -> <the complete 500,000-token source>   # outside the LM prompt
+
+model-visible turn:
+    "The source is available as `context`. Use bounded operations to answer."
+
+model action:
+    count(group(filter(context, status == "failed"), owner))
+
+next model-visible observation:
+    {"alice": 19, "bob": 7}                         # only this result enters
+```
+
+The name is not magical and it is not a neural-network variable. It is closer
+to a **read-only database relation, file handle, array, or lazy collection** in
+a tool runtime. The LM writes a small program/query against it. The runtime
+executes that operation over the complete source and returns a bounded
+observation. The LM can repeat this loop, keep intermediate derived values, or
+ask another model to interpret one selected value.
+
+That changes the scaling shape: the model no longer needs all source tokens in
+its attention window at once, although the external runtime still must read or
+index the source and the returned observations still consume context. It also
+does not guarantee correctness: the model can write a bad query, omit needed
+records, or accumulate too many observations. This is why fak should expose a
+small typed query algebra, provenance, limits, and exact aggregation witnesses
+rather than unrestricted eval.
+
+In fak terms:
+
+```text
+"context"                  = optional workspace binding (#6524)
+abi.Ref / content hash      = addressable source identity (existing)
+filter/group/count plan     = queryable-context operation (#6518)
+derived immutable result   = derived context view (#6518)
+reused result              = materialized/memoized view (#6525)
+why/how/replay              = derivation explanation (#6528)
+quality/cost counterfactual = aggregation evaluation (#6526)
+helper-model interpretation = governed later recursion (#6527)
+```
+
+So **“context as a variable” is the programming-interface metaphor**;
+**“queryable context over addressable sources” is the more precise fak system
+contract**.
+
+## Filed follow-on graph
+
+The surviving opportunities are now tracked rather than deferred in prose:
+
+- [#6518](https://github.com/anthony-chaudhary/fak/issues/6518) — minimal query
+  algebra and derived-view spine.
+- [#6524](https://github.com/anthony-chaudhary/fak/issues/6524) — immutable
+  task-scoped names/context workspace.
+- [#6525](https://github.com/anthony-chaudhary/fak/issues/6525) — derived-view
+  memoization by full semantic identity.
+- [#6526](https://github.com/anthony-chaudhary/fak/issues/6526) — exact
+  aggregation comparison with whole-source and tuned retrieval.
+- [#6528](https://github.com/anthony-chaudhary/fak/issues/6528) — derivation
+  explain and replay.
+- [#6527](https://github.com/anthony-chaudhary/fak/issues/6527) — governed
+  helper-model interpretation after deterministic evaluation.
+
+Dependency order:
+`#6518 -> {#6524, #6525, #6526, #6528} -> #6527`.
