@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func main() { os.Exit(run(os.Stdout, os.Stderr, os.Args[1:])) }
@@ -104,7 +106,7 @@ func runList(stdout, stderr io.Writer, args []string) int {
 	}
 	rows := []any{}
 	if *native {
-		cmd := exec.Command("dos", "decisions", "--workspace", ws, "--all", "--json")
+		cmd := windowgate.Command("dos", "decisions", "--workspace", ws, "--all", "--json")
 		b, err := cmd.Output()
 		if err != nil {
 			if ee, ok := err.(*exec.ExitError); ok {

@@ -6,11 +6,12 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const vsLexiconFloor = 20
@@ -217,6 +218,6 @@ func camelReasonCode(s string) string {
 }
 
 func vsGitTracked(root, rel string) bool {
-	cmd := exec.Command("git", "-C", root, "ls-files", "--error-unmatch", "--", rel)
+	cmd := windowgate.Command("git", "-C", root, "ls-files", "--error-unmatch", "--", rel)
 	return cmd.Run() == nil
 }

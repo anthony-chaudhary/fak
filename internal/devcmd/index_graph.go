@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/docreach"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func indexGraphMain(stdout, stderr io.Writer, args []string) int {
@@ -20,20 +20,20 @@ func indexGraphMain(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	head, err := windowgate.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		fmt.Fprintf(stderr, "fak index graph: resolve HEAD: %v\n", err)
 		return 1
 	}
 	commit := strings.TrimSpace(string(head))
-	names, err := exec.Command("git", "ls-tree", "-r", "--name-only", commit, "--", "*.md").Output()
+	names, err := windowgate.Command("git", "ls-tree", "-r", "--name-only", commit, "--", "*.md").Output()
 	if err != nil {
 		fmt.Fprintf(stderr, "fak index graph: list HEAD: %v\n", err)
 		return 1
 	}
 	var blobs []docreach.Blob
 	for _, name := range strings.Fields(string(names)) {
-		b, e := exec.Command("git", "show", commit+":"+name).Output()
+		b, e := windowgate.Command("git", "show", commit+":"+name).Output()
 		if e != nil {
 			fmt.Fprintf(stderr, "fak index graph: read %s: %v\n", name, e)
 			return 1

@@ -436,6 +436,18 @@ func TestFakTestRunnerSuppressesGoToolchainWindow(t *testing.T) {
 	}
 }
 
+func TestGoExecViolationsAcceptWindowgateCommandConstructor(t *testing.T) {
+	src := `package main
+import "github.com/anthony-chaudhary/fak/internal/windowgate"
+func f() {
+	cmd := windowgate.Command("go", "list", "./...")
+	_, _ = cmd.Output()
+}`
+	if got := GoExecViolations("internal/devcmd/index_graph.go", src); len(got) != 0 {
+		t.Fatalf("windowgate.Command must satisfy the no-window launch contract, got %v", got)
+	}
+}
+
 func TestGoExecCandidatesSurfaceLiteralConsoleTools(t *testing.T) {
 	src := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n _, _ = cmd.Output()\n}\n"
 	got := GoExecCandidates("cmd/fak/feature.go", src)
