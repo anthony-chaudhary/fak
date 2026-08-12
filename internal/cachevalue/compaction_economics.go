@@ -72,6 +72,13 @@ const (
 // post-rewrite cache-creation counter drive the net verdict. A caller derives it
 // from a warm before-turn and the first settled post-rewrite turn (see the
 // steady-state note on ClassifyCompaction).
+//
+// The provider-side half (the re-warm counters) can either be pasted in by the
+// caller's own convention or PROVEN: a caller that stamps JoinKey hands the
+// sample to JoinProviderUsage (compaction_join.go, #2788), which fills the
+// provider counters from the one usage record sharing the fire's coordinate and
+// withdraws them when that binding cannot be proven. An unstamped sample is the
+// pre-join path and is left exactly as the caller assembled it.
 type CompactionSample struct {
 	// PromptTokensBefore / PromptTokensAfter record the resident prompt size
 	// around the rewrite, so the report can show the shrink the operator SEES
@@ -94,6 +101,21 @@ type CompactionSample struct {
 	// cache-creation counter (dollar-blind / codex): the net verdict abstains
 	// rather than treating an absent counter as a phantom zero re-warm cost.
 	RewriteKnown bool
+	// ObservedCacheReadTokens is the OBSERVED provider cache_read the joined
+	// turn reported — how much of that turn's prompt the provider still served
+	// warm after the rewrite. It is provider-relayed evidence carried BESIDE the
+	// verdict, not an input to it: ClassifyCompaction scores the shed value and
+	// the re-warm write cost only, so a relayed read count can never move the net
+	// sign. JoinProviderUsage stamps it (clamped non-negative) on a proven join
+	// and withdraws it on an unproven one; zero when no join was performed.
+	ObservedCacheReadTokens int64
+	// JoinKey is the event-join coordinate this fire shares with the provider
+	// usage record for the turn it rewrote (#2788; see compaction_join.go). The
+	// zero value is UNSTAMPED — the honest state of a sample assembled without
+	// turn context, which JoinProviderUsage passes through verbatim rather than
+	// counting as a failed join. It is a correlation coordinate only; no verdict
+	// reads it.
+	JoinKey CompactionJoinKey
 }
 
 // CompactionVerdict is the classified reading for one compaction event. The shed

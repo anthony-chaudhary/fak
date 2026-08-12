@@ -208,7 +208,8 @@
       "definition": "CompactionBudget is the gateway exit-summary field (Config.CompactHistoryBudget) holding the resident-token threshold the history rewrite fires past (0 means the compaction lever is OFF and the body is forwarded byte-for-byte).",
       "distinction": "Not the compaction mechanism itself (compaction); CompactionBudget is the operator threshold knob, and CompactionShedTokens (aliased here) is the input-token count actually shed under it.",
       "distinct_from": [
-        "compaction"
+        "compaction",
+        "compactionjoinkey"
       ],
       "aliases": [
         "compactionshedtokens"
