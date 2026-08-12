@@ -362,6 +362,14 @@ concurrent = [
   "archreport",
   "fp4runtime",
   "quantpolicy",
+  # #6407: internal/mixedprecision (shipped for #6254) had NO lane, so the lane-coverage
+  # audit resolved it to an EMPTY tree -- and an empty tree conservatively overlaps every
+  # live lease (internal/laneadmit/laneadmit.go), collapsing unrelated lease concurrency
+  # whenever anyone worked on it. Declared here so a `(fak mixedprecision)` ship-stamp binds
+  # and the arbiter detects a same-tree collision on internal/mixedprecision/** edits; tree =
+  # internal/mixedprecision/** only, keeping every leaf tree pairwise-disjoint per the header
+  # invariant. Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
+  "mixedprecision",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1081,6 +1089,7 @@ quantdetect = ["internal/quantdetect/**"]
 fp4runtime = ["internal/fp4runtime/**"]
 quantpolicy = ["internal/quantpolicy/**"]
 codexresume = ["internal/codexresume/**"]
+mixedprecision = ["internal/mixedprecision/**"] # #6407: see the [lanes].concurrent note.
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

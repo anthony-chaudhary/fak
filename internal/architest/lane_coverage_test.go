@@ -210,6 +210,91 @@ func treeCoversLeaf(globs []string, leaf string) bool {
 	return false
 }
 
+// treePrefix reduces a lane's glob to the path prefix it actually claims:
+// "internal/foo/**" -> "internal/foo/". A glob with no wildcard tail is an exact path and
+// keeps its own text.
+func treePrefix(glob string) string {
+	return strings.TrimSuffix(strings.TrimSpace(glob), "**")
+}
+
+// pathContains reports whether prefix outer claims everything under inner. Containment is
+// SEGMENT-WISE, not string-prefix: that is the trap treeCoversLeaf already documents
+// ("internal/agentdojo/**" must not claim leaf "agent"), and it applies just as much when
+// two lanes are compared against each other.
+func pathContains(outer, inner string) bool {
+	if outer == "" {
+		// The empty tree is the hazard this whole file exists for: laneadmit treats it as
+		// overlapping EVERYTHING, so it can never be disjoint from a peer.
+		return true
+	}
+	if !strings.HasPrefix(inner, outer) {
+		return false
+	}
+	return strings.HasSuffix(outer, "/") || strings.HasPrefix(inner[len(outer):], "/")
+}
+
+// treesOverlap reports whether two lane globs can ever claim the same file.
+func treesOverlap(a, b string) bool {
+	pa, pb := treePrefix(a), treePrefix(b)
+	return pa == pb || pathContains(pa, pb) || pathContains(pb, pa)
+}
+
+// TestLeafTreesArePairwiseDisjoint is the third half of the same invariant: dos.toml's
+// header says "the honest partition is ONE LANE PER LEAF", and a partition is only a
+// partition if the parts do not overlap. Coverage (TestEveryLeafDeclaresLane) proves every
+// leaf HAS a tree and uniqueness (TestLaneRosterHasNoDuplicates) proves no lane is declared
+// twice; neither notices two DIFFERENT lanes both claiming internal/<leaf>/. That case is
+// not cosmetic either — laneadmit's geometric rung would then refuse two workers on lanes
+// that were meant to be independent, so the fleet's parallel width silently drops, which is
+// the exact cost the coverage gate was written to prevent.
+//
+// Scope: globs rooted at internal/, i.e. the LEAF trees the header invariant is about. The
+// non-leaf trees (cmd/**, docs/**, the release file list) are deliberately nesting umbrella
+// scopes and are not part of the leaf partition.
+//
+// Unscoped by push, for the same reason TestLaneRosterHasNoDuplicates is: dos.toml is
+// itself an EXCLUSIVE lane, so only one worker at a time may edit it and a new overlap is
+// always attributable to the commit that wrote it — there is no peer to wedge.
+func TestLeafTreesArePairwiseDisjoint(t *testing.T) {
+	roster := readLaneRoster(t)
+	type claim struct{ lane, glob string }
+	var claims []claim
+	for lane, globs := range roster.trees {
+		for _, g := range globs {
+			if g = strings.TrimSpace(g); strings.HasPrefix(g, "internal/") {
+				claims = append(claims, claim{lane, g})
+			}
+		}
+	}
+	if len(claims) < 100 {
+		t.Fatalf("only %d internal/-rooted lane trees parsed out of dos.toml — the reader is "+
+			"broken, not the config; a gate that inspects nothing cannot fire.", len(claims))
+	}
+	sort.Slice(claims, func(i, j int) bool {
+		if claims[i].glob != claims[j].glob {
+			return claims[i].glob < claims[j].glob
+		}
+		return claims[i].lane < claims[j].lane
+	})
+	var bad []string
+	for i := range claims {
+		for j := i + 1; j < len(claims); j++ {
+			if claims[i].lane == claims[j].lane || !treesOverlap(claims[i].glob, claims[j].glob) {
+				continue
+			}
+			bad = append(bad, "lane "+claims[i].lane+" ("+claims[i].glob+") overlaps lane "+
+				claims[j].lane+" ("+claims[j].glob+")")
+		}
+	}
+	if len(bad) > 0 {
+		t.Errorf("dos.toml [lanes.trees] declares %d overlapping leaf tree pair(s):\n  %s\n"+
+			"Leaf trees must be PAIRWISE DISJOINT — one lane per leaf, each rooted at its own "+
+			"internal/<leaf>/ prefix and nothing else. Move the shared path onto exactly one "+
+			"lane (a cmd/fak shim belongs to the `cmd` lane, not to its leaf's lane).",
+			len(bad), strings.Join(bad, "\n  "))
+	}
+}
+
 // duplicateLanes returns each lane that appears more than once, once per extra occurrence.
 // Split out as a pure helper so the uniqueness rule is testable without the real dos.toml.
 func duplicateLanes(lanes []string) []string {
@@ -252,6 +337,21 @@ func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 	} {
 		if got := treeCoversLeaf(tc.globs, tc.leaf); got != tc.want {
 			t.Errorf("treeCoversLeaf(%q, %q) = %v, want %v (%s)", tc.globs, tc.leaf, got, tc.want, tc.name)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"two distinct leaves", "internal/mixedprecision/**", "internal/quantpolicy/**", false},
+		{"the string-prefix trap", "internal/agent/**", "internal/agenttopo/**", false},
+		{"same tree twice", "internal/agent/**", "internal/agent/**", true},
+		{"a leaf swallowing a nested leaf", "internal/resume/**", "internal/resume/scan/**", true},
+		{"an empty tree overlaps everything", "internal/agent/**", "", true},
+	} {
+		if got := treesOverlap(tc.a, tc.b); got != tc.want {
+			t.Errorf("treesOverlap(%q, %q) = %v, want %v (%s)", tc.a, tc.b, got, tc.want, tc.name)
 		}
 	}
 	if got := duplicateLanes([]string{"a", "b", "a", "c", "b"}); len(got) != 2 {
