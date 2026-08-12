@@ -443,7 +443,11 @@ func reclassTypeUnwitnessed(typ string, paths []string) string {
 	return ""
 }
 
-func sortedKeys(m map[string]bool) []string {
+// sortedKeys renders a map's keys deterministically, for a message that must not churn between
+// runs. Generic in the VALUE type because the callers disagree about it — a set (map[string]bool)
+// here, a constant-to-token table (map[string]string) in the fail-closed ledger surfaces — and one
+// helper both can reach is what keeps the package from carrying two copies of the same four lines.
+func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

@@ -138,11 +138,158 @@ cross-checked against the live registry in code.
 | E2E_OVER_MOCKS | warn | fail-open | advisory by design (#2901); asks for a witnessed run |
 | DESKTOP_POPUP_REGRESSION | block | fail-open | candidate-index Go/Python/PowerShell helpers must suppress background console windows |
 | PARALLEL_FABRIC_NUDGE | warn | fail-open | advisory; new parallel-fanout language should name the bounded micro-context fabric |
+| GIT_HYGIENE_BYPASS | warn | fail-open | advisory by design (#5588); flags ad-hoc git-lock removal / object maintenance outside the owning packages |
 | TRUST_WIDENING | warn | fail-open | advisory; flags a widened trust boundary |
 | PRIOR_ART | warn | fail-open | advisory; prints the SOTA reference to cite |
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |
 | GOFMT | warn | fail-open | advisory; commit-boundary twin of make ci gofmt-check |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
+
+<!-- failclosed-ledger:end -->
+
+## The repo-guard posture ledger
+
+`internal/repoguard` decides the PreToolUse verdict for every reason it names,
+and `defaultSeverity` (`internal/repoguard/severity.go`) is the per-reason
+posture table behind that decision. `deny` refuses the call; `warn` returns a
+hint and lets it run; `record` journals it and lets it run silently; `off` is not
+evaluated at all. A reason with **no** entry in that map resolves to `deny` —
+`DefaultSeverity`'s fail-safe fallthrough — so it is enumerated below as the
+strict entry it actually is rather than vanishing from the count.
+
+The `Fail mode` column is *derived* from the severity rather than asserted
+separately: only a denied call fails closed, so an unannounced escalation to
+`deny` reds the gate until this table says so.
+
+This surface was enumerated by hand in the original audit, which is the exact
+failure the audit exists to prevent — a complete-*looking* list stops the reader
+checking. The fenced table below is parsed and cross-checked against the package
+source in both directions by
+`internal/hooks/failclosed_ledger_surfaces_test.go`: a new reason with no row
+reds, and a row naming no live reason reds.
+
+<!-- failclosed-ledger:begin surface=repoguard-severity -->
+
+| Entry | Default severity | Fail mode | Note |
+|---|---|---|---|
+| FOREGROUND_NETWORK_LOOP | warn | fail-open | hint returned, call proceeds |
+| FOREGROUND_POWERSHELL_INVENTORY | warn | fail-open | hint returned, call proceeds |
+| FOREGROUND_SLEEP | warn | fail-open | hint returned, call proceeds |
+| INTERACTIVE_HANG | warn | fail-open | hint returned, call proceeds |
+| LIVE_MONITOR_OUTPUT_READ | record | fail-open | journalled, call proceeds silently |
+| OUT_OF_TREE_WRITE | record | fail-open | journalled, call proceeds silently |
+| UNDECLARED_LEAF | warn | fail-open | hint returned, call proceeds |
+| WORKSPACE_PATH_UNMAPPED | warn | fail-open | hint returned, call proceeds |
+
+<!-- failclosed-ledger:end -->
+
+## The DOS refusal-vocabulary ledger
+
+`dos.toml`'s `[reasons.*]` blocks are the closed vocabulary a refusal may cite.
+`Posture` is the block's own `refusal` flag: `refusal` means a caller may refuse
+with it, `advisory` means it reports without refusing. `Floor` records whether
+the block names an **enforcing floor** — a `Floor:` cite in its fix text, naming
+the code or command that actually stops the behaviour — or declares none.
+
+`floor-absent` is the load-bearing half of this table. A refusal reason with no
+enforcing floor is a *name* for a behaviour nothing stops; the audit's point is
+that such an entry must be an explicitly declared row, never an omission a reader
+mistakes for completeness. The `Note` column is derived from the two columns
+beside it on purpose: each block's own prose is the long form, and this ledger
+binds the posture, not the wording.
+
+Bound in both directions against `dos.toml` by the same test as the surface
+above.
+
+<!-- failclosed-ledger:begin surface=dos-reason -->
+
+| Entry | Posture | Floor | Note |
+|---|---|---|---|
+| ARCH_LAYER_VIOLATION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| ASSUMPTION_STALE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| ASSUMPTION_UNVERIFIABLE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| ASSUMPTION_VIOLATED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| BARE_COMMIT_SWEEP | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| BLOCKED_BY_KNOWN_BAD | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| BLOCKED_BY_OPEN_PREREQ | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| BROADCAST_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| CACHE_PREFIX_RESIDENT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| CHECKER_TAMPERED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| COLLISION_RISK | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| COMPACTION_THRASH | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| CONTROL_REV_STALE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| CONTROL_SESSION_TERMINAL | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| CORE_SELF_MODIFY | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| CRASH_RESTART_EXHAUSTED | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
+| DOOM_LOOP | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FILE_ADMISSION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FLEETBUS_APPLY_REFUSED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FLEETBUS_EXPIRED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FLEETBUS_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FLEETBUS_NO_TARGET | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FLEETBUS_UNKNOWN_OP | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FOCUS_WIP_SATURATED | advisory | floor-declared | `Floor:` cite in the dos.toml block |
+| FOREGROUND_SLEEP | advisory | floor-declared | `Floor:` cite in the dos.toml block |
+| FRESH_DELETION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| FRONTIERSWE_SCORE_PARITY_FAILED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| GATE_LATENCY_REGRESSION | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| GATE_PRESSURE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| HOST_CHURN_BACKOFF | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| INDETERMINATE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| INTERACTIVE_HANG | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| INVALID_OPTIONS | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| ISSUEFANOUT_CONTRACT_REFUSED | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
+| KNOWN_BAD_ALREADY_CLAIMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| KNOWN_BAD_EXPIRED_OR_REVOKED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| KNOWN_BAD_NOT_WITNESSED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| L3_CROSS_TENANT_SCOPE_DENIED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| L3_PAGE_DIGEST_MISMATCH | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| L3_UNWITNESSED_FLEET_STAMP | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| LEDGER_WRITE_FAILED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| LESSON_OVERCLAIMS | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| LIVE_MONITOR_OUTPUT_READ | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| LOCK_CLEANUP_FAILED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| LOOP_DONE_UNWITNESSED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| MAINTENANCE_INCIDENT | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| MESSAGE_RACE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| MICROCONTEXT_LEDGER_REFUSED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| MODEL_TOON_UNFIT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| NET_TOKENS_NONPOSITIVE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| NEVER_AMEND_SHARED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| OBJECTIVE_SCORER_MISSING | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
+| OFF_TRUNK | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| OUTPUT_DIRECTION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| OUT_OF_DIRECTION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| OUT_OF_TREE_WRITE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| OVERHEAD_BUDGET_EXCEEDED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| OVERLAY_WOULD_GATE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| PAYLOAD_TOO_SMALL | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| PIN_EVICT_REFUSED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| PUBLIC_LEAK | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| RATE_LIMIT_BACKOFF | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| REDIRECT_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| REDIRECT_NO_REDIRECTABLE_STATE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| RELAY_IDLE_PARKED | advisory | floor-declared | `Floor:` cite in the dos.toml block |
+| RELAY_NO_PROGRESS | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| RELAY_ORPHANED_FOLLOWON | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| REQUIRE_WITNESS | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| RESUME_COST_EXCEEDED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| ROUNDTRIP_LOSSY | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| RUN_STATUS_CLAIMED_FIELD | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| SESSION_CEILING_SATURATED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| SKILL_DESC_BUDGET_EXCEEDED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| SKILL_DESC_BUDGET_STALE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| STALE_BASE_DELETION | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| STALE_RECALL | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| STEER_NO_OWNED_LOOP | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| TABULAR_ELIGIBILITY_LOW | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| TICK_BUSY | advisory | floor-absent | no enforcing floor declared — vocabulary-only |
+| TICK_LOCK_ERROR | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| UNAUTHENTICATED_OFF_HOST_BIND | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| UNTIERED_LEAF | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| VOLATILE_SPAN | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| WEBHOOK_URL_NOT_ALLOWLISTED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| WORKSPACE_PATH_UNMAPPED | advisory | floor-declared | `Floor:` cite in the dos.toml block |
 
 <!-- failclosed-ledger:end -->
 

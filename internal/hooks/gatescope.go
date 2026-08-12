@@ -76,6 +76,12 @@ func gateScopes() []gateScopeRow {
 		{"PRIOR_ART", "gate_priorart.go", SeamPreCommit, ClassLandsTree, ""},
 		{"BARE_COMMIT_SWEEP", "gate_barecommitsweep.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PARALLEL_FABRIC_NUDGE", "gate_microcontext_nudge.go", SeamPreCommit, ClassLandsTree, ""},
+		// GIT_HYGIENE_BYPASS judges ADDED LINES only — it makes no fileProbe read at all — so the
+		// wrapper is a no-op for it in the same way it is for CONCEPT_FRESHNESS. It is listed
+		// LANDS_TREE because that is the change set its verdict is about: the view shares the very
+		// AddedByFile/StagedPaths slices the bare diff carries, so "judged over HEAD ⊕ staged" is
+		// true of it by construction rather than by wiring.
+		{"GIT_HYGIENE_BYPASS", "gate_githygiene.go", SeamPreCommit, ClassLandsTree, ""},
 		// CONCEPT_FRESHNESS is the prior art for this whole ticket inside fak: it already scores
 		// HEAD-plus-your-pathspec via conceptcatalog.CheckGitTree (#5534/#5829) and says so in the
 		// refusal text it prints. Listed LANDS_TREE because that is what it judges; the wrapper is

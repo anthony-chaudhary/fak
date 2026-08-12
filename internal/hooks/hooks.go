@@ -9,7 +9,7 @@
 // staged diff ONCE and runs every gate over it — the whole measured cost was spawn overhead,
 // so a single static-binary start recovers essentially all of it.
 //
-// The registry has grown well past that Python-era set: PreCommitGates() registers all 19 gates
+// The registry has grown well past that Python-era set: PreCommitGates() registers all 20 gates
 // today. That number is BOUND, not typed — exhaustiveness_claim_test.go re-derives it from the
 // registry and fails when the two disagree, so this sentence cannot quietly decay the way the
 // count it replaces did (#5605, epic #5601). Adding a gate is expected to update it.
@@ -136,6 +136,14 @@ func PreCommitGates() []Gate {
 		// ALLOW_UNTIERED_LEAF=1 to skip it once.
 		{Name: "UNTIERED_LEAF", ModeEnv: "FLEET_TIER_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNTIERED_LEAF", Check: gateUntieredLeaf},
 		{Name: "PARALLEL_FABRIC_NUDGE", ModeEnv: "FLEET_PF_NUDGE", DefaultMode: "warn", EscapeEnv: "ALLOW_PF_NUDGE", Check: checkParallelFabricNudge},
+		// GIT_HYGIENE_BYPASS is ADVISORY (issue #5588): DefaultMode "warn" so it never reds a shared
+		// trunk out of the box. It fires when a staged commit adds hand-rolled git-lock reclamation
+		// or object-database maintenance OUTSIDE the packages that own those decisions, and names the
+		// evidence-gated route (`fak git-daily`, internal/gitdaily) instead of letting the fifth
+		// private copy of "just remove index.lock" reach the trunk. Set FLEET_GIT_HYGIENE_GUARD=block
+		// to hard-enforce it, ALLOW_GIT_HYGIENE_BYPASS=1 to skip it once; a `git-hygiene:` note or
+		// code already routed through the daily tick silences it in-band.
+		{Name: "GIT_HYGIENE_BYPASS", ModeEnv: "FLEET_GIT_HYGIENE_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_GIT_HYGIENE_BYPASS", Check: gateGitHygieneBypass},
 		// GOFMT is ADVISORY (DefaultMode "warn"): the commit-boundary sibling of make ci's
 		// gofmt-check. It fires when a staged .go file is not gofmt-clean, before the drift reds
 		// every peer's `make ci` at the trunk — a recurring red the release notes keep clearing

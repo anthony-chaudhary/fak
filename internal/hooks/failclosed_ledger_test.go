@@ -30,10 +30,20 @@ type ledgerRow struct {
 	FailMode    string
 }
 
-// parseLedger extracts the fenced table rows. It returns rows in file order. A missing fence
-// or an unparseable table yields zero rows, which the caller treats as a failure — the gate
+// parseLedger extracts the pre-commit-gate table's rows. It returns rows in file order. A missing
+// fence or an unparseable table yields zero rows, which the caller treats as a failure — the gate
 // fails closed on a parse of nothing so a moved or renamed ledger cannot read as green.
 func parseLedger(t *testing.T) []ledgerRow {
+	t.Helper()
+	return parseLedgerFence(t, ledgerBegin)
+}
+
+// parseLedgerFence is the same parse over an arbitrary surface fence, so a second and third audited
+// surface (the repo-guard posture table, the dos.toml refusal vocabulary — see
+// failclosed_ledger_surfaces_test.go) read their rows through this one parser instead of growing a
+// private copy of it. Every fenced table in the ledger shares one end marker, so only the begin
+// fence varies.
+func parseLedgerFence(t *testing.T, begin string) []ledgerRow {
 	t.Helper()
 	b, err := os.ReadFile(ledgerPath)
 	if err != nil {
@@ -41,11 +51,11 @@ func parseLedger(t *testing.T) []ledgerRow {
 	}
 	body := string(b)
 
-	i := strings.Index(body, ledgerBegin)
+	i := strings.Index(body, begin)
 	if i < 0 {
-		t.Fatalf("ledger %s: begin fence %q not found", ledgerPath, ledgerBegin)
+		t.Fatalf("ledger %s: begin fence %q not found", ledgerPath, begin)
 	}
-	rest := body[i+len(ledgerBegin):]
+	rest := body[i+len(begin):]
 	j := strings.Index(rest, ledgerEnd)
 	if j < 0 {
 		t.Fatalf("ledger %s: end fence %q not found", ledgerPath, ledgerEnd)
