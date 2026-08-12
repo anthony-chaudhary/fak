@@ -144,9 +144,11 @@ func Paraphrasers() []Paraphraser {
 // paraphraser, carrying the seed's vector + sink (so Defense.Run scores the identical
 // harmful sink) but a freshly rephrased, marker-free injection at Paraphrased
 // adaptivity. The result is DETERMINISTIC (stable seed order × stable paraphraser
-// order), DEDUPED by injection body (two families that happen to render identical
-// text collapse to one), and EXCLUDES any derived attack whose injection equals its
-// seed's (a no-op rephrase carries no new search signal).
+// order), DEDUPED by sink tool + sink ARGS + injection body (two families that happen
+// to render identical text against the identical sink collapse to one; the same body
+// aimed at a DIFFERENT destination stays a distinct attack), and EXCLUDES any derived
+// attack whose injection equals its seed's (a no-op rephrase carries no new search
+// signal).
 //
 // This is the function an RL EngineDriver would eventually REPLACE: same output type
 // (a []Attack feeding arrow (1)), same scoring contract (Defense.Run), but the
@@ -162,7 +164,7 @@ func Expand(seeds []Attack, paras []Paraphraser) []Attack {
 			if body == "" || body == s.Injection {
 				continue // empty render or a no-op rephrase carries no new signal
 			}
-			key := s.SinkTool + "\x00" + body
+			key := s.SinkTool + "\x00" + s.SinkArgs + "\x00" + body
 			if seen[key] {
 				continue
 			}
