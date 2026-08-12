@@ -12,6 +12,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -21,27 +23,99 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "dispatch_preflight.py"
 
+# #5879: the fleet-tuning knobs both modules under test read from the ambient
+# environment. On a live fleet host these ARE exported (FAK_SESSIONS_PER_ACCOUNT=6,
+# FAK_HOST_CORES_PER_WORKER=1, ...), and every one of them feeds a number this module
+# asserts on — so an unpinned run reads the OPERATOR's box, not the code, and reports a
+# confident false red. Both loaders below clear the whole family and re-apply only what
+# a test asks for explicitly, so the assertions are about the defaults in the source.
+# KnobDriftTest pins this list against the tools themselves so a knob added later
+# cannot quietly re-open the leak.
+AMBIENT_ENV_KNOBS = (
+    "FAK_MAX_WORKERS",
+    "FAK_CODEX_OAUTH_SESSIONS",
+    "FAK_HOST_CORES_PER_WORKER",
+    "FAK_HOST_RAM_MB_PER_WORKER",
+    "FAK_HOST_THREADS_PER_CORE",
+    "FAK_HOST_THREADS_PER_WORKER",
+    "FAK_SESSIONS_PER_ACCOUNT",
+)
 
-def load():
-    sys.path.insert(0, str(SCRIPT.parent))
-    spec = importlib.util.spec_from_file_location("dispatch_preflight", SCRIPT)
+# Set by the witness's own re-run of this module (AmbientKnobHermeticityTest) so the
+# child process does not recurse into spawning another one.
+CHILD_RUN_ENV = "FAK_DISPATCH_PREFLIGHT_TEST_CHILD"
+
+
+def no_window_creationflags() -> int:
+    """CREATE_NO_WINDOW on Windows, ``0`` on POSIX — mirrors
+    ``dispatch_preflight._no_window_creationflags`` so the one child this file spawns
+    cannot pop a console window when the suite runs windowless."""
+    return 0x08000000 if os.name == "nt" else 0
+
+
+def _pinned_env(overrides: dict) -> dict:
+    """The real environment with every ambient knob cleared, then ``overrides`` applied.
+
+    ``None`` in ``overrides`` means "stay cleared", which lets a test say "load with
+    FAK_MAX_WORKERS unset" without caring what the host exports."""
+    for name in overrides:
+        if name not in AMBIENT_ENV_KNOBS:
+            # Explicit raise, not `assert`: `python -O` would strip the assert and let a
+            # misspelled knob silently fall through to the host's ambient value.
+            raise AssertionError("not a pinned knob: %s" % (name,))
+    env = {k: v for k, v in os.environ.items() if k not in AMBIENT_ENV_KNOBS}
+    env.update({k: v for k, v in overrides.items() if v is not None})
+    return env
+
+
+class _PinnedOS:
+    """``os`` with a knob-masked ``environ``, for the module under test to import.
+
+    Clearing the process environment around the import is enough for the constants
+    folded at import time (``HOST_CORES_PER_WORKER`` and friends), but NOT for the
+    knobs read LAZILY inside the call a test makes — ``fleet_accounts._claude_session_cap``
+    re-reads FAK_SESSIONS_PER_ACCOUNT on every ``seat_pool`` row. Rebinding the loaded
+    module's ``os`` keeps those reads pinned for the module's whole life without
+    editing the tool. ``environ`` is rebuilt per access rather than snapshotted, so a
+    test that mutates an UNpinned variable (HOME/USERPROFILE) is still seen; every
+    other attribute (``os.path``, ``os.utime``, ...) delegates to the real module."""
+
+    def __init__(self, overrides: dict) -> None:
+        self._overrides = overrides
+
+    @property
+    def environ(self) -> dict:
+        return _pinned_env(self._overrides)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _load_pinned(name: str, path: Path, overrides: dict):
+    """Import ``path`` as ``name`` with the ambient knobs pinned at import AND after."""
+    sys.path.insert(0, str(path.parent))
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    with mock.patch.dict(os.environ, _pinned_env(overrides), clear=True):
+        spec.loader.exec_module(mod)
+    mod.os = _PinnedOS(overrides)
     return mod
 
 
-def load_fleet_accounts():
+def load(**knobs):
+    """Import tools/dispatch_preflight.py hermetically.
+
+    Keyword knobs are ambient env names (see AMBIENT_ENV_KNOBS): pass a string to load
+    as if the host exported it, pass nothing to load against the built-in defaults."""
+    return _load_pinned("dispatch_preflight", SCRIPT, knobs)
+
+
+def load_fleet_accounts(**knobs):
     """Import tools/fleet_accounts.py the same hermetic way â€” the explicit seat pool
     (#1336: ``seat_pool`` / ``live_seat_leases``) lives there, so the SeatPool and
     LiveSeatLeases tests load and exercise it directly."""
-    fa = ROOT / "tools" / "fleet_accounts.py"
-    sys.path.insert(0, str(fa.parent))
-    spec = importlib.util.spec_from_file_location("fleet_accounts", fa)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return _load_pinned("fleet_accounts", ROOT / "tools" / "fleet_accounts.py", knobs)
 
 
 def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res=None,
@@ -1334,15 +1408,7 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
     def _load_with_env(self, value: str | None):
         """Load the module with FAK_MAX_WORKERS pinned (None = unset), hermetic to
         whatever the real box exports â€” the constant is resolved at import time."""
-        old = os.environ.pop("FAK_MAX_WORKERS", None)
-        if value is not None:
-            os.environ["FAK_MAX_WORKERS"] = value
-        try:
-            return load()
-        finally:
-            os.environ.pop("FAK_MAX_WORKERS", None)
-            if old is not None:
-                os.environ["FAK_MAX_WORKERS"] = old
+        return load(FAK_MAX_WORKERS=value)
 
     def test_default_ceiling_is_raised(self) -> None:
         # The ceiling itself: pin 20 so a later silent revert is caught.
@@ -1393,16 +1459,9 @@ class RaisedDefaultCeilingTest(unittest.TestCase):
     def test_host_budget_env_knobs_retune_the_gradient(self) -> None:
         # The per-worker charges are env knobs too (FAK_HOST_*): a measured box can
         # halve the cores-per-worker guess and double its cores dimension.
-        old = os.environ.pop("FAK_HOST_CORES_PER_WORKER", None)
-        os.environ["FAK_HOST_CORES_PER_WORKER"] = "1"
-        try:
-            mod = load()
-            cap = mod.host_capacity(cores=8, free_ram_mb=128_000, total_threads=1000)
-            self.assertEqual(cap["components"]["cores"], 8)   # 8 // 1, not 8 // 2
-        finally:
-            os.environ.pop("FAK_HOST_CORES_PER_WORKER", None)
-            if old is not None:
-                os.environ["FAK_HOST_CORES_PER_WORKER"] = old
+        mod = load(FAK_HOST_CORES_PER_WORKER="1")
+        cap = mod.host_capacity(cores=8, free_ram_mb=128_000, total_threads=1000)
+        self.assertEqual(cap["components"]["cores"], 8)   # 8 // 1, not 8 // 2
 
 
 class WeeklyCapCooldownTest(unittest.TestCase):
@@ -1797,6 +1856,92 @@ class PosixThreadProbeDialectTests(unittest.TestCase):
         self.assertEqual(len(columns), 1, "argv %r asks for more than the one column "
                                           "procps-only `nlwp` can lose on its own" % (seen[0],))
         self.assertTrue(columns[0].startswith("nlwp"))
+
+
+class AmbientKnobHermeticityTest(unittest.TestCase):
+    """#5879: the ambient fleet-tuning knobs must not reach the modules under test.
+
+    Every knob in AMBIENT_ENV_KNOBS is folded into a number this file asserts on, so
+    an operator's exported tuning silently rewrites the expected values: on the live
+    fleet host (FAK_SESSIONS_PER_ACCOUNT=6, FAK_HOST_CORES_PER_WORKER=1,
+    FAK_HOST_THREADS_PER_CORE=1000) a clean trunk reported 13 failures. That is a
+    check reporting on something other than the thing under test — the same class of
+    defect as a stale binary — so it is pinned by the loaders and witnessed here with
+    the exact hostile values measured on that host."""
+
+    HOSTILE = {
+        "FAK_MAX_WORKERS": "4",
+        "FAK_HOST_CORES_PER_WORKER": "1",
+        "FAK_HOST_THREADS_PER_CORE": "1000",
+        "FAK_SESSIONS_PER_ACCOUNT": "6",
+    }
+
+    def test_import_time_constants_ignore_ambient_knobs(self) -> None:
+        # The eager half: constants folded by _env_pos_int at import time.
+        with mock.patch.dict(os.environ, self.HOSTILE):
+            mod = load()
+        self.assertEqual(mod.HOST_CORES_PER_WORKER, 2)
+        self.assertEqual(mod.HOST_THREADS_PER_CORE, 400)
+        self.assertEqual(mod.DEFAULT_MAX_WORKERS, 20)
+        # ... and therefore the derived host_cap every verdict test leans on: the roomy
+        # 64-core box is worth 32 workers, not the 64 the host's knobs would claim.
+        self.assertEqual(mod.host_capacity(cores=64, free_ram_mb=128_000,
+                                           total_threads=1000)["host_cap"], 32)
+
+    def test_lazily_read_seat_cap_ignores_ambient_knobs(self) -> None:
+        # The lazy half: fleet_accounts._claude_session_cap re-reads the env inside the
+        # seat_pool call, so clearing it only around the import would not be enough.
+        with mock.patch.dict(os.environ, self.HOSTILE):
+            fa = load_fleet_accounts()
+            pool = fa.seat_pool([_seat_row("worker-a")], [])
+        self.assertEqual(pool["total_seats"], 4)
+        self.assertEqual(pool["free_seats"], 4)
+
+    def test_an_explicit_knob_still_reaches_the_module(self) -> None:
+        # Pinned is a MASK, not a hardcode: a test that means to tune a knob still can,
+        # and gets its value whatever the host exports underneath.
+        with mock.patch.dict(os.environ, self.HOSTILE):
+            self.assertEqual(load(FAK_HOST_CORES_PER_WORKER="4").HOST_CORES_PER_WORKER, 4)
+            fa = load_fleet_accounts(FAK_SESSIONS_PER_ACCOUNT="6")
+            self.assertEqual(fa.seat_pool([_seat_row("worker-a")], [])["total_seats"], 6)
+
+    def test_a_mistyped_knob_is_refused(self) -> None:
+        # A knob name that is not pinned would silently do nothing (the ambient value
+        # would win), so asking for one is an error rather than a no-op.
+        with self.assertRaises(AssertionError):
+            load(FAK_HOST_CORES_PER_WORKR="4")
+
+    def test_whole_module_is_green_under_the_hostile_host_env(self) -> None:
+        # The end-to-end witness: re-run THIS file in a child that exports exactly the
+        # knobs the fleet host does. Before the pin that child was 13-red; the child
+        # skips this test itself (CHILD_RUN_ENV) so the re-run cannot recurse.
+        if os.environ.get(CHILD_RUN_ENV):
+            self.skipTest("already the hostile-env child run")
+        env = dict(os.environ, **self.HOSTILE)
+        env[CHILD_RUN_ENV] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-m", "unittest", "tools/dispatch_preflight_test.py"],
+            cwd=str(ROOT), env=env, capture_output=True, text=True,
+            creationflags=no_window_creationflags())
+        self.assertEqual(proc.returncode, 0,
+                         "hostile ambient knobs turned this module red:\n%s"
+                         % (proc.stderr[-4000:],))
+
+
+class KnobDriftTest(unittest.TestCase):
+    """AMBIENT_ENV_KNOBS is the pin list, so it has to keep matching the tools. A knob
+    added to dispatch_preflight.py (or a renamed seat-cap knob in fleet_accounts.py)
+    without being pinned re-opens #5879 silently — here it fails loudly instead."""
+
+    def test_every_env_pos_int_knob_is_pinned(self) -> None:
+        src = SCRIPT.read_text(encoding="utf-8")
+        found = set(re.findall(r'_env_pos_int\(\s*"([A-Z0-9_]+)"', src))
+        self.assertTrue(found, "no _env_pos_int knobs found — did the reader move?")
+        self.assertEqual(sorted(found - set(AMBIENT_ENV_KNOBS)), [])
+
+    def test_the_seat_cap_knob_is_pinned(self) -> None:
+        fa = load_fleet_accounts()
+        self.assertIn(fa.SESSIONS_PER_ACCOUNT_ENV, AMBIENT_ENV_KNOBS)
 
 
 if __name__ == "__main__":
