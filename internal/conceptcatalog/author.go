@@ -528,27 +528,65 @@ func ProductionCorpus(root, raw string) (bool, error) {
 	return found[token(raw)], err
 }
 
+// corpusSkipDir reports whether the grounding walk refuses to descend a directory.
+// Excluding run artifacts is a correctness rule before it is a cost one: a token that
+// survives only in a stale dispatch log or a build temp tree is not grounded in
+// production source, yet the unfiltered walk let 48-day-old scratch output vouch for a
+// concept. The "." / "_" prefix is the same convention the go tool uses to ignore a
+// directory, and it is where every run-artifact tree in this repo lives
+// (.dispatch-runs, _scratch, .scratch-*, .goal-runs).
+func corpusSkipDir(name string) bool {
+	switch name {
+	case ".git", "vendor", "node_modules", "concept_disambiguation_scorecard.data":
+		return true
+	case ".github", ".claude":
+		// Dot-prefixed but tracked production configuration, not run output.
+		return false
+	}
+	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
+}
+
 // ProductionCorpusMany resolves many grounding tokens with one bounded tree walk.
 // A per-row walk made current-catalog validation scale as rows times corpus size.
+//
+// The walk holds one file's tokenized text at a time and stops as soon as every token
+// is grounded. Concatenating the whole tree into a single buffer instead made
+// `fak concept position` peak at 20.79GB RSS over 112s on this repo, because ~98% of
+// the bytes it matched came from in-tree run artifacts rather than source. Matching
+// per file is exactly equivalent to matching the concatenation: token() keeps only
+// [a-z0-9], so no want can span the "\n" that separates two tokenized lines.
 func ProductionCorpusMany(root string, raw []string) (map[string]bool, error) {
-	wants := map[string]bool{}
-	for _, v := range raw {
-		if n := token(v); n != "" {
-			wants[n] = true
-		}
+	type want struct {
+		norm  string
+		bytes []byte
 	}
 	found := map[string]bool{}
+	var wants []want
+	for _, v := range raw {
+		n := token(v)
+		if n == "" {
+			continue
+		}
+		if _, dup := found[n]; dup {
+			continue
+		}
+		found[n] = false
+		wants = append(wants, want{norm: n, bytes: []byte(n)})
+	}
 	if len(wants) == 0 {
 		return found, nil
 	}
-	skip := map[string]bool{".git": true, "vendor": true, "node_modules": true, "concept_disambiguation_scorecard.data": true}
-	var corpus strings.Builder
+	remaining := len(wants)
+	var body []byte
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
+		if remaining == 0 {
+			return filepath.SkipAll
+		}
 		if d.IsDir() {
-			if skip[d.Name()] {
+			if p != root && corpusSkipDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -566,6 +604,7 @@ func ProductionCorpusMany(root string, raw []string) (map[string]bool, error) {
 			return nil
 		}
 		defer f.Close()
+		body = body[:0]
 		sc := bufio.NewScanner(f)
 		first := true
 		for sc.Scan() {
@@ -574,17 +613,19 @@ func ProductionCorpusMany(root string, raw []string) (map[string]bool, error) {
 				return nil
 			}
 			first = false
-			corpus.WriteString(token(line))
-			corpus.WriteByte('\n')
+			body = append(body, token(line)...)
+			body = append(body, '\n')
+		}
+		for _, w := range wants {
+			if !found[w.norm] && bytes.Contains(body, w.bytes) {
+				found[w.norm] = true
+				remaining--
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
-	}
-	body := corpus.String()
-	for want := range wants {
-		found[want] = strings.Contains(body, want)
 	}
 	return found, nil
 }
