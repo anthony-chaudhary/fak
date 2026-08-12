@@ -236,3 +236,7 @@ Shipped pieces that already live in these tiers — with the gaps named, not hid
 - [Addressable KV cache](./addressable-kv-cache.md) — the T5 forgetting witness.
 - [Cloud / VM / remote-agent landscape](../notes/RESEARCH-cloud-vm-remote-agent-landscape-2026-06-23.md) — why fak is the boundary, not the box.
 - [`examples/vm-fs-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/vm-fs-guard/) — the VM-vs-boundary witness: the T0-vs-T1 proof that fak gates FS syscalls inside a sandbox it did not provision (filesystem twin of [`examples/remote-vm-guard/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/remote-vm-guard/)).
+- [Context as a variable](./context-as-a-variable.md) — applies the same
+  stable-name/content-identity idea to lazy context sources and immutable
+  filtered/aggregated views, with separate call-snapshot and prompt-admission
+  semantics.

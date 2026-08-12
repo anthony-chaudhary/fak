@@ -418,3 +418,11 @@ The resulting architecture is:
        |
 #6526 exact aggregation counterfactual -> #6527 optional helper model
 ```
+
+## Canonical reader-facing explainer
+
+The maintained conceptual route is
+[`docs/explainers/context-as-a-variable.md`](../explainers/context-as-a-variable.md).
+Use that page for the binding, lazy-load, filtering, cache-tier, call-snapshot,
+and implementation-order model. This dated note remains the pinned-source
+research trail and candidate analysis.

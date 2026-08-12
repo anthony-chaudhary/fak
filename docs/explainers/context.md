@@ -102,3 +102,13 @@ context mechanism.
 - [Context shedding](context-shedding.md) — drop, pin, tombstone, restore, and value details.
 - [You Never Manage the Context Window](you-never-manage-the-context-window.md) — doctrine, wiring survey, and historical rationale.
 - [D3 · ctxmmu](../proofs/ctxmmu.md) — scoped implementation proof.
+
+### Named, lazy, queryable sources
+
+Managed placement answers which spans are resident. The complementary
+programming interface is [Context as a variable](context-as-a-variable.md): a
+task-scoped name resolves to immutable source bytes, then demand separately
+fetches, queries/materializes, and admits a bounded derived view. The explainer
+also distinguishes page/blob, plan, derived-view, call-outcome, and provider-KV
+caches, and specifies why dereferencing a call-result binding never refreshes or
+reissues the call.

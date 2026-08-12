@@ -180,6 +180,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **How every new unit of work is scoped and shipped** (applied spine first, then exhaustive proof, measured optimization, and backlog fan-out) | [Spine-first + fan-out defaults](spine-first-defaults.md) |
 | **How agents discover fak features and memory tools** | [Self-feature query spine](notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
+| **How named context is loaded, filtered, cached, and backed by call snapshots** | [Context as a variable](explainers/context-as-a-variable.md) |
 | **Why a cache-hit % isn't the whole story** | [Context signal-to-noise](explainers/context-signal-to-noise.md) |
 | **How fak runs the agent as nested loops** | [Engineering is building loops](explainers/engineering-is-building-loops.md) |
 | **What a micro agent is, and when to use one** | [Micro agents](concepts/micro-agents.md) — definition, lifecycle, limits, and a no-key example |

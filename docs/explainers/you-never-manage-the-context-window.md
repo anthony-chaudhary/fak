@@ -158,3 +158,7 @@ being the owner.
   [`addressable-kv-cache.md`](addressable-kv-cache.md)
 - Why context survival and durable-memory promotion are separate decisions:
   [`../CONTEXT-IS-NOT-MEMORY.md`](../CONTEXT-IS-NOT-MEMORY.md)
+
+- How a large external source can be named, faulted, filtered, cached, and
+  admitted without putting all of it in every model turn:
+  [`context-as-a-variable.md`](context-as-a-variable.md)
