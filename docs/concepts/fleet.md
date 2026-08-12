@@ -180,6 +180,7 @@ The public/private line for the *box* fleet is a data contract rather than a cod
 | If you want… | Read |
 |---|---|
 | **The terminal fleet UI/UX generation plan** | [Fleet UI/UX generation plan](../fleet-ui-generation-plan.md) |
+| **The per-agent gateway console and its address space** | [The port is the agent](../gateway-port-ui-plan.md) |
 | **The worker launch and rollup runbook** | [Issue-scoped headless worker dispatch](../agentic-issue-dispatch.md) |
 | **The always-on backlog driver** | [The issue-dispatch loop](../dispatch-loop.md) |
 | **Witness, closure, and retry vocabulary** | [Dispatch SLO glossary](../dispatch-slo-glossary.md) |
