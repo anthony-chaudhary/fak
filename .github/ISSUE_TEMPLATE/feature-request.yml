@@ -14,18 +14,19 @@ body:
       label: The problem
       description: What are you trying to do, and where does it hurt today?
     validations:
-      required: true  - type: dropdown
-    id: primary_problem
-    attributes:
-      label: Primary fak problem
-      description: Choose the main operator burden this removes; see docs/problems-we-solve.md.
-      options:
-        - P1 — Context should manage itself
-        - P2 — Efficiency must be net-true
-        - P3 — Fast adaptation without another standard
-        - P4 — Agent operations should be one product, not a kit
-    validations:
       required: true
+  - type: checkboxes
+    id: problems_touched
+    attributes:
+      label: Which fak problems does this touch?
+      description: >-
+        Optional, and not a single-choice — the problems are a connected cluster,
+        so tick every row this plausibly advances. See docs/problems-we-solve.md.
+      options:
+        - label: P1 — Managed context (sessions rebuild setup, lose state, or resend context that could have been retained)
+        - label: P2 — Net-true efficiency (an optimization looks cheaper in isolation while the real workflow gets worse)
+        - label: P3 — Fast, bounded adaptation (workloads change faster than static infrastructure; broad rewrites are too slow)
+        - label: P4 — Integrated operations (operators cannot discover, run, observe, recover, or govern it through the real path)
   - type: textarea
     id: operator_value
     attributes:
