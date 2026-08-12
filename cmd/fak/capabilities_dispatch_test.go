@@ -97,27 +97,21 @@ func TestCapabilitiesVerbIsDispatched(t *testing.T) {
 	}
 	if tier, ok := devindex.TierOf(verb); !ok {
 		t.Errorf("%q has no tier in internal/devindex/tiers.go -- classify it in one tier block or the pre-push VERB_UNTIERED gate reds the tree", verb)
-	} else if tier != devindex.TierDev {
-		t.Errorf("%q is tiered %q; it is internal fleet tooling, not product surface (the frontdoor tier is ceiling-gated)", verb, tier)
+	} else if tier != devindex.TierFrontdoor {
+		t.Errorf("%q is tiered %q; the installed product outcome query belongs at the front door", verb, tier)
 	}
 }
 
 // TestCapabilitiesCarriesAHelpRow pins the other half of a reachable verb:
-// `fak help capabilities` must answer. A dev-tier verb has no
-// cmd/fak/help.go overviewGroups line by construction (the overview is
-// frontdoor-ONLY, gated by TestOverviewIsExactlyFrontdoor), so its help row
-// is the devindex catalog entry -- which is also what `fak help --all` and
-// `fak dev` list. Without it, an agent that reads the guard-startup banner
-// (guard_capabilities.go) or the field-borrow/study-repo skills and then
-// reaches for help gets nothing.
+// `fak help capabilities` must answer from the frontdoor overview. The product
+// query must not require knowing the separate fak-dev artifact exists.
 func TestCapabilitiesCarriesAHelpRow(t *testing.T) {
 	var out bytes.Buffer
 	if !printVerbHelp(&out, "capabilities") {
 		t.Fatal("`fak help capabilities` knows nothing about the verb -- add a verbManifest entry in internal/devindex/verbs.go")
 	}
 	got := out.String()
-	// Dev-tier verbs are introduced by their canonical `fak dev <verb>` spelling.
-	if !strings.Contains(got, "fak dev capabilities") {
-		t.Errorf("help header does not name the canonical dev spelling:\n%s", got)
+	if !strings.Contains(got, "fak capabilities") {
+		t.Errorf("help does not name the installed product spelling:\n%s", got)
 	}
 }

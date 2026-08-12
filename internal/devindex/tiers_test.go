@@ -110,8 +110,12 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // to run, but it was classified dev, so `fak help` did not list it and
 // `fak help agent` printed "fak dev agent — …". A newcomer could not find the one
 // command the front page told them to run. It is a product surface (#5464).
+// 27 (was 26): `capabilities` promoted - the installed product can now answer
+// outcome-language queries such as "token savings" and "turn control" without
+// requiring the separately built maintainer executable. This is the discovery
+// front door for the other 26 verbs, not another specialist operation.
 func TestFrontdoorTierStaysSmall(t *testing.T) {
-	const ceiling = 26
+	const ceiling = 27
 	var front []string
 	for key, tier := range verbTiers {
 		if tier == TierFrontdoor {

@@ -44,6 +44,7 @@ var overviewGroups = []struct {
 	entries []overviewEntry
 }{
 	{"spend fewer tokens + turns", []overviewEntry{
+		{"capabilities", "query token, turn, cache, routing, and session-control outcomes"},
 		{"ablate", "same-trace cache ablation: attribute savings instead of guessing"},
 		{"resume", "price full replay vs cut/reset when resuming a long context"},
 		{"session", "budget turns/tokens/context; steer or stop without another prompt turn"},
@@ -159,6 +160,10 @@ func printVerbHelp(w io.Writer, tok string) bool {
 // nor the wall knows the verb.
 func verbDeepHelpBody(w io.Writer, tok string) bool {
 	tok = strings.ToLower(strings.TrimSpace(tok))
+	if tok == "capabilities" {
+		writeCapabilitiesUsage(w)
+		return true
+	}
 	sections := verbWallSections([]string{tok})
 	if len(sections) == 0 {
 		return false

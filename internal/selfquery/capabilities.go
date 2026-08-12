@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/capindex"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -139,56 +140,31 @@ func withCapabilitiesMemoryRequest(c FeatureCard, intent string) FeatureCard {
 	return c
 }
 
-// runtimeOutcomeCards is the small, outcome-named product index behind
-// `fak-dev capabilities`. It describes capabilities rather than implementation
-// packages so operators and agents can ask in their own words. Every card names
-// a usable request and shipped evidence seams.
+// runtimeOutcomeCards adapts the one runtime-safe product catalog into the
+// richer repository self-query shape. Product truth lives in capindex so the
+// installed `fak capabilities` and `fak-dev capabilities` cannot drift.
 func runtimeOutcomeCards() []FeatureCard {
-	return []FeatureCard{
-		runtimeOutcomeCard("turn-savings", "Avoid unnecessary model turns", EffectRead,
-			"measure turn tax and elide kernel-known work instead of paying for another model round trip",
-			"go run ./cmd/turntaxdemo -selfcheck", "internal/turntaxmeter + internal/fusedturn + cmd/turntaxdemo",
-			[]string{"turn control", "turn tax", "turn savings", "fewer turns", "fused turn", "elision", "token efficiency", "latency"}),
-		runtimeOutcomeCard("context-reuse", "Reuse stable prompt and context work", EffectRead,
-			"reuse stable prefixes, manage resident context, and price replay versus cut or reset after cache expiry",
-			"fak resume plan --resident-tokens 250000 --idle-seconds 7200 --json", "internal/ctxmmu + internal/vdso + docs/managed-context-continuous-usage.md",
-			[]string{"token savings", "save tokens", "prompt cache", "prefix reuse", "context compaction", "ctxmmu", "vdso", "resume", "cache efficiency"}),
-		runtimeOutcomeCard("session-control", "Control a live session out of band", EffectMutate,
-			"budget, pause, resume, throttle, steer, or stop a served session without spending another prompt turn",
-			"fak session budget <id> --turns N --tokens N --context-tokens N", "internal/sessionctl + internal/sessionsignals + docs/operator-control-plane.md",
-			[]string{"turn control", "turn budget", "token budget", "context budget", "session control", "steer", "pause", "throttle", "cancel"}),
-		runtimeOutcomeCard("model-routing", "Route each call to an appropriate model", EffectRead,
-			"select cheaper or specialized inference per call instead of pinning a whole session to one expensive model",
-			"fak model --help", "internal/modelroute + internal/modelladder + docs/model-routing.md",
-			[]string{"token savings", "cost efficiency", "model routing", "per call model", "model ladder", "cheap model", "inference efficiency"}),
-		runtimeOutcomeCard("savings-observability", "Attribute cache and token savings", EffectRead,
-			"show reused tokens, effective cost, and total savings; ablate one frozen trace to attribute the gain",
-			"fak info --once", "internal/cachevalue + internal/cachevaluereport + docs/cache-value-rollup.md",
-			[]string{"token savings", "cache savings", "cost savings", "cache value", "observability", "ablate", "same trace", "efficiency"}),
-		runtimeOutcomeCard("capability-floor", "Enforce the supporting capability floor", EffectRead,
-			"check tool authority before execution so efficiency changes remain bounded and auditable",
-			"fak preflight --policy <file> --tool <name> --args '{}'", "internal/policy + internal/adjudicator + docs/fak/security.md",
-			[]string{"security", "policy", "capability floor", "preflight", "audit", "default deny"}),
+	outcomes := capindex.ProductOutcomes()
+	cards := make([]FeatureCard, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		cards = append(cards, FeatureCard{
+			Kind:      "runtime-capability",
+			Name:      outcome.Name,
+			Summary:   outcome.Summary,
+			Tags:      append([]string(nil), outcome.Tags...),
+			DetailRef: outcome.Detail,
+			Effect:    Effect(outcome.Effect),
+			Source:    "runtime",
+			Witness:   outcome.Witness,
+			Request: RequestShape{
+				Route:    "cli",
+				Command:  append([]string(nil), outcome.Command...),
+				Note:     strings.Join(outcome.Command, " "),
+				Executed: false,
+			},
+		})
 	}
-}
-
-func runtimeOutcomeCard(id, name string, effect Effect, summary, command, witness string, tags []string) FeatureCard {
-	return FeatureCard{
-		Kind:      "runtime-capability",
-		Name:      name,
-		Summary:   summary,
-		Tags:      tags,
-		DetailRef: "docs/CAPABILITIES.md#" + id,
-		Effect:    effect,
-		Source:    "runtime",
-		Witness:   witness,
-		Request: RequestShape{
-			Route:    "cli",
-			Command:  strings.Fields(command),
-			Note:     command,
-			Executed: false,
-		},
-	}
+	return cards
 }
 
 // kernelVerbCards describes the kernel shared-path verbs #1500 names by name:

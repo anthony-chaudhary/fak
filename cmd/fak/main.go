@@ -167,6 +167,8 @@ func main() {
 		cmdMacBench(os.Args[2:])
 	case "macfit":
 		cmdMacFit(os.Args[2:])
+	case "capabilities":
+		os.Exit(runCapabilities(os.Stdout, os.Stderr, os.Args[2:]))
 	case "codex":
 		cmdCodex(os.Args[2:])
 	case "codex-mcp-health":
@@ -292,6 +294,8 @@ func main() {
 		cmdServe(os.Args[2:])
 	case "serve-wiring":
 		cmdServeWiring(os.Args[2:])
+	case "manage", "m":
+		cmdManage(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
 	case "goal-park":
