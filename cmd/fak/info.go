@@ -592,8 +592,9 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		// Read the REAL os.Stdout fd (the same source the startup measure at runInfo used), not
 		// the stdout writer param — under test that writer is a bytes.Buffer with tty=true, so an
 		// fd assertion on it would panic; the GetSize on a non-tty real fd simply errors and is
-		// ignored, leaving the test's passed-in width/height untouched.
-		if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		// ignored, leaving the test's passed-in width/height untouched. infoTermSize is the
+		// pinnable seam over that read (info_resize.go).
+		if w, h, err := infoTermSize(); err == nil {
 			if w > 0 {
 				width = w
 			}
@@ -650,7 +651,11 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			writeFocusEnable(stdout)
 			writeMouseEnable(stdout)
 			keyCh = startGuardInfoInputReader(os.Stdin, stop)
-			rc, stopResize := newInfoResizeChan()
+			// Seed the watcher with the geometry this overlay is ABOUT to paint at, so a startup
+			// measure that was already wrong (a pane sampled before its host finished laying the
+			// split out) fires a repaint on the first poll instead of being mistaken for the
+			// steady state.
+			rc, stopResize := newInfoResizeChan(width, height)
 			resizeCh = rc
 			defer stopResize()
 		}
@@ -666,10 +671,17 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// still erases the old block — zeroing prevRows here would skip the clear and leave ghost rows.
 	writeFrame := func(v guardInfoVars) {
 		lastSample, haveSample = v, true
-		if fs.needsRepaint {
-			remeasure()
-			fs.needsRepaint = false
-		}
+		// Re-measure on EVERY frame, not only when a focus-in / SIGWINCH latched a repaint.
+		// The interactive frame is padded to exactly `height` rows and drawn in place, so a
+		// `height` LARGER than the real pane overflows it: the pane scrolls, and what is left
+		// on screen is the padded TAIL — blank rows. That is the "the 20% pane starts scrolled
+		// down and looks empty" report, and it used to be permanent on Windows, which has no
+		// SIGWINCH and whose --split pane is deliberately never focused (guard_split.go hands
+		// focus back to the agent), so neither latch could ever fire and the geometry measured
+		// once at flag-parse time stood for the whole session. One cheap syscall per tick bounds
+		// any staleness to a single frame; the resize watcher below just makes it faster.
+		remeasure()
+		fs.needsRepaint = false
 		if visual {
 			tr.push(v)
 			// The interactive path (a visual-mode TTY whose stdin is also a TTY) draws the TABBED

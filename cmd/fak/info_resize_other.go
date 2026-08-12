@@ -16,10 +16,14 @@ import (
 //
 // SIGWINCH is NOT always delivered to a pane whose tab is hidden (some terminals coalesce or
 // drop it while backgrounded), which is exactly why the focus-in edge ALSO re-measures — the
-// two signals are complementary, not redundant. The Windows build (info_resize_windows.go)
-// returns a nil channel and relies on the per-tick GetSize poll instead, since Windows has no
-// SIGWINCH.
-func newInfoResizeChan() (<-chan struct{}, func()) {
+// two signals are complementary, not redundant. The Windows build (info_resize_windows.go) has
+// no SIGWINCH to wait on and polls GetSize instead.
+//
+// baseW/baseH are the geometry the overlay is about to paint at. The polling build seeds its
+// "last known size" with them so a startup measure that was already wrong repaints on the first
+// poll; the kernel hands SIGWINCH to this build on every real change, so they are unused here.
+// The signature is shared so the call site stays platform-free.
+func newInfoResizeChan(_, _ int) (<-chan struct{}, func()) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGWINCH)
 	out := make(chan struct{}, 1)
