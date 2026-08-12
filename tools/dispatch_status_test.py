@@ -9,6 +9,7 @@ minimal payload to prove it does not raise.
 """
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -3857,6 +3858,75 @@ class SpawnFailedCauseBreakdownTest(unittest.TestCase):
             self.assertEqual(out["rate"], 0.0)
 
 
+class WaveSpawnFailedTelemetryTest(unittest.TestCase):
+    """#6492: the WAVE path's launch failures must be countable too.
+
+    The #2635 fold only ever enumerated `resolve-<issue>-<stamp>.log` — so a wave whose
+    four children all died on launch reported a 0% SPAWN_FAILED rate while the fleet was
+    launching nothing. Wave dispatch logs now count as spawns, and the terminal
+    `.spawn-failed.json` record each dead wave child leaves behind counts as a failure
+    with its classified cause."""
+
+    def _wave_log(self, runs: Path, lane: str, stamp: str, body: str = "") -> Path:
+        log = runs / f"dispatch-{lane}-{stamp}.log"
+        log.write_text(body, encoding="utf-8")
+        return log
+
+    def _failed(self, runs: Path, lane: str, stamp: str, cause: str,
+                returncode: int = 1) -> None:
+        log = self._wave_log(runs, lane, stamp)
+        (runs / f"dispatch-{lane}-{stamp}.spawn-failed.json").write_text(json.dumps({
+            "verdict": "SPAWN_FAILED", "cause": cause, "lane": lane,
+            "seat": "acct-0", "pid": 4242, "log": str(log), "returncode": returncode,
+            "log_bytes": 0, "silent": True, "tail": "", "stamp": stamp,
+        }), encoding="utf-8")
+
+    def test_dead_wave_children_are_counted_not_invisible(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._failed(runs, "tools", "20260811-010101", "exec_race")
+            self._failed(runs, "docs", "20260811-010102", "weekly_limit")
+            # a surviving wave worker: a spawn, but NOT a failure
+            self._wave_log(runs, "model", "20260811-010103", "x" * 4000)
+
+            out = mod.spawn_failed_cause_breakdown(runs, alive=set())
+
+            self.assertEqual(out["spawns"], 3)        # wave logs now count as spawns
+            self.assertEqual(out["spawn_failed"], 2)  # was: 0 — wave deaths were unseen
+            self.assertEqual(out["by_cause"]["exec_race"]["count"], 1)
+            self.assertEqual(out["by_cause"]["weekly_limit"]["count"], 1)
+            ev = out["by_cause"]["exec_race"]["evidence"][0]
+            self.assertEqual(ev["lane"], "tools")
+            self.assertEqual(ev["returncode"], 1)
+            self.assertEqual(ev["source"], "wave_spawn_failed_record")
+            self.assertIn("spawn-failed cause breakdown", mod.render_spawn_causes(out))
+
+    def test_a_malformed_record_is_skipped_not_fatal(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._wave_log(runs, "tools", "20260811-020201")
+            (runs / "dispatch-tools-20260811-020201.spawn-failed.json").write_text(
+                "{ not json", encoding="utf-8")
+            out = mod.spawn_failed_cause_breakdown(runs, alive=set())
+            self.assertEqual(out["spawns"], 1)
+            self.assertEqual(out["spawn_failed"], 0)  # fail-open: no phantom failure
+
+    def test_a_record_older_than_the_lookback_is_out_of_window(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._failed(runs, "tools", "20260101-030301", "exec_race")
+            fresh = mod.spawn_failed_cause_breakdown(runs, alive=set(), lookback_min=60)
+            self.assertEqual(fresh["spawn_failed"], 1)
+            # same record, read a day later: outside the lookback, so out of the rate
+            stale = mod.spawn_failed_cause_breakdown(
+                runs, alive=set(), lookback_min=60,
+                now_ts=os.stat(runs / "dispatch-tools-20260101-030301.log").st_mtime + 86400)
+            self.assertEqual(stale["spawn_failed"], 0)
+
+
 class CapacityHonestyTest(unittest.TestCase):
     """#4649 residual: the dispatcher card renders capacity honestly — a missing read is
     UNKNOWN (never a literal None), an over-subscribed pool shows the overshoot (never a
@@ -3930,6 +4000,273 @@ class CapacityHonestyTest(unittest.TestCase):
                   resolver_preflight=resolver_preflight())
         md = mod.render_md(p, date="2026-07-05")
         self.assertNotIn("capacity reconcile", md)
+
+
+def seat_pool(*, free: int = 1, tag: str = "worker-a", cooling: bool = False,
+              cooldown_until: str | None = None, extra: list[dict] | None = None) -> dict:
+    """A synthetic `fleet_accounts.seat_pool` inventory with `free` free slot(s) on
+    `tag` -- the "nominally free seat" the #6495 failure turned on."""
+    seats = [{
+        "seat": tag, "tag": tag, "account": f".claude-{tag}", "product": "claude",
+        "model": "claude", "available": not cooling,
+        "state": "free", "dispatch_state": "cooling" if cooling else "available",
+        "hold_reason": "rate_limited" if cooling else "",
+        "cooldown": ({"next_eligible": cooldown_until} if cooldown_until else None),
+        "session_cap": free, "leased_slots": 0, "free_slots": free, "workers": [],
+    }]
+    seats += list(extra or [])
+    return {
+        "schema": "fak.seat-pool/1",
+        "total_seats": sum(int(s.get("session_cap") or 0) for s in seats),
+        "free_seats": sum(int(s.get("free_slots") or 0) for s in seats),
+        "leased_seats": 0, "blocked_seats": 0,
+        "depleted": False, "double_booked": [], "unbound_leases": [],
+        "seats": seats,
+    }
+
+
+def write_ledger(path: Path, rows: list[tuple[str, "dt.datetime"]]) -> str:
+    """Write a real `launch_admission` ledger: (account, launch time) per line."""
+    with open(path, "w", encoding="utf-8") as fh:
+        for account, ts in rows:
+            fh.write(json.dumps({
+                "ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "account": account, "resume_account": account,
+                "phase": "launched", "via": "test",
+            }) + "\n")
+    return str(path)
+
+
+class LaunchAdmissionGateTest(unittest.TestCase):
+    """#6495: the card folds the LAUNCHER's final admission gate.
+
+    Every verdict here is produced by the real `tools/launch_admission.py` (the one
+    seam a launcher passes through) over a real on-disk ledger -- not a stubbed
+    verdict -- so a drift between what status folds and what the launcher enforces
+    fails these tests.
+    """
+
+    def admission(self, mod, ledger_rows, *, seats=None, tag="worker-a",
+                  now=None, cooling=False, cooldown_until=None):
+        now = now or dt.datetime.now(dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as td:
+            ledger = write_ledger(Path(td) / "resume_ledger.jsonl", ledger_rows)
+            return mod.read_launch_admission(
+                ROOT, pre("SPAWN_OK"),
+                seats if seats is not None else seat_pool(
+                    tag=tag, cooling=cooling, cooldown_until=cooldown_until),
+                now=now, ledger_path=ledger)
+
+    def test_free_seat_under_launch_rate_exceeded_does_not_recommend_growth(self) -> None:
+        # The #6495 witness: preflight SPAWN_OK, a nominally FREE seat, and a launch
+        # ledger already at the per-account ceiling. The launcher would refuse this
+        # launch LAUNCH_RATE_EXCEEDED, so the card must not recommend growth.
+        mod = load()
+        now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.timezone.utc)
+        rows = [("worker-a", now - dt.timedelta(minutes=m)) for m in (1, 2, 3)]
+        adm = self.admission(mod, rows, now=now)
+        self.assertEqual(adm["verdict"], "DEFER")
+        self.assertEqual(adm["reason"], "LAUNCH_RATE_EXCEEDED")
+        self.assertFalse(adm["would_launch"])
+        self.assertTrue(adm["retry_after"])
+
+        p = build(mod, pre=pre("SPAWN_OK"), seat_inventory=seat_pool(),
+                  launch_admission=adm)
+        self.assertNotEqual(p["verdict"], "READY_TO_GROW")
+        self.assertEqual(p["verdict"], "LAUNCH_COOLDOWN")
+        self.assertTrue(p["ok"])  # a cooldown is a steady state, not breakage
+        self.assertFalse(p["spawn_gate"]["would_launch"])
+        self.assertEqual(p["spawn_gate"]["reason"], "LAUNCH_RATE_EXCEEDED")
+        self.assertEqual(p["spawn_gate"]["retry_after"], adm["retry_after"])
+        # "one free seat" is never mistaken for "one launchable seat" again.
+        self.assertEqual(p["accounts"]["free_seats"], 1)
+        self.assertEqual(p["accounts"]["launchable_seats"], 0)
+        self.assertEqual([d["account"] for d in p["accounts"]["deferred"]], ["worker-a"])
+        self.assertIn(adm["retry_after"], p["next_action"])
+        self.assertTrue(any("LAUNCH_RATE_EXCEEDED" in r for r in p["reasons"]))
+
+    def test_admitted_launch_keeps_ready_to_grow(self) -> None:
+        mod = load()
+        adm = self.admission(mod, [])
+        self.assertEqual(adm["verdict"], "ADMIT")
+        p = build(mod, pre=pre("SPAWN_OK"), seat_inventory=seat_pool(),
+                  launch_admission=adm)
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertTrue(p["spawn_gate"]["would_launch"])
+        self.assertEqual(p["accounts"]["launchable_seats"], 1)
+        self.assertIn("launch one worker", p["next_action"])
+
+    def test_global_cap_defers_every_candidate_account(self) -> None:
+        # Six nominally free seats, a fleet already at the GLOBAL cap: no account
+        # can launch, so the fold must refuse growth for ALL of them (the #6495
+        # follow-up comment -- global-cap admission, not only per-account cooldown).
+        mod = load()
+        now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.timezone.utc)
+        rows = [(f"other-{i}", now - dt.timedelta(minutes=1)) for i in range(10)]
+        extra = [dict(seat_pool(tag="worker-b")["seats"][0])]
+        adm = self.admission(mod, rows, seats=seat_pool(extra=extra), now=now)
+        self.assertEqual(adm["reason"], "GLOBAL_LAUNCH_CAP")
+        self.assertEqual(len(adm["deferred_accounts"]), 2)
+        p = build(mod, pre=pre("SPAWN_OK"), launch_admission=adm)
+        self.assertEqual(p["verdict"], "LAUNCH_COOLDOWN")
+
+    def test_cooling_seat_is_deferred_on_its_own_reset(self) -> None:
+        mod = load()
+        adm = self.admission(mod, [], cooling=True,
+                             cooldown_until="2026-08-11T21:00:00Z")
+        self.assertEqual(adm["reason"], "ACCOUNT_THROTTLED")
+        self.assertEqual(adm["retry_after"], "2026-08-11T21:00:00Z")
+        p = build(mod, pre=pre("SPAWN_OK"), launch_admission=adm)
+        self.assertEqual(p["verdict"], "LAUNCH_COOLDOWN")
+
+    def test_one_admitted_account_among_deferrals_still_grows(self) -> None:
+        # Growth is "could ONE worker launch", so a single admitted account is enough
+        # even while a rate-limited sibling defers -- the fold must not over-refuse.
+        mod = load()
+        now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.timezone.utc)
+        rows = [("worker-a", now - dt.timedelta(minutes=m)) for m in (1, 2, 3)]
+        extra = [dict(seat_pool(tag="worker-b")["seats"][0])]
+        adm = self.admission(mod, rows, seats=seat_pool(extra=extra), now=now)
+        self.assertTrue(adm["would_launch"])
+        self.assertEqual(adm["admitted_accounts"], ["worker-b"])
+        p = build(mod, pre=pre("SPAWN_OK"), launch_admission=adm)
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertEqual(p["accounts"]["launchable_seats"], 1)
+
+    def test_unconsultable_gate_never_reads_as_a_green_light(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"),
+                  launch_admission={"schema": "fak.dispatch-launch-admission.v1",
+                                    "evaluated": False, "would_launch": None,
+                                    "selected": "worker-a",
+                                    "_error": "ledger unreadable"})
+        self.assertEqual(p["verdict"], "LAUNCH_ADMISSION_UNKNOWN")
+        self.assertIsNone(p["spawn_gate"]["would_launch"])
+        self.assertIn("launch_admission.py", p["next_action"])
+
+    def test_deferral_does_not_overwrite_a_more_specific_hold(self) -> None:
+        mod = load()
+        now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.timezone.utc)
+        rows = [("worker-a", now - dt.timedelta(minutes=m)) for m in (1, 2, 3)]
+        adm = self.admission(mod, rows, now=now)
+        p = build(mod, pre=pre("REFUSE_AT_CAP", cap=2, live=2), launch_admission=adm)
+        self.assertEqual(p["verdict"], "AT_CAP")  # the binding constraint, still
+        self.assertTrue(any("LAUNCH_RATE_EXCEEDED" in r for r in p["reasons"]))
+        self.assertFalse(p["spawn_gate"]["would_launch"])
+
+    def test_candidate_accounts_lead_with_the_switcher_pick_and_skip_full_seats(self) -> None:
+        mod = load()
+        busy = {"seat": "worker-c", "tag": "worker-c", "dispatch_state": "busy",
+                "session_cap": 1, "leased_slots": 1, "free_slots": 0}
+        inv = seat_pool(tag="worker-b", extra=[busy])
+        rows = mod.launch_candidate_accounts(inv, "worker-a")
+        self.assertEqual([r["account"] for r in rows], ["worker-a", "worker-b"])
+        self.assertIsNone(rows[0]["free_slots"])  # the pick is not itself a pool seat
+
+    def test_no_candidate_account_is_not_a_deferral(self) -> None:
+        mod = load()
+        adm = mod.read_launch_admission(ROOT, {"account": {}}, {"seats": []})
+        self.assertFalse(adm["evaluated"])
+        p = build(mod, pre=pre("REFUSE_NO_ACCOUNT"), launch_admission=adm)
+        self.assertEqual(p["verdict"], "BLOCKED_ON_ACCOUNT")
+
+    def test_card_renders_the_admission_gate_and_next_action(self) -> None:
+        mod = load()
+        now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.timezone.utc)
+        rows = [("worker-a", now - dt.timedelta(minutes=m)) for m in (1, 2, 3)]
+        adm = self.admission(mod, rows, now=now)
+        text = mod.render(build(mod, pre=pre("SPAWN_OK"),
+                                seat_inventory=seat_pool(), launch_admission=adm))
+        self.assertIn("admission :", text)
+        self.assertIn("LAUNCH_RATE_EXCEEDED", text)
+        self.assertIn("launchable=0/1", text)
+        self.assertIn("next      :", text)
+
+    def test_unmodelled_preflight_refusal_never_reads_as_growth(self) -> None:
+        # The same #6495 failure one layer up: the card only NAMED four preflight
+        # tokens and fell through to READY_TO_GROW on every other one — so a live
+        # REFUSE_BIN_SKEW (#6508) host published "safe to spawn".
+        mod = load()
+        p = build(mod, pre=pre("REFUSE_BIN_SKEW"))
+        self.assertNotEqual(p["verdict"], "READY_TO_GROW")
+        self.assertEqual(p["verdict"], "BLOCKED_ON_BIN_SKEW")
+        self.assertFalse(p["spawn_gate"]["would_launch"] or False)
+        self.assertTrue(any("REFUSE_BIN_SKEW" in r for r in p["reasons"]))
+
+    def test_unknown_preflight_token_holds_and_names_itself(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("REFUSE_SOMETHING_NEW"))
+        self.assertEqual(p["verdict"], "BLOCKED_ON_PREFLIGHT")
+        self.assertTrue(any("REFUSE_SOMETHING_NEW" in r for r in p["reasons"]))
+        self.assertIn("dispatch_preflight", p["next_action"])
+
+    def test_missing_preflight_verdict_is_not_a_yes(self) -> None:
+        mod = load()
+        doc = pre("SPAWN_OK")
+        doc.pop("verdict")
+        p = build(mod, pre=doc)
+        self.assertEqual(p["verdict"], "BLOCKED_ON_PREFLIGHT")
+        self.assertTrue(any("no preflight verdict" in r for r in p["reasons"]))
+
+    def test_weekly_capped_preflight_keeps_its_specific_name(self) -> None:
+        mod = load()
+        p = build(mod, pre=pre("REFUSE_WEEKLY_CAPPED"))
+        self.assertEqual(p["verdict"], "WEEKLY_CAPPED")
+
+    def test_cooling_switcher_pick_is_asked_with_its_cooldown(self) -> None:
+        # A cooling account holds NO free slot in the real seat pool, so it never
+        # reaches the free-seat scan — the switcher's pick must still be asked with
+        # its own reset, or a throttled pick reads as admitted by omission.
+        mod = load()
+        cooling = {"seat": "worker-a", "tag": "worker-a", "dispatch_state": "cooling",
+                   "hold_reason": "rate_limited", "session_cap": 1, "leased_slots": 0,
+                   "free_slots": 0,
+                   "cooldown": {"next_eligible": "2026-08-11T22:00:00Z"}}
+        rows = mod.launch_candidate_accounts({"seats": [cooling]}, "worker-a")
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["throttled"])
+        self.assertEqual(rows[0]["throttle_reset"], "2026-08-11T22:00:00Z")
+        adm = self.admission(mod, [], seats={"seats": [cooling]})
+        self.assertEqual(adm["reason"], "ACCOUNT_THROTTLED")
+        p = build(mod, pre=pre("SPAWN_OK"), launch_admission=adm)
+        self.assertEqual(p["verdict"], "LAUNCH_COOLDOWN")
+
+    def test_spawn_gate_carries_immediate_exit_evidence(self) -> None:
+        # #6492's false-success signature, carried ON the growth gate: dead-pid
+        # workers that produced nothing beside a spawn counter reporting 0 failures.
+        mod = load()
+        silent = [{"issue": 6492, "stamp": "20260811-2026", "log": "resolve-6492.log",
+                   "pid": 15724, "size": 0, "kind": "empty"}]
+        p = build(mod, pre=pre("SPAWN_OK"), silent=silent,
+                  spawn_causes=spawn_causes(spawns=8, stale_cred=0))
+        ev = p["spawn_gate"]["launch_evidence"]
+        self.assertEqual(ev["immediate_exits"], 1)
+        self.assertEqual(ev["issues"], [6492])
+        self.assertEqual(ev["spawns"], 8)
+        self.assertEqual(ev["spawn_failed"], 0)
+
+    def test_md_doc_publishes_the_admission_state_and_next_action(self) -> None:
+        mod = load()
+        now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.timezone.utc)
+        rows = [("worker-a", now - dt.timedelta(minutes=m)) for m in (1, 2, 3)]
+        adm = self.admission(mod, rows, now=now)
+        md = mod.render_md(build(mod, pre=pre("SPAWN_OK"), seat_inventory=seat_pool(),
+                                 launch_admission=adm), date="2026-08-11")
+        self.assertIn("launch admission", md)
+        self.assertIn("LAUNCH_RATE_EXCEEDED", md)
+        self.assertIn("next action", md)
+
+    def test_contract_fields_are_present_without_an_admission_fold(self) -> None:
+        # Back-compat: a caller that supplies no admission fold still gets the three
+        # populated contract fields (#6495 done condition 3) and the old verdict.
+        mod = load()
+        p = build(mod, pre=pre("SPAWN_OK"))
+        self.assertEqual(p["verdict"], "READY_TO_GROW")
+        self.assertEqual(p["spawn_gate"]["preflight_verdict"], "SPAWN_OK")
+        self.assertIsNone(p["spawn_gate"]["would_launch"])
+        self.assertFalse(p["accounts"]["admission_evaluated"])
+        self.assertEqual(p["accounts"]["selected"]["tag"], "worker-a")
+        self.assertTrue(p["next_action"])
 
 
 if __name__ == "__main__":

@@ -197,6 +197,15 @@ _GUARD_EMPTY_LOG_WINDOW_S = 600.0
 _GUARD_EMPTY_LOG_SCAN_CAP = 400
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
+# dispatch-<lane>-<stamp>.log written by issue_dispatch.spawn_detached — the WAVE
+# spawn path. It was outside this fold's population entirely, which is how a wave that
+# lost every child could still read `spawns=8 spawn_failed=0` (#6492): the denominator
+# saw only per-issue resolve spawns and the numerator saw only their silent logs.
+_WAVE_LOG_RE = re.compile(r"dispatch-(.+)-(\d{8}-\d{6})\.log$")
+# The terminal record issue_dispatch.retire_failed_spawn writes beside the log of a
+# child that died inside the wave's read-back window. It is a POSITIVE witness (the
+# tick watched the child exit), so it is folded whatever the log's pid state says.
+_WAVE_SPAWN_FAILED_GLOB = "dispatch-*.spawn-failed.json"
 _LEASEREF_PREFIX = "refs/fak/locks/"
 _NOOP_BANNER_RE = re.compile(r"(?i)>\s*build\s*[·:]")
 # The real-turn byte floor: a log at or below this carried no productive turn — it
@@ -2202,6 +2211,50 @@ _SPAWN_STALE_CRED_RED_RATE = 0.10
 _SPAWN_STALE_CRED_RED_MIN_SPAWNS = 8
 
 
+def _wave_spawn_failed_events(runs_dir: Path, *, horizon: float) -> list[dict[str, Any]]:
+    """The wave path's TERMINAL spawn-failure records inside the window (#6492).
+
+    ``issue_dispatch.retire_failed_spawn`` writes one of these beside the log of every
+    child that was already dead when the dispatching tick read it back, carrying the
+    cause it classified with the SAME #2635 classifier used above. Reading the record
+    (rather than re-deriving from a log tail) is what makes a wave's launch failures
+    countable at all: a wave child that dies before writing a byte leaves a 0-byte log
+    with no pid sidecar, which the ``silent_workers`` fold never enumerated.
+
+    Read-only + FAIL-OPEN: an unreadable or malformed record is skipped, never fatal.
+    Newest first, matching the caller's evidence ordering."""
+    rows: list[tuple[float, dict[str, Any]]] = []
+    try:
+        records = sorted(runs_dir.glob(_WAVE_SPAWN_FAILED_GLOB))
+    except OSError:
+        return []
+    for path in records:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < horizon:
+            continue
+        try:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        rows.append((mtime, {
+            "issue": None,
+            "lane": rec.get("lane"),
+            "log": Path(str(rec.get("log") or path)).name,
+            "stamp": rec.get("stamp"),
+            "size": int(rec.get("log_bytes") or 0),
+            "returncode": rec.get("returncode"),
+            "cause": str(rec.get("cause") or "unknown"),
+            "source": "wave_spawn_failed_record",
+        }))
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return [row for _, row in rows]
+
+
 def spawn_failed_cause_breakdown(
     runs_dir: Path,
     *,
@@ -2224,8 +2277,12 @@ def spawn_failed_cause_breakdown(
     reports the count + rate PER cause with per-event evidence rows, so "≈4%
     baseline" becomes a named, watchable MIX instead of a lumped constant.
 
-    Denominator = every ``resolve-*.log`` inside the window (each is one spawn), so
-    ``rate`` is spawn_failed / spawns. Scope note: a crash that dumps a LARGE log
+    Denominator = every ``resolve-*.log`` AND every wave ``dispatch-*.log`` inside the
+    window (each is one spawn), so ``rate`` is spawn_failed / spawns. The wave path
+    contributes to BOTH sides (#6492): its launches to the denominator, and its
+    terminal ``*.spawn-failed.json`` read-back records to the numerator — before that,
+    a wave whose children all died on launch still read ``spawn_failed=0``. Scope
+    note: a crash that dumps a LARGE log
     before exiting clears the stub floor and is out of this disk-fold's population —
     it is attributed instead by the live tick's ``cause`` stamp
     (:func:`issue_resolve_dispatch.classify_spawn_failed_cause` at the spawn_failed
@@ -2243,16 +2300,20 @@ def spawn_failed_cause_breakdown(
         return empty
     now_ts = time.time() if now_ts is None else now_ts
     horizon = now_ts - lookback_min * 60
-    # Denominator: every spawn (resolve log) whose mtime is inside the window.
+    # Denominator: every spawn whose mtime is inside the window — the per-issue resolve
+    # logs AND (#6492) the wave path's dispatch logs, so a wave's launches are inside
+    # the same population as its failures instead of only the failures' denominator.
     spawns = 0
-    for log in runs_dir.glob("resolve-*.log"):
-        if not _RESOLVE_LOG_RE.search(log.name):
-            continue
-        try:
-            if log.stat().st_mtime >= horizon:
-                spawns += 1
-        except OSError:
-            continue
+    for pattern, name_re in (("resolve-*.log", _RESOLVE_LOG_RE),
+                             ("dispatch-*.log", _WAVE_LOG_RE)):
+        for log in runs_dir.glob(pattern):
+            if not name_re.search(log.name):
+                continue
+            try:
+                if log.stat().st_mtime >= horizon:
+                    spawns += 1
+            except OSError:
+                continue
     causes = list(getattr(ird, "SPAWN_FAILED_CAUSES",
                           ("weekly_limit", "stale_cred", "child_crash",
                            "exec_race", "unknown")))
@@ -2279,6 +2340,16 @@ def spawn_failed_cause_breakdown(
               "stamp": row.get("stamp"), "size": size, "cause": cause}
         events.append(ev)
         bucket = by_cause.setdefault(cause, {"count": 0, "evidence": []})
+        bucket["count"] += 1
+        if len(bucket["evidence"]) < max_evidence:
+            bucket["evidence"].append(ev)
+    # Numerator, part two (#6492): the wave path's TERMINAL failure records. These need
+    # no pid oracle and no stub-floor inference — the dispatching tick watched the child
+    # exit inside its read-back window and wrote down the returncode, size and cause.
+    # Without them a wave that lost every child reported zero spawn failures.
+    for ev in _wave_spawn_failed_events(runs_dir, horizon=horizon):
+        events.append(ev)
+        bucket = by_cause.setdefault(str(ev.get("cause")), {"count": 0, "evidence": []})
         bucket["count"] += 1
         if len(bucket["evidence"]) < max_evidence:
             bucket["evidence"].append(ev)
@@ -3268,6 +3339,331 @@ def annotate_seat_inventory_from_preflight(seat_inventory: dict[str, Any],
     return out
 
 
+# ---------------------------------------------------------------------------
+# Final launch admission (#6495): the gate the LAUNCHER actually obeys.
+# ---------------------------------------------------------------------------
+#
+# `dispatch_preflight` answers "is the host clean, is an account free, are we under
+# the worker cap?". It does NOT ask the launch-rate/cooldown gate every launcher
+# passes through (`tools/launch_admission.py`, #617). On 2026-08-11 that split let
+# this card publish READY_TO_GROW while six nominally free seats produced ZERO
+# launches: the one-worker dry-run granted 1, and the matching live launch was
+# refused `LAUNCH_RATE_EXCEEDED` with a retry timestamp. A verdict that recommends
+# growth the launcher will refuse is not actionable, so the card now folds the SAME
+# final admission verdict the launcher folds -- per candidate account, including the
+# per-account cooldown and the fleet-wide global cap -- and downgrades READY_TO_GROW
+# to the typed wait verdict LAUNCH_COOLDOWN (with the retry time) whenever a
+# one-worker launch would be deferred.
+
+_LAUNCH_ADMISSION_SCHEMA = "fak.dispatch-launch-admission.v1"
+_SPAWN_GATE_SCHEMA = "fak.dispatch-spawn-gate.v1"
+_ACCOUNTS_SCHEMA = "fak.dispatch-accounts.v1"
+# The typed WAIT verdict: preflight admits, the launcher's final gate does not.
+VERDICT_LAUNCH_COOLDOWN = "LAUNCH_COOLDOWN"
+# Preflight said SPAWN_OK but the final gate could not be consulted at all. Growth
+# stays UNPROVEN rather than advertised (the #6495 failure mode is the false yes).
+VERDICT_ADMISSION_UNKNOWN = "LAUNCH_ADMISSION_UNKNOWN"
+_ADMIT = "ADMIT"
+
+
+def _account_key(tag: Any) -> str:
+    """Case/whitespace-insensitive account identity for matching and de-duping."""
+    return str(tag or "").strip().lower()
+
+
+def launch_candidate_accounts(seat_inventory: dict[str, Any] | None,
+                              selected: str = "") -> list[dict[str, Any]]:
+    """The accounts a ONE-worker launch could target right now: every seat holding a
+    free slot, plus the account preflight itself picked (which need not appear in the
+    pool at all on a single-account host). The switcher's pick leads the list.
+
+    Each row carries the seat's cooldown state so the admission gate is asked the same
+    throttle question the launcher asks (``cooling`` -> throttled, with its reset)."""
+
+    def row(seat: dict[str, Any], tag: str) -> dict[str, Any]:
+        cooldown = seat.get("cooldown") or {}
+        return {
+            "account": tag,
+            "free_slots": _int(seat.get("free_slots")),
+            "throttled": str(seat.get("dispatch_state") or "") == "cooling",
+            "throttle_reset": cooldown.get("next_eligible") or cooldown.get("until"),
+        }
+
+    out: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
+    for seat in (seat_inventory or {}).get("seats") or []:
+        tag = str(seat.get("tag") or seat.get("account") or seat.get("seat") or "").strip()
+        key = _account_key(tag)
+        if not key or key in by_key:
+            continue
+        by_key[key] = seat
+        if (_int(seat.get("free_slots"), 0) or 0) <= 0:
+            continue  # no free slot -> not a launch target this tick
+        out.append(row(seat, tag))
+    sel = _account_key(selected)
+    if sel:
+        for i, cand in enumerate(out):
+            if _account_key(cand["account"]) == sel:
+                out.insert(0, out.pop(i))
+                break
+        else:
+            # The switcher's pick is always asked, even when the pool shows it with no
+            # free slot -- carrying ITS cooldown, so a throttled pick cannot read as
+            # admitted just because it fell out of the free-seat scan.
+            seat = by_key.get(sel)
+            out.insert(0, row(seat, str(selected).strip()) if seat else
+                       {"account": str(selected).strip(), "free_slots": None,
+                        "throttled": False, "throttle_reset": None})
+    return out
+
+
+def _earliest_retry(retries: list[Any]) -> Any:
+    """The soonest retry marker among a set of DEFERs. Parseable ISO stamps win (the
+    operator can wait on them); an unparseable marker (a throttle reset like "3pm" is
+    surfaced verbatim by the gate) is kept only when nothing parseable exists."""
+    dated = [(e, r) for r in retries
+             if r and (e := _iso_epoch(r)) is not None]
+    if dated:
+        return min(dated, key=lambda p: p[0])[1]
+    return next((r for r in retries if r), None)
+
+
+def launch_admission_fold(rows: list[dict[str, Any]], *,
+                          selected: str = "") -> dict[str, Any]:
+    """Pure fold: per-account admission verdicts -> the card's final launch gate.
+
+    ``would_launch`` is True iff at least ONE candidate account is admitted — that is
+    exactly the question "could a one-worker launch fire right now?". When nothing is
+    admitted the fold carries the blocking reason token (the switcher's own account
+    first, else the first deferral) and the soonest retry time, so the card can say
+    LAUNCH_COOLDOWN <token> until <ts> instead of READY_TO_GROW."""
+    rows = list(rows or [])
+    admitted = [r for r in rows if str(r.get("verdict") or "") == _ADMIT]
+    deferred = [r for r in rows if str(r.get("verdict") or "") != _ADMIT]
+    sel = _account_key(selected)
+    lead = next((r for r in deferred if _account_key(r.get("account")) == sel),
+                deferred[0] if deferred else {})
+    return {
+        "schema": _LAUNCH_ADMISSION_SCHEMA,
+        "evaluated": bool(rows),
+        "would_launch": bool(admitted),
+        "selected": str(selected).strip() or None,
+        "verdict": _ADMIT if admitted else "DEFER",
+        "reason": None if admitted else (lead.get("reason") or None),
+        "retry_after": None if admitted else _earliest_retry(
+            [r.get("retry_after") for r in deferred]),
+        "detail": (lead.get("detail") or "") if not admitted else "",
+        "admitted_accounts": [r.get("account") for r in admitted],
+        "deferred_accounts": [
+            {"account": r.get("account"), "reason": r.get("reason"),
+             "retry_after": r.get("retry_after")}
+            for r in deferred
+        ],
+        "accounts": rows,
+    }
+
+
+def read_launch_admission(root: Path, pre: dict[str, Any],
+                          seat_inventory: dict[str, Any] | None = None,
+                          *, now: Any = None, ledger_path: str | None = None,
+                          admitter: Any | None = None) -> dict[str, Any]:
+    """Ask the LAUNCHER's own admission gate whether one more worker would launch.
+
+    Delegates to ``launch_admission.admit_or_defer`` (the single #617 seam every
+    launcher passes through) once per candidate account, with ``record=False`` so the
+    question has no side effect on the ledger. The card therefore grades growth on the
+    SAME three gates the next launch gets: the account throttle/cooldown reset, the
+    fleet-wide global cap, and the per-account rate ceiling.
+
+    Pure-local ledger read (no gh, no subprocess), so ``--fast`` keeps it. Best effort:
+    an import/read failure degrades to ``{"_error": ...}`` like the sibling card folds
+    and never raises — but, unlike them, an un-consultable gate is NOT read as a green
+    light (see ``_apply_launch_admission``). ``admitter`` is injectable for hermetic
+    tests (same signature as the closure built here)."""
+    selected = str(((pre or {}).get("account") or {}).get("tag") or "").strip()
+    candidates = launch_candidate_accounts(seat_inventory, selected)
+    if not candidates:
+        return {"schema": _LAUNCH_ADMISSION_SCHEMA, "evaluated": False,
+                "would_launch": None, "selected": selected or None,
+                "detail": "no candidate account to launch onto"}
+    try:
+        if admitter is None:
+            sys.path.insert(0, str(root / "tools"))
+            import launch_admission  # noqa: PLC0415  (lazy: only paid for on the card)
+            ledger = ledger_path or launch_admission.DEFAULT_LEDGER
+
+            def admitter(account, *, throttled=False, throttle_reset=None):  # noqa: F811
+                return launch_admission.admit_or_defer(
+                    account, ledger_path=ledger, now=now, throttled=throttled,
+                    throttle_reset=throttle_reset, record=False)
+
+        rows: list[dict[str, Any]] = []
+        for cand in candidates:
+            v = admitter(cand["account"], throttled=bool(cand.get("throttled")),
+                         throttle_reset=cand.get("throttle_reset")) or {}
+            rows.append({
+                "account": cand["account"],
+                "free_slots": cand.get("free_slots"),
+                "verdict": v.get("verdict"),
+                "reason": v.get("reason"),
+                "retry_after": v.get("retry_after"),
+                "detail": v.get("detail"),
+            })
+    except Exception as exc:  # best-effort card fold; never fail the whole card
+        return {"schema": _LAUNCH_ADMISSION_SCHEMA, "evaluated": False,
+                "would_launch": None, "selected": selected or None,
+                "_error": str(exc)}
+    return launch_admission_fold(rows, selected=selected)
+
+
+def _launch_evidence(silent: list[dict[str, Any]],
+                     spawn_causes: dict[str, Any]) -> dict[str, Any]:
+    """The trailing evidence that a REPORTED launch did not become a worker (#6492):
+    workers whose pid is dead over a log that never crossed the real-turn floor —
+    the immediate-exit / false-success signature — beside the spawn counters that
+    reported those same launches as successful. Carried on the spawn gate so a
+    growth recommendation is never read without the last wave's actual outcome."""
+    return {
+        "immediate_exits": len(silent),
+        "issues": [w.get("issue") for w in silent[:6]],
+        "spawns": spawn_causes.get("spawns"),
+        "spawn_failed": spawn_causes.get("spawn_failed"),
+        "note": ("immediate_exits are dead-pid workers whose log never crossed the "
+                 "real-turn floor; a nonzero count beside spawn_failed=0 is the "
+                 "#6492 false-success signature"),
+    }
+
+
+def _spawn_gate_block(pre_verdict: Any, admission: dict[str, Any] | None,
+                      *, verdict: str, next_action: str,
+                      evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The card's spawn-gate block: BOTH halves of the real spawn decision — the
+    preflight (host/account/cap) and the launcher's final admission gate — plus the
+    single derived answer "would one more worker actually launch right now?"."""
+    admission = admission or {}
+    would = admission.get("would_launch")
+    preflight_ok = str(pre_verdict or "") == "SPAWN_OK"
+    return {
+        "schema": _SPAWN_GATE_SCHEMA,
+        "preflight_verdict": pre_verdict,
+        "admission": admission,
+        "would_launch": (bool(would) and preflight_ok) if would is not None else None,
+        "reason": (None if would else admission.get("reason")) if admission else None,
+        "retry_after": admission.get("retry_after") if not would else None,
+        "verdict": verdict,
+        "next_action": next_action,
+        "launch_evidence": evidence or {},
+    }
+
+
+def _accounts_block(seat_inventory: dict[str, Any] | None, acct: dict[str, Any],
+                    admission: dict[str, Any] | None) -> dict[str, Any]:
+    """The card's accounts block: the seat pool joined to the FINAL admission verdict
+    per account, so "N free seats" is never mistaken for "N launchable seats" (the
+    #6495 gap — six free seats, zero admitted launches)."""
+    seat_inventory = seat_inventory or {}
+    admission = admission or {}
+    by_account = {_account_key(r.get("account")): r
+                  for r in (admission.get("accounts") or [])}
+    admitted = [r for r in by_account.values()
+                if str(r.get("verdict") or "") == _ADMIT]
+    launchable = [r.get("account") for r in admitted]
+    # In SLOTS, so it is comparable to free_seats: an admitted account contributes its
+    # free slots (the switcher's pick, which need not be a pool seat at all, contributes
+    # the one launch we actually asked about).
+    launchable_slots = 0
+    for row in admitted:
+        slots = _int(row.get("free_slots"))
+        launchable_slots += 1 if slots is None else max(0, slots)
+    return {
+        "schema": _ACCOUNTS_SCHEMA,
+        "selected": {k: acct.get(k) for k in ("tag", "tier", "model", "available")},
+        "total_seats": seat_inventory.get("total_seats"),
+        "free_seats": seat_inventory.get("free_seats"),
+        "leased_seats": seat_inventory.get("leased_seats"),
+        "blocked_seats": seat_inventory.get("blocked_seats"),
+        "launchable_seats": None if not admission.get("evaluated") else launchable_slots,
+        "launchable_accounts": None if not admission.get("evaluated") else len(launchable),
+        "launchable": launchable,
+        "deferred": admission.get("deferred_accounts") or [],
+        "admission_evaluated": bool(admission.get("evaluated")),
+        "admission_error": admission.get("_error"),
+    }
+
+
+def _apply_launch_admission(admission: dict[str, Any] | None, *, ok: bool,
+                            verdict: str, reasons: list[str]) -> tuple[bool, str]:
+    """Fold the launcher's final admission verdict into the card verdict (#6495).
+
+    Only the GROWTH verdict is rewritten: READY_TO_GROW is the one that tells an
+    operator (or an autonomous planner) to launch, so it is the one that must not
+    outrun the launcher. A DEFER makes it the typed wait verdict LAUNCH_COOLDOWN; an
+    un-consultable gate makes it LAUNCH_ADMISSION_UNKNOWN. Both stay ``ok`` — a
+    cooldown is a healthy steady state like AT_CAP, not breakage. Every other verdict
+    (already a hold or a failure) keeps its more specific token and only gains the
+    reason line."""
+    if not admission:
+        return ok, verdict
+    if admission.get("_error"):
+        if verdict == "READY_TO_GROW":
+            reasons.insert(0, "final launch admission gate could not be consulted "
+                              f"({admission.get('_error')}) — growth UNPROVEN; run "
+                              "`python tools/launch_admission.py admit --account <tag>`")
+            return ok, VERDICT_ADMISSION_UNKNOWN
+        return ok, verdict
+    if not admission.get("evaluated") or admission.get("would_launch"):
+        return ok, verdict
+    token = admission.get("reason") or "LAUNCH_DEFERRED"
+    retry = admission.get("retry_after") or "?"
+    deferred = admission.get("deferred_accounts") or []
+    reasons.insert(0, f"final launch admission would DEFER every candidate account "
+                      f"({len(deferred)}): {token} — retry after {retry}")
+    if verdict == "READY_TO_GROW":
+        return ok, VERDICT_LAUNCH_COOLDOWN
+    return ok, verdict
+
+
+# The operator's single next move per verdict. Growth verdicts get a launch action;
+# a wait verdict gets the thing to wait ON (never a bare "wait"), so the field is
+# actionable on its own — the #6495 payload had no next_action at all.
+_NEXT_ACTION_BY_VERDICT = {
+    "READY_TO_GROW": "launch one worker (`python tools/issue_resolve_dispatch.py --live`)",
+    "AT_CAP": "hold: at the configured worker ceiling",
+    "BLOCKED_ON_ACCOUNT": "hold: wait for an account to free (`fak accounts status`)",
+    "BLOCKED_ON_SEAT": "hold: wait for a dispatch seat to free (`fak accounts status`)",
+    "BLOCKED_ON_PREFLIGHT": ("clear the preflight refusal named in the reasons "
+                             "(`python tools/dispatch_preflight.py --json`)"),
+    "BLOCKED_ON_BIN_SKEW": ("rebuild/install a clean `fak` — the adjudicating binary "
+                            "is an unreviewed build (or set "
+                            "FAK_PREFLIGHT_ALLOW_BIN_SKEW=1 deliberately)"),
+    "WEEKLY_CAPPED": "hold: the account is weekly-capped until its reset",
+    "INSPECT": "inspect: a safety preflight could not run",
+    "HOST_FLAGGED": "reap/inspect the flagged host process before growing",
+}
+
+
+def _next_action(verdict: str, admission: dict[str, Any] | None,
+                 merge: dict[str, Any], reasons: list[str]) -> str:
+    """The one next move, derived from the SAME verdict the card publishes."""
+    admission = admission or {}
+    if verdict == "MERGE_IN_PROGRESS":
+        return str(merge.get("next_action")
+                   or "wait for MERGE_HEAD to clear before starting worker edits")
+    if verdict == VERDICT_LAUNCH_COOLDOWN:
+        return (f"wait for launch admission: {admission.get('reason') or 'DEFER'} "
+                f"until {admission.get('retry_after') or '?'} "
+                f"(`python tools/launch_admission.py admit --account "
+                f"{admission.get('selected') or '<tag>'}`)")
+    if verdict == VERDICT_ADMISSION_UNKNOWN:
+        return ("re-run the launch admission gate by hand: "
+                "`python tools/launch_admission.py admit --account "
+                f"{admission.get('selected') or '<tag>'}`")
+    known = _NEXT_ACTION_BY_VERDICT.get(verdict)
+    if known:
+        return known
+    return str((reasons or [""])[0])
+
+
 def _github_rate_limit_error(*docs: dict[str, Any]) -> str:
     for doc in docs:
         err = str((doc or {}).get("_error") or "")
@@ -3477,6 +3873,11 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         low_yield = low_yield_f.result()
         ships = ships_f.result()
 
+    # The launcher's FINAL admission gate (#6495), asked with no side effect once the
+    # seat pool is known. Pure-local ledger read (no gh, no subprocess), so --fast and
+    # the full card fold the SAME gate the next launch will pass through.
+    launch_admission_state = read_launch_admission(root, pre, seat_inventory)
+
     # Watch decision (#2642): explain WHY the health-watch (no-)acts, folded from
     # the trailing window of progress rows. Pure-local read, informational only —
     # never launches work or changes caps. The scheduled-task classification
@@ -3511,7 +3912,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          low_yield=low_yield, ships=ships, watch=watch,
                          backlog_rate=backlog_rate, spawn_causes=spawn_causes,
                          seat_streaks=seat_streaks, fleet_decline=fleet_decline,
-                         route_health=route_health)
+                         route_health=route_health,
+                         launch_admission=launch_admission_state)
 
 
 # ---------------------------------------------------------------------------
@@ -4105,6 +4507,14 @@ def _git_block(merge: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Preflight refusals the card has a SPECIFIC name for. Anything else still holds
+# (BLOCKED_ON_PREFLIGHT, with the raw token in the reason) — never READY_TO_GROW.
+_PREFLIGHT_HOLD_VERDICT = {
+    "REFUSE_WEEKLY_CAPPED": "WEEKLY_CAPPED",
+    "REFUSE_BIN_SKEW": "BLOCKED_ON_BIN_SKEW",
+}
+
+
 def _dispatch_base_verdict(*, pre: dict, cap: int | None, live: int | None,
                            host_safe: bool, acct: dict[str, Any],
                            weekly_cap: dict[str, Any] | None,
@@ -4135,10 +4545,26 @@ def _dispatch_base_verdict(*, pre: dict, cap: int | None, live: int | None,
         ok = True
         verdict = "AT_CAP"
         reasons.append(f"{live}/{cap} workers live — at the configured ceiling")
-    else:
+    elif pre_verdict == "SPAWN_OK":
         ok = True
         verdict = "READY_TO_GROW"
         reasons.append(f"safe to spawn: {live}/{cap} live, account '{acct.get('tag')}' free")
+    else:
+        # Every OTHER preflight token is still a REFUSAL to spawn — `REFUSE_BIN_SKEW`
+        # (#6508), `REFUSE_HOST`, `REFUSE_WEEKLY_CAPPED`, or a token added tomorrow.
+        # Falling through to READY_TO_GROW on an unmodelled refusal is the #6495 failure
+        # in its purest form: the card advertised growth on a gate that had already said
+        # no. Unknown tokens therefore HOLD (naming the token), and a missing verdict
+        # (the preflight itself could not be read) holds too rather than assuming yes.
+        ok = True
+        verdict = _PREFLIGHT_HOLD_VERDICT.get(str(pre_verdict or ""),
+                                              "BLOCKED_ON_PREFLIGHT")
+        if pre_verdict:
+            reasons.append(f"preflight refuses to spawn: {pre_verdict} — "
+                           f"{pre.get('reason') or 'run tools/dispatch_preflight.py --json'}")
+        else:
+            reasons.append("no preflight verdict — cannot confirm a spawn is safe "
+                           "(run `python tools/dispatch_preflight.py --json`)")
 
     # A logged-in-but-quota-capped account makes the preflight read SPAWN_OK while
     # the dispatcher's weekly-cap gate is actually HOLDING. Surface that so the card
@@ -4585,7 +5011,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   spawn_causes: dict[str, Any] | None = None,
                   seat_streaks: list[dict[str, Any]] | None = None,
                   fleet_decline: dict[str, Any] | None = None,
-                  route_health: dict[str, Any] | None = None) -> dict[str, Any]:
+                  route_health: dict[str, Any] | None = None,
+                  launch_admission: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -4601,6 +5028,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     ok, verdict, reasons = _dispatch_base_verdict(
         pre=pre, cap=cap, live=live, host_safe=host_safe, acct=acct,
         weekly_cap=weekly_cap, merge=merge)
+
+    # The launcher's FINAL gate (#6495). Folded immediately after the base verdict so
+    # no later alarm can be read as the reason growth is held: a READY_TO_GROW that the
+    # launch-rate/cooldown gate would refuse becomes LAUNCH_COOLDOWN right here, with
+    # the retry time, before any other signal is layered on.
+    ok, verdict = _apply_launch_admission(
+        launch_admission, ok=ok, verdict=verdict, reasons=reasons)
 
     reasons += _watchdog_reasons(wd)
     silent = silent or []
@@ -4686,11 +5120,18 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         weekly_cap=weekly_cap, merge=merge)
     reasons += _utilization_reasons(utilization)
 
+    next_action = _next_action(verdict, launch_admission, merge, reasons)
+
     return {
         "schema": SCHEMA,
         "ok": ok,
         "verdict": verdict,
         "reasons": reasons,
+        "next_action": next_action,
+        "spawn_gate": _spawn_gate_block(pre_verdict, launch_admission,
+                                        verdict=verdict, next_action=next_action,
+                                        evidence=_launch_evidence(silent, spawn_causes)),
+        "accounts": _accounts_block(seat_inventory, acct, launch_admission),
         "workspace": str(root),
         "weekly_cap": weekly_cap,
         "dispatcher": {
@@ -4935,7 +5376,33 @@ def _card_gate_lines(p: dict[str, Any]) -> list[str]:
             f"║ use       : {util.get('state')} "
             f"slots={slots.get('live')}/{slots.get('cap')} "
             f"free={slots.get('headroom')} next={actions}")
+    lines += _card_launch_gate_lines(p)
     return lines
+
+
+def _card_launch_gate_lines(p: dict[str, Any]) -> list[str]:
+    """The launcher's final admission gate (#6495): would ONE more worker actually
+    launch, on which accounts, and — when not — what to wait on."""
+    gate = p.get("spawn_gate") or {}
+    if not gate.get("schema"):
+        return []
+    adm = gate.get("admission") or {}
+    accounts = p.get("accounts") or {}
+    if adm.get("_error"):
+        state = f"UNKNOWN ({adm.get('_error')})"
+    elif not adm.get("evaluated"):
+        state = "n/a (no candidate account)"
+    elif gate.get("would_launch"):
+        state = f"ADMIT [{', '.join(str(a) for a in adm.get('admitted_accounts') or [])}]"
+    else:
+        state = (f"{adm.get('reason') or 'DEFER'} retry={adm.get('retry_after') or '?'}"
+                 f" (0/{len(adm.get('accounts') or [])} accounts admitted)")
+    return [
+        f"║ admission : {state} "
+        f"launchable={_or_unknown(accounts.get('launchable_seats'))}/"
+        f"{_or_unknown(accounts.get('free_seats'))} free seat(s)",
+        f"║ next      : {p.get('next_action') or '-'}",
+    ]
 
 
 def _card_flow_lines(p: dict[str, Any]) -> list[str]:
@@ -5185,6 +5652,23 @@ def render(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _md_admission_clause(payload: dict[str, Any]) -> str:
+    """One line of the launcher's final admission state for the operator doc."""
+    gate = payload.get("spawn_gate") or {}
+    adm = gate.get("admission") or {}
+    accounts = payload.get("accounts") or {}
+    seats = (f" ({accounts.get('launchable_seats')}/{accounts.get('free_seats')} "
+             f"free seat(s) launchable)") if adm.get("evaluated") else ""
+    if adm.get("_error"):
+        return f"**UNKNOWN** — gate not consultable ({adm.get('_error')})"
+    if not adm.get("evaluated"):
+        return "n/a (no candidate account)"
+    if gate.get("would_launch"):
+        return f"`ADMIT`{seats}"
+    return (f"**`{adm.get('reason') or 'DEFER'}`** — retry after "
+            f"`{adm.get('retry_after') or '?'}`{seats}")
+
+
 def _md_summary_bullets(payload: dict[str, Any], *, date: str) -> list[str]:
     """The Jekyll front matter, the dated title, and the dispatcher/worker/
     limiter/switcher/watchdog/supervisor summary bullets that open the doc."""
@@ -5217,6 +5701,10 @@ def _md_summary_bullets(payload: dict[str, Any], *, date: str) -> list[str]:
         f"({_dispatch_limiter_terms(d.get('limiter') or {})})",
         f"- **switcher account**: `{a.get('tag') or '-'}` (t{a.get('tier')}, "
         f"{a.get('model') or '?'}), available={a.get('available')}",
+        # The launcher's FINAL gate (#6495): the doc used to publish a growth verdict
+        # the launcher would refuse, with no admission state to check it against.
+        f"- **launch admission**: {_md_admission_clause(payload)}",
+        f"- **next action**: {payload.get('next_action') or '-'}",
         "- **always-on watchdog**: "
         + ("installed (" + str(wd.get('status') or 'scheduled') + ")"
            if wd.get("installed") else
