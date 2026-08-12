@@ -1,15 +1,22 @@
 package dispatchcache
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
 const BacklogSchema = "fak.dispatch-backlog.v1"
+
+// BacklogWatermarkSchema tags the sidecar that carries the watermark of a tick whose delta
+// changed nothing. It is deliberately a separate file from the snapshot: the snapshot's issue
+// array is multi-megabyte, the watermark is 28 bytes, and a quiet tick only moves the latter.
+const BacklogWatermarkSchema = "fak.dispatch-backlog-watermark.v1"
 
 type BacklogIssue struct {
 	Number int             `json:"number"`
@@ -21,6 +28,14 @@ type BacklogSnapshot struct {
 	Key       string         `json:"key"`
 	Watermark time.Time      `json:"watermark"`
 	Issues    []BacklogIssue `json:"issues"`
+}
+
+// backlogWatermark is the on-disk shape of the sidecar. It repeats the key so a snapshot written
+// under a different key can never inherit an unrelated tick's watermark.
+type backlogWatermark struct {
+	Schema    string    `json:"schema"`
+	Key       string    `json:"key"`
+	Watermark time.Time `json:"watermark"`
 }
 
 func MergeBacklog(base []BacklogIssue, changed []BacklogIssue, closed []int) []BacklogIssue {
@@ -46,6 +61,34 @@ func MergeBacklog(base []BacklogIssue, changed []BacklogIssue, closed []int) []B
 	return out
 }
 
+// SyncBacklog merges a delta into the cached snapshot and persists the result, returning the
+// merged rows. A tick that learns nothing -- no changed row, no closure, so the merge is
+// byte-identical to the base -- writes only the watermark sidecar, leaving the snapshot's bytes
+// and mtime untouched; a tick that learns anything rewrites the whole snapshot exactly as before.
+// Callers must not write the snapshot themselves on the delta path.
+func SyncBacklog(path, key string, watermark time.Time, base, changed []BacklogIssue, closed []int) ([]BacklogIssue, error) {
+	merged := MergeBacklog(base, changed, closed)
+	if sameBacklog(base, merged) {
+		return merged, WriteBacklogWatermark(path, key, watermark)
+	}
+	return merged, WriteBacklog(path, key, watermark, merged)
+}
+
+// sameBacklog reports whether two merged row sets carry the same issues with the same bytes.
+// Comparing the merge result (rather than just len(changed)==0 && len(closed)==0) also catches a
+// delta that re-sends an unchanged issue or closes one the snapshot never held.
+func sameBacklog(a, b []BacklogIssue) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Number != b[i].Number || !bytes.Equal(a[i].Data, b[i].Data) {
+			return false
+		}
+	}
+	return true
+}
+
 func WriteBacklog(path, key string, watermark time.Time, issues []BacklogIssue) error {
 	if path == "" || key == "" {
 		return errors.New("dispatchcache: backlog path and key are required")
@@ -54,7 +97,36 @@ func WriteBacklog(path, key string, watermark time.Time, issues []BacklogIssue) 
 	if err != nil {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err = writeAtomic(path, b); err != nil {
+		return err
+	}
+	// The snapshot now carries the newest watermark, so any sidecar left by earlier quiet ticks
+	// is redundant. Removal is best-effort: ReadBacklog only honours a sidecar that is strictly
+	// ahead of the snapshot, so a survivor is inert.
+	_ = os.Remove(backlogWatermarkPath(path))
+	return nil
+}
+
+// WriteBacklogWatermark advances the watermark without touching the snapshot. The next delta
+// search still starts where this tick finished, so a long run of quiet ticks does not widen the
+// window back to the last time an issue actually changed.
+func WriteBacklogWatermark(path, key string, watermark time.Time) error {
+	if path == "" || key == "" {
+		return errors.New("dispatchcache: backlog path and key are required")
+	}
+	b, err := json.Marshal(backlogWatermark{Schema: BacklogWatermarkSchema, Key: key, Watermark: watermark.UTC()})
+	if err != nil {
+		return err
+	}
+	return writeAtomic(backlogWatermarkPath(path), b)
+}
+
+func backlogWatermarkPath(path string) string {
+	return strings.TrimSuffix(path, filepath.Ext(path)) + ".watermark.json"
+}
+
+func writeAtomic(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".backlog-*.tmp")
@@ -80,5 +152,19 @@ func ReadBacklog(path, key string) (BacklogSnapshot, bool) {
 	if err != nil || json.Unmarshal(b, &s) != nil || s.Schema != BacklogSchema || s.Key != key || s.Watermark.IsZero() {
 		return BacklogSnapshot{}, false
 	}
+	if w, ok := readBacklogWatermark(path, key); ok && w.After(s.Watermark) {
+		s.Watermark = w
+	}
 	return s, true
+}
+
+// readBacklogWatermark returns the sidecar watermark for this key. A missing, corrupt, or
+// foreign-key sidecar is simply ignored -- the snapshot's own watermark stays authoritative.
+func readBacklogWatermark(path, key string) (time.Time, bool) {
+	var w backlogWatermark
+	b, err := os.ReadFile(backlogWatermarkPath(path))
+	if err != nil || json.Unmarshal(b, &w) != nil || w.Schema != BacklogWatermarkSchema || w.Key != key || w.Watermark.IsZero() {
+		return time.Time{}, false
+	}
+	return w.Watermark, true
 }

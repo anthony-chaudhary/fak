@@ -552,12 +552,14 @@ func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]d
 	if snap, ok := dispatchcache.ReadBacklog(path, key); ok {
 		delta, err := dispatchFetchBacklogDeltaIssues(root, snap.Watermark, limit)
 		if err == nil {
-			merged := dispatchcache.MergeBacklog(snap.Issues, dispatchIssueRows(delta.Issues), delta.Closed)
 			watermark := delta.Watermark
 			if watermark.IsZero() {
 				watermark = now
 			}
-			if err = dispatchcache.WriteBacklog(path, key, watermark, merged); err == nil {
+			// SyncBacklog merges and persists in one step so a quiet tick rewrites only the
+			// watermark sidecar instead of the whole multi-megabyte issue array (#6092).
+			merged, werr := dispatchcache.SyncBacklog(path, key, watermark, snap.Issues, dispatchIssueRows(delta.Issues), delta.Closed)
+			if werr == nil {
 				return dispatchRowsIssues(merged)
 			}
 		}
