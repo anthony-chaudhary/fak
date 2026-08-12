@@ -18,6 +18,8 @@ fak is one Go binary between an agent and its model/tools. Keep Claude Code, Cod
 
 <!-- readme-verified: 2026-08-09 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
+**Current focus: spend fewer tokens and turns.** See the [performance-first capability map](docs/CAPABILITIES.md) for the shipped turn-tax controls, stable-prefix reuse, managed context, per-call model routing, cache-value accounting, and out-of-band session controls. The security floor remains shipped and indexed, but it supports this efficiency story rather than leading it.
+
 ## Install and run
 
 macOS or Linux (the installer verifies the release SHA-256):
@@ -39,6 +41,8 @@ fak guard --provider openai -- codex     # provider is normally auto-detected
 See [INSTALL.md](INSTALL.md) for manual downloads, containers, source builds, and release verification, or [first-run troubleshooting](docs/adoption/troubleshooting-first-run.md) if the command refuses to start.
 
 ## What changes at the boundary
+
+The largest avoidable cost is often not one token string but an entire extra model round trip: the resident prefix is processed again, latency is paid again, and the result enlarges later context. fak can measure that **turn tax**, complete kernel-known work without another model call, and let an operator budget or steer a live session without prompting the model to manage itself.
 
 | Outcome | How fak provides it |
 |---|---|

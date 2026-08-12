@@ -5,6 +5,8 @@ description: "The durable catalog of what fak invented or assembled: each innova
 
 # INNOVATIONS INDEX — fak's innovations, concepts, and learnings, in one map
 
+> Looking for product capabilities rather than the exhaustive research inventory? Start with [Spend fewer tokens and turns](CAPABILITIES.md), the performance-first map of shipped outcomes. This index retains maturity labels and the supporting security work.
+
 The durable, refreshable catalog of *what fak invented or assembled* — distinct from
 the doc map ([`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)), the repo map ([`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md)), the
 naming disambiguators ([`docs/glossary.md`](glossary.md) / [`docs/fak/concept-glossary.md`](fak/concept-glossary.md)),

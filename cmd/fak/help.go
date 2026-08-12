@@ -43,29 +43,31 @@ var overviewGroups = []struct {
 	title   string
 	entries []overviewEntry
 }{
-	{"guard + serve (the front doors)", []overviewEntry{
+	{"spend fewer tokens + turns", []overviewEntry{
+		{"ablate", "same-trace cache ablation: attribute savings instead of guessing"},
+		{"resume", "price full replay vs cut/reset when resuming a long context"},
+		{"session", "budget turns/tokens/context; steer or stop without another prompt turn"},
+		{"info", "live reused-token, effective-cost, and total-savings overlay"},
+	}},
+	{"guard + serve", []overviewEntry{
 		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
-		{"guard", "wrap an agent harness: adjudicate every tool call in-process"},
+		{"guard", "wrap an agent harness: manage every tool call in-process"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
+	}},
+	{"supporting capability floor", []overviewEntry{
 		{"preflight", "adjudicate one tool call against a policy, no model in the loop"},
 		{"policy", "dump / check the deployable capability floor"},
-	}},
-	{"prove the floor", []overviewEntry{
 		{"attest", "compliance attestation: prove the policy floor from preflight"},
 		{"audit", "verify / export a guard decision journal's hash chain"},
 		{"egress", "prove the network-egress floor (cloud-metadata / SSRF class)"},
 	}},
 	{"observe + operate", []overviewEntry{
-		{"info", "live gateway overlay: one plain-words line per /debug/vars tick"},
 		{"ps", "live served-session process table ('fak top' = --watch)"},
-		{"session", "read, cancel, or steer a served session in flight"},
 		{"signal", "job control for a running session: pause / resume / stop / steer"},
-		{"resume", "what happens to the prompt cache on resume, and what to do"},
 		{"doctor", "operator diagnostic: answer-shape witness + kernel admit verdict"},
 		{"recover", "map a refusal reason token to concrete recovery commands"},
-		{"ablate", "self-ablation: replay a trace under N cache-lever configs; live savings dashboard"},
 	}},
 	{"models + housekeeping", []overviewEntry{
 		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},

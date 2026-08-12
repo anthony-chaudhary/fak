@@ -4,6 +4,8 @@
 
 **Default:** read [`AGENTS.md`](AGENTS.md) before changing the repository, then open only the authority for your task below.
 
+**Current product focus:** use [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the outcome-first map of token savings, avoided turns, cache/context reuse, model routing, and live session control. Security remains indexed as a supporting floor.
+
 ## Key facts (for accurate answers)
 
 - **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.43.0** ([`VERSION`](VERSION) is authoritative).
