@@ -126,6 +126,155 @@ func TestWeldedMappingKeys(t *testing.T) {
 	}
 }
 
+// TestFeatureRequestMatchesProblemDoc binds the feature-request form's problem
+// checkboxes to the headings in docs/problems-we-solve.md.
+//
+// This is the drift that caused the outage above, one step upstream. The form's
+// problem field was added by the doc rollout (45fafabb35) and then went stale in
+// two directions at once: the YAML broke, and the doc separately retired the
+// "choose one primary P-ID" convention the field was built around
+// (docs/problems-we-solve.md: "The block replaces the old 'choose one primary
+// P-ID' convention" / "Multiple rows may be advanced because the problems are a
+// cluster, not competing buckets"). Nothing connected the two files, so renaming a
+// problem in the doc leaves the public form quietly describing the old model.
+//
+// The doc is the source of truth: every "### Pn — Title" heading must appear as a
+// checkbox label, and the form may not offer a problem the doc does not define.
+// Labels carry a parenthetical gloss after the title, so the heading is matched as
+// a PREFIX rather than for equality — the gloss is the form's to word.
+func TestFeatureRequestMatchesProblemDoc(t *testing.T) {
+	root := filepath.Dir(internalDir(t))
+
+	docBytes, err := os.ReadFile(filepath.Join(root, "docs", "problems-we-solve.md"))
+	if err != nil {
+		t.Fatalf("read docs/problems-we-solve.md: %v", err)
+	}
+	headings := problemHeadings(string(docBytes))
+	// Fail closed: no headings means the doc's section format moved and this gate
+	// would wave through any form at all.
+	if len(headings) == 0 {
+		t.Fatal("no \"### Pn — Title\" headings found in docs/problems-we-solve.md — " +
+			"the doc's section format changed, so this gate is silently inert")
+	}
+
+	const form = ".github/ISSUE_TEMPLATE/feature-request.yml"
+	formBytes, err := os.ReadFile(filepath.Join(root, ".github", "ISSUE_TEMPLATE", "feature-request.yml"))
+	if err != nil {
+		t.Fatalf("read %s: %v", form, err)
+	}
+	labels := problemLabels(string(formBytes))
+	for _, msg := range bindProblems(headings, labels) {
+		t.Errorf("%s and docs/problems-we-solve.md disagree: %s", form, msg)
+	}
+	t.Logf("problem headings bound to form checkboxes: %d", len(headings))
+}
+
+// TestBindProblems witnesses both directions of the doc-to-form binding, so the
+// gate is not merely green against today's files: a problem renamed in the doc,
+// and a problem the form offers that the doc no longer defines.
+func TestBindProblems(t *testing.T) {
+	const docFixture = "# intro\n\n### P1 — Managed context\n\nprose\n\n### P2 — Net-true efficiency\n\n#### P9 not a section\n"
+	headings := problemHeadings(docFixture)
+	if len(headings) != 2 {
+		t.Fatalf("problemHeadings: got %q, want the two \"### Pn\" headings only", headings)
+	}
+
+	form := func(labels ...string) string {
+		var b strings.Builder
+		b.WriteString("body:\n  - type: checkboxes\n    attributes:\n      options:\n")
+		for _, l := range labels {
+			b.WriteString("        - label: " + l + "\n")
+		}
+		return b.String()
+	}
+
+	for _, tc := range []struct {
+		name    string
+		labels  []string
+		wantBad bool
+	}{
+		{"aligned, with glosses", []string{
+			"P1 — Managed context (sessions rebuild setup)",
+			"P2 — Net-true efficiency (looks cheaper in isolation)",
+		}, false},
+		{"aligned, bare titles", []string{"P1 — Managed context", "P2 — Net-true efficiency"}, false},
+		{"doc renamed a problem", []string{"P1 — Context management", "P2 — Net-true efficiency"}, true},
+		{"form missing a problem", []string{"P1 — Managed context"}, true},
+		{"form offers a retired problem", []string{
+			"P1 — Managed context", "P2 — Net-true efficiency", "P5 — Something removed",
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := bindProblems(headings, problemLabels(form(tc.labels...)))
+			if (len(bad) > 0) != tc.wantBad {
+				t.Fatalf("bindProblems: disagreements=%v want any=%v", bad, tc.wantBad)
+			}
+		})
+	}
+}
+
+// problemHeadings returns each "### Pn — Title" heading of the problem doc, in
+// document order, without the leading "### ".
+func problemHeadings(doc string) []string {
+	var out []string
+	for _, raw := range strings.Split(doc, "\n") {
+		l := strings.TrimSpace(strings.TrimRight(raw, "\r"))
+		rest, ok := strings.CutPrefix(l, "### ")
+		if !ok || len(rest) < 2 || rest[0] != 'P' || rest[1] < '1' || rest[1] > '9' {
+			continue
+		}
+		out = append(out, strings.TrimSpace(rest))
+	}
+	return out
+}
+
+// problemLabels returns the checkbox labels of the form that name a problem.
+func problemLabels(form string) []string {
+	var out []string
+	for _, raw := range strings.Split(form, "\n") {
+		l := strings.TrimSpace(strings.TrimRight(raw, "\r"))
+		if rest, ok := strings.CutPrefix(l, "- label: P"); ok {
+			out = append(out, "P"+rest)
+		}
+	}
+	return out
+}
+
+// bindProblems reports every way the doc's headings and the form's labels have
+// come apart. A label carries a parenthetical gloss after the title, so a heading
+// binds to a label by PREFIX; the gloss is the form's own wording.
+func bindProblems(headings, labels []string) []string {
+	var out []string
+	bound := func(h, l string) bool { return strings.HasPrefix(l, h) }
+	for _, h := range headings {
+		matched := false
+		for _, l := range labels {
+			if bound(h, l) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			out = append(out, "the doc defines "+h+" but the form offers no checkbox for it "+
+				"(the public form describes a problem model the doc no longer uses)")
+		}
+	}
+	for _, l := range labels {
+		matched := false
+		for _, h := range headings {
+			if bound(h, l) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			out = append(out, "the form offers "+l+", which matches no \"### Pn — Title\" heading "+
+				"(a renamed or retired problem left the form behind)")
+		}
+	}
+	return out
+}
+
 // finding is one structural violation: the 1-based line and why it is wrong.
 type finding struct {
 	line int
