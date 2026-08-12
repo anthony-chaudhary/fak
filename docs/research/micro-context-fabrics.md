@@ -2,7 +2,7 @@
 title: "Micro-context fabrics for 100–10,000 parallel agents"
 description: "Dedicated research focus for splitting one cached agent base into many bounded logical contexts, with controlled-kernel and API-only paths."
 status: active
-last_reviewed: 2026-08-09
+last_reviewed: 2026-08-12
 ---
 
 # Micro-context fabrics: one cached base, 10,000 useful agent contexts
@@ -115,37 +115,85 @@ full harness instances. Ultracode remains useful for issue/worktree coordination
 micro-context fabric handles model-turn scheduling and compact context lifetimes. They
 compose, but their speedups are measured separately from inference batching/cache gains.
 
-## Known blockers and explicit experiments
+## Constraints, existing footholds, and explicit next proofs
 
-- **Harness assumptions:** many harnesses assume one process, terminal, transcript, cwd,
-  credential set, and human approval channel per agent. Measure the fixed bring-up cost,
-  then define a headless descriptor that omits those surfaces.
-- **Prefix identity drift:** timestamps, reordered tools, per-agent IDs, provider wrappers,
-  and sampling metadata can destroy cache sharing. Canonicalize the base and expose a
-  fingerprint plus miss reason.
-- **KV/cache capacity:** 10k logical contexts cannot imply 10k resident KV allocations.
-  Build warm/parked/hibernated tiers and measure restore cost versus recompute.
-- **Batch incompatibility:** different models, sampling parameters, tools, deadlines, and
-  sequence lengths fragment batches. Schedule by compatibility class and report padding
-  and queue-delay tax.
-- **Head-of-line blocking:** long tool calls and long decodes must not pin model slots.
-  Separate model turns from tool waits and make cancellation/preemption observable.
-- **Provider/API opacity:** closed APIs may not reveal KV identity, cache eviction, or batch
-  formation. Restrict claims to billed cached tokens, latency, and controlled A/B results;
-  never infer internal reuse from hope.
-- **Rate limits and quotas:** API-only fan-out is bounded by RPM/TPM/concurrency limits.
-  Admission needs token buckets, retry budgets, and provider-aware fairness.
-- **Result quality:** throughput without useful work is noise. Use fixed task corpora,
-  verifiers not authored by the workers, and report pass rate × completed work/time.
-- **Tool/effect conflicts:** parallel contexts can collide on files, DB rows, messages, or
-  side effects. Capabilities, lane/resource leases, idempotency keys, and independent
-  read-back are mandatory before tool-capable scale.
-- **Fault amplification:** one bad base or retry policy can fail 10k contexts at once. Add
-  canaries, circuit breakers, bounded retries, quarantine, and base-version rollback.
-- **Observability cardinality:** per-context events can overwhelm telemetry. Preserve
-  traceability with sampled spans plus aggregate queue/cache/quality metrics.
-- **Economics:** report net value against a tuned alternative, including duplicated output,
-  scheduler overhead, idle GPU time, cache storage, and failed work.
+These are not undifferentiated reasons the program might fail. Each constraint is paired
+with the fak capability that already reduces it and the remaining experiment or mitigation.
+That distinction prevents shipped substrate from being rediscovered as a blocker and keeps
+an external limitation beside the route around it.
+
+- **Harness assumptions — start with our harness, then expose micro-agents:** third-party
+  harnesses often bind one process, terminal, transcript, cwd, credential set, and approval
+  channel to one agent. fak already has a compact `microagent.Descriptor`, bounded host,
+  session gateway, and continuation budgets, so the first integration target is fak's own
+  harness: keep one top-level operator/harness agent and expose the bounded contexts beneath
+  it as micro-agents. Measure that path's bring-up cost and effect boundary first; only then
+  map the same descriptor onto Codex, Claude, OpenAI, or other provider/harness adapters
+  through `docs/integrations/`, rather than requiring each external harness to become the
+  fleet runtime. #5789 shipped the descriptor inventory; the next proof is this
+  parent-agent/micro-agent integration shape, not another descriptor design pass.
+- **Context segmentation and addressability — extend, do not re-invent:** fak already
+  separates immutable base from per-context delta, gives each logical context an ID and
+  durable continuation state, and derives in-kernel shared-prefix cache identity from the
+  request context (`prefixCacheIdentityFromContext`). The remaining risk is identity drift
+  from timestamps, reordered tools, provider wrappers, sampling regimes, or an incomplete
+  namespace key. Canonicalize those inputs, make base/context/prefix IDs visible at the
+  gateway, and require every miss to carry a reason. S2b (#5817) already proved that this
+  addressability reaches real KV reuse on the controlled kernel; the open work is preserving
+  and explaining that identity across each new provider wrapper and decode regime.
+- **KV/cache capacity — logical scale is not resident scale:** `internal/microagent` already
+  has warm-band, warm-reserve, parked, and hibernated state, so 10k context IDs need not mean
+  10k live KV allocations. S3 (#5788) and the controlled 10k soak (#5792) exercised the
+  bounded lifecycle; each new backend must still report restore latency and bytes against
+  recompute under a fixed resident-slot budget so admission can choose warm, parked, or
+  hibernated placement from evidence.
+- **Batch incompatibility — classify before coalescing:** the compatibility scheduler already
+  keys work by model, sampling configuration, tools, prefix identity, phase, and length
+  bucket, with incompatible work retaining a singleton path. The remaining experiment is a
+  shipped in #5790/#5819. Preserve its proof obligation on every backend: a real-model
+  mixed-workload run must report achieved batch size, padding waste, queue-delay tax, and
+  singleton fallback rate instead of treating scheduler presence as a throughput gain.
+- **Head-of-line blocking — model turns and effects are separate resources:** the bounded
+  scheduler and tool-execution seam already prevent a tool call from being the model slot
+  itself. Add observable cancellation/preemption and prove with one long tool wait plus
+  short decodes that the short contexts continue retiring within their deadlines.
+- **Provider/API opacity — integrate at the top-level boundary and narrow the claim:** the
+  API-only adapter shipped in #5793 and can carry the same base/delta descriptor to an
+  external provider while a top-level fak agent owns decomposition, policy, journals, and
+  result folding. For closed
+  providers, expose micro-agents through that adapter and claim only observable billed
+  cached tokens, latency, errors, and controlled A/B outcomes; reserve KV residency and
+  batch-formation claims for fak's controlled-kernel path. Provider-specific integrations
+  are follow-ons after the own-harness spine, not prerequisites for proving the fabric.
+- **Rate limits and quotas — provider capacity is an admission input:** API mode remains
+  bounded by RPM, TPM, and concurrency quotas even when logical contexts are cheap. Feed
+  #5793/#5795 feed those limits into the budget/fair scheduler with token buckets, retry
+  budgets, and provider-aware fairness. Every provider integration must report admitted,
+  delayed, retried, and rejected work by provider rather than calling queued fan-out
+  concurrency.
+- **Result quality — fold witnessed work, not turn count:** the verifier and quality-ledger
+  seams already exist, so use fixed task corpora and verifiers not authored by workers; the
+  acceptance metric is pass rate times completed work per time, with duplicated or failed
+  outputs charged as cost. #5794 shipped that ledger; new workloads must populate it rather
+  than invent a throughput-only score.
+- **Tool/effect conflicts — read-only first, leased effects second:** capabilities, the tool
+  execution floor, journals, and independent read-back are existing control points. Keep the
+  first scale runs read-only; #5791 shipped the effect-safe seam, and effectful micro-agents
+  must still enter through its lane/resource leases and idempotency keys while reporting
+  denied, conflicted, and independently confirmed effects.
+- **Fault amplification — version and canary the shared base:** bounded retries and journal
+  quarantine already limit some local failures, but one bad immutable base can still poison
+  a cohort. Roll each base version through a small canary cohort, trip a circuit breaker on
+  shared failure signatures, quarantine retries, and retain the prior base for rollback
+  before raising admission.
+- **Observability cardinality — aggregate without losing addressability:** context IDs and
+  journals provide the correlation key; full per-turn spans for 10k contexts do not scale.
+  Keep aggregate queue/cache/quality metrics for every cohort, sampled spans for normal work,
+  and unsampled error/effect journals addressable by context ID.
+- **Economics — compare complete systems:** the relevant alternative is a tuned top-level
+  agent or harness running the same task corpus, not 10k naive processes. Report net value
+  after duplicated output, scheduler and adapter overhead, idle GPU time, cache storage,
+  provider charges, and failed work; without that witness the outcome remains `not yet`.
 
 ## Measurement contract
 
