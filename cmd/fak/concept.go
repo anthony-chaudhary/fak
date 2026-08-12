@@ -113,6 +113,14 @@ func runConceptPosition(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	}
 	r.DistinctFrom = conceptCSV(refs)
 	r.Aliases = conceptCSV(aliases)
+	// Plan first: it is pure field validation, while the grounding check walks the
+	// whole tree. Ordered the other way, a request that was going to be refused for a
+	// missing field still paid the full walk before anyone looked at the field.
+	p, e := conceptcatalog.PlanPosition(c, r)
+	if e != nil {
+		fmt.Fprintln(errw, "fak concept position:", e)
+		return 1
+	}
 	grounded, e := conceptcatalog.ProductionCorpus(filepath.Dir(filepath.Dir(c.Dir)), r.Grounding)
 	if e != nil {
 		fmt.Fprintln(errw, "fak concept position:", e)
@@ -120,11 +128,6 @@ func runConceptPosition(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	}
 	if !grounded {
 		fmt.Fprintf(errw, "fak concept position: grounding %q does not appear in the production corpus (tests/build-tag-only text does not count)\n", r.Grounding)
-		return 1
-	}
-	p, e := conceptcatalog.PlanPosition(c, r)
-	if e != nil {
-		fmt.Fprintln(errw, "fak concept position:", e)
 		return 1
 	}
 	return emitConceptPlan(out, errw, p, dry, jsonOut)

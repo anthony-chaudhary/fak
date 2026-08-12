@@ -3,11 +3,15 @@ package conceptcatalog
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func fixture(t *testing.T) (Catalog, string) {
@@ -198,6 +202,121 @@ func TestProductionCorpusExcludesTestsAndBuildTags(t *testing.T) {
 		got, err := ProductionCorpus(root, tok)
 		if err != nil || got != want {
 			t.Fatalf("%s got %v,%v want %v", tok, got, err, want)
+		}
+	}
+}
+
+// Run artifacts are not production source. Before this, the walk descended every
+// in-tree run directory, so a token that survived only in a 48-day-old dispatch log
+// counted as grounded - and reading them made `fak concept position` peak at 20.79GB.
+func TestProductionCorpusIgnoresRunArtifactDirectories(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/x/prod.go", "package x\nconst SourceGrounding = 1")
+	write(".github/workflows/ci.yml", "name: TrackedConfigGrounding")
+	write(".dispatch-runs/run-1/report.md", "DispatchLogGrounding showed up in a run log")
+	write("_scratch/clone/pkg/a.go", "package a // ScratchCloneGrounding")
+	write(".scratch-1365/notes.md", "ScratchNumberedGrounding")
+	write(".goal-runs/g/out.json", "{\"note\":\"GoalRunGrounding\"}")
+
+	for tok, want := range map[string]bool{
+		"SourceGrounding":          true,
+		"TrackedConfigGrounding":   true,
+		"DispatchLogGrounding":     false,
+		"ScratchCloneGrounding":    false,
+		"ScratchNumberedGrounding": false,
+		"GoalRunGrounding":         false,
+	} {
+		got, err := ProductionCorpus(root, tok)
+		if err != nil {
+			t.Fatalf("ProductionCorpus(%q): %v", tok, err)
+		}
+		if got != want {
+			t.Errorf("ProductionCorpus(%q) = %v, want %v", tok, got, want)
+		}
+	}
+}
+
+// The walk must hold one file at a time, never the concatenated tree. Buffering the
+// whole corpus is what turned a 7GB matched corpus into a 20.79GB resident process.
+func TestProductionCorpusManyDoesNotBufferTheWholeTree(t *testing.T) {
+	root := t.TempDir()
+	// ~32MB over 512 files, every line well under bufio's 64KB scan limit and no
+	// single file above 64KB - so any peak far above one file means retention.
+	line := strings.Repeat("qwertyuiopasdfghjklzxcvbnm", 2) + "abcdefghijk\n" // 63B + \n
+	filler := strings.Repeat(line, 1024)
+	for i := 0; i < 512; i++ {
+		dir := filepath.Join(root, "pkg", fmt.Sprintf("p%03d", i))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "f.go"), []byte("package p\n"+filler), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "pkg", "z.go"), []byte("package p\nconst LateGrounding = 1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var peak atomic.Uint64
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		var m runtime.MemStats
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(time.Millisecond):
+			}
+			runtime.ReadMemStats(&m)
+			if m.HeapAlloc > peak.Load() {
+				peak.Store(m.HeapAlloc)
+			}
+		}
+	}()
+	runtime.GC()
+	found, err := ProductionCorpusMany(root, []string{"LateGrounding", "NeverAppearsGrounding"})
+	close(stop)
+	<-done
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found[token("LateGrounding")] || found[token("NeverAppearsGrounding")] {
+		t.Fatalf("wrong verdicts over the large tree: %v", found)
+	}
+	if got := peak.Load(); got > 16<<20 {
+		t.Errorf("peak heap %.1fMB over a 32MB tree: the walk is retaining the corpus, not streaming it", float64(got)/(1<<20))
+	}
+}
+
+// Per-file matching must stay exactly equivalent to matching the concatenation:
+// token() keeps only [a-z0-9], so a want can never span the newline between lines.
+func TestProductionCorpusManyKeepsTokensIndependent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package p\n// alpha\n// beta\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ProductionCorpusMany(root, []string{"Alpha", "Beta", "alpha-beta", "", "Alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"alpha": true, "beta": true, "alphabeta": false}
+	if len(got) != len(want) {
+		t.Fatalf("got %d verdicts %v, want %d (blank dropped, duplicate deduped)", len(got), got, len(want))
+	}
+	for tok, w := range want {
+		if got[tok] != w {
+			t.Errorf("%q = %v, want %v", tok, got[tok], w)
 		}
 	}
 }
