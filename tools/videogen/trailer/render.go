@@ -88,6 +88,43 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 	x := int(float64(c.Width) * min(1, t/s.Secs))
 	fill(im, image.Rect(0, c.Height-8, x, c.Height), cyan)
 	switch s.Kind {
+	case "token-hook":
+		center(im, p, 105, s.Eyebrow, 30, cyan, true, false)
+		center(im, p, 255+yoff, s.Title, 92, alpha(white, fade), true, false)
+		center(im, p, 350+yoff, s.Subtitle, 44, alpha(muted, fade), false, false)
+		left := image.Rect(125, 455, 560, 625)
+		right := image.Rect(720, 455, 1155, 625)
+		fill(im, left, color.RGBA{35, 20, 28, 255})
+		stroke(im, left, red, 3)
+		centerBoxText(im, p, left, s.Action, 52, red)
+		fill(im, right, color.RGBA{11, 31, 34, 255})
+		stroke(im, right, green, 3)
+		centerBoxText(im, p, right, s.Detail, 52, green)
+		center(im, p, 560, "->", 54, cyan, true, true)
+	case "token-grid":
+		center(im, p, 90, s.Eyebrow, 30, cyan, true, false)
+		center(im, p, 185+yoff, s.Title, 72, alpha(white, fade), true, false)
+		for i, item := range s.Items {
+			col, row := i%2, i/2
+			r := image.Rect(75+col*610, 280+row*120, 595+col*610, 380+row*120)
+			fill(im, r, color.RGBA{13, 25, 36, 255})
+			stroke(im, r, cyan, 2)
+			centerBoxText(im, p, r, item, 48, white)
+		}
+	case "token-flow":
+		center(im, p, 100, s.Eyebrow, 30, cyan, true, false)
+		center(im, p, 195+yoff, s.Title, 72, alpha(white, fade), true, false)
+		colors := []color.RGBA{cyan, green, cyan}
+		for i, item := range s.Items {
+			r := image.Rect(70+i*420, 350, 390+i*420, 535)
+			fill(im, r, color.RGBA{13, 25, 36, 255})
+			stroke(im, r, colors[i], 3)
+			centerBoxText(im, p, r, item, 36, white)
+			if i < 2 {
+				center(im, p, 465+i*420, "->", 42, muted, true, true)
+			}
+		}
+		center(im, p, 625, s.Verdict, 42, green, true, false)
 	case "hook":
 		center(im, p, 250+yoff, s.Title, 82, alpha(white, fade), true, false)
 		center(im, p, 340+yoff, s.Subtitle, 44, alpha(muted, fade), false, false)
@@ -125,15 +162,27 @@ func sceneFrame(c Config, s Scene, t float64, p *painter) *image.RGBA {
 		r := image.Rect(165, 390, c.Width-165, 555)
 		fill(im, r, color.RGBA{13, 22, 32, 255})
 		stroke(im, r, cyan, 3)
-		center(im, p, 498, s.Command, 84, white, true, true)
+		centerBoxText(im, p, r, s.Command, 84, white)
 		center(im, p, 650, s.Subtitle, 38, muted, false, false)
 	}
 	return im
 }
 func centerBoxText(im *image.RGBA, p *painter, r image.Rectangle, s string, size float64, c color.Color) {
+	const inset = 24
+	for size > 18 {
+		f := p.face(size, true, false)
+		bounds, _ := font.BoundString(f, s)
+		if (bounds.Max.X-bounds.Min.X).Ceil() <= r.Dx()-2*inset && (bounds.Max.Y-bounds.Min.Y).Ceil() <= r.Dy()-2*inset {
+			break
+		}
+		size--
+	}
 	f := p.face(size, true, false)
-	w := font.MeasureString(f, s).Ceil()
-	text(im, p, r.Min.X+(r.Dx()-w)/2, r.Min.Y+r.Dy()/2+int(size/3), s, size, c, true, false)
+	bounds, _ := font.BoundString(f, s)
+	px := r.Min.X + (r.Dx()-(bounds.Max.X-bounds.Min.X).Ceil())/2 - bounds.Min.X.Ceil()
+	py := r.Min.Y + (r.Dy()-(bounds.Max.Y-bounds.Min.Y).Ceil())/2 - bounds.Min.Y.Ceil()
+	d := font.Drawer{Dst: im, Src: image.NewUniform(c), Face: f, Dot: fixed.P(px, py)}
+	d.DrawString(s)
 }
 func stroke(im *image.RGBA, r image.Rectangle, c color.Color, w int) {
 	fill(im, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+w), c)
@@ -177,7 +226,16 @@ func renderAll(c Config, ff string, a Audit) error {
 	if e = encode(ff, c, dir); e != nil {
 		return e
 	}
-	if e = pngAt(c.Poster, sceneFrame(c, c.Scenes[len(c.Scenes)-1], 1, p)); e != nil {
+	if c.AppendMP4 != "" {
+		if e = compose(ff, c); e != nil {
+			return e
+		}
+	}
+	posterScene := c.Scenes[len(c.Scenes)-1]
+	if len(c.Scenes) > 0 && c.Scenes[0].Kind == "token-hook" {
+		posterScene = c.Scenes[0]
+	}
+	if e = pngAt(c.Poster, sceneFrame(c, posterScene, posterScene.Secs*.55, p)); e != nil {
 		return e
 	}
 	if e = contact(c.ContactSheet, c, p); e != nil {
@@ -201,6 +259,28 @@ func encode(ff string, c Config, dir string) error {
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
+
+func compose(ff string, c Config) error {
+	if c.CompositeMP4 == "" || c.CompositeGIF == "" {
+		return fmt.Errorf("appendMP4 requires compositeMP4 and compositeGIF")
+	}
+	_ = os.MkdirAll(filepath.Dir(c.CompositeMP4), 0755)
+	cmd := exec.Command(ff, "-y", "-i", c.MP4, "-i", c.AppendMP4,
+		"-filter_complex", "[0:v]setpts=PTS-STARTPTS[v0];[1:v]setpts=PTS-STARTPTS[v1];[v0][v1]concat=n=2:v=1:a=0[v]",
+		"-map", "[v]", "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-movflags", "+faststart", c.CompositeMP4)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	cmd = exec.Command(ff, "-y", "-i", c.CompositeMP4,
+		"-vf", "fps=15,scale=680:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+		"-loop", "0", c.CompositeGIF)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func pngAt(path string, im image.Image) error {
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
 	f, e := os.Create(path)
