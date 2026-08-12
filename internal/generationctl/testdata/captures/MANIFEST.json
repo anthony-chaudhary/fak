@@ -1,0 +1,103 @@
+{
+  "note": "Real provider responses recorded by tools/capture_live_stream.py. Replayed byte-for-byte by internal/generationctl/captured_live_test.go. No key, host credential, or account identifier is recorded here.",
+  "captures": [
+    {
+      "file": "fak-gateway-anthropic--claude-sonnet-4-5--anthropic-unbounded-glob.sse",
+      "provider": "fak-gateway-anthropic",
+      "endpoint_host": "loopback-fak-gateway",
+      "wire": "anthropic-messages-sse",
+      "model": "claude-sonnet-4-5",
+      "scenario": "anthropic-unbounded-glob",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:f498e4a04d9f170bc41e036dcf3eb5fc891e61e1ffb566abcda113102e478496",
+      "capture_sha256": "sha256:b13d74d21fe441f0540a7d260b70df8143ac609e44f63d5cf95497744d49ddf1",
+      "captured_utc": "2026-08-10T22:22:53Z",
+      "bytes": 919
+    },
+    {
+      "file": "groq--openai-gpt-oss-120b--prose.sse",
+      "provider": "groq",
+      "endpoint_host": "api.groq.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "prose",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:1aa939d7e0c36a6f1d3bc4c04fc6ea29fb898a8066eccd32b91adb1a2915139d",
+      "capture_sha256": "sha256:95b3575c600949b07de84a1bd1f9b8bf57de3a2189d22d401ac5b2362d1a2e6a",
+      "captured_utc": "2026-08-10T21:56:58Z",
+      "bytes": 23592
+    },
+    {
+      "file": "groq--openai-gpt-oss-120b--tool-destructive-nonstream.json",
+      "provider": "groq",
+      "endpoint_host": "api.groq.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "tool-destructive-nonstream",
+      "streaming": false,
+      "http_status": 200,
+      "request_sha256": "sha256:10a94ddb6acbb2cc90da7c7e9e233ade6f6517eafaa7aec1871dffb345f4de54",
+      "capture_sha256": "sha256:0ba0e3f12ac4ace00c5683c180dfb977aacef5edec16f318c0e8187646e26a2c",
+      "captured_utc": "2026-08-10T21:57:08Z",
+      "bytes": 1437
+    },
+    {
+      "file": "groq--openai-gpt-oss-120b--tool-destructive.sse",
+      "provider": "groq",
+      "endpoint_host": "api.groq.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "tool-destructive",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:bb1e0bee2c1d8fb0434a40f7848edbc46312a94bb51931535e07d26bdcab1295",
+      "capture_sha256": "sha256:7f2d1a88c40b8b10eb2f41487f6a46940bd58ce35b175b9a7a1bdfb21fc954ad",
+      "captured_utc": "2026-08-10T21:57:00Z",
+      "bytes": 38645
+    },
+    {
+      "file": "nvidia--deepseek-ai-deepseek-v4-flash-0731--tool-destructive.sse",
+      "provider": "nvidia",
+      "endpoint_host": "integrate.api.nvidia.com",
+      "wire": "openai-chat-completions",
+      "model": "deepseek-ai/deepseek-v4-flash-0731",
+      "scenario": "tool-destructive",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:ebcfbbb8f721de9c85a86e08353afdb5ec4ac24b4d4bf21530c39e587dde7cae",
+      "capture_sha256": "sha256:2846ef0dea1d7f5ad3dc40364fcb05e8d24047e1337ea3e65b981659a0825c52",
+      "captured_utc": "2026-08-10T21:58:03Z",
+      "bytes": 904
+    },
+    {
+      "file": "nvidia--meta-llama-3.3-70b-instruct--prose.sse",
+      "provider": "nvidia",
+      "endpoint_host": "integrate.api.nvidia.com",
+      "wire": "openai-chat-completions",
+      "model": "meta/llama-3.3-70b-instruct",
+      "scenario": "prose",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:f60dcd0cd8a29ae15c0755dd3ff38e75781ded19001e83a6d048c9b38681c743",
+      "capture_sha256": "sha256:2153bffd4f3847fc33cd73a128689e89e17d019f9713ef8139eb756c04ce542c",
+      "captured_utc": "2026-08-10T21:54:01Z",
+      "bytes": 10780
+    },
+    {
+      "file": "nvidia--minimaxai-minimax-m3--tool-destructive.sse",
+      "provider": "nvidia",
+      "endpoint_host": "integrate.api.nvidia.com",
+      "wire": "openai-chat-completions",
+      "model": "minimaxai/minimax-m3",
+      "scenario": "tool-destructive",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:5e5a37a76eb501eb6ddff800c977ec1d5311d0f82b7f2cbe28ee76b19b843159",
+      "capture_sha256": "sha256:225e9a3e365acc87e6abe2561a1ccd1cb21b2ca769e4fcfc36012359651457ec",
+      "captured_utc": "2026-08-10T21:58:05Z",
+      "bytes": 877
+    }
+  ]
+}

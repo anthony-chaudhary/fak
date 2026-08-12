@@ -99,15 +99,47 @@ func (c *Controller) Accept(text string) error {
 	return nil
 }
 
+// ObserveText commits an output delta to the durable prefix and checks it
+// against text-scope rules in one step. The order is load-bearing: the bytes
+// join the prefix BEFORE the check, so a checkpoint taken by a rule that
+// matched them still contains the text the provider already emitted. A redirect
+// steers what happens next; it does not retroactively unsay the turn.
+func (c *Controller) ObserveText(key streamrules.StreamKey, delta string) (Transition, error) {
+	if err := c.Accept(delta); err != nil {
+		return Transition{}, err
+	}
+	return c.observe(key, delta)
+}
+
+// ObserveThinking checks a reasoning delta against thinking-scope rules. Unlike
+// ObserveText it never accepts: reasoning is steerable but is not part of the
+// durable trajectory prefix, so a checkpoint taken here carries the output
+// committed before it and nothing from the reasoning channel.
+func (c *Controller) ObserveThinking(key streamrules.StreamKey, delta string) (Transition, error) {
+	if c.closed {
+		return Transition{}, errors.New("generation epoch is closed")
+	}
+	return c.observe(key, delta)
+}
+
 // ObserveToolDelta checks speculative tool arguments as they stream. A matched
-// substitution closes the epoch before those arguments become an effect.
+// substitution closes the epoch before those arguments become an effect. The
+// bytes are never accepted, which is what keeps a refused call's arguments out
+// of the prefix the next epoch resumes from.
 func (c *Controller) ObserveToolDelta(key streamrules.StreamKey, delta string) (Transition, error) {
 	if c.closed {
 		return Transition{}, errors.New("generation epoch is closed")
 	}
-	matches := c.matcher.CheckDelta(key, delta)
+	return c.observe(key, delta)
+}
+
+// observe is the one steering step every stream scope shares: feed the delta to
+// the matcher, and on the first interrupting match close the epoch at a
+// checkpoint carrying the substitute action. What differs per scope is only
+// whether the caller accepted the bytes first, not how a match is handled.
+func (c *Controller) observe(key streamrules.StreamKey, delta string) (Transition, error) {
 	var match streamrules.Match
-	for _, candidate := range matches {
+	for _, candidate := range c.matcher.CheckDelta(key, delta) {
 		if candidate.Interrupt {
 			match = candidate
 			break

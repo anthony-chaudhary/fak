@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-12eacd14-9afc-47c1-824c-d5d984ad158b","choices":[{"index":0,"delta":{"content":"\n\n","role":"assistant"},"finish_reason":null,"logprobs":null}],"created":1786399082,"model":"deepseek-ai/deepseek-v4-flash-0731","service_tier":null,"system_fingerprint":null,"object":"chat.completion.chunk","usage":null}
+
+data: {"id":"chatcmpl-12eacd14-9afc-47c1-824c-d5d984ad158b","choices":[{"index":0,"delta":{"content":"","tool_calls":[{"index":0,"id":"call_e7597dec36f24917b378d66a","type":"function","function":{"name":"shell","arguments":"{\"command\":\"Remove-Item -Recurse -Force /work/scratch/build-artifacts-2026\",\"path\":\"/work/scratch\"}"}}],"role":"assistant"},"finish_reason":"tool_calls","logprobs":null}],"created":1786399082,"model":"deepseek-ai/deepseek-v4-flash-0731","service_tier":null,"system_fingerprint":null,"object":"chat.completion.chunk","usage":null}
+
+data: [DONE]
+
