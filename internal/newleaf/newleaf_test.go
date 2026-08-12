@@ -22,6 +22,64 @@ foo = ["internal/foo/**"]
 cmd = ["cmd/**"]
 `
 
+// A line that MENTIONS the marker is not a marker. The real dos.toml carries a
+// prose comment inside [lanes].concurrent explaining why some lanes landed by
+// hand — and that sentence quotes `# new-leaf:lane`. A substring match treated it
+// as a third marker and inserted the generated leaf into `concurrent` TWICE, so
+// `fak new-leaf` reliably handed back a tree that failed the roster gate
+// (CONCURRENT_LANES_OVERLAP) it had just written.
+func TestAddLeafLaneIgnoresProseThatMentionsTheMarker(t *testing.T) {
+	fixture := `[lanes]
+concurrent = [
+  "foo",
+  # They landed by hand, so the ` + "`# new-leaf:lane`" + ` auto-insert never fired.
+  "bar",
+  # new-leaf:lane
+]
+autopick = [
+  "foo",
+  # new-leaf:lane
+]
+[lanes.trees]
+foo = ["internal/foo/**"]
+# new-leaf:tree
+cmd = ["cmd/**"]
+`
+	out, err := AddLeafLane(fixture, "fedtrust")
+	if err != nil {
+		t.Fatalf("AddLeafLane: %v", err)
+	}
+	// Exactly two lane entries: one per REAL marker (concurrent, autopick).
+	if got := strings.Count(out, `  "fedtrust",`); got != 2 {
+		t.Fatalf("lane inserted %d time(s), want exactly 2 (one per real marker):\n%s", got, out)
+	}
+	// And the duplicate specifically must not be inside `concurrent`.
+	concurrent := out[strings.Index(out, "concurrent = ["):strings.Index(out, "autopick = [")]
+	if got := strings.Count(concurrent, `"fedtrust"`); got != 1 {
+		t.Fatalf("[lanes].concurrent declares the leaf %d time(s), want exactly 1:\n%s", got, concurrent)
+	}
+	if !strings.Contains(out, `fedtrust = ["internal/fedtrust/**"]`) {
+		t.Errorf("lane tree missing:\n%s", out)
+	}
+}
+
+func TestInsertBeforeMarkerRequiresTheMarkerToOpenTheLine(t *testing.T) {
+	text := "a\n  # see `# new-leaf:tree` for how this works\nb\n# new-leaf:tree\nc\n"
+	out, err := InsertBeforeMarker(text, TreeMarker, "INSERTED\n")
+	if err != nil {
+		t.Fatalf("InsertBeforeMarker: %v", err)
+	}
+	if strings.Count(out, "INSERTED") != 1 {
+		t.Fatalf("inserted %d times, want 1:\n%s", strings.Count(out, "INSERTED"), out)
+	}
+	if !strings.Contains(out, "b\nINSERTED\n# new-leaf:tree") {
+		t.Fatalf("insert did not land above the real marker:\n%s", out)
+	}
+	if _, err := InsertBeforeMarker("only a mention of # new-leaf:tree mid-line\n", TreeMarker, "x\n"); err == nil {
+		t.Error("a mere mention was accepted as a marker; it must report the marker as not found")
+	}
+}
+
 func TestDocGoCarriesTierAndPackage(t *testing.T) {
 	out := DocGo("fedtrust", "composer", 3, "a federated trust gate")
 	if !strings.Contains(out, "package fedtrust") {

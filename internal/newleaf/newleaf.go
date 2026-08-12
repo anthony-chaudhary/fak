@@ -77,11 +77,28 @@ func TestGo(name string) string {
 		"}\n"
 }
 
+// isMarkerLine reports whether ln IS the marker line rather than a line that
+// merely MENTIONS the marker.
+//
+// The distinction is load-bearing, and a substring match got it wrong: dos.toml
+// carries a prose comment documenting why some lanes landed by hand ("... so the
+// `# new-leaf:lane` auto-insert never fired"), and that sentence sits INSIDE the
+// [lanes].concurrent array. A Contains-based match treated it as a third marker,
+// so every generated leaf was inserted into `concurrent` twice — once at the real
+// marker, once above the prose — and the duplicate tripped the roster gate
+// (CONCURRENT_LANES_OVERLAP, internal/architest TestLaneRosterHasNoDuplicates) on
+// a tree the generator had just written. A real marker always OPENS its line, so
+// anchoring the match to the trimmed prefix keeps documentation about the marker
+// from acting as one.
+func isMarkerLine(ln, marker string) bool {
+	return strings.HasPrefix(strings.TrimSpace(ln), marker)
+}
+
 func InsertBeforeMarker(text, marker, line string) (string, error) {
 	var out strings.Builder
 	done := false
 	for _, ln := range splitKeepLines(text) {
-		if !done && strings.Contains(ln, marker) {
+		if !done && isMarkerLine(ln, marker) {
 			out.WriteString(line)
 			done = true
 		}
@@ -97,7 +114,7 @@ func InsertBeforeAllMarkers(text, marker, line string) (string, error) {
 	var out strings.Builder
 	hits := 0
 	for _, ln := range splitKeepLines(text) {
-		if strings.Contains(ln, marker) {
+		if isMarkerLine(ln, marker) {
 			out.WriteString(line)
 			hits++
 		}
