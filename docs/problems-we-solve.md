@@ -1,122 +1,175 @@
 # The problems fak exists to solve
 
-> **Direction:** make operating useful agent systems feel like “don’t make me think.”
-> One integrated kernel should absorb recurring context, measurement, market-change, and
-> operations decisions so a person can state the outcome instead of assembling a new stack.
+fak exists to make long-running agent work **cheaper, faster, safer, and more operable**.
+Those outcomes meet at one kernel seam: every tool call crosses a checkpoint where fak can
+preserve useful context, avoid unnecessary work, adapt execution, and enforce the operating
+contract.
 
-This is fak’s canonical problem map. It is a product-direction document, **not** a claim
-that every part is already automatic or shipped. Capability claims remain in
-[`CLAIMS.md`](../CLAIMS.md), and measured gains remain subject to the
-[net-true-value standard](standards/net-true-value.md).
+This page gives development work two different instruments. Do not collapse them into one score:
 
-## The promise: less operator cognition, not less operator control
+1. **The P1-P4 problem checklist** is a design and review checklist. Every change considers
+   every row. The rows are not competing priorities and an author does not pick a favorite one.
+2. **Problem centrality** is a portfolio signal. It says how directly a unit of work advances
+   the connected problem cluster below. More-central work normally outranks less-related work,
+   after hard obligations and dependencies are accounted for.
 
-“Don’t make me think” does not mean hiding consequential choices or removing review. It
-means making the routine correct path the easy default: retain the right context, choose
-and measure efficiency techniques honestly, adapt integrations as the field changes, and
-operate the fleet through one coherent boundary. fak should ask a human only for a real
-decision, expose why it acted, and fail closed when it cannot act safely.
+A P1 implementation still has to be net-true (P2), adaptable rather than brittle (P3), and
+operable through the real system (P4). Conversely, release or maintenance work may directly
+implement none of the four yet still be necessary stewardship. The checklist governs **how we
+do the work**; centrality helps decide **which work to do next**.
 
-The next-best alternative is not “do nothing.” It is a person repeatedly wiring prompt and
-context policy, benchmark scripts, provider changes, serving, dispatch, leases, retries,
-security gates, and evidence ledgers. As agent count and market velocity rise, that bespoke
-integration tax grows faster than human attention. fak’s value is to internalize that tax
-behind one binary and one tool-call checkpoint.
+## The connected problem cluster
 
-## P1 — Context should manage itself
+The labels are stable handles for related user problems, not product silos. A real change can
+advance several at once.
 
-**Problem.** Humans are poor context schedulers. They cannot reliably decide what every
-agent should retain, retrieve, compact, share, or forget on every turn; at fleet scale, and
-as tasks, models, prices, and context windows change, manual context management is not a
-viable control loop. More tokens alone do not solve relevance, continuity, cache survival,
-or isolation.
+### P1 — Managed context
 
-**Direction.** fak should make context an automatically managed resource: reuse shared
-setup, preserve provider-cache value, retrieve or compact at the boundary, keep continuity
-across long sessions, and expose intervention only when policy or uncertainty requires it.
-The desired operator experience is to specify the task—not curate every prompt.
+**Problem:** Agent sessions repeatedly reconstruct shared setup, lose useful state as histories
+grow, and send context that could have been retained or served locally.
 
-**Current seams and evidence maps:** [`managed-context-continuous-usage.md`](managed-context-continuous-usage.md),
-[`CONTEXT-IS-NOT-MEMORY.md`](CONTEXT-IS-NOT-MEMORY.md),
-[`long-session-value.md`](long-session-value.md), and [`cache-value-rollup.md`](cache-value-rollup.md).
+**Direction:** Preserve reusable prefixes, serve safe repeats locally, compact old turns
+deliberately, and keep provider caches useful across long-running sessions.
 
-## P2 — Efficiency must be net-true
+**Witness:** less repeated input or setup work at equal task quality; longer useful sessions;
+a cache, replay, or compaction effect read back from the real path.
 
-**Problem.** The agent market has too many “efficiency” techniques supported by weak or
-misleading comparisons. A cache, router, compactor, smaller model, or orchestration layer
-can move cost to another component, degrade task success, add latency or operational work,
-or beat only a deliberately naive baseline. An optimization that hurts the complete system
-is not a gain.
+### P2 — Net-true efficiency
 
-**Direction.** fak should organize optimization around reproducible, end-to-end evidence:
-compare with the real tuned alternative, count added costs, preserve outcome quality and
-safety, label provenance, and say `not yet` when no witness exists. Selection and reuse
-should become automatic only after the gain is shown to be net-true.
+**Problem:** An optimization can look cheaper in isolation while routing, verification, quality
+loss, retries, or operator burden makes the real workflow worse.
 
-**Current seams and evidence maps:** [`standards/net-true-value.md`](standards/net-true-value.md),
-[`BENCHMARK-METHODOLOGY.md`](BENCHMARK-METHODOLOGY.md),
-[`../BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md), and
-[`DEFAULT-VALUE-SCORECARD.md`](DEFAULT-VALUE-SCORECARD.md).
+**Direction:** Use the least expensive execution that still meets the contract, count all added
+costs, and compare with the tuned next-best alternative rather than a naive baseline.
 
-## P3 — Fast adaptation without another standard
+**Witness:** an end-to-end latency, cost, quality, or completed-work gain that survives the
+[`net-true-value`](standards/net-true-value.md) accounting.
 
-**Problem.** Models, providers, protocols, memory methods, serving engines, agent
-frameworks, and claimed best practices change too quickly for every team to continuously
-re-evaluate and rewire. A new universal standard would become one more moving dependency;
-fak must not pretend to freeze a market that is still discovering its shape.
+### P3 — Fast, bounded adaptation
 
-**Direction.** fak should be an adaptable kernel at the existing tool-call boundary: thin
-leaves and adapters can absorb the latest useful technique, test it against the same
-contracts and evidence floor, and replace it when the field moves. The stable thing is the
-checkpoint and its verification discipline—not a mandated provider, framework, protocol,
-or technique.
+**Problem:** Agents and workloads change faster than static infrastructure. Broad rewrites are
+too slow; unbounded adaptation is unsafe and hard to trust.
 
-**Current seams and evidence maps:** [`integrations/README.md`](integrations/README.md),
-[`a2a-value-opportunities.md`](a2a-value-opportunities.md),
-[`notes/CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md`](notes/CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md),
-and the additive leaf model in [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+**Direction:** Make routing, policy, model, and memory behavior changeable at small seams, with
+explicit bounds, rollback, and evidence.
 
-## P4 — Agent operations should be one product, not a kit
+**Witness:** a new workload or policy supported through a small, reversible change with captured
+before/after behavior.
 
-**Problem.** Rolling an agent stack still means combining serving, model routing, context,
-tool policy, credentials, dispatch, concurrency, leases, retries, observability, proof, and
-recovery. Each new agent, provider, and accelerator multiplies interactions. A pile of
-individually good components still leaves the operator as the integration layer.
+### P4 — Integrated operations
 
-**Direction.** fak should converge those recurring decisions behind one binary and a small
-set of coherent operating shapes—from one local agent to a witnessed fleet. Safe defaults,
-self-checks, routing, serving, supervision, and evidence should work together; advanced
-controls remain available without being prerequisites for the first useful run.
+**Problem:** A good component does not help if operators cannot discover, run, observe, recover,
+and govern it through the actual agent/tool path.
 
-**Current seams and evidence maps:** [`fleet.md`](fleet.md), [`fleet-rollup.md`](fleet-rollup.md),
-[`loops-user-value.md`](loops-user-value.md), [`integrations/README.md`](integrations/README.md),
-and the runnable routes in [`../START-HERE.md`](../START-HERE.md).
+**Direction:** Put performance, security, observability, recovery, and lifecycle control on the
+same checkpoint rather than in disconnected side systems.
 
-## How work maps to the problems
+**Witness:** the real end-to-end path works and exposes enough state to diagnose, recover, and
+enforce its contract.
 
-Every new issue or plan should name one **primary problem ID** (`P1`–`P4`) and state the
-observable operator burden it removes. Supporting more than one problem is welcome, but
-“improves the architecture” is not sufficient by itself. Use this compact frame:
+## The all-work problem checklist
 
-- **For:** who gets the benefit?
-- **Problem:** which `P1`–`P4` burden appears in their real workflow?
-- **Today:** what is the real next-best alternative, including human integration work?
-- **Better because:** what observable step, decision, failure, cost, or delay disappears?
-- **Witness:** what artifact would prove that movement without relying on the author’s claim?
+Run this checklist at **framing, spine design, implementation, witness, and review**. “All must
+pass” means every row receives an honest answer; it does not mean every change produces a new
+feature for every P-number.
 
-A completed issue should be explainable as movement on at least one row below. If it cannot,
-rescope it, connect it to an enabling issue that can, or do not prioritize it.
-
-| ID | We are moving when… | We are **not** done merely because… |
+| Check | Ask on every unit of work | Pass condition |
 |---|---|---|
-| P1 | fewer context-curation decisions are required while continuity, relevance, isolation, and outcome quality hold | more tokens were accepted or a memory component was added |
-| P2 | an end-to-end, reproducible comparison shows a gain against the tuned alternative, net of added costs | one component benchmark got faster or cheaper |
-| P3 | a new field technique/provider/protocol can be evaluated and integrated through an existing seam without making it permanent doctrine | a trend was documented or a new abstraction was invented |
-| P4 | a real operator completes a fleet/serve/agent outcome with fewer separately managed systems and recoverable defaults | more knobs or another standalone tool were added |
+| **P1 · Context** | What context or repeated work does this add, remove, preserve, or invalidate? | It improves managed context, or does not create avoidable repetition, cache damage, or context growth. |
+| **P2 · Net value** | Is this better than the real alternative after implementation, runtime, verification, quality, retry, and operator costs? | A proportionate witness supports the gain, or it makes no gain claim and names its necessary obligation. |
+| **P3 · Adaptation** | What is likely to change next, and is the seam bounded, reversible, and small enough to adapt? | It avoids gratuitous lock-in, states its bounds, and has a risk-appropriate rollback or safe failure path. |
+| **P4 · Operations** | Can the real system discover, run, observe, secure, and recover this behavior? | The end-to-end seam and operating contract are witnessed; component proof is not used for a system claim. |
 
-## Product decision rule
+A row may be **advanced**, **preserved**, or **not applicable with a concrete reason**. “N/A” is
+not a shortcut: a typo fix can state that it changes no runtime context, gain claim, adaptation
+seam, or operating path; a broad feature cannot plausibly dismiss all four. A row **fails** when
+the change creates an unmitigated regression, makes an unwitnessed claim, or supplies only a
+label. Failed rows block normal landing. A time-critical obligation must name the accepted
+tradeoff, owner, and follow-up rather than silently converting failure to N/A.
 
-When priorities compete, prefer the smallest working spine that removes the most repeated
-human integration or judgment while preserving evidence and control. Then fan out the
-operating envelope. This is the “all in one, easy by default” direction in practical form:
-**one boundary, fewer decisions, measured outcomes, replaceable internals.**
+### Use it through the development loop
+
+1. **Frame:** State `For / Problem / Today / Better because / Witness` in plain language.
+2. **Classify centrality:** Assign one class and one sentence of evidence using the rubric below.
+3. **Design the spine:** Choose the smallest real end-to-end path and record P1-P4 risks.
+4. **Implement:** Keep context accounting, net cost, bounded change, and operations at the seam;
+   do not bolt them on after the code is “done.”
+5. **Witness:** Capture the working spine first, then its operating envelope and optimization.
+6. **Review and close:** Re-run all four rows against the diff and evidence; file follow-ons
+   rather than hiding a failed row in prose.
+
+This complements the [spine-first defaults](spine-first-defaults.md), the
+[Feynman-simple value frame](shift-left-task-organization.md), architectural leaf boundaries,
+capability policy, and net-true evidence standard. Those are delivery disciplines; P1-P4 are
+the persistent problem lens applied through them.
+
+## Problem centrality: the portfolio signal
+
+Centrality asks:
+
+> If this work succeeds, how directly does it relieve the connected user problems above or
+> unblock evidence that they are relieved?
+
+Use qualitative classes; do not manufacture numeric precision the evidence cannot support.
+
+| Class | Meaning | Evidence and default treatment |
+|---|---|---|
+| **Core** | Directly changes a user-visible P1-P4 outcome on fak's kernel path. | Witness the end-to-end effect; prefer it when evidence, urgency, and readiness are comparable. |
+| **Enabling** | Removes a concrete blocker or supplies required measurement for named Core work. | Name the blocked outcome; sequence with it and reclassify if that outcome closes or changes. |
+| **Stewardship** | Maintains reliability, security, compatibility, release health, or developer throughput without directly moving a P1-P4 outcome. | Name the obligation or risk; schedule by risk, deadline, and recurring cost. |
+| **Peripheral** | Has no evidenced path to the problem cluster, enabling dependency, or current obligation. | Defer, reshape, or decline unless an explicit external obligation overrides. |
+
+Centrality is **not the whole priority decision**. First honor security incidents, data-loss
+risks, broken trunk/release obligations, and contractual deadlines. Then satisfy dependencies
+and compare ready work by centrality, user evidence, expected net value, urgency, effort, and
+reversibility. Centrality is the directional tie-breaker that prevents an attractive but
+unrelated backlog from displacing fak's reason to exist.
+
+Re-evaluate centrality when scope, dependencies, or the user outcome changes; never inherit it
+mechanically from a parent epic. Classify the **effect**, not its directory, label, or mechanism.
+For example, observability is Peripheral as a speculative dashboard, Enabling when it measures
+a named cache spine, and Core when diagnosis/recovery is itself the broken P4 path.
+
+### Examples
+
+- **Core:** preserve a provider-cache-compatible prefix across compaction and capture reduced
+  repeated input on the real path. It still answers P2, P3, and P4.
+- **Enabling:** add counters required to decide whether that named compaction spine saves work.
+  Generic telemetry without a named outcome is not enough.
+- **Stewardship:** update a supported Go version after a security deadline or repair a flaky
+  release gate. Urgent stewardship can outrank Core work without a fictional product claim.
+- **Peripheral:** add an unrelated management surface with no kernel-path user, dependency, or
+  obligation. Tie it to witnessed P1-P4 pain or spend capacity on more central work.
+
+## Required issue and plan frame
+
+```text
+For: <specific user/operator>
+Problem: <observable pain today>
+Today: <real next-best alternative>
+Better because: <expected outcome, net of added cost>
+Witness: <artifact or read-back that can prove it>
+Centrality: Core | Enabling(<named Core outcome>) | Stewardship(<obligation>) | Peripheral
+P1 Context: advanced | preserved | N/A — <reason>
+P2 Net value: advanced | preserved | N/A — <reason>
+P3 Adaptation: advanced | preserved | N/A — <reason>
+P4 Operations: advanced | preserved | N/A — <reason>
+```
+
+Keep this proportionate. The block replaces the old “choose one primary P-ID” convention.
+Multiple rows may be advanced because the problems are a cluster, not competing buckets.
+
+## What this model refuses
+
+- Picking P2 and ignoring P4: a benchmark-only speedup is not an integrated outcome.
+- Four ceremonial checkmarks: identify an effect, preserved invariant, or concrete reason.
+- Calling every prerequisite Core: enabling work names the outcome it actually unblocks.
+- Using centrality to skip maintenance: urgent stewardship can outrank product work.
+- Using priority to excuse bad design: urgent work still passes a proportionate checklist.
+- Mistaking a leaf for a user problem: centrality follows the witnessed effect.
+
+## One-sentence test
+
+> We apply context, net-value, adaptation, and operations checks to every change; when choosing
+> among changes, we prefer the strongest evidenced path to fak's connected user problems,
+> subject to real obligations and risk.

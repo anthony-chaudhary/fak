@@ -11,9 +11,12 @@ Use this page when new work is being proposed, split, filed, or handed to an age
 
 The Feynman test is the first gate: explain the work in words a new operator can repeat accurately. Name **who has what problem, how they handle it today, and why the smallest end-to-end change should be better**. Complexity that cannot yet be explained is uncertainty to resolve, not detail to hide behind. “Better” means a witnessed user outcome against the real next-best alternative—not more machinery, more files, or a larger scorecard.
 
-First select a primary ID from the canonical [problems fak exists to solve](problems-we-solve.md):
-`P1` context, `P2` net-true efficiency, `P3` fast adaptation, or `P4` integrated
-operations. The ID is a durable why; the value frame still has to name the concrete pain.
+First use the canonical [problems fak exists to solve](problems-we-solve.md) in two ways:
+classify the work's **problem centrality** (`Core`, `Enabling`, `Stewardship`, or
+`Peripheral`), then answer **all four** P1-P4 checks for context, net value, bounded
+adaptation, and integrated operations. Centrality is a portfolio signal; the P rows are
+all-work design and review checks, not competing priority labels. The value frame still has
+to name the concrete pain.
 
 This is an authoring and reading contract over the repository's existing sources of truth. It does not replace GitHub Issues, DOS plans, [`fak issue contract`](agentic-issue-dispatch.md), lane leases, or the [`shared-task/1`](shared-task-record-contract.md) runtime record.
 
@@ -36,12 +39,16 @@ At creation time, fill every field that is knowable. Use `unknown(<reason>)` onl
 
 ```markdown
 ## Value
-- Primary problem: <P1 | P2 | P3 | P4>
 - For: <the person or operator who benefits>
 - Problem: <observable pain or unmet need>
 - Today: <the real next-best way they handle it now>
 - Better because: <plain-language reason the smallest spine should win>
 - Witness: <artifact that would prove the operator burden changed>
+- Centrality: <Core | Enabling(named Core outcome) | Stewardship(obligation) | Peripheral>
+- P1 Context: <advanced | preserved | N/A — reason>
+- P2 Net value: <advanced | preserved | N/A — reason>
+- P3 Adaptation: <advanced | preserved | N/A — reason>
+- P4 Operations: <advanced | preserved | N/A — reason>
 
 ## Outcome
 <one sentence describing what becomes observably better for that person>
