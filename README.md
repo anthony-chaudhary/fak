@@ -12,7 +12,7 @@ fak is one Go binary between an agent and its model/tools. Keep Claude Code, Cod
 
 [![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
 
-<p align="center"><strong><a href="visuals/fak-homepage-hero.mp4">Watch the 40-second value walk (MP4)</a></strong> · token savings first · <a href="tools/videogen/projects/token-savings/">reproduce the modular render</a></p>
+<p align="center"><strong><a href="visuals/fak-homepage-hero.mp4">Watch the 20-second token-savings animation (MP4)</a></strong> · <a href="visuals/fak-hero-values.mp4">separate policy story</a> · <a href="tools/videogen/projects/token-savings/">reproduce the render</a></p>
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
@@ -96,4 +96,5 @@ After trying `guard`, `fak launch install --provider all --default claude` can i
 - **Contribute:** [contributing guide](CONTRIBUTING.md) · [security policy](SECURITY.md) · [documentation map](docs/index.md) · [front-page overflow](docs/README-legacy.md)
 
 Apache-2.0. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); participation is governed by the [Code of Conduct](.github/CODE_OF_CONDUCT.md).
+
 
