@@ -130,6 +130,10 @@ const (
 	// drive-state OUTRANKS transcript-forensic resume, so never resurrect it, even past a
 	// re-death latch. The reason names which drive-state held it.
 	WatchdogSkipOperatorHold WatchdogAction = "skip_operator_hold"
+	// WatchdogSkipQuarantine: the fleet's DECLARED desired worker population refuses new
+	// work (target 0, or a population the tick could not read). A fleet-wide fact, so it
+	// outranks every per-row fact below it — see the guard in DecideWatchdogRow.
+	WatchdogSkipQuarantine WatchdogAction = "skip_quarantine"
 )
 
 // The operator drive-state vocabulary (WatchdogDriveState, HeldByOperator, HoldReason) and the
@@ -163,6 +167,16 @@ type WatchdogGuards struct {
 	// operator-hold guard INERT (fail-open, per-key — NOT the roster-style "absent ⇒ skip"
 	// rule the worker-account guard uses; the guard fires only on an explicit held token).
 	DriveStates map[string]WatchdogDriveState `json:"drive_states,omitempty"`
+	// Fleet is the declared desired worker population this tick decides against — the same
+	// quarantine SSOT the supervisors read, folded by the shell (quarantine.go). A declared
+	// target of 0 is the operator's quarantine and refuses EVERY row; a declared positive
+	// target leaves the guard inert. The zero value (FleetTargetUndeclared) means the tick
+	// supplied no posture at all and keeps the row-level guard inert, matching every other
+	// guard here: the leaf cannot force a caller to fold a field. AdmitQuarantine — the
+	// primitive each recovery path calls directly — is NOT so forgiving: it refuses an
+	// undeclared posture outright, so an actuator that asks the gate rather than omitting
+	// the field can never be admitted by forgetting to read the SSOT.
+	Fleet FleetPosture `json:"fleet,omitempty"`
 }
 
 // WatchdogRowDecision is the leaf's verdict for one plan row.
@@ -181,6 +195,17 @@ type WatchdogRowDecision struct {
 // Total over any input: an empty row fails no guard and folds to a launch with attempt 1,
 // but a real caller only feeds rows the plan actually carries.
 func DecideWatchdogRow(row WatchdogPlanRow, g WatchdogGuards, history []Attempt, outcome Outcome) WatchdogRowDecision {
+	// Fleet quarantine (#6505) sits ABOVE every per-row guard because it is not a fact
+	// ABOUT the row: the operator declared how many workers may exist at all, and a resume
+	// is one more worker. Placing it first is what makes the target-0 hold unbypassable by
+	// row-level evidence — a re-death revive, a fresh recoverable outcome, or a preserved
+	// partial turn are all reasons to launch onto a RUNNING fleet, none of them reasons to
+	// repopulate a drained one. Inert only when the tick declared no posture at all.
+	if g.Fleet.State != FleetTargetUndeclared {
+		if d := AdmitQuarantine(g.Fleet, RecoveryResumeSession); !d.Admit {
+			return WatchdogRowDecision{Action: WatchdogSkipQuarantine, Reason: d.Summary}
+		}
+	}
 	if g.SelfSID != "" && row.Session == g.SelfSID {
 		return WatchdogRowDecision{Action: WatchdogSkipSelf,
 			Reason: "this is the live session running the watchdog (self-resume guard)"}
