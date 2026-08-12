@@ -558,6 +558,7 @@ func SummarizeFrom(seed []LoopSnapshot, events []Event, now time.Time) Status {
 			loop.setRun(ev, StatusRunning)
 		case EventEnd:
 			loop.Ended++
+			loop.applyEndUtility(ev)
 			status := fallbackStatus(ev.Status, StatusClaimedDone)
 			loop.State = string(status)
 			loop.setRun(ev, status)
@@ -640,6 +641,32 @@ type LoopSnapshot struct {
 	Notifications       uint64           `json:"notifications"`
 	Metrics             map[string]int64 `json:"metrics,omitempty"`
 	LastRun             *RunSnapshot     `json:"last_run,omitempty"`
+
+	// The #6497 utility partition of Ended: Ended == Failed+Effects+NoFuel+Unattributed.
+	// Ended alone counts an end regardless of its outcome, so a loop that has failed on
+	// every recorded run still reads Ended>0 and looks like it is doing work. See
+	// utility.go for the classification and why each bucket is kept distinct.
+
+	// Failed is the count of ended runs that ended failed or canceled.
+	Failed uint64 `json:"failed"`
+	// ConsecutiveFailures is the length of the CURRENT trailing streak of failing
+	// ends, reset to 0 by any end that completed. It is the alert lever
+	// (FailureAlertThreshold), not a history.
+	ConsecutiveFailures uint64 `json:"consecutive_failures"`
+	// Effects is the count of completed runs that declared >= 1 useful effect.
+	Effects uint64 `json:"effects"`
+	// NoFuel is the count of completed runs that declared, in the typed vocabulary,
+	// that there was no work available. A no-fuel tick is a success, not an effect.
+	NoFuel uint64 `json:"no_fuel"`
+	// Unattributed is the count of completed runs that declared neither an effect nor
+	// no-fuel — a bare child exit 0, which proves only that the process ran.
+	Unattributed uint64 `json:"unattributed"`
+	// CostMilliUSD is the summed reported cost across ended runs, in thousandths of a
+	// US dollar. Meaningful only alongside CostedRuns.
+	CostMilliUSD int64 `json:"cost_milli_usd,omitempty"`
+	// CostedRuns is how many ended runs actually reported a cost, so a zero
+	// CostMilliUSD reads as "never measured" rather than "free".
+	CostedRuns uint64 `json:"costed_runs,omitempty"`
 }
 
 // LastActive exposes the loop's dormancy clock (issue #1179, epic #1178): the durable

@@ -184,6 +184,40 @@ type HealthRow struct {
 	// field without re-deriving it from KeepRate.
 	WitnessCollapse bool `json:"witness_collapse"`
 
+	// Failed is the count of ended runs that ended failed or canceled. Runs counts an
+	// end regardless of outcome, so without this a loop that has failed on every
+	// recorded run is indistinguishable, in this pane, from one that worked (#6497).
+	Failed uint64 `json:"failed"`
+
+	// ConsecutiveFailures is the current trailing streak of failing ends, reset by any
+	// completed run. Carried on the row so an operator sees "failing right now" rather
+	// than a lifetime total that a long-ago streak could explain away.
+	ConsecutiveFailures uint64 `json:"consecutive_failures"`
+
+	// FailureAlert is the surfaced boolean the issue asks for: true once the loop has
+	// failed FailureAlertThreshold times in a row — the first REPEATED failure. Like
+	// Dark and WitnessCollapse it is carried explicitly so a --json consumer gates on
+	// one field instead of re-deriving the threshold.
+	FailureAlert bool `json:"failure_alert,omitempty"`
+
+	// NeverSucceeded is true when the loop has ended at least one run and EVERY one
+	// failed — the exact shape #6497 was filed about (four runs, four failures, zero
+	// witnessed successes, while the OS scheduler looked green).
+	NeverSucceeded bool `json:"never_succeeded,omitempty"`
+
+	// Effects, NoFuel and Unattributed are the utility partition of the completed
+	// runs: produced something, typed-declared there was nothing to do, or ended with
+	// a bare child exit 0 that proves neither. Runs == Failed+Effects+NoFuel+Unattributed.
+	Effects      uint64 `json:"effects"`
+	NoFuel       uint64 `json:"no_fuel"`
+	Unattributed uint64 `json:"unattributed"`
+
+	// CostMilliUSD is the summed reported cost across ended runs (thousandths of a US
+	// dollar); CostedRuns is how many runs reported one, so a zero cost reads as
+	// "never measured" rather than "free".
+	CostMilliUSD int64  `json:"cost_milli_usd,omitempty"`
+	CostedRuns   uint64 `json:"costed_runs,omitempty"`
+
 	// LastState is the loop's last folded state string (the ledger's word on what it
 	// was doing), carried for context. Not the health verdict — that is State.
 	LastState string `json:"last_state,omitempty"`
@@ -236,6 +270,27 @@ type HealthRollup struct {
 	// (per-row WitnessCollapse). A scheduler can gate on WitnessCollapse > 0 the way it
 	// already gates on Dark > 0.
 	WitnessCollapse int `json:"witness_collapse"`
+	// Runs is the fleet-wide sum of ended runs — the denominator the utility counters
+	// below partition, carried so a reader never has to re-sum the rows.
+	Runs int `json:"runs"`
+	// Failed is the fleet-wide sum of failed/canceled ended runs; FailureAlert and
+	// NeverSucceeded are the counts of LOOPS in each alarming shape (#6497). A pane
+	// gates on FailureAlert > 0 exactly as it already gates on Dark > 0 — and unlike
+	// Dark, this one fires for a loop that is ticking perfectly on cadence and failing
+	// every single time.
+	Failed         int `json:"failed"`
+	FailureAlert   int `json:"failure_alert"`
+	NeverSucceeded int `json:"never_succeeded"`
+	// Effects, NoFuel and Unattributed are the fleet-wide utility partition of the
+	// completed runs. A fleet whose completed runs are all Unattributed is a fleet that
+	// cannot prove it did anything, however green its schedulers look.
+	Effects      int `json:"effects"`
+	NoFuel       int `json:"no_fuel"`
+	Unattributed int `json:"unattributed"`
+	// CostMilliUSD is the fleet-wide reported cost; CostedRuns is how many runs
+	// reported one, so a zero total is readable as unmeasured rather than free.
+	CostMilliUSD int64 `json:"cost_milli_usd,omitempty"`
+	CostedRuns   int   `json:"costed_runs,omitempty"`
 	// OSFiredNoLedgerRow is the count of rows promoted by the #4989 OS-scheduler rung:
 	// ledger-DARK loops whose mapped OS task fired 0x0 within cadence. It is a SUBSET of
 	// Dark (each such row is still counted in Dark), never a sibling tally — a reader
@@ -416,6 +471,22 @@ func healthRow(id string, snap LoopSnapshot, ledgered bool, job Job, registered 
 	}
 	row.WitnessCollapse = row.Runs > 0 && row.Witnessed*2 < row.Runs
 
+	// The #6497 utility partition and its two alarms. Same shape as the witness block
+	// above: the snapshot already carries the counters, so this fold reads them and
+	// names the one derived bit (FailureAlert / NeverSucceeded) each surface would
+	// otherwise re-derive. A loop can be LIVE, on cadence, and still be alerting here —
+	// that disagreement is the whole point, since the liveness verdict answers "is it
+	// ticking" and these answer "is it working".
+	row.Failed = snap.Failed
+	row.ConsecutiveFailures = snap.ConsecutiveFailures
+	row.FailureAlert = snap.FailureAlert()
+	row.NeverSucceeded = snap.NeverSucceeded()
+	row.Effects = snap.Effects
+	row.NoFuel = snap.NoFuel
+	row.Unattributed = snap.Unattributed
+	row.CostMilliUSD = snap.CostMilliUSD
+	row.CostedRuns = snap.CostedRuns
+
 	// Cadence: a registered job's interval is the truth; else the default horizon.
 	cadence := int64(0)
 	if registered && job.Schedule.IntervalSeconds > 0 {
@@ -516,6 +587,19 @@ func rollup(rows []HealthRow) HealthRollup {
 		if row.WitnessCollapse {
 			r.WitnessCollapse++
 		}
+		r.Runs += int(row.Runs)
+		r.Failed += int(row.Failed)
+		if row.FailureAlert {
+			r.FailureAlert++
+		}
+		if row.NeverSucceeded {
+			r.NeverSucceeded++
+		}
+		r.Effects += int(row.Effects)
+		r.NoFuel += int(row.NoFuel)
+		r.Unattributed += int(row.Unattributed)
+		r.CostMilliUSD += row.CostMilliUSD
+		r.CostedRuns += int(row.CostedRuns)
 		if row.OSFiredNoLedgerRow {
 			r.OSFiredNoLedgerRow++
 		}

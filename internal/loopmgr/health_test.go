@@ -157,7 +157,10 @@ func TestFoldHealth_PerLoopRowsAndRates(t *testing.T) {
 	// WitnessGap: active 1 + dark-ledger 1 (ended, never witnessed) + dark-registered 0.
 	// WitnessCollapse: only dark-ledger (0 of 1 witnessed is majority-unwitnessed); active
 	// is exactly half (boundary, not collapse) and dark-registered has no ended runs.
-	want := HealthRollup{Loops: 3, Live: 1, Stale: 0, Dark: 2, Unknown: 0, Registered: 2, Ledgered: 2, WitnessGap: 2, WitnessCollapse: 1}
+	// Utility partition (#6497): all three ended runs completed but declared neither a
+	// useful effect nor a typed no-fuel result, so they land in Unattributed — and no
+	// failure counter fires.
+	want := HealthRollup{Loops: 3, Live: 1, Stale: 0, Dark: 2, Unknown: 0, Registered: 2, Ledgered: 2, WitnessGap: 2, WitnessCollapse: 1, Runs: 3, Unattributed: 3}
 	if rep.Rollup != want {
 		t.Errorf("rollup = %+v, want %+v", rep.Rollup, want)
 	}
