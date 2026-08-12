@@ -333,6 +333,35 @@ func (t *Table) SetGoal(trace string, goal Goal) (State, bool) {
 	return t.setLocked(trace, func(cur *State) { cur.Goal = goal })
 }
 
+// SetPins records the operator-declared keep-set for a session (issue #2211, the
+// out-of-band control-plane epic #2208): the span/fact ids an operator asked to stay
+// resident through the planner's automatic shed. A terminal session rejects the
+// change, matching every other Set*. The table only RECORDS the set — the planner
+// (internal/agent's SessionPlanner.SetOperatorPins) forces the ids ahead of the
+// knapsack, and eviction stays automatic for everything else.
+//
+// The write REPLACES the whole set, and a nil/empty set clears it: pin/unpin merge
+// discipline lives with the CLI's read-modify-write, never in the table, so two
+// operators racing cannot silently union their keep-sets. The caller's slice is
+// COPIED in, so a caller that retains and later mutates the argument cannot reach
+// into the stored record. Setting it bumps Rev like any other write, so a
+// /v1/fak/changes cursor sees the pin update.
+func (t *Table) SetPins(trace string, pins []string) (State, bool) {
+	return t.setLocked(trace, func(cur *State) { cur.Pins = clonePins(pins) })
+}
+
+// clonePins copies an operator keep-set for storage, normalizing the empty set to
+// nil so a cleared record is wire-identical to one that never carried pins. The
+// copy is what makes SetPins defensive against caller aliasing.
+func clonePins(pins []string) []string {
+	if len(pins) == 0 {
+		return nil
+	}
+	out := make([]string, len(pins))
+	copy(out, pins)
+	return out
+}
+
 // SetPendingTurn records (or, with the zero PendingTurn, clears) the write-ahead
 // checkpoint of an in-flight turn's retry progress (issue #1363). A terminal session
 // rejects the change, matching every other Set*. The table only RECORDS it; the

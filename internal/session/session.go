@@ -371,6 +371,24 @@ type State struct {
 	// PinObjective/RepinObjective/CarryObjective mint and reconcile the pin; this field
 	// is only its durable home on the drive so a migration cannot drop it.
 	ObjectivePin ctxplan.ObjectivePin `json:"objective_pin,omitempty,omitzero"`
+	// Pins is the OPERATOR-declared keep-set for this session (issue #2211, the
+	// out-of-band control-plane epic #2208): the span / fact ids an operator has asked
+	// to stay resident through the planner's automatic shed. It is the cross-session
+	// home of the in-window keep-set the planner applies via SessionPlanner
+	// .SetOperatorPins (internal/agent) — a declared INTENT input, never a plan: the
+	// table records the ids and nothing more, the planner forces them ahead of the
+	// knapsack, and eviction stays automatic for everything else. An id naming no live
+	// span is harmless (the planner skips it), so drive state may legitimately run
+	// ahead of ingestion.
+	//
+	// The set is REPLACED wholesale by each write and cleared by a nil/empty one (see
+	// Table.SetPins) — pin/unpin merge discipline lives with the CLI's
+	// read-modify-write, so two operators racing cannot silently union their keep-sets.
+	// SetPins copies the caller's slice in; readers must treat the slice a Get/Snapshot
+	// hands back as read-only, exactly like every other reference field on this record.
+	// The zero value is "no operator pins" and, via omitempty, marshals byte-identically
+	// to a pre-#2211 State.
+	Pins []string `json:"pins,omitempty"`
 	// PendingTurn is the write-ahead checkpoint of an in-flight turn's retry/backoff
 	// progress (issue #1363, epic #1352 Pillar 3 "durable turn"). The retry loop
 	// (internal/agent's HTTPPlanner.Complete) tracks its attempt count and last
