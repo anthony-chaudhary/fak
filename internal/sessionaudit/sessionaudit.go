@@ -178,8 +178,14 @@ type Aggregate struct {
 	// legacy tier-substring heuristic. Their dollars rest on a heuristic, not
 	// identity provenance — the #4635 overmatch hazard, surfaced explicitly so
 	// a gate can hold on it.
-	UnverifiedClaudeIDs []string      `json:"unverified_claude_ids,omitempty"`
-	Distributions       Distributions `json:"dist"`
+	UnverifiedClaudeIDs []string `json:"unverified_claude_ids,omitempty"`
+	// ShellChoice is the shell-choice KPI (#3227): the corpus-wide join of ToolMix
+	// (which shell got picked) to the per-session Behavior.ToolErrors rollup (how
+	// often it came back broken). Both halves were already in the artifact as two
+	// unjoined tables; folding them here is what makes the friction one number a
+	// gate can watch. See shellchoice.go.
+	ShellChoice   ShellChoice   `json:"shell_choice"`
+	Distributions Distributions `json:"dist"`
 }
 
 type Namespace struct {
@@ -195,6 +201,11 @@ type Distributions struct {
 	IORatio                StatSet `json:"io_ratio"`
 	CacheHitFrac           StatSet `json:"cache_hit_frac"`
 	ReadOnlyFrac           StatSet `json:"read_only_frac"`
+	// ShellErrorRate is the per-session all-shell error rate (#3227). The
+	// corpus-wide rate in Aggregate.ShellChoice averages an outlier session away;
+	// this keeps the session that ate the shell friction visible. Sessions that ran
+	// no shell command at all are absent rather than counted as a clean 0%.
+	ShellErrorRate StatSet `json:"shell_error_rate"`
 }
 
 type StatSet struct {
@@ -524,7 +535,12 @@ func AggregateSessions(sessions []Session) Aggregate {
 		PerTrack:              map[string]ModelCounts{},
 	}
 	nsModels := map[string]map[string]int64{}
-	var calls, outs, ios, cacheHits, rofs []float64
+	// toolErrors is the corpus-wide errored-result rollup, the second half of the
+	// shell-choice KPI's join (#3227). It is summed here rather than exported on its
+	// own because the KPI is the joined view; the raw per-session counts stay on
+	// Session.Behavior.ToolErrors.
+	toolErrors := map[string]int64{}
+	var calls, outs, ios, cacheHits, rofs, shellErrs []float64
 	for _, s := range sessions {
 		if s.Error != "" {
 			continue
@@ -533,6 +549,7 @@ func AggregateSessions(sessions []Session) Aggregate {
 		addTokens(&agg.Totals, s.Tokens)
 		agg.TotalCostUSD += s.CostUSD
 		addMap(agg.ToolMix, s.Tools)
+		addMap(toolErrors, s.Behavior.ToolErrors)
 		ns := namespaceName(s.Path)
 		n := agg.PerNamespace[ns]
 		n.Sessions++
@@ -570,6 +587,11 @@ func AggregateSessions(sessions []Session) Aggregate {
 		}
 		if s.ReadOnlyFrac != nil {
 			rofs = append(rofs, *s.ReadOnlyFrac)
+		}
+		// A session that ran no shell command has no shell error rate; it stays out
+		// of the distribution instead of entering it as a flawless 0%.
+		if r := SessionShellErrorRate(s); r != nil {
+			shellErrs = append(shellErrs, *r)
 		}
 	}
 	for model, c := range agg.PerModel {
@@ -625,12 +647,14 @@ func AggregateSessions(sessions []Session) Aggregate {
 			agg.PerNamespaceOpusShare[ns] = &v
 		}
 	}
+	agg.ShellChoice = FoldShellChoice(agg.ToolMix, toolErrors)
 	agg.Distributions = Distributions{
 		CallsPerSession:        stat(calls, true, false, true),
 		OutputTokensPerSession: stat(outs, false, false, true),
 		IORatio:                stat(ios, false, true, false),
 		CacheHitFrac:           stat(cacheHits, false, true, false),
 		ReadOnlyFrac:           stat(rofs, false, false, false),
+		ShellErrorRate:         stat(shellErrs, false, false, true),
 	}
 	return agg
 }

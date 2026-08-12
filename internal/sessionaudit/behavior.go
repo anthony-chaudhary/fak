@@ -24,7 +24,9 @@ const (
 )
 
 var (
-	shellTools       = map[string]bool{"Bash": true, "PowerShell": true}
+	// Built from the ShellTools vocabulary the shell-choice KPI reports (#3227), so a
+	// third shell cannot be counted by one and ignored by the other.
+	shellTools       = shellToolSet()
 	mutationTools    = map[string]bool{"Edit": true, "Write": true, "NotebookEdit": true}
 	successLoopTools = map[string]bool{"Read": true, "Glob": true, "Grep": true, "LS": true, "Bash": true, "PowerShell": true}
 

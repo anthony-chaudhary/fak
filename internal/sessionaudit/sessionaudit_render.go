@@ -50,6 +50,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	renderModelMix(&b, agg)
 	renderSelfHostedShare(&b, agg)
 	writeDelegationShare(&b, agg)
+	renderShellChoice(&b, agg)
 	renderBuckets(&b, agg)
 	renderModels(&b, agg)
 	renderNamespaces(&b, agg)
@@ -264,6 +265,47 @@ func writeDelegationShare(b *strings.Builder, agg Aggregate) {
 			fmtPct(d.OutputShare), fmtPct(d.Coverage), fmtInt(d.SpawnCalls))
 	}
 	fmt.Fprintln(b)
+}
+
+// renderShellChoice prints the shell-choice KPI (#3227): which shell the corpus
+// actually reached for, and how often each one came back broken.
+//
+// It sits in the scope rollup, not in the tool-mix table at the bottom, because the
+// tool mix answers "how many Bash calls" while this answers the two questions a fix
+// can move: which shell agents PICK, and which one WORKS. Reading them apart is what
+// left the friction an anecdote someone had to re-derive by eye.
+//
+// A shell nobody called still gets its row (that IS the choice signal), and a window
+// with no shell calls reports UNKNOWN rather than a flawless 0%.
+func renderShellChoice(b *strings.Builder, agg Aggregate) {
+	sc := agg.ShellChoice
+	fmt.Fprintln(b, "## Shell choice (KPI)")
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, "| Shell | Calls | Call share | Errors | Error rate |")
+	fmt.Fprintln(b, "|---|---:|---:|---:|---:|")
+	for _, s := range sc.Shells {
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n", s.Tool, fmtInt(s.Calls), fmtPct(s.CallShare), fmtInt(s.Errors), fmtPct(s.ErrorRate))
+	}
+	fmt.Fprintln(b)
+	if sc.Calls == 0 {
+		fmt.Fprintln(b, "**Preferred shell = UNKNOWN** - this corpus ran no shell command at all, so there is no choice and no error rate to report. That is an empty window, NOT a 0% error rate.")
+		fmt.Fprintln(b)
+		return
+	}
+	fmt.Fprintf(b, "**Preferred shell:** %s  _(%s of %s shell call(s); all-shell error rate %s over %s errored result(s))_\n",
+		sc.Preferred, fmtPct(ratio(shellCalls(sc, sc.Preferred), sc.Calls)), fmtInt(sc.Calls), fmtPct(sc.ErrorRate), fmtInt(sc.Errors))
+	fmt.Fprintln(b)
+}
+
+// shellCalls returns one shell's call count from a folded KPI, or 0 for a name the
+// fold does not carry.
+func shellCalls(sc ShellChoice, tool string) int64 {
+	for _, s := range sc.Shells {
+		if s.Tool == tool {
+			return s.Calls
+		}
+	}
+	return 0
 }
 
 func renderBuckets(b *strings.Builder, agg Aggregate) {
@@ -518,6 +560,10 @@ func renderDistributions(b *strings.Builder, d Distributions) {
 	fmt.Fprintf(b, "- **Cache-hit fraction/session:** median %s, p10 %s, p90 %s\n",
 		fmtStat(d.CacheHitFrac.Median), fmtStat(d.CacheHitFrac.P10), fmtStat(d.CacheHitFrac.P90))
 	fmt.Fprintf(b, "- **Read-only tool fraction/session:** median %s\n", fmtStat(d.ReadOnlyFrac.Median))
+	// Shell error rate is per SESSION here (#3227): the corpus-wide rate in the KPI
+	// rollup averages an outlier away, and the max is the session that ate it.
+	fmt.Fprintf(b, "- **Shell error rate/session:** median %s, p90 %s, max %s  _(sessions that ran a shell command)_\n",
+		fmtPct(d.ShellErrorRate.Median), fmtPct(d.ShellErrorRate.P90), fmtPct(d.ShellErrorRate.Max))
 	fmt.Fprintln(b)
 }
 
