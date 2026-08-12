@@ -188,30 +188,15 @@ func RegenerateFromGitTree(root, treeish, dest string) ([]string, error) {
 	if dest == "" {
 		dest = root
 	}
-	tree, cleanup, err := materializeGitTree(root, treeish)
+	rendered, err := renderFromGitTree(root, treeish, nil)
 	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-	// Generate into scratch first: generate() encodes the "exit 1 is an honest ACTION
-	// verdict as long as every artifact exists" rule, so a real crash must not leave
-	// half-written artifacts in the operator's worktree.
-	out, err := os.MkdirTemp("", "fak-concept-regen-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(out)
-	if err := generate(tree, out); err != nil {
 		return nil, err
 	}
 	written := make([]string, 0, len(generatedArtifacts))
 	for _, art := range generatedArtifacts {
 		// Copied byte for byte: the generator emits LF and git staging must leave the
 		// blob unchanged (#5136). Any rewriting here re-breaks that round trip.
-		b, err := os.ReadFile(filepath.Join(out, art.Name))
-		if err != nil {
-			return written, fmt.Errorf("read generated %s: %w", art.Name, err)
-		}
+		b := rendered[art.Tracked]
 		target := filepath.Join(dest, filepath.FromSlash(art.Tracked))
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return written, err

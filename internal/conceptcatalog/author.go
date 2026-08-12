@@ -437,7 +437,11 @@ func PlanClassify(c Catalog, req ClassifyRequest) (Plan, error) {
 	}
 	out := buf.Bytes() // Encode already terminates with a newline.
 	plan := Plan{Mode: "classify", Family: req.Family, BeforeFamilyCount: before, AfterFamilyCount: before, Files: []string{filepath.ToSlash(p)}, Changes: []Change{{Path: p, BeforeCount: before, AfterCount: before, Content: out}}}
-	return AddGeneratedArtifacts(c, plan)
+	// Deliberately NOT AddGeneratedArtifacts: unlike a position, a classification is not
+	// graded against the snapshot it renders, so the only reason to run the generator is
+	// to refresh the two COMMITTED docs - and those must be rendered from the git tree the
+	// freshness gate scores, never from this shared worktree (#6521).
+	return addClassifyGeneratedArtifacts(c, plan)
 }
 func toStrings(v any) []string {
 	var out []string
