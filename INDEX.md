@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Terminal relief runs inside a managed pause barrier](docs/notes/TERMINAL-RELIEF-PAUSE-BARRIER-2026-08-12.md) -- auto-indexed dated note.
 - [Context as variable vs addressable context](docs/notes/CONTEXT-AS-VARIABLE-RLM-STUDY-2026-08-12.md) -- auto-indexed dated note.
 - [Maintenance-loop tombstones — 2026-08-12](docs/notes/MAINTENANCE-LOOP-TOMBSTONES-2026-08-12.md) -- auto-indexed dated note.
 - [Windows unexpected restart incident — 2026-08-10](docs/notes/INCIDENT-WINDOWS-UNEXPECTED-RESTART-2026-08-10.md) -- auto-indexed dated note.

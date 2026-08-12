@@ -179,9 +179,16 @@ while ($true) {
   # Unlike daemon cleanup, terminal pressure needs consecutive observations.
   # Call the fail-closed actuator on every sample; it acts only after its own
   # run threshold and cooldown, and dry-runs are available through the verb.
+  # #6436: the actuator now runs every replacement inside a lifecycle transaction
+  # and prints one barrier line naming the transaction ID and its read-back. Keep
+  # that line in a durable log so an abstention is as auditable as a replacement.
   if ($AutoMitigate) {
+    $barrierLog = Join-Path $env:LOCALAPPDATA 'Fleet\terminal-relief-barrier.log'
     & $fak terminal-relief --apply --json 2>&1 | ForEach-Object {
       Write-Host "[terminal-relief] $_"
+      if ("$_" -like '*terminal-relief barrier *') {
+        Add-Content -LiteralPath $barrierLog -Value ("{0} {1}" -f (Get-Date -Format o), $_)
+      }
     }
   }
 

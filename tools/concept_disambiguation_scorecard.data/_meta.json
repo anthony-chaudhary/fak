@@ -3564,6 +3564,11 @@
           "category": "incidental",
           "reason": "machine-readable benchmark metric field, not a new context-management concept",
           "token": "SearchRecall"
+        },
+        {
+          "category": "incidental",
+          "reason": "counter of host-restore actuator calls in a terminal-relief barrier report; unrelated to any context/ctx concept",
+          "token": "RestoreCalls"
         }
       ],
       "id": "context-ctx",
@@ -3573,6 +3578,7 @@
         "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "RestoreCalls",
         "SearchRecall",
         "appendGuardCompactionWitnessTo",
         "callCtx",

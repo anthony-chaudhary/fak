@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -132,6 +133,85 @@ func TestTerminalReliefPersistentSafeHostRelaunchesThenStops(t *testing.T) {
 		t.Fatalf("order=%v", order)
 	}
 }
+func terminalReliefPressuredHost() (terminalReliefSnapshot, error) {
+	return terminalReliefSnapshot{PID: 7, Handles: 12000, Threads: 600, Processes: []terminalReliefProcess{{PID: 8, ParentPID: 7, Name: "pwsh.exe"}, {PID: 9, ParentPID: 8, Name: "fak.exe", CommandLine: `C:\Users\u\bin\fak.exe info --gateway-url http://127.0.0.1:1 --interval 2s`}}}, nil
+}
+
+// #6436: replacement is only ever reached through a lifecycle transaction whose
+// prepare/pause requests and completed acknowledgements are durable and readable.
+func TestTerminalReliefReplacementRunsInsideLifecycleTransaction(t *testing.T) {
+	oldGather, oldLaunch, oldStop := gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn
+	defer func() {
+		gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn = oldGather, oldLaunch, oldStop
+	}()
+	gatherTerminalReliefSnapshotFn = terminalReliefPressuredHost
+	launchTerminalReliefCommandFn = func([]string) error { return nil }
+	stops := 0
+	stopTerminalReliefHostFn = func(int) error { stops++; return nil }
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state.json")
+	var out, errOut bytes.Buffer
+	for i := 0; i < 3; i++ {
+		out.Reset()
+		errOut.Reset()
+		if rc := runTerminalRelief(&out, &errOut, []string{"--apply", "--json", "--state", state, "--cooldown", "0s"}); rc != 0 {
+			t.Fatalf("tick=%d rc=%d err=%s", i, rc, errOut.String())
+		}
+	}
+	var got struct {
+		Verdict string `json:"verdict"`
+		Barrier struct {
+			TransactionID string   `json:"transaction_id"`
+			ForestID      string   `json:"forest_id"`
+			Verdict       string   `json:"verdict"`
+			StopCalls     int      `json:"stop_calls"`
+			Readback      []string `json:"readback"`
+		} `json:"barrier"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("record=%s err=%v", out.String(), err)
+	}
+	if got.Verdict != "APPLY" || got.Barrier.Verdict != "READY" || got.Barrier.StopCalls != 1 || stops != 1 {
+		t.Fatalf("record=%+v stops=%d", got, stops)
+	}
+	if got.Barrier.ForestID != "terminal-host-7" || got.Barrier.TransactionID == "" || len(got.Barrier.Readback) == 0 {
+		t.Fatalf("barrier=%+v", got.Barrier)
+	}
+	// The monitor reads exactly this line: it names the transaction and the read-back.
+	if !strings.Contains(errOut.String(), "transaction="+got.Barrier.TransactionID) || !strings.Contains(errOut.String(), "readback=") {
+		t.Fatalf("monitor line=%q", errOut.String())
+	}
+	for _, kind := range []string{"requests", "acks"} {
+		ents, err := os.ReadDir(filepath.Join(dir, "lifecycle", kind, got.Barrier.TransactionID))
+		if err != nil || len(ents) != 1 {
+			t.Fatalf("durable %s=%v err=%v", kind, ents, err)
+		}
+	}
+}
+
+// A member that cannot acknowledge inside the deadline proves zero stop calls.
+func TestTerminalReliefLateAcknowledgementMakesZeroStopCalls(t *testing.T) {
+	oldGather, oldLaunch, oldStop := gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn
+	defer func() {
+		gatherTerminalReliefSnapshotFn, launchTerminalReliefCommandFn, stopTerminalReliefHostFn = oldGather, oldLaunch, oldStop
+	}()
+	gatherTerminalReliefSnapshotFn = terminalReliefPressuredHost
+	launches, stops := 0, 0
+	launchTerminalReliefCommandFn = func([]string) error { launches++; return nil }
+	stopTerminalReliefHostFn = func(int) error { stops++; return nil }
+	state := filepath.Join(t.TempDir(), "state.json")
+	for i := 0; i < 3; i++ {
+		var out, errOut bytes.Buffer
+		rc := runTerminalRelief(&out, &errOut, []string{"--apply", "--json", "--state", state, "--cooldown", "0s", "--barrier-deadline", "1ns"})
+		if i == 2 && rc != 3 {
+			t.Fatalf("expected fail-closed abstain, rc=%d out=%s", rc, out.String())
+		}
+	}
+	if launches != 0 || stops != 0 {
+		t.Fatalf("barrier let the host be replaced: launches=%d stops=%d", launches, stops)
+	}
+}
+
 func TestTerminalReliefUnsafeDescendantAbstains(t *testing.T) {
 	old := gatherTerminalReliefSnapshotFn
 	defer func() { gatherTerminalReliefSnapshotFn = old }()
