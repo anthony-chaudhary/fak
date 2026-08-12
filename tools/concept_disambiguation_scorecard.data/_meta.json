@@ -1406,6 +1406,41 @@
           "category": "incidental",
           "reason": "Struct field of GateProvenance: the adjudicating binary's path, carried for the reason line.",
           "token": "GatePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct field of GateProvenance: whether a gate binary was resolved at all (the fail-open discriminator).",
+          "token": "GateResolved"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct field of GateProvenance: whether the resolved gate binary produced a usable VCS revision.",
+          "token": "GateAttested"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct field of GateProvenance: the VCS revision the adjudicating binary self-reports.",
+          "token": "GateBuild"
+        },
+        {
+          "category": "incidental",
+          "reason": "Struct field of GateProvenance: whether the adjudicating binary self-reports a +uncommitted working-tree build.",
+          "token": "GateDirty"
+        },
+        {
+          "category": "incidental",
+          "reason": "Impure-shell reader that lifts the preflight payload's existing fak_bin block into GateProvenance. A map decode, no decision.",
+          "token": "dispatchGateProvenance"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing resolver NAME in tools/dispatch_preflight.py's fak_bin provenance payload, read here as a map key. Not a new concept — it names the resolver that already exists.",
+          "token": "worker_guard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum member of the selfinstall Role vocabulary: the repo-root fak binary that adjudicates the spawn gate. A deployment-slot label, not a gate.",
+          "token": "RoleGate"
         }
       ],
       "exclude": [
@@ -1437,14 +1472,19 @@
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
         "FLEET_GIT_HYGIENE_GUARD",
         "GATED_UNWITNESSED",
+        "GateAttested",
+        "GateBuild",
+        "GateDirty",
         "GateFlipped",
         "GatePath",
         "GateProvenance",
+        "GateResolved",
         "GateSkewRefusal",
         "IsAggregate",
         "LifecycleGate",
         "OutcomeDelegate",
         "ReportedGates",
+        "RoleGate",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "admitGuardShrinkLevers",
         "aggregateLive",
@@ -1455,6 +1495,7 @@
         "cmdCacheValueGateScore",
         "cooldownGateBlindWarning",
         "coreLockLandGate",
+        "dispatchGateProvenance",
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
@@ -1595,7 +1636,8 @@
         "transform_guard",
         "ungated",
         "unguarded",
-        "withGuardRegistrationEnv"
+        "withGuardRegistrationEnv",
+        "worker_guard"
       ],
       "min_files": 3,
       "name": "Guard / gate family",
@@ -3337,6 +3379,11 @@
           "category": "incidental",
           "reason": "thin cmd/fak wrapper that names the guard child's policy origin-evidence location; the governed concept lives in internal/guard.PolicyOriginEvidencePath",
           "token": "guardPolicyOriginEvidencePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Env knob naming the operator override for the #6508 bin-skew refusal. An escape-hatch flag read by the impure shell; the capability it toggles is the refusal itself.",
+          "token": "FAK_PREFLIGHT_ALLOW_BIN_SKEW"
         }
       ],
       "exclude": [
@@ -3357,6 +3404,7 @@
         "ErrNotAdjudicated",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
+        "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
         "HeldSchedulePolicy",
         "MaxPostures",
         "OrgPolicyCachePath",

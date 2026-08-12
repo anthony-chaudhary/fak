@@ -51,14 +51,15 @@ func defaultCooldownStorePath() string {
 // loadCooldownStoreFailOpen loads the fleet-shared cooldown store for a cooldown-aware
 // resolution (Registry.ServeAt) and FAILS OPEN: an absent or unreadable store yields nil —
 // the cooldown-blind fold — so bad cooldown state can never block a resolve, launch, or
-// dispatch preflight (#4675). Callers that must EXPLAIN unreadability (the status and
-// cooldown verbs) load the store themselves and surface the error instead.
-func loadCooldownStoreFailOpen() *accounts.CooldownStore {
-	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
-	if err != nil {
-		return nil
-	}
-	return store
+// dispatch preflight (#4675). It is no longer SILENT about it: an unreadable store writes
+// one warning naming the store to warn (surface labels the calling command), because a
+// one-byte corruption otherwise downgrades a fleet safety gate to a no-op that nobody sees
+// until someone happens to run `fak accounts cooldown` (#6027). The fold and the warning
+// both live in accounts.LoadCooldownStoreFailOpen so they are witnessed together; this
+// wrapper only binds the fleet-shared path. Callers that must EXPLAIN unreadability (the
+// status and cooldown verbs) load the store themselves and surface the error instead.
+func loadCooldownStoreFailOpen(surface string, warn io.Writer) *accounts.CooldownStore {
+	return accounts.LoadCooldownStoreFailOpen(defaultCooldownStorePath(), surface, warn)
 }
 
 // accountsCooldown is the `fak accounts cooldown` surface: with no --clear, it

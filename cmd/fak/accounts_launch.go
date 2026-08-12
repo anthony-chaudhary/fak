@@ -357,7 +357,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	// seat. In the all-cooled terminal (non-nil cdEntry) the launch proceeds on the
 	// soonest-reset seat with a warning: a seat that resets soon still beats refusing to
 	// launch at all.
-	home, chain, cdEntry, err := reg.ServeAt(name, loadCooldownStoreFailOpen(), time.Now())
+	home, chain, cdEntry, err := reg.ServeAt(name, loadCooldownStoreFailOpen("fak accounts launch", stderr), time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", err)
 		return 1

@@ -674,7 +674,7 @@ func accountsResolve(stdout, stderr io.Writer, positional []string, nameFlag, re
 	if !ok {
 		return code
 	}
-	home, chain, entry, err := accountsResolveServe(reg, name, pin, loadCooldownStoreFailOpen(), time.Now())
+	home, chain, entry, err := accountsResolveServe(reg, name, pin, loadCooldownStoreFailOpen("fak accounts resolve", stderr), time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1

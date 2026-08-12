@@ -1194,7 +1194,10 @@ func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, er
 	if err != nil {
 		return nil, err
 	}
-	return dispatchApplyAccountCooldown(rows, loadCooldownStoreFailOpen(), time.Now()), nil
+	// This is an ADMISSION path (it drops cooled seats from the routable pool), so an
+	// unreadable store warns on os.Stderr like the resolve/launch seams do (#6027) —
+	// stdout stays clean for the preflight's JSON.
+	return dispatchApplyAccountCooldown(rows, loadCooldownStoreFailOpen("fak dispatch", os.Stderr), time.Now()), nil
 }
 
 // dispatchApplyAccountCooldown marks every roster row whose upstream account holds an
@@ -1263,7 +1266,10 @@ func dispatchPreflightUsageCap(root, product string, seat dispatchtick.SeatCheck
 	if product == "codex" {
 		return dispatchtick.UsageCapAdvisory{}
 	}
-	store := loadCooldownStoreFailOpen()
+	// Silent fold here on purpose: this census is ADVISORY ONLY and runs on the same tick
+	// as the roster above, which already warned about the same file — a second copy per
+	// tick would be noise, not signal (#6027).
+	store := loadCooldownStoreFailOpen("fak dispatch", nil)
 	if store == nil {
 		return dispatchtick.UsageCapAdvisory{}
 	}
