@@ -12,6 +12,7 @@ unattended is safe by construction - nothing is ever lost.
   .\register_worktree_doctor.ps1 -PruneBranches   # ALSO delete merged local branches (git branch -d)
   .\register_worktree_doctor.ps1 -ReportOnly      # install: report only, never remove anything
   .\register_worktree_doctor.ps1 -EveryHours 4    # repeat every N hours (0 = once daily at -At)
+  .\register_worktree_doctor.ps1 -AlsoRepo C:\work\fak  # ALSO maintain another checkout on this box
   .\register_worktree_doctor.ps1 -Action status
   .\register_worktree_doctor.ps1 -Action remove
   .\register_worktree_doctor.ps1 -At 02:00 -AllowBranch fak-v0.1,my-release
@@ -26,6 +27,16 @@ param(
   [switch]$PruneBranches,                    # ALSO delete merged local branches (opt-in; default off)
   [string]$At = '03:30',                     # daily run time (HH:mm, 24h)
   [int]$EveryHours = 4,                      # also repeat every N hours within the day (0 = daily only)
+  # The live task name is machine-global (see -TaskName below), so ONE task has to
+  # maintain EVERY checkout on this box. -AlsoRepo names the others; the doctor reports
+  # each repository separately and its exit NAMES the one that failed, so a clean sweep
+  # of this clone can never stand in for an unswept peer (#6498).
+  [string[]]$AlsoRepo = @(),                 # additional checkouts this one task also maintains
+  # Directories whose immediate subdirectories are audited for checkouts whose AGENTS.md
+  # promises a scheduled worktree doctor. Any such checkout missing from the --repo set
+  # fails the run with NO_SCHEDULED_DOCTOR_COVERAGE naming it, so the promise stops
+  # outrunning the task. Defaults to this clone's parent (e.g. C:\work); pass @() to opt out.
+  [string[]]$CoverageScan = @(),
   [string[]]$AllowBranch = @('fak-v0.1'),    # long-lived worktree branches to RETAIN, never prune
   # The live task is named FleetWorktreeDoctor, bare -- that is what the versioned
   # capture declares (tools/scheduled-tasks/FleetWorktreeDoctor.xml: <URI>\FleetWorktreeDoctor</URI>)
@@ -45,6 +56,9 @@ $ErrorActionPreference = 'Stop'
 # Resolve the repo from THIS script's location (tools/ -> repo root). No hardcoded path.
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Repo      = (Resolve-Path (Join-Path $ScriptDir '..')).Path
+# Default coverage audit: this clone's parent, so a sibling checkout that advertises a
+# scheduled doctor but is not in the --repo set is reported instead of silently unswept.
+if (-not $PSBoundParameters.ContainsKey('CoverageScan')) { $CoverageScan = @((Split-Path -Parent $Repo)) }
 $Doctor    = Join-Path $ScriptDir 'worktree_doctor.py'
 $LogDir    = Join-Path $env:LOCALAPPDATA 'Fleet\watchdog'
 $Log       = Join-Path $LogDir 'worktree_doctor.log'
@@ -62,12 +76,18 @@ if ($Action -eq 'status') {
   if (-not $t) { Write-Output "NOT INSTALLED ($TaskName)"; return }
   $i = Get-ScheduledTaskInfo -TaskName $TaskName
   $a = ($t.Actions | Select-Object -First 1).Arguments
+  # WHICH repositories does the live task actually maintain? That is the audit #6498
+  # opened with: the task looked healthy while sweeping one checkout and never touching
+  # the other, and nothing in status said so.
+  $repos = [regex]::Matches($a, '--repo\s+"?([^"\s]+)"?') | ForEach-Object { $_.Groups[1].Value }
+  if (-not $repos) { $repos = @('(none declared - the action carries no --repo)') }
   $parts = @()
   if ($a -match '--prune\b') { $parts += 'prune-worktrees' }
   if ($a -match '--sweep-disposable') { $parts += 'sweep-scratch' }
   if ($a -match '--prune-branches') { $parts += 'prune-branches' }
   $mode = if ($parts.Count) { ($parts -join '+') } else { 'REPORT-ONLY' }
   Write-Output "State=$($t.State) mode=$mode LastRun=$($i.LastRunTime) LastResult=$($i.LastTaskResult) NextRun=$($i.NextRunTime)"
+  Write-Output "repos: $($repos -join ', ')"
   Write-Output "log: $Log"
   return
 }
@@ -86,6 +106,10 @@ New-Item -ItemType Directory -Force $LogDir | Out-Null
 # Branch deletion (git branch -d) is opt-in via -PruneBranches so a fresh install never
 # purges merged local branches by surprise.
 $dargs = @("`"$Doctor`"", '--repo', "`"$Repo`"", '--fetch')
+# Every checkout this one machine-global task is responsible for, plus the coverage audit
+# that fails the run when a checkout claims a scheduled doctor nobody actually scheduled.
+foreach ($r in $AlsoRepo)     { if ($r) { $dargs += @('--repo', "`"$r`"") } }
+foreach ($c in $CoverageScan) { if ($c) { $dargs += @('--coverage-scan', "`"$c`"") } }
 if (-not $ReportOnly) {
   $dargs += @('--prune', '--sweep-disposable')
   # The durable worker-worktree root sits outside TEMP. Include it explicitly so

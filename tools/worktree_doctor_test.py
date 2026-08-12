@@ -6,6 +6,7 @@ parse_worktree_list) with synthetic worktree records, so the safety rule — nev
 remove a worktree that has uncommitted work, an in-progress merge, or commits not
 yet on master — is proven without touching a real repo."""
 import datetime
+import json
 import os
 import tempfile
 import unittest
@@ -367,6 +368,254 @@ class ArchiveDayRetention(unittest.TestCase):
             removed = wd.reap_stale_archive_days(archive_dir, keep_days=0, today=today)
             self.assertEqual(removed, [(today - datetime.timedelta(days=1)).isoformat()])
             self.assertTrue(os.path.isdir(os.path.join(base, today.isoformat())))
+
+
+class MultiRepoAggregate(unittest.TestCase):
+    """One machine-global scheduled task maintains SEVERAL checkouts, so the run's verdict
+    must fold every repository's own result. The regression these lock down is #6498: the
+    live task swept C:\\work\\fleet only, reported one clean repo, and nothing anywhere said
+    C:\\work\\fak had never been looked at. A clean result must never stand in for a failing
+    or an absent one — in either direction, whatever order the repos are listed in."""
+
+    @staticmethod
+    def repo(path, code=0, reason=wd.REASON_OK, **extra):
+        return dict({"repo": path, "exit": code, "reason": reason,
+                     "paths_scanned": [path], "retained": [], "pruned": [], "blocked": []},
+                    **extra)
+
+    def test_all_healthy_is_zero(self):
+        got = wd.aggregate_result([self.repo("/fleet"), self.repo("/fak")])
+        self.assertEqual((got["exit"], got["reason"], got["failed_repo"]),
+                         (0, wd.REASON_OK, None))
+
+    def test_a_clean_repo_cannot_mask_a_blocked_peer_in_either_order(self):
+        clean = self.repo("/fleet")
+        blocked = self.repo("/fak", 1, wd.REASON_NEEDS_HUMAN)
+        for label, rows in (("clean first", [clean, blocked]),
+                            ("blocked first", [blocked, clean])):
+            with self.subTest(label):
+                got = wd.aggregate_result(rows)
+                self.assertEqual(got["exit"], 1)
+                self.assertEqual(got["reason"], wd.REASON_NEEDS_HUMAN)
+                self.assertEqual(got["failed_repo"], "/fak")
+
+    def test_could_not_run_outranks_needs_human_and_names_that_repo(self):
+        rows = [self.repo("/fleet"),
+                self.repo("/fak", 1, wd.REASON_NEEDS_HUMAN),
+                self.repo("/broken", 2, wd.REASON_ERROR, error="not a git repository")]
+        got = wd.aggregate_result(rows)
+        self.assertEqual((got["exit"], got["reason"], got["failed_repo"]),
+                         (2, wd.REASON_ERROR, "/broken"))
+
+    def test_a_clean_repo_cannot_mask_an_UNSWEPT_one(self):
+        # the #6498 shape exactly: the one repo in the run is perfectly healthy, and the
+        # repo that was never in the run is the failure the exit code must carry.
+        coverage = [{"repo": "/fleet", "declared": True, "covered": True,
+                     "reason": wd.REASON_OK},
+                    {"repo": "/fak", "declared": True, "covered": False,
+                     "reason": wd.REASON_NO_COVERAGE}]
+        got = wd.aggregate_result([self.repo("/fleet")], coverage)
+        self.assertEqual((got["exit"], got["reason"], got["failed_repo"]),
+                         (1, wd.REASON_NO_COVERAGE, "/fak"))
+
+    def test_full_coverage_over_healthy_repos_stays_zero(self):
+        coverage = [{"repo": "/fleet", "declared": True, "covered": True,
+                     "reason": wd.REASON_OK},
+                    {"repo": "/fak", "declared": True, "covered": True,
+                     "reason": wd.REASON_OK}]
+        got = wd.aggregate_result([self.repo("/fleet"), self.repo("/fak")], coverage)
+        self.assertEqual(got["exit"], 0)
+
+
+class OneBadRepoDoesNotSinkTheRun(unittest.TestCase):
+    """A --repo that cannot be run at all must come back as ITS OWN typed row. Before the
+    multi-repo run this was an uncaught OSError out of `git -C <missing>`, which would have
+    taken the sweep of every other repository down with it — the very masking #6498 is about."""
+
+    def test_git_survives_an_unusable_cwd(self):
+        with tempfile.TemporaryDirectory() as base:
+            rc, out, err = wd._git(["status"], cwd=os.path.join(base, "no-such-dir"))
+            self.assertNotEqual(rc, 0)
+            self.assertEqual(out, "")
+            self.assertTrue(err)
+
+    def test_missing_repo_yields_exit_2_and_never_hides_a_peer(self):
+        import types
+        with tempfile.TemporaryDirectory() as base:
+            args = types.SimpleNamespace(master_ref="origin/main", fetch=False,
+                                         archive_dir=os.path.join(base, "archive"))
+            result, ctx = wd.run_repo(os.path.join(base, "no-such-dir"), args)
+            self.assertIsNone(ctx)
+            self.assertEqual((result["exit"], result["reason"]), (2, wd.REASON_ERROR))
+            self.assertTrue(result["error"])
+            self.assertEqual(result["paths_scanned"], [])
+            got = wd.aggregate_result([{"repo": "/fleet", "exit": 0, "reason": wd.REASON_OK},
+                                       result])
+            self.assertEqual((got["exit"], got["failed_repo"]),
+                             (2, result["repo"]))
+
+
+class DoctorCoverage(unittest.TestCase):
+    """A checkout whose AGENTS.md promises a scheduled worktree doctor and that no --repo
+    maintains is a typed gap, not silence."""
+
+    def test_agents_md_claim_is_detected_and_a_bare_doc_is_not(self):
+        self.assertTrue(wd.agents_md_declares_doctor(
+            "A scheduled task runs it (`tools/register_worktree_doctor.ps1`)."))
+        self.assertTrue(wd.agents_md_declares_doctor(
+            "`tools/worktree_doctor.py` is the janitor: it prunes safe strays."))
+        self.assertFalse(wd.agents_md_declares_doctor("Run make ci before you push."))
+        self.assertFalse(wd.agents_md_declares_doctor(None))
+
+    def test_declaring_checkout_absent_from_the_run_is_a_gap(self):
+        cands = [("/work/fleet", "a scheduled task runs tools/worktree_doctor.py"),
+                 ("/work/fak", "the janitor is tools/worktree_doctor.py"),
+                 ("/work/unrelated", "nothing to see here")]
+        rows = wd.coverage_gaps(cands, ["/work/fleet"])
+        by_repo = {r["repo"]: r for r in rows}
+        self.assertEqual(len(rows), 2, "only the two DECLARING checkouts get a row")
+        self.assertTrue(by_repo[os.path.abspath("/work/fleet")]["covered"])
+        gap = by_repo[os.path.abspath("/work/fak")]
+        self.assertFalse(gap["covered"])
+        self.assertEqual(gap["reason"], wd.REASON_NO_COVERAGE)
+
+    def test_repo_paths_match_across_separator_and_case_spelling(self):
+        cands = [("/work/fak", "tools/worktree_doctor.py")]
+        spelled = os.path.join(os.path.abspath("/work"), "fak") + os.sep
+        self.assertTrue(wd.coverage_gaps(cands, [spelled])[0]["covered"])
+
+    def test_scratch_clones_of_a_maintained_repo_raise_no_gap(self):
+        # a busy box carries dozens of throwaway clones of the SAME repo, each with the
+        # identical AGENTS.md. Auditing them one by one would report ~50 gaps for one real
+        # one, so identity (origin URL) groups them and the canonical path names the group.
+        cands = [("/work/fak", "tools/worktree_doctor.py", "git@github:org/fak"),
+                 ("/work/.iso5032", "tools/worktree_doctor.py", "git@github:org/fak"),
+                 ("/work/fak-verify-1349", "tools/worktree_doctor.py", "git@github:org/fak"),
+                 ("/work/fleet", "tools/worktree_doctor.py", "git@github:org/fleet")]
+        rows = wd.coverage_gaps(cands, ["/work/fak"], ["git@github:org/fak"])
+        self.assertEqual([os.path.basename(r["repo"]) for r in rows], ["fak", "fleet"])
+        self.assertEqual([r["covered"] for r in rows], [True, False])
+
+    def test_a_scratch_clone_alone_does_not_cover_its_repository_by_identity(self):
+        # the identity match is what covers the group; without it the repo is still a gap.
+        cands = [("/work/fak", "tools/worktree_doctor.py", "git@github:org/fak")]
+        self.assertFalse(wd.coverage_gaps(cands, ["/work/fleet"], ["git@github:org/fleet"])[0]
+                         ["covered"])
+
+    def test_scan_finds_sibling_checkouts_and_skips_non_repos(self):
+        with tempfile.TemporaryDirectory() as base:
+            for name, agents in (("fleet", "runs tools/worktree_doctor.py"),
+                                 ("fak", "A scheduled task runs it (register_worktree_doctor.ps1)"),
+                                 ("notes", "just a folder"), ("empty", None)):
+                os.makedirs(os.path.join(base, name))
+                if agents is not None:
+                    with open(os.path.join(base, name, "AGENTS.md"), "w",
+                              encoding="utf-8") as fh:
+                        fh.write(agents)
+            found = wd.scan_coverage_roots([base], identify=lambda p: os.path.basename(p))
+            rows = wd.coverage_gaps(found, [os.path.join(base, "fleet")], ["fleet"])
+            self.assertEqual([os.path.basename(r["repo"]) for r in rows], ["fak", "fleet"])
+            self.assertEqual([r["covered"] for r in rows], [False, True])
+
+    def test_scan_only_pays_for_identity_on_a_declaring_checkout(self):
+        with tempfile.TemporaryDirectory() as base:
+            for name, agents in (("fak", "tools/worktree_doctor.py"), ("notes", "nothing")):
+                os.makedirs(os.path.join(base, name))
+                with open(os.path.join(base, name, "AGENTS.md"), "w", encoding="utf-8") as fh:
+                    fh.write(agents)
+            asked = []
+
+            def identify(p):
+                asked.append(os.path.basename(p))
+                return "origin"
+
+            wd.scan_coverage_roots([base], identify=identify)
+            self.assertEqual(asked, ["fak"])
+
+    def test_missing_scan_root_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as base:
+            gone = os.path.join(base, "no-such-dir")
+            self.assertEqual(wd.scan_coverage_roots([gone]), [])
+
+
+class MainEnumeratesRepos(unittest.TestCase):
+    """End-to-end through main(): every --repo is run, every one gets its own record in the
+    JSON envelope, and the process exit names the repository at fault."""
+
+    def _run(self, argv, runner, identity=None):
+        import contextlib
+        import io as _io
+        buf = _io.StringIO()
+        real, real_id = wd.run_repo, wd.repo_identity
+        wd.run_repo = runner
+        # These temp dirs are not clones, so stand in for the origin-URL lookup the real
+        # coverage audit uses to group a repository's scratch copies.
+        wd.repo_identity = identity or (lambda p: os.path.basename(os.path.abspath(p)))
+        try:
+            with contextlib.redirect_stdout(buf):
+                code = wd.main(argv)
+        finally:
+            wd.run_repo, wd.repo_identity = real, real_id
+        return code, json.loads(buf.getvalue())
+
+    def test_every_repo_is_run_and_the_failing_one_is_named(self):
+        seen = []
+
+        def fake(repo, args):
+            seen.append(repo)
+            blocked = repo.endswith("fak")
+            return ({"repo": repo, "exit": 1 if blocked else 0,
+                     "reason": wd.REASON_NEEDS_HUMAN if blocked else wd.REASON_OK,
+                     "paths_scanned": [repo], "retained": [], "pruned": [],
+                     "blocked": [repo + "/stray"] if blocked else []}, None)
+
+        code, out = self._run(["--repo", "/work/fleet", "--repo", "/work/fak", "--json"], fake)
+        self.assertEqual(seen, ["/work/fleet", "/work/fak"], "both repos were maintained")
+        self.assertEqual(code, 1)
+        self.assertEqual(out["schema"], wd.JSON_SCHEMA)
+        self.assertEqual(out["reason"], wd.REASON_NEEDS_HUMAN)
+        self.assertEqual(out["failed_repo"], "/work/fak")
+        # the healthy repo is still fully reported: the failure hides neither peer.
+        self.assertEqual([r["repo"] for r in out["repos"]], ["/work/fleet", "/work/fak"])
+        self.assertEqual(out["repos"][0]["paths_scanned"], ["/work/fleet"])
+        self.assertEqual(out["repos"][1]["blocked"], ["/work/fak/stray"])
+
+    def test_repeated_repo_is_maintained_once(self):
+        seen = []
+
+        def fake(repo, args):
+            seen.append(repo)
+            return ({"repo": repo, "exit": 0, "reason": wd.REASON_OK,
+                     "paths_scanned": [], "retained": [], "pruned": [], "blocked": []}, None)
+
+        code, out = self._run(["--repo", "/work/fak", "--repo", "/work/fak/", "--json"], fake)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(out["repos"]), 1)
+
+    def test_uncovered_checkout_fails_a_run_whose_repos_are_all_clean(self):
+        with tempfile.TemporaryDirectory() as base:
+            fleet, fak = os.path.join(base, "fleet"), os.path.join(base, "fak")
+            for d in (fleet, fak):
+                os.makedirs(d)
+                with open(os.path.join(d, "AGENTS.md"), "w", encoding="utf-8") as fh:
+                    fh.write("A scheduled task runs tools/worktree_doctor.py")
+
+            def fake(repo, args):
+                return ({"repo": os.path.abspath(repo), "exit": 0, "reason": wd.REASON_OK,
+                         "paths_scanned": [], "retained": [], "pruned": [],
+                         "blocked": []}, None)
+
+            code, out = self._run(["--repo", fleet, "--coverage-scan", base, "--json"], fake)
+            self.assertEqual(code, 1, "an unswept declaring checkout must fail the run")
+            self.assertEqual(out["reason"], wd.REASON_NO_COVERAGE)
+            self.assertEqual(os.path.normcase(out["failed_repo"]), os.path.normcase(fak))
+            self.assertEqual([r["covered"] for r in out["coverage"]], [False, True])
+
+            code, out = self._run(["--repo", fleet, "--repo", fak,
+                                   "--coverage-scan", base, "--json"], fake)
+            self.assertEqual(code, 0, "covering both checkouts clears the gap")
+            self.assertEqual(out["reason"], wd.REASON_OK)
 
 
 if __name__ == "__main__":

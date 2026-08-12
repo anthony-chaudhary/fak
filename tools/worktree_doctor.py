@@ -64,12 +64,15 @@ USAGE
                                                  # and don't let it trip the needs-a-human exit 1
   worktree_doctor.py --prune-branches            # ALSO delete merged, non-checked-out, non-protected
                                                  # local branches (git branch -d) + prune stale remote refs
+  worktree_doctor.py --repo C:/work/fleet --repo C:/work/fak   # maintain SEVERAL checkouts in one run
+  worktree_doctor.py --coverage-scan C:/work     # + fail if a checkout under C:/work whose AGENTS.md
+                                                 # promises a scheduled doctor is not among the --repo
 
 MAKING IT DURABLE
 -----------------
 Run it on a cadence next to the existing fleet watchers (see
 register_mac_watchers.sh / mac-host cron). `--json` + the exit code make it a clean
-cron citizen:
+cron citizen. Each `--repo` gets its OWN exit, and the process exit is their fold:
   exit 0  already converged (one clean worktree on master), or a --prune made all the
           progress it safely could — including the normal case where the shared primary
           is on master but carries in-flight peer work (this repo's steady state, not an
@@ -79,6 +82,13 @@ cron citizen:
           merge/rebase/cherry-pick on the primary. Dirtiness / untracked files on an
           on-master primary do NOT trip this — cron notifies only on real anomalies;
   exit 2  the tool could not run (not a git repo, git error).
+A run over several repositories exits 0 only when EVERY one of them is healthy and every
+checkout whose AGENTS.md promises a scheduled doctor was in the run; otherwise it exits
+nonzero with a typed reason (REPO_ERROR / REPO_NEEDS_HUMAN / NO_SCHEDULED_DOCTOR_COVERAGE)
+NAMING the repository at fault, so one clean checkout can never mask another (#6498).
+`--json` emits {"schema": "worktree-doctor/2", "repos": [...], "coverage": [...], "exit",
+"reason", "failed_repo"} — one record per repository with its paths scanned and the
+worktrees it retained / pruned / blocked.
 A nightly `worktree_doctor.py --prune` keeps the sprawl swept to its safe minimum
 without ever risking unsaved work; the report flags the human-only remainder.
 Pure stdlib; no deps.
@@ -111,10 +121,17 @@ DEFAULT_ARCHIVE_RETENTION_DAYS = 7
 
 
 def _git(args, cwd=None):
-    """Run a git command; return (rc, stdout, stderr). Never raises on nonzero."""
-    p = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True
-    )
+    """Run a git command; return (rc, stdout, stderr). Never raises on nonzero.
+
+    Nor on an unusable `cwd`: once ONE run maintains several repositories, a --repo that
+    does not exist must come back as this repo's own typed failure, never as an exception
+    that takes the sweep of every other repository down with it."""
+    try:
+        p = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True
+        )
+    except OSError as e:
+        return 127, "", str(e)
     return p.returncode, p.stdout.strip(), p.stderr.strip()
 
 
@@ -481,14 +498,19 @@ def render_text(sigs, plan, trunk="master"):
     return "\n".join(lines)
 
 
-def do_prune(plan, dry_run=True):
-    """Remove the safe-to-prune worktrees. Returns list of {path, removed, error}."""
+def do_prune(plan, dry_run=True, repo=None):
+    """Remove the safe-to-prune worktrees. Returns list of {path, removed, error}.
+
+    `repo` is the checkout whose worktree registry owns these paths. It matters once one
+    run maintains several repositories: `git worktree remove` resolves the registry from
+    the CWD, so without it repo B's prune would be asked of repo A (which refuses — the
+    path is not one of its working trees) and nothing would ever be reclaimed."""
     results = []
     for p in plan["prune"]:
         if dry_run:
             results.append({"path": p["path"], "removed": False, "dry_run": True})
             continue
-        rc, _, err = _git(["worktree", "remove", p["path"]])  # NO --force, ever
+        rc, _, err = _git(["worktree", "remove", p["path"]], cwd=repo)  # NO --force, ever
         results.append({"path": p["path"], "removed": rc == 0,
                         "error": err if rc != 0 else None})
     return results
@@ -667,9 +689,319 @@ def reap_stale_archive_days(archive_dir, keep_days=DEFAULT_ARCHIVE_RETENTION_DAY
     return removed
 
 
+# --------------------------------------------------------------------------- #
+# Multi-repository runs, and the coverage audit that proves every checkout is in one.
+#
+# The scheduled janitor is ONE machine-global task: #5409 pinned its name to a literal
+# so a reinstall UPDATES the live task instead of registering a second, differently
+# named worktree janitor beside it. The accepted cost was that two clones on one box
+# now share one task — and the unaccepted consequence was that the shared task ran
+# `--repo C:\work\fleet` only, so no scheduled run ever looked at C:\work\fak even
+# though ITS AGENTS.md tells every agent a scheduled doctor sweeps the shared tree's
+# strays (#6498). The gap was invisible: the log carried one repo's report and the task
+# exit code said nothing about the repository nobody swept.
+#
+# So the shared task enumerates repositories. `--repo` is repeatable; every repository
+# gets its own machine-readable result and its own exit contribution; the aggregate exit
+# NAMES the repository that failed; and `--coverage-scan` turns the AGENTS.md promise
+# into a checkable claim — a checkout that advertises a scheduled doctor and is missing
+# from the run is a typed failure, not silence. A clean result in one repository can
+# therefore never stand in for a failing or an unswept one.
+# --------------------------------------------------------------------------- #
+
+JSON_SCHEMA = "worktree-doctor/2"  # v1 was the single-repo object; v2 is the repos[] envelope
+
+REASON_OK = "OK"
+REASON_NEEDS_HUMAN = "REPO_NEEDS_HUMAN"       # this repo's own exit 1 (a human must resolve)
+REASON_ERROR = "REPO_ERROR"                   # this repo's own exit 2 (could not run at all)
+REASON_NO_COVERAGE = "NO_SCHEDULED_DOCTOR_COVERAGE"  # a declaring checkout no --repo swept
+
+# What makes an AGENTS.md a COVERAGE CLAIM rather than a passing mention: it points its
+# agents at this janitor or at the installer that schedules it. A checkout that makes the
+# claim and is absent from the run is exactly the #6498 hole — the promise outran the task.
+COVERAGE_MARKERS = ("worktree_doctor.py", "register_worktree_doctor.ps1", "worktree doctor")
+
+
+def normalize_repo(path):
+    """Comparison form of a repo path: absolute, normalized, case-folded on Windows."""
+    return os.path.normcase(os.path.abspath(os.path.normpath(str(path))))
+
+
+def agents_md_declares_doctor(text):
+    """PURE: does this AGENTS.md promise its tree is maintained by the scheduled doctor?"""
+    if not text:
+        return False
+    low = text.lower()
+    return any(marker in low for marker in COVERAGE_MARKERS)
+
+
+def _read_agents_md(repo):
+    """Read <repo>/AGENTS.md, or None when there is none (not every dir is a checkout)."""
+    try:
+        with open(os.path.join(repo, "AGENTS.md"), "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def repo_identity(repo):
+    """A checkout's REPOSITORY identity: its origin URL, normalized (None if unknown).
+
+    Coverage is owed to a repository, not to a directory. A busy box carries dozens of
+    throwaway clones of the same repo (C:\\work\\.iso5032, C:\\work\\fak-verify-1349, ...),
+    each with the identical AGENTS.md; auditing them one by one would report ~50 gaps for
+    one real one and drown the signal the scheduled task exists to raise."""
+    rc, out, _ = _git(["config", "--get", "remote.origin.url"], cwd=repo)
+    if rc != 0:
+        return None
+    url = out.strip().rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    return url.lower() or None
+
+
+def scan_coverage_roots(dirs, read_agents=None, identify=None):
+    """Candidate checkouts under `dirs`: each DIR itself plus its immediate children.
+
+    Returns [(repo_path, agents_md_text_or_None, repo_identity_or_None)] in a stable
+    order. This is the only filesystem-touching half of the coverage audit — the
+    classification below is pure — so `--coverage-scan C:\\work` finds both
+    C:\\work\\fleet and C:\\work\\fak without anyone having to keep a second list of
+    checkouts in sync by hand."""
+    read_agents = read_agents or _read_agents_md
+    identify = identify or repo_identity
+    seen, out = set(), []
+    for d in dirs or ():
+        candidates = [d]
+        try:
+            candidates += [os.path.join(d, name) for name in sorted(os.listdir(d))]
+        except OSError:
+            pass  # unreadable/absent scan root: audit what we can, never abort the sweep
+        for c in candidates:
+            if not os.path.isdir(c):
+                continue
+            key = normalize_repo(c)
+            if key in seen:
+                continue
+            seen.add(key)
+            path = os.path.abspath(c)
+            text = read_agents(c)
+            # Only pay for the identity lookup on a checkout that actually makes the claim.
+            out.append((path, text, identify(c) if agents_md_declares_doctor(text) else None))
+    return out
+
+
+def coverage_gaps(candidates, scanned, scanned_identities=()):
+    """PURE: one coverage row per REPOSITORY that claims a scheduled doctor.
+
+    `candidates` is [(repo_path, agents_md_text[, repo_identity])] (see
+    scan_coverage_roots); `scanned` / `scanned_identities` are the repositories this run
+    actually maintained. A repository whose AGENTS.md names the scheduled doctor but which
+    no --repo covers comes back covered=False — the audit hole #6498 opened with, now a row
+    an operator (and the exit code) can read.
+
+    Candidates are grouped by repository identity, so the box's throwaway clones of an
+    already-maintained repo do not each raise their own gap; the row names the group's
+    canonical checkout (the shortest path — scratch clones live under longer, decorated
+    names). A candidate whose identity was looked for and NOT found (a remote-less copy, a
+    broken worktree registration) is skipped rather than reported: we cannot tell it from a
+    clone of a repository already maintained, and the doctor never cries wolf. A 2-tuple
+    candidate carries no identity question at all and stands for itself."""
+    have = {normalize_repo(p) for p in scanned or ()}
+    have_ids = {i for i in (scanned_identities or ()) if i}
+    groups = {}
+    for cand in candidates or ():
+        path, text = cand[0], cand[1]
+        if not agents_md_declares_doctor(text):
+            continue  # no claim, no gap: an unrelated tree is not this task's business
+        if len(cand) > 2:
+            if cand[2] is None:
+                continue  # unidentifiable checkout — see the docstring
+            identity = cand[2]
+        else:
+            identity = None
+        key = identity or normalize_repo(path)
+        g = groups.setdefault(key, {"paths": [], "identity": identity})
+        g["paths"].append(os.path.abspath(path))
+    rows = []
+    for g in groups.values():
+        # A local-path origin means "a clone OF that checkout": if the checkout it was
+        # cloned from is maintained, the repository is covered.
+        covered = (g["identity"] in have_ids
+                   or (bool(g["identity"]) and normalize_repo(g["identity"]) in have)
+                   or any(normalize_repo(p) in have for p in g["paths"]))
+        canonical = min(g["paths"], key=lambda p: (len(p), os.path.normcase(p)))
+        rows.append({"repo": canonical, "declared": True, "covered": covered,
+                     "reason": REASON_OK if covered else REASON_NO_COVERAGE})
+    rows.sort(key=lambda r: os.path.normcase(r["repo"]))
+    return rows
+
+
+def aggregate_result(repo_results, coverage=()):
+    """PURE: fold the per-repository results into ONE typed exit for the scheduled task.
+
+    exit 0 only when EVERY maintained repository is healthy AND every declaring checkout
+    was in the run. Otherwise the first failure in a fixed severity order — could-not-run
+    (2), then needs-a-human (1), then an unswept declaring checkout (1) — and the result
+    NAMES that repository. The order is fixed so the verdict is deterministic, and the
+    scan is over ALL repositories rather than stopping at the first success, so a clean
+    result in one checkout can never mask a failure or an absence in another."""
+    rows = list(repo_results or ())
+    for code, reason in ((2, REASON_ERROR), (1, REASON_NEEDS_HUMAN)):
+        for r in rows:
+            if int(r.get("exit") or 0) == code:
+                return {"exit": code, "reason": reason, "failed_repo": r.get("repo")}
+    for c in coverage or ():
+        if not c.get("covered"):
+            return {"exit": 1, "reason": REASON_NO_COVERAGE, "failed_repo": c.get("repo")}
+    return {"exit": 0, "reason": REASON_OK, "failed_repo": None}
+
+
+def run_repo(repo, args):
+    """Maintain ONE repository end to end.
+
+    Returns (result, ctx): `result` is the JSON-safe per-repository record (paths scanned,
+    worktrees retained/pruned/blocked, this repo's own exit + typed reason), `ctx` carries
+    the objects render_repo_text needs and is None when the repo could not be read at all.
+    A repo that cannot be run yields an exit-2 row instead of raising, so the remaining
+    repositories are still swept and still reported."""
+    base = {"repo": os.path.abspath(repo), "master_ref": None, "trunk": None,
+            "archive_dir": None}
+    try:
+        master_ref = args.master_ref or detect_master_ref(repo)
+        trunk = master_ref.split("/", 1)[-1]
+        archive_dir = args.archive_dir or _default_archive_dir()
+        base = dict(base, master_ref=master_ref, trunk=trunk, archive_dir=archive_dir)
+        sigs = collect(repo, master_ref, args.fetch)
+    except Exception as e:  # not a git repo / missing path / git error
+        return dict(base, exit=2, reason=REASON_ERROR, error=str(e),
+                    paths_scanned=[], retained=[], pruned=[], blocked=[]), None
+
+    # Disposable-worktree sweep FIRST, so the convergence plan below reflects the survivors
+    # (and a successful sweep doesn't leave the just-reaped worktrees flagged needs_human).
+    cands = sweep_candidates(sigs, roots=args.disposable_root,
+                             fresh_seconds=args.fresh_minutes * 60.0,
+                             keep_paths=args.keep_path)
+    swept = do_sweep(cands, archive_dir, repo,
+                     dry_run=not args.sweep_disposable) if cands else []
+    if any(r.get("removed") for r in swept):
+        sigs = collect(repo, master_ref, fetch=False)  # refresh after real removals
+    # Reap stale archive days on every REAL sweep run (even one that swept nothing today):
+    # the sweep is the only mutating mode, so the reaper — also a mutation — follows the same
+    # gate, keeping the default report-only run side-effect-free. Never touches today's day.
+    archive_reaped = (reap_stale_archive_days(archive_dir, keep_days=args.archive_retention_days)
+                      if args.sweep_disposable else [])
+
+    plan = make_plan(sigs, master_ref, allow_branches=args.allow_branch, trunk=trunk)
+    pruned = do_prune(plan, dry_run=not args.prune, repo=repo) if plan["prune"] else []
+
+    # Branch + remote-ref hygiene: protect the trunk, the master-ref's own branch, and
+    # every allow-listed branch; delete only the merged, non-checked-out remainder.
+    master_ref_branch = master_ref.split("/", 1)[-1]
+    protected = {"master", trunk, master_ref_branch, *args.allow_branch}
+    binfo = gather_branches(repo, master_ref)
+    deletable = deletable_branches(binfo["local"], protected,
+                                   binfo["checked_out"], binfo["merged"])
+    branch_results = do_prune_branches(deletable, repo,
+                                       dry_run=not args.prune_branches) if deletable else []
+    remote_pruned = None
+    if args.prune_branches:
+        rc, out, _ = _git(["remote", "prune", "origin"], cwd=repo)
+        remote_pruned = [ln for ln in out.splitlines() if ln.strip()] if rc == 0 else []
+
+    # This repo's own exit: 0 converged / only allow-listed extras remain; 1 a real anomaly
+    # needs a human (blocked / primary off master). See the module docstring.
+    if plan["converged"] or not plan["needs_human"]:
+        code, reason = 0, REASON_OK
+    else:
+        code, reason = 1, REASON_NEEDS_HUMAN
+
+    result = dict(
+        base,
+        exit=code,
+        reason=reason,
+        # The audit surface: what this run looked at, and what it did with each worktree.
+        paths_scanned=[s["path"] for s in sigs],
+        retained=[r["path"] for r in plan["retained"]],
+        pruned=[r["path"] for r in pruned if r.get("removed")],
+        blocked=[b["path"] for b in plan["blocked"]],
+        plan=plan,
+        prune_results=pruned,
+        swept=swept,
+        archive_reaped=archive_reaped,
+        deletable_branches=deletable,
+        branch_results=branch_results,
+        remote_pruned=remote_pruned,
+        worktrees=[{k: s.get(k) for k in
+                    ("path", "branch", "is_primary", "dirty", "untracked", "mid_op",
+                     "unmerged_to_master", "unpushed", "age_seconds")} for s in sigs],
+    )
+    return result, {"sigs": sigs, "plan": plan, "trunk": trunk}
+
+
+def render_repo_text(result, ctx, args):
+    """The human report for ONE repository, headed by the repo it belongs to."""
+    lines = [f"===== {result['repo']} =====" ]
+    if ctx is None:
+        lines.append(f"worktree_doctor: {result.get('error')}")
+        lines.append(f"[exit {result['exit']} {result['reason']}]")
+        return "\n".join(lines)
+
+    lines.append(render_text(ctx["sigs"], ctx["plan"], trunk=ctx["trunk"]))
+    swept = result["swept"]
+    if swept:
+        lines.append("")
+        verb = "SWEPT" if args.sweep_disposable else "WOULD SWEEP (run with --sweep-disposable)"
+        lines.append(f"DISPOSABLE SCRATCH WORKTREES — {verb} (archive: {result['archive_dir']}):")
+        for r in swept:
+            if r.get("dry_run"):
+                lines.append(f"  - {r['path']}")
+            elif r["removed"]:
+                arch = r.get("archived")
+                tag = (f" [archived {arch['tracked_patch_bytes']}B diff, "
+                       f"{arch['untracked']} untracked]") if arch else ""
+                lines.append(f"  - reaped {r['path']}{tag}")
+            else:
+                lines.append(f"  - FAILED {r['path']}: {r['error']}")
+    if result["archive_reaped"]:
+        lines.append(f"  reaped {len(result['archive_reaped'])} stale archive day(s) "
+                     f"(> {args.archive_retention_days}d): {', '.join(result['archive_reaped'])}")
+    if result["prune_results"]:
+        lines.append("")
+        for r in result["prune_results"]:
+            if r.get("dry_run"):
+                lines.append(f"  would remove {r['path']} (run with --prune)")
+            elif r["removed"]:
+                lines.append(f"  removed {r['path']}")
+            else:
+                lines.append(f"  FAILED to remove {r['path']}: {r['error']}")
+    lines.append("")
+    deletable = result["deletable_branches"]
+    if deletable:
+        verb = "delete" if args.prune_branches else "would delete (run with --prune-branches)"
+        lines.append(f"STALE LOCAL BRANCHES ({verb}): merged to {result['master_ref']}, "
+                     "not checked out")
+        for r in result["branch_results"]:
+            if r.get("dry_run"):
+                lines.append(f"  - {r['branch']}")
+            elif r["deleted"]:
+                lines.append(f"  - deleted {r['branch']}")
+            else:
+                lines.append(f"  - FAILED {r['branch']}: {r['error']}")
+    else:
+        lines.append("STALE LOCAL BRANCHES: none")
+    if result["remote_pruned"]:
+        lines.append(f"remote-tracking refs pruned: {', '.join(result['remote_pruned'])}")
+    lines.append(f"[exit {result['exit']} {result['reason']}]")
+    return "\n".join(lines)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Converge to one worktree on the trunk, safely.")
-    ap.add_argument("--repo", default=".", help="repo path (default: cwd)")
+    ap.add_argument("--repo", action="append", default=None, metavar="DIR",
+                    help="repo path (repeatable; default: cwd). One machine-global "
+                         "scheduled task maintains every checkout on the box, so each "
+                         "--repo gets its own result and its own exit contribution")
     ap.add_argument("--master-ref", default=None,
                     help="trunk remote ref (default: auto-detect origin/HEAD, e.g. origin/main)")
     ap.add_argument("--json", action="store_true")
@@ -701,117 +1033,50 @@ def main(argv=None):
                          "day-directories older than N days (recover a same-week accidental "
                          f"sweep, bound the archive's growth; default {DEFAULT_ARCHIVE_RETENTION_DAYS}). "
                          "The current run's day and any day inside the window are never removed.")
+    ap.add_argument("--coverage-scan", action="append", default=[], metavar="DIR",
+                    help="audit DIR and its immediate subdirectories for checkouts whose "
+                         "AGENTS.md promises a scheduled worktree doctor; any such checkout "
+                         "missing from --repo is reported NO_SCHEDULED_DOCTOR_COVERAGE and "
+                         "fails the run (repeatable)")
     args = ap.parse_args(argv)
 
-    # Anchor on the REAL trunk: detect origin/HEAD unless the operator pinned --master-ref.
-    master_ref = args.master_ref or detect_master_ref(args.repo)
-    trunk = master_ref.split("/", 1)[-1]
-    archive_dir = args.archive_dir or _default_archive_dir()
+    # Maintain every requested repository, de-duplicated but in the order given. Each one
+    # is run to completion on its own: an unreadable or blocked repo yields its own typed
+    # row and never short-circuits the sweep of the repositories behind it.
+    repos, seen = [], set()
+    for r in (args.repo or ["."]):
+        key = normalize_repo(r)
+        if key not in seen:
+            seen.add(key)
+            repos.append(r)
 
-    try:
-        sigs = collect(args.repo, master_ref, args.fetch)
-    except Exception as e:  # not a git repo / git error
-        if args.json:
-            print(json.dumps({"error": str(e)}))
-        else:
-            print(f"worktree_doctor: {e}", file=sys.stderr)
-        return 2
-
-    # Disposable-worktree sweep FIRST, so the convergence plan below reflects the survivors
-    # (and a successful sweep doesn't leave the just-reaped worktrees flagged needs_human).
-    cands = sweep_candidates(sigs, roots=args.disposable_root,
-                             fresh_seconds=args.fresh_minutes * 60.0,
-                             keep_paths=args.keep_path)
-    swept = do_sweep(cands, archive_dir, args.repo,
-                     dry_run=not args.sweep_disposable) if cands else []
-    if any(r.get("removed") for r in swept):
-        sigs = collect(args.repo, master_ref, fetch=False)  # refresh after real removals
-    # Reap stale archive days on every REAL sweep run (even one that swept nothing today):
-    # the sweep is the only mutating mode, so the reaper — also a mutation — follows the same
-    # gate, keeping the default report-only run side-effect-free. Never touches today's day.
-    archive_reaped = (reap_stale_archive_days(archive_dir, keep_days=args.archive_retention_days)
-                      if args.sweep_disposable else [])
-
-    plan = make_plan(sigs, master_ref, allow_branches=args.allow_branch, trunk=trunk)
-    pruned = do_prune(plan, dry_run=not args.prune) if plan["prune"] else []
-
-    # Branch + remote-ref hygiene: protect the trunk, the master-ref's own branch, and
-    # every allow-listed branch; delete only the merged, non-checked-out remainder.
-    master_ref_branch = master_ref.split("/", 1)[-1]
-    protected = {"master", trunk, master_ref_branch, *args.allow_branch}
-    binfo = gather_branches(args.repo, master_ref)
-    deletable = deletable_branches(binfo["local"], protected,
-                                   binfo["checked_out"], binfo["merged"])
-    branch_results = do_prune_branches(deletable, args.repo,
-                                       dry_run=not args.prune_branches) if deletable else []
-    remote_pruned = None
-    if args.prune_branches:
-        rc, out, _ = _git(["remote", "prune", "origin"], cwd=args.repo)
-        remote_pruned = [ln for ln in out.splitlines() if ln.strip()] if rc == 0 else []
+    runs = [run_repo(repo, args) for repo in repos]
+    results = [result for result, _ in runs]
+    coverage = coverage_gaps(scan_coverage_roots(args.coverage_scan),
+                             [r["repo"] for r in results],
+                             [repo_identity(r["repo"]) for r in results])
+    verdict = aggregate_result(results, coverage)
 
     if args.json:
-        print(json.dumps({"master_ref": master_ref, "trunk": trunk,
-                          "plan": plan, "pruned": pruned, "swept": swept,
-                          "archive_dir": archive_dir,
-                          "archive_reaped": archive_reaped,
-                          "deletable_branches": deletable,
-                          "branch_results": branch_results,
-                          "remote_pruned": remote_pruned,
-                          "worktrees": [{k: s.get(k) for k in
-                                         ("path", "branch", "is_primary", "dirty",
-                                          "untracked", "mid_op", "unmerged_to_master",
-                                          "unpushed", "age_seconds")} for s in sigs]}, indent=2))
+        print(json.dumps({"schema": JSON_SCHEMA, "repos": results, "coverage": coverage,
+                          **verdict}, indent=2))
     else:
-        print(render_text(sigs, plan, trunk=trunk))
-        if swept:
+        for result, ctx in runs:
+            if ctx is None:
+                print(f"worktree_doctor: {result['repo']}: {result.get('error')}",
+                      file=sys.stderr)
+            print(render_repo_text(result, ctx, args))
             print("")
-            verb = "SWEPT" if args.sweep_disposable else "WOULD SWEEP (run with --sweep-disposable)"
-            print(f"DISPOSABLE SCRATCH WORKTREES — {verb} (archive: {archive_dir}):")
-            for r in swept:
-                if r.get("dry_run"):
-                    print(f"  - {r['path']}")
-                elif r["removed"]:
-                    arch = r.get("archived")
-                    tag = f" [archived {arch['tracked_patch_bytes']}B diff, {arch['untracked']} untracked]" if arch else ""
-                    print(f"  - reaped {r['path']}{tag}")
-                else:
-                    print(f"  - FAILED {r['path']}: {r['error']}")
-        if archive_reaped:
-            print(f"  reaped {len(archive_reaped)} stale archive day(s) "
-                  f"(> {args.archive_retention_days}d): {', '.join(archive_reaped)}")
-        if pruned:
-            print("")
-            for r in pruned:
-                if r.get("dry_run"):
-                    print(f"  would remove {r['path']} (run with --prune)")
-                elif r["removed"]:
-                    print(f"  removed {r['path']}")
-                else:
-                    print(f"  FAILED to remove {r['path']}: {r['error']}")
-        print("")
-        if deletable:
-            verb = "delete" if args.prune_branches else "would delete (run with --prune-branches)"
-            print(f"STALE LOCAL BRANCHES ({verb}): merged to {master_ref}, not checked out")
-            for r in branch_results:
-                if r.get("dry_run"):
-                    print(f"  - {r['branch']}")
-                elif r["deleted"]:
-                    print(f"  - deleted {r['branch']}")
-                else:
-                    print(f"  - FAILED {r['branch']}: {r['error']}")
-        else:
-            print("STALE LOCAL BRANCHES: none")
-        if remote_pruned:
-            print(f"remote-tracking refs pruned: {', '.join(remote_pruned)}")
+        for c in coverage:
+            if not c["covered"]:
+                print(f"COVERAGE: {c['repo']} {c['reason']} — its AGENTS.md promises a "
+                      "scheduled worktree doctor, but no --repo in this run maintains it")
+        print(f"RESULT: exit={verdict['exit']} reason={verdict['reason']}"
+              + (f" repo={verdict['failed_repo']}" if verdict["failed_repo"] else ""))
 
-    # exit code: 0 converged / only allow-listed extras remain; 1 a real anomaly needs
-    # a human (blocked / primary off master); 2 could not run. See module docstring.
-    if plan["converged"]:
-        return 0
-    if plan["needs_human"]:
-        return 1
-    return 0
-
+    # Aggregate exit: 0 only when every maintained repository is healthy AND every
+    # declaring checkout was in the run; otherwise the typed nonzero names the repo.
+    return verdict["exit"]
 
 if __name__ == "__main__":
     sys.exit(main())
