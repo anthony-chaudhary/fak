@@ -81,6 +81,16 @@ Application-Control policy that blocks freshly compiled test binaries — that i
 not a code failure. Run the tests under WSL if you need them; see the Windows note in
 [`GETTING-STARTED.md`](GETTING-STARTED.md).
 
+## Connect the change to an operator problem
+
+Before choosing an implementation route, map new work to the canonical
+[problems fak exists to solve](docs/problems-we-solve.md). Name one primary ID (`P1`
+context, `P2` net-true efficiency, `P3` fast adaptation, or `P4` integrated operations)
+and fill **For / Problem / Today / Better because / Witness**. This keeps a leaf, issue, or
+plan anchored to removed operator burden rather than architecture for its own sake. Product
+direction is not shipped evidence: use [`CLAIMS.md`](CLAIMS.md) and the relevant captured
+witness for completion claims.
+
 ## Choose the route for your change
 
 | Change | Start here | Proof before landing |

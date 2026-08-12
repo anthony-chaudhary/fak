@@ -6,6 +6,10 @@ This page routes; it does not re-explain. The repository's configured homepage i
 
 For the current product focus—fewer tokens, fewer turns, better model routing, and controllable long sessions—start with [Spend fewer tokens and turns](docs/CAPABILITIES.md).
 
+For the durable product thesis—“don’t make me think,” without surrendering control—read
+[The problems fak exists to solve](docs/problems-we-solve.md). It maps all work to four
+operator burdens: context, net-true efficiency, market adaptation, and integrated operations.
+
 ## See one verdict in one command — no key, model, or GPU
 
 If you are evaluating fak for the first time, the shortest proof that it manages a
