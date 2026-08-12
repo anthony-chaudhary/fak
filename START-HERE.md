@@ -4,6 +4,12 @@
 
 This page routes; it does not re-explain. The repository's configured homepage is the published copy of [`docs/showcase.html`](docs/showcase.html), which the README audit keeps in step with the README.
 
+For the current product focus—fewer tokens, fewer turns, better model routing, and controllable long sessions—start with [Spend fewer tokens and turns](docs/CAPABILITIES.md).
+
+For the durable product thesis—“don’t make me think,” without surrendering control—read
+[The problems fak exists to solve](docs/problems-we-solve.md). It maps all work to four
+operator burdens: context, net-true efficiency, market adaptation, and integrated operations.
+
 ## See one verdict in one command — no key, model, or GPU
 
 If you are evaluating fak for the first time, the shortest proof that it manages a
@@ -27,6 +33,11 @@ expanded policy, routing, and benchmark sequence, use the
 Everything below is the route map — choose the job you have now.
 
 ## Choose your route
+
+| If you want to… | Go here |
+|---|---|
+| Discover token, turn, cache, routing, and session-control capabilities | [Performance-first capability map](docs/CAPABILITIES.md) |
+
 
 | You want to… | Current route | Next action |
 |---|---|---|

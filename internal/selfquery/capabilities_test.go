@@ -150,3 +150,46 @@ func TestCapabilitiesKernelVerbCardsAreReadOnly(t *testing.T) {
 		t.Fatalf("dos_arbitrate card = %+v, want read-only unexecuted request", found)
 	}
 }
+
+// TestCapabilitiesDiscoversRuntimeEfficiencyOutcomes prevents the repository's
+// machine-readable capability answer from regressing to dev tooling only. The
+// performance-first product focus must be discoverable in operator language,
+// including the high-value turn-control surface.
+func TestCapabilitiesDiscoversRuntimeEfficiencyOutcomes(t *testing.T) {
+	catalog := &Catalog{}
+	tests := []struct {
+		query   string
+		wantIDs []string
+	}{
+		{"token savings", []string{"docs/CAPABILITIES.md#context-reuse", "docs/CAPABILITIES.md#model-routing", "docs/CAPABILITIES.md#savings-observability"}},
+		{"turn control", []string{"docs/CAPABILITIES.md#turn-savings", "docs/CAPABILITIES.md#session-control"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			got, err := catalog.Capabilities(CapabilitiesRequest{Query: tc.query, Limit: 8})
+			if err != nil {
+				t.Fatalf("Capabilities(%q): %v", tc.query, err)
+			}
+			seen := map[string]bool{}
+			for _, card := range got.Cards {
+				seen[card.DetailRef] = true
+			}
+			for _, want := range tc.wantIDs {
+				if !seen[want] {
+					t.Errorf("Capabilities(%q) missing %q; got IDs %v", tc.query, want, cardIDs(got.Cards))
+				}
+			}
+			if len(got.Cards) == 0 || got.Cards[0].Kind != "runtime-capability" {
+				t.Errorf("Capabilities(%q) first result = %#v, want runtime capability", tc.query, got.Cards)
+			}
+		})
+	}
+}
+
+func cardIDs(cards []FeatureCard) []string {
+	ids := make([]string, 0, len(cards))
+	for _, card := range cards {
+		ids = append(ids, card.DetailRef)
+	}
+	return ids
+}

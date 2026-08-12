@@ -14,6 +14,25 @@ body:
       label: The problem
       description: What are you trying to do, and where does it hurt today?
     validations:
+      required: true  - type: dropdown
+    id: primary_problem
+    attributes:
+      label: Primary fak problem
+      description: Choose the main operator burden this removes; see docs/problems-we-solve.md.
+      options:
+        - P1 — Context should manage itself
+        - P2 — Efficiency must be net-true
+        - P3 — Fast adaptation without another standard
+        - P4 — Agent operations should be one product, not a kit
+    validations:
+      required: true
+  - type: textarea
+    id: operator_value
+    attributes:
+      label: Today → better → witness
+      description: Name the real next-best alternative, the observable operator step/decision/cost that disappears, and the artifact that would prove it.
+      placeholder: "Today: …\nBetter because: …\nWitness: …"
+    validations:
       required: true
   - type: textarea
     id: proposal

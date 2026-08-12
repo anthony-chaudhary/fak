@@ -86,6 +86,8 @@ func gateScopes() []gateScopeRow {
 		// ---- pre-commit, deliberately NOT moved ----------------------------------------------
 		{"PUBLIC_LEAK", "gate_publicleak.go", SeamPreCommit, ClassWorktree,
 			"its private needle list (tools/_registry/scrub_needles.private.json) is UNTRACKED by design, so the change-set view cannot see it and the gate would silently scan with fewer needles — a scope fix must never turn a security gate quiet"},
+		{"DESKTOP_POPUP_REGRESSION", "gate_desktoppopup.go", SeamPreCommit, ClassWorktree,
+			"reads each complete candidate-index source file independently; no sibling-state dependency"},
 		{"DUPLICATION", "gate_duplication.go", SeamPreCommit, ClassWorktree,
 			"neighborBytes reads sibling sources off disk deliberately (its own doc): a MOVED block is correctly not flagged there, where the staged-blob read would still see the old copy and cry duplicate — and it is advisory by default, so a peer-dirty read cannot refuse a commit"},
 		{"COMMIT_MSG", "gate_commitmsg.go", SeamCommitMsg, ClassWorktree,
@@ -116,18 +118,6 @@ func gateScopes() []gateScopeRow {
 var gateScopeFilesWithoutGates = map[string]string{
 	"gate_tuning.go": "shared operator knobs (gateEnvInt) for the SIZE gates — declares no gate of its own",
 }
-
-// GATES OUTSIDE THIS PACKAGE, recorded because the ticket's target list names one and silence
-// about it would read as coverage:
-//
-//	DESKTOP_POPUP_REGRESSION is NOT an internal/hooks gate. It is the PUSH-seam scanner in
-//	cmd/fak/hooks_popup_scan.go, which walks the tree itself rather than probing a *StagedDiff, so
-//	it neither implements nor consumes fileProbe and this table's wiring cannot reach it. It is
-//	the subject of its own ticket (#5128: "a peer's STAGED-but-uncommitted file wedges the
-//	tree-wide DESKTOP_POPUP_REGRESSION gate for the whole fleet"). The mechanism it needs is the
-//	one in landstree.go — LandsTreeView is exported for that adoption — but the change belongs in
-//	that scanner's own file and lane, not here.
-const gateScopeOutOfPackageNote = "DESKTOP_POPUP_REGRESSION: cmd/fak/hooks_popup_scan.go (push seam) — see #5128"
 
 // gateClass returns the classification for a gate name, or "" when the name is not in the table.
 // An unknown name is treated as unclassified and left on the working tree, which is the SAFE

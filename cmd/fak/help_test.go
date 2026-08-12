@@ -33,6 +33,34 @@ func TestUsageCompactStaysCompact(t *testing.T) {
 // TestRuntimeHelpHasNoDevelopmentCatalog proves --all remains useful while
 // exposing only runtime-owned help text. The development inventory belongs to
 // the separately built fak-dev artifact.
+
+// TestUsageCompactLeadsWithEfficiencyCapabilities is the discoverability
+// witness for the performance-first product focus. The compact front door must
+// name the whole-turn/session controls before the supporting policy floor; a
+// reader should not need to know internal package names to discover them.
+func TestUsageCompactLeadsWithEfficiencyCapabilities(t *testing.T) {
+	var b strings.Builder
+	usageCompact(&b)
+	got := b.String()
+
+	focus := "spend fewer tokens + turns"
+	floor := "supporting capability floor"
+	if !strings.Contains(got, focus) {
+		t.Fatalf("compact overview missing %q section:\n%s", focus, got)
+	}
+	if !strings.Contains(got, floor) {
+		t.Fatalf("compact overview missing %q section:\n%s", floor, got)
+	}
+	if strings.Index(got, focus) > strings.Index(got, floor) {
+		t.Fatalf("efficiency section must precede supporting security floor:\n%s", got)
+	}
+	for _, capability := range []string{"ablate", "resume", "session", "info"} {
+		if !strings.Contains(got, "  "+capability) {
+			t.Errorf("compact overview does not expose %q", capability)
+		}
+	}
+}
+
 func TestRuntimeHelpHasNoDevelopmentCatalog(t *testing.T) {
 	var b strings.Builder
 	usageAllVerbs(&b)

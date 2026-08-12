@@ -10,13 +10,15 @@ fak is one Go binary between an agent and its model/tools. Keep Claude Code, Cod
 
 > **Start here:** install fak, then run `fak guard -- claude`. No API key or new agent framework is required.
 
-[![Watch the 55-second fak value walk: reuse stable work, compact long sessions, enforce tool policy, and capture proof](visuals/fak-hero-values.gif)](visuals/fak-hero-values.mp4)
+[![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
 
-<p align="center"><strong><a href="visuals/fak-hero-values.mp4">Watch the 55-second value walk (MP4)</a></strong> · <a href="tools/videogen/projects/hero-values/">reproduce the render</a></p>
+<p align="center"><strong><a href="visuals/fak-homepage-hero.mp4">Watch the 40-second value walk (MP4)</a></strong> · token savings first · <a href="tools/videogen/projects/token-savings/">reproduce the modular render</a></p>
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
 <!-- readme-verified: 2026-08-09 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+
+**Current focus: spend fewer tokens and turns.** See the [performance-first capability map](docs/CAPABILITIES.md) for the shipped turn-tax controls, stable-prefix reuse, managed context, per-call model routing, cache-value accounting, and out-of-band session controls. The security floor remains shipped and indexed, but it supports this efficiency story rather than leading it.
 
 ## Install and run
 
@@ -39,6 +41,8 @@ fak guard --provider openai -- codex     # provider is normally auto-detected
 See [INSTALL.md](INSTALL.md) for manual downloads, containers, source builds, and release verification, or [first-run troubleshooting](docs/adoption/troubleshooting-first-run.md) if the command refuses to start.
 
 ## What changes at the boundary
+
+The largest avoidable cost is often not one token string but an entire extra model round trip: the resident prefix is processed again, latency is paid again, and the result enlarges later context. fak can measure that **turn tax**, complete kernel-known work without another model call, and let an operator budget or steer a live session without prompting the model to manage itself.
 
 | Outcome | How fak provides it |
 |---|---|
@@ -92,3 +96,4 @@ After trying `guard`, `fak launch install --provider all --default claude` can i
 - **Contribute:** [contributing guide](CONTRIBUTING.md) · [security policy](SECURITY.md) · [documentation map](docs/index.md) · [front-page overflow](docs/README-legacy.md)
 
 Apache-2.0. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); participation is governed by the [Code of Conduct](.github/CODE_OF_CONDUCT.md).
+

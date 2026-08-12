@@ -33,7 +33,7 @@ func audit(c Config) (Audit, error) {
 	ctaCount := 0
 	at := 0.0
 	maxWords := 0
-	allowed := map[string]bool{"hook": true, "checkpoint": true, "proof": true, "cta": true}
+	allowed := map[string]bool{"hook": true, "checkpoint": true, "proof": true, "cta": true, "token-hook": true, "token-grid": true, "token-flow": true}
 	for i, s := range c.Scenes {
 		if !allowed[s.Kind] {
 			return a, fmt.Errorf("scene %d: unknown kind %q", i, s.Kind)
@@ -41,7 +41,9 @@ func audit(c Config) (Audit, error) {
 		if s.Secs < 2 {
 			return a, fmt.Errorf("scene %d: %.1fs is too brief to read", i, s.Secs)
 		}
-		for _, v := range []string{s.Eyebrow, s.Title, s.Subtitle, s.Action, s.Detail, s.Verdict} {
+		regions := []string{s.Eyebrow, s.Title, s.Subtitle, s.Action, s.Detail, s.Verdict}
+		regions = append(regions, s.Items...)
+		for _, v := range regions {
 			n := len(strings.Fields(v))
 			if n > maxWords {
 				maxWords = n
@@ -49,6 +51,12 @@ func audit(c Config) (Audit, error) {
 			if n > 8 {
 				return a, fmt.Errorf("scene %d: text region %q has %d words; max 8", i, v, n)
 			}
+		}
+		if s.Kind == "token-grid" && len(s.Items) != 6 {
+			return a, fmt.Errorf("scene %d: token-grid needs exactly 6 value cards", i)
+		}
+		if s.Kind == "token-flow" && len(s.Items) != 3 {
+			return a, fmt.Errorf("scene %d: token-flow needs exactly 3 steps", i)
 		}
 		if s.Kind == "cta" {
 			ctaCount++

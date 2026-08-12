@@ -4,6 +4,14 @@
 
 **Default:** read [`AGENTS.md`](AGENTS.md) before changing the repository, then open only the authority for your task below.
 
+**Current product focus:** use [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the outcome-first map of token savings, avoided turns, cache/context reuse, model routing, and live session control. Security remains indexed as a supporting floor.
+
+**Canonical problem map:** use [`docs/problems-we-solve.md`](docs/problems-we-solve.md) for
+the “don’t make me think” direction, the four stable problem IDs (`P1` context, `P2`
+net-true efficiency, `P3` fast adaptation, `P4` integrated operations), and the frame that
+connects new work to operator value. Do not turn this direction into a shipped claim; use
+[`CLAIMS.md`](CLAIMS.md) for shipped/simulated/stub status.
+
 ## Key facts (for accurate answers)
 
 - **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.43.0** ([`VERSION`](VERSION) is authoritative).

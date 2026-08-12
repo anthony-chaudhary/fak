@@ -17,19 +17,23 @@ type Config struct {
 	Poster       string  `json:"poster"`
 	ContactSheet string  `json:"contactSheet"`
 	Audit        string  `json:"audit"`
+	AppendMP4    string  `json:"appendMP4,omitempty"`
+	CompositeMP4 string  `json:"compositeMP4,omitempty"`
+	CompositeGIF string  `json:"compositeGIF,omitempty"`
 	Scenes       []Scene `json:"scenes"`
 }
 
 type Scene struct {
-	Kind     string  `json:"kind"`
-	Secs     float64 `json:"secs"`
-	Eyebrow  string  `json:"eyebrow,omitempty"`
-	Title    string  `json:"title,omitempty"`
-	Subtitle string  `json:"subtitle,omitempty"`
-	Action   string  `json:"action,omitempty"`
-	Detail   string  `json:"detail,omitempty"`
-	Verdict  string  `json:"verdict,omitempty"`
-	Command  string  `json:"command,omitempty"`
+	Kind     string   `json:"kind"`
+	Secs     float64  `json:"secs"`
+	Eyebrow  string   `json:"eyebrow,omitempty"`
+	Title    string   `json:"title,omitempty"`
+	Subtitle string   `json:"subtitle,omitempty"`
+	Action   string   `json:"action,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	Verdict  string   `json:"verdict,omitempty"`
+	Command  string   `json:"command,omitempty"`
+	Items    []string `json:"items,omitempty"`
 }
 
 func main() {
@@ -73,7 +77,7 @@ func main() {
 }
 
 func (c *Config) anchor(dir string) {
-	for _, p := range []*string{&c.MP4, &c.GIF, &c.Poster, &c.ContactSheet, &c.Audit} {
+	for _, p := range []*string{&c.MP4, &c.GIF, &c.Poster, &c.ContactSheet, &c.Audit, &c.AppendMP4, &c.CompositeMP4, &c.CompositeGIF} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(dir, *p)
 		}

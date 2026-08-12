@@ -1,0 +1,60 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "mp4": "out/fak-token-savings.mp4",
+  "gif": "out/fak-token-savings.gif",
+  "poster": "out/fak-token-savings-poster.png",
+  "contactSheet": "out/review-contact-sheet.png",
+  "audit": "out/readability-audit.json",
+  "appendMP4": "../../../../visuals/fak-hero-values.mp4",
+  "compositeMP4": "../../../../visuals/fak-homepage-hero.mp4",
+  "compositeGIF": "../../../../visuals/fak-homepage-hero.gif",
+  "scenes": [
+    {
+      "kind": "token-hook",
+      "secs": 4.0,
+      "eyebrow": "TOKEN SAVINGS FIRST",
+      "title": "Stop paying the turn tax.",
+      "subtitle": "Less repeated work. Fewer model calls.",
+      "action": "WITHOUT FAK",
+      "detail": "WITH FAK"
+    },
+    {
+      "kind": "token-grid",
+      "secs": 4.0,
+      "eyebrow": "ONE PERFORMANCE CHECKPOINT",
+      "title": "Six ways to spend less.",
+      "items": [
+        "Reuse stable prefixes",
+        "Serve repeats locally",
+        "Route each call",
+        "Shed stale turns",
+        "Skip known work",
+        "Reuse live KV"
+      ]
+    },
+    {
+      "kind": "token-flow",
+      "secs": 4.0,
+      "eyebrow": "COMPOUNDING VALUE",
+      "title": "Save this turn and every next turn.",
+      "items": [
+        "Skip a model turn",
+        "Shrink context",
+        "Run longer"
+      ],
+      "verdict": "Cheaper. Faster. Still controlled."
+    },
+    {
+      "kind": "cta",
+      "secs": 8.0,
+      "eyebrow": "KEEP YOUR AGENT",
+      "title": "Put fak at the boundary.",
+      "command": "fak guard -- claude",
+      "subtitle": "See every tool call checked before it runs."
+    }
+  ]
+}
+
+
