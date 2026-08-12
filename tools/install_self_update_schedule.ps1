@@ -49,7 +49,13 @@ param(
   # had not advanced in nine hours was indistinguishable from a perfectly converged one.
   [string]$LogPath  = (Join-Path $env:LOCALAPPDATA 'Fleet\watchdog\self_update.log'),
   [switch]$RunNow,
-  [switch]$Uninstall
+  [switch]$Uninstall,
+  # #6508: registration PINS the binary provenance it reviewed. A task registered against an
+  # `+uncommitted` (or unstampable) binary freezes unreviewed code into a schedule that then
+  # re-executes it every tick unattended -- which is how a stale Go-bin copy ended up
+  # certifying logvault evidence. Refuse by default; this switch is the deliberate opt-out for
+  # a maintainer knowingly scheduling a hand-build.
+  [switch]$AllowUnreviewedBin
 )
 $ErrorActionPreference = 'Continue'
 
@@ -72,6 +78,33 @@ $fakBin = @(
 ) | Where-Object { $_ -eq 'fak' -or (Test-Path $_) } | Select-Object -First 1
 if (-not $fakBin) { throw "no fak binary found (looked in $RepoRoot\tools\.bin, $Target, PATH)" }
 
+# Pin the provenance we are about to schedule (#6508). A scheduled task is an UNATTENDED
+# standing grant: whatever binary it names keeps running every tick with nobody looking, so the
+# thing to review is exactly the identity of that file -- once, here, at registration. Resolve
+# it to an ABSOLUTE path (a bare `fak` re-resolves through whatever PATH session 0 inherits,
+# which is not a reviewable provenance) and read the build it self-reports.
+$pinnedBin = $fakBin
+if ($pinnedBin -eq 'fak') {
+  $resolved = (Get-Command fak -ErrorAction SilentlyContinue).Source
+  if ($resolved) { $pinnedBin = $resolved }
+}
+$pinnedBin = try { (Resolve-Path -LiteralPath $pinnedBin -ErrorAction Stop).Path } catch { $pinnedBin }
+$pinnedBuild = ''
+try {
+  $verText = (& $pinnedBin version 2>&1 | Out-String)
+  $m = [regex]::Match($verText, 'build:\s*(?<rev>[0-9a-f]{7,40})(?<dirty>\s*\+uncommitted)?')
+  if ($m.Success) { $pinnedBuild = $m.Groups['rev'].Value + $(if ($m.Groups['dirty'].Success) { ' +uncommitted' } else { '' }) }
+} catch { $pinnedBuild = '' }
+if (-not $AllowUnreviewedBin) {
+  if (-not $pinnedBuild) {
+    throw ("refusing to register '$TaskName': $pinnedBin reports no VCS stamp, so the schedule cannot say which commit it will run every tick. Rebuild with `make build` (or pass -AllowUnreviewedBin to schedule it anyway).")
+  }
+  if ($pinnedBuild -match '\+uncommitted') {
+    throw ("refusing to register '$TaskName': $pinnedBin is a working-tree build ($pinnedBuild) that no commit reviews; a scheduled task would re-execute it unattended forever. Point -Target at an installed clean binary, or pass -AllowUnreviewedBin.")
+  }
+}
+Write-Host "Pinned binary: $pinnedBin  build=$(if ($pinnedBuild) { $pinnedBuild } else { '(unstamped)' })"
+
 # Register-ScheduledTask with an S4U principal + StartWhenAvailable (#3322): the
 # migration off the old `schtasks /Create ... /RL LIMITED` Interactive default, which
 # did not run at cold boot before logon and skipped any self-update tick missed while
@@ -86,8 +119,13 @@ if ($logDir -and -not (Test-Path $logDir)) { New-Item -ItemType Directory -Force
 # the rest literally, which is what lets the quoted paths AND the `>>` redirection coexist.
 # The redirection is the point -- self-update prints one `outcome=<cause>` line per tick, and
 # without a capture it goes to a discarded headless console.
+#
+# `--pinned-bin` carries the reviewed provenance INTO every tick (#6508): the task refuses to
+# run when the binary actually executing is no longer the pinned one, has lost its stamp, or has
+# become a working-tree build -- skew detected BEFORE execution rather than discovered afterward
+# in whatever the stale copy certified.
 $act = New-ScheduledTaskAction -Execute 'cmd.exe' `
-  -Argument ('/d /s /c ""{0}" self-update --root "{1}" --target "{2}" >> "{3}" 2>&1"' -f $fakBin, $RepoRoot, $Target, $LogPath)
+  -Argument ('/d /s /c ""{0}" self-update --root "{1}" --target "{2}" --pinned-bin "{4}" >> "{3}" 2>&1"' -f $pinnedBin, $RepoRoot, $Target, $LogPath, $pinnedBin)
 $trg = New-ScheduledTaskTrigger -Once -At (Get-Date) `
   -RepetitionInterval (New-TimeSpan -Minutes $IntervalMin) -RepetitionDuration (New-TimeSpan -Days 3650)
 $prin = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited

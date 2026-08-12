@@ -105,28 +105,11 @@ func TestSelfUpdateSiblingsSkipsMissingPaths(t *testing.T) {
 	}
 }
 
-// TestConvergeSiblings pins that skipping requires PROOF of freshness: only a binstamp.Fresh
-// invoker is left alone. An Unknown stamp — a binary that cannot self-report which commit it is —
-// converges, because that is exactly the un-attestable fleet binary the lag hid.
-func TestConvergeSiblings(t *testing.T) {
-	head := "2c52df490c53d5689fe6f42dfb829d27b5f160bb"
-	cases := []struct {
-		name  string
-		stamp binstamp.Stamp
-		want  bool
-	}{
-		{"fresh invoker is left alone", binstamp.Stamp{Revision: head, HasVCS: true}, false},
-		{"stale invoker converges", binstamp.Stamp{Revision: "b225bb1ca20f0000000000000000000000000000", HasVCS: true}, true},
-		{"unstamped invoker converges", binstamp.Stamp{}, true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := convergeSiblings(c.stamp, head); got != c.want {
-				t.Errorf("convergeSiblings(%+v, head) = %v; want %v", c.stamp, got, c.want)
-			}
-		})
-	}
-}
+// convergeSiblings — the old "is the INVOKER provably fresh?" guard on the sibling swap — is
+// gone (#6508). It both over- and under-shot: it re-swapped siblings that were already current
+// and never looked at the PATH / Go-bin copies at all. The decision is now per-copy, from the
+// role census, and is pinned by TestNeedsConvergeDemandsProofOfFreshness in
+// internal/selfinstall — a package whose tests actually build and run.
 
 // TestSelfUpdateSkipOutcome pins the closed outcome vocabulary against the message switch it
 // mirrors. The scheduler sees only an exit code, and rc=0 is identical for "installed",

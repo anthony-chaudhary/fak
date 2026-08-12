@@ -37,7 +37,20 @@ func cmdSelfUpdate(argv []string) {
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	root := fs.String("root", "", "repo root to build from (default: discover from cwd)")
 	target := fs.String("target", "", "binary path to replace (default: this binary's own path). Lets a scheduler update the FLEET binary regardless of which fak it invokes.")
+	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
+
+	// Scheduled-task provenance skew, checked BEFORE anything else: the task pinned one
+	// reviewed absolute path at registration, and a tick executing anything else — or executing
+	// that path after it turned into an unattestable / `+uncommitted` build — is adjudicating
+	// the fleet's binary with code nobody reviewed. Refuse instead of converging from it.
+	if strings.TrimSpace(*pinnedBin) != "" {
+		if skew, why := selfinstall.PinSkew(selfinstall.Pin{Path: *pinnedBin}, selfUpdateInvoker()); skew {
+			fmt.Fprintln(os.Stderr, "self-update: PIN_SKEW —", why)
+			emitSelfUpdateOutcome(outcomePinSkew, *pinnedBin, why)
+			os.Exit(2)
+		}
+	}
 
 	repoRoot := strings.TrimSpace(*root)
 	if repoRoot == "" {
@@ -99,6 +112,9 @@ func cmdSelfUpdate(argv []string) {
 		// leak of "<binary>.old.<pid>.<i>" files (the 9 GB class this reaper exists to prevent)
 		// is a one-line signal here instead of an invisible pile only `ls` would reveal.
 		reportAsideFootprint(installTargetOr(*target))
+		// The whole role table, not just this one binary: a host is converged only when EVERY
+		// declared hot copy holds origin/main, and --check is where an operator asks that.
+		printHotCopyAudit(selfUpdateAudit(repoRoot, headRev))
 		emitSelfUpdateOutcome(outcomeCheckOnly, installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict))
 		return
 	}
@@ -201,36 +217,33 @@ func cmdSelfUpdate(argv []string) {
 		os.Exit(1)
 	}
 
-	// Converge the SIBLING binaries too. --target is ONE path; a real host runs several fak
-	// binaries and the fleet does not load the one this flag names:
+	// Converge the OTHER hot copies too. --target is ONE path; a real host runs several fak
+	// binaries and the fleet does not load the one this flag names. internal/selfinstall's role
+	// table (roles.go) declares them: the invoker/scheduled binary, the in-tree
+	// <root>/tools/.bin/fak[.exe] every dispatched worker is fronted by, the installed PATH copy,
+	// and the Go-bin copy scheduled tasks execute. Nothing else on the host refreshes them, and
+	// the omission is invisible: the tick still exits 0, because from --target's point of view
+	// everything worked (#6508 found four binaries on three builds after a "successful" tick).
 	//
-	//   - the INVOKER (os.Executable()). Under the scheduled task this is an absolute path
-	//     captured at REGISTRATION time, so its build is frozen at whatever was on disk that
-	//     day while --target advances every tick. Every later fix to self-update itself is
-	//     then dead code on the host, because the updater that actually runs is the frozen one.
-	//   - <root>/tools/.bin/fak[.exe] — the in-tree path tools/dispatch_worker.py
-	//     resolve_fak_bin prefers ahead of PATH when building every worker's `fak guard --`
-	//     argv. While that file exists, PATH is never consulted, so converging only a PATH
-	//     binary leaves every dispatched worker on the stale in-tree one.
-	//
-	// Neither is refreshed by anything else on the host, and the omission is invisible: the
-	// tick still exits 0, because from --target's point of view everything worked.
-	//
-	// We already hold the single-flight lock and already have a gated origin/main worktree, so
-	// each extra convergence costs one cache-warm rebuild and reuses the SAME build->vet->smoke
-	// ladder. A non-green tree still installs nothing.
+	// The census — not a freshness guess about the invoker — decides who needs a swap, so a copy
+	// already on origin/main is skipped and a stale one is never missed. We already hold the
+	// single-flight lock and already have a gated origin/main worktree, so each convergence costs
+	// one cache-warm rebuild and reuses the SAME build->vet->smoke ladder. A non-green tree still
+	// installs nothing.
+	census := selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe)
 	stragglers := []string{}
-	if fleetTarget && convergeSiblings(selfStamp, headRev) {
-		for _, sib := range selfUpdateSiblings(repoRoot, installTarget) {
-			fmt.Printf("self-update: sibling %s is not converged by anything else — converging it too …\n", sib)
-			sres := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
-				RepoRoot: buildDir,
-				Target:   sib,
-			})
-			fmt.Println("self-update: sibling " + filepath.Base(sib) + " — " + selfinstall.FormatResult(sres))
-			if !sres.Installed {
-				stragglers = append(stragglers, sib+" ("+string(sres.Stage)+": "+sres.Detail+")")
-			}
+	for _, sib := range selfUpdateSiblings(repoRoot, installTarget) {
+		if !selfinstall.NeedsConverge(census, sib, headRev) {
+			continue // provably already on origin/main
+		}
+		fmt.Printf("self-update: hot copy %s is not converged by anything else — converging it too …\n", sib)
+		sres := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
+			RepoRoot: buildDir,
+			Target:   sib,
+		})
+		fmt.Println("self-update: hot copy " + filepath.Base(sib) + " — " + selfinstall.FormatResult(sres))
+		if !sres.Installed {
+			stragglers = append(stragglers, sib+" ("+string(sres.Stage)+": "+sres.Detail+")")
 		}
 	}
 	if len(stragglers) > 0 {
@@ -240,50 +253,86 @@ func cmdSelfUpdate(argv []string) {
 		emitSelfUpdateOutcome(outcomeSiblingStale, installTarget, "not converged: "+strings.Join(stragglers, "; "))
 		os.Exit(1)
 	}
+	// Re-census and AUDIT: every configured hot copy is either converged above or named here with
+	// the build it is stuck on. The audit-only role (the repo-root gate binary, a hand-build in a
+	// shared dirty checkout that may be held live) is never swapped unattended — so an explicit,
+	// greppable audit line is the only thing that keeps it from drifting unnoticed.
+	audit := selfUpdateAudit(repoRoot, headRev)
+	printHotCopyAudit(audit)
+	if !audit.Converged {
+		emitSelfUpdateOutcome(outcomeHotCopyDivergent, installTarget,
+			"target installed; hot copies still divergent: "+strings.Join(audit.Lines(), " | "))
+		return
+	}
 	emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
 }
 
+// selfUpdateHost roots the hot-copy role table on this host: the checkout we build from, the
+// user home dir the installed/Go-bin copies live under, and the binary actually running this
+// tick (which under a scheduled task is the path its registration pinned).
+func selfUpdateHost(repoRoot string) selfinstall.Host {
+	exe, _ := os.Executable()
+	home, _ := os.UserHomeDir()
+	return selfinstall.Host{RepoRoot: repoRoot, Home: home, Scheduled: exe}
+}
+
+// selfUpdateProbe reads one deployed binary's VCS provenance for the census. Our OWN path is
+// answered from the in-process stamp instead of re-execing ourselves; every other copy is asked
+// directly with `<bin> version` (stampOfBinary), and a binary that cannot answer stays
+// unattested rather than being assumed current.
+func selfUpdateProbe(path string) (string, bool, bool) {
+	if sameBinary(path) {
+		s := binstamp.Self()
+		return s.Revision, s.Dirty, s.HasVCS && strings.TrimSpace(s.Revision) != ""
+	}
+	s, ok := stampOfBinary(path)
+	return s.Revision, s.Dirty, ok
+}
+
+// selfUpdateInvoker is the hot copy for the binary running this tick — what the scheduled-task
+// pin is checked against.
+func selfUpdateInvoker() selfinstall.HotCopy {
+	exe, err := os.Executable()
+	c := selfinstall.HotCopy{Role: selfinstall.RoleScheduled, Path: exe}
+	if err != nil || strings.TrimSpace(exe) == "" {
+		c.Err = "cannot resolve this binary's own path"
+		return c
+	}
+	if st, serr := os.Stat(exe); serr == nil && !st.IsDir() {
+		c.Present = true
+	}
+	s := binstamp.Self()
+	c.Build, c.Dirty = s.Revision, s.Dirty
+	c.Attested = s.HasVCS && strings.TrimSpace(s.Revision) != ""
+	return c
+}
+
+// selfUpdateAudit grades every declared hot copy against origin/main.
+func selfUpdateAudit(repoRoot, headRev string) selfinstall.Audit {
+	return selfinstall.AuditCopies(selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe), headRev)
+}
+
+// printHotCopyAudit prints one greppable line per hot copy plus the verdict.
+func printHotCopyAudit(a selfinstall.Audit) {
+	for _, line := range a.Lines() {
+		fmt.Println("self-update: " + line)
+	}
+}
+
 // selfUpdateSiblings lists the OTHER fak binaries on this host that a fleet consumer resolves
-// but no updater targets: the binary running this command, and the in-tree
-// <root>/tools/.bin/fak[.exe] that dispatch_worker.resolve_fak_bin prefers ahead of PATH.
-// Paths that do not exist are skipped (we converge binaries, never create new install
-// locations), as is anything equal to the primary target. Order is stable and deduped
-// case-insensitively so a Windows host does not swap the same file twice.
+// but no updater targets — the binary running this command, the in-tree
+// <root>/tools/.bin/fak[.exe] that dispatch_worker.resolve_fak_bin prefers ahead of PATH, the
+// installed <home>/bin copy, and the <home>/go/bin copy scheduled tasks execute.
+//
+// The set is the CONVERGEABLE half of internal/selfinstall's declared role table (#6508), not an
+// ad-hoc list here: one place declares which binary fills which role, and the repo-root gate
+// binary is deliberately excluded from unattended swaps (it is a hand-build in a shared dirty
+// checkout, audited every tick instead). Paths that do not exist are skipped — we converge
+// binaries, never create new install locations — as is anything equal to the primary target.
+// Order is stable and deduped case-insensitively so a Windows host does not swap the same file
+// twice.
 func selfUpdateSiblings(repoRoot, target string) []string {
-	cands := []string{}
-	if exe, err := os.Executable(); err == nil {
-		cands = append(cands, exe)
-	}
-	if r := strings.TrimSpace(repoRoot); r != "" {
-		cands = append(cands,
-			filepath.Join(r, "tools", ".bin", "fak"+exeSuffix()),
-		)
-	}
-	seen := map[string]bool{}
-	if abs, err := filepath.Abs(filepath.Clean(target)); err == nil {
-		seen[strings.ToLower(abs)] = true
-	}
-	out := []string{}
-	for _, c := range cands {
-		c = strings.TrimSpace(c)
-		if c == "" {
-			continue
-		}
-		abs, err := filepath.Abs(filepath.Clean(c))
-		if err != nil {
-			continue
-		}
-		key := strings.ToLower(abs)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		if st, err := os.Stat(abs); err != nil || st.IsDir() {
-			continue // converge only binaries that already exist; never create a new install
-		}
-		out = append(out, abs)
-	}
-	return out
+	return selfinstall.ConvergeTargets(selfinstall.Roles(selfUpdateHost(repoRoot)), target)
 }
 
 // selfUpdateOutcome is the closed vocabulary of self-update tick outcomes.
@@ -308,6 +357,13 @@ const (
 	outcomeGateFailed    selfUpdateOutcome = "gate-failed"    // build/vet/smoke/swap refused the candidate
 	outcomePrepareFailed selfUpdateOutcome = "prepare-failed" // could not stage the origin/main worktree
 	outcomeSiblingStale  selfUpdateOutcome = "sibling-stale"  // --target landed, a fleet-loaded sibling did not
+	// outcomeHotCopyDivergent: everything this tick was allowed to swap landed, but the role
+	// census still shows a declared hot copy on another build (typically the audit-only repo-root
+	// gate binary). Distinct from sibling-stale, which is a FAILED swap (#6508).
+	outcomeHotCopyDivergent selfUpdateOutcome = "hot-copy-divergent"
+	// outcomePinSkew: the binary executing this tick is not the reviewed one the scheduled task
+	// pinned, so it refused to adjudicate the fleet's binary at all (#6508).
+	outcomePinSkew selfUpdateOutcome = "pin-skew"
 )
 
 // emitSelfUpdateOutcome prints the single machine-readable outcome line for this tick. It
@@ -339,15 +395,6 @@ func selfUpdateSkipOutcome(fleetTarget bool, skew versionskew.Verdict) selfUpdat
 	default:
 		return outcomeSelfUnknown
 	}
-}
-
-// convergeSiblings reports whether the sibling binaries must ALSO be swapped after a fleet-mode
-// install. It consults the INVOKER's own stamp (never --target's, which we just refreshed), and
-// demands proof of freshness to skip: anything short of binstamp.Fresh — including an
-// unresolvable Unknown — converges, because a fleet binary that cannot prove it is current is
-// exactly the silent staleness this exists to end.
-func convergeSiblings(selfStamp binstamp.Stamp, head string) bool {
-	return binstamp.Compare(selfStamp, head) != binstamp.Fresh
 }
 
 // selfUpdateShouldBuild decides whether self-update proceeds to build+gate+install. The two

@@ -797,7 +797,12 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	for name, ms := range preflightTimings {
 		timings["preflight_"+name] = ms
 	}
-	preOK := dispatchMapString(pre, "verdict") == "SPAWN_OK"
+	// #6508: the gate must REFUSE, not merely warn, when the binary that adjudicated this
+	// preflight is unreviewable or disagrees with the one that will front the worker it
+	// admits. The decision is internal/selfinstall.ApplyGateSkew (tested there); this seam
+	// only folds it into the payload, so it exits through the same !preOK path below.
+	dispatchApplyBinSkew(pre, dispatchtick.PreflightOKVerdict)
+	preOK := dispatchMapString(pre, "verdict") == dispatchtick.PreflightOKVerdict
 	account := accountFromMap(mapAt(pre, "account"))
 	if opts.Account != nil {
 		account = *opts.Account
