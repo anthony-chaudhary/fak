@@ -411,12 +411,11 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		if len(findings) == 0 {
 			continue
 		}
-		for _, finding := range findings {
-			// The gate mode is the disposition contract for this run: warn findings remain
-			// visible but must trail every binding repair in the model-facing hand-off.
-			finding.Advisory = mode != "block"
-			allFindings = append(allFindings, finding)
-		}
+		// The gate mode is the disposition contract for this run: warn findings remain visible
+		// but must trail every binding repair in the model-facing hand-off (#5972). Marking and
+		// ordering live in internal/hooks so both the JSON payload and the printed block get the
+		// same answer, and so the rule has a test that runs.
+		allFindings = append(allFindings, hooks.MarkDisposition(findings, mode)...)
 		if mode == "block" {
 			blocked = true
 			if !*asJSON {
@@ -444,8 +443,16 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, cleanRunSummary(reports, len(d.StagedPaths), scope))
 	}
 
+	// One ordering for both consumers (#5972). The per-gate blocks above are printed in REGISTRY
+	// order — parity order, not impact order — so the fix list an agent reads leads with an
+	// advisory item the moment an early gate is softened or a late one hardened. The repair
+	// summary restates the same findings binding-first with each disposition named; nothing is
+	// re-judged and no gate's own block is withdrawn.
+	orderFindingsForRepair(allFindings)
+	if len(allFindings) > 0 && !*asJSON {
+		fmt.Fprintln(stderr, hooks.RepairSummary(allFindings))
+	}
 	if *asJSON {
-		orderFindingsForRepair(allFindings)
 		emitFindingsJSON(stdout, stderr, allFindings, skipped, reports, scope)
 	}
 	if blocked {
@@ -688,12 +695,9 @@ func cleanRunSummary(reports []gateReport, stagedFiles int, scope runScope) stri
 }
 
 // orderFindingsForRepair puts binding work before advisory work without disturbing the
-// registry/file/line order inside either disposition.
-func orderFindingsForRepair(findings []hooks.Finding) {
-	sort.SliceStable(findings, func(i, j int) bool {
-		return !findings[i].Advisory && findings[j].Advisory
-	})
-}
+// registry/file/line order inside either disposition. The rule itself lives in internal/hooks
+// (repairorder.go, #5972) where it is testable; this stays as the call site's name.
+func orderFindingsForRepair(findings []hooks.Finding) { hooks.OrderForRepair(findings) }
 
 // emitFindingsJSON writes the --json report: the findings, and the ledger of gates that never
 // delivered a verdict. skipped_gates / skipped_count are the machine-readable half of #5299 —
