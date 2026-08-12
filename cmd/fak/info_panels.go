@@ -203,8 +203,17 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 		rows = append(rows, fmt.Sprintf(" saved %s  %s calls avoided",
 			sparklineTUI(ctx.tr.savedCalls, ctx.sparkW), guardInfoShortCount(int(saved))))
 	}
-	if seconds, ok := timeSavedSeconds(float64(guardInfoTurnsSaved(v)), *v.Adjudication); ok {
-		rows = append(rows, fmt.Sprintf(" faster ≈ ~%.0fs (observed)", seconds))
+	// The adjudication block is OPTIONAL in the gateway's /debug/vars payload
+	// (`adjudication,omitempty`): a session that has not adjudicated anything yet reports no
+	// block at all, so v.Adjudication is nil. Dereferencing it unguarded panics the whole
+	// overlay on its first full-size frame — in a `fak guard --split` pane that is the entire
+	// observability strip dying before it draws. No block means no observed timing to convert,
+	// so the row simply stays silent, exactly like the "why" detail below (which already takes
+	// the pointer and nil-checks inside).
+	if v.Adjudication != nil {
+		if seconds, ok := timeSavedSeconds(float64(guardInfoTurnsSaved(v)), *v.Adjudication); ok {
+			rows = append(rows, fmt.Sprintf(" faster ≈ ~%.0fs (observed)", seconds))
+		}
 	}
 	return rows
 }
