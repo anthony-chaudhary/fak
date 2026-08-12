@@ -84,6 +84,15 @@ var (
 	prepushNow          = time.Now
 )
 
+// prepushTestQuality is the seam over the ADVISORY test-quality ratchet this gate runs after its
+// own verdict (see the call site in runHooksPrePush). It exists to pin the two properties `go vet`
+// cannot check: that the RESOLVED root travels as a `--root` FLAG inside argv — the #6012 break
+// handed it POSITIONALLY to a function that takes none, which silently disarmed the ratchet — and
+// that a non-zero scanner code only WARNS, never changing the push decision. Deliberately outside
+// prepushSeamSnapshot: it is orthogonal to the git/go build seams above, so the test that stubs it
+// saves and restores it itself.
+var prepushTestQuality = runTestQuality
+
 // prepushBaselineTolerance arms the pre-existing-red attribution (#3618): when the tip's cone
 // fails to build, re-build each failing package against the base trunk to tell a peer's already-
 // published red (TRUNK_ALREADY_RED, allow) from a break THIS push introduced (TRUNK_WOULD_NOT_
@@ -274,7 +283,7 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	}
 	// Test-quality is advisory at the push seam: the baseline absorbs existing debt,
 	// and only growth is surfaced. Never turn scanner failure into an unrelated refusal.
-	if tqCode := runTestQuality(io.Discard, stderr, []string{"--root", r}); tqCode != 0 {
+	if tqCode := prepushTestQuality(io.Discard, stderr, []string{"--root", r}); tqCode != 0 {
 		fmt.Fprintln(stderr, "fak hooks pre-push: WARNING: test-quality ratchet reported growth or could not run (advisory)")
 	}
 	if *report != "" {
