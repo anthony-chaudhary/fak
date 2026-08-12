@@ -117,6 +117,60 @@ func FormatBaseline(findings []Finding) []byte {
 	return []byte(sb.String())
 }
 
+// TrailingNotes returns the comment block a baseline file carries AFTER its last
+// data row — the human record of which candidates were reviewed and judged
+// deliberate, and why.
+//
+// It is extracted separately because FormatBaseline rewrites the file from the
+// findings alone, and the header it writes tells its reader to regenerate with
+// `fak test-quality --write-baseline`. A writer that did not carry these lines
+// over would delete the tree's only statement of WHY a row is deliberate, on the
+// exact command the file recommends — and the loss is silent, because the
+// regenerated file still parses and still ratchets. Only the audit trail is gone.
+//
+// Blank lines inside the block are preserved; trailing blank lines are not. A
+// leading comment block is NOT returned: that is the generated header, and
+// carrying it over would duplicate it on every regeneration.
+func TrailingNotes(src []byte) []byte {
+	lines := strings.Split(strings.ReplaceAll(string(src), "\r\n", "\n"), "\n")
+	last := -1
+	for i, ln := range lines {
+		s := strings.TrimSpace(ln)
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		last = i
+	}
+	start := -1
+	for i := last + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "#") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	block := lines[start:]
+	for len(block) > 0 && strings.TrimSpace(block[len(block)-1]) == "" {
+		block = block[:len(block)-1]
+	}
+	return []byte(strings.Join(block, "\n") + "\n")
+}
+
+// FormatBaselineWithNotes is FormatBaseline with prior's trailing note block
+// carried across, so regenerating the floor tightens the counts without erasing
+// the review that justified them. prior may be nil or noteless; then this is
+// exactly FormatBaseline.
+func FormatBaselineWithNotes(findings []Finding, prior []byte) []byte {
+	out := FormatBaseline(findings)
+	notes := TrailingNotes(prior)
+	if len(notes) == 0 {
+		return out
+	}
+	return append(append(out, '\n'), notes...)
+}
+
 // NewFindings splits findings into those the baseline already accounts for and
 // those it does not, and reports which baseline keys are now LOOSER than the tree
 // (a fix landed, so the floor can be lowered).

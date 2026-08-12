@@ -55,6 +55,36 @@ func TestParseBaselineRejectsMalformedRowWithLine(t *testing.T) {
 	}
 }
 
+// The generated header must not be mistaken for the review notes, or every
+// regeneration would staple another copy of it onto the file until the rows are
+// buried under their own preamble.
+func TestFormatBaselineWithNotesCarriesTailNotHeader(t *testing.T) {
+	x := Finding{Code: CodeNoAssertion, File: "p/x_test.go", Func: "TestX"}
+	prior := append(FormatBaseline([]Finding{x}),
+		[]byte("\n## Precision spot-check at SHA deadbeef\n# TestX is a child fixture; the parent asserts.\n")...)
+
+	got := string(FormatBaselineWithNotes([]Finding{{Code: CodeNoAssertion, File: "p/y_test.go", Func: "TestY"}}, prior))
+
+	if !strings.Contains(got, "SHA deadbeef") || !strings.Contains(got, "the parent asserts") {
+		t.Fatalf("regeneration dropped the trailing review notes:\n%s", got)
+	}
+	if strings.Contains(got, "p/x_test.go") {
+		t.Fatalf("regeneration kept a row no longer in the tree:\n%s", got)
+	}
+	if n := strings.Count(got, "the accepted FLOOR"); n != 1 {
+		t.Fatalf("header appears %d times; regeneration must not restack it:\n%s", n, got)
+	}
+	if _, err := ParseBaseline([]byte(got)); err != nil {
+		t.Fatalf("regenerated baseline does not parse: %v", err)
+	}
+	// Idempotent: regenerating the regenerated file is a no-op, so the tracked
+	// baseline does not churn a diff on every run.
+	again := string(FormatBaselineWithNotes([]Finding{{Code: CodeNoAssertion, File: "p/y_test.go", Func: "TestY"}}, []byte(got)))
+	if again != got {
+		t.Fatalf("regeneration is not idempotent:\n--- first ---\n%s\n--- second ---\n%s", got, again)
+	}
+}
+
 func TestFormatBaselineTightensAfterFix(t *testing.T) {
 	f := Finding{Code: CodeNoAssertion, File: "p/x_test.go", Func: "TestX"}
 	before := string(FormatBaseline([]Finding{f, f}))

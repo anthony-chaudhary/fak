@@ -59,7 +59,11 @@ func runTestQuality(stdout, stderr io.Writer, argv []string) int {
 
 	if *write {
 		path := filepath.Join(r, filepath.FromSlash(testquality.BaselineFile))
-		if err := os.WriteFile(path, testquality.FormatBaseline(findings), 0o644); err != nil {
+		// The prior file is read for its trailing note block only. A missing or
+		// unreadable baseline simply has no notes to carry; it must not stop a
+		// regeneration, which is the documented way OUT of a broken baseline.
+		prior, _ := os.ReadFile(path)
+		if err := os.WriteFile(path, testquality.FormatBaselineWithNotes(findings, prior), 0o644); err != nil {
 			fmt.Fprintf(stderr, "fak test-quality: %v\n", err)
 			return 2
 		}
@@ -71,7 +75,14 @@ func runTestQuality(stdout, stderr io.Writer, argv []string) int {
 
 	if *all {
 		if *asJSON {
-			return emitTestQualityJSON(stdout, stderr, findings, findings, files, counts, nil)
+			// --all deliberately never consulted the floor, so this report says
+			// "unratcheted" rather than reporting New: 0. Reusing "not growing" here
+			// would let `--all --json` masquerade as a passing ratchet run.
+			return emitTestQualityJSON(stdout, stderr, testQualityReport{
+				Schema: testQualityJSONSchema, Root: r, Files: len(files),
+				Total: len(findings), New: 0, CountsByCode: counts,
+				Verdict: verdictUnratcheted, Findings: nonNilFindings(findings),
+			}, 0)
 		}
 		for _, f := range findings {
 			fmt.Fprintln(stdout, f)
@@ -96,8 +107,20 @@ func runTestQuality(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	fresh, slack := testquality.NewFindings(findings, base)
+	verdict, code := verdictNotGrowing, 0
+	if len(fresh) > 0 {
+		verdict, code = verdictGrowing, 1
+	}
 	if *asJSON {
-		return emitTestQualityJSON(stdout, stderr, findings, fresh, files, counts, slack)
+		// Same verdict and same exit code as the text path below. A --json run that
+		// disagreed with the text run about whether the class grew would make the
+		// machine-read gate the LOOSER of the two, which is the direction that goes
+		// unnoticed.
+		return emitTestQualityJSON(stdout, stderr, testQualityReport{
+			Schema: testQualityJSONSchema, Root: r, Files: len(files),
+			Total: len(findings), New: len(fresh), CountsByCode: counts,
+			Verdict: verdict, Slack: slack, Findings: nonNilFindings(fresh),
+		}, code)
 	}
 
 	if len(slack) > 0 {
@@ -137,10 +160,27 @@ func writeCodeTally(w io.Writer, counts map[string]int) {
 	}
 }
 
+// The report's verdict vocabulary. Three values, not a bool, because "the floor
+// was never consulted" (--all) is a different claim from "nothing grew", and a
+// consumer that collapsed them would read an unratcheted dump as a passing gate.
+const (
+	verdictNotGrowing  = "not_growing" // findings exist, none beyond the floor
+	verdictGrowing     = "growing"     // at least one finding beyond the floor
+	verdictUnratcheted = "unratcheted" // --all: every candidate listed, no floor applied
+	// testQualityJSONSchema is versioned so a consumer can refuse a shape it does
+	// not know rather than silently reading absent fields as zeroes.
+	testQualityJSONSchema = "fak.test-quality/v1"
+)
+
 // testQualityReport is the JSON shape. Total and New are separate fields because
 // the two numbers answer different questions: Total is the debt, New is the
 // verdict, and a consumer that conflated them would read a stable tree as a
-// failing one.
+// failing one. Branch on Verdict, not on New.
+//
+// Findings mirrors whatever the text mode would have printed for the same flags:
+// the NEW findings on a ratcheted run, every candidate under --all. Two formats
+// that disagreed about what "the findings" are would make the choice of -json a
+// silent change of question.
 type testQualityReport struct {
 	Schema       string                `json:"schema"`
 	Root         string                `json:"root"`
@@ -153,12 +193,29 @@ type testQualityReport struct {
 	Findings     []testquality.Finding `json:"findings"`
 }
 
-func emitTestQualityJSON(stdout, stderr io.Writer, all, fresh []Finding2, files []string,
-	counts map[string]int, slack map[string]int) int {
-	return 0
+// emitTestQualityJSON writes the report and returns exitCode UNCHANGED — the
+// verdict is the caller's, so the two output formats cannot drift apart.
+//
+// A marshal failure returns 2 (tool broke) and never the caller's code: a
+// consumer that received no JSON must not be able to read exit 0 off the wire as
+// "clean". That is the same three-valued-exit argument the file header makes,
+// applied to the encoder itself.
+func emitTestQualityJSON(stdout, stderr io.Writer, rep testQualityReport, exitCode int) int {
+	b, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak test-quality: encode report: %v\n", err)
+		return 2
+	}
+	fmt.Fprintln(stdout, string(b))
+	return exitCode
 }
 
-// Finding2 is unused; kept out of the build.
-type Finding2 = testquality.Finding
-
-var _ = json.Marshal
+// nonNilFindings keeps the JSON array an ARRAY. A nil slice marshals to `null`,
+// and `null` is the one value a consumer is most likely to mistake for "the run
+// did not report" rather than "the run reported nothing".
+func nonNilFindings(f []testquality.Finding) []testquality.Finding {
+	if f == nil {
+		return []testquality.Finding{}
+	}
+	return f
+}

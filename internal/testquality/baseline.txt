@@ -10,17 +10,22 @@
 #
 # The key is (code, file, func) and the value is a COUNT, never a line number, so
 # the floor survives the file being reformatted or the finding moving.
+TESTQ_NO_ASSERTION	cmd/fak/accounts_launch_registration_test.go	TestAccountsRegistrationHelper	1
 TESTQ_NO_ASSERTION	cmd/fak/claude_mac_fak_test.go	TestClaudeMacFakSSHHelperProcess	1
 TESTQ_NO_ASSERTION	cmd/fak/dispatch_tick_test.go	TestDispatchSpawnHelper	1
+TESTQ_NO_ASSERTION	cmd/fak/guard_child_registration_test.go	TestGuardRegistrationHelper	1
 TESTQ_NO_ASSERTION	cmd/fak/macbench_test.go	TestMacBenchSSHHelperProcess	1
+TESTQ_NO_ASSERTION	cmd/fak/resume_watchdog_codex_test.go	TestWatchdogCodexHelper	1
 TESTQ_NO_ASSERTION	cmd/fak/worktree_worker_test.go	TestLandVerifyFlagParsesGoBuild	1
 TESTQ_NO_ASSERTION	internal/blobfs/store_test.go	TestResolverInterface	1
 TESTQ_NO_ASSERTION	internal/blobhttp/store_test.go	TestResolverInterface	1
 TESTQ_NO_ASSERTION	internal/codexmcphealth/reap_realtree_test.go	TestHelperChildSpawnsGrandchild	1
 TESTQ_NO_ASSERTION	internal/codexmcphealth/reap_realtree_test.go	TestHelperGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/codexresume/codexresume_test.go	TestResumeHelperProcess	1
 TESTQ_NO_ASSERTION	internal/dispatchaudit/dispatchaudit_test.go	TestDispatchAuditDeadPIDHelper	1
 TESTQ_NO_ASSERTION	internal/edittx/proctree_realtree_test.go	TestHelperEdittxChildSpawnsGrandchild	1
 TESTQ_NO_ASSERTION	internal/edittx/proctree_realtree_test.go	TestHelperEdittxGrandchildBlocks	1
+TESTQ_NO_ASSERTION	internal/fabricmap/process_adapter_test.go	TestProcessAdapterHelper	1
 TESTQ_NO_ASSERTION	internal/fleetpane/procbind_realtree_test.go	TestHelperFleetpaneChildSpawnsGrandchild	1
 TESTQ_NO_ASSERTION	internal/fleetpane/procbind_realtree_test.go	TestHelperFleetpaneGrandchildBlocks	1
 TESTQ_NO_ASSERTION	internal/guard/landlock_acceptance_linux_test.go	TestLandlockApplyDoesNotPanicOnEmptySpec	1
@@ -71,3 +76,14 @@ TESTQ_UNREAD_EXPECTATION	internal/taskmgr/concept_test.go	TestNamedConceptHelper
 # - TestLandlockApplyDoesNotPanicOnEmptySpec: panic absence is the asserted behavior.
 # Real-defect candidates are intentionally baselined too: this ratchet claims only "not growing";
 # remediation is separate work and regeneration will tighten the floor when they are fixed.
+#
+## Precision spot-check #2 at SHA a363533457 (2026-08-12) — the 5 rows added since the seed.
+# Sample: every key NEW relative to the seeded floor, i.e. the ratchet's own report, not a slice of it.
+# Reviewed: 0 real defects, 5 deliberate — all one family:
+# - TestAccountsRegistrationHelper, TestGuardRegistrationHelper, TestWatchdogCodexHelper,
+#   TestResumeHelperProcess, TestProcessAdapterHelper: env-gated child-process fixtures
+#   (`if os.Getenv(...) != "1" { return }`) re-executed by a parent test that owns the assertion.
+# That the 5 keys the ratchet flagged are 5/5 deliberate is the ratchet's argument, not against it:
+# the tool is a CANDIDATE finder, which is exactly why it advises and never refuses.
+#
+# These trailing notes survive `--write-baseline`; see testquality.TrailingNotes.
