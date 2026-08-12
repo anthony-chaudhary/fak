@@ -3,12 +3,18 @@ package adjudicator
 import (
 	"context"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
-const ComparisonSchema = "fak-policy-adjudication-comparison/1"
+const (
+	ComparisonSchema = "fak-policy-adjudication-comparison/1"
+	// DefaultCompareIterations is the corpus-repeat count CompareLocal falls back to
+	// when the caller passes a non-positive iterations value.
+	DefaultCompareIterations = 10000
+)
 
 type ComparisonCase struct {
 	Name     string          `json:"name"`
@@ -71,10 +77,11 @@ func comparisonPolicy() Policy {
 // processes evaluate the same policy/corpus with process metrics captured.
 func CompareLocal(iterations int) ComparisonReport {
 	if iterations <= 0 {
-		iterations = 10000
+		iterations = DefaultCompareIterations
 	}
 	corpus := ComparisonCorpus()
-	native := New(comparisonPolicy())
+	policy := comparisonPolicy()
+	native := New(policy)
 	ctx := context.Background()
 
 	nativeCorrect := 0
@@ -88,11 +95,12 @@ func CompareLocal(iterations int) ComparisonReport {
 	}
 	nativeElapsed := time.Since(start)
 
+	baseline := tunedBaselineLookup(policy, corpus)
 	baselineCorrect := 0
 	start = time.Now()
 	for i := 0; i < iterations; i++ {
 		for j := range corpus {
-			if directLookupKind(corpus[j].Call.Tool) == corpus[j].WantKind {
+			if baseline[corpus[j].Call.Tool] == corpus[j].WantKind {
 				baselineCorrect++
 			}
 		}
@@ -115,13 +123,38 @@ func CompareLocal(iterations int) ComparisonReport {
 	}
 }
 
-func directLookupKind(tool string) abi.VerdictKind {
-	switch tool {
-	case "search_kb", "read_ticket":
-		return abi.VerdictAllow
-	default:
-		return abi.VerdictDeny
+// tunedBaselineLookup precomputes the direct allow/deny answer for every tool in the
+// corpus, derived from the SAME Policy the native arm evaluates. Deriving it means the
+// baseline can never silently drift from comparisonPolicy() the way a hand-maintained
+// switch does — an added Allow entry or AllowPrefix is picked up here for free, so a
+// policy edit can no longer make the baseline look wrong instead of the arm.
+//
+// The derivation happens ONCE, OUTSIDE the timed loop, and that placement is the whole
+// point: this arm is the no-engine floor the native seam is measured against, so its
+// hot path has to stay a bare map hit. Resolving the policy per call would put map
+// construction and prefix scanning inside the measurement and stop it being a floor at
+// all.
+func tunedBaselineLookup(p Policy, corpus []ComparisonCase) map[string]abi.VerdictKind {
+	m := make(map[string]abi.VerdictKind, len(corpus))
+	for i := range corpus {
+		tool := corpus[i].Call.Tool
+		if _, done := m[tool]; !done {
+			m[tool] = directLookupKind(p, tool)
+		}
 	}
+	return m
+}
+
+func directLookupKind(p Policy, tool string) abi.VerdictKind {
+	if p.Allow[tool] {
+		return abi.VerdictAllow
+	}
+	for _, prefix := range p.AllowPrefix {
+		if strings.HasPrefix(tool, prefix) {
+			return abi.VerdictAllow
+		}
+	}
+	return abi.VerdictDeny
 }
 
 func localComparisonArm(name, class string, calls, correct int, elapsed time.Duration) ComparisonArm {
