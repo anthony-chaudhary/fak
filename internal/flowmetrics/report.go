@@ -78,8 +78,14 @@ type Report struct {
 	Corpus     map[string]any `json:"corpus"`
 	KPIs       []KPI          `json:"kpis"`
 
-	// Aging is the actionable list: started work nobody finished.
+	// Aging is the actionable list: started work nobody finished, oldest
+	// first, holding the same rows the aging_wip KPI counts. It is truncated
+	// by Input.AgingLimit so the payload stays bounded.
 	Aging []Span `json:"aging_wip,omitempty"`
+	// AgingTotal is how many rows existed BEFORE that truncation. Without it
+	// a bounded list reports its own limit as the size of the problem — a
+	// 25-row cap would make 86 rotting issues read as 25.
+	AgingTotal int `json:"aging_wip_total,omitempty"`
 	// Curve is the WIP-over-time series when a window was requested.
 	Curve []DayWIP `json:"wip_curve,omitempty"`
 }
@@ -119,12 +125,21 @@ func Build(in Input) Report {
 	}
 	since := in.Now.Add(-time.Duration(in.WindowDays) * 24 * time.Hour)
 
+	// The stalled set is folded ONCE and handed to both the KPI and the
+	// emitted list, so the graded number and the actionable rows are the same
+	// set by construction rather than by two agreeing filters.
+	stalled := stalledWIP(spans, in.Now)
+	aging := stalled
+	if in.AgingLimit > 0 && len(aging) > in.AgingLimit {
+		aging = aging[:in.AgingLimit]
+	}
+
 	var kpis []KPI
 	kpis = append(kpis,
 		kpiFlowEfficiency(spans, since),
 		kpiQueueTime(spans, since),
 		kpiUnstartedBacklog(spans),
-		kpiAgingWIP(spans, in.Now),
+		kpiAgingWIP(stalled, in.Now),
 		kpiAtomicity(spans, since),
 		kpiArrivalVsService(spans, since, in.Now),
 		kpiWitnessedProgress(in.Issues, byNumber),
@@ -136,11 +151,12 @@ func Build(in Input) Report {
 		debt += len(k.Defects)
 	}
 	rep := Report{
-		Schema:    Schema,
-		Workspace: in.Workspace,
-		KPIs:      kpis,
-		Aging:     AgingWIP(spans, in.Now, in.AgingLimit),
-		Curve:     WIPCurve(spans, since, in.Now),
+		Schema:     Schema,
+		Workspace:  in.Workspace,
+		KPIs:       kpis,
+		Aging:      aging,
+		AgingTotal: len(stalled),
+		Curve:      WIPCurve(spans, since, in.Now),
 		Corpus: map[string]any{
 			"flow_debt":   debt,
 			"grade":       GradeLetter(debt),
@@ -300,18 +316,16 @@ func kpiUnstartedBacklog(spans []Span) KPI {
 	return k
 }
 
-func kpiAgingWIP(spans []Span, now time.Time) KPI {
+// kpiAgingWIP grades the ALREADY-FILTERED stalled set from stalledWIP, rather
+// than re-filtering the spans itself. Taking the rows means the graded count and
+// the rows the readout prints are the same slice, so the two can never disagree.
+func kpiAgingWIP(rows []Span, now time.Time) KPI {
 	k := KPI{KPI: "aging_wip", Group: "wip", Defects: []string{}, Soft: []string{}}
-	stalled := 0
+	stalled := len(rows)
 	var oldest float64
-	for _, s := range AgingWIP(spans, now, 0) {
-		age := s.AgeHours(now)
-		if age > float64(AgingWIPDays)*24 {
-			stalled++
-			if age > oldest {
-				oldest = age
-			}
-		}
+	if stalled > 0 {
+		// The rows arrive oldest-first, so the head is the maximum age.
+		oldest = rows[0].AgeHours(now)
 	}
 	k.Value = float64(stalled)
 	if stalled <= AgingWIPCeiling {
