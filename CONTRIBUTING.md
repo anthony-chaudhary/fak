@@ -346,3 +346,20 @@ than filed as a public issue.
 Participation in this project — issues, pull requests, and reviews — is governed by the
 [Code of Conduct](.github/CODE_OF_CONDUCT.md). It also names the route for reporting a
 problem with someone's conduct.
+
+### One-time Windows developer setup
+
+Windows contributors can enable native `go test`, fak's generated test binaries, and the
+Fleet-spine discovery path with one elevated setup:
+
+```powershell
+go run ./cmd/fak-dev windows-setup              # inspect; makes no changes
+go run ./cmd/fak-dev windows-setup --apply      # one UAC prompt; install + verify
+```
+
+The command idempotently adds Microsoft Defender exclusions for the repository, Go build
+cache/temp roots, fak/Fleet state, and the Go/fak/agent tool processes. It also installs
+inbound and outbound Windows Firewall rules for fak's Fleet-spine multicast endpoint
+`239.255.70.65:4765`. It reports `READY` only after reading every setting back. Use
+`--json` for machine-readable planning or verification. These are local-machine security
+exceptions: review the dry-run first and use them only on a trusted development checkout.
