@@ -110,14 +110,14 @@ func TestGuardLaunchSettleLines(t *testing.T) {
 		t.Errorf("missing build stamp must surface in the identity line, got %q", noStamp[0])
 	}
 
-	// A refusal carry-forward is appended verbatim (extra lines beyond the two-line rest).
+	// Refusal history must not grow the attended resting state; full detail stays in the startup report.
 	withRefusals := guardLaunchSettleLines("9.9.9", "abc123", "claude", "http://x", 200,
 		[]guardRefusalCarry{{Reason: "FS_WRITE_OUTSIDE_ROOT", Count: 2}})
-	if len(withRefusals) <= 2 {
-		t.Fatalf("refusal carry-forward should add lines, got %d: %#v", len(withRefusals), withRefusals)
+	if len(withRefusals) != 2 {
+		t.Fatalf("refusal history grew attended settle lines: got %d: %#v", len(withRefusals), withRefusals)
 	}
-	if !strings.Contains(strings.Join(withRefusals, "\n"), "FS_WRITE_OUTSIDE_ROOT") {
-		t.Errorf("refusal reason not carried into settle lines: %#v", withRefusals)
+	if strings.Contains(strings.Join(withRefusals, "\n"), "FS_WRITE_OUTSIDE_ROOT") {
+		t.Errorf("refusal history leaked into attended settle lines: %#v", withRefusals)
 	}
 }
 

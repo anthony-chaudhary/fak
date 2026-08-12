@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -525,5 +526,32 @@ func TestGuardAdvertisesExactlyWhatItCanApply(t *testing.T) {
 		if out.Reason == fleetbus.UnknownOp {
 			t.Fatalf("op %q was declared unsupported but refused as UNKNOWN — the two are different facts", op)
 		}
+	}
+}
+
+func TestStartGuardFleetBusQuietSuppressesSuccessfulArming(t *testing.T) {
+	busDir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	stop := startGuardFleetBus(ctx, true, busDir, "guard-quiet-1", time.Hour, true)
+	stop()
+	w.Close()
+	os.Stderr = old
+	out, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("quiet attended arming wrote pre-child bytes: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(busDir, "instances", "guard-quiet-1.json")); err != nil {
+		t.Fatalf("quiet mode must still arm fleet bus: %v", err)
 	}
 }

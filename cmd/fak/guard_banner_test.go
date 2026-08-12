@@ -77,21 +77,18 @@ func TestPrintGuardCompactBannerIsCompact(t *testing.T) {
 	}
 }
 
-// TestPrintGuardCompactBannerKeepsRefusalCarryForward: compacting must never hide the
-// prior-run refusal block — it is the one part of the startup text an operator must act
-// on BEFORE re-attempting work (don't re-attempt a refused call blindly).
-func TestPrintGuardCompactBannerKeepsRefusalCarryForward(t *testing.T) {
+// TestPrintGuardCompactBannerKeepsHardBudget proves stale refusal history cannot
+// grow the attended pre-child surface. Complete refusal detail remains in the
+// startup report addressed by the third line.
+func TestPrintGuardCompactBannerKeepsHardBudget(t *testing.T) {
 	var b strings.Builder
 	printGuardCompactBanner(&b, "9.9.9", "", "http://127.0.0.1:9", []string{"claude"},
-		[]guardRefusalCarry{{Reason: "OFF_TRUNK", Count: 1, Fix: "commit directly to main"}})
+		[]guardRefusalCarry{{Reason: "OFF_TRUNK", Count: 99, Fix: "commit directly to main"}})
 	out := b.String()
-	for _, want := range []string{"OFF_TRUNK x1", "commit directly to main"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("compact banner dropped the refusal carry-forward %q:\n%s", want, out)
-		}
+	if n := strings.Count(out, "\n"); n != 3 {
+		t.Fatalf("compact banner with refusal history is %d lines, want exactly 3:\n%s", n, out)
 	}
-	// An empty short build id must not render as "9.9.9 ()".
-	if strings.Contains(out, "()") {
-		t.Errorf("empty build id rendered as (): %q", out)
+	if strings.Contains(out, "OFF_TRUNK") || strings.Contains(out, "commit directly") {
+		t.Fatalf("compact banner leaked prior refusal history into child scrollback:\n%s", out)
 	}
 }

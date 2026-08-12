@@ -75,9 +75,8 @@ func guardBannerModeDecision(banner string, quiet, stdinInteractive, childIntera
 // ~20-line full report. It keeps the identity line (version + short build id — the "+"
 // dirty marker is the staleness tell, same as the fak info pane header), the gateway URL
 // (the one value every other surface hangs off), and a COPY-PASTEABLE command that
-// prints the full report on demand. The prior-run refusal carry-forward still prints in
-// full — it is the one actionable block an operator must see BEFORE re-attempting work,
-// so compacting must never hide it.
+// prints the full report on demand. Prior-run refusals stay in that report: attended
+// launch has a hard three-line budget so stale history cannot scroll the child UI.
 func printGuardCompactBanner(w io.Writer, version, shortBuild, gwURL string, command []string, refusalCarryForward []guardRefusalCarry) {
 	identity := version
 	if strings.TrimSpace(shortBuild) != "" {
@@ -92,5 +91,4 @@ func printGuardCompactBanner(w io.Writer, version, shortBuild, gwURL string, com
 	fmt.Fprintf(w, "fak guard %s — kernel-adjudicated: %s\n", identity, strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway %s — every tool call crosses the capability floor; audit journal + /metrics live there\n", gwURL)
 	fmt.Fprintf(w, "  full startup report: fak info --startup --gateway-url %s   (or relaunch with --banner=full)\n", gwURL)
-	fmt.Fprint(w, formatGuardRefusalCarryForward(refusalCarryForward))
 }

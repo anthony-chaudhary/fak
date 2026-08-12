@@ -357,7 +357,10 @@ func resolveGuardFleetBusID(id string) string {
 // is the guard-shaped call onto startFleetBusInstance; everything role-specific — who
 // it says it is, what it claims, what it declares it cannot do, and which applier owns
 // the meaning — is stated here and nowhere else.
-func startGuardFleetBus(ctx context.Context, on bool, dir, id string, interval time.Duration) func() {
+// startGuardFleetBus preserves bus arming while optionally suppressing successful
+// initialization chatter for compact attended launch. Errors still spill.
+func startGuardFleetBus(ctx context.Context, on bool, dir, id string, interval time.Duration, quiet ...bool) func() {
+	suppressSuccess := len(quiet) > 0 && quiet[0]
 	busDir := resolveGuardFleetBusDir(on, dir)
 	if busDir == "" {
 		return func() {}
@@ -368,6 +371,7 @@ func startGuardFleetBus(ctx context.Context, on bool, dir, id string, interval t
 		instanceID:  instanceID,
 		role:        guardFleetBusRole,
 		logPrefix:   "fak guard",
+		quiet:       suppressSuccess,
 		interval:    interval,
 		ops:         guardFleetBusAdvertisedOps(),
 		unsupported: guardFleetBusUnsupportedOps(),

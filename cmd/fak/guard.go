@@ -1026,7 +1026,10 @@ func cmdManageCommand(commandName string, argv []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	startGuardAllowWatcher(ctx, guardPolicyReloader(*policyPath), *quiet)
 	fleetLogf := fleetspine.Logf(nil)
-	if !*quiet {
+	// Compact/animated attended startup owns a hard pre-child output budget. Fleet
+	// discovery is best-effort operational detail and remains visible in the full
+	// startup report/logs; it must not independently scroll the child UI.
+	if !*quiet && bannerMode == guardBannerFull {
 		fleetLogf = func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "fak guard: "+format+"\n", args...)
 		}
@@ -1044,7 +1047,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// before ready ages out of the roster within one TTL, and until it does it folds as
 	// OUTSTANDING — "addressed, never answered" — never as an apply.
 	// --fleet-bus=false makes this a total no-op.
-	stopGuardFleetBus := startGuardFleetBus(ctx, *fleetBus, *fleetBusDir, *fleetBusID, *fleetBusInterval)
+	stopGuardFleetBus := startGuardFleetBus(ctx, *fleetBus, *fleetBusDir, *fleetBusID, *fleetBusInterval, bannerMode != guardBannerFull)
 	defer stopGuardFleetBus()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()

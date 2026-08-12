@@ -399,6 +399,8 @@ type fleetBusArming struct {
 	// so an operator reading a mixed log can tell which process refused.
 	logPrefix string
 	interval  time.Duration
+	// quiet suppresses successful arming chatter but never errors.
+	quiet bool
 	// ops / unsupported are the two capability CLAIMS on the presence record. Neither
 	// routes; see fleetbus.Instance.
 	ops         []fleetbus.Op
@@ -495,14 +497,16 @@ func startFleetBusInstance(ctx context.Context, arm fleetBusArming) func() {
 		return inst
 	}
 	self = announce(time.Now(), self)
-	fmt.Fprintf(os.Stderr, "%s: fleet-bus armed as %s on %s (drain every %s)\n", prefix, self.ID, bus.Root, arm.interval)
-	if len(self.Unsupported) > 0 {
-		// Say the closed half out loud at arm time. An instance that declares an op
-		// unsupported is still addressed by it (that is deliberate — see
-		// fleetbus.Instance.Unsupported), so the operator's first evidence would
-		// otherwise be a refusal ack, long after the boot log could have told them.
-		fmt.Fprintf(os.Stderr, "%s: fleet-bus %s declares unsupported: %v (it will be addressed and will refuse, never silently skipped)\n",
-			prefix, self.ID, self.Unsupported)
+	if !arm.quiet {
+		fmt.Fprintf(os.Stderr, "%s: fleet-bus armed as %s on %s (drain every %s)\n", prefix, self.ID, bus.Root, arm.interval)
+		if len(self.Unsupported) > 0 {
+			// Say the closed half out loud at arm time. An instance that declares an op
+			// unsupported is still addressed by it (that is deliberate — see
+			// fleetbus.Instance.Unsupported), so the operator's first evidence would
+			// otherwise be a refusal ack, long after the boot log could have told them.
+			fmt.Fprintf(os.Stderr, "%s: fleet-bus %s declares unsupported: %v (it will be addressed and will refuse, never silently skipped)\n",
+				prefix, self.ID, self.Unsupported)
+		}
 	}
 
 	loopCtx, cancel := context.WithCancel(ctx)

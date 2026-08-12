@@ -144,11 +144,6 @@ func guardLaunchSettleLines(version, shortBuild, agent, gwURL string, width int,
 	head += "  ·  gateway " + gwURL
 	lines := []string{takeCellsTUI(head, width)}
 	lines = append(lines, takeCellsTUI("  full startup report: fak info --startup --gateway-url "+gwURL+" (spilled here only if launch fails)", width))
-	if cf := strings.TrimRight(formatGuardRefusalCarryForward(refusals), "\n"); cf != "" {
-		for _, r := range strings.Split(cf, "\n") {
-			lines = append(lines, takeCellsTUI(r, width))
-		}
-	}
 	return lines
 }
 
