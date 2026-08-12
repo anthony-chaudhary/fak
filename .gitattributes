@@ -9,3 +9,10 @@
 # byte compare fails locally while passing on Linux/CI. Pin LF so the freeze
 # tests are platform-independent.
 *.golden text eol=lf
+
+# CUDA reference producers are PROVENANCE-PINNED by SHA-256 (internal/kvint2eval/testdata,
+# docs/research/quantization/int2-kv-rotation.md), and a digest only names one artifact if every
+# checkout holds the same bytes. Under core.autocrlf=true a Windows checkout would rewrite these
+# to CRLF and hash differently from the recorded pin — the same failure the *.golden line above
+# prevents, so pin LF for the same reason (#6260).
+*.cu text eol=lf

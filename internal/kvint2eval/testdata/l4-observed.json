@@ -3,7 +3,7 @@
   "artifact": {
     "id": "kvint2eval-l4-output-aware-slice",
     "version": "2",
-    "sha256": "653f025b233038a199476e1ed8d0b86f688c52a54b92df6abcdd2263470bae44"
+    "sha256": "b6c5b443791b6f9cc46dafcd2adbe9ea77d2e316c260ae1146b628beb05e5520"
   },
   "recipe_artifact": {
     "id": "arxiv:2608.02691",
@@ -13,7 +13,7 @@
   "model": {
     "id": "synthetic-attention-head",
     "version": "seed-6260-v2",
-    "sha256": "653f025b233038a199476e1ed8d0b86f688c52a54b92df6abcdd2263470bae44"
+    "sha256": "b6c5b443791b6f9cc46dafcd2adbe9ea77d2e316c260ae1146b628beb05e5520"
   },
   "runtime": {
     "name": "cuda",
@@ -156,6 +156,6 @@
     "baseline_decode_microseconds": 19907.1976,
     "candidate_decode_microseconds": 19187.1855
   },
-  "witness_sha256": "7416fe5688ea6a205ce0612589b6d134217540488f770985c1b1817864f29220"
+  "witness_sha256": "ee901456e1ef8ccf787b90d42a2871693bb21bedf8a9a421ebec0b5ba0f1decf"
 }
 

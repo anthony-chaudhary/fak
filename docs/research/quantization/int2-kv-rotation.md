@@ -34,8 +34,16 @@ The independent read-back is `internal/kvint2eval/testdata/l4-observed.json`; it
 reference evaluation, not a production kernel. It was compiled and run through the
 sanctioned GCP GPU route on Ubuntu 22.04.5, CUDA 12.9 / driver 580.159.03, and one NVIDIA
 L4 (23,034 MiB reported). Producer SHA-256 is
-`653f025b233038a199476e1ed8d0b86f688c52a54b92df6abcdd2263470bae44`; binary SHA-256 is
+`b6c5b443791b6f9cc46dafcd2adbe9ea77d2e316c260ae1146b628beb05e5520`; binary SHA-256 is
 `2a2afb63578807ac7ad798a864a5084818a2039c1c8a4caa83bf2dbe54716f2c`.
+
+That producer digest is over the file's canonical LF form — the bytes git stores, which is what a
+POSIX checkout holds on disk — so it is reproducible anywhere with
+`git show HEAD:internal/kvint2eval/testdata/l4_producer.cu | sha256sum`. It is checked, not merely
+published: `TestPublishedProducerDigestMatchesTheProducer` rehashes the producer and fails this
+document if the two ever drift. The binary digest is the compiled artifact from that GPU run and is
+not reproducible from this repository, which holds no binary; it is recorded for the operator who
+still has the run, and no test can bind it.
 
 Observed envelope: 4,096 cached tokens, 4 KV heads, head dimension 128, output dimension
 128, seed 6260. The identity/no-rotation baseline and eight deterministic signed-Hadamard
