@@ -75,6 +75,13 @@ func TestTrajctlDeclareListCloseEndToEnd(t *testing.T) {
 		t.Fatalf("list --json budget = %+v", objs[0].Budget)
 	}
 
+	// Witness both declared phases before closing. `met` is adjudicated against the
+	// declared plan (internal/depthadmit, DEPTH_NOT_CARRIED), so a close on a plan
+	// with no witnessed phase is refused now — see trajctl_depth_test.go for that
+	// direction. This test is about the lifecycle, so give it the carried plan a
+	// clean close costs.
+	witnessPhases(t, ledger, "obj-1", "phase-1", "phase-2")
+
 	// close flips the status; the objective drops out of the default open list.
 	out.Reset()
 	errb.Reset()

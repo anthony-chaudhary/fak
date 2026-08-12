@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/depthadmit"
 	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
@@ -47,10 +48,25 @@ const trajctlUsage = `fak trajctl - trajectory-control objective lifecycle (over
       (rubric-based prompt, per-criterion attribution) — never regenerate it.
       A failed or over-budget rubric call fails the declare (nothing appended).
 
-  fak trajctl close --id ID [--status met|abandoned] [--ledger FILE] [--json]
+  fak trajctl close --id ID [--status met|abandoned] [--force] [--ledger FILE] [--json]
       Append a status-flip row for ID (default --status met). The prior
       statement/plan/budget/parent carry over unchanged. Fails if ID has never
       been declared.
+
+      Depth gate (internal/depthadmit): --status met is REFUSED with
+      DEPTH_NOT_CARRIED unless every declared plan phase has a witness in the
+      latest W3 witnessed-commit-progress row -- so "done" costs a carried plan
+      instead of a self-report. An objective with NO plan is refused too: a met
+      with nothing declared claims a depth nobody can check. --status abandoned
+      is never refused (it claims nothing) but still records the depth reached.
+      --force closes shallow anyway, loudly.
+
+  fak trajctl depth [--id ID] [--ledger FILE] [--json]
+      Read how far down its declared plan an objective actually got: the
+      carried/declared phase count, the FRONTIER (the first phase with no
+      witness -- the concrete next step), any off-plan witnesses, and the
+      one-line handoff a successor session resumes from instead of re-planning.
+      Default is every open (active+paused) objective.
 
   fak trajctl list [--status active|paused|met|abandoned|open|all] [--ledger FILE] [--json]
       List objectives in id order. Default --status is "open" (active+paused).
@@ -129,6 +145,8 @@ func runTrajctl(stdout, stderr io.Writer, argv []string) int {
 		return runTrajctlDeclare(stdout, stderr, rest)
 	case "close":
 		return runTrajctlClose(stdout, stderr, rest)
+	case "depth":
+		return runTrajctlDepth(stdout, stderr, rest)
 	case "list":
 		return runTrajctlList(stdout, stderr, rest)
 	case "curve":
@@ -293,6 +311,7 @@ func runTrajctlClose(stdout, stderr io.Writer, argv []string) int {
 	status := fs.String("status", string(trajctl.StatusMet), "terminal status: met|abandoned")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+trajctl.DefaultLedgerRel+")")
 	asJSON := fs.Bool("json", false, "emit the closed objective as JSON")
+	force := fs.Bool("force", false, "close --status met even when the declared plan is not carried ("+depthadmit.RefusalReason+")")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -313,6 +332,26 @@ func runTrajctlClose(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak trajctl close: unknown objective %q\n", *id)
 		return 1
 	}
+	// Depth gate (internal/depthadmit): `met` claims the objective's goal was
+	// reached, so it costs a witnessed phase per declared phase. Without this, a
+	// six-phase plan closed `met` on one witnessed phase read as a clean close to
+	// every downstream fold — the curve and focus scores measure motion and
+	// breadth, neither of which can see a line that stopped short. `abandoned` is
+	// never gated: it claims nothing, and refusing it would only trap dead
+	// objectives open.
+	decision := depthadmit.Admit(trajctlDepthInput(obj, st), depthadmit.Closure(newStatus))
+	if !decision.Admitted {
+		if !*force {
+			fmt.Fprintf(stderr, "fak trajctl close: %s: %s\n", decision.Reason, decision.Detail)
+			fmt.Fprintf(stderr, "  %s\n", depthadmit.HandoffLine(obj.ID, decision.Report))
+			fmt.Fprintln(stderr, "  carry the remaining phases (bind each landing commit with a `Trajctl-Phase: <id>` trailer,")
+			fmt.Fprintln(stderr, "  then `fak trajctl score --objective "+obj.ID+"` to witness them), close with --status abandoned")
+			fmt.Fprintln(stderr, "  to drop the line honestly, or re-run with --force to close it shallow anyway.")
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak trajctl close: --force overrode %s: %s\n", decision.Reason, decision.Detail)
+	}
+
 	obj.Status = newStatus
 	if err := trajctl.Append(path, trajctl.ObjectiveRecord(obj)); err != nil {
 		fmt.Fprintf(stderr, "fak trajctl close: %v\n", err)

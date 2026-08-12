@@ -370,6 +370,7 @@ concurrent = [
   # internal/mixedprecision/** only, keeping every leaf tree pairwise-disjoint per the header
   # invariant. Deliberately NOT mirrored into [lanes].autopick (see the 2026-07-25 note).
   "mixedprecision",
+  "depthadmit",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -506,6 +507,7 @@ autopick = [
   "fp4runtime",
   "quantpolicy",
   "codexresume",
+  "depthadmit",
   # new-leaf:lane
 ]
 
@@ -1090,6 +1092,7 @@ fp4runtime = ["internal/fp4runtime/**"]
 quantpolicy = ["internal/quantpolicy/**"]
 codexresume = ["internal/codexresume/**"]
 mixedprecision = ["internal/mixedprecision/**"] # #6407: see the [lanes].concurrent note.
+depthadmit = ["internal/depthadmit/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1739,6 +1742,29 @@ refusal  = false
 summary  = "A dispatch spawn would OPEN a new concurrent objective while fleet breadth is at/over the focusscore WIP cap (active objectives >= cap). Warn-first: advisory by default (still dispatches), upgraded to a hold that skips the new-objective spawn under --focus-hold / FLEET_DISPATCH_FOCUS_HOLD. Continuation of an already-open objective is never held -- this bounds fan-out, not convergence work."
 fix      = "Converge before broadening: pause or meet an active objective to get back under the WIP cap, or continue an already-open objective (never held) instead of opening a new one. The signal is re-derived from the trajctl ledger -- lower it by converging, not by editing a file. Tune posture with --focus-hold / FLEET_DISPATCH_FOCUS_HOLD. Floor: go test ./internal/dispatchtick -run TestEvaluateFocusAdmission."
 see_also = ["internal/dispatchtick/preflight_focus.go", "internal/focusscore/focusscore.go", "cmd/fak/dispatch_tick_focus.go", "RATE_LIMIT_BACKOFF", "COLLISION_RISK"]
+
+# Depth gate (internal/depthadmit): the DEPTH mirror of FOCUS_WIP_SATURATED. The focus
+# token above bounds fan-out -- it refuses OPENING another objective while the fleet is
+# broad. Nothing bounded the other end: an objective whose Plan declares six phases could
+# be closed `met` with one phase witnessed, and every downstream fold read it as a clean
+# close, because trajctl's curve measures MOTION (HEALTHY/STALL/DRIFT) and focusscore
+# measures BREADTH (active count vs cap) and neither can see a line that stopped short.
+# So `fak trajctl close --status met` is now adjudicated against the declared plan: every
+# phase needs a witness in the LATEST W3 witnessed-commit-progress row (the row whose
+# evidence the commit scorer only writes for a phase whose commit resolved to
+# EvidenceVerified). Latest row, not the union -- crediting every row a scoring pass ever
+# wrote would keep crediting a phase whose commit later went dangling.
+# An objective with NO plan is refused too: `met` with nothing declared claims a depth
+# nobody can check, which is the shallow-close hole in its purest form. `abandoned` is
+# NEVER refused -- it claims nothing, and refusing it would only trap dead objectives open
+# -- but the depth reached is recorded on the way out.
+# Floor: `go test ./internal/depthadmit` and `go test ./cmd/fak -run TrajctlDepth`.
+[reasons.DEPTH_NOT_CARRIED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a `met` closure claims an objective's goal was reached while its declared plan is NOT carried -- some declared phase has no witness in the latest W3 witnessed-commit-progress row, or no plan was declared at all (a met with nothing declared claims a depth nobody can check). This is the depth mirror of FOCUS_WIP_SATURATED: that token bounds fan-out, this one refuses a line of work that stopped short. `abandoned` is never refused, only recorded."
+fix      = "carry the remaining phases: bind each landing commit with a `Trajctl-Phase: <phase-id>` trailer, then `fak trajctl score --objective <id>` to witness them, and re-close. `fak trajctl depth --id <id>` prints the frontier -- the first phase with no witness -- which is the concrete next step. If the line is genuinely dead, close it `--status abandoned` (never refused) instead of claiming it met. One-shot escape: `--force`, which closes shallow and says so on stderr. Floor: go test ./internal/depthadmit; go test ./cmd/fak -run TrajctlDepth."
+see_also = ["internal/depthadmit/depthadmit.go", "cmd/fak/trajctl_depth.go", "internal/trajctl/commitscorer.go", "FOCUS_WIP_SATURATED", "LOOP_DONE_UNWITNESSED"]
 
 # Deployment session-ceiling backpressure (#3425, epic #3256 Workstream E: the all-in-one
 # deployment). The runtime-boundary projection of the fleet's admission machinery for the
