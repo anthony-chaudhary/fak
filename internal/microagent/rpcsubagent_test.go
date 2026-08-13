@@ -114,6 +114,9 @@ func TestRPCSubagentCollapsesUnderFloor(t *testing.T) {
 	// the orchestrator far less than the intermediate chatter.
 	orch.Append("tool", res.Collapsed)
 	folded := orch.Tokens() - before
+	if res.IntermediateTokens != intermediate || res.FoldedTokens <= 0 || res.SavedTokens != res.IntermediateTokens-res.FoldedTokens {
+		t.Fatalf("receipt accounting=%+v measured intermediate=%d folded=%d", res, intermediate, folded)
+	}
 	if folded <= 0 {
 		t.Fatal("collapsed result folded to 0 tokens — nothing was returned to the orchestrator")
 	}

@@ -102,11 +102,14 @@ func (s RPCStep) Allowed() bool { return s.Verdict.Kind == abi.VerdictAllow && s
 // deliberately does NOT carry the intermediate transcript — that is the zero-
 // context-cost collapse: the orchestrator gets Collapsed, not the chatter.
 type RPCResult struct {
-	Steps     []RPCStep // one per script action, in order
-	Collapsed string    // the bounded summary the orchestrator may fold (the collapsed turn)
-	Allowed   int       // count of adjudicated+executed calls
-	Denied    int       // count of floor-refused calls (contained, never executed)
-	Errored   int       // count of allowed-but-not-dispatched calls (config faults, not decisions)
+	Steps              []RPCStep // one per script action, in order
+	Collapsed          string    // the bounded summary the orchestrator may fold (the collapsed turn)
+	Allowed            int       // count of adjudicated+executed calls
+	Denied             int       // count of floor-refused calls (contained, never executed)
+	Errored            int       // count of allowed-but-not-dispatched calls (config faults, not decisions)
+	IntermediateTokens int       // bounded child-context tokens retained after the script
+	FoldedTokens       int       // standalone estimate for the Collapsed message
+	SavedTokens        int       // max(IntermediateTokens-FoldedTokens, 0)
 }
 
 // RPCSubagent runs a fixed multi-call tool SCRIPT on behalf of an orchestrator,
@@ -172,6 +175,15 @@ func (s *RPCSubagent) RunScript(ctx context.Context, script []ToolAction) RPCRes
 		out.Steps = append(out.Steps, step)
 	}
 	out.Collapsed = fmt.Sprintf("pipeline %q: %d/%d calls allowed, %d denied", s.id, out.Allowed, len(script), out.Denied)
+	out.IntermediateTokens = s.ctx.Tokens()
+	fold := NewContext(max(out.IntermediateTokens+1, 1))
+	fold.Append("user", "goal")
+	beforeFold := fold.Tokens()
+	fold.Append("tool", out.Collapsed)
+	out.FoldedTokens = fold.Tokens() - beforeFold
+	if out.IntermediateTokens > out.FoldedTokens {
+		out.SavedTokens = out.IntermediateTokens - out.FoldedTokens
+	}
 	return out
 }
 

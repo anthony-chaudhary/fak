@@ -99,6 +99,10 @@ func (c microConfig) slots() int {
 }
 
 func cmdMicro(args []string) {
+	if len(args) > 0 && args[0] == "collapse" {
+		cmdMicroCollapse(args[1:])
+		return
+	}
 	// `fak micro trace <id>` is the per-agent trace readout (#2031): it renders one
 	// microagent's structured timeline (legs, tokens, seat, verdicts) out of the
 	// interleaved single-process fleet, either from a persisted --trace-in JSONL or
