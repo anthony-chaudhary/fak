@@ -128,6 +128,12 @@ type procSample struct {
 	haveRSS     bool
 	peakRSS     uint64
 	havePeakRSS bool
+	// private is the process's non-shared committed memory (Windows PrivateUsage,
+	// Linux resident-minus-shared). Only the per-PID fleet reader (fleet.go) fills it:
+	// resident double-counts the pages N copies of one binary already share, so a
+	// pooling argument has to be made against private bytes to be honest.
+	private     uint64
+	havePrivate bool
 	ioRead      uint64
 	ioWrite     uint64
 	haveIO      bool
