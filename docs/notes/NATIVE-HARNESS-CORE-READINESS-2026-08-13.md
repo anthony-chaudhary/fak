@@ -231,6 +231,16 @@ Worst-regret-first. The first item unblocks the other four.
 5. **#6552 rungs #6560/#6562** — pool MCP hosts and co-host arms, after (1) so the pooled
    substrate is the real tool catalog.
 
+### 2026-08-13 execution update
+
+A guarded three-worker wave converted the first ordered step into explicit, witnessed work:
+
+- **#6657 CLOSED** — the Messages wire now preserves ordered conversation history and the request-scoped `tools[]` catalog for both buffered and streaming native handlers. Witnessed by commits `5847cd1901` and `561f6ff7d1`; malformed declarations and unsupported roles fail closed at the wire conversion seam.
+- **#6659 CLOSED** — `serve --help` no longer claims streaming falls through to proxy; commit `18942abfe7` added the captured help regression test (later trunk reconciliation preserved that contract).
+- **#6658 OPEN** — the real kernel-mediated Read/Write/Edit/Bash/Grep/Glob engines remain the binding prerequisite. The first guarded worker exhausted its managed-context restart budget without a witnessed ship; no coding-engine commit was found during reconciliation.
+
+The dependency order below therefore remains unchanged after the wire half: **#6658 → coding-shaped #1380 witness → #2405/#2408/#2409 permission ergonomics → #6560/#6562 pooled/co-hosted real catalog**. #2407 canonicalization is already CLOSED and should not be reimplemented.
+
 ## Honesty note
 
 Everything marked SHIPPED above has a `file:line` or commit witness in this document and
