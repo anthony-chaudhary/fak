@@ -1490,6 +1490,46 @@
           "category": "incidental",
           "reason": "Receipt boolean proving a prelaunch route did not bind a listener, not a new guard gate.",
           "token": "GatewayBound"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go binding that pairs one existing gateway with one bounded seat; not a new guard-gate concept.",
+          "token": "GatewaySeat"
+        },
+        {
+          "category": "incidental",
+          "reason": "ClassGuard is the fleet-rollup CLASS NAME for fak's own binaries (fak guard/broker processes) in internal/harnessres, not a gate or admission concept: it labels a row in a read-only resource table and decides nothing.",
+          "token": "ClassGuard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
+          "token": "AffinityGatewayConfig"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
+          "token": "SessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
+          "token": "AffinitySelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
+          "token": "NewSessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
+          "token": "WithAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
+          "token": "AffinityFromContext"
         }
       ],
       "exclude": [
@@ -1505,6 +1545,9 @@
       ],
       "id": "guard-gate",
       "ignore": [
+        "AffinityFromContext",
+        "AffinityGatewayConfig",
+        "AffinitySelection",
         "AggregateErrors",
         "AggregateHBMBytes",
         "ApplyGateSkew",
@@ -1514,6 +1557,7 @@
         "CacheValueGateDebtKey",
         "CaseDelegate",
         "ClaimRuntimeDelegated",
+        "ClassGuard",
         "CorrectnessGate",
         "DELEGATE",
         "FAK_CHILD_ATTEMPT_ID",
@@ -1531,12 +1575,16 @@
         "GateResolved",
         "GateSkewRefusal",
         "GatewayBound",
+        "GatewaySeat",
         "IsAggregate",
         "LifecycleGate",
+        "NewSessionAffinityGateway",
         "OutcomeDelegate",
         "ReportedGates",
         "RoleGate",
+        "SessionAffinityGateway",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
+        "WithAffinity",
         "admitGuardShrinkLevers",
         "aggregateLive",
         "aggregateTail",
@@ -2623,14 +2671,145 @@
           "category": "incidental",
           "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
           "token": "SessionPlacement"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "AdmitSessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "continueSessionMoveProvider"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "FinalizeSessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "materializeSessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "RestoreSessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "runSessionMove"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "runSessionMoveAdmit"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "runSessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "runSessionMoveRestore"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "runSessionMoveVerify"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "sessionMoveDestination"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "sessionMoveDestinationFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "SessionMoveDestinationReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "SessionMoveProviderWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "sessionMoveUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "splitSessionMoveCSV"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "VerifySessionMoveDestinationReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
+          "token": "writeSessionMoveJSON"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "SessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "NewSessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "AffinitySelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "AffinityGatewayConfig"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "GatewaySeat"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "WithAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
+          "token": "AffinityFromContext"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "AdmitSessionMoveCheckpoint",
+        "AffinityFromContext",
+        "AffinityGatewayConfig",
+        "AffinitySelection",
         "BeginSessionEffect",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "FAK_SESSION_CLIENT_TOKEN",
+        "FinalizeSessionMoveCheckpoint",
+        "GatewaySeat",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
@@ -2638,6 +2817,7 @@
         "ModelSlotsDuringToolWait",
         "MoveSession",
         "NarrowsSessions",
+        "NewSessionAffinityGateway",
         "ObservedSessions",
         "ReapMalformedSessionRefs",
         "RecordSessionTerminalOutput",
@@ -2645,6 +2825,7 @@
         "ResolveSessionEffect",
         "RestoreSessionClientState",
         "RestoreSessionClientStateWithDependency",
+        "RestoreSessionMoveCheckpoint",
         "RetiredSessions",
         "RunSessionDiag",
         "SESSION_CLIENT_UNAVAILABLE",
@@ -2653,6 +2834,7 @@
         "SchedulerEvents",
         "SchedulerMS",
         "SchedulerOverhead",
+        "SessionAffinityGateway",
         "SessionAutonomous",
         "SessionClass",
         "SessionClientActionRequest",
@@ -2673,10 +2855,12 @@
         "SessionMoveCutoverCommitted",
         "SessionMoveDelta",
         "SessionMoveDestinationAdmitted",
+        "SessionMoveDestinationReceipt",
         "SessionMoveError",
         "SessionMoveHooks",
         "SessionMoveJournalHooks",
         "SessionMovePhase",
+        "SessionMoveProviderWitness",
         "SessionMoveRequest",
         "SessionMoveResponse",
         "SessionMoveRestored",
@@ -2686,6 +2870,8 @@
         "SessionShellErrorRate",
         "SessionTerminalView",
         "SetSessionAffinity",
+        "VerifySessionMoveDestinationReceipt",
+        "WithAffinity",
         "WorkSessionOpened",
         "WorkSessionView",
         "adaptive-selective-hedge",
@@ -2699,6 +2885,7 @@
         "compactThrashSessions",
         "conceptSessions",
         "confusedsessions",
+        "continueSessionMoveProvider",
         "control-window",
         "deadline_released_slot",
         "decodeSessionClientJSON",
@@ -2735,6 +2922,7 @@
         "live-tool",
         "loadSchedulerRecords",
         "matchedSessions",
+        "materializeSessionMoveCheckpoint",
         "member_sessions",
         "microagentSessionID",
         "observedSchedulerResult",
@@ -2751,6 +2939,11 @@
         "runSessionAuditCodex",
         "runSessionCheckpointWitness",
         "runSessionConPTY",
+        "runSessionMove",
+        "runSessionMoveAdmit",
+        "runSessionMoveCheckpoint",
+        "runSessionMoveRestore",
+        "runSessionMoveVerify",
         "runSessionOpen",
         "runSessionOpenSelfcheck",
         "runtuisessions",
@@ -2780,8 +2973,11 @@
         "sessionClientSchema",
         "sessionClientSession",
         "sessionLocked",
+        "sessionMoveDestination",
+        "sessionMoveDestinationFlags",
         "sessionMoveSchema",
         "sessionMoveState",
+        "sessionMoveUsage",
         "sessionNameForBatch",
         "sessionOpenClient",
         "sessionOpenRestartResult",
@@ -2798,6 +2994,7 @@
         "simulateScheduler",
         "slots",
         "slotting",
+        "splitSessionMoveCSV",
         "stagesFor",
         "stopDispHandoffSessionGiveUp",
         "tSESSION",
@@ -2811,7 +3008,8 @@
         "verifyFilterToolScheduler",
         "verifyFilterToolSchedulerPath",
         "wipPeerCheckpointSessions",
-        "witnessed_sufficiency_slot_released"
+        "witnessed_sufficiency_slot_released",
+        "writeSessionMoveJSON"
       ],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -3617,17 +3815,59 @@
           "category": "incidental",
           "reason": "Selfcheck receipt count of HTTP model turns, not a gateway engine or mode.",
           "token": "KernelTurns"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go binding inside the positioned microagent affinity router; not a separate gateway engine.",
+          "token": "GatewaySeat"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
+          "token": "AffinityGatewayConfig"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
+          "token": "SessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
+          "token": "NewSessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
+          "token": "AffinitySelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
+          "token": "WithAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
+          "token": "AffinityFromContext"
         }
       ],
       "id": "gateway-engine",
       "ignore": [
+        "AffinityFromContext",
+        "AffinityGatewayConfig",
+        "AffinitySelection",
         "BaselineEngineCalls",
         "DeniedEngineCalls",
         "EngineReductionPct",
+        "GatewaySeat",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelTurns",
+        "NewSessionAffinityGateway",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
+        "SessionAffinityGateway",
+        "WithAffinity",
         "cacheEmitter",
         "convkernel",
         "countingEngine",
@@ -4080,6 +4320,16 @@
           "category": "incidental",
           "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
           "token": "CapabilityRemoved"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal/framebus constructor helper that stamps a Mode and an interval into the package-local Policy struct (a publish licence for one seat's frame rate); it is not a capability policy in the kernel-adjudication sense",
+          "token": "policyOf"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal/framebus lock-held accessor returning the publish licence for one seat (live when attached, floor or off otherwise); it is not a capability policy in the kernel-adjudication sense",
+          "token": "policyLocked"
         }
       ],
       "exclude": [
@@ -4156,6 +4406,8 @@
         "phasePolicy",
         "policies",
         "policyErr",
+        "policyLocked",
+        "policyOf",
         "policy_changed",
         "policyblocks",
         "policylabel",
@@ -4431,10 +4683,26 @@
           "category": "incidental",
           "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
           "token": "sessionClientDescriptorForContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed context accessor for the positioned session-affinity router.",
+          "token": "AffinityFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed context setter for the positioned session-affinity router.",
+          "token": "WithAffinity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private typed-context key for the positioned session-affinity router.",
+          "token": "affinityContextKey"
         }
       ],
       "id": "context-ctx",
       "ignore": [
+        "AffinityFromContext",
         "COMPACTION_THRASH",
         "CompactionContract",
         "ContextLimit",
@@ -4443,6 +4711,8 @@
         "MetricFactRecall",
         "RestoreCalls",
         "SearchRecall",
+        "WithAffinity",
+        "affinityContextKey",
         "appendGuardCompactionWitnessTo",
         "callCtx",
         "cctx",
@@ -5694,6 +5964,46 @@
           "category": "incidental",
           "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
           "token": "renderSessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "tuiRenderSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "runTUIRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "tuiRenderUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "runTUIRenderServe"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "runTUIRenderSeat"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "runTUIRenderControl"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "renderSeatCells"
+        },
+        {
+          "category": "incidental",
+          "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
+          "token": "formatTUIRenderStatus"
         }
       ],
       "id": "render-materialize",
@@ -5716,6 +6026,7 @@
         "RenderSystemDirective",
         "RenderUnrun",
         "RenderUserSplice",
+        "formatTUIRenderStatus",
         "indexrenderhits",
         "materialized",
         "materializers",
@@ -5736,6 +6047,7 @@
         "renderGitSpawnReport",
         "renderResumeDedup",
         "renderRunaway",
+        "renderSeatCells",
         "renderSessionOpen",
         "renderShellChoice",
         "renderSweepParkedText",
@@ -5747,6 +6059,12 @@
         "renders",
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
+        "runTUIRender",
+        "runTUIRenderControl",
+        "runTUIRenderSeat",
+        "runTUIRenderServe",
+        "tuiRenderSchema",
+        "tuiRenderUsage",
         "tuioverviewsavingsrender",
         "unmaterialized",
         "wipBlockedRender",
@@ -6224,6 +6542,11 @@
           "category": "incidental",
           "reason": "Go constructor name for the microagent provider-seat admission pool; not a new product concept distinct from the existing pool family.",
           "token": "NewSeatPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local constructor slice used to instantiate the existing bounded seat pool.",
+          "token": "poolSeats"
         }
       ],
       "exclude": [
@@ -6240,6 +6563,7 @@
         "poolIdleExt",
         "poolIdleMembers",
         "poolMarker",
+        "poolSeats",
         "poolStateDir",
         "poolStatePath",
         "poolspanscores",
