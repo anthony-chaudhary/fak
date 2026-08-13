@@ -125,7 +125,7 @@
         },
         {
           "category": "incidental",
-          "reason": "private TTL bound on the keychain exec memo — a rate-limit over /usr/bin/security calls, not a member of the cache vocabulary (vCache/KV/provider prompt-cache)",
+          "reason": "private TTL bound on the keychain exec memo â€” a rate-limit over /usr/bin/security calls, not a member of the cache vocabulary (vCache/KV/provider prompt-cache)",
           "token": "claudeKeychainCacheTTL"
         },
         {
@@ -854,12 +854,12 @@
         },
         {
           "category": "incidental",
-          "reason": "Prometheus KV-prefix reuse counter on the gateway /metrics surface; matches guard-gate only on the 'gate' substring of 'gateway'. It admits/refuses nothing — pure observability, incidental to the guard-gate concept family.",
+          "reason": "Prometheus KV-prefix reuse counter on the gateway /metrics surface; matches guard-gate only on the 'gate' substring of 'gateway'. It admits/refuses nothing â€” pure observability, incidental to the guard-gate concept family.",
           "token": "fak_gateway_kv_prefix_prompt_tokens_by_source_total"
         },
         {
           "category": "incidental",
-          "reason": "unexported secretload.SecretSource impl — the macOS Keychain rung of guard's OAuth token ladder (#5363); a source in an existing ladder, not a new guard/gate concept",
+          "reason": "unexported secretload.SecretSource impl â€” the macOS Keychain rung of guard's OAuth token ladder (#5363); a source in an existing ladder, not a new guard/gate concept",
           "token": "guardOAuthKeychainSource"
         },
         {
@@ -899,7 +899,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Wire value of the GradedVerdictUnwitnessed verdict — a gated-abstain status string emitted when no delta is attributable; not a distinct gate concept.",
+          "reason": "Wire value of the GradedVerdictUnwitnessed verdict â€” a gated-abstain status string emitted when no delta is attributable; not a distinct gate concept.",
           "token": "GATED_UNWITNESSED"
         },
         {
@@ -1199,12 +1199,12 @@
         },
         {
           "category": "incidental",
-          "reason": "Mode env var for the GIT_HYGIENE_BYPASS advisory gate (#5588); a positional member of the established FLEET_<NAME>_GUARD family (FLEET_PF_NUDGE, FLEET_TIER_GUARD, FLEET_BARE_COMMIT_GUARD), not a new governed concept — it names no distinct idea beyond 'the mode knob for this gate'.",
+          "reason": "Mode env var for the GIT_HYGIENE_BYPASS advisory gate (#5588); a positional member of the established FLEET_<NAME>_GUARD family (FLEET_PF_NUDGE, FLEET_TIER_GUARD, FLEET_BARE_COMMIT_GUARD), not a new governed concept â€” it names no distinct idea beyond 'the mode knob for this gate'.",
           "token": "FLEET_GIT_HYGIENE_GUARD"
         },
         {
           "category": "incidental",
-          "reason": "Unexported Check implementation for the GIT_HYGIENE_BYPASS gate (#5588); a positional member of the established gate<Name> helper family (gateUntieredLeaf, gateDemoCommandTree, gateScratchMarkTree), not a governed concept — the concept it implements is GIT_HYGIENE_BYPASS, which the fail-closed ledger and gateScopes already carry.",
+          "reason": "Unexported Check implementation for the GIT_HYGIENE_BYPASS gate (#5588); a positional member of the established gate<Name> helper family (gateUntieredLeaf, gateDemoCommandTree, gateScratchMarkTree), not a governed concept â€” the concept it implements is GIT_HYGIENE_BYPASS, which the fail-closed ledger and gateScopes already carry.",
           "token": "gateGitHygieneBypass"
         },
         {
@@ -1369,7 +1369,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Pure renderer: abbreviates the already-resolved binaryIdentity commit for space-constrained surfaces. Not a governed concept — it is the testable seam of guardShortBuildID, carrying no new gate semantics.",
+          "reason": "Pure renderer: abbreviates the already-resolved binaryIdentity commit for space-constrained surfaces. Not a governed concept â€” it is the testable seam of guardShortBuildID, carrying no new gate semantics.",
           "token": "guardShortBuildIDOf"
         },
         {
@@ -1389,7 +1389,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Implementation predicate behind ApplyGateSkew: measured fak-bin provenance in, (refuse, reason) out. Not a governed gate concept — it carries no admission vocabulary of its own and exists so the same rule can be asked by self-update --check and by the dispatch tick.",
+          "reason": "Implementation predicate behind ApplyGateSkew: measured fak-bin provenance in, (refuse, reason) out. Not a governed gate concept â€” it carries no admission vocabulary of its own and exists so the same rule can be asked by self-update --check and by the dispatch tick.",
           "token": "GateSkewRefusal"
         },
         {
@@ -1434,7 +1434,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Existing resolver NAME in tools/dispatch_preflight.py's fak_bin provenance payload, read here as a map key. Not a new concept — it names the resolver that already exists.",
+          "reason": "Existing resolver NAME in tools/dispatch_preflight.py's fak_bin provenance payload, read here as a map key. Not a new concept â€” it names the resolver that already exists.",
           "token": "worker_guard"
         },
         {
@@ -2128,6 +2128,16 @@
           "category": "incidental",
           "reason": "parameter name only: the LastTaskResult integer a caller read back from the OS scheduler, passed into AuditResultSwallowed for comparison; it names no new runtime concept",
           "token": "observedSchedulerResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selfcheck receipt count derived from session state, not a new session lifecycle concept.",
+          "token": "RetiredSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus sample name for a distinct-session count, not a session runtime abstraction",
+          "token": "fak_fleet_goal_sessions"
         }
       ],
       "id": "session-runtime",
@@ -2139,6 +2149,7 @@
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
         "ReapMalformedSessionRefs",
+        "RetiredSessions",
         "RunSessionDiag",
         "SchedulerEvents",
         "SchedulerMS",
@@ -2162,6 +2173,7 @@
         "enqueueGuardSessionThreadNotice",
         "episodes",
         "exact-filter",
+        "fak_fleet_goal_sessions",
         "fak_gateway_compaction_thrash_sessions_total",
         "filterToolSchedulerFold",
         "filterToolSchedulerOutput",
@@ -2261,27 +2273,27 @@
         },
         {
           "category": "incidental",
-          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label â€” a graded model failure class, not a new operator-facing witness-proof concept",
           "token": "done_not_witnessed"
         },
         {
           "category": "incidental",
-          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label â€” a graded model failure class, not a new operator-facing witness-proof concept",
           "token": "wrong_missing_witness"
         },
         {
           "category": "incidental",
-          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label â€” a graded model failure class, not a new operator-facing witness-proof concept",
           "token": "HonestyClaimUnwitnessed"
         },
         {
           "category": "incidental",
-          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label â€” a graded model failure class, not a new operator-facing witness-proof concept",
           "token": "HonestyDoneNotWitnessed"
         },
         {
           "category": "incidental",
-          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label — a graded model failure class, not a new operator-facing witness-proof concept",
+          "reason": "conceptbench #2738 honesty-scenario grader taxonomy label â€” a graded model failure class, not a new operator-facing witness-proof concept",
           "token": "HonestyWrongWitness"
         },
         {
@@ -2386,22 +2398,22 @@
         },
         {
           "category": "incidental",
-          "reason": "options bag of three caller-supplied resolver funcs (work class, timestamp, zone) for the #5428 capability-evidence producer — a parameter carrier for one sweep, not a new witness-proof concept; the proof vocabulary it reads (CLAIM_WITNESSED / CLAIM_TEST_GREEN|RED|UNRUN) is the existing governed one",
+          "reason": "options bag of three caller-supplied resolver funcs (work class, timestamp, zone) for the #5428 capability-evidence producer â€” a parameter carrier for one sweep, not a new witness-proof concept; the proof vocabulary it reads (CLAIM_WITNESSED / CLAIM_TEST_GREEN|RED|UNRUN) is the existing governed one",
           "token": "WitnessEvidenceOptions"
         },
         {
           "category": "incidental",
-          "reason": "per-sweep counter bag naming the records that did NOT become evidence (unattributed / unclassified / undated / unidentified) so a silent zero has an actionable cause — accounting over the existing witness records, not a new witness-proof concept",
+          "reason": "per-sweep counter bag naming the records that did NOT become evidence (unattributed / unclassified / undated / unidentified) so a silent zero has an actionable cause â€” accounting over the existing witness records, not a new witness-proof concept",
           "token": "WitnessEvidenceStats"
         },
         {
           "category": "incidental",
-          "reason": "bridge function only: it consumes the existing governed witness verdicts and emits the existing modelroute.TurnOutcome evidence type, defining no proof notion of its own. Same posture as VerdictUnwitnessed — a view over the existing oracle rather than a second one; its concept weight lives in modelroute's already-positioned evidence vocabulary",
+          "reason": "bridge function only: it consumes the existing governed witness verdicts and emits the existing modelroute.TurnOutcome evidence type, defining no proof notion of its own. Same posture as VerdictUnwitnessed â€” a view over the existing oracle rather than a second one; its concept weight lives in modelroute's already-positioned evidence vocabulary",
           "token": "TurnOutcomesFromWitness"
         },
         {
           "category": "incidental",
-          "reason": "unexported implementation helper picking the slot's own log path (else its commit sha) as a replay-stable evidence id — a keying detail of the producer, not an operator-facing witness-proof concept",
+          "reason": "unexported implementation helper picking the slot's own log path (else its commit sha) as a replay-stable evidence id â€” a keying detail of the producer, not an operator-facing witness-proof concept",
           "token": "witnessOutcomeID"
         },
         {
@@ -2999,6 +3011,11 @@
           "category": "incidental",
           "reason": "Demo-local measurement or fixture name; not a new gateway-engine architecture concept.",
           "token": "query_public_policy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selfcheck receipt count of HTTP model turns, not a gateway engine or mode.",
+          "token": "KernelTurns"
         }
       ],
       "id": "gateway-engine",
@@ -3007,6 +3024,7 @@
         "DeniedEngineCalls",
         "EngineReductionPct",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
+        "KernelTurns",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
         "cacheEmitter",
@@ -3431,6 +3449,11 @@
           "category": "incidental",
           "reason": "JSON field name on the ledger report counting CLAIMS.md capability lines; a count field, not a governed capability concept",
           "token": "capability_lines"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus counter name aggregating existing adjudications by goal, not a new policy capability",
+          "token": "fak_fleet_goal_adjudications_total"
         }
       ],
       "exclude": [
@@ -3486,6 +3509,7 @@
         "dispatchPreflightChurnState",
         "executeLivePipeline",
         "executeTailPolicy",
+        "fak_fleet_goal_adjudications_total",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
         "gradeSemanticFiles",
@@ -4823,12 +4847,12 @@
         },
         {
           "category": "incidental",
-          "reason": "Private single-call-site text formatter for one verb (fak wip blocked); it materializes no new concept — the vocabulary it prints (LAND/WAIT/IDLE/ACTIVE) is owned and defined by internal/wipattr.BlockState, and this function only lays those rows out as a table.",
+          "reason": "Private single-call-site text formatter for one verb (fak wip blocked); it materializes no new concept â€” the vocabulary it prints (LAND/WAIT/IDLE/ACTIVE) is owned and defined by internal/wipattr.BlockState, and this function only lays those rows out as a table.",
           "token": "wipBlockedRender"
         },
         {
           "category": "incidental",
-          "reason": "unexported single-call-site printer for the wip reconcile --reclaim listing; it renders rows but carries no domain meaning of its own — the positioned concepts are Reclaimable and ReclaimRow in internal/wiprecon",
+          "reason": "unexported single-call-site printer for the wip reconcile --reclaim listing; it renders rows but carries no domain meaning of its own â€” the positioned concepts are Reclaimable and ReclaimRow in internal/wiprecon",
           "token": "wipReclaimRender"
         },
         {
@@ -4940,6 +4964,16 @@
           "category": "incidental",
           "reason": "internal helper in conceptcatalog: exports a git tree to scratch and returns the generated artifact bytes; not a governed concept",
           "token": "renderFromGitTree"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local text formatter for the sweep report, not a new rendering subsystem",
+          "token": "renderSweepParkedText"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Prometheus renderer helper, not a user-facing render/materialize capability",
+          "token": "renderFleetGoalExposition"
         }
       ],
       "id": "render-materialize",
@@ -4975,6 +5009,7 @@
         "renderCommitVelocity",
         "renderConcepts",
         "renderFleetControl",
+        "renderFleetGoalExposition",
         "renderFromGitTree",
         "renderGhostReport",
         "renderGitSpawnDelta",
@@ -4982,6 +5017,7 @@
         "renderResumeDedup",
         "renderRunaway",
         "renderShellChoice",
+        "renderSweepParkedText",
         "renderValidate",
         "renderVelocityLeg",
         "renderWorkpattern",

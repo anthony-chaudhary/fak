@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
 
@@ -120,14 +123,15 @@ const defaultFleetMetricsMaxSessions = 200
 // the serve handler fold from the SAME recipe — what Grafana scrapes is the projection of
 // exactly what `fak session ls --durable` would print for the same instant.
 type fleetMetricsSources struct {
-	registryPath string
-	fleet        bool
-	remote       string
-	staleWindow  time.Duration
-	usageLedger  string
-	since        string
-	maxSessions  int
-	stderr       io.Writer
+	registryPath       string
+	fleet              bool
+	remote             string
+	staleWindow        time.Duration
+	usageLedger        string
+	registrationLedger string
+	since              string
+	maxSessions        int
+	stderr             io.Writer
 }
 
 // render re-reads the registry and the ledger from disk and returns the exposition text.
@@ -145,10 +149,136 @@ func (s fleetMetricsSources) render(now time.Time) string {
 	// snapshot landing in the same millisecond) writes the same row key twice, and a
 	// double-counted session would inflate every historical panel by a silent amount.
 	usageRows, dupDropped := gatewayusageledger.DedupeByKey(filterGatewayUsageSince(gatewayusageledger.ReadLedgerFile(s.usagePath()), s.since))
-	renderFleetUsageExposition(w, foldFleetUsage(usageRows), s.maxSessions, dupDropped)
+	usageFold := foldFleetUsage(usageRows)
+	renderFleetUsageExposition(w, usageFold, s.maxSessions, dupDropped)
+
+	registrations, registrationReadable := s.registrationInventory()
+	renderFleetGoalExposition(w, registrations, usageFold)
+	w.gauge("fak_fleet_registration_registry_readable", "1 when the child-registration lineage ledger was read successfully; 0 means goal-level attribution is unavailable, not that the fleet has no goals.", boolGauge(registrationReadable))
 
 	w.gauge("fak_fleet_registry_readable", "1 when the durable session registry was read successfully; 0 when it could not be read (every live family then reads an honest zero, which is NOT the same as an empty fleet).", boolGauge(readable))
 	return w.String()
+}
+
+// registrationInventory reads the execution lineage graph written before every guard /
+// dispatchworker child starts. Missing is an honest empty graph; malformed or unreadable
+// data flips the readability gauge so absence is never mistaken for "no goals".
+func defaultChildRegistrationLedgerPath() string {
+	// FAK_SESSION_REGISTRY historically names the durable PCB registry consumed by
+	// --registry. Reusing it here would make the two unrelated schemas collide. The
+	// child-lineage writer uses its own documented default; an operator sharing a custom
+	// lineage store names it explicitly with --registration-ledger.
+	if d, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(d, "fak", "child-registrations.jsonl")
+	}
+	return filepath.Join(".fak", "child-registrations.jsonl")
+}
+
+func (s fleetMetricsSources) registrationInventory() ([]sessionregistry.Record, bool) {
+	path := strings.TrimSpace(s.registrationLedger)
+	if path == "" {
+		return nil, true
+	}
+	rows, err := (sessionregistry.Store{Path: pathutil.ExpandTilde(path)}).ReadAll()
+	if err != nil {
+		s.note("read child-registration ledger %s: %v (goal families fold to zero)", path, err)
+		return nil, false
+	}
+	return rows, true
+}
+
+type fleetGoalAgg struct {
+	rootID    string
+	rootIssue string
+	taskID    string
+	states    map[sessionregistry.State]int
+	sessions  map[string]struct{}
+	usage     fleetUsageAgg
+}
+
+// renderFleetGoalExposition is the root-goal join: every descendant registration is
+// folded under its durable root_registration_id, and historical gateway usage joins by
+// the registered session id. A parent, a headless child, and a micro-context grandchild
+// therefore contribute to one bounded, queryable goal series without relying on process
+// nesting or an agent's self-report.
+func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold) {
+	goals := map[string]*fleetGoalAgg{}
+	for _, r := range rows {
+		root := strings.TrimSpace(r.RootRegistrationID)
+		if root == "" {
+			continue
+		}
+		g := goals[root]
+		if g == nil {
+			g = &fleetGoalAgg{rootID: root, states: map[sessionregistry.State]int{}, sessions: map[string]struct{}{}}
+			goals[root] = g
+		}
+		if g.rootIssue == "" {
+			g.rootIssue = strings.TrimSpace(r.RootIssue)
+		}
+		if g.taskID == "" {
+			g.taskID = strings.TrimSpace(r.TaskID)
+		}
+		g.states[r.State]++
+		sid := strings.TrimSpace(r.Identity.SessionID)
+		if sid != "" {
+			g.sessions[sid] = struct{}{}
+			if a, ok := usage.BySession[sid]; ok {
+				g.usage.merge(*a)
+			}
+		}
+	}
+	for _, root := range fleetSortedKeys(goals) {
+		g := goals[root]
+		labels := []string{"root_registration", g.rootID, "root_issue", fleetDashIfEmpty(g.rootIssue), "task", fleetDashIfEmpty(g.taskID)}
+		w.gauge("fak_fleet_goal_info", "Durable root-goal identity. Descendant registrations and joined usage share these labels.", 1, labels...)
+		w.gauge("fak_fleet_goal_registrations", "Latest child registrations attributed to this root goal across all descendant depths.", float64(sumGoalStates(g.states)), labels...)
+		w.gauge("fak_fleet_goal_sessions", "Distinct non-empty session ids registered under this root goal.", float64(len(g.sessions)), labels...)
+		for _, state := range sortedGoalStates(g.states) {
+			w.gauge("fak_fleet_goal_registration_state", "Registrations under a root goal by latest lifecycle state.", float64(g.states[state]), append(labels, "state", string(state))...)
+		}
+		w.gauge("fak_fleet_goal_observed_turns_total", "Historical observed turns joined from every registered session under this root goal.", float64(g.usage.ObservedTurns), labels...)
+		w.gauge("fak_fleet_goal_input_tokens_total", "Historical input tokens joined from every registered session under this root goal.", float64(g.usage.InputTokens), labels...)
+		w.gauge("fak_fleet_goal_output_tokens_total", "Historical output tokens joined from every registered session under this root goal.", float64(g.usage.OutputTokens), labels...)
+		w.gauge("fak_fleet_goal_adjudications_total", "Historical policy adjudications joined from every registered session under this root goal.", float64(g.usage.Adjudications), labels...)
+	}
+}
+
+func (a *fleetUsageAgg) merge(b fleetUsageAgg) {
+	a.Sessions += b.Sessions
+	a.Seconds += b.Seconds
+	a.InputTokens += b.InputTokens
+	a.OutputTokens += b.OutputTokens
+	a.CachedPromptTokens += b.CachedPromptTokens
+	a.CacheCreationTokens += b.CacheCreationTokens
+	a.KVPrefixPromptTokens += b.KVPrefixPromptTokens
+	a.KVPrefixReusedTokens += b.KVPrefixReusedTokens
+	a.ObservedTurns += b.ObservedTurns
+	a.CachedTurns += b.CachedTurns
+	a.Adjudications += b.Adjudications
+	a.Allowed += b.Allowed
+	a.Denied += b.Denied
+	a.Transformed += b.Transformed
+	a.Quarantined += b.Quarantined
+	a.Deferred += b.Deferred
+	a.Escalated += b.Escalated
+	a.Errored += b.Errored
+}
+
+func sumGoalStates(states map[sessionregistry.State]int) int {
+	n := 0
+	for _, v := range states {
+		n += v
+	}
+	return n
+}
+func sortedGoalStates(states map[sessionregistry.State]int) []sessionregistry.State {
+	out := make([]sessionregistry.State, 0, len(states))
+	for state := range states {
+		out = append(out, state)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // usagePath resolves the ledger flag the same way every other nightrun reader does, so a

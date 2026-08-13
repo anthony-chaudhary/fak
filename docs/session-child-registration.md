@@ -17,6 +17,12 @@ dispatchworker inspect --registration reg-...
 
 The first command reads all latest registrations and returns counts by lifecycle and launch kind. Filters support `--root-issue`, `--parent`, `--session`, `--thread`, `--pid` plus `--process-start`, `--lane`, `--lease`, and `--witness`. `--observed processes.json` joins independently observed process identities and surfaces every unmatched PID/start pair as `UNREGISTERED_OBSERVED`. The second resolves the selected row to its root and renders the complete descendant tree, in human table form by default or stable JSON with `--json`. `FAK_WITNESS_REF` binds the terminal result to an external proof.
 
+### Fleet-level goal metrics
+
+`fak fleet metrics --registration-ledger PATH` joins this graph to the gateway usage ledger. Every registration is grouped by `root_registration_id`, while `root_issue` and `task` remain drill-down labels. A parent, dedicated headless child, nested child, or in-process micro-context therefore contributes to the same `fak_fleet_goal_*` series as long as it registers its execution and carries a session id. The exporter publishes registration/session counts, lifecycle-state counts, observed turns, input/output tokens, and adjudications for each root goal. `fak_fleet_registration_registry_readable` distinguishes an empty graph from an unreadable one.
+
+The join is deliberately structural: ancestry comes from the prelaunch registration graph, not from process nesting or agent narration, and usage joins only on an explicit registered `session_id`. Rows without a session id still count toward the goal's registration lifecycle but do not receive guessed usage attribution.
+
 The store is execution identity, not prompt storage: prompts, credentials, and full command lines are deliberately excluded. Restrict the store to its owner (the writer creates directories `0700` and files `0600`). Archive/retention and cross-host integrity are tracked by #6459. Broader thread/process/guard reconciliation consumes this same record in #6430. The lifecycle contract and dry-run cleanup plan are documented in [`session-lifecycle-reconciliation.md`](session-lifecycle-reconciliation.md); #6431 tracks applying owner-specific terminal repairs.
 
 ## Operator recovery

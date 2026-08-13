@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 // sampleNameRe matches the metric name that opens an exposition sample line.
@@ -405,5 +409,92 @@ func TestServeUsageSessionIDOnlyStampsSingleSessionServe(t *testing.T) {
 	seedFleetBusSession(t, sentinel, guardSharedTraceSentinel, sessionctl.BroadcastMeta{})
 	if got := serveUsageSessionID(sentinel); got != "" {
 		t.Errorf("sentinel-trace serve = %q, want empty", got)
+	}
+}
+
+func TestFleetMetricsAttributesDescendantUsageToRootGoal(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	registrationPath := filepath.Join(t.TempDir(), "child-registrations.jsonl")
+	store := sessionregistry.Store{Path: registrationPath}
+	root, err := sessionregistry.New(sessionregistry.NewInput{
+		RegistrationID: "reg-root", RootIssue: "7000", TaskID: "goal-improve-fleet",
+		LaunchKind: "guard", Runtime: "codex", SessionID: "session-root", Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Register(root); err != nil {
+		t.Fatal(err)
+	}
+	child, err := sessionregistry.New(sessionregistry.NewInput{
+		RegistrationID: "reg-child", ParentRegistrationID: root.RegistrationID,
+		RootRegistrationID: root.RootRegistrationID, RootIssue: root.RootIssue, TaskID: root.TaskID,
+		LaunchKind: "headless", Runtime: "codex", SessionID: "session-child", Now: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Register(child); err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := sessionregistry.New(sessionregistry.NewInput{
+		RegistrationID: "reg-micro", ParentRegistrationID: child.RegistrationID,
+		RootRegistrationID: root.RootRegistrationID, RootIssue: root.RootIssue, TaskID: root.TaskID,
+		LaunchKind: "micro-context", Runtime: "in-process", SessionID: "session-micro", Now: now.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Register(grandchild); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Start(child.RegistrationID, 22, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	usagePath := filepath.Join(t.TempDir(), "usage.jsonl")
+	rows := []gatewayusageledger.Row{
+		{Schema: gatewayusageledger.Schema, SessionID: "session-root", UnixMillis: now.UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 2, InputTokens: 20, OutputTokens: 4, Total: 2}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-child", UnixMillis: now.UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 3, InputTokens: 30, OutputTokens: 6, Total: 3}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-micro", UnixMillis: now.UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 5, InputTokens: 50, OutputTokens: 10, Total: 5}},
+	}
+	var ledger strings.Builder
+	for _, row := range rows {
+		b, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ledger.Write(b)
+		ledger.WriteByte('\n')
+	}
+	if err := os.WriteFile(usagePath, []byte(ledger.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	src := fleetMetricsSources{registryPath: filepath.Join(t.TempDir(), "sessions.json"), registrationLedger: registrationPath, usageLedger: usagePath, maxSessions: 100, stderr: io.Discard}
+	raw := src.render(now.Add(time.Minute))
+	parseExposition(t, raw)
+	labels := `root_registration="reg-root",root_issue="7000",task="goal-improve-fleet"`
+	for _, want := range []string{
+		"fak_fleet_goal_info{" + labels + "} 1",
+		"fak_fleet_goal_registrations{" + labels + "} 3",
+		"fak_fleet_goal_sessions{" + labels + "} 3",
+		"fak_fleet_goal_observed_turns_total{" + labels + "} 10",
+		"fak_fleet_goal_input_tokens_total{" + labels + "} 100",
+		"fak_fleet_goal_output_tokens_total{" + labels + "} 20",
+		"fak_fleet_goal_adjudications_total{" + labels + "} 10",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("missing root-goal rollup %q\n%s", want, raw)
+		}
+	}
+	if !strings.Contains(raw, `fak_fleet_goal_registration_state{`+labels+`,state="active"} 1`) {
+		t.Errorf("active child was not attributed to root goal\n%s", raw)
+	}
+	if !strings.Contains(raw, `fak_fleet_goal_registration_state{`+labels+`,state="registered"} 2`) {
+		t.Errorf("registered descendants were not attributed to root goal\n%s", raw)
+	}
+	if !strings.Contains(raw, "fak_fleet_registration_registry_readable 1") {
+		t.Errorf("registration ledger readability missing\n%s", raw)
 	}
 }
