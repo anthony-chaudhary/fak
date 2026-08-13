@@ -887,3 +887,15 @@ docs/dispatch-status.md
 /tools/videogen/projects/*/frames/
 /tools/videogen/projects/*/frames-hires/
 /visuals/frames/
+
+# Root-local captures from manual fleet/CLI diagnostics. These are regenerated JSON,
+# stdout/stderr, help, process, and Go coverage dumps—not repository source. Keep the
+# names root-anchored so legitimate fixtures with the same basename remain trackable.
+/dosloop.out
+/dosloop.err
+/tick.json
+/router.json
+/fak_help.txt
+/ps5.out
+/ps5.err
+/$cover
