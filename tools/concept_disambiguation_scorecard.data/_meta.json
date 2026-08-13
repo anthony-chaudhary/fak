@@ -3570,6 +3570,11 @@
           "category": "incidental",
           "reason": "Prometheus projection of existing witness_ref, not a new witness concept",
           "token": "fak_fleet_goal_witnessed_registrations"
+        },
+        {
+          "category": "incidental",
+          "reason": "Organization revocation audit field name, not an independent witness-proof concept.",
+          "token": "revocation_reason"
         }
       ],
       "id": "witness-proof",
@@ -3662,6 +3667,7 @@
         "refutes",
         "refutil",
         "renderCheckpointWitness",
+        "revocation_reason",
         "revocations",
         "revokeProxyFillWitness",
         "runSessionCheckpointWitness",
@@ -4330,6 +4336,11 @@
           "category": "incidental",
           "reason": "internal/framebus lock-held accessor returning the publish licence for one seat (live when attached, floor or off otherwise); it is not a capability policy in the kernel-adjudication sense",
           "token": "policyLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed organization policy decision code, not a distinct capability concept.",
+          "token": "POLICY_CONFLICT"
         }
       ],
       "exclude": [
@@ -4358,6 +4369,7 @@
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
+        "POLICY_CONFLICT",
         "PolicyHash",
         "PolicyRevision",
         "ProgressCallAdjudicated",
@@ -6004,6 +6016,11 @@
           "category": "incidental",
           "reason": "cmd/fak console-pane plumbing for the #6561 render split: a flag parser, a usage banner, a subcommand dispatcher, a status formatter or a JSON-cell flattener named after the 'render' pane id, not a distinct rendering concept -- the semantics live in internal/framebus",
           "token": "formatTUIRenderStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "checkpoint persistence helper for the existing session movement contract, not a rendering or materialization concept",
+          "token": "materializeSessionMoveCheckpoint"
         }
       ],
       "id": "render-materialize",
@@ -6028,6 +6045,7 @@
         "RenderUserSplice",
         "formatTUIRenderStatus",
         "indexrenderhits",
+        "materializeSessionMoveCheckpoint",
         "materialized",
         "materializers",
         "materializes",

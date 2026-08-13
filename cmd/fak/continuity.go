@@ -17,6 +17,10 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	sub, args := argv[0], argv[1:]
+	if sub == "org-selfcheck" {
+		jsonOut := len(args) > 0 && args[0] == "--json"
+		return runContinuityOrgSelfcheck(stdout, stderr, jsonOut)
+	}
 	if sub == "sync-plan" {
 		return runContinuitySyncPlan(stdout, stderr, args)
 	}

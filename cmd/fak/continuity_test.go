@@ -110,3 +110,25 @@ func TestContinuitySyncCLIJourneyAndConflictExplanations(t *testing.T) {
 		t.Fatalf("json conflict: %s", out.String())
 	}
 }
+
+func TestContinuityOrganizationSelfcheckCapturedJourney(t *testing.T) {
+	var out, stderr bytes.Buffer
+	if code := runContinuity(&out, &stderr, []string{"org-selfcheck"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"PASS organization continuity", "signed review-kit@1", "no service", "publish=UNAUTHORIZED", "approval=APPROVAL_REQUIRED", "ring=RING_CLOSED", "revoked-activation=REVOKED", "canary installed and activated", "revoked active devbox install quarantined", "corporate > team > project > personal", "audit append-only chain valid"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in:\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	stderr.Reset()
+	if code := runContinuity(&out, &stderr, []string{"org-selfcheck", "--json"}); code != 0 {
+		t.Fatalf("json code=%d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{`"result": "PASS"`, `"audit_chain": "valid"`, `"unauthorized_publish": "UNAUTHORIZED"`, `"quarantined": true`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing JSON %q in:\n%s", want, out.String())
+		}
+	}
+}
