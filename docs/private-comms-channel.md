@@ -15,6 +15,10 @@ clone root and follow its discovery and readback procedure. Access to that priva
 is the authorization check. If the sibling or your access is absent, stop and ask a fak lab
 maintainer for access; do not reconstruct the route from public notes.
 
+If instead you are **standing up a new machine** to be driven through this route, that is the
+other half and a different artifact — see [the two halves](#two-halves-operator-client-and-node-daemon)
+below before asking anyone for "the source".
+
 ## What this route controls
 
 The channel is fak's private, out-of-band control bridge to the lab GPU servers. An
@@ -26,6 +30,34 @@ This public page is a **route, not an operating runbook**. The current commands,
 selection rules, node map, credentials, and recovery procedure are maintained together in
 the private README named above. Following that runbook is the supported choice; copying an
 old command from a public note is not.
+
+## Two halves: operator client and node daemon
+
+The bridge is two programs, and asking for "the bridge source" is ambiguous in a way that
+routinely costs an afternoon. Decide which half you need before requesting an artifact.
+
+| You want to | You need the | Where it is documented |
+|---|---|---|
+| Drive a machine that is already reachable, and read results back | **operator client** (`dgxbridge`) | the private README named above |
+| Make a *new* machine — a laptop, a workstation, a lab box — drivable through this route | **node daemon** (`slack-control-go`) | `node/NODE-SETUP.md` in [`slack-helpers`](https://github.com/anthony-chaudhary/slack-helpers) |
+
+The client is the half with the memorable name, so it is the one handed over by default when
+someone asks for "the source" — and it will never run a command on the machine it is installed
+on. The node daemon is the executing half: it joins the control channel, runs work under a
+named launch profile, holds a fenced ownership lease so two nodes cannot serve one channel, and
+posts results back.
+
+The node half is published as its own bundle carrying native Linux/amd64 and Windows/amd64
+binaries and a Python-3-only installer, so bringing up a node needs neither a Go toolchain nor
+a machine-wide script-execution policy change. **Windows nodes are supported**, with one
+consequence worth knowing before copying configuration between machines: the Windows supervisor
+runs pipe mode only — no PTY, no tmux — so it ships a different launch-profile set, and a
+profile requesting a PTY is accepted at load and fails only when someone tries to use the
+session.
+
+Standing up a node needs the bot credential and the control channel for the deployment, which
+are deployment configuration and are not in this repository — see
+[Slack helper ownership](integrations/slack-helpers-canonical.md).
 
 ## Current boundary and support
 
@@ -267,3 +299,6 @@ published subject.
   private control into public evidence.
 - [Lab development loop](fak/lab-dev-loop.md) — return a scrubbed hardware witness to the
   public development workflow.
+- [Slack helper ownership](integrations/slack-helpers-canonical.md) — the repository that owns
+  the node daemon and its install runbook, for standing up a new machine rather than driving an
+  existing one.
