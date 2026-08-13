@@ -7,7 +7,7 @@ rebuilt from an empty output directory.
 
 ## What happens automatically
 
-`.github/workflows/pages.yml` runs when `docs/**` or the publishing implementation changes:
+`.github/workflows/pages.yml` coalesces source churn on a 15-minute schedule, and also runs immediately when the publishing implementation changes. A per-doc push trigger is intentionally avoided: this shared trunk can land docs many times per minute, and GitHub Actions keeps only one pending run per concurrency group, so newer pushes otherwise starve every build before it starts:
 
 1. `pagescheck source` rejects non-UTF-8 source before Jekyll can fail opaquely.
 2. GitHub's supported Jekyll builder creates a fresh `_site` from `docs/`.
@@ -16,7 +16,7 @@ rebuilt from an empty output directory.
    rendered `awesome-token-efficiency.html` page with title, description, and canonical URL.
 4. The check writes `_site/.pages-manifest.json`, an exact sorted list of deployed paths,
    byte sizes, and SHA-256 digests.
-5. `deploy-pages` replaces the prior Pages artifact with that clean build. Runs queue rather than cancel an in-progress build, so a busy shared trunk cannot starve Pages forever.
+5. `deploy-pages` replaces the prior Pages artifact with that clean build. An in-progress build is never cancelled. The cadence coalesces rapid source updates, so the single pending concurrency slot advances instead of being replaced on every trunk commit.
 
 The replacement model is the stale-page deletion mechanism: a file removed from `docs/`
 cannot survive in `_site`, the manifest, or the next deployment. No generated site is
