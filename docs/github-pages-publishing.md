@@ -16,7 +16,7 @@ rebuilt from an empty output directory.
    rendered `awesome-token-efficiency.html` page with title, description, and canonical URL.
 4. The check writes `_site/.pages-manifest.json`, an exact sorted list of deployed paths,
    byte sizes, and SHA-256 digests.
-5. `deploy-pages` replaces the prior Pages artifact with that clean build.
+5. `deploy-pages` replaces the prior Pages artifact with that clean build. Runs queue rather than cancel an in-progress build, so a busy shared trunk cannot starve Pages forever.
 
 The replacement model is the stale-page deletion mechanism: a file removed from `docs/`
 cannot survive in `_site`, the manifest, or the next deployment. No generated site is
@@ -48,3 +48,4 @@ Actions** as the build source; legacy `main:/docs` builds bypass this contract.
 - **Changed:** Pages moves from the legacy `main:/docs` builder to the explicit `pages.yml` artifact and deployment contract.
 - **Consumers migrated:** the Pages environment receives `_site`; `robots.txt` continues to point crawlers at the generated production sitemap.
 - **Cutover / rollback:** switch Pages `build_type` to `workflow`; rollback is restoring `legacy` with `main:/docs`, though that also restores opaque failures and stale-output risk.
+
