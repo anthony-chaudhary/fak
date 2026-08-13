@@ -4036,6 +4036,26 @@
           "category": "incidental",
           "reason": "Boolean CLI control for the existing dogfood scorecard kernel-value section.",
           "token": "kernelValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private concrete engine implementation type, not a new gateway architecture concept",
+          "token": "grepEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private concrete engine implementation type, not a new gateway architecture concept",
+          "token": "globEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private engine registration helper, not a new gateway architecture concept",
+          "token": "RegisterEngines"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private engine registration helper, not a new gateway architecture concept",
+          "token": "engineFor"
         }
       ],
       "id": "gateway-engine",
@@ -4055,6 +4075,7 @@
         "NewSessionAffinityGateway",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
+        "RegisterEngines",
         "SessionAffinityGateway",
         "WithAffinity",
         "cacheEmitter",
@@ -4062,6 +4083,7 @@
         "convkernel",
         "countingEngine",
         "dogfoodKernelValue",
+        "engineFor",
         "engineTokensPerCall",
         "engineer",
         "engineered",
@@ -4071,6 +4093,8 @@
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",
+        "globEngine",
+        "grepEngine",
         "inKernelPlannerEPCoordinated",
         "kernel32",
         "kernelSession",
@@ -5587,6 +5611,31 @@
           "category": "incidental",
           "reason": "Prometheus configuration projection, not a new support maturity concept",
           "token": "fak_fleet_goal_efficiency_coverage_threshold"
+        },
+        {
+          "category": "incidental",
+          "reason": "SDK enum symbol used only to serialize a full adapter support status; it does not introduce a new support-maturity concept.",
+          "token": "SupportFull"
+        },
+        {
+          "category": "incidental",
+          "reason": "SDK enum symbol used only to serialize a local-only adapter status; it does not redefine the support-maturity ladder.",
+          "token": "SupportLocalOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "SDK enum symbol serializing an explicitly partial adapter status; it does not redefine the support-maturity ladder.",
+          "token": "SupportPartial"
+        },
+        {
+          "category": "incidental",
+          "reason": "SDK enum symbol for preserved unknown adapter data that cannot activate; it is not a new support-maturity rung.",
+          "token": "SupportInactive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Registry coverage-check method; its name is implementation vocabulary rather than a support-maturity concept.",
+          "token": "RequireCoverage"
         }
       ],
       "id": "support-maturity",
@@ -5649,12 +5698,17 @@
         "ReasonUnsupportedQuantizer",
         "ReasonUnsupportedTransition",
         "ReasonUnsupportedVersion",
+        "RequireCoverage",
         "ResultUnsupported",
         "RunCommitSubjectCoverage",
         "SUPPORTED_COMBINATION",
         "SecurityParityConfirmed",
         "SetupParityBlocks",
         "SetupParityReport",
+        "SupportFull",
+        "SupportInactive",
+        "SupportLocalOnly",
+        "SupportPartial",
         "SupportsRoutedExpertKQuant",
         "TierStatusSupported",
         "TierStatusUnsupported",
@@ -6606,6 +6660,11 @@
           "category": "incidental",
           "reason": "Deserializer reads a portability merge record rather than a planning subsystem",
           "token": "ReadMergePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deterministic hash helper for an adapter preview plan; it is implementation vocabulary and not a planning concept.",
+          "token": "stablePlanID"
         }
       ],
       "exclude": [
@@ -6691,6 +6750,7 @@
         "runAblatePlan",
         "runContinuitySyncPlan",
         "seedCandidate",
+        "stablePlanID",
         "wipLandOptions",
         "wipLandWith"
       ],

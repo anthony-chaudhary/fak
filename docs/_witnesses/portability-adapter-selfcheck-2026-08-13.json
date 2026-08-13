@@ -1,0 +1,371 @@
+{
+  "schema": "fak-portability-adapter-selfcheck/1",
+  "verdict": "PASS",
+  "results": [
+    {
+      "kind": "checkpoint",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "local-only",
+      "degradation": "runtime handles are not portable"
+    },
+    {
+      "kind": "model-binding",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "partial",
+      "degradation": "provider identity requires local rebinding"
+    },
+    {
+      "kind": "policy",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "full"
+    },
+    {
+      "kind": "profile",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "partial",
+      "degradation": "provider-local preferences omitted"
+    },
+    {
+      "kind": "receipt",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "full"
+    },
+    {
+      "kind": "session",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "local-only",
+      "degradation": "live process state is local-only"
+    },
+    {
+      "kind": "skill",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "full"
+    },
+    {
+      "kind": "tool-binding",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "partial",
+      "degradation": "credential bindings are never exported"
+    },
+    {
+      "kind": "workflow",
+      "passed": [
+        "malformed/adversarial-input",
+        "deterministic-identity-export",
+        "round-trip-unknown-fields",
+        "secret-non-leakage",
+        "dependencies",
+        "schema-evolution",
+        "apply-rollback-idempotence",
+        "precedence-conflict",
+        "partial-translation-status",
+        "interruption-rollback"
+      ],
+      "support": "partial",
+      "degradation": "host-specific triggers remain inactive"
+    }
+  ],
+  "matrix": [
+    {
+      "kind": "checkpoint",
+      "version": "1",
+      "support": "local-only",
+      "sensitivity": "private",
+      "compatibility": "same-runtime",
+      "degradation": "runtime handles are not portable",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "model-binding",
+      "version": "1",
+      "support": "partial",
+      "sensitivity": "restricted",
+      "compatibility": "v1",
+      "degradation": "provider identity requires local rebinding",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "policy",
+      "version": "1",
+      "support": "full",
+      "sensitivity": "restricted",
+      "compatibility": "v1",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "profile",
+      "version": "1",
+      "support": "partial",
+      "sensitivity": "private",
+      "compatibility": "v1",
+      "degradation": "provider-local preferences omitted",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "receipt",
+      "version": "1",
+      "support": "full",
+      "sensitivity": "internal",
+      "compatibility": "v1",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "session",
+      "version": "1",
+      "support": "local-only",
+      "sensitivity": "private",
+      "compatibility": "same-host",
+      "degradation": "live process state is local-only",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "skill",
+      "version": "1",
+      "support": "full",
+      "sensitivity": "private",
+      "compatibility": "v1",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "tool-binding",
+      "version": "1",
+      "support": "partial",
+      "sensitivity": "restricted",
+      "compatibility": "v1",
+      "degradation": "credential bindings are never exported",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    },
+    {
+      "kind": "workflow",
+      "version": "1",
+      "support": "partial",
+      "sensitivity": "private",
+      "compatibility": "v1",
+      "degradation": "host-specific triggers remain inactive",
+      "capabilities": [
+        "discover",
+        "read",
+        "write",
+        "validate",
+        "preview",
+        "apply",
+        "rollback",
+        "migrate",
+        "diff",
+        "dependencies",
+        "identity",
+        "export",
+        "compatibility",
+        "degradation"
+      ]
+    }
+  ]
+}
