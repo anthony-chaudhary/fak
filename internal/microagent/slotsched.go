@@ -183,6 +183,22 @@ func (s *Scheduler) Close() {
 }
 
 // Limit reports K, the configured maximum concurrent in-flight calls.
+// TryAcquire admits immediately or returns false without parking. It is the
+// capacity-fallback seam for seat-aware routing: callers can probe another
+// independently bounded seat rather than queue behind a busy affinity target.
+func (s *Scheduler) TryAcquire() (release func(), ok bool) {
+	if s == nil {
+		return noopRelease, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.inflight >= s.limit || s.waiters.Len() > 0 {
+		return noopRelease, false
+	}
+	s.inflight++
+	return s.releaseOnce(), true
+}
+
 func (s *Scheduler) Limit() int { return s.limit }
 
 // Inflight reports how many slots are held right now (gauge).

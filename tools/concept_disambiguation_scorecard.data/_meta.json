@@ -6195,6 +6195,11 @@
           "category": "incidental",
           "reason": "Unexported helper returning a finished worktree to the idle set on the Reap path, up to the cap. An internal step of the positioned pool cap, not a separate concept.",
           "token": "returnPooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constructor name for the microagent provider-seat admission pool; not a new product concept distinct from the existing pool family.",
+          "token": "NewSeatPool"
         }
       ],
       "exclude": [
@@ -6203,6 +6208,7 @@
       "id": "pool",
       "ignore": [
         "FLEET_WORKER_WORKTREE_POOL",
+        "NewSeatPool",
         "PooledSpeedupPct",
         "defaultPoolCap",
         "kvpoolbytes",
