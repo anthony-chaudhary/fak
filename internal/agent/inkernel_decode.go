@@ -149,6 +149,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		s.MetalQ4K = p.q4k
 	}
 
+	// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the
+	// turn-tax planner is defined on: the lookup has run and every servability/trust gate above
+	// has settled (`matched` is final, and a prefix that matched but could not be served is still
+	// visible as cacheable > 0 with matched == 0), while NO prefill or decode compute has happened
+	// yet — so the decision is made from signals known ahead of the work. One append per turn that
+	// reaches this seam, on the reuse path and the cold path alike.
+	p.recordTurnTax(promptTok, cacheable, matched)
+
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss). Device hybrid
 	// snapshots cannot be truncated when a radix edge later splits: recurrent GDN state is
 	// position-dependent. Materialize one stable block boundary before the leaf so sibling

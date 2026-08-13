@@ -101,6 +101,13 @@ type InKernelPlanner struct {
 	// ladder's accounting is destroyed at each teardown and no serve surface can see it.
 	moeResidencyState
 
+	// inKernelTurnTaxState is the per-turn cache-decision ledger (#1538, inkernel_turntax.go),
+	// embedded for the same reason as moeResidencyState directly above: the decision is taken
+	// inside a session this planner builds and closes PER REQUEST, so planner-scoped storage is
+	// the only place it survives that teardown. Its zero value is a usable empty ledger, so
+	// every constructor — including a bare &InKernelPlanner{…} — records from its first turn.
+	inKernelTurnTaxState
+
 	oomRetryMu sync.Mutex
 	oomRetry   map[string]*inKernelOOMRetryClassStats
 
