@@ -116,11 +116,12 @@ type RPCResult struct {
 // over the adjudicating ToolExec seam, keeping the two properties above together.
 // It is NOT safe for concurrent use — one RPCSubagent belongs to one pipeline run.
 type RPCSubagent struct {
-	id   string           // the subagent id, tagged onto every journal row (its TraceID)
-	exec *ToolExec        // the adjudicating seam every call passes through
-	ctx  *Context         // the subagent's OWN bounded transcript (the chatter lands here)
-	jrnl *journal.Journal // the durable decision journal (nil => journaling degrades to silence)
-	seq  uint64           // per-subagent call counter, the journal join key (ToolCall.SeqNo)
+	id        string           // the subagent id, tagged onto every journal row (its TraceID)
+	exec      *ToolExec        // the adjudicating seam every call passes through
+	ctx       *Context         // the subagent's OWN bounded transcript (the chatter lands here)
+	jrnl      *journal.Journal // the durable decision journal (nil => journaling degrades to silence)
+	summarize func(string, []RPCStep) string
+	seq       uint64 // per-subagent call counter, the journal join key (ToolCall.SeqNo)
 }
 
 // NewRPCSubagent builds a subagent that drives a script through exec, capping its
@@ -139,6 +140,13 @@ func NewRPCSubagent(id string, exec *ToolExec, ctxCap int, jrnl *journal.Journal
 // tool chatter lands. The witness reads Tokens() off it to prove the chatter is
 // real and contained here, NOT billed to the orchestrator.
 func (s *RPCSubagent) Context() *Context { return s.ctx }
+
+// WithSummarizer installs a deterministic bounded synthesis over step outputs.
+// The intermediate transcript remains in the child context; only this result crosses back.
+func (s *RPCSubagent) WithSummarizer(fn func(string, []RPCStep) string) *RPCSubagent {
+	s.summarize = fn
+	return s
+}
 
 // RunScript runs the script action by action, ADJUDICATING each call through the
 // ToolExec floor and JOURNALING the floor's real decision, while appending every
@@ -175,6 +183,9 @@ func (s *RPCSubagent) RunScript(ctx context.Context, script []ToolAction) RPCRes
 		out.Steps = append(out.Steps, step)
 	}
 	out.Collapsed = fmt.Sprintf("pipeline %q: %d/%d calls allowed, %d denied", s.id, out.Allowed, len(script), out.Denied)
+	if s.summarize != nil {
+		out.Collapsed = s.summarize(s.id, out.Steps)
+	}
 	out.IntermediateTokens = s.ctx.Tokens()
 	fold := NewContext(max(out.IntermediateTokens+1, 1))
 	fold.Append("user", "goal")
