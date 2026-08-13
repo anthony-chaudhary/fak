@@ -529,6 +529,7 @@ var tier = map[string]int{
 	"kvquantmeta":           1,
 	"quantdetect":           1,
 	"fp4runtime":            1, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
+	"bitnetruntime":         1, // stdlib-only BitNet runtime delegation and host-compatibility contract; discovers external runtimes but does not execute a model kernel.
 	"quantpolicy":           1, // stdlib-only structural quantization capability policy; no quantizer, conversion, runtime, or model kernel.
 	"requanteval":           1,
 	"lightroteval":          1,
@@ -550,6 +551,7 @@ var tier = map[string]int{
 	"lifecycleadapter":      1, // stdlib-only process-forest adapter capability negotiation and bounded invocation contract.
 	"terminalbarrier":       3, // #6436 (epic #6432): the fail-closed pause barrier terminal relief must clear before any host replacement. Composes fleetbus(2) durable lifecycle envelopes with processforest(1) identity and lifecycleadapter(1) negotiation; the destructive step is an injected Actuator, so the barrier itself can never kill anything.
 	"depthadmit":            1, // The DEPTH mirror of focusscore(1): focusscore folds how BROAD the fleet is (active objectives vs the WIP cap), this folds how FAR DOWN one line got (declared plan phases vs the ones a W3 commit-progress row witnessed), so a `met` that stopped short is refused as DEPTH_NOT_CARRIED instead of reading clean. Pure over stdlib, no ledger and no git: the impure read lives in cmd/fak/trajctl_depth.go.
+	"quantmeta":             1, // stdlib-only neutral quantization capability descriptor (#6222): typed vocabulary + pure adjudicator; abstains on unknown input, refuses only self-contradiction; no ranking, no runtime, no model kernel.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
