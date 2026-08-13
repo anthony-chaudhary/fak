@@ -5,8 +5,6 @@ description: "Industry-first competitive scorecard: a researched taxonomy of the
 
 # Industry scorecard — fak vs the LLM-serving field
 
-<!-- industry-scorecard: 2026-07-18 · process: tools/industry_scorecard.py · data: tools/industry_scorecard.data/ -->
-
 This is the **outward** measuring stick — the counterpart of the inward scorecards (hygiene, code, docs). It does not start from what fak happened to measure; it starts from the **industry**. The source of truth is a researched taxonomy of the dimensions a serious operator, buyer, or analyst uses to evaluate an LLM-serving system (`tools/industry_scorecard.data/_taxonomy.json`), each with the current SOTA bar and a dated source. fak is then positioned honestly on every dimension — and for most of them the honest answer is a **named gap**, not a win. Everything below is re-derived from the data by `tools/industry_scorecard.py`; no number is hand-typed.
 
 The numbers that are driven (unbounded competitive front first):
