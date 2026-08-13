@@ -517,6 +517,51 @@
           "category": "incidental",
           "reason": "Root-goal projection of existing provider cache-creation counter",
           "token": "fak_fleet_goal_cache_write_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "cacheSeatFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "microCacheArm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "microCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "runMicroCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "parseCacheSeats"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "runMicroCacheArm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "cacheWitnessServer"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "TestMicroCacheWitnessRefusesSingleEndpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
+          "token": "TestMicroCacheWitnessCapturesOnOffProviderCounters"
         }
       ],
       "id": "cache",
@@ -550,6 +595,8 @@
         "ReasonCacheState",
         "RestartCacheHits",
         "SubCacheWarmReplay",
+        "TestMicroCacheWitnessCapturesOnOffProviderCounters",
+        "TestMicroCacheWitnessRefusesSingleEndpoint",
         "TokenCacheDir",
         "UncachedMS",
         "UpgradeAnthropicStableCacheTTL1hHeadOnly",
@@ -561,8 +608,10 @@
         "builtinCacheLevers",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheSeatFlags",
         "cacheStats",
         "cacheValueGateFactsFromReport",
+        "cacheWitnessServer",
         "cache_bytes",
         "cache_creation_span",
         "cache_future_dated",
@@ -645,6 +694,8 @@
         "loadCacheValueGateBaseline",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
+        "microCacheArm",
+        "microCacheWitness",
         "minCacheRun",
         "newCache",
         "no_cache_state_delta",
@@ -654,6 +705,7 @@
         "numCacheTiers",
         "observeTurnCache",
         "observecachettlupgrade",
+        "parseCacheSeats",
         "prefixcachehits",
         "prefixcachequeries",
         "promptcachehittokens",
@@ -662,6 +714,8 @@
         "registerCacheLevers",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
+        "runMicroCacheArm",
+        "runMicroCacheWitness",
         "selectorCacheKey",
         "strongMatrixCache",
         "summarizeTurnCache",
@@ -3575,6 +3629,26 @@
           "category": "incidental",
           "reason": "Organization revocation audit field name, not an independent witness-proof concept.",
           "token": "revocation_reason"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed evidence payload within the existing session movement receipt, not a separate proof system",
+          "token": "SessionMoveProviderWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "receipt validator for the existing session movement protocol, not a separate proof system",
+          "token": "VerifySessionMoveDestinationReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt struct for the positioned microagent cache-affinity witness.",
+          "token": "microCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI runner for the positioned microagent cache-affinity witness.",
+          "token": "runMicroCacheWitness"
         }
       ],
       "id": "witness-proof",
@@ -3601,11 +3675,13 @@
         "ReceiptsDigest",
         "ResolutionUnwitnessed",
         "SOURCE_WITNESSED",
+        "SessionMoveProviderWitness",
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
+        "VerifySessionMoveDestinationReceipt",
         "WITNESSLESS",
         "WITNESS_REQUIRED",
         "WithCoreLockWitness",
@@ -3650,6 +3726,7 @@
         "latestGuardCompactionWitness",
         "liveTreeWitness",
         "maxWitnessFileBytes",
+        "microCacheWitness",
         "motifDetectReproduceFixWitness",
         "named_witness",
         "newGuardCompactionWitness",
@@ -3670,6 +3747,7 @@
         "revocation_reason",
         "revocations",
         "revokeProxyFillWitness",
+        "runMicroCacheWitness",
         "runSessionCheckpointWitness",
         "sessionOpenRestartWitness",
         "setup_not_witnessed",
@@ -6021,12 +6099,18 @@
           "category": "incidental",
           "reason": "checkpoint persistence helper for the existing session movement contract, not a rendering or materialization concept",
           "token": "materializeSessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "digest field proving checkpoint readback, not a new rendering or materialization concept",
+          "token": "MaterializedStateDigest"
         }
       ],
       "id": "render-materialize",
       "ignore": [
         "AllowsRender",
         "DefaultRender",
+        "MaterializedStateDigest",
         "RenderAging",
         "RenderAuditClusterReport",
         "RenderCeilings",
