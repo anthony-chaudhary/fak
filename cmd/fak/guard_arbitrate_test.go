@@ -87,13 +87,28 @@ func TestGuardArbitrateShadowLogsWithoutPublishing(t *testing.T) {
 	guardArbitrateSeedLease(t, root, "peer-cmd", []string{"cmd/**"})
 	var stderr strings.Builder
 	lease, err := guardArbitrateAcquire(context.Background(), &stderr, guardArbitrateConfig{
-		Mode: guardArbitrateModeShadow, Root: root, Tree: []string{"cmd/**"},
+		Mode: guardArbitrateModeShadow, Root: root, Tree: []string{"cmd/**"}, ShowShadowNotice: true,
 	})
 	if err != nil || lease != nil {
 		t.Fatalf("shadow = lease %v err %v", lease, err)
 	}
 	if got := stderr.String(); !strings.Contains(got, "shadow would refuse") || !strings.Contains(got, "peer-cmd") {
 		t.Fatalf("shadow log = %q", got)
+	}
+}
+
+func TestGuardArbitrateCompactStartupSuppressesShadowCollision(t *testing.T) {
+	root := guardArbitrateTestRepo(t)
+	guardArbitrateSeedLease(t, root, "peer-cmd", []string{"cmd/**"})
+	var stderr strings.Builder
+	lease, err := guardArbitrateAcquire(context.Background(), &stderr, guardArbitrateConfig{
+		Mode: guardArbitrateModeShadow, Root: root, Tree: []string{"cmd/**"},
+	})
+	if err != nil || lease != nil {
+		t.Fatalf("shadow = lease %v err %v", lease, err)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("shadow collision polluted compact startup: %q", got)
 	}
 }
 

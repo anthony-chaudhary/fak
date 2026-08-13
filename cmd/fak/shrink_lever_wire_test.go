@@ -602,3 +602,27 @@ func TestGuardBootWiresTheShrinkLeverAdmission(t *testing.T) {
 		t.Errorf("the shrink-lever admission (offset %d) must run BEFORE the in-kernel weight load (offset %d) so a refusal costs milliseconds, not a multi-GB pull", call, load)
 	}
 }
+
+func TestGuardCompactStartupSuppressesDefaultShrinkLeverEssay(t *testing.T) {
+	in := guardDefaultShrinkLeverBoot()
+	in.Provider = "openai-responses"
+	in.BaseURL = "https://api.openai.com/v1"
+	var stderr strings.Builder
+	if !admitGuardShrinkLevers(in, &stderr) {
+		t.Fatal("default-on inert levers must not refuse startup")
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("compact startup leaked inert-lever essay: %q", got)
+	}
+
+	// Silence applies only to defaults. An operator-explicit inert lever remains a
+	// refusal because continuing would misrepresent the requested configuration.
+	in.SetFlags = map[string]bool{"elide-stale-reads": true}
+	stderr.Reset()
+	if admitGuardShrinkLevers(in, &stderr) {
+		t.Fatal("explicit inert lever unexpectedly admitted")
+	}
+	if got := stderr.String(); !strings.Contains(got, "SHRINK_LEVER_INERT_ON_WIRE") {
+		t.Fatalf("explicit refusal missing from compact startup: %q", got)
+	}
+}

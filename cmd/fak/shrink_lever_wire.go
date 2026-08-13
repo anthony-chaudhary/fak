@@ -380,6 +380,9 @@ type guardShrinkLeverInputs struct {
 	CompactHistoryBudget int
 	ElideStaleReads      bool
 	DeferColdTools       bool
+	// SuppressDefaultNotice keeps non-actionable default-on lever diagnostics out of
+	// compact attended startup. Explicit inert levers still refuse with full detail.
+	ShowDefaultNotice bool
 }
 
 // admitGuardShrinkLevers applies the same wire rule to a resolved `fak guard` launch,
@@ -390,6 +393,14 @@ type guardShrinkLeverInputs struct {
 func admitGuardShrinkLevers(in guardShrinkLeverInputs, stderr io.Writer) bool {
 	wire := classifyShrinkWire(in.Provider, in.BaseURL, nil, in.GGUFPath)
 	levers := shrinkLevers(in.SetFlags, in.CompactHistoryBudget, in.ElideStaleReads, in.DeferColdTools)
+	if !in.ShowDefaultNotice {
+		inert := inertShrinkLevers(wire, levers)
+		if refusal := shrinkLeverRefusal(shrinkLeverGuardCommand, wire, in.Provider, explicitShrinkLevers(inert)); refusal != "" {
+			fmt.Fprintln(stderr, refusal)
+			return false
+		}
+		return true
+	}
 	return admitShrinkLevers(shrinkLeverGuardCommand, wire, in.Provider, levers, stderr)
 }
 

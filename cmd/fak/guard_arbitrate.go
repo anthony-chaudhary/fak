@@ -32,6 +32,9 @@ type guardArbitrateConfig struct {
 	Tree  []string
 	Force bool
 	Root  string
+	// ShowShadowNotice opts into advisory collision narration. The zero value keeps
+	// successful startup clean; enforce-mode refusals remain visible as errors.
+	ShowShadowNotice bool
 }
 
 type guardArbitrateFlagValue struct {
@@ -153,7 +156,9 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 	if err != nil {
 		if errors.Is(err, gpulease.ErrBusy) || errors.Is(err, gpulease.ErrTimeout) {
 			if mode == guardArbitrateModeShadow {
-				fmt.Fprintf(stderr, "fak guard: arbitrate shadow would refuse: COLLISION_RISK admission serialization is busy: %v\n", err)
+				if cfg.ShowShadowNotice {
+					fmt.Fprintf(stderr, "fak guard: arbitrate shadow would refuse: COLLISION_RISK admission serialization is busy: %v\n", err)
+				}
 				return nil, nil
 			}
 			return nil, fmt.Errorf("COLLISION_RISK: guard admission serialization is busy: %w", err)
@@ -188,7 +193,9 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 			conflict = dec.Conflict.ID
 		}
 		if mode == guardArbitrateModeShadow {
-			fmt.Fprintf(stderr, "fak guard: arbitrate shadow would refuse %s: %s conflict=%s detail=%s\n", regionLabel(req, tax), dec.Reason, conflict, dec.Detail)
+			if cfg.ShowShadowNotice {
+				fmt.Fprintf(stderr, "fak guard: arbitrate shadow would refuse %s: %s conflict=%s detail=%s\n", regionLabel(req, tax), dec.Reason, conflict, dec.Detail)
+			}
 			return nil, nil
 		}
 		return nil, fmt.Errorf("%s: conflicting lease %s: %s", dec.Reason, conflict, dec.Detail)

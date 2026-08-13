@@ -389,7 +389,8 @@ func openGuardInfoPane(stderr io.Writer, getenv func(string) string, where, gwUR
 		return
 	}
 	go func() { _ = cmd.Wait() }() // reap the multiplexer client so it never lingers as a zombie.
-	fmt.Fprintf(stderr, "fak guard: --split · opening a 20%% fak-info pane (%s) beside the agent ...\n", plan.Geometry)
+	// A successful split is visible by construction. Do not narrate it into the agent
+	// pane; failures below remain actionable and therefore visible.
 }
 
 // guardInfoPaneMaxIdle is the #2340 backstop applied to the AUTO-spawned split pane: if its

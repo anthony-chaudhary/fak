@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os/exec"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -38,8 +37,9 @@ func TestOpenGuardInfoPaneNonBlocking(t *testing.T) {
 	if elapsed > 1*time.Second {
 		t.Fatalf("openGuardInfoPane blocked for %v while the spawn takes ~2s — it must NOT wait on the multiplexer client (non-blocking startup regressed)", elapsed)
 	}
-	// It should still report that it opened the pane (the fire-and-reap path, not the failure path).
-	if !strings.Contains(buf.String(), "opening a 20% fak-info pane") {
-		t.Fatalf("expected the pane-opening note, got: %q", buf.String())
+	// Success is visible as the pane itself; compact startup must not narrate it into
+	// the agent surface. Only an actionable spawn failure belongs on stderr.
+	if got := buf.String(); got != "" {
+		t.Fatalf("successful split polluted compact startup: %q", got)
 	}
 }
