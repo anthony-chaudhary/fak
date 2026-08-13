@@ -18,6 +18,7 @@ type sweepParkedItem struct {
 	Kind    string `json:"kind"`
 	Name    string `json:"name"`
 	Summary string `json:"summary,omitempty"`
+	Paths   int    `json:"paths,omitempty"`
 }
 
 func collectSweepParked(root string) sweepParkedSummary {
@@ -27,7 +28,11 @@ func collectSweepParked(root string) sweepParkedSummary {
 	} else {
 		for _, line := range nonemptyLines(raw) {
 			name, summary, _ := strings.Cut(line, "\t")
-			out.Stashes = append(out.Stashes, sweepParkedItem{"stash", name, summary})
+			paths := 0
+			if changed, countErr := gitOutput(root, "diff", "--name-only", name+"^1", name); countErr == nil {
+				paths = len(nonemptyLines(changed))
+			}
+			out.Stashes = append(out.Stashes, sweepParkedItem{Kind: "stash", Name: name, Summary: summary, Paths: paths})
 		}
 	}
 	if raw, err := gitOutput(root, "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/heads", "refs/remotes"); err != nil {
@@ -45,7 +50,7 @@ func collectSweepParked(root string) sweepParkedSummary {
 			if len(parts) == 3 && parts[2] != "" {
 				summary += " " + parts[2]
 			}
-			out.Refs = append(out.Refs, sweepParkedItem{"ref", parts[0], summary})
+			out.Refs = append(out.Refs, sweepParkedItem{Kind: "ref", Name: parts[0], Summary: summary})
 		}
 	}
 	if raw, err := gitOutput(root, "worktree", "list", "--porcelain"); err != nil {
@@ -65,7 +70,7 @@ func collectSweepParked(root string) sweepParkedSummary {
 					head = strings.TrimPrefix(line, "HEAD ")
 				}
 			}
-			out.Worktrees = append(out.Worktrees, sweepParkedItem{"worktree", path, head})
+			out.Worktrees = append(out.Worktrees, sweepParkedItem{Kind: "worktree", Name: path, Summary: head})
 		}
 	}
 	sort.Slice(out.Refs, func(i, j int) bool { return out.Refs[i].Name < out.Refs[j].Name })
@@ -86,7 +91,11 @@ func writeSweepParkedText(b io.Writer, parked sweepParkedSummary) {
 	fmt.Fprintf(b, "\nPARKED / HIDDEN WORK  %d item(s) outside the main working-tree diff\n", parked.Count)
 	for _, group := range [][]sweepParkedItem{parked.Stashes, parked.Refs, parked.Worktrees} {
 		for _, item := range group {
-			fmt.Fprintf(b, "  %-8s %-28s %s\n", item.Kind, item.Name, item.Summary)
+			detail := item.Summary
+			if item.Paths > 0 {
+				detail = fmt.Sprintf("%d changed path(s); %s", item.Paths, detail)
+			}
+			fmt.Fprintf(b, "  %-8s %-28s %s\n", item.Kind, item.Name, detail)
 		}
 	}
 	for _, d := range parked.Diagnostics {
