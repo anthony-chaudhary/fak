@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Portability formats: reuse the package, registry, sync, and context layers](docs/notes/RESEARCH-PORTABILITY-FORMATS-2026-08-13.md) -- auto-indexed dated note.
 - [Native desktop command center for durable coding sessions](docs/notes/NATIVE-DESKTOP-DURABLE-SESSION-COMMAND-CENTER-2026-08-13.md) -- auto-indexed dated note.
 - [Fleet repository-targeting incident — 2026-08-13](docs/notes/FLEET-REPOSITORY-TARGETING-INCIDENT-2026-08-13.md) -- auto-indexed dated note.
 - [Deterministic AMOProf-to-Confluence publication rerun — 2026-08-12](docs/notes/CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md) -- auto-indexed dated note.
