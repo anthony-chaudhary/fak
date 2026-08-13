@@ -1,0 +1,1718 @@
+{
+  "schema": "fak-ux-journey-baseline/1",
+  "study_id": "github-6597-managed-context-cognitive-load",
+  "as_of": "2026-08-13",
+  "revision": "883662e2514288b0198052b8ec90ef7870e8dcee",
+  "provenance": "MODELED",
+  "corpus_sha256": "a29df08aa32b5e31429cef6b138e4c9ed38d13af4eeb4dc4cbf1256264a657c9",
+  "privacy": {
+    "fixture_only": true,
+    "forbidden_inputs": [
+      "real credentials or tokens",
+      "real conversation or shell history",
+      "private repository contents or hostnames",
+      "participant home-directory paths",
+      "corporate-only policy or identity data"
+    ],
+    "allowed_synthetic": [
+      "reserved example.invalid hostnames",
+      "fake token shapes marked TEST_ONLY",
+      "isolated temporary homes",
+      "synthetic skills, policies, profiles, and receipts"
+    ],
+    "retention": "Commit only the frozen synthetic corpus and aggregate scores; retain no participant transcript or environment dump."
+  },
+  "sources": [
+    {
+      "id": "codex-config-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "Codex configuration reference",
+      "locators": [
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ],
+      "pin": "current page fetched 2026-08-13; local Codex CLI 0.147.0",
+      "accessed": "2026-08-13",
+      "evidence": "User and project config are separate, named profiles are separate files, and project config cannot override several machine-local keys."
+    },
+    {
+      "id": "codex-skills-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "Build skills",
+      "locators": [
+        "https://learn.chatgpt.com/docs/build-skills"
+      ],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Codex loads skills from distinct repository, user, admin, and system scopes."
+    },
+    {
+      "id": "codex-cli-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "Codex developer commands and AGENTS.md scope",
+      "locators": [
+        "https://learn.chatgpt.com/docs/developer-commands?surface=cli",
+        "https://learn.chatgpt.com/docs/agent-configuration/agents-md"
+      ],
+      "pin": "current pages fetched 2026-08-13; local Codex CLI 0.147.0",
+      "accessed": "2026-08-13",
+      "evidence": "Resume is session- and directory-aware; AGENTS.md instructions merge by global/project directory scope."
+    },
+    {
+      "id": "codex-plugins-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "OpenAI plugin package, submission, security, and privacy documentation",
+      "locators": [
+        "https://developers.openai.com/plugins/build/plugins",
+        "https://developers.openai.com/plugins/deploy/submission",
+        "https://developers.openai.com/plugins/guides/security-privacy"
+      ],
+      "pin": "current pages fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "A native plugin has documented package, connect/test, submission, and security/privacy surfaces."
+    },
+    {
+      "id": "chezmoi-setup-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "chezmoi setup",
+      "locators": [
+        "https://www.chezmoi.io/user-guide/setup/"
+      ],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Common source state and machine-local config are separate; a new machine can init, diff, and apply from a hosted repository."
+    },
+    {
+      "id": "chezmoi-apply-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "chezmoi apply reference",
+      "locators": [
+        "https://www.chezmoi.io/reference/commands/apply/"
+      ],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Apply supports dry-run/selectors and prompts when a destination changed since the last write."
+    },
+    {
+      "id": "chezmoi-merge-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "chezmoi merge",
+      "locators": [
+        "https://www.chezmoi.io/user-guide/tools/merge/"
+      ],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Merge reconciles destination, source, and rendered target states."
+    },
+    {
+      "id": "git-2.55-merge",
+      "kind": "primary-documentation",
+      "title": "git-merge documentation",
+      "locators": [
+        "https://git-scm.com/docs/git-merge"
+      ],
+      "pin": "manual latest version 2.55.0; merge text last changed in 2.54.0; local Git 2.51.0.windows.1",
+      "accessed": "2026-08-13",
+      "evidence": "A conflict stops the merge; continue and abort are explicit, with an honest warning about restoring dirty pre-merge state."
+    },
+    {
+      "id": "github-repository-security-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "GitHub repository visibility and secret scanning",
+      "locators": [
+        "https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories",
+        "https://docs.github.com/en/code-security/concepts/secret-security/secret-scanning"
+      ],
+      "pin": "current pages fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Visibility controls exposure; public repositories increase risk and secret/security controls mitigate but do not erase it."
+    },
+    {
+      "id": "local-fak-roots-883662e",
+      "kind": "repository-evidence",
+      "title": "fak managed-context, receipt, and disambiguation seams",
+      "locators": [
+        "internal/contextq/contextq.go",
+        "internal/contextq/diff.go",
+        "internal/agent/receipt.go",
+        "cmd/fak/session_receipt.go",
+        "internal/disambiguation/entry.go",
+        "internal/registrations/registrations.go"
+      ],
+      "pin": "883662e2514288b0198052b8ec90ef7870e8dcee",
+      "accessed": "2026-08-13",
+      "evidence": "Existing seams expose typed context materialization/diff, witnessed receipts, vocabulary provenance, and the built-in driver inventory, but not the proposed portability transaction."
+    }
+  ],
+  "scripts": [
+    {
+      "journey": "new-machine-restore",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 640,
+      "choice_count": 8,
+      "vocabulary_items": [
+        "AGENTS scope",
+        "Codex home",
+        "behavior oracle",
+        "credential boundary",
+        "profile",
+        "project trust",
+        "session scope",
+        "session storage",
+        "skill scope",
+        "user scope"
+      ],
+      "term_count": 10,
+      "step_count": 5,
+      "command_count": 10,
+      "errors": 1,
+      "recovery_seconds": 100,
+      "correct": false,
+      "missing_effects": [
+        "provenance_preserved"
+      ],
+      "confidence": 0.65,
+      "confidence_calibration_gap": 0.65,
+      "control_ratio": 0.667,
+      "missing_expert_controls": [
+        "redaction_policy",
+        "source_revision"
+      ]
+    },
+    {
+      "journey": "new-machine-restore",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 240,
+      "choice_count": 8,
+      "vocabulary_items": [
+        "AGENTS scope",
+        "Codex home",
+        "behavior oracle",
+        "content identity",
+        "credential boundary",
+        "profile",
+        "project trust",
+        "provenance",
+        "revision",
+        "session scope",
+        "skill scope",
+        "user scope"
+      ],
+      "term_count": 12,
+      "step_count": 5,
+      "command_count": 11,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.88,
+      "confidence_calibration_gap": 0.12,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "redaction_policy"
+      ]
+    },
+    {
+      "journey": "new-machine-restore",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 425,
+      "choice_count": 6,
+      "vocabulary_items": [
+        "behavior oracle",
+        "content identity",
+        "credential reference",
+        "destination state",
+        "machine data",
+        "provenance",
+        "revision",
+        "source state",
+        "target state"
+      ],
+      "term_count": 9,
+      "step_count": 4,
+      "command_count": 6,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.82,
+      "confidence_calibration_gap": 0.18,
+      "control_ratio": 1
+    },
+    {
+      "journey": "new-machine-restore",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 155,
+      "choice_count": 6,
+      "vocabulary_items": [
+        "behavior oracle",
+        "content identity",
+        "credential reference",
+        "destination state",
+        "machine data",
+        "provenance",
+        "revision",
+        "source state",
+        "target state"
+      ],
+      "term_count": 9,
+      "step_count": 4,
+      "command_count": 6,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.94,
+      "confidence_calibration_gap": 0.06,
+      "control_ratio": 1
+    },
+    {
+      "journey": "new-machine-restore",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 825,
+      "choice_count": 12,
+      "vocabulary_items": [
+        "AGENTS scope",
+        "archive layout",
+        "behavior oracle",
+        "config precedence",
+        "content identity",
+        "file permissions",
+        "history root",
+        "profile",
+        "provenance",
+        "revision",
+        "scope",
+        "sensitivity",
+        "skill root"
+      ],
+      "term_count": 13,
+      "step_count": 5,
+      "command_count": 14,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.72,
+      "confidence_calibration_gap": 0.28,
+      "control_ratio": 1
+    },
+    {
+      "journey": "new-machine-restore",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 325,
+      "choice_count": 12,
+      "vocabulary_items": [
+        "AGENTS scope",
+        "archive layout",
+        "behavior oracle",
+        "config precedence",
+        "content identity",
+        "file permissions",
+        "history root",
+        "profile",
+        "provenance",
+        "revision",
+        "scope",
+        "sensitivity",
+        "skill root"
+      ],
+      "term_count": 13,
+      "step_count": 5,
+      "command_count": 14,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.9,
+      "confidence_calibration_gap": 0.1,
+      "control_ratio": 1
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 190,
+      "choice_count": 3,
+      "vocabulary_items": [
+        "current directory",
+        "directory-scoped session",
+        "precedence",
+        "profile layer",
+        "project trust",
+        "source state",
+        "target state"
+      ],
+      "term_count": 7,
+      "step_count": 3,
+      "command_count": 3,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.82,
+      "confidence_calibration_gap": 0.18,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "atomicity"
+      ]
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 85,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "current directory",
+        "directory-scoped session",
+        "precedence",
+        "profile layer",
+        "project trust",
+        "rollback anchor",
+        "source state",
+        "target state"
+      ],
+      "term_count": 8,
+      "step_count": 4,
+      "command_count": 5,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.95,
+      "confidence_calibration_gap": 0.05,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "atomicity"
+      ]
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 265,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "config path",
+        "destination state",
+        "rollback anchor",
+        "source directory",
+        "target state"
+      ],
+      "term_count": 5,
+      "step_count": 3,
+      "command_count": 5,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.78,
+      "confidence_calibration_gap": 0.22,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "machine_output"
+      ]
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 115,
+      "choice_count": 5,
+      "vocabulary_items": [
+        "config path",
+        "destination state",
+        "precedence",
+        "rollback anchor",
+        "source directory",
+        "source state",
+        "target state"
+      ],
+      "term_count": 7,
+      "step_count": 4,
+      "command_count": 6,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.92,
+      "confidence_calibration_gap": 0.08,
+      "control_ratio": 1
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 385,
+      "choice_count": 7,
+      "vocabulary_items": [
+        "activation order",
+        "config precedence",
+        "project root",
+        "rollback anchor",
+        "scope"
+      ],
+      "term_count": 5,
+      "step_count": 3,
+      "command_count": 8,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.7,
+      "confidence_calibration_gap": 0.3,
+      "control_ratio": 0.667,
+      "missing_expert_controls": [
+        "atomicity",
+        "machine_output"
+      ]
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 165,
+      "choice_count": 8,
+      "vocabulary_items": [
+        "activation order",
+        "config precedence",
+        "precedence",
+        "project root",
+        "rollback anchor",
+        "scope",
+        "source state",
+        "target state"
+      ],
+      "term_count": 8,
+      "step_count": 4,
+      "command_count": 9,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.88,
+      "confidence_calibration_gap": 0.12,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "atomicity"
+      ]
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 635,
+      "choice_count": 9,
+      "vocabulary_items": [
+        "base",
+        "behavior oracle",
+        "commit",
+        "merge base",
+        "ours",
+        "remote head",
+        "rollback anchor",
+        "semantic conflict",
+        "staging index",
+        "theirs"
+      ],
+      "term_count": 10,
+      "step_count": 5,
+      "command_count": 12,
+      "errors": 1,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.72,
+      "confidence_calibration_gap": 0.28,
+      "control_ratio": 1
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 215,
+      "choice_count": 9,
+      "vocabulary_items": [
+        "base",
+        "behavior oracle",
+        "commit",
+        "merge base",
+        "ours",
+        "remote head",
+        "rollback anchor",
+        "semantic conflict",
+        "staging index",
+        "theirs"
+      ],
+      "term_count": 10,
+      "step_count": 5,
+      "command_count": 12,
+      "errors": 1,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.9,
+      "confidence_calibration_gap": 0.1,
+      "control_ratio": 1
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 520,
+      "choice_count": 7,
+      "vocabulary_items": [
+        "behavior oracle",
+        "desired state",
+        "destination state",
+        "remote head",
+        "rollback anchor",
+        "source state",
+        "target state"
+      ],
+      "term_count": 7,
+      "step_count": 4,
+      "command_count": 10,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.8,
+      "confidence_calibration_gap": 0.2,
+      "control_ratio": 0.8,
+      "missing_expert_controls": [
+        "tombstone_policy"
+      ]
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 170,
+      "choice_count": 7,
+      "vocabulary_items": [
+        "behavior oracle",
+        "desired state",
+        "destination state",
+        "remote head",
+        "rollback anchor",
+        "source state",
+        "target state"
+      ],
+      "term_count": 7,
+      "step_count": 4,
+      "command_count": 10,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.94,
+      "confidence_calibration_gap": 0.06,
+      "control_ratio": 0.8,
+      "missing_expert_controls": [
+        "tombstone_policy"
+      ]
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 675,
+      "choice_count": 9,
+      "vocabulary_items": [
+        "base",
+        "behavior oracle",
+        "checksum",
+        "ours",
+        "replica",
+        "rollback anchor",
+        "semantic conflict",
+        "theirs"
+      ],
+      "term_count": 8,
+      "step_count": 4,
+      "command_count": 12,
+      "errors": 1,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.65,
+      "confidence_calibration_gap": 0.35,
+      "control_ratio": 1
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 245,
+      "choice_count": 9,
+      "vocabulary_items": [
+        "base",
+        "behavior oracle",
+        "checksum",
+        "ours",
+        "replica",
+        "rollback anchor",
+        "semantic conflict",
+        "theirs"
+      ],
+      "term_count": 8,
+      "step_count": 4,
+      "command_count": 12,
+      "errors": 1,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.86,
+      "confidence_calibration_gap": 0.14,
+      "control_ratio": 1
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 655,
+      "choice_count": 10,
+      "vocabulary_items": [
+        "AGENTS scope",
+        "activation authority",
+        "discovery versus activation",
+        "owner",
+        "policy overlay",
+        "repo skill scope",
+        "scope",
+        "sensitivity",
+        "version pin"
+      ],
+      "term_count": 9,
+      "step_count": 4,
+      "command_count": 10,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.76,
+      "confidence_calibration_gap": 0.24,
+      "control_ratio": 0.875,
+      "missing_expert_controls": [
+        "revocation"
+      ]
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 260,
+      "choice_count": 11,
+      "vocabulary_items": [
+        "AGENTS scope",
+        "activation authority",
+        "discovery versus activation",
+        "journal",
+        "owner",
+        "policy overlay",
+        "reason code",
+        "receipt",
+        "repo skill scope",
+        "scope",
+        "sensitivity",
+        "version pin"
+      ],
+      "term_count": 12,
+      "step_count": 5,
+      "command_count": 11,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.9,
+      "confidence_calibration_gap": 0.1,
+      "control_ratio": 0.875,
+      "missing_expert_controls": [
+        "revocation"
+      ]
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 520,
+      "choice_count": 8,
+      "vocabulary_items": [
+        "activation authority",
+        "discovery versus activation",
+        "owner",
+        "policy overlay",
+        "scope",
+        "sensitivity",
+        "version pin"
+      ],
+      "term_count": 7,
+      "step_count": 3,
+      "command_count": 8,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.8,
+      "confidence_calibration_gap": 0.2,
+      "control_ratio": 0.875,
+      "missing_expert_controls": [
+        "revocation"
+      ]
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 215,
+      "choice_count": 9,
+      "vocabulary_items": [
+        "activation authority",
+        "discovery versus activation",
+        "journal",
+        "owner",
+        "policy overlay",
+        "reason code",
+        "receipt",
+        "scope",
+        "sensitivity",
+        "version pin"
+      ],
+      "term_count": 10,
+      "step_count": 4,
+      "command_count": 9,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.92,
+      "confidence_calibration_gap": 0.08,
+      "control_ratio": 0.875,
+      "missing_expert_controls": [
+        "revocation"
+      ]
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 690,
+      "choice_count": 11,
+      "vocabulary_items": [
+        "activation authority",
+        "approval",
+        "owner",
+        "policy",
+        "quarantine directory",
+        "retention",
+        "scope",
+        "sensitivity",
+        "version"
+      ],
+      "term_count": 9,
+      "step_count": 3,
+      "command_count": 11,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.68,
+      "confidence_calibration_gap": 0.32,
+      "control_ratio": 0.75,
+      "missing_expert_controls": [
+        "rollout_ring",
+        "machine_output"
+      ]
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 285,
+      "choice_count": 12,
+      "vocabulary_items": [
+        "activation authority",
+        "approval",
+        "journal",
+        "owner",
+        "policy",
+        "quarantine directory",
+        "reason code",
+        "receipt",
+        "retention",
+        "scope",
+        "sensitivity",
+        "version"
+      ],
+      "term_count": 12,
+      "step_count": 4,
+      "command_count": 12,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.86,
+      "confidence_calibration_gap": 0.14,
+      "control_ratio": 0.875,
+      "missing_expert_controls": [
+        "rollout_ring"
+      ]
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 620,
+      "choice_count": 11,
+      "vocabulary_items": [
+        "compatibility",
+        "dependency",
+        "install versus activate",
+        "license",
+        "plugin manifest",
+        "publisher review",
+        "scope",
+        "sensitivity"
+      ],
+      "term_count": 8,
+      "step_count": 3,
+      "command_count": 7,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.74,
+      "confidence_calibration_gap": 0.26,
+      "control_ratio": 0.889,
+      "missing_expert_controls": [
+        "machine_output"
+      ]
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 245,
+      "choice_count": 12,
+      "vocabulary_items": [
+        "compatibility",
+        "content identity",
+        "dependency",
+        "install versus activate",
+        "license",
+        "plugin manifest",
+        "provenance",
+        "publisher review",
+        "revision",
+        "scope",
+        "sensitivity"
+      ],
+      "term_count": 11,
+      "step_count": 4,
+      "command_count": 9,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.9,
+      "confidence_calibration_gap": 0.1,
+      "control_ratio": 1
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 510,
+      "choice_count": 10,
+      "vocabulary_items": [
+        "compatibility",
+        "content identity",
+        "license",
+        "repository visibility",
+        "secret scanning",
+        "signature",
+        "tag"
+      ],
+      "term_count": 7,
+      "step_count": 2,
+      "command_count": 11,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.78,
+      "confidence_calibration_gap": 0.22,
+      "control_ratio": 1
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 200,
+      "choice_count": 11,
+      "vocabulary_items": [
+        "compatibility",
+        "content identity",
+        "journal",
+        "license",
+        "reason code",
+        "receipt",
+        "repository visibility",
+        "secret scanning",
+        "signature",
+        "tag"
+      ],
+      "term_count": 10,
+      "step_count": 3,
+      "command_count": 12,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.92,
+      "confidence_calibration_gap": 0.08,
+      "control_ratio": 1
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 840,
+      "choice_count": 14,
+      "vocabulary_items": [
+        "compatibility",
+        "content identity",
+        "dependency",
+        "license",
+        "private history",
+        "scope",
+        "sensitivity",
+        "signature",
+        "transport"
+      ],
+      "term_count": 9,
+      "step_count": 2,
+      "command_count": 13,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.66,
+      "confidence_calibration_gap": 0.34,
+      "control_ratio": 0.889,
+      "missing_expert_controls": [
+        "machine_output"
+      ]
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 355,
+      "choice_count": 15,
+      "vocabulary_items": [
+        "compatibility",
+        "content identity",
+        "dependency",
+        "journal",
+        "license",
+        "private history",
+        "reason code",
+        "receipt",
+        "scope",
+        "sensitivity",
+        "signature",
+        "transport"
+      ],
+      "term_count": 12,
+      "step_count": 3,
+      "command_count": 14,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.84,
+      "confidence_calibration_gap": 0.16,
+      "control_ratio": 1
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 280,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "AGENTS merge order",
+        "commit",
+        "config layer",
+        "diff",
+        "signature",
+        "skill scope",
+        "tag"
+      ],
+      "term_count": 7,
+      "step_count": 2,
+      "command_count": 6,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.78,
+      "confidence_calibration_gap": 0.22,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "policy_decision"
+      ]
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 115,
+      "choice_count": 5,
+      "vocabulary_items": [
+        "AGENTS merge order",
+        "commit",
+        "config layer",
+        "diff",
+        "journal",
+        "reason code",
+        "receipt",
+        "signature",
+        "skill scope",
+        "tag"
+      ],
+      "term_count": 10,
+      "step_count": 3,
+      "command_count": 7,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.92,
+      "confidence_calibration_gap": 0.08,
+      "control_ratio": 1
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 310,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "commit",
+        "destination state",
+        "diff",
+        "signature",
+        "source state",
+        "tag",
+        "target state"
+      ],
+      "term_count": 7,
+      "step_count": 2,
+      "command_count": 7,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.82,
+      "confidence_calibration_gap": 0.18,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "policy_decision"
+      ]
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 120,
+      "choice_count": 5,
+      "vocabulary_items": [
+        "commit",
+        "destination state",
+        "diff",
+        "journal",
+        "reason code",
+        "receipt",
+        "signature",
+        "source state",
+        "tag",
+        "target state"
+      ],
+      "term_count": 10,
+      "step_count": 3,
+      "command_count": 8,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.95,
+      "confidence_calibration_gap": 0.05,
+      "control_ratio": 1
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 260,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "approval",
+        "change log",
+        "checksum",
+        "manifest",
+        "signature"
+      ],
+      "term_count": 5,
+      "step_count": 1,
+      "command_count": 4,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.68,
+      "confidence_calibration_gap": 0.32,
+      "control_ratio": 0.667,
+      "missing_expert_controls": [
+        "dependency_graph",
+        "machine_output"
+      ]
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 125,
+      "choice_count": 5,
+      "vocabulary_items": [
+        "approval",
+        "change log",
+        "checksum",
+        "journal",
+        "manifest",
+        "reason code",
+        "receipt",
+        "signature"
+      ],
+      "term_count": 8,
+      "step_count": 2,
+      "command_count": 5,
+      "errors": 0,
+      "recovery_seconds": 0,
+      "correct": true,
+      "confidence": 0.88,
+      "confidence_calibration_gap": 0.12,
+      "control_ratio": 0.833,
+      "missing_expert_controls": [
+        "dependency_graph"
+      ]
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 265,
+      "choice_count": 3,
+      "vocabulary_items": [
+        "behavior oracle",
+        "partial apply",
+        "session transcript",
+        "working tree"
+      ],
+      "term_count": 4,
+      "step_count": 3,
+      "command_count": 4,
+      "errors": 1,
+      "recovery_seconds": 150,
+      "correct": false,
+      "missing_effects": [
+        "prior_active",
+        "receipt_verified"
+      ],
+      "confidence": 0.62,
+      "confidence_calibration_gap": 0.62,
+      "control_ratio": 0.429,
+      "missing_expert_controls": [
+        "journal",
+        "rollback",
+        "idempotency",
+        "reason_codes"
+      ]
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 95,
+      "choice_count": 3,
+      "vocabulary_items": [
+        "journal",
+        "partial apply",
+        "reason code",
+        "receipt",
+        "session transcript",
+        "working tree"
+      ],
+      "term_count": 6,
+      "step_count": 3,
+      "command_count": 4,
+      "errors": 1,
+      "recovery_seconds": 55,
+      "correct": false,
+      "missing_effects": [
+        "prior_active"
+      ],
+      "confidence": 0.55,
+      "confidence_calibration_gap": 0.55,
+      "control_ratio": 0.714,
+      "missing_expert_controls": [
+        "rollback",
+        "idempotency"
+      ]
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 440,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "destination state",
+        "idempotency",
+        "journal",
+        "partial apply",
+        "reason code",
+        "receipt",
+        "rollback anchor",
+        "target state"
+      ],
+      "term_count": 8,
+      "step_count": 5,
+      "command_count": 9,
+      "errors": 1,
+      "recovery_seconds": 260,
+      "correct": true,
+      "confidence": 0.76,
+      "confidence_calibration_gap": 0.24,
+      "control_ratio": 1
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 150,
+      "choice_count": 4,
+      "vocabulary_items": [
+        "destination state",
+        "idempotency",
+        "journal",
+        "partial apply",
+        "reason code",
+        "receipt",
+        "rollback anchor",
+        "target state"
+      ],
+      "term_count": 8,
+      "step_count": 5,
+      "command_count": 9,
+      "errors": 1,
+      "recovery_seconds": 85,
+      "correct": true,
+      "confidence": 0.92,
+      "confidence_calibration_gap": 0.08,
+      "control_ratio": 1
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 680,
+      "choice_count": 8,
+      "vocabulary_items": [
+        "change log",
+        "idempotency",
+        "journal",
+        "partial apply",
+        "partial copy",
+        "reason code",
+        "receipt",
+        "rollback anchor",
+        "staging"
+      ],
+      "term_count": 9,
+      "step_count": 5,
+      "command_count": 14,
+      "errors": 1,
+      "recovery_seconds": 500,
+      "correct": true,
+      "confidence": 0.68,
+      "confidence_calibration_gap": 0.32,
+      "control_ratio": 1
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "task_seconds": 255,
+      "choice_count": 8,
+      "vocabulary_items": [
+        "change log",
+        "idempotency",
+        "journal",
+        "partial apply",
+        "partial copy",
+        "reason code",
+        "receipt",
+        "rollback anchor",
+        "staging"
+      ],
+      "term_count": 9,
+      "step_count": 5,
+      "command_count": 14,
+      "errors": 1,
+      "recovery_seconds": 190,
+      "correct": true,
+      "confidence": 0.86,
+      "confidence_calibration_gap": 0.14,
+      "control_ratio": 1
+    }
+  ],
+  "aggregates": [
+    {
+      "persona": "novice",
+      "alternative": "codex_native",
+      "scripts": 7,
+      "completion_rate": 0.714,
+      "mean_task_seconds": 469.29,
+      "mean_choices": 6.86,
+      "mean_terms": 7.86,
+      "mean_step_count": 3.57,
+      "mean_errors": 0.43,
+      "mean_recovery_seconds": 35.71,
+      "mean_confidence_calibration_gap": 0.35,
+      "mean_control_ratio": 0.789
+    },
+    {
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "scripts": 7,
+      "completion_rate": 1,
+      "mean_task_seconds": 427.14,
+      "mean_choices": 6.14,
+      "mean_terms": 7.14,
+      "mean_step_count": 3.29,
+      "mean_errors": 0.14,
+      "mean_recovery_seconds": 37.14,
+      "mean_confidence_calibration_gap": 0.206,
+      "mean_control_ratio": 0.906
+    },
+    {
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "scripts": 7,
+      "completion_rate": 1,
+      "mean_task_seconds": 622.14,
+      "mean_choices": 9.29,
+      "mean_terms": 8.29,
+      "mean_step_count": 3.29,
+      "mean_errors": 0.29,
+      "mean_recovery_seconds": 71.43,
+      "mean_confidence_calibration_gap": 0.319,
+      "mean_control_ratio": 0.853
+    },
+    {
+      "persona": "expert",
+      "alternative": "codex_native",
+      "scripts": 7,
+      "completion_rate": 0.857,
+      "mean_task_seconds": 179.29,
+      "mean_choices": 7.43,
+      "mean_terms": 9.86,
+      "mean_step_count": 4.14,
+      "mean_errors": 0.29,
+      "mean_recovery_seconds": 7.86,
+      "mean_confidence_calibration_gap": 0.157,
+      "mean_control_ratio": 0.894
+    },
+    {
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "scripts": 7,
+      "completion_rate": 1,
+      "mean_task_seconds": 160.71,
+      "mean_choices": 6.71,
+      "mean_terms": 8.71,
+      "mean_step_count": 3.86,
+      "mean_errors": 0.14,
+      "mean_recovery_seconds": 12.14,
+      "mean_confidence_calibration_gap": 0.07,
+      "mean_control_ratio": 0.954
+    },
+    {
+      "persona": "expert",
+      "alternative": "manual_checklist",
+      "scripts": 7,
+      "completion_rate": 1,
+      "mean_task_seconds": 250.71,
+      "mean_choices": 9.86,
+      "mean_terms": 10,
+      "mean_step_count": 3.86,
+      "mean_errors": 0.29,
+      "mean_recovery_seconds": 27.14,
+      "mean_confidence_calibration_gap": 0.131,
+      "mean_control_ratio": 0.934
+    }
+  ],
+  "best_current": [
+    {
+      "journey": "new-machine-restore",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 425,
+      "choice_count": 6,
+      "step_count": 4
+    },
+    {
+      "journey": "new-machine-restore",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 155,
+      "choice_count": 6,
+      "step_count": 4
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "novice",
+      "alternative": "codex_native",
+      "task_seconds": 190,
+      "choice_count": 3,
+      "step_count": 3
+    },
+    {
+      "journey": "switch-project-context",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 85,
+      "choice_count": 4,
+      "step_count": 4
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 520,
+      "choice_count": 7,
+      "step_count": 4
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 170,
+      "choice_count": 7,
+      "step_count": 4
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 520,
+      "choice_count": 8,
+      "step_count": 3
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 215,
+      "choice_count": 9,
+      "step_count": 4
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 510,
+      "choice_count": 10,
+      "step_count": 2
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 200,
+      "choice_count": 11,
+      "step_count": 3
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "novice",
+      "alternative": "manual_checklist",
+      "task_seconds": 260,
+      "choice_count": 4,
+      "step_count": 1
+    },
+    {
+      "journey": "inspect-provenance",
+      "persona": "expert",
+      "alternative": "codex_native",
+      "task_seconds": 115,
+      "choice_count": 5,
+      "step_count": 3
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "novice",
+      "alternative": "chezmoi_git",
+      "task_seconds": 440,
+      "choice_count": 4,
+      "step_count": 5
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "persona": "expert",
+      "alternative": "chezmoi_git",
+      "task_seconds": 150,
+      "choice_count": 4,
+      "step_count": 5
+    }
+  ],
+  "vocabulary": {
+    "correct": 18,
+    "total": 18,
+    "accuracy": 1,
+    "cases": [
+      {
+        "id": "object-positive",
+        "expected": "object",
+        "actual": "object",
+        "correct": true
+      },
+      {
+        "id": "object-enumeration",
+        "expected": "object",
+        "actual": "object",
+        "correct": true
+      },
+      {
+        "id": "object-not-file",
+        "expected": "object",
+        "actual": "object",
+        "correct": true
+      },
+      {
+        "id": "collection-positive",
+        "expected": "collection",
+        "actual": "collection",
+        "correct": true
+      },
+      {
+        "id": "collection-curated",
+        "expected": "collection",
+        "actual": "collection",
+        "correct": true
+      },
+      {
+        "id": "collection-dependencies",
+        "expected": "collection",
+        "actual": "collection",
+        "correct": true
+      },
+      {
+        "id": "context-positive",
+        "expected": "context",
+        "actual": "context",
+        "correct": true
+      },
+      {
+        "id": "context-status",
+        "expected": "context",
+        "actual": "context",
+        "correct": true
+      },
+      {
+        "id": "context-precedence",
+        "expected": "context",
+        "actual": "context",
+        "correct": true
+      },
+      {
+        "id": "package-positive",
+        "expected": "package",
+        "actual": "package",
+        "correct": true
+      },
+      {
+        "id": "package-channel-contrast",
+        "expected": "package",
+        "actual": "package",
+        "correct": true
+      },
+      {
+        "id": "package-safety",
+        "expected": "package",
+        "actual": "package",
+        "correct": true
+      },
+      {
+        "id": "channel-positive",
+        "expected": "channel",
+        "actual": "channel",
+        "correct": true
+      },
+      {
+        "id": "channel-enumeration",
+        "expected": "channel",
+        "actual": "channel",
+        "correct": true
+      },
+      {
+        "id": "channel-route",
+        "expected": "channel",
+        "actual": "channel",
+        "correct": true
+      },
+      {
+        "id": "transaction-positive",
+        "expected": "transaction",
+        "actual": "transaction",
+        "correct": true
+      },
+      {
+        "id": "transaction-verbs",
+        "expected": "transaction",
+        "actual": "transaction",
+        "correct": true
+      },
+      {
+        "id": "transaction-not-package",
+        "expected": "transaction",
+        "actual": "transaction",
+        "correct": true
+      }
+    ]
+  },
+  "spine_budgets": [
+    {
+      "journey": "new-machine-restore",
+      "novice_choice_cap": 3,
+      "max_novice_steps": 5,
+      "max_recovery_seconds": 120
+    },
+    {
+      "journey": "switch-project-context",
+      "novice_choice_cap": 1,
+      "max_novice_steps": 3,
+      "max_recovery_seconds": 60
+    },
+    {
+      "journey": "reconcile-sync-conflict",
+      "novice_choice_cap": 4,
+      "max_novice_steps": 6,
+      "max_recovery_seconds": 180
+    },
+    {
+      "journey": "share-governed-team-collection",
+      "novice_choice_cap": 4,
+      "max_novice_steps": 6,
+      "max_recovery_seconds": 120
+    },
+    {
+      "journey": "publish-safe-public-subset",
+      "novice_choice_cap": 5,
+      "max_novice_steps": 7,
+      "max_recovery_seconds": 120
+    },
+    {
+      "journey": "inspect-provenance",
+      "novice_choice_cap": 1,
+      "max_novice_steps": 2,
+      "max_recovery_seconds": 30
+    },
+    {
+      "journey": "recover-interrupted-apply",
+      "novice_choice_cap": 2,
+      "max_novice_steps": 4,
+      "max_recovery_seconds": 90
+    }
+  ],
+  "limitations": [
+    "MODELED timings are fixed task weights, not observed human performance.",
+    "The deterministic proxy tests completeness and contrast; it does not establish human comprehension.",
+    "Alternatives are scored only inside the pinned fixture and documented tuned setup."
+  ]
+}

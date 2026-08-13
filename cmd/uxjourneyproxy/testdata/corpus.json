@@ -1,0 +1,738 @@
+{
+  "schema": "fak-ux-journey-corpus/1",
+  "study_id": "github-6597-managed-context-cognitive-load",
+  "as_of": "2026-08-13",
+  "revision": "883662e2514288b0198052b8ec90ef7870e8dcee",
+  "provenance": "MODELED",
+  "privacy": {
+    "fixture_only": true,
+    "forbidden_inputs": [
+      "real credentials or tokens",
+      "real conversation or shell history",
+      "private repository contents or hostnames",
+      "participant home-directory paths",
+      "corporate-only policy or identity data"
+    ],
+    "allowed_synthetic": [
+      "reserved example.invalid hostnames",
+      "fake token shapes marked TEST_ONLY",
+      "isolated temporary homes",
+      "synthetic skills, policies, profiles, and receipts"
+    ],
+    "retention": "Commit only the frozen synthetic corpus and aggregate scores; retain no participant transcript or environment dump."
+  },
+  "sources": [
+    {
+      "id": "codex-config-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "Codex configuration reference",
+      "locators": ["https://learn.chatgpt.com/docs/config-file/config-reference"],
+      "pin": "current page fetched 2026-08-13; local Codex CLI 0.147.0",
+      "accessed": "2026-08-13",
+      "evidence": "User and project config are separate, named profiles are separate files, and project config cannot override several machine-local keys."
+    },
+    {
+      "id": "codex-skills-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "Build skills",
+      "locators": ["https://learn.chatgpt.com/docs/build-skills"],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Codex loads skills from distinct repository, user, admin, and system scopes."
+    },
+    {
+      "id": "codex-cli-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "Codex developer commands and AGENTS.md scope",
+      "locators": ["https://learn.chatgpt.com/docs/developer-commands?surface=cli", "https://learn.chatgpt.com/docs/agent-configuration/agents-md"],
+      "pin": "current pages fetched 2026-08-13; local Codex CLI 0.147.0",
+      "accessed": "2026-08-13",
+      "evidence": "Resume is session- and directory-aware; AGENTS.md instructions merge by global/project directory scope."
+    },
+    {
+      "id": "codex-plugins-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "OpenAI plugin package, submission, security, and privacy documentation",
+      "locators": ["https://developers.openai.com/plugins/build/plugins", "https://developers.openai.com/plugins/deploy/submission", "https://developers.openai.com/plugins/guides/security-privacy"],
+      "pin": "current pages fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "A native plugin has documented package, connect/test, submission, and security/privacy surfaces."
+    },
+    {
+      "id": "chezmoi-setup-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "chezmoi setup",
+      "locators": ["https://www.chezmoi.io/user-guide/setup/"],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Common source state and machine-local config are separate; a new machine can init, diff, and apply from a hosted repository."
+    },
+    {
+      "id": "chezmoi-apply-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "chezmoi apply reference",
+      "locators": ["https://www.chezmoi.io/reference/commands/apply/"],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Apply supports dry-run/selectors and prompts when a destination changed since the last write."
+    },
+    {
+      "id": "chezmoi-merge-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "chezmoi merge",
+      "locators": ["https://www.chezmoi.io/user-guide/tools/merge/"],
+      "pin": "current page fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Merge reconciles destination, source, and rendered target states."
+    },
+    {
+      "id": "git-2.55-merge",
+      "kind": "primary-documentation",
+      "title": "git-merge documentation",
+      "locators": ["https://git-scm.com/docs/git-merge"],
+      "pin": "manual latest version 2.55.0; merge text last changed in 2.54.0; local Git 2.51.0.windows.1",
+      "accessed": "2026-08-13",
+      "evidence": "A conflict stops the merge; continue and abort are explicit, with an honest warning about restoring dirty pre-merge state."
+    },
+    {
+      "id": "github-repository-security-2026-08-13",
+      "kind": "primary-documentation",
+      "title": "GitHub repository visibility and secret scanning",
+      "locators": ["https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories", "https://docs.github.com/en/code-security/concepts/secret-security/secret-scanning"],
+      "pin": "current pages fetched 2026-08-13",
+      "accessed": "2026-08-13",
+      "evidence": "Visibility controls exposure; public repositories increase risk and secret/security controls mitigate but do not erase it."
+    },
+    {
+      "id": "local-fak-roots-883662e",
+      "kind": "repository-evidence",
+      "title": "fak managed-context, receipt, and disambiguation seams",
+      "locators": ["internal/contextq/contextq.go", "internal/contextq/diff.go", "internal/agent/receipt.go", "cmd/fak/session_receipt.go", "internal/disambiguation/entry.go", "internal/registrations/registrations.go"],
+      "pin": "883662e2514288b0198052b8ec90ef7870e8dcee",
+      "accessed": "2026-08-13",
+      "evidence": "Existing seams expose typed context materialization/diff, witnessed receipts, vocabulary provenance, and the built-in driver inventory, but not the proposed portability transaction."
+    }
+  ],
+  "alternatives": [
+    {
+      "id": "codex_native",
+      "name": "Codex native configuration, skills, AGENTS.md, profiles, sessions, and plugins",
+      "tuned_setup": [
+        "Project AGENTS.md, .codex/config.toml, and repo-scoped skills are already version controlled.",
+        "User config and profiles are separately backed up without auth material.",
+        "The operator uses named profiles, directory-scoped resume, plugin packaging, and JSON output where documented."
+      ],
+      "source_ids": ["codex-config-2026-08-13", "codex-skills-2026-08-13", "codex-cli-2026-08-13", "codex-plugins-2026-08-13"],
+      "limit": "Native surfaces are scoped and capable, but they do not expose one portable identity, transaction, or receipt spanning configuration, skills, instructions, sessions, and plugins."
+    },
+    {
+      "id": "chezmoi_git",
+      "name": "chezmoi plus tuned Git repository workflow",
+      "tuned_setup": [
+        "The source state is already in a private remote with templates and machine-local data separated.",
+        "Secrets use password-manager references or age encryption; dry-run diff precedes apply.",
+        "Git review, signed tags, protected branches, and secret scanning are available for team/public flows."
+      ],
+      "source_ids": ["chezmoi-setup-2026-08-13", "chezmoi-apply-2026-08-13", "chezmoi-merge-2026-08-13", "git-2.55-merge", "github-repository-security-2026-08-13"],
+      "limit": "File desired-state and Git history are strong, but typed agent semantics, activation authority, cross-object atomicity, and apply receipts require conventions or extra tooling."
+    },
+    {
+      "id": "manual_checklist",
+      "name": "Tuned documented manual archive, copy, review, and recovery procedure",
+      "tuned_setup": [
+        "A maintained checklist names every known root, exclusion, verification, and rollback step.",
+        "The operator uses checksums, an encrypted archive, a staging directory, and a written change log.",
+        "Team/public changes use a second-person review and a non-executing inspection directory."
+      ],
+      "source_ids": ["local-fak-roots-883662e", "git-2.55-merge", "github-repository-security-2026-08-13"],
+      "limit": "The procedure can preserve control, but users must maintain the inventory, ordering, trust, and rollback model themselves."
+    }
+  ],
+  "actions": {
+    "g.privacy-review": {
+      "label": "classify scope and remove secret/private/machine-local values",
+      "seconds": {"novice": 120, "expert": 45},
+      "decisions": 2,
+      "commands": 1,
+      "concepts": ["scope", "sensitivity"],
+      "controls": ["redaction_policy", "egress_policy"],
+      "effects": ["secrets_excluded", "private_excluded", "secret_scan_passed"]
+    },
+    "g.behavior-verify": {
+      "label": "run a behavior read-back against the intended active configuration",
+      "seconds": {"novice": 90, "expert": 35},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["behavior oracle"],
+      "controls": ["behavior_oracle", "machine_output"],
+      "effects": ["behavior_verified"]
+    },
+    "g.provenance-capture": {
+      "label": "capture source revision, content digest, and change record",
+      "seconds": {"novice": 75, "expert": 25},
+      "decisions": 1,
+      "commands": 2,
+      "concepts": ["content identity", "provenance", "revision"],
+      "controls": ["source_revision", "raw_manifest", "machine_output"],
+      "effects": ["provenance_preserved", "immutable_identity"]
+    },
+    "g.snapshot-prior": {
+      "label": "snapshot the prior state and record the rollback anchor",
+      "seconds": {"novice": 75, "expert": 25},
+      "decisions": 1,
+      "commands": 2,
+      "concepts": ["rollback anchor"],
+      "controls": ["checkpoint_policy", "abort", "rollback"],
+      "effects": ["prior_preserved", "rollback_available"]
+    },
+    "g.diff-explain": {
+      "label": "inspect the resolved diff and active precedence",
+      "seconds": {"novice": 70, "expert": 25},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["precedence", "source state", "target state"],
+      "controls": ["diff", "precedence_override", "machine_output"],
+      "effects": ["state_explained", "changes_identified"]
+    },
+    "g.receipt-verify": {
+      "label": "read the journal or receipt and verify the final state",
+      "seconds": {"novice": 80, "expert": 25},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["journal", "receipt", "reason code"],
+      "controls": ["journal", "reason_codes", "machine_output", "policy_decision"],
+      "effects": ["receipt_verified", "trust_status_identified"]
+    },
+
+    "restore.codex-locate": {
+      "label": "identify user config, profiles, repo instructions, skills, and saved sessions",
+      "seconds": {"novice": 180, "expert": 65},
+      "decisions": 3,
+      "commands": 3,
+      "concepts": ["AGENTS scope", "Codex home", "profile", "skill scope", "session scope"],
+      "controls": ["selectors", "target_scope"],
+      "effects": []
+    },
+    "restore.codex-copy": {
+      "label": "clone repo-scoped state and copy non-auth user config and profiles",
+      "seconds": {"novice": 180, "expert": 70},
+      "decisions": 2,
+      "commands": 4,
+      "concepts": ["project trust", "user scope"],
+      "controls": ["selectors", "target_scope"],
+      "effects": ["inventory_restored", "secrets_excluded"]
+    },
+    "restore.codex-login": {
+      "label": "authenticate independently on the new machine",
+      "seconds": {"novice": 90, "expert": 45},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["credential boundary"],
+      "controls": [],
+      "effects": ["secrets_excluded"]
+    },
+    "restore.codex-session-miss": {
+      "label": "attempt directory-scoped resume and discover the old local session is absent",
+      "seconds": {"novice": 100, "expert": 35},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["session storage"],
+      "controls": [],
+      "effects": [],
+      "errors": 1,
+      "recovery_phase": true
+    },
+    "restore.chezmoi-init": {
+      "label": "initialize the tuned private source on the new machine without applying",
+      "seconds": {"novice": 110, "expert": 40},
+      "decisions": 2,
+      "commands": 1,
+      "concepts": ["source state", "machine data", "credential reference"],
+      "controls": ["selectors", "target_scope", "redaction_policy"],
+      "effects": ["inventory_restored", "secrets_excluded"]
+    },
+    "restore.chezmoi-preview-apply": {
+      "label": "preview the desired-state diff, then apply the selected agent roots",
+      "seconds": {"novice": 150, "expert": 55},
+      "decisions": 2,
+      "commands": 2,
+      "concepts": ["destination state", "source state", "target state"],
+      "controls": ["selectors", "target_scope", "machine_output"],
+      "effects": ["inventory_restored"]
+    },
+    "restore.manual-inventory": {
+      "label": "walk the maintained root checklist and mark the files to restore",
+      "seconds": {"novice": 300, "expert": 120},
+      "decisions": 5,
+      "commands": 5,
+      "concepts": ["AGENTS scope", "config precedence", "history root", "profile", "skill root"],
+      "controls": ["selectors", "target_scope"],
+      "effects": []
+    },
+    "restore.manual-copy": {
+      "label": "decrypt into staging, copy selected roots, and set permissions",
+      "seconds": {"novice": 240, "expert": 100},
+      "decisions": 3,
+      "commands": 5,
+      "concepts": ["archive layout", "file permissions"],
+      "controls": ["selectors", "target_scope"],
+      "effects": ["inventory_restored"]
+    },
+
+    "switch.codex-select": {
+      "label": "launch the target directory with its named Codex profile",
+      "seconds": {"novice": 65, "expert": 20},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["current directory", "profile layer", "project trust"],
+      "controls": ["target_scope", "precedence_override"],
+      "effects": ["target_active"]
+    },
+    "switch.codex-resume": {
+      "label": "resume the target directory's saved session while leaving the prior session intact",
+      "seconds": {"novice": 55, "expert": 15},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["directory-scoped session"],
+      "controls": ["checkpoint_policy"],
+      "effects": ["prior_preserved"]
+    },
+    "switch.chezmoi-select": {
+      "label": "select the named config/source pair and preview its destination diff",
+      "seconds": {"novice": 115, "expert": 40},
+      "decisions": 2,
+      "commands": 2,
+      "concepts": ["config path", "destination state", "source directory"],
+      "controls": ["target_scope", "diff", "precedence_override"],
+      "effects": ["state_explained"]
+    },
+    "switch.chezmoi-apply": {
+      "label": "apply the selected source to the agent roots",
+      "seconds": {"novice": 75, "expert": 25},
+      "decisions": 1,
+      "commands": 1,
+      "concepts": ["target state"],
+      "controls": ["atomicity"],
+      "effects": ["target_active"]
+    },
+    "switch.manual-choose": {
+      "label": "choose the project manifest and calculate precedence by checklist",
+      "seconds": {"novice": 160, "expert": 60},
+      "decisions": 4,
+      "commands": 2,
+      "concepts": ["config precedence", "project root", "scope"],
+      "controls": ["target_scope", "precedence_override"],
+      "effects": ["state_explained"]
+    },
+    "switch.manual-activate": {
+      "label": "replace links/files from staging and verify selected roots",
+      "seconds": {"novice": 150, "expert": 55},
+      "decisions": 2,
+      "commands": 4,
+      "concepts": ["activation order"],
+      "controls": ["diff"],
+      "effects": ["target_active"]
+    },
+
+    "conflict.git-detect": {
+      "label": "fetch/pull and stop on the synthetic text conflict",
+      "seconds": {"novice": 80, "expert": 25},
+      "decisions": 1,
+      "commands": 2,
+      "concepts": ["base", "ours", "theirs"],
+      "controls": ["merge_tool", "abort"],
+      "effects": ["conflict_detected"],
+      "errors": 1
+    },
+    "conflict.git-resolve": {
+      "label": "inspect the three versions, resolve the semantic choice, and stage it",
+      "seconds": {"novice": 240, "expert": 80},
+      "decisions": 4,
+      "commands": 3,
+      "concepts": ["merge base", "semantic conflict", "staging index"],
+      "controls": ["merge_tool", "per_object_resolution", "tombstone_policy"],
+      "effects": ["resolution_applied"]
+    },
+    "conflict.git-finish": {
+      "label": "commit, push, pull again, and verify convergence",
+      "seconds": {"novice": 150, "expert": 50},
+      "decisions": 2,
+      "commands": 4,
+      "concepts": ["commit", "remote head"],
+      "controls": ["machine_output"],
+      "effects": ["converged"]
+    },
+    "conflict.chezmoi-merge": {
+      "label": "merge destination, source, and rendered target, then preview apply",
+      "seconds": {"novice": 210, "expert": 65},
+      "decisions": 3,
+      "commands": 3,
+      "concepts": ["destination state", "source state", "target state"],
+      "controls": ["merge_tool", "per_object_resolution", "abort", "machine_output"],
+      "effects": ["conflict_detected", "resolution_applied"]
+    },
+    "conflict.chezmoi-finish": {
+      "label": "apply the merge, commit/push source state, and verify a clean diff",
+      "seconds": {"novice": 145, "expert": 45},
+      "decisions": 2,
+      "commands": 4,
+      "concepts": ["desired state", "remote head"],
+      "controls": ["machine_output"],
+      "effects": ["converged"]
+    },
+    "conflict.manual-diff3": {
+      "label": "copy all three versions to staging and perform a line/semantic diff",
+      "seconds": {"novice": 330, "expert": 120},
+      "decisions": 5,
+      "commands": 5,
+      "concepts": ["base", "ours", "theirs", "semantic conflict"],
+      "controls": ["merge_tool", "per_object_resolution", "tombstone_policy", "abort"],
+      "effects": ["conflict_detected", "resolution_applied"],
+      "errors": 1
+    },
+    "conflict.manual-finish": {
+      "label": "copy the resolution to both sides and compare checksums",
+      "seconds": {"novice": 180, "expert": 65},
+      "decisions": 2,
+      "commands": 4,
+      "concepts": ["checksum", "replica"],
+      "controls": [],
+      "effects": ["converged"]
+    },
+
+    "team.repo-curate": {
+      "label": "create a reviewed repository subset with owners, policy, and version pin",
+      "seconds": {"novice": 300, "expert": 110},
+      "decisions": 5,
+      "commands": 5,
+      "concepts": ["activation authority", "owner", "policy overlay", "version pin"],
+      "controls": ["owner", "approver", "policy_overlay", "version_pin", "audit"],
+      "effects": ["governed_subset_shared", "approval_recorded", "provenance_preserved"]
+    },
+    "team.repo-clone-inactive": {
+      "label": "clone/inspect the approved subset without activating it",
+      "seconds": {"novice": 100, "expert": 35},
+      "decisions": 1,
+      "commands": 2,
+      "concepts": ["discovery versus activation"],
+      "controls": ["rollout_ring", "machine_output"],
+      "effects": ["inactive_by_default"]
+    },
+    "team.codex-scope": {
+      "label": "place team skills and instructions at repository scope and verify load paths",
+      "seconds": {"novice": 135, "expert": 45},
+      "decisions": 2,
+      "commands": 2,
+      "concepts": ["AGENTS scope", "repo skill scope"],
+      "controls": ["rollout_ring"],
+      "effects": []
+    },
+    "team.manual-bundle": {
+      "label": "assemble the approved subset, manifest, policy, and owner record",
+      "seconds": {"novice": 420, "expert": 160},
+      "decisions": 7,
+      "commands": 7,
+      "concepts": ["activation authority", "approval", "owner", "policy", "retention", "version"],
+      "controls": ["owner", "approver", "policy_overlay", "version_pin", "audit", "revocation"],
+      "effects": ["governed_subset_shared", "approval_recorded", "provenance_preserved"]
+    },
+    "team.manual-inspect": {
+      "label": "transfer to a quarantine directory and inspect without activation",
+      "seconds": {"novice": 150, "expert": 55},
+      "decisions": 2,
+      "commands": 3,
+      "concepts": ["quarantine directory"],
+      "controls": [],
+      "effects": ["inactive_by_default"]
+    },
+
+    "publish.codex-package": {
+      "label": "package the safe plugin subset with metadata, compatibility, and license",
+      "seconds": {"novice": 260, "expert": 90},
+      "decisions": 5,
+      "commands": 3,
+      "concepts": ["compatibility", "dependency", "license", "plugin manifest"],
+      "controls": ["license", "compatibility", "dependency_policy", "pin"],
+      "effects": ["license_recorded", "immutable_identity", "provenance_preserved"]
+    },
+    "publish.codex-submit": {
+      "label": "connect/test, submit the plugin, and inspect it as a consumer before activation",
+      "seconds": {"novice": 240, "expert": 85},
+      "decisions": 4,
+      "commands": 3,
+      "concepts": ["publisher review", "install versus activate"],
+      "controls": ["signing", "deprecation", "revocation"],
+      "effects": ["public_subset_published", "inactive_inspection"]
+    },
+    "publish.git-curate": {
+      "label": "curate a public repository, record license/compatibility, and scan history/content",
+      "seconds": {"novice": 300, "expert": 105},
+      "decisions": 6,
+      "commands": 6,
+      "concepts": ["compatibility", "license", "repository visibility", "secret scanning"],
+      "controls": ["license", "compatibility", "egress_policy", "dependency_policy"],
+      "effects": ["license_recorded", "secret_scan_passed", "provenance_preserved"]
+    },
+    "publish.git-release": {
+      "label": "create a signed immutable tag/release and inspect a fresh clone without activation",
+      "seconds": {"novice": 210, "expert": 70},
+      "decisions": 4,
+      "commands": 5,
+      "concepts": ["content identity", "signature", "tag"],
+      "controls": ["signing", "pin", "deprecation", "revocation", "machine_output"],
+      "effects": ["public_subset_published", "immutable_identity", "inactive_inspection"]
+    },
+    "publish.manual-curate": {
+      "label": "copy a public subset to staging and complete privacy/license/compatibility checklists",
+      "seconds": {"novice": 540, "expert": 210},
+      "decisions": 9,
+      "commands": 7,
+      "concepts": ["compatibility", "dependency", "license", "private history", "scope", "sensitivity"],
+      "controls": ["license", "compatibility", "egress_policy", "dependency_policy"],
+      "effects": ["license_recorded", "secret_scan_passed", "provenance_preserved"]
+    },
+    "publish.manual-release": {
+      "label": "checksum/sign the archive, upload it, and inspect a download without activation",
+      "seconds": {"novice": 300, "expert": 120},
+      "decisions": 5,
+      "commands": 6,
+      "concepts": ["content identity", "signature", "transport"],
+      "controls": ["signing", "pin", "deprecation", "revocation"],
+      "effects": ["public_subset_published", "immutable_identity", "inactive_inspection"]
+    },
+
+    "provenance.codex-locate": {
+      "label": "resolve the loaded skill/instruction/config source by scope",
+      "seconds": {"novice": 130, "expert": 45},
+      "decisions": 2,
+      "commands": 3,
+      "concepts": ["AGENTS merge order", "config layer", "skill scope"],
+      "controls": ["dependency_graph", "raw_manifest"],
+      "effects": ["origin_identified"]
+    },
+    "provenance.git-inspect": {
+      "label": "read revision history/diff and verify the signed source reference",
+      "seconds": {"novice": 150, "expert": 45},
+      "decisions": 2,
+      "commands": 3,
+      "concepts": ["commit", "diff", "signature", "tag"],
+      "controls": ["signature_verify", "source_revision", "machine_output"],
+      "effects": ["version_identified", "changes_identified", "trust_status_identified"]
+    },
+    "provenance.chezmoi-map": {
+      "label": "map destination to source, render the target, and inspect Git provenance",
+      "seconds": {"novice": 160, "expert": 50},
+      "decisions": 2,
+      "commands": 4,
+      "concepts": ["destination state", "source state", "target state"],
+      "controls": ["dependency_graph", "raw_manifest", "source_revision", "machine_output"],
+      "effects": ["origin_identified", "version_identified", "changes_identified"]
+    },
+    "provenance.manual-manifest": {
+      "label": "locate the manifest/change log, compare checksum, and read approval/signature",
+      "seconds": {"novice": 260, "expert": 100},
+      "decisions": 4,
+      "commands": 4,
+      "concepts": ["approval", "change log", "checksum", "manifest", "signature"],
+      "controls": ["raw_manifest", "signature_verify", "source_revision", "policy_decision"],
+      "effects": ["origin_identified", "version_identified", "changes_identified", "trust_status_identified"]
+    },
+
+    "recover.interruption": {
+      "label": "inject a deterministic interruption after the first destination mutation",
+      "seconds": {"novice": 25, "expert": 15},
+      "decisions": 0,
+      "commands": 1,
+      "concepts": ["partial apply"],
+      "controls": ["timeout"],
+      "effects": ["interruption_detected"],
+      "errors": 1
+    },
+    "recover.codex-resume": {
+      "label": "resume the interrupted Codex conversation and reconstruct the attempted file action",
+      "seconds": {"novice": 150, "expert": 55},
+      "decisions": 2,
+      "commands": 2,
+      "concepts": ["session transcript", "working tree"],
+      "controls": ["resume"],
+      "effects": ["resume_or_rollback"],
+      "recovery_phase": true
+    },
+    "recover.chezmoi-restore": {
+      "label": "restore the pre-apply snapshot and confirm the prior active files",
+      "seconds": {"novice": 150, "expert": 50},
+      "decisions": 1,
+      "commands": 3,
+      "concepts": ["destination state", "rollback anchor"],
+      "controls": ["rollback", "reason_codes"],
+      "effects": ["prior_active", "resume_or_rollback"],
+      "recovery_phase": true
+    },
+    "recover.chezmoi-retry": {
+      "label": "preview and rerun the idempotent desired-state apply",
+      "seconds": {"novice": 110, "expert": 35},
+      "decisions": 1,
+      "commands": 2,
+      "concepts": ["idempotency", "target state"],
+      "controls": ["idempotency", "resume", "machine_output"],
+      "effects": ["resume_or_rollback"],
+      "recovery_phase": true
+    },
+    "recover.manual-restore": {
+      "label": "consult the change log, restore the pre-copy snapshot, and compare checksums",
+      "seconds": {"novice": 260, "expert": 100},
+      "decisions": 3,
+      "commands": 5,
+      "concepts": ["change log", "partial copy", "rollback anchor"],
+      "controls": ["journal", "rollback", "reason_codes"],
+      "effects": ["prior_active", "resume_or_rollback"],
+      "recovery_phase": true
+    },
+    "recover.manual-retry": {
+      "label": "restart the checklist from staging and verify every copied checksum",
+      "seconds": {"novice": 240, "expert": 90},
+      "decisions": 3,
+      "commands": 5,
+      "concepts": ["idempotency", "staging"],
+      "controls": ["idempotency", "resume", "machine_output"],
+      "effects": ["resume_or_rollback"],
+      "recovery_phase": true
+    }
+  },
+  "journeys": [
+    {
+      "id": "new-machine-restore",
+      "name": "Restore a mixed managed-agent setup on a new machine",
+      "outcome": "The intended non-secret configuration works, provenance survives, and credentials are re-established rather than copied.",
+      "required_effects": ["inventory_restored", "secrets_excluded", "behavior_verified", "provenance_preserved"],
+      "required_expert_controls": ["selectors", "redaction_policy", "target_scope", "behavior_oracle", "source_revision", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["restore.codex-locate", "restore.codex-copy", "restore.codex-login", "restore.codex-session-miss", "g.behavior-verify"], "confidence": 0.65},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["restore.codex-locate", "restore.codex-copy", "restore.codex-login", "g.provenance-capture", "g.behavior-verify"], "confidence": 0.88},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["restore.chezmoi-init", "restore.chezmoi-preview-apply", "g.provenance-capture", "g.behavior-verify"], "confidence": 0.82},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["restore.chezmoi-init", "restore.chezmoi-preview-apply", "g.provenance-capture", "g.behavior-verify"], "confidence": 0.94},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["restore.manual-inventory", "g.privacy-review", "restore.manual-copy", "g.provenance-capture", "g.behavior-verify"], "confidence": 0.72},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["restore.manual-inventory", "g.privacy-review", "restore.manual-copy", "g.provenance-capture", "g.behavior-verify"], "confidence": 0.9}
+      ]
+    },
+    {
+      "id": "switch-project-context",
+      "name": "Switch from one project context to another without losing the prior one",
+      "outcome": "The target is active, the prior state remains recoverable, and precedence is explainable.",
+      "required_effects": ["target_active", "prior_preserved", "state_explained"],
+      "required_expert_controls": ["target_scope", "precedence_override", "checkpoint_policy", "diff", "atomicity", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["switch.codex-select", "switch.codex-resume", "g.diff-explain"], "confidence": 0.82},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["g.snapshot-prior", "switch.codex-select", "switch.codex-resume", "g.diff-explain"], "confidence": 0.95},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["g.snapshot-prior", "switch.chezmoi-select", "switch.chezmoi-apply"], "confidence": 0.78},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["g.snapshot-prior", "switch.chezmoi-select", "switch.chezmoi-apply", "g.diff-explain"], "confidence": 0.92},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["g.snapshot-prior", "switch.manual-choose", "switch.manual-activate"], "confidence": 0.7},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["g.snapshot-prior", "switch.manual-choose", "switch.manual-activate", "g.diff-explain"], "confidence": 0.88}
+      ]
+    },
+    {
+      "id": "reconcile-sync-conflict",
+      "name": "Reconcile concurrent edits to a managed policy and skill",
+      "outcome": "Ambiguity is surfaced, the chosen semantic resolution converges, behavior is checked, and abort remains available.",
+      "required_effects": ["conflict_detected", "resolution_applied", "converged", "rollback_available", "behavior_verified"],
+      "required_expert_controls": ["merge_tool", "per_object_resolution", "tombstone_policy", "abort", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["g.snapshot-prior", "conflict.git-detect", "conflict.git-resolve", "conflict.git-finish", "g.behavior-verify"], "confidence": 0.72},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["g.snapshot-prior", "conflict.git-detect", "conflict.git-resolve", "conflict.git-finish", "g.behavior-verify"], "confidence": 0.9},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["g.snapshot-prior", "conflict.chezmoi-merge", "conflict.chezmoi-finish", "g.behavior-verify"], "confidence": 0.8},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["g.snapshot-prior", "conflict.chezmoi-merge", "conflict.chezmoi-finish", "g.behavior-verify"], "confidence": 0.94},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["g.snapshot-prior", "conflict.manual-diff3", "conflict.manual-finish", "g.behavior-verify"], "confidence": 0.65},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["g.snapshot-prior", "conflict.manual-diff3", "conflict.manual-finish", "g.behavior-verify"], "confidence": 0.86}
+      ]
+    },
+    {
+      "id": "share-governed-team-collection",
+      "name": "Share an approved team subset without private state or automatic activation",
+      "outcome": "A governed subset is approved, versioned, auditable, private-safe, and inspectable before activation.",
+      "required_effects": ["governed_subset_shared", "private_excluded", "approval_recorded", "inactive_by_default", "provenance_preserved"],
+      "required_expert_controls": ["owner", "approver", "policy_overlay", "version_pin", "rollout_ring", "audit", "revocation", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["g.privacy-review", "team.repo-curate", "team.codex-scope", "team.repo-clone-inactive"], "confidence": 0.76},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["g.privacy-review", "team.repo-curate", "team.codex-scope", "team.repo-clone-inactive", "g.receipt-verify"], "confidence": 0.9},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["g.privacy-review", "team.repo-curate", "team.repo-clone-inactive"], "confidence": 0.8},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["g.privacy-review", "team.repo-curate", "team.repo-clone-inactive", "g.receipt-verify"], "confidence": 0.92},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["g.privacy-review", "team.manual-bundle", "team.manual-inspect"], "confidence": 0.68},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["g.privacy-review", "team.manual-bundle", "team.manual-inspect", "g.receipt-verify"], "confidence": 0.86}
+      ]
+    },
+    {
+      "id": "publish-safe-public-subset",
+      "name": "Publish a safe reusable subset and inspect it without execution",
+      "outcome": "Public bytes pass safety/license/compatibility checks, have immutable provenance, and remain inactive during inspection.",
+      "required_effects": ["public_subset_published", "secret_scan_passed", "license_recorded", "immutable_identity", "provenance_preserved", "inactive_inspection"],
+      "required_expert_controls": ["license", "compatibility", "signing", "egress_policy", "dependency_policy", "pin", "deprecation", "revocation", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["g.privacy-review", "publish.codex-package", "publish.codex-submit"], "confidence": 0.74},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["g.privacy-review", "publish.codex-package", "publish.codex-submit", "g.provenance-capture"], "confidence": 0.9},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["publish.git-curate", "publish.git-release"], "confidence": 0.78},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["publish.git-curate", "publish.git-release", "g.receipt-verify"], "confidence": 0.92},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["publish.manual-curate", "publish.manual-release"], "confidence": 0.66},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["publish.manual-curate", "publish.manual-release", "g.receipt-verify"], "confidence": 0.84}
+      ]
+    },
+    {
+      "id": "inspect-provenance",
+      "name": "Explain where an active object came from, what changed, and why it is trusted",
+      "outcome": "Origin, version, changes, and trust status are all identified without exposing private content.",
+      "required_effects": ["origin_identified", "version_identified", "changes_identified", "trust_status_identified"],
+      "required_expert_controls": ["raw_manifest", "signature_verify", "dependency_graph", "source_revision", "policy_decision", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["provenance.codex-locate", "provenance.git-inspect"], "confidence": 0.78},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["provenance.codex-locate", "provenance.git-inspect", "g.receipt-verify"], "confidence": 0.92},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["provenance.chezmoi-map", "provenance.git-inspect"], "confidence": 0.82},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["provenance.chezmoi-map", "provenance.git-inspect", "g.receipt-verify"], "confidence": 0.95},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["provenance.manual-manifest"], "confidence": 0.68},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["provenance.manual-manifest", "g.receipt-verify"], "confidence": 0.88}
+      ]
+    },
+    {
+      "id": "recover-interrupted-apply",
+      "name": "Recover after interruption during an apply",
+      "outcome": "The interruption is detected, prior active state is unambiguous, recovery is bounded, and a receipt confirms the result.",
+      "required_effects": ["interruption_detected", "prior_active", "resume_or_rollback", "receipt_verified"],
+      "required_expert_controls": ["journal", "resume", "rollback", "idempotency", "timeout", "reason_codes", "machine_output"],
+      "scripts": [
+        {"persona": "novice", "alternative": "codex_native", "actions": ["recover.interruption", "recover.codex-resume", "g.behavior-verify"], "confidence": 0.62},
+        {"persona": "expert", "alternative": "codex_native", "actions": ["recover.interruption", "recover.codex-resume", "g.receipt-verify"], "confidence": 0.55},
+        {"persona": "novice", "alternative": "chezmoi_git", "actions": ["g.snapshot-prior", "recover.interruption", "recover.chezmoi-restore", "recover.chezmoi-retry", "g.receipt-verify"], "confidence": 0.76},
+        {"persona": "expert", "alternative": "chezmoi_git", "actions": ["g.snapshot-prior", "recover.interruption", "recover.chezmoi-restore", "recover.chezmoi-retry", "g.receipt-verify"], "confidence": 0.92},
+        {"persona": "novice", "alternative": "manual_checklist", "actions": ["g.snapshot-prior", "recover.interruption", "recover.manual-restore", "recover.manual-retry", "g.receipt-verify"], "confidence": 0.68},
+        {"persona": "expert", "alternative": "manual_checklist", "actions": ["g.snapshot-prior", "recover.interruption", "recover.manual-restore", "recover.manual-retry", "g.receipt-verify"], "confidence": 0.86}
+      ]
+    }
+  ],
+  "vocabulary_cases": [
+    {"id": "object-positive", "prompt": "What names the smallest managed typed unit, such as one skill or policy?", "expected": "object"},
+    {"id": "object-enumeration", "prompt": "A skill policy or workflow is one registered managed concept. Which term applies?", "expected": "object"},
+    {"id": "object-not-file", "prompt": "The typed unit may span files and still has one identity. Name it.", "expected": "object"},
+    {"id": "collection-positive", "prompt": "What names an intentional set of managed items and their dependencies?", "expected": "collection"},
+    {"id": "collection-curated", "prompt": "A curated set groups reusable managed items but does not itself activate them. Name it.", "expected": "collection"},
+    {"id": "collection-dependencies", "prompt": "Which term means a dependency-complete set chosen for backup or sharing?", "expected": "collection"},
+    {"id": "context-positive", "prompt": "What names the active view that decides which collections and precedence apply here?", "expected": "context"},
+    {"id": "context-status", "prompt": "The operator asks which collections are active for this project. Which noun answers?", "expected": "context"},
+    {"id": "context-precedence", "prompt": "A named precedence view is selected without changing package identity. Name it.", "expected": "context"},
+    {"id": "package-positive", "prompt": "What is the sealed portable representation with a stable content identity?", "expected": "package"},
+    {"id": "package-channel-contrast", "prompt": "The same digest survives movement through a file, registry, or peer link. Name the artifact, not its route.", "expected": "package"},
+    {"id": "package-safety", "prompt": "A signed redacted artifact carries a collection between machines. Name it.", "expected": "package"},
+    {"id": "channel-positive", "prompt": "What names the transport boundary where bytes move, such as backup storage or a registry?", "expected": "channel"},
+    {"id": "channel-enumeration", "prompt": "Private backup or public registry changes distribution and trust, not content identity. Name this concept.", "expected": "channel"},
+    {"id": "channel-route", "prompt": "A repository registry or peer is the route used to move an unchanged package. Name the route concept.", "expected": "channel"},
+    {"id": "transaction-positive", "prompt": "What names an atomic change that previews apply, emits an undo receipt, and either completes or recovers?", "expected": "transaction"},
+    {"id": "transaction-verbs", "prompt": "Apply switch or merge is previewed and recoverable as one unit. Name that unit.", "expected": "transaction"},
+    {"id": "transaction-not-package", "prompt": "This previewed mutation changes active state and records rollback; it is not the portable artifact. Name it.", "expected": "transaction"}
+  ],
+  "spine_budgets": [
+    {"journey": "new-machine-restore", "novice_choice_cap": 3, "max_novice_steps": 5, "max_recovery_seconds": 120},
+    {"journey": "switch-project-context", "novice_choice_cap": 1, "max_novice_steps": 3, "max_recovery_seconds": 60},
+    {"journey": "reconcile-sync-conflict", "novice_choice_cap": 4, "max_novice_steps": 6, "max_recovery_seconds": 180},
+    {"journey": "share-governed-team-collection", "novice_choice_cap": 4, "max_novice_steps": 6, "max_recovery_seconds": 120},
+    {"journey": "publish-safe-public-subset", "novice_choice_cap": 5, "max_novice_steps": 7, "max_recovery_seconds": 120},
+    {"journey": "inspect-provenance", "novice_choice_cap": 1, "max_novice_steps": 2, "max_recovery_seconds": 30},
+    {"journey": "recover-interrupted-apply", "novice_choice_cap": 2, "max_novice_steps": 4, "max_recovery_seconds": 90}
+  ]
+}
