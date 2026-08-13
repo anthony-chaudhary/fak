@@ -11,6 +11,39 @@ metadata:
 
 # study-repo — turn "look at <repo>" into scoped, witnessed, FILED borrows
 
+## Invocation input contract — bind the target before doing anything else
+
+On explicit invocation, the repository target is normally carried in the **same user
+message as the skill token**, for example:
+
+```text
+$study-repo https://github.com/juliusbrussee/caveman
+$study-repo C:\src\project --quick
+```
+
+Treat the text after `$study-repo` as this run's argument string. Before asking any
+question or emitting a readiness message:
+
+1. Re-read the triggering user message verbatim and extract the first repository URL,
+   local path, package/paper identifier, PR/commit URL, or bare project name after the
+   skill token. Parse `--quick`, `--draft`, and `--subtree <path>` as modifiers; they are
+   not part of the target.
+2. If the client supplied the skill instructions in a follow-up message, retain the target
+   from the immediately preceding invocation message. A skill expansion does **not** erase
+   arguments already present in conversation context.
+3. Ignore client-status debris such as `Conversation interrupted`, `Something went wrong?`,
+   or `/feedback` text appended after the invocation. It is neither a target nor a reason
+   to ask again when a valid target appeared earlier in that message.
+4. Echo the resolved target in one short line and immediately acquire it. **Never respond
+   with “provide the repository/source” when a URL, path, or name is already present in the
+   triggering or immediately preceding invocation message.** Ask only when no plausible
+   target exists anywhere in that invocation context.
+
+Example: for `$study-repo https://github.com/juliusbrussee/caveman` followed by an
+expanded `<skill>...</skill>` payload, resolve the target to
+`https://github.com/juliusbrussee/caveman` and start the deep pass; do not treat the skill
+payload as a new targetless request.
+
 ## Why this skill exists
 
 Someone drops a repo — "look at this" — and the silent failure mode fires: an agent
