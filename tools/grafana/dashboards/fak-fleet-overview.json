@@ -12,7 +12,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -599,6 +599,408 @@
     },
     {
       "type": "row",
+      "title": "Starting goals \u2014 descendants folded by durable root lineage",
+      "id": 211,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "id": 212,
+      "title": "Root goals",
+      "description": "Distinct durable starting goals represented by the registration ledger.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count(fak_fleet_goal_info) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "id": 213,
+      "title": "Goal attribution coverage",
+      "description": "Fraction of gateway-usage rows attributable to exactly one root goal. Unknown and ambiguous joins remain uncovered.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 4,
+        "y": 13
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_fleet_goal_usage_attribution_ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "id": 214,
+      "title": "Goal attempts",
+      "description": "Distinct attempt IDs across root goals.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 13
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(fak_fleet_goal_attempts_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "id": 215,
+      "title": "Goal resumes",
+      "description": "Explicit resume_of_attempt_id edges across root goals.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 13
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(fak_fleet_goal_resumes_total) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "id": 216,
+      "title": "Unattributed usage rows",
+      "description": "Usage rows withheld from goal totals because lineage was missing, unknown, or ambiguous.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 13
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_fleet_goal_usage_rows{attribution=\"unattributed\"} or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "Root goals",
+      "description": "One row per starting goal. Labels are deliberately bounded to root_registration, root_issue, task, state, and outcome; raw session IDs never become goal-table labels.",
+      "type": "table",
+      "id": 217,
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "displayName": "session",
+            "desc": false
+          }
+        ]
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fak_fleet_goal_info",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "fleet": true,
+              "service": true
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
       "title": "Which sessions are live \u2014 click one to drill down",
       "id": 186,
       "collapsed": false,
@@ -606,7 +1008,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 27
       },
       "panels": []
     },
@@ -623,7 +1025,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 28
       },
       "fieldConfig": {
         "defaults": {
@@ -730,7 +1132,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 23
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -845,7 +1247,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 23
+        "y": 38
       },
       "fieldConfig": {
         "defaults": {
@@ -951,7 +1353,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 46
       },
       "fieldConfig": {
         "defaults": {
@@ -1014,7 +1416,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 46
       },
       "fieldConfig": {
         "defaults": {
@@ -1073,7 +1475,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 54
       },
       "panels": []
     },
@@ -1090,7 +1492,7 @@
         "h": 4,
         "w": 3,
         "x": 0,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1150,7 +1552,7 @@
         "h": 4,
         "w": 3,
         "x": 3,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1210,7 +1612,7 @@
         "h": 4,
         "w": 3,
         "x": 6,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1278,7 +1680,7 @@
         "h": 4,
         "w": 3,
         "x": 9,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1338,7 +1740,7 @@
         "h": 4,
         "w": 3,
         "x": 12,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1398,7 +1800,7 @@
         "h": 4,
         "w": 3,
         "x": 15,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1458,7 +1860,7 @@
         "h": 4,
         "w": 3,
         "x": 18,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1518,7 +1920,7 @@
         "h": 4,
         "w": 3,
         "x": 21,
-        "y": 40
+        "y": 55
       },
       "fieldConfig": {
         "defaults": {
@@ -1586,7 +1988,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -1701,7 +2103,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -1780,7 +2182,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {
@@ -1843,7 +2245,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {
@@ -1904,7 +2306,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 75
       },
       "panels": []
     },
@@ -1921,7 +2323,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 76
       },
       "fieldConfig": {
         "defaults": {
@@ -2045,7 +2447,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 69
+        "y": 84
       },
       "fieldConfig": {
         "defaults": {
@@ -2105,7 +2507,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 69
+        "y": 84
       },
       "fieldConfig": {
         "defaults": {
@@ -2165,7 +2567,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 69
+        "y": 84
       },
       "fieldConfig": {
         "defaults": {
@@ -2233,7 +2635,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 69
+        "y": 84
       },
       "fieldConfig": {
         "defaults": {

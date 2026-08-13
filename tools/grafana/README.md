@@ -171,6 +171,12 @@ The **FAK Fleet — Live Sessions & Roll-up** (uid `fak-fleet-overview`) and **F
 — Session Drill-down** (uid `fak-fleet-session`) dashboards are one surface in two
 zoom levels, and they answer the question none of the dashboards above could:
 
+The fleet overview starts with a bounded **starting-goal** section when `--registration-ledger`
+is configured: root identity, outcome state, attempts/resumes, attributed usage, and explicit
+unattributed coverage. Goal labels are limited to `root_registration`, `root_issue`, `task`,
+`state`, and `outcome`; per-session identifiers remain in the existing session drill-down so
+root-goal panels do not multiply cardinality by descendant count.
+
 > *Which sessions are alive right now, and what is each one costing?*
 
 Every other dashboard here is either **aggregate** (the `fleet_*` scores are fleet-wide
