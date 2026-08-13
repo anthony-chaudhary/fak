@@ -35,6 +35,11 @@ func TestNoUnchokepointedDownloadURLs(t *testing.T) {
 	root := repoRoot(t)
 	allow := map[string]bool{
 		"cmd/simpledemo/main.go": true, // the single audited download-url builder
+		// Pinned by immutable repo revision, and cmd/quantdemo/main.go refuses the
+		// artifact unless its bytes+sha256 match ModelBytes/ModelSHA256 — the
+		// property the chokepoint exists to enforce. cmd/ mains cannot import
+		// simpledemo's builder.
+		"cmd/quantdemo/contract.go": true,
 	}
 	offenses, err := ScanForDownloadURLs(root, allow)
 	if err != nil {
