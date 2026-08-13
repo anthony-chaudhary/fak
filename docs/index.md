@@ -159,6 +159,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 
 ## Learn more
 
+- **Token-efficiency field map:** [Awesome Token Efficiency](awesome-token-efficiency.md) — prompt caching, context engineering, KV-cache reduction, serving, and agent-layer methods with loss/fidelity and fak-status labels.
 | If you want… | Read |
 |---|---|
 | **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md) |

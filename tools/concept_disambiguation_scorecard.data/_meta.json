@@ -4364,6 +4364,11 @@
           "category": "incidental",
           "reason": "Direct compatibility name preserved while porting the existing Python lightgap scorecard to its first-class Go leaf.",
           "token": "lightgap_scorecard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local command-line threshold variable, not a repository concept or operator-facing score-debt term",
+          "token": "debtCeiling"
         }
       ],
       "id": "score-debt",
@@ -4376,6 +4381,7 @@
         "TestModeDebtGradeInvariants",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
+        "debtCeiling",
         "flow_debt",
         "lightgap_debt",
         "lightgap_scorecard",

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/pagespublish"
+	"github.com/anthony-chaudhary/fak/internal/seoaeoscore"
 )
 
 type stringList []string
@@ -26,6 +28,22 @@ func main() {
 		root := fs.String("root", "docs", "Pages source directory")
 		_ = fs.Parse(os.Args[2:])
 		report, err = pagespublish.AuditSource(*root)
+	case "seo":
+		fs := flag.NewFlagSet("pagescheck seo", flag.ExitOnError)
+		root := fs.String("root", ".", "repository root")
+		scoreFloor := fs.Float64("minimum-score", 0, "minimum published-corpus score")
+		debtCeiling := fs.Int("maximum-debt", -1, "maximum published-corpus SEO debt (-1 disables)")
+		orphanCeiling := fs.Int("maximum-orphans", -1, "maximum discovery orphans (-1 disables)")
+		_ = fs.Parse(os.Args[2:])
+		payload := seoaeoscore.Build(*root, "published")
+		if err = validateSEO(payload.Corpus, *scoreFloor, *debtCeiling, *orphanCeiling); err == nil {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetEscapeHTML(false)
+			err = enc.Encode(payload)
+			if err == nil {
+				return
+			}
+		}
 	case "artifact":
 		fs := flag.NewFlagSet("pagescheck artifact", flag.ExitOnError)
 		root := fs.String("root", "_site", "generated Pages artifact")
@@ -48,4 +66,17 @@ func main() {
 		os.Exit(1)
 	}
 }
-func usage() { fmt.Fprintln(os.Stderr, "usage: pagescheck source|artifact [flags]"); os.Exit(2) }
+func usage() { fmt.Fprintln(os.Stderr, "usage: pagescheck source|seo|artifact [flags]"); os.Exit(2) }
+
+func validateSEO(c seoaeoscore.Corpus, scoreFloor float64, debtCeiling, orphanCeiling int) error {
+	if c.OverallScore < scoreFloor {
+		return fmt.Errorf("published SEO score %.1f is below %.1f", c.OverallScore, scoreFloor)
+	}
+	if debtCeiling >= 0 && c.SEODebt > debtCeiling {
+		return fmt.Errorf("published SEO debt %d exceeds %d", c.SEODebt, debtCeiling)
+	}
+	if orphanCeiling >= 0 && c.DiscoveryOrphans > orphanCeiling {
+		return fmt.Errorf("discovery orphans %d exceeds %d", c.DiscoveryOrphans, orphanCeiling)
+	}
+	return nil
+}

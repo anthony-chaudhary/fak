@@ -1,5 +1,7 @@
 ---
 title: "Awesome Token Efficiency — the catalog of token / context / KV-cache efficiency methods"
+last_modified_at: 2026-08-13
+type: CollectionPage
 description: "A maintained awesome-list index of every token-efficiency method we know of — prompt/API-level, KV-cache/serving, and agent/context-engineering — each tagged lossy-vs-lossless, semantic-vs-mechanical, and with fak's status (shipped / partial / plan / not-in-fak / out-of-scope). Methods that can be safely default-on in fak link to a tracking issue."
 ---
 
@@ -11,7 +13,7 @@ description: "A maintained awesome-list index of every token-efficiency method w
 > **even if fak does not and will not implement them**, so an operator or contributor
 > can see the whole field on one page and know where fak sits on each.
 
-<!-- awesome-token-efficiency: maintained index. Last refreshed 2026-06-28. -->
+<!-- awesome-token-efficiency: maintained index. Last refreshed 2026-08-13. -->
 
 ## How to read this
 

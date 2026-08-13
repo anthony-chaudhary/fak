@@ -35,6 +35,14 @@ jobs:
           cache: false
       - name: Reject source that Pages cannot render
         run: go run ./cmd/pagescheck source --root docs
+      - name: Hold the published corpus SEO floor
+        run: >-
+          go run ./cmd/pagescheck seo
+          --root .
+          --minimum-score 85
+          --maximum-debt 414
+          --maximum-orphans 46
+          > pages-seo-report.json
       - name: Build a fresh site from tracked source
         uses: actions/jekyll-build-pages@v1
         with:
@@ -42,6 +50,10 @@ jobs:
           destination: ./_site
       - name: Make the container-built artifact writable for its manifest
         run: sudo chown -R "$(id -u):$(id -g)" _site
+      - name: Publish the source SEO witness with the site
+        run: |
+          mkdir -p _site/_proofs
+          cp pages-seo-report.json _site/_proofs/seo-report.json
       - name: Prove breadth, sitemap, and SEO-critical page
         run: >-
           go run ./cmd/pagescheck artifact
