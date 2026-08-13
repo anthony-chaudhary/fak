@@ -20,7 +20,7 @@ type target struct {
 }
 
 func TestFleetOverviewCarriesRootGoalDrilldownContract(t *testing.T) {
-	b, err := os.ReadFile("dashboards/fak-fleet-overview.json")
+	b, err := os.ReadFile("../../tools/grafana/dashboards/fak-fleet-overview.json")
 	if err != nil {
 		t.Fatal(err)
 	}
