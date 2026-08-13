@@ -1023,6 +1023,7 @@ func cmdAgent(argv []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
+	outputStyle := fs.String("output-style", "full", "response profile: full|concise|brief|terse|minimal|native:{low|medium|high}|caveman:native:{low|medium|high}")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	model := fs.String("model", "gemini-2.5-flash", "model id")
@@ -1036,6 +1037,18 @@ func cmdAgent(argv []string) {
 	routeManifest := fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	routeAccounts := fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	_ = fs.Parse(argv)
+
+	style, err := resolveAgentOutputStyle(*outputStyle)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	restoreStyle, err := applyAgentOutputStyle(style)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent: set --output-style: %v\n", err)
+		os.Exit(2)
+	}
+	defer restoreStyle()
 	applyPolicy(*policyPath)
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)

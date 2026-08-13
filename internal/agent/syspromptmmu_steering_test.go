@@ -162,3 +162,30 @@ func TestOwnedSystemBlockSteeringIdempotent(t *testing.T) {
 			a.Audit.GotDigest, c.Audit.GotDigest)
 	}
 }
+
+func TestNamedCavemanStyleFlowsThroughOwnedSystemBlock(t *testing.T) {
+	t.Setenv(syspromptmmu.StyleEnvVar, "caveman:native:medium")
+	t.Setenv(syspromptmmu.SteeringEnvVar, "4") // named style takes precedence
+
+	b := BuildOwnedSystemBlock(steerItems(), spmmuPassWitness)
+	if b.Steering != 2 || b.Style != "caveman:native:medium" || b.StyleFamily != syspromptmmu.StyleFamilyCaveman+":"+syspromptmmu.StyleFamilyNative || b.StyleIntensity != "medium" {
+		t.Fatalf("named style readout = steering=%d style=%q family=%q intensity=%q", b.Steering, b.Style, b.StyleFamily, b.StyleIntensity)
+	}
+	seg, _ := syspromptmmu.StyleSegment("caveman:native:medium")
+	if !bytes.Contains(b.Value, seg.Content) {
+		t.Fatal("owned system block does not carry selected named style bytes")
+	}
+}
+
+func TestUnknownNamedStyleFailsSafeInsteadOfFallingThrough(t *testing.T) {
+	t.Setenv(syspromptmmu.StyleEnvVar, "caveman:original")
+	t.Setenv(syspromptmmu.SteeringEnvVar, "4")
+
+	b := BuildOwnedSystemBlock(steerItems(), spmmuPassWitness)
+	if b.Steering != syspromptmmu.SteeringOff {
+		t.Fatalf("unknown explicit named style fell through to numeric steering: %+v", b)
+	}
+	if b.Style != syspromptmmu.StyleFull || b.StyleFamily != syspromptmmu.StyleFamilyNative || b.StyleIntensity != "off" {
+		t.Fatalf("unknown style readout = style=%q family=%q intensity=%q", b.Style, b.StyleFamily, b.StyleIntensity)
+	}
+}

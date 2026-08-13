@@ -111,3 +111,15 @@ The architecture can make fak's selectable envelope a strict functional superset
 3. the compatibility matrix distinguishes `behavioral coverage`, `safe composition`, and `measured advantage` rather than using one undifferentiated “compatible” badge.
 
 Until those witnesses exist, the honest wording is: **fak has the governed substrate and filed opt-in profiles needed to cover both user experiences; comparative parity is not yet proven.**
+
+## Implemented spine — family, implementation, and intensity are separate (2026-08-13)
+
+The first native spine now treats a response profile as three dimensions rather than one overloaded style word:
+
+`family : implementation : intensity`
+
+The accepted Caveman-compatible native spellings are `caveman:native:low`, `caveman:native:medium`, and `caveman:native:high`. Existing `concise|brief|terse|minimal` and `native:low|medium|high` remain aliases for fak's native scale. The `fak agent --output-style` flag drives the owned system block through `FAK_OUTPUT_STYLE`, and the captured `SystemBlock` records the canonical style, family, and intensity while leaving the resident cache prefix byte-identical.
+
+This grammar leaves a deliberate slot for an eventual `caveman:original:<intensity>` adapter without pretending fak-authored bytes are upstream-original. `original`, `caveman:original`, unsupported intensities, and unrelated families currently fail closed. An original adapter must pin and attribute the source revision, preserve the upstream license, expose the exact fragment digest, and pass the same safety/precedence tests before it is admitted.
+
+Mix-and-match remains orthogonal: response shape composes later with `--work-profile ponytail:{native|original}:{low|medium|high}` rather than making Ponytail an output style. The current commit ships only the response-profile spine; original-source adapters, Ponytail work profiles, `auto`, guard/harness propagation, and a general repeated `--profile` expression remain filed follow-ons rather than silently deferred behavior.

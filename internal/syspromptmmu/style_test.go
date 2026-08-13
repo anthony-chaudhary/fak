@@ -60,20 +60,27 @@ func TestStyleUnknownIsFailSafe(t *testing.T) {
 // by increasing terseness — the order an operator sees in a read-out or a help string.
 func TestStyleNamesAreOrderedAndComplete(t *testing.T) {
 	names := StyleNames()
-	if len(names) != 5 {
-		t.Fatalf("StyleNames() returned %d names, want 5: %v", len(names), names)
+	if len(names) != 11 {
+		t.Fatalf("StyleNames() returned %d names, want 11: %v", len(names), names)
 	}
 	lastLevel := -1
+	seen := map[string]bool{}
 	for _, name := range names {
 		level, known := StyleLevel(name)
 		if !known {
 			t.Errorf("StyleNames() returned %q which StyleLevel does not know", name)
 			continue
 		}
-		if level <= lastLevel {
-			t.Errorf("StyleNames() not ordered by increasing terseness at %q (level %d after %d)", name, level, lastLevel)
+		if level < lastLevel {
+			t.Errorf("StyleNames() not ordered by nondecreasing terseness at %q (level %d after %d)", name, level, lastLevel)
 		}
 		lastLevel = level
+		seen[name] = true
+	}
+	for _, name := range []string{StyleFull, StyleConcise, StyleBrief, StyleTerse, StyleMinimal, "native:low", "native:medium", "native:high", "caveman:native:low", "caveman:native:medium", "caveman:native:high"} {
+		if !seen[name] {
+			t.Fatalf("StyleNames() missing %q: %v", name, names)
+		}
 	}
 }
 
@@ -179,6 +186,47 @@ func TestStyleReadoutIsByteStable(t *testing.T) {
 		a, b := DescribeStyle(name), DescribeStyle(name)
 		if a != b {
 			t.Errorf("style %q: two read-outs differ: %+v vs %+v", name, a, b)
+		}
+	}
+}
+
+func TestComposableStyleFamiliesAndIntensities(t *testing.T) {
+	tests := []struct {
+		name      string
+		level     int
+		family    string
+		intensity string
+	}{
+		{"native:low", 1, StyleFamilyNative, "low"},
+		{"native:medium", 2, StyleFamilyNative, "medium"},
+		{"native:high", 3, StyleFamilyNative, "high"},
+		{"caveman:native:low", 1, StyleFamilyCaveman, "low"},
+		{"caveman:native:medium", 2, StyleFamilyCaveman, "medium"},
+		{"caveman:native:high", 3, StyleFamilyCaveman, "high"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DescribeStyle(tt.name)
+			if !got.Known || !got.Applied || got.Level != tt.level || got.Family != tt.family || got.Intensity != tt.intensity {
+				t.Fatalf("DescribeStyle(%q) = %+v", tt.name, got)
+			}
+			seg, ok := StyleSegment(tt.name)
+			if !ok {
+				t.Fatalf("StyleSegment(%q) refused", tt.name)
+			}
+			want, _ := SteeringSegment(tt.level)
+			if string(seg.Content) != string(want.Content) || seg.Witness != want.Witness {
+				t.Fatalf("StyleSegment(%q) drifted from governed level %d", tt.name, tt.level)
+			}
+		})
+	}
+}
+
+func TestOriginalStyleIsNotSilentlyAliased(t *testing.T) {
+	for _, name := range []string{"original", "caveman:original", "native:original", "caveman:auto", "ponytail:medium"} {
+		got := DescribeStyle(name)
+		if got.Known || got.Applied || got.Level != SteeringOff {
+			t.Fatalf("DescribeStyle(%q) = %+v; foreign/or unsupported profiles must fail safe", name, got)
 		}
 	}
 }

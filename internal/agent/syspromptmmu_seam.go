@@ -50,6 +50,11 @@ type SystemBlock struct {
 	// breakpoint alongside the queried overlay, so it never re-serializes the resident
 	// prefix (CacheStable still holds).
 	Steering int
+	// Style is the canonical opt-in response profile, including family/intensity aliases.
+	Style string
+	// StyleFamily and StyleIntensity make mixed profile captures reproducible.
+	StyleFamily    string
+	StyleIntensity string
 }
 
 // CacheStable is the one-bit verdict the owned loop checks before sending: the realized
@@ -71,7 +76,29 @@ func (b SystemBlock) CacheStable() bool {
 // ApplyEdit never mutates its input, so the resident plan can never be corrupted by an
 // authored overlay item.
 func BuildOwnedSystemBlock(items [][]byte, witness func(syspromptmmu.BaseEdit) bool) SystemBlock {
-	return buildOwnedSystemBlockAt(items, witness, steeringLevelFromEnv())
+	return buildOwnedSystemBlockWithStyle(items, witness, styleReadoutFromEnv())
+}
+
+// styleReadoutFromEnv resolves the named response profile first, then the legacy numeric
+// steering knob. Unknown named profiles fail safe to full/off and never fall through to a
+// second knob: an explicit but malformed selection cannot accidentally enable another mode.
+func styleReadoutFromEnv() syspromptmmu.StyleReadout {
+	if raw := strings.TrimSpace(os.Getenv(syspromptmmu.StyleEnvVar)); raw != "" {
+		return syspromptmmu.DescribeStyle(raw)
+	}
+	level := steeringLevelFromEnv()
+	if level == syspromptmmu.SteeringOff {
+		return syspromptmmu.DescribeStyle(syspromptmmu.StyleFull)
+	}
+	for _, name := range syspromptmmu.StyleNames() {
+		if strings.Contains(name, ":") {
+			continue
+		}
+		if candidate, ok := syspromptmmu.StyleLevel(name); ok && candidate == level {
+			return syspromptmmu.DescribeStyle(name)
+		}
+	}
+	return syspromptmmu.DescribeStyle("")
 }
 
 // steeringLevelFromEnv reads the opt-in FAK_STEERING_LEVEL knob (#5047). Unset, empty, or
@@ -105,6 +132,20 @@ func steeringLevelFromEnv() int {
 // resident prefix still reads AuditOK and the resident prefix bytes are byte-identical to
 // the off build — only after-breakpoint tail bytes are added.
 func buildOwnedSystemBlockAt(items [][]byte, witness func(syspromptmmu.BaseEdit) bool, level int) SystemBlock {
+	style := syspromptmmu.DescribeStyle("")
+	for _, name := range syspromptmmu.StyleNames() {
+		if strings.Contains(name, ":") {
+			continue
+		}
+		if candidate, ok := syspromptmmu.StyleLevel(name); ok && candidate == level {
+			style = syspromptmmu.DescribeStyle(name)
+			break
+		}
+	}
+	return buildOwnedSystemBlockWithStyle(items, witness, style)
+}
+
+func buildOwnedSystemBlockWithStyle(items [][]byte, witness func(syspromptmmu.BaseEdit) bool, style syspromptmmu.StyleReadout) SystemBlock {
 	residentPlan := syspromptmmu.BaseContextPlan() // spine + policy floor, fak-concepts first
 
 	var overlayBase []syspromptmmu.Segment // dynamically authored overlay layer, starts empty
@@ -121,18 +162,23 @@ func buildOwnedSystemBlockAt(items [][]byte, witness func(syspromptmmu.BaseEdit)
 
 	overlayPlan := syspromptmmu.PlanOf(overlayBase)
 	steering := syspromptmmu.SteeringOff
-	if seg, ok := syspromptmmu.SteeringSegment(level); ok {
-		overlayPlan = append(overlayPlan, seg) // strictly after the queried cards, past the breakpoint
-		steering = level
+	if style.Known {
+		if seg, ok := syspromptmmu.StyleSegment(style.Style); ok {
+			overlayPlan = append(overlayPlan, seg) // strictly after the queried cards, past the breakpoint
+			steering = style.Level
+		}
 	}
 
 	value := syspromptmmu.BuildSystemValue(residentPlan, overlayPlan)
 	return SystemBlock{
-		Value:    value,
-		Audit:    syspromptmmu.AuditRealizedPrefix(systemRequestBody(value), residentPlan),
-		Overlays: len(overlayBase),
-		Refused:  refused,
-		Steering: steering,
+		Value:          value,
+		Audit:          syspromptmmu.AuditRealizedPrefix(systemRequestBody(value), residentPlan),
+		Overlays:       len(overlayBase),
+		Refused:        refused,
+		Steering:       steering,
+		Style:          style.Style,
+		StyleFamily:    style.Family,
+		StyleIntensity: style.Intensity,
 	}
 }
 

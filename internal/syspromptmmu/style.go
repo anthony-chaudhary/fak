@@ -47,6 +47,11 @@ const StyleEnvVar = "FAK_STYLE"
 // collapses to, so "I chose off" and "your value was refused" produce the same steering
 // outcome (no block) while staying distinguishable in the read-out via Known.
 const (
+	StyleFamilyNative  = "native"
+	StyleFamilyCaveman = "caveman"
+)
+
+const (
 	StyleFull    = "full"    // level 0 — no steering block at all
 	StyleConcise = "concise" // level 1 — mild: trim filler, keep substance
 	StyleBrief   = "brief"   // level 2 — moderate: skip preamble and recap
@@ -59,11 +64,17 @@ const (
 // meaningful order. TestStyleLevelClosedSet pins these pairings because changing one
 // silently re-steers every session that selected that name.
 var styleLevels = map[string]int{
-	StyleFull:    SteeringOff,
-	StyleConcise: 1,
-	StyleBrief:   2,
-	StyleTerse:   3,
-	StyleMinimal: 4,
+	StyleFull:               SteeringOff,
+	StyleConcise:            1,
+	StyleBrief:              2,
+	StyleTerse:              3,
+	StyleMinimal:            4,
+	"native:low":            1,
+	"native:medium":         2,
+	"native:high":           3,
+	"caveman:native:low":    1,
+	"caveman:native:medium": 2,
+	"caveman:native:high":   3,
 }
 
 // StyleReadout is the read-out: everything needed to SEE and PROVE the selection seam
@@ -75,7 +86,9 @@ var styleLevels = map[string]int{
 type StyleReadout struct {
 	// Style is the canonical style in force — always a member of the closed set, and
 	// always StyleFull when the requested name was refused.
-	Style string
+	Style     string
+	Family    string
+	Intensity string
 	// Level is the terseness level Style maps to (SteeringOff when steering is off).
 	Level int
 	// Known reports whether the requested name was in the closed set. False means it was
@@ -124,6 +137,23 @@ func StyleNames() []string {
 	return names
 }
 
+// styleIdentity separates implementation family from intensity. Legacy names are native
+// aliases. "original" is deliberately absent: foreign prompt bytes must be provenance checked.
+func styleIdentity(name string, level int) (family, intensity string) {
+	canonical := canonicalStyle(name)
+	parts := strings.Split(canonical, ":")
+	if len(parts) == 3 && parts[0] == StyleFamilyCaveman && parts[1] == StyleFamilyNative {
+		return StyleFamilyCaveman + ":" + StyleFamilyNative, parts[2]
+	}
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	if canonical == StyleFull {
+		return StyleFamilyNative, "off"
+	}
+	return StyleFamilyNative, map[int]string{1: "low", 2: "medium", 3: "high", 4: "ultra"}[level]
+}
+
 // DescribeStyle resolves a raw, operator-supplied name into the full read-out, applying the
 // fail-safe: anything outside the closed set — including the empty string — resolves to
 // StyleFull with Known=false and carries no block, so the request path stays exactly where
@@ -134,9 +164,10 @@ func StyleNames() []string {
 func DescribeStyle(name string) StyleReadout {
 	level, known := StyleLevel(name)
 	if !known {
-		return StyleReadout{Style: StyleFull, Level: SteeringOff}
+		return StyleReadout{Style: StyleFull, Family: StyleFamilyNative, Intensity: "off", Level: SteeringOff}
 	}
-	out := StyleReadout{Style: canonicalStyle(name), Level: level, Known: true}
+	family, intensity := styleIdentity(name, level)
+	out := StyleReadout{Style: canonicalStyle(name), Family: family, Intensity: intensity, Level: level, Known: true}
 	if seg, ok := SteeringSegment(level); ok {
 		out.Applied = true
 		out.Segment = string(seg.Content)
