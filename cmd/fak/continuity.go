@@ -17,6 +17,14 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	sub, args := argv[0], argv[1:]
+	if sub == "ux-selfcheck" {
+		jsonOut := len(args) > 0 && args[0] == "--json"
+		return runContinuityUXSelfcheck(stdout, jsonOut)
+	}
+	if sub == "explain" {
+		return runContinuityExplain(stdout, args)
+	}
+	sub, impliedChannel := continuityCanonicalTask(sub)
 	if sub == "registry-selfcheck" {
 		jsonOut := len(args) > 0 && args[0] == "--json"
 		return runContinuityRegistrySelfcheck(stdout, stderr, jsonOut)
@@ -45,6 +53,9 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "egress channel: public, organization, private, machine-local")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *channel == "" && impliedChannel != "" {
+		*channel = impliedChannel
 	}
 	if sub == "selfcheck" {
 		return runContinuitySelfcheck(stdout, stderr, *jsonOut)
@@ -90,6 +101,8 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		v, err = s.Switch(id, *commit)
+	case "receipts":
+		v, err = continuityReceipts(*home)
 	case "status":
 		id, e := s.Active()
 		err = e
@@ -149,25 +162,41 @@ func emitContinuity(w io.Writer, v any, j bool) int {
 func continuityHelp(w io.Writer) {
 	fmt.Fprint(w, `fak profile continuity — move a safe managed context between homes
 
-Journey (mutations preview unless --commit is present):
-  preview   discover/redact managed skill, workflow, and policy objects
-  export    write a portable package and durable receipt
-  sync-plan preview a typed three-way merge from base/local/remote packages
-  sync-apply replay an approved plan atomically with receipt/recovery
-  apply     restore package inactive into a second --home
-  switch    activate an applied package; --package is its package ID
-  status    behavior read-back of the active context
-  rollback  restore the context named by a switch --receipt
-  selfcheck capture the clean-room two-home journey
-  registry-selfcheck capture publish, inspect, install, update, rollback, and revoke
+Backup, restore, switch, share, and publish managed work
 
-Common expert controls: --json, repeatable --select kind[:name], --home DIR.
-Examples: fak profile continuity preview --home HOME
-          fak profile continuity export --home HOME --out context.fakpkg.json --commit
-          fak profile continuity apply --home SECOND --package context.fakpkg.json --commit
+Start with one task (mutations preview unless --commit is present):
+  backup    create a private Package from the current Context
+  restore   preview/apply a Package without activating it
+  switch    activate an applied Package as the current Context
+  share     preview an organization Channel export
+  publish   preview a public Channel export
+
+Inspect and recover:
+  status    what Context is active and why
+  preview   Objects included/rejected; use --json for a scriptable diff
+  explain   --reason CODE gives meaning and at most two Next actions
+  receipts  Transaction evidence is retained under HOME/receipts
+  recover   alias for rollback; the prior Context stays available
+
+Mental model:
+`)
+	for _, line := range continuityTaskLines(80) {
+		fmt.Fprintf(w, "  %s\n", line)
+	}
+	fmt.Fprint(w, `
+Reason codes: READY, CONFLICT, INCOMPATIBLE, EGRESS_DENIED, INTERRUPTED, ROLLED_BACK.
+
+Foundation/expert tasks:
+  export    Package creation with repeatable --select kind[:name]
+  apply     inactive Package transaction
+  sync-plan / sync-apply  explicit three-way policy and precedence
+  rollback  receipt-selected reversal
+  selfcheck / ux-selfcheck / registry-selfcheck  captured witnesses
+
+Expert controls remain auditable: --json, repeatable --select, --channel, --package,
+--receipt, --commit, and sync policy/precedence flags. No mutation occurs by default.
 `)
 }
-
 func continuityEgressPreview(s portability.Store, selectors []string, channel portability.Channel) (any, error) {
 	preview, err := s.DiscoverForEgress(selectors)
 	if err != nil {

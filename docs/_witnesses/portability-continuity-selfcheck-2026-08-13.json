@@ -1,0 +1,47 @@
+{
+  "schema": "fak/continuity-ux-selfcheck/v1",
+  "result": "PASS",
+  "vocabulary": [
+    "Object",
+    "Collection",
+    "Context",
+    "Package",
+    "Channel",
+    "Transaction"
+  ],
+  "entries": [
+    "backup",
+    "restore",
+    "switch",
+    "share",
+    "publish",
+    "status",
+    "preview",
+    "diff",
+    "explain",
+    "receipts",
+    "recover",
+    "rollback"
+  ],
+  "baseline": {
+    "vocabulary_nouns": 10,
+    "decisions": 8,
+    "expert_controls": 8
+  },
+  "candidate": {
+    "vocabulary_nouns": 6,
+    "decisions": 3,
+    "expert_controls": 8
+  },
+  "terminal_widths": [
+    40,
+    80,
+    120
+  ],
+  "accessibility": [
+    "no-color meaning",
+    "reason codes",
+    "bounded next actions",
+    "JSON parity"
+  ]
+}
