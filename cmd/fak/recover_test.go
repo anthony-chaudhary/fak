@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -171,5 +172,36 @@ func TestRecoverUnknownFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "NOT_A_REASON") {
 		t.Fatalf("stderr should name the refused token: %s", errb.String())
+	}
+}
+
+func TestRecoveryCatalogCoversEmittedReasons(t *testing.T) {
+	plans := recoveryPlans(t.TempDir())
+	if !sort.StringsAreSorted(emittedRecoveryReasons) {
+		t.Fatalf("emitted recovery vocabulary must stay sorted: %v", emittedRecoveryReasons)
+	}
+	for _, reason := range emittedRecoveryReasons {
+		plan, ok := plans[reason]
+		if !ok {
+			t.Errorf("emitted refusal %s has no recovery plan", reason)
+			continue
+		}
+		if plan.Reason != reason || plan.Summary == "" || (len(plan.Steps) == 0 && len(plan.Notes) == 0) {
+			t.Errorf("emitted refusal %s has incomplete recovery: %+v", reason, plan)
+		}
+	}
+}
+
+func TestRecoverResolvesFrequentLiveRefusals(t *testing.T) {
+	for _, reason := range emittedRecoveryReasons {
+		t.Run(reason, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runRecover(&stdout, &stderr, []string{reason}); code != 0 {
+				t.Fatalf("runRecover(%s)=%d stderr=%s", reason, code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "recover "+reason+" (dry-run)") {
+				t.Fatalf("missing actionable plan header:\n%s", stdout.String())
+			}
+		})
 	}
 }

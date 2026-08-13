@@ -171,11 +171,26 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 // recovery runs complete commands, a config recovery carries placeholders the
 // bail site binds — but they share one namespace so `fak recover <TOKEN>`
 // resolves any reason fak emits, whichever half produced it.
+// emittedRecoveryReasons is the refusal vocabulary recover must cover. Adding a
+// refusal token without an actionable recovery must fail CI, not a live agent turn.
+var emittedRecoveryReasons = []string{
+	"COMMITTED_RED", "CONCEPT_ADMISSION", "CONCEPT_FRESHNESS", "ISSUE_NOT_DISPATCH_LEAF",
+	"ISSUE_UNROUTED", "LOCK_BUSY", "PATHSPEC_RACE", "REQUIRE_WITNESS",
+}
+
 func recoveryPlans(trunk string) map[string]recoveryPlan {
 	plans := treeRecoveryPlans(trunk)
 	for token, plan := range configRecoveryPlans() {
 		plans[token] = plan
 	}
+	plans["REQUIRE_WITNESS"] = recoveryPlan{Reason: "REQUIRE_WITNESS", Summary: "the claimed effect has no independently inspectable witness", Notes: []string{"capture the failure-class witness (test, render, live read-back, or dos verify) and retry with that artifact; do not self-certify the effect"}}
+	plans["PATHSPEC_RACE"] = recoveryPlan{Reason: "PATHSPEC_RACE", Summary: "a peer changed the index while the path-scoped commit was being sealed", Steps: []recoveryStep{{Argv: []string{"git", "show", "--stat", "--oneline", "HEAD"}, Summary: "inspect the intact commit and verify which paths landed"}}, Notes: []string{"do not amend or force-push; if an extra peer path landed, report the intact commit and let its owner reconcile it"}, Executable: true}
+	plans["COMMITTED_RED"] = recoveryPlan{Reason: "COMMITTED_RED", Summary: "the committed tip fails its isolated build or formatting gate", Steps: []recoveryStep{{Argv: []string{"fak", "ci-preflight"}, Summary: "reproduce the committed-tip failure outside the peer-dirty tree"}}, Notes: []string{"fix the committed failure before attempting another commit or push"}, Executable: true}
+	plans["LOCK_BUSY"] = recoveryPlan{Reason: "LOCK_BUSY", Summary: "another committer owns the serialized index lock", Steps: []recoveryStep{{Argv: []string{"fak", "commit", "--reclaim-stale-index-lock"}, Summary: "reclaim only when the recorded owner is proven stale"}}, Notes: []string{"if the owner is live, wait and retry; never delete the lock by hand"}, Executable: true}
+	plans["CONCEPT_ADMISSION"] = recoveryPlan{Reason: "CONCEPT_ADMISSION", Summary: "a new concept-family identifier is absent from the staged concept corpus", Notes: []string{"add or reuse the concept-corpus row named by the refusal, then stage that evidence in the same commit as the identifier"}}
+	plans["CONCEPT_FRESHNESS"] = recoveryPlan{Reason: "CONCEPT_FRESHNESS", Summary: "the staged concept corpus is stale relative to the staged source tree", Steps: []recoveryStep{{Argv: []string{"fak", "concept", "generate-staged"}, Summary: "regenerate against the exact staged tree"}}, Notes: []string{"stage the generated corpus paths in the same commit; the gate intentionally evaluates the staged tree"}, Executable: true}
+	plans["ISSUE_NOT_DISPATCH_LEAF"] = recoveryPlan{Reason: "ISSUE_NOT_DISPATCH_LEAF", Summary: "the selected issue is a parent, research item, or other non-leaf unit", Notes: []string{"decompose it into independently shippable child issues with done conditions, then dispatch one child leaf"}}
+	plans["ISSUE_UNROUTED"] = recoveryPlan{Reason: "ISSUE_UNROUTED", Summary: "the issue lacks enough lane, path, or scope evidence for safe dispatch", Notes: []string{"add an explicit owned path/lane and bounded done condition to the issue, then rerun issue contract/dispatch planning"}}
 	return plans
 }
 
