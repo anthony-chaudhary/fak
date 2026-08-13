@@ -899,3 +899,8 @@ docs/dispatch-status.md
 /ps5.out
 /ps5.err
 /$cover
+
+# Dot-prefixed session transaction captures (for example .st_<issue>_commit.log and
+# .st_<issue>_precommit_hash.txt) are failed-command diagnostics, not package source.
+# No tracked file uses this namespace; ignore it recursively where a session ran.
+**/.st_*
