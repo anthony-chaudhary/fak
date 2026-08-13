@@ -1456,6 +1456,11 @@
           "category": "incidental",
           "reason": "unexported helper pairing a gated claim with its stated-reason prose; introduces no governed gate concept",
           "token": "proseGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal no-I/O selfcheck helper mirroring the package's existing TriageSelfcheck; it asserts the audit gate's invariants and introduces no governed concept of its own",
+          "token": "AuditGateSelfcheck"
         }
       ],
       "exclude": [
@@ -1476,6 +1481,7 @@
         "ApplyGateSkew",
         "AuditGate",
         "AuditGateResult",
+        "AuditGateSelfcheck",
         "CacheValueGateDebtKey",
         "CaseDelegate",
         "ClaimRuntimeDelegated",
@@ -2117,6 +2123,11 @@
           "category": "incidental",
           "reason": "unexported method on the resume watchdog's per-tick process-table snapshot; returns the matched command line alongside the existing liveness bool, not a new session-runtime concept",
           "token": "sessionProcess"
+        },
+        {
+          "category": "incidental",
+          "reason": "parameter name only: the LastTaskResult integer a caller read back from the OS scheduler, passed into AuditResultSwallowed for comparison; it names no new runtime concept",
+          "token": "observedSchedulerResult"
         }
       ],
       "id": "session-runtime",
@@ -2176,6 +2187,7 @@
         "loadSchedulerRecords",
         "matchedSessions",
         "member_sessions",
+        "observedSchedulerResult",
         "orderRecords",
         "readSessionHandoffBlocks",
         "repairMalformedLooseSessionRef",
@@ -5233,6 +5245,11 @@
           "category": "incidental",
           "reason": "pure fold in cmd/fak/resume_dedup.go turning stopped.Decisions into the #3146 tombstone list; a file-local helper, not a distinct planning concept",
           "token": "planResumeDedup"
+        },
+        {
+          "category": "incidental",
+          "reason": "planner entry point for the go-build WORK dir sweep, mirroring the package's existing Plan* helpers; adds no governed planning concept",
+          "token": "PlanGoTmp"
         }
       ],
       "exclude": [
@@ -5259,6 +5276,7 @@
         "NoteCandidates",
         "PlanDecodeInterleave",
         "PlanEviction",
+        "PlanGoTmp",
         "PlanLog",
         "PlanLogEntry",
         "PlanReconciliation",

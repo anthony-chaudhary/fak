@@ -42,6 +42,13 @@
 //   - The object DB, through gitgate's tiers only: add-only index builds always;
 //     redundant-copy folds when unlocked and posture-safe; and a prune ONLY under the
 //     opt-in, quiet-window-gated, >=2-week-expire grace tier.
+//   - Orphaned `go-build*` WORK dirs under the configured GOTMPDIR (Options.GoTmpDir),
+//     via treedoctor's age-based reap. `go` deletes its own WORK dir on a clean exit, so
+//     a survivor was killed; the reap is keyed on the newest file ANYWHERE inside, never
+//     the top-level mtime, so a long-running build is never deleted out from under
+//     itself. This is the collector half of the build-isolation redirection (#6207):
+//     pointing GOTMPDIR into the tree is deliberate, but nothing ever collected it —
+//     5.9 GB of orphaned WORK dirs on the reference box.
 //
 // Worktree pruning is deliberately NOT in the unattended path (Options.PruneWorktrees
 // opts in): every reap above is decided by a dead PID or a structurally-inert filename,
@@ -151,6 +158,14 @@ type Options struct {
 	// next-index-<pid>.lock sweep. Nil uses commitlane's production observer and
 	// decisions. Tests inject a no-op or fixture-backed sweep so they need no real repo.
 	IndexLockSweep IndexLockSweepFunc
+	// GoTmpDir is the GOTMPDIR whose orphaned `go-build*` WORK dirs this tick collects
+	// (#6207). EMPTY DISABLES THE RUNG ENTIRELY — the caller must name the directory, so a
+	// clone with no redirected GOTMPDIR, and every test that does not opt in, keeps
+	// today's behavior byte-for-byte and this tick can never guess at a path to delete.
+	GoTmpDir string
+	// GoTmpMinAge is the quiet period a WORK dir must clear before it is reapable, measured
+	// on the newest file anywhere inside it. Zero => treedoctor.DefaultGoTmpMinAge.
+	GoTmpMinAge time.Duration
 }
 
 // LockSweep is the lock half's outcome: the ghost lease locks and the treedoctor reaps.
@@ -224,6 +239,9 @@ type Result struct {
 	LastRunDay string              `json:"last_run_day,omitempty"`
 	Locks      LockSweep           `json:"locks"`
 	Maint      gitgate.MaintResult `json:"maint"`
+	// GoTmp is the orphaned-WORK-dir reap (#6207). Zero-valued when Options.GoTmpDir is
+	// empty, which is the rung's disabled state.
+	GoTmp treedoctor.GoTmpReport `json:"go_tmp"`
 	// Incident is true for gitgate posture drift or a lock-cleanup failure. Both need an
 	// operator: the tick never edits .git/config, and a lock it could not remove can keep
 	// the maintenance wedge in place.
@@ -254,7 +272,13 @@ type Row struct {
 	// "deferred as LOCKED for nine consecutive days".
 	GraceRefused      string `json:"grace_refused,omitempty"`
 	GracePruneRefused string `json:"grace_prune_refused,omitempty"`
-	Incident          bool   `json:"incident,omitempty"`
+	// GoTmpReaped / GoTmpReclaimedBytes witness the orphaned-WORK-dir reap (#6207) in the
+	// same ledger that already witnesses the fold, so "is the collector actually
+	// collecting?" is a readback rather than another one-off `du`. Bytes are counted from
+	// the dirs the filesystem actually gave up, never from the plan's intent.
+	GoTmpReaped         int   `json:"gotmp_reaped,omitempty"`
+	GoTmpReclaimedBytes int64 `json:"gotmp_reclaimed_bytes,omitempty"`
+	Incident            bool  `json:"incident,omitempty"`
 }
 
 // LooseFolded reports the loose objects this run folded away.
@@ -322,6 +346,18 @@ func Run(ctx context.Context, run Runner, opts Options) Result {
 	}
 
 	res.Locks = sweepLocks(ctx, run, opts, now)
+
+	// Reclaim the orphaned build WORK dirs BEFORE the object-DB fold: repacking wants
+	// free space, and on the reference box this rung is the single largest reclaim of the
+	// tick (5.9 GB) while the fold moves megabytes. A GoTmp failure is reported but is
+	// deliberately NOT an Incident — a WORK dir that resisted deletion costs disk and will
+	// be retried tomorrow, whereas Incident means "an operator must act today", and
+	// spending that signal here would train the operator to ignore it.
+	res.GoTmp = treedoctor.SweepGoTmp(treedoctor.GoTmpOptions{
+		Root:   opts.GoTmpDir,
+		MinAge: opts.GoTmpMinAge,
+		Now:    now,
+	}, opts.Apply)
 
 	res.Maint = gitgate.RunMaint(ctx, gitgate.MaintRunner(run), gitgate.MaintOptions{
 		RepoRoot:     opts.RepoRoot,
@@ -393,7 +429,11 @@ func (r Result) row() Row {
 		PacksAfter:        r.Maint.After.Packs,
 		GraceRefused:      string(r.Maint.GraceRefused),
 		GracePruneRefused: string(r.Maint.GracePruneRefused),
-		Incident:          r.Incident,
+
+		GoTmpReaped:         r.GoTmp.ReapCount(),
+		GoTmpReclaimedBytes: r.GoTmp.ReapedBytes,
+
+		Incident: r.Incident,
 	}
 }
 

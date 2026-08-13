@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gitdaily"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
+	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -56,6 +57,8 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 	gracePrune := fs.Bool("grace-prune", false, "opt into gitgate's supervised grace-prune tier (quiet window + >=2-week expire floor); default never deletes an object")
 	pruneExpire := fs.String("prune-expire", "", "override the grace-prune expire window (must be provably >= 2 weeks; empty = the floor)")
 	leaseMaxAge := fs.Duration("lease-lock-max-age", 0, "orphan bound for refs/fak/locks/*.lock (0 = the session-heartbeat TTL)")
+	goTmpDir := fs.String("gotmp-dir", "", "collect orphaned go-build* WORK dirs under this GOTMPDIR (default: $"+treedoctor.GoTmpDirEnv+"; empty disables the rung)")
+	goTmpMinAge := fs.Duration("gotmp-min-age", 0, "quiet period a go-build WORK dir must clear before it is reapable, measured on the newest file ANYWHERE inside it (0 = the default floor)")
 	emitUnit := fs.String("emit-unit", "", "instead of running, print an OS scheduler unit that fires this verb: launchd|systemd|taskscheduler")
 	interval := fs.Duration("interval", 24*time.Hour, "firing cadence stamped into --emit-unit's unit")
 	fakBin := fs.String("fak-bin", "fak", "path to the fak binary the emitted unit invokes")
@@ -83,6 +86,15 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	// The GOTMPDIR rung (#6207) defaults to whatever the session actually redirected go's
+	// WORK dirs into, so the scheduled tick collects the same tree the builds fill. It is
+	// resolved HERE, at the I/O edge — gitdaily itself never guesses a path to delete, so a
+	// caller that names nothing gets an inert rung rather than a surprise sweep.
+	goTmpRoot := strings.TrimSpace(*goTmpDir)
+	if goTmpRoot == "" {
+		goTmpRoot = treedoctor.GoTmpRootFromEnv(os.Getenv)
+	}
+
 	opts := gitdaily.Options{
 		RepoRoot:        repoRoot,
 		GitCommonDir:    commonDir,
@@ -93,6 +105,8 @@ func runGitDaily(stdout, stderr io.Writer, argv []string) int {
 		GracePrune:      *gracePrune,
 		PruneExpire:     *pruneExpire,
 		LeaseLockMaxAge: *leaseMaxAge,
+		GoTmpDir:        goTmpRoot,
+		GoTmpMinAge:     *goTmpMinAge,
 	}
 
 	// --status is a pure readback: it never runs a tick, so an operator can audit the
@@ -274,6 +288,18 @@ func writeGitDailyText(w io.Writer, res gitdaily.Result) {
 		fmt.Fprintf(w, "  - %s\n", a)
 	}
 
+	// The GOTMPDIR rung (#6207). The age split prints under the summary because a single
+	// total is exactly what made an earlier audit of this tree call in-flight churn a leak.
+	fmt.Fprintf(w, "\nbuild scratch:\n  %s\n", res.GoTmp.Summary())
+	for _, band := range res.GoTmp.Bands {
+		fmt.Fprintf(w, "    %-9s %3d entries  %d bytes\n", band.Name, band.Entries, band.Bytes)
+	}
+	for _, e := range res.GoTmp.Entries {
+		if e.RemoveErr != "" {
+			fmt.Fprintf(w, "    FAILED to remove %s: %s\n", e.Path, e.RemoveErr)
+		}
+	}
+
 	fmt.Fprintln(w)
 	renderGitMaintText(w, res.Maint)
 
@@ -344,6 +370,9 @@ func writeGitDailyStatus(w io.Writer, path string, rows []gitdaily.Row) {
 			r.LeaseLocksReaped+r.IndexLocksReaped+r.LockActions)
 		if r.GraceRefused != "" {
 			note += "; fold tier " + r.GraceRefused
+		}
+		if r.GoTmpReaped > 0 {
+			note += fmt.Sprintf("; reaped %d go-build WORK dirs (%d bytes)", r.GoTmpReaped, r.GoTmpReclaimedBytes)
 		}
 		if r.Incident {
 			note += "; INCIDENT"
