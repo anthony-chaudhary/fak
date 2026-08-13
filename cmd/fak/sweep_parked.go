@@ -11,6 +11,7 @@ type sweepParkedSummary struct {
 	Count       int               `json:"count"`
 	Stashes     []sweepParkedItem `json:"stashes,omitempty"`
 	Refs        []sweepParkedItem `json:"unmerged_refs,omitempty"`
+	Checkpoints []sweepParkedItem `json:"wip_checkpoints,omitempty"`
 	Worktrees   []sweepParkedItem `json:"other_worktrees,omitempty"`
 	Diagnostics []string          `json:"diagnostics,omitempty"`
 }
@@ -53,6 +54,21 @@ func collectSweepParked(root string) sweepParkedSummary {
 			out.Refs = append(out.Refs, sweepParkedItem{Kind: "ref", Name: parts[0], Summary: summary})
 		}
 	}
+	if raw, err := gitOutput(root, "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/fak/wip"); err != nil {
+		out.Diagnostics = append(out.Diagnostics, "WIP checkpoint inventory: "+err.Error())
+	} else {
+		for _, line := range nonemptyLines(raw) {
+			parts := strings.SplitN(line, "\t", 3)
+			if len(parts) < 2 {
+				continue
+			}
+			summary := parts[1]
+			if len(parts) == 3 && parts[2] != "" {
+				summary += " " + parts[2]
+			}
+			out.Checkpoints = append(out.Checkpoints, sweepParkedItem{Kind: "checkpoint", Name: parts[0], Summary: summary})
+		}
+	}
 	if raw, err := gitOutput(root, "worktree", "list", "--porcelain"); err != nil {
 		out.Diagnostics = append(out.Diagnostics, "worktree inventory: "+err.Error())
 	} else {
@@ -75,7 +91,7 @@ func collectSweepParked(root string) sweepParkedSummary {
 	}
 	sort.Slice(out.Refs, func(i, j int) bool { return out.Refs[i].Name < out.Refs[j].Name })
 	sort.Slice(out.Worktrees, func(i, j int) bool { return out.Worktrees[i].Name < out.Worktrees[j].Name })
-	out.Count = len(out.Stashes) + len(out.Refs) + len(out.Worktrees)
+	out.Count = len(out.Stashes) + len(out.Refs) + len(out.Checkpoints) + len(out.Worktrees)
 	return out
 }
 func nonemptyLines(raw string) []string {
@@ -89,7 +105,7 @@ func nonemptyLines(raw string) []string {
 }
 func writeSweepParkedText(b io.Writer, parked sweepParkedSummary) {
 	fmt.Fprintf(b, "\nPARKED / HIDDEN WORK  %d item(s) outside the main working-tree diff\n", parked.Count)
-	for _, group := range [][]sweepParkedItem{parked.Stashes, parked.Refs, parked.Worktrees} {
+	for _, group := range [][]sweepParkedItem{parked.Stashes, parked.Refs, parked.Checkpoints, parked.Worktrees} {
 		for _, item := range group {
 			detail := item.Summary
 			if item.Paths > 0 {
@@ -104,6 +120,6 @@ func writeSweepParkedText(b io.Writer, parked sweepParkedSummary) {
 	if parked.Count == 0 {
 		io.WriteString(b, "  none detected\n")
 	} else {
-		io.WriteString(b, "  inspect before dropping: git stash show -p <stash> / git show <ref> / fak worktree worker list\n")
+		io.WriteString(b, "  inspect before dropping: git stash show -p <stash> / git show <ref> / fak wip reap --census / fak worktree worker list\n")
 	}
 }
