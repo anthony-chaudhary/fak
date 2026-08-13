@@ -154,6 +154,24 @@ type cudaBackend struct {
 	budgetBytes int64
 	dlUsed      int64
 	managedN    int
+	// faultLatch is the session-scoped device-fault boundary (#6412). This backend owns the
+	// process's single CUDA context (one g_stream, one cudaMu), so backend scope IS session
+	// scope: once a launch/execution/allocation fault is observed here, gated entry points
+	// refuse typed instead of computing on a suspect context. nil admits everything, so a
+	// backend constructed without a latch (older tests) behaves exactly as before.
+	faultLatch *DeviceFaultLatch
+}
+
+// cudaFaultReconstructBudget bounds how many context reconstructions a poisoned session may
+// attempt before the latch declares it unrecoverable. Nothing in-package drives Reconstruct
+// yet — the serving boundary owns teardown/rebuild — but the budget must be fixed at
+// construction so a future driver cannot retry forever against a dead device.
+const cudaFaultReconstructBudget = 3
+
+// DeviceFaultLatch satisfies DeviceFaultReporter: it exposes the session latch so a serving
+// path holding only a compute.Backend can gate on AdmitDevice and drive recovery.
+func (c *cudaBackend) DeviceFaultLatch() *DeviceFaultLatch {
+	return c.faultLatch
 }
 
 func (c *cudaBackend) CUDADebugResidencyBudget() (budgetBytes, dlUsed int64, managedN int) {

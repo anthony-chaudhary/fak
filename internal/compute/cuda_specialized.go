@@ -182,6 +182,12 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
 	rmsNormEpsilon float32,
 ) (output, nextConvState, nextRecurrentState Tensor, err error) {
+	// Session fault gate (#6412), FIRST — before geometry, locks, or any allocation. Once a
+	// prior operation observed a device fault, this context is suspect and no result computed
+	// on it may be returned; the typed refusal outranks every per-operand diagnosis.
+	if err := c.faultLatch.Admit("qwen35-gdn-decode"); err != nil {
+		return Tensor{}, Tensor{}, Tensor{}, err
+	}
 	hidden, keyDim, valueDim, convDim, err := validateQwen35GDNGeometry(
 		normalizedInput,
 		inProjQKV, inProjZ, inProjB, inProjA,
@@ -234,6 +240,10 @@ func (c *cudaBackend) Qwen35GDNDecode(
 		tensor, buffer, allocErr := c.devTrDeviceOnly(allocation.shape, F32, "qwen35-gdn-"+allocation.name)
 		if allocErr != nil {
 			c.releaseTransientBuffers(strictBuffers)
+			// A cudaMalloc that fails AFTER pre-flight admitted the plan may be a context
+			// already poisoned by an earlier async fault, not a capacity miss; ObserveError
+			// poisons the session only when the error is device-fault evidence.
+			c.faultLatch.ObserveError(allocErr, "qwen35-gdn-"+allocation.name)
 			return Tensor{}, Tensor{}, Tensor{}, allocErr
 		}
 		strictTensors = append(strictTensors, tensor)
@@ -284,10 +294,16 @@ func (c *cudaBackend) Qwen35GDNDecode(
 		// operation-owned buffers are safe to free immediately. Durable mutable
 		// state remains caller-owned, allocated, and poisoned for explicit cleanup.
 		c.releaseTransientBuffers(strictBuffers)
-		return Tensor{}, Tensor{}, Tensor{}, &Qwen35GDNKernelError{
+		kernelErr := &Qwen35GDNKernelError{
 			Stage: qwen35GDNKernelStage(status),
 			Code:  status,
 		}
+		// Poison the SESSION, not just the touched buffers: a launch or asynchronous
+		// execution failure (the live Xid-31 class) leaves the whole CUDA context suspect,
+		// so the latch makes the next gated operation refuse typed instead of computing
+		// plausible garbage (#6412).
+		c.faultLatch.ObserveError(kernelErr, "qwen35-gdn-decode")
+		return Tensor{}, Tensor{}, Tensor{}, kernelErr
 	}
 	// fcuda_qwen35_gdn_decode_f32 synchronized g_stream successfully. Record the
 	// host fence so this output and any earlier stream-ordered outputs become Ready.

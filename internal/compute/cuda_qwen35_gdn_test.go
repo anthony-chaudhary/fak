@@ -193,6 +193,12 @@ func TestCUDAQwen35GDNLaunchAndAsyncFailuresInvalidateState(t *testing.T) {
 			be := cudaGDNBackend(t)
 			t.Cleanup(be.Recycle)
 			t.Cleanup(func() { qwen35GDNInjectFaultForTest(0) })
+			// Isolate the shared backend's session latch: this test spends fault->reconstruct
+			// cycles, and the production latch's attempt budget must not be consumed (or left
+			// poisoned) for every later test in the process.
+			prodLatch := be.faultLatch
+			be.faultLatch = NewDeviceFaultLatch("cuda", cudaFaultReconstructBudget)
+			t.Cleanup(func() { be.faultLatch = prodLatch })
 			g := cudaGDNGeometry{hidden: 8, nK: 1, nV: 2, kHd: 2, vHd: 2, kernel: 3, eps: 1e-5}
 			for attempt := 0; attempt < 3; attempt++ {
 				o := newCUDAGDNOperands(t, be, g)
@@ -206,6 +212,18 @@ func TestCUDAQwen35GDNLaunchAndAsyncFailuresInvalidateState(t *testing.T) {
 				var kernel *Qwen35GDNKernelError
 				if !errors.As(err, &kernel) || kernel.Stage != tc.stageName {
 					t.Fatalf("attempt %d fault stage %d error = %T %v, want stage %q", attempt, tc.stage, err, err, tc.stageName)
+				}
+				// #6412: the execution fault poisons the SESSION, not just the touched
+				// buffers, so the very next gated operation refuses typed before any
+				// allocation or launch — the pre-latch behavior was to admit it and let a
+				// suspect context keep producing plausible results.
+				if !be.faultLatch.Snapshot().Refusing() {
+					t.Fatalf("attempt %d: session still admits after an injected %s fault", attempt, tc.name)
+				}
+				_, _, _, refusedErr := o.decode(be, g)
+				var faultErr *DeviceFaultError
+				if !errors.As(refusedErr, &faultErr) || faultErr.Site != "qwen35-gdn-decode" {
+					t.Fatalf("attempt %d post-fault decode error = %T %v, want *DeviceFaultError at qwen35-gdn-decode", attempt, refusedErr, refusedErr)
 				}
 				if out.Backend() != nil || nextConv.Backend() != nil || nextRecurrent.Backend() != nil {
 					t.Fatal("failed operation returned usable output/state tensors")
@@ -237,6 +255,14 @@ func TestCUDAQwen35GDNLaunchAndAsyncFailuresInvalidateState(t *testing.T) {
 						}()
 						_ = be.Read(state)
 					}()
+				}
+				// A validated reconstruction is the only sanctioned way back to serving.
+				// nil steps are the latch's explicit no-op rebuild/validate — the real
+				// context teardown belongs to the serving boundary, and this test's next
+				// attempt (a fresh injected fault reaching the C ABI) is the proof that
+				// the session genuinely admits again.
+				if err := be.faultLatch.Reconstruct(nil, nil); err != nil {
+					t.Fatalf("attempt %d latch reconstruct: %v", attempt, err)
 				}
 			}
 		})
