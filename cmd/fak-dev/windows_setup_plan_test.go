@@ -31,8 +31,47 @@ func TestDefaultPlanCoversNativeTestsAndFleetSpine(t *testing.T) {
 			t.Errorf("processes omit %s", want)
 		}
 	}
-	if p.Group != "239.255.70.65" || p.Port != 4765 {
+	if p.Group != FleetGroup || p.Port != FleetPort {
 		t.Fatalf("fleet spine endpoint = %s:%d", p.Group, p.Port)
+	}
+}
+
+func TestPlanUsesFleetSpineEndpointEnvironment(t *testing.T) {
+	t.Setenv(FleetGroupEnv, "239.1.2.3")
+	t.Setenv(FleetPortEnv, "9876")
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := buildWindowsSetupSpec(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Group != "239.1.2.3" || p.Port != 9876 {
+		t.Fatalf("fleet spine endpoint = %s:%d, want environment endpoint", p.Group, p.Port)
+	}
+	script := PowerShell(p, `C:\tmp\result.json`, true)
+	for _, want := range []string{"239.1.2.3", "9876"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script omits configured endpoint %q", want)
+		}
+	}
+	for _, stale := range []string{FleetGroup, "4765"} {
+		if strings.Contains(script, stale) {
+			t.Errorf("script retains hard-coded endpoint %q", stale)
+		}
+	}
+}
+
+func TestPlanFallsBackForInvalidFleetSpinePortEnvironment(t *testing.T) {
+	for _, value := range []string{"", "not-a-port", "0", "65536"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(FleetPortEnv, value)
+			_, port := fleetSpineEndpointFromEnv()
+			if port != FleetPort {
+				t.Fatalf("port = %d, want default %d", port, FleetPort)
+			}
+		})
 	}
 }
 
@@ -43,9 +82,9 @@ func TestDefaultPlanRefusesBroadNonRepositoryPath(t *testing.T) {
 }
 
 func TestPowerShellIsIdempotentAndReadBackDriven(t *testing.T) {
-	p := SetupSpec{Paths: []string{`C:\src\fak`}, Processes: []string{"go.exe"}, Group: FleetGroup, Port: FleetPort}
+	p := SetupSpec{Paths: []string{`C:\src\fak`}, Processes: []string{"go.exe"}, Group: "239.1.2.3", Port: 9876}
 	script := PowerShell(p, `C:\tmp\result.json`, true)
-	for _, want := range []string{"Add-MpPreference", "Set-NetFirewallProfile", "-DefaultInboundAction Allow", "-DefaultOutboundAction Allow", "-NotifyOnListen False", "-AllowInboundRules True", "-AllowLocalFirewallRules True", "Get-NetFirewallRule", "Remove-NetFirewallRule", "New-NetFirewallRule", "Get-MpPreference", "Get-NetFirewallProfile", "239.255.70.65", "4765", "ConvertTo-Json"} {
+	for _, want := range []string{"Add-MpPreference", "Set-NetFirewallProfile", "-DefaultInboundAction Allow", "-DefaultOutboundAction Allow", "-NotifyOnListen False", "-AllowInboundRules True", "-AllowLocalFirewallRules True", "Get-NetFirewallRule", "Remove-NetFirewallRule", "New-NetFirewallRule", "Get-MpPreference", "Get-NetFirewallProfile", "239.1.2.3", "9876", "ConvertTo-Json"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script omits %q", want)
 		}

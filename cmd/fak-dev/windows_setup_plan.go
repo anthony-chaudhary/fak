@@ -8,12 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 const (
-	FleetGroup = "239.255.70.65"
-	FleetPort  = 4765
+	FleetGroup    = "239.255.70.65"
+	FleetPort     = 4765
+	FleetGroupEnv = "FLEET_SPINE_GROUP"
+	FleetPortEnv  = "FLEET_SPINE_PORT"
 )
 
 type SetupSpec struct {
@@ -79,11 +82,24 @@ func buildWindowsSetupSpec(repo string) (SetupSpec, error) {
 		filepath.Join(home, ".codex"), filepath.Join(home, ".claude"),
 	}
 	paths = uniqueClean(paths)
+	group, port := fleetSpineEndpointFromEnv()
 	return SetupSpec{Paths: paths, Processes: []string{
 		"go.exe", "compile.exe", "link.exe", "fak.exe", "fak-dev.exe",
 		"codex.exe", "claude.exe", "pwsh.exe", "powershell.exe", "node.exe",
 		"git.exe", "bash.exe", "sh.exe",
-	}, Group: FleetGroup, Port: FleetPort}, nil
+	}, Group: group, Port: port}, nil
+}
+
+func fleetSpineEndpointFromEnv() (string, int) {
+	group := strings.TrimSpace(os.Getenv(FleetGroupEnv))
+	if group == "" {
+		group = FleetGroup
+	}
+	port := FleetPort
+	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv(FleetPortEnv))); err == nil && configured > 0 && configured <= 65535 {
+		port = configured
+	}
+	return group, port
 }
 
 func uniqueClean(in []string) []string {

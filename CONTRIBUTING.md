@@ -362,7 +362,9 @@ go run ./cmd/fak-dev windows-setup --apply      # one UAC prompt; default-allow 
 
 The command idempotently adds Microsoft Defender exclusions for the repository, Go build
 cache/temp roots, fak/Fleet state, and the Go/fak/agent tool processes. It also installs
-inbound and outbound Windows Firewall rules for fak's Fleet-spine multicast endpoint
-`239.255.70.65:4765`. It reports `READY` only after reading every setting back. Use
+inbound and outbound Windows Firewall rules for fak's Fleet-spine multicast endpoint.
+The endpoint defaults to `239.255.70.65:4765` and follows `FLEET_SPINE_GROUP` /
+`FLEET_SPINE_PORT` when those environment variables configure the guard. It reports `READY`
+only after reading every setting back. Use
 `--json` for machine-readable planning or verification. These are local-machine security
 exceptions: review the dry-run first and use them only on a trusted development checkout.

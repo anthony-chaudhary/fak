@@ -25,6 +25,8 @@ func TestWindowsSetupDryRunNamesUACAndFleetSpine(t *testing.T) {
 	old := windowsSetupGOOS
 	windowsSetupGOOS = "windows"
 	defer func() { windowsSetupGOOS = old }()
+	t.Setenv(FleetGroupEnv, "239.1.2.3")
+	t.Setenv(FleetPortEnv, "9876")
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example"), 0o600); err != nil {
 		t.Fatal(err)
@@ -33,7 +35,7 @@ func TestWindowsSetupDryRunNamesUACAndFleetSpine(t *testing.T) {
 	if rc := runWindowsSetup(&out, &errb, []string{"--repo", repo}); rc != 0 {
 		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
 	}
-	for _, want := range []string{"UAC", "fleet spine", "239.255.70.65:4765"} {
+	for _, want := range []string{"UAC", "fleet spine", "239.1.2.3:9876"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output omits %q: %s", want, out.String())
 		}
