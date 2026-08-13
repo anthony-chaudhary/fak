@@ -192,7 +192,7 @@ readiness, a local target config entry, and a fresh healthy scrubbed report whos
 guard path is:
 
 ```bash
-fak guard --remote-serve @lab/glm-5.2 --probe -- codex
+fak manage --remote-serve @lab/glm-5.2 --probe -- codex
 ```
 
 ### First green run (before the private bridge is wired)

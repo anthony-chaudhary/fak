@@ -95,7 +95,7 @@ free-text error. A first run often trips this because the floor is deliberately 
 capability you actually want:
 
 ```
-fak guard --dump-policy      # print the embedded floor and every rule
+fak manage --dump-policy     # print the embedded floor and every rule
 ```
 
 Read the refusal's reason, find the matching rule, and allow that capability explicitly

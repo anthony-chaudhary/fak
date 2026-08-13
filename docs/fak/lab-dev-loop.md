@@ -74,7 +74,7 @@ fak lab target @lab/glm-5.2 --json
 Then run the guarded turn through the alias:
 
 ```bash
-fak guard --remote-serve @lab/glm-5.2 --probe -- codex
+fak manage --remote-serve @lab/glm-5.2 --probe -- codex
 ```
 
 Alias resolution fails closed unless `fak lab readiness --json` is `READY_FOR_DEV_WORK`,
@@ -120,7 +120,7 @@ fak serve \
 
 # from the box (or the bridge session on it): run a kernel-adjudicated dev turn,
 # inference on this box's GPU, kernel local. The agent reads OPENAI_BASE_URL.
-fak guard --remote-serve localhost:8080 -- codex
+fak manage --remote-serve localhost:8080 -- codex
 ```
 
 The banner shows the upstream as a **remote fak serve on a lab box** so you can see at a
@@ -134,7 +134,7 @@ model text well inside the probe window. The **Codex** shape is different, and i
 naming why so the next operator does not re-diagnose it:
 
 ```bash
-fak guard --remote-serve @lab/glm-5.2 --probe -- \
+fak manage --remote-serve @lab/glm-5.2 --probe -- \
   codex exec --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check \
     -C <tmp> --sandbox read-only -m glm-5.2 \
     "Reply with exactly GLM52_OK. Do not inspect files. Do not call tools."

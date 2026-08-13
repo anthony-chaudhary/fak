@@ -75,7 +75,7 @@ go test ./cmd/fak -run 'TestHarnessProfile'
 # assert every call lands on its expected ALLOW/DENY disposition — the launcher completing
 # an inspect-and-edit loop without a false DEFAULT_DENY. (cmd/fak/guard_replay_test.go)
 go test ./cmd/fak -run 'TestGuardReplay'
-fak guard --replay-trace internal/gateway/testdata/guard-trace-e2e.json --replay-wire openai
+fak manage --replay-trace internal/gateway/testdata/guard-trace-e2e.json --replay-wire openai
 ```
 
 The gate is **data, not prose**: each first-class harness is a

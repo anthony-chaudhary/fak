@@ -179,7 +179,7 @@ go test ./internal/model -run TestKVPrefixReuseMatchesRecompute
 go test ./internal/cachemeta
 
 # Your live managed-cache posture (Level 2–3 wire lever), for contrast:
-fak guard --managed-cache on -- claude   # witness metric: fak_gateway_cache_ttl_upgrade_total
+fak manage --managed-cache on -- claude  # witness metric: fak_gateway_cache_ttl_upgrade_total
 ```
 
 ## See also

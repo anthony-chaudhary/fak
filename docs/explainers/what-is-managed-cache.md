@@ -117,9 +117,9 @@ There are **two layers** of default, and they differ — this is the one subtle 
   Exporting `FAK_MANAGED_CACHE` does nothing for a bare `fak guard`.
 
 ```bash
-fak guard --managed-cache on   -- claude   # request the 1h upgrade (API key: active; subscription-OAuth: downgrades to passive)
-fak guard --managed-cache off  -- claude   # force it off
-fak guard --managed-cache auto -- claude   # billing-gated: on for API key, passive on Pro/Max
+fak manage --managed-cache on   -- claude  # request the 1h upgrade (API key: active; subscription-OAuth: downgrades to passive)
+fak manage --managed-cache off  -- claude  # force it off
+fak manage --managed-cache auto -- claude  # billing-gated: on for API key, passive on Pro/Max
 ```
 
 | Mode | What it does |
@@ -254,7 +254,7 @@ the quick map so you don't conflate them:
 ## Try it
 
 ```bash
-fak guard --managed-cache on -- claude   # request the 1h upgrade (API key: active; subscription-OAuth: passive)
+fak manage --managed-cache on -- claude  # request the 1h upgrade (API key: active; subscription-OAuth: passive)
 fak cachevalue report                     # see what caching actually saved
 ```
 

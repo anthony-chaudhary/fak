@@ -54,7 +54,7 @@ covers.)
 Nothing extra. You run your agent through fak the normal way:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 Caching is the provider's feature, and fak looks after it for you from there. There are
@@ -75,7 +75,7 @@ filling, not the coat check failing.
 ## Try it
 
 ```bash
-fak guard -- claude                    # run your agent through fak, as usual
+fak manage claude                      # run your agent through fak, as usual
 fak cachevalue report --dev-sessions   # later: see what caching saved in your sessions
 ```
 

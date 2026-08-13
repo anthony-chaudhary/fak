@@ -67,10 +67,10 @@ agent and guard injects the right wire and base URL into the child process only,
 your shell untouched:
 
 ```bash
-fak guard -- claude       # Anthropic wire, your Claude Pro/Max subscription
-fak guard -- codex        # OpenAI wire, inferred from the agent name
-fak guard -- opencode     # OpenAI wire, lowercase-tool floor
-fak guard -- aider        # OpenAI wire, via the injected OPENAI_API_BASE
+fak manage claude         # Anthropic wire, your Claude Pro/Max subscription
+fak manage codex          # OpenAI wire, inferred from the agent name
+fak manage opencode       # OpenAI wire, lowercase-tool floor
+fak manage aider          # OpenAI wire, via the injected OPENAI_API_BASE
 ```
 
 An unrecognized agent keeps the Anthropic default, and `--provider` always overrides the

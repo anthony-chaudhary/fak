@@ -35,7 +35,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."   # the host's upstream credential
 fak node install                        # loopback gateway on 127.0.0.1:8080
 fak node status                         # service up + /healthz 200
 
-fak guard -- claude                     # guarded interactive session
+fak manage claude                       # guarded interactive session
 ```
 
 `install` with no flags binds loopback only — nothing is exposed off-host, and no bearer key

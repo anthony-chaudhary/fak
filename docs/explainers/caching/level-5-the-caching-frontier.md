@@ -117,7 +117,7 @@ rows carry per-item *landed vs open* annotations for exactly this reason.
 ## Try it
 
 ```bash
-fak guard -- claude                              # run as usual; managed cache is auto
+fak manage claude                                # run as usual; managed cache is auto
 fak vcache score --json                          # per-plane score + the 7-facet usefulness fold
 fak vcache status                                # what's live vs gated right now
 fak cachevalue report --since 2026-06-22 --json  # OBSERVED/WITNESSED value, when available

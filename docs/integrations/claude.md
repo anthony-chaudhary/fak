@@ -47,7 +47,7 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 **2. Launch your normal Claude Code, kernel-adjudicated:**
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 No API key needed — `fak guard` uses your logged-in Claude Pro/Max **subscription** by
@@ -69,7 +69,7 @@ A destructive `rm -rf`, a `git push`, or a write into `.git/` is refused *before
 session:
 
 ```bash
-fak guard --probe -- claude -p "Reply with exactly the word: pong"
+fak manage --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
 That's the whole loop. Everything below is the detail behind these three steps — the
@@ -112,13 +112,13 @@ The fastest way to put the kernel in front of the Claude Code you already run is
 terminal, no config-file edits:
 
 ```bash
-fak guard -- claude    # your normal Claude Code, kernel-adjudicated, on your subscription
+fak manage claude      # your normal Claude Code, kernel-adjudicated, on your subscription
 ```
 
 For a quick live smoke that does not ask the agent to write a fleet handoff, run:
 
 ```bash
-fak guard --probe -- claude -p "Reply with exactly the word: pong"
+fak manage --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
 (No API key needed — `fak guard` uses your logged-in Claude Pro/Max subscription by
@@ -176,8 +176,8 @@ stop/continue behavior after a denial. New `fak guard` launcher claims are gated
 Wrap a different agent or upstream by naming it after `--` and switching the provider:
 
 ```bash
-fak guard --provider openai -- codex            # an OpenAI-compatible coding agent
-fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
+fak manage --provider openai -- codex           # an OpenAI-compatible coding agent
+fak manage --policy my-floor.json -- claude     # enforce your own reviewed allow-list
 ```
 
 ### Local model: no key, no network, one command
@@ -185,7 +185,7 @@ fak guard --policy my-floor.json -- claude      # enforce your own reviewed allo
 `fak guard --gguf` runs a local GGUF model in-kernel as the upstream for your agent. No API key, no network, no second terminal — the whole stack (local model + your harness + kernel floor) is one command:
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak manage --gguf qwen2.5:7b -- claude
 ```
 
 What you'll see on first run (the GGUF is cached locally after the first pull):
@@ -215,9 +215,9 @@ The `--gguf` flag accepts a model alias (from `fak ls`), an `hf://` URI, or a lo
 
 ```bash
 fak ls    # list available aliases: qwen2.5:7b, qwen2.5:1.5b, smollm2, ornith:9b
-fak guard --gguf qwen2.5:1.5b -- claude               # smaller 1.5B model (~1.6 GB)
-fak guard --gguf <path/to/model.gguf> -- claude      # local file
-fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
+fak manage --gguf qwen2.5:1.5b -- claude              # smaller 1.5B model (~1.6 GB)
+fak manage --gguf <path/to/model.gguf> -- claude     # local file
+fak manage --gguf hf://owner/repo/model.gguf -- claude # download on demand
 ```
 
 **GPU acceleration (optional):**
@@ -225,7 +225,7 @@ fak guard --gguf hf://owner/repo/model.gguf -- claude # download on demand
 Use `--backend cuda` or `--backend metal` to run decode on GPU (CUDA requires `-tags cuda`; Metal is linked on darwin/arm64 with cgo):
 
 ```bash
-FAK_GGUF_LOAD_WORKERS=8 fak guard --gguf qwen2.5:7b --backend cuda -- claude
+FAK_GGUF_LOAD_WORKERS=8 fak manage --gguf qwen2.5:7b --backend cuda -- claude
 ```
 
 **The honest fence:**
@@ -243,7 +243,7 @@ When you need the best coding quality and you have a subscription, use `fak guar
 `fak guard` can also seed a stable served-session budget for wrapped Claude Code:
 
 ```bash
-fak guard --context-budget-tokens 150000 --reset-on-budget -- claude
+fak manage --context-budget-tokens 150000 --reset-on-budget -- claude
 ```
 
 The gateway uses a stable default trace id (`guard`) for child requests that do not send
@@ -262,7 +262,7 @@ planned view, and reuse provider cache only where legal.
 For a hard child-process boundary, use the guard restart supervisor:
 
 ```bash
-fak guard --context-budget-tokens 150000 --restart-on-budget -- claude
+fak manage --context-budget-tokens 150000 --restart-on-budget -- claude
 ```
 
 On budget exhaustion, guard distills the served transcript into a carryover seed, re-arms
@@ -321,11 +321,11 @@ going.
    3 consecutive continues.)
 
 ```bash
-fak guard -- claude                          # auto-continue ON (enforce); give up after 6 identical repeats
-fak guard --deny-all-continue=shadow -- claude   # log the would-continue, still stop (observe first)
-fak guard --deny-all-continue=off -- claude      # restore the bare end_turn stop
-fak guard --same-stop 10 -- claude               # tolerate up to 10 identical repeats before standing down
-fak guard --deny-all-max 5 -- claude             # legacy blind bound (older gateways without the same-issue gauge)
+fak manage claude                            # auto-continue ON (enforce); give up after 6 identical repeats
+fak manage --deny-all-continue=shadow -- claude  # log the would-continue, still stop (observe first)
+fak manage --deny-all-continue=off -- claude     # restore the bare end_turn stop
+fak manage --same-stop 10 -- claude              # tolerate up to 10 identical repeats before standing down
+fak manage --deny-all-max 5 -- claude            # legacy blind bound (older gateways without the same-issue gauge)
 ```
 
 The Stop hook is merged into the **same** `--settings` file as the PreCompact hook (a single
@@ -340,7 +340,7 @@ same way — over `--provider openai`:
 
 ```bash
 export OPENAI_API_KEY=sk-...                       # or point --base-url at a local model
-fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode
+fak manage --provider openai --api-key-env OPENAI_API_KEY -- opencode
 ```
 
 guard injects `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1` into OpenCode (the `/v1` matters
@@ -356,7 +356,7 @@ If OpenCode does not pick up `OPENAI_BASE_URL` in your setup, bind a **fixed** p
 point an `opencode.json` provider at it instead — same kernel boundary, explicit wiring:
 
 ```bash
-fak guard --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY -- opencode
+fak manage --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY -- opencode
 ```
 
 ```json
@@ -428,7 +428,7 @@ disagree:
   per-reason breakdown.
 
 ```bash
-FAK_AUDIT_JOURNAL=~/fak-audit.jsonl fak guard --log ~/fak-gw.log -- claude
+FAK_AUDIT_JOURNAL=~/fak-audit.jsonl fak manage --log ~/fak-gw.log -- claude
 ```
 
 ### Prove it: the request really transited the gateway over your subscription
@@ -461,7 +461,7 @@ go build -o fak ./cmd/fak
 # --log, FAK_AUDIT_JOURNAL, and --anthropic-oauth are fak flags.
 # -p, --allowedTools, and --output-format AFTER `claude` are Claude Code flags.
 FAK_AUDIT_JOURNAL="$PWD/fak-audit.jsonl" \
-  ./fak guard --log "$PWD/gw.log" --anthropic-oauth -- \
+  ./fak manage --log "$PWD/gw.log" --anthropic-oauth -- \
   claude -p "Run: echo hello-from-guard" \
     --allowedTools "Bash(echo:*)" \
     --output-format json
@@ -794,7 +794,7 @@ llama-server -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
   --host 127.0.0.1 --port 8131 --ctx-size 32768 --n-gpu-layers 99
 
 # terminal 2 — front it and launch Claude Code; --local auto-detects the server above:
-fak guard --local -- claude
+fak manage --local -- claude
 ```
 
 `--local` probes Ollama (`11434`), LM Studio (`1234`), the Qwen3.6 dogfood port
@@ -806,7 +806,7 @@ the Qwen preset (`top_k=20` and `preserve_thinking=true`) unless you already set
 interactive session:
 
 ```bash
-fak guard --local --probe -- claude -p "Reply with exactly the word: pong"
+fak manage --local --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
 The `fak-qwen36-claude` preset (installed by `scripts/dogfood-claude.sh --install`) is

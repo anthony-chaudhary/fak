@@ -155,7 +155,7 @@ is a property you can diff and test, not a prompt you hope holds.
 3. Launch the agent through the gate, with this policy as the floor:
 
    ```bash
-   fak guard --policy examples/mem0-openmemory-policy.json -- claude
+   fak manage --policy examples/mem0-openmemory-policy.json -- claude
    ```
 
 Now every memory tool call the model proposes surfaces on the proxied stream, crosses
@@ -171,7 +171,7 @@ fak guard: 47 kernel decision(s) — 44 allowed, 3 denied, 0 repaired, 1 quarant
 For a durable, hash-chained record of every memory decision, add an audit journal:
 
 ```bash
-FAK_AUDIT_JOURNAL=~/mem-audit.jsonl fak guard --policy examples/mem0-openmemory-policy.json -- claude
+FAK_AUDIT_JOURNAL=~/mem-audit.jsonl fak manage --policy examples/mem0-openmemory-policy.json -- claude
 ```
 
 ---

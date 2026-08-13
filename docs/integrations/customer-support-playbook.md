@@ -152,7 +152,7 @@ Point your agent's base URL at `http://127.0.0.1:8080`. The agent sees no differ
 #### Option B — Use `fak guard` with Claude Code (local dev)
 
 ```bash
-./fak guard --policy my-support-policy.json -- claude
+./fak manage --policy my-support-policy.json -- claude
 ```
 
 Every tool call Claude proposes crosses the customer-support floor before execution.

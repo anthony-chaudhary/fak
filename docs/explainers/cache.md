@@ -67,7 +67,7 @@ reporting a result. OpenAI-wire and other non-Anthropic sessions do not acquire 
 For an API-backed guarded session:
 
 ```sh
-fak guard --managed-cache on -- claude
+fak manage --managed-cache on -- claude
 # Use the session, exit it, then inspect the captured provider telemetry.
 fak cachevalue report
 ```

@@ -44,7 +44,7 @@ does **not** mean the tokens are unbilled. On API billing Fable 5 is a paid tier
 ## The one command
 
 ```bash
-fak guard -- claude    # your normal Claude Code, on your subscription, kernel-adjudicated
+fak manage claude      # your normal Claude Code, on your subscription, kernel-adjudicated
 ```
 
 That's the whole setup. Specifically:
@@ -183,7 +183,7 @@ high-pressure session cleanly, where an Opus route would be refused without an
 explicit justification:
 
 ```bash
-fak guard --session-pressure-gate high --model claude-fable-5 -- claude
+fak manage --session-pressure-gate high --model claude-fable-5 -- claude
 # an explicit Fable route SATISFIES current high cost/context-pressure actions
 # (cmd/fak/guard_session_pressure.go:86-136; docs/cli-reference.md:550-554)
 ```
@@ -302,7 +302,7 @@ fak cachevalue report --dev-sessions --dev-session-days 3   # the recent "our ow
 fak cachevalue status --session <transcript.jsonl> --json   # one session, priced (the per-session table)
 
 # 3. Watch the lever move on a live session (compaction on by default; 0 disables):
-fak guard --compact-history-budget 48000 -- claude
+fak manage --compact-history-budget 48000 -- claude
 #   → the per-turn `fak-turn …` line and the exit summary print what was shed.
 
 # 4. Inspect the live session's context budget (what THIS page witnessed):

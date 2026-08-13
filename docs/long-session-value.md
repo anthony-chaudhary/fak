@@ -114,7 +114,7 @@ A/B) at long horizons:
 go test ./internal/bench -run RelayVsCompaction
 
 # 2. Live, on your own Claude Code session (compaction is on by default; 0 disables):
-fak guard --compact-history-budget 48000 -- claude
+fak manage --compact-history-budget 48000 -- claude
 
 # 3. Price real Claude Code transcripts (~/.claude/projects/**/*.jsonl) with the same economics:
 fak cachevalue report --dev-sessions

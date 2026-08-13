@@ -94,7 +94,7 @@ base URL **into the child process only**, and proxies to your real upstream:
 
 ```bash
 export OPENAI_API_KEY=sk-...                  # or point --base-url at a local model
-fak guard --provider openai --api-key-env OPENAI_API_KEY -- hermes
+fak manage --provider openai --api-key-env OPENAI_API_KEY -- hermes
 ```
 
 `fak guard`:
@@ -129,7 +129,7 @@ Run a local GGUF in-kernel as Hermes Agent's upstream — the whole stack (model
 kernel floor) in one process:
 
 ```bash
-fak guard --gguf qwen2.5-coder:7b -- hermes
+fak manage --gguf qwen2.5-coder:7b -- hermes
 ```
 
 The GGUF downloads from Hugging Face on first run (cached in `~/.cache/fak-models/`), loads

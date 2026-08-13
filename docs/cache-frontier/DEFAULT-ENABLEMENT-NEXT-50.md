@@ -177,7 +177,7 @@ This goal is complete only when a fresh user can run these surfaces and see a
 coherent, per-plane cache story:
 
 ```bash
-fak guard -- <agent>
+fak manage <agent>
 fak vcache score --json
 fak cachevalue report --since <date> --json
 fak cachevalue review --since <date> --json

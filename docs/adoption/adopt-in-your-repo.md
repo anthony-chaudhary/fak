@@ -68,7 +68,7 @@ For a Claude Code agent, the whole gateway is one verb. No second terminal, no
 config-file edit:
 
 ```
-fak guard -- claude
+fak manage claude
 ```
 
 `fak guard` starts an in-process gateway on a private loopback port, loads a secure
@@ -79,8 +79,8 @@ your agent proposes crosses the floor first.
 Wrap a different agent by naming it after `--` and switching the provider:
 
 ```
-fak guard --provider openai -- codex        # an OpenAI-compatible coding agent
-fak guard --provider openai -- opencode
+fak manage --provider openai -- codex       # an OpenAI-compatible coding agent
+fak manage --provider openai -- opencode
 ```
 
 If your client reads an environment variable instead of launching under a wrapper,
@@ -106,7 +106,7 @@ floor and adapt it. Print the built-in guard floor, or dump the default for the
 serve path:
 
 ```
-fak guard --dump-policy > policy.json        # the embedded guard floor
+fak manage --dump-policy > policy.json       # the embedded guard floor
 # or
 fak policy --dump > policy.json              # the default serve floor
 ```

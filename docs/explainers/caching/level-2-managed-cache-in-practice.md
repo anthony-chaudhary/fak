@@ -78,9 +78,9 @@ So the same unset config resolves to `on` under a launcher and `auto` under a ba
 guard. If you want one specific posture, pass the flag explicitly and stop guessing.
 
 ```bash
-fak guard --managed-cache on   -- claude   # request the 1h upgrade (activates on API-key billing; downgrades to passive on subscription-OAuth)
-fak guard --managed-cache off  -- claude   # never steer the provider cache
-fak guard --managed-cache auto -- claude   # on for an API key, passive on Pro/Max
+fak manage --managed-cache on   -- claude  # request the 1h upgrade (activates on API-key billing; downgrades to passive on subscription-OAuth)
+fak manage --managed-cache off  -- claude  # never steer the provider cache
+fak manage --managed-cache auto -- claude  # on for an API key, passive on Pro/Max
 ```
 
 ## On Pro/Max, the payoff is headroom — and it comes from the rest of the family
@@ -140,7 +140,7 @@ which" map.
 ## Try it
 
 ```bash
-fak guard --managed-cache on -- claude   # request the 1h upgrade (API-key seats activate; subscription-OAuth downgrades to passive)
+fak manage --managed-cache on -- claude  # request the 1h upgrade (API-key seats activate; subscription-OAuth downgrades to passive)
 fak cachevalue report                     # later: see what caching actually saved
 ```
 

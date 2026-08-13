@@ -262,7 +262,7 @@ page is the *what and why* of the trim itself.
 ## Try it
 
 ```bash
-fak guard -- claude          # compaction is on by default at a 48K budget
+fak manage claude            # compaction is on by default at a 48K budget
 fak cachevalue report        # the owner-attribution + per-fire compaction health
 ```
 

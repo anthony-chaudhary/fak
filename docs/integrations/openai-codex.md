@@ -253,7 +253,7 @@ For `fak guard`, use the restart supervisor when the wrapped client benefits fro
 child-process boundary:
 
 ```bash
-fak guard --provider openai --context-budget-tokens 150000 --restart-on-budget -- <openai-compatible-agent>
+fak manage --provider openai --context-budget-tokens 150000 --restart-on-budget -- <openai-compatible-agent>
 ```
 
 On budget exhaustion, guard distills the served transcript into a carryover seed, re-arms

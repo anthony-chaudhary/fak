@@ -18,7 +18,7 @@ llama-server -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
   --host 127.0.0.1 --port 8131 --ctx-size 32768 --n-gpu-layers 99
 
 # terminal 2 — front it with the kernel and launch Claude Code
-fak guard --local -- claude
+fak manage --local -- claude
 ```
 
 `fak guard --local` auto-detects the server above (it probes Ollama, LM Studio, the

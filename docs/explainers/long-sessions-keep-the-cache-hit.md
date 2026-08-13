@@ -59,7 +59,7 @@ You don't have to ask for it: it fires automatically once a conversation sprawls
 to shed sooner, or `--compact-history-budget 0` to disable it entirely:
 
 ```bash
-fak guard --compact-history-budget 8000 -- claude   # tighter than the ~48k default
+fak manage --compact-history-budget 8000 -- claude  # tighter than the ~48k default
 ```
 
 ## When would you burst the cache?

@@ -39,7 +39,7 @@ Run the live Claude Code guard path with an audit journal:
 go build -o fak ./cmd/fak
 
 FAK_AUDIT_JOURNAL="$PWD/fak-audit.jsonl" \
-  ./fak guard --log "$PWD/gw.log" --anthropic-oauth -- \
+  ./fak manage --log "$PWD/gw.log" --anthropic-oauth -- \
   claude -p "Run: echo hello-from-guard" \
     --allowedTools "Bash(echo:*)" \
     --output-format json

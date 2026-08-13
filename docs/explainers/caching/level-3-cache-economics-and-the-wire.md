@@ -161,8 +161,8 @@ command with `--since` for the current fold.
 ## Try it
 
 ```bash
-fak guard --managed-cache on -- claude          # force the 1h TTL upgrade on the wire (API-key billing)
-fak guard --managed-cache off -- claude         # forward the client's own cache_control only
+fak manage --managed-cache on -- claude         # force the 1h TTL upgrade on the wire (API-key billing)
+fak manage --managed-cache off -- claude        # forward the client's own cache_control only
 fak cachevalue report --since 2026-07-01         # two-track P&L: WITNESSED kernel vs OBSERVED $, split by owner
 fak cachevalue report --since 2026-07-01 --json  # the same fold as structured JSON
 ```

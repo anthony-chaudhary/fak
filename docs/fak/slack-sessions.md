@@ -52,7 +52,7 @@ Nothing to turn on: when a `FAK_GUARD_SESSIONS_TOKEN` is resolvable, `fak guard`
 a session run-card at startup and drains it to Slack in the background.
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 The startup report tells you whether the card was queued:
@@ -78,7 +78,7 @@ leaked into the channel.
 Point sessions at a specific channel per-run without touching `.env.slack.local`:
 
 ```bash
-FAK_GUARD_SESSIONS_CHANNEL=C0XXXXOPS fak guard -- claude
+FAK_GUARD_SESSIONS_CHANNEL=C0XXXXOPS fak manage claude
 ```
 
 ## Chat with a kernel-hosted model from Slack
@@ -98,7 +98,7 @@ FAK_Q4K=1 fak serve --gguf <model-shard1.gguf> --addr 127.0.0.1:8080
 fak chatrelay --endpoint http://127.0.0.1:8080 --channel C0XXXXCHAT --model glm-5.2
 
 # or run the bridge itself under the guard's capability floor:
-fak guard -- fak chatrelay --endpoint http://127.0.0.1:8080 --channel C0XXXXCHAT
+fak manage fak chatrelay --endpoint http://127.0.0.1:8080 --channel C0XXXXCHAT
 ```
 
 Check the wiring before a live run — `--dry-run` prints the resolved config (with the
