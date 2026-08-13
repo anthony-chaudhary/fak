@@ -3,7 +3,7 @@
   "corpus": "popular-agent-subtasks-v1",
   "execution_verdict": "PASS",
   "value_verdict": "NOT_YET",
-  "reason": "paired corpus execution plus grounded retry and independent verification contributions are measured, but gateway dollars and context/mode ablations are not yet available; no quality/$ winner is claimed",
+  "reason": "paired corpus execution plus retry, bounded context compaction, and independent verification contributions are measured, but gateway dollars and mode ablation are not yet available; no quality/$ winner is claimed",
   "cases": [
     {
       "task": {
@@ -142,8 +142,8 @@
     },
     {
       "layer": "context",
-      "status": "NOT_YET",
-      "reason": "pinned tasks do not cross the context compaction threshold"
+      "status": "PASS",
+      "reason": "naive FIFO lost an early durable pointer; managed compaction retained it while peak context stayed within the same cap"
     },
     {
       "layer": "verify",
@@ -171,5 +171,15 @@
     "with_verifier_caught": true,
     "readback": "artifact-absent",
     "evidence": "artifact-absent: independent readback found no claimed artifact"
+  },
+  "history_ablation": {
+    "token_cap": 64,
+    "turns": 24,
+    "naive_retained_pointer": false,
+    "compacted_retained_pointer": true,
+    "compactions": 20,
+    "peak_tokens": 64,
+    "final_tokens": 57
   }
 }
+

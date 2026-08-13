@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -170,4 +171,54 @@ func runVerifierAblationArm(parent context.Context, verifier microagent.Verifier
 func verifierAblationPassed(r microVerifierAblation) bool {
 	return r.WithoutVerifierCompleted && !r.WithVerifierCompleted && r.WithVerifierCaught &&
 		r.Readback == "artifact-absent" && r.Evidence == "artifact-absent: independent readback found no claimed artifact"
+}
+
+const historyReceiptPointer = "artifact://run/receipt-42"
+
+type microHistoryAblation struct {
+	TokenCap                 int  `json:"token_cap"`
+	Turns                    int  `json:"turns"`
+	NaiveRetainedPointer     bool `json:"naive_retained_pointer"`
+	CompactedRetainedPointer bool `json:"compacted_retained_pointer"`
+	Compactions              int  `json:"compactions"`
+	PeakTokens               int  `json:"peak_tokens"`
+	FinalTokens              int  `json:"final_tokens"`
+}
+
+func runMicroHistoryAblation() microHistoryAblation {
+	const capTokens = 64
+	const turns = 24
+	naive := microagent.NewContext(capTokens)
+	managed := microagent.NewManagedContext(capTokens)
+	initial := "task receipt at " + historyReceiptPointer
+	naive.Append("tool", initial)
+	managed.Append("tool", initial, microagent.ArtifactPointer{Kind: "receipt", URI: historyReceiptPointer})
+	for i := 0; i < turns; i++ {
+		content := fmt.Sprintf("turn-%02d routine observation alpha beta gamma delta", i)
+		naive.Append("tool", content)
+		managed.Append("tool", content)
+	}
+	return microHistoryAblation{
+		TokenCap:                 capTokens,
+		Turns:                    turns,
+		NaiveRetainedPointer:     historyContains(naive.Messages(), historyReceiptPointer),
+		CompactedRetainedPointer: historyContains(managed.Messages(), historyReceiptPointer),
+		Compactions:              managed.Compactions(),
+		PeakTokens:               managed.PeakTokens(),
+		FinalTokens:              managed.Tokens(),
+	}
+}
+
+func historyContains(messages []microagent.Msg, needle string) bool {
+	for _, message := range messages {
+		if strings.Contains(message.Content, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func historyAblationPassed(r microHistoryAblation) bool {
+	return !r.NaiveRetainedPointer && r.CompactedRetainedPointer && r.Compactions > 0 &&
+		r.PeakTokens <= r.TokenCap && r.FinalTokens <= r.TokenCap
 }

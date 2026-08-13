@@ -4,7 +4,7 @@
 - Corpus: `popular-agent-subtasks-v1`
 - Execution: **PASS**
 - Value: **NOT_YET**
-- Reason: paired corpus execution plus grounded retry and independent verification contributions are measured, but gateway dollars and context/mode ablations are not yet available; no quality/$ winner is claimed
+- Reason: paired corpus execution plus retry, bounded context compaction, and independent verification contributions are measured, but gateway dollars and mode ablation are not yet available; no quality/$ winner is claimed
 
 | Task | Complexity | Micro | Managed baseline | Micro tokens | Baseline tokens | Micro ms | Baseline ms |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -17,7 +17,7 @@
 | Layer | Status | Reason |
 |---|---|---|
 | retry | PASS | retry-off failed after one attempt; retry-on completed after exact transient evidence was fed back, bounded at two attempts |
-| context | NOT_YET | pinned tasks do not cross the context compaction threshold |
+| context | PASS | naive FIFO lost an early durable pointer; managed compaction retained it while peak context stayed within the same cap |
 | verify | PASS | verifier-off accepted claimed completion; verifier-on independently read back the absent artifact and refused it |
 | mode | NOT_YET | the real gateway microagent currently exposes completion mode only; #2026 owns bash/tool mode parity |
 
@@ -26,6 +26,12 @@
 - retry off: completed=false, attempts=1
 - retry on: completed=true, attempts=2
 - evidence re-fed verbatim: `fixture transient: upstream reset`
+
+### Context witness
+
+- same cap: 64 tokens across 24 long-history turns
+- durable pointer retained: naive=false, compacted=true
+- managed compactions=20, peak tokens=64, final tokens=57
 
 ### Verifier witness
 

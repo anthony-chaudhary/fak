@@ -24,3 +24,10 @@ func TestRunMicroVerifierAblationCatchesUnsupportedClaim(t *testing.T) {
 		t.Fatalf("verifier ablation did not isolate contribution: %+v", r)
 	}
 }
+
+func TestRunMicroHistoryAblationRetainsDurablePointerWithinCap(t *testing.T) {
+	r := runMicroHistoryAblation()
+	if !historyAblationPassed(r) {
+		t.Fatalf("context ablation did not isolate contribution: %+v", r)
+	}
+}
