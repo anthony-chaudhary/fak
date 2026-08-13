@@ -417,6 +417,7 @@ var tier = map[string]int{
 	"harnessprofile":      1,
 	"managedinventory":    1, // public-safe managed-agent object registry + catalog validator/renderer; stdlib-only, imports nothing internal, off the hot path.
 	"portabilitycontract": 1, // versioned managed-agent portability object/package/transaction contract; stdlib-only, imports nothing internal, off the hot path.
+	"portability":         1, // personal-continuity discovery/export/apply/switch/rollback leaf; stdlib-only, imports nothing internal, off the hot path.
 	"orchestration":       2, // pure portable workflow-plan/profile resolution contract; stdlib-only, no provider adapters, off the hot path.
 	"devexmeter":          1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
 	"toolproc":            3,
