@@ -1,0 +1,20 @@
+[
+  "checkpoint",
+  "credential-reference",
+  "future-managed-object",
+  "harness-profile",
+  "history",
+  "lease",
+  "loop",
+  "memory",
+  "model-binding",
+  "plan",
+  "policy",
+  "receipt",
+  "session",
+  "skill",
+  "task",
+  "tool-binding",
+  "trajectory",
+  "workflow"
+]
