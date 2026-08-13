@@ -2469,6 +2469,26 @@
           "category": "incidental",
           "reason": "Wire error or request shape within the #6547 full-power attachment decision path; not a separate user-facing concept.",
           "token": "SessionClientDecisionRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Audit report field naming, not a new session runtime concept",
+          "token": "ObservedSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function parameter for external census, not a new session runtime concept",
+          "token": "observedSessionIDs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Audit count field, not a new session runtime concept",
+          "token": "RegisteredObserved"
+        },
+        {
+          "category": "incidental",
+          "reason": "Audit issue code, not a new session runtime concept",
+          "token": "ambiguous_session_root"
         }
       ],
       "id": "session-runtime",
@@ -2482,8 +2502,10 @@
         "MalformedSessionRef",
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
+        "ObservedSessions",
         "ReapMalformedSessionRefs",
         "RecordSessionTerminalOutput",
+        "RegisteredObserved",
         "ResolveSessionEffect",
         "RestoreSessionClientState",
         "RestoreSessionClientStateWithDependency",
@@ -2516,6 +2538,7 @@
         "WorkSessionOpened",
         "WorkSessionView",
         "adaptive-selective-hedge",
+        "ambiguous_session_root",
         "attemptHeap",
         "authorizeSessionClient",
         "blankSessionOpen",
@@ -2563,6 +2586,7 @@
         "member_sessions",
         "microagentSessionID",
         "observedSchedulerResult",
+        "observedSessionIDs",
         "orderRecords",
         "readSessionHandoffBlocks",
         "renderSessionOpen",
