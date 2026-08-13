@@ -108,6 +108,48 @@ func TestDispatchOrderCooldownHolds(t *testing.T) {
 	}
 }
 
+// TestDispatchOrderBlockedByPrereq drives the #3224 prerequisite gate through the CLI: a unit
+// whose blocked_by names an open prerequisite is held (blocked, out of the pick) while the
+// prerequisite is present, and the table names the open prerequisite it waits on.
+func TestDispatchOrderBlockedByPrereq(t *testing.T) {
+	path := writeCandidates(t, `[
+	  {"id":"120","key":"A","updated_unix":1999900},
+	  {"id":"123","key":"B","updated_unix":1999990,"blocked_by":["120"]}
+	]`)
+	// --json: the dependent is blocked and never the pick; the prerequisite is picked.
+	out, errb, code := runDispatchAt("order", "--in", path, "--now", "2000000", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var res struct {
+		dispatchorder.Result
+		Pick string `json:"pick"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if res.BlockedCount != 1 || res.KeepCount != 1 {
+		t.Errorf("blocked %d keep %d, want 1/1", res.BlockedCount, res.KeepCount)
+	}
+	if res.Pick != "120" {
+		t.Errorf("pick = %q, want 120 (the open prerequisite; its dependent is held)", res.Pick)
+	}
+	// The human table surfaces the blocked disposition and names the open prerequisite.
+	table, _, code := runDispatchAt("order", "--in", path, "--now", "2000000")
+	if code != 0 {
+		t.Fatalf("table exit = %d, want 0", code)
+	}
+	if !strings.Contains(table, "1 blocked") {
+		t.Errorf("table header missing blocked accounting:\n%s", table)
+	}
+	if !strings.Contains(table, "blocked") || !strings.Contains(table, "120") {
+		t.Errorf("table missing the blocked line naming prerequisite 120:\n%s", table)
+	}
+	if !strings.Contains(table, "pick: 120") {
+		t.Errorf("table should pick the open prerequisite 120:\n%s", table)
+	}
+}
+
 func TestDispatchOrderJSONPricesFanoutBeforeLaunch(t *testing.T) {
 	const now = 2_000_000
 	path := writeCandidates(t, `[
