@@ -94,6 +94,11 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 			LastIssueStatus:   dispatchLastIssueStatus(inf.State),
 		},
 	})
+	pulse, pulseErr := dispatchRepoPulseOrientation(root)
+	if pulse != "" {
+		rec.Prompt += "\n\nRepository orientation (governed collapsed child; do not rerun these reads unless state changes):\n" + pulse + "\n"
+		rec.PromptChars = len(rec.Prompt)
+	}
 	out := map[string]any{
 		"schema":             rec.Schema,
 		"issue":              rec.Issue,
@@ -106,6 +111,10 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 		"prompt":             rec.Prompt,
 		"prompt_chars":       rec.PromptChars,
 		"development_branch": roles.DevelopmentBranch,
+		"repo_pulse_default": pulse != "",
+	}
+	if pulseErr != nil {
+		out["repo_pulse_error"] = pulseErr.Error()
 	}
 	if roleErr != nil {
 		out["branch_role_error"] = roleErr.Error()
