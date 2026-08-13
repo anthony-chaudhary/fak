@@ -55,6 +55,7 @@ type microCorpusReport struct {
 	Totals           microCorpusTotals     `json:"totals"`
 	Ablations        []microCorpusAblation `json:"ablations"`
 	RetryAblation    microRetryAblation    `json:"retry_ablation"`
+	VerifierAblation microVerifierAblation `json:"verifier_ablation"`
 }
 
 // pinnedMicroCorpus is deliberately small: one exact instruction, one structured
@@ -85,7 +86,13 @@ func cmdMicroCorpus(args []string) {
 		os.Exit(1)
 	}
 	report.RetryAblation = retry
-	applyRetryAblation(&report)
+	verifier, err := runMicroVerifierAblation(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak micro corpus: verifier ablation: %v\n", err)
+		os.Exit(1)
+	}
+	report.VerifierAblation = verifier
+	applyMeasuredAblations(&report)
 	if *markdown != "" {
 		if err := os.WriteFile(*markdown, []byte(formatMicroCorpusReport(report)), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "fak micro corpus: write Markdown: %v\n", err)
@@ -161,21 +168,24 @@ func foldMicroCorpus(cases []microCorpusCase) microCorpusReport {
 	return r
 }
 
-func applyRetryAblation(report *microCorpusReport) {
+func applyMeasuredAblations(report *microCorpusReport) {
 	if report == nil {
 		return
 	}
 	for i := range report.Ablations {
-		if report.Ablations[i].Layer == "retry" && retryAblationPassed(report.RetryAblation) {
-			report.Ablations[i] = microCorpusAblation{
-				Layer:  "retry",
-				Status: "PASS",
-				Reason: "retry-off failed after one attempt; retry-on completed after exact transient evidence was fed back, bounded at two attempts",
+		switch report.Ablations[i].Layer {
+		case "retry":
+			if retryAblationPassed(report.RetryAblation) {
+				report.Ablations[i] = microCorpusAblation{Layer: "retry", Status: "PASS", Reason: "retry-off failed after one attempt; retry-on completed after exact transient evidence was fed back, bounded at two attempts"}
+			}
+		case "verify":
+			if verifierAblationPassed(report.VerifierAblation) {
+				report.Ablations[i] = microCorpusAblation{Layer: "verify", Status: "PASS", Reason: "verifier-off accepted claimed completion; verifier-on independently read back the absent artifact and refused it"}
 			}
 		}
 	}
-	if retryAblationPassed(report.RetryAblation) {
-		report.Reason = "paired corpus execution and grounded retry contribution are measured, but gateway dollars and context/verify/mode ablations are not yet available; no quality/$ winner is claimed"
+	if retryAblationPassed(report.RetryAblation) && verifierAblationPassed(report.VerifierAblation) {
+		report.Reason = "paired corpus execution plus grounded retry and independent verification contributions are measured, but gateway dollars and context/mode ablations are not yet available; no quality/$ winner is claimed"
 	}
 }
 
@@ -195,6 +205,12 @@ func formatMicroCorpusReport(r microCorpusReport) string {
 		fmt.Fprintf(&b, "- retry off: completed=%t, attempts=%d\n", r.RetryAblation.WithoutRetryCompleted, r.RetryAblation.WithoutRetryAttempts)
 		fmt.Fprintf(&b, "- retry on: completed=%t, attempts=%d\n", r.RetryAblation.WithRetryCompleted, r.RetryAblation.WithRetryAttempts)
 		fmt.Fprintf(&b, "- evidence re-fed verbatim: `%s`\n", r.RetryAblation.Evidence[0])
+	}
+	if verifierAblationPassed(r.VerifierAblation) {
+		b.WriteString("\n### Verifier witness\n\n")
+		fmt.Fprintf(&b, "- verifier off: claimed completion accepted=%t\n", r.VerifierAblation.WithoutVerifierCompleted)
+		fmt.Fprintf(&b, "- verifier on: claimed completion accepted=%t, caught=%t\n", r.VerifierAblation.WithVerifierCompleted, r.VerifierAblation.WithVerifierCaught)
+		fmt.Fprintf(&b, "- independent readback: `%s`; evidence: `%s`\n", r.VerifierAblation.Readback, r.VerifierAblation.Evidence)
 	}
 	return b.String()
 }

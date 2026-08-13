@@ -3,7 +3,7 @@
   "corpus": "popular-agent-subtasks-v1",
   "execution_verdict": "PASS",
   "value_verdict": "NOT_YET",
-  "reason": "paired corpus execution and grounded retry contribution are measured, but gateway dollars and context/verify/mode ablations are not yet available; no quality/$ winner is claimed",
+  "reason": "paired corpus execution plus grounded retry and independent verification contributions are measured, but gateway dollars and context/mode ablations are not yet available; no quality/$ winner is claimed",
   "cases": [
     {
       "task": {
@@ -147,8 +147,8 @@
     },
     {
       "layer": "verify",
-      "status": "NOT_YET",
-      "reason": "exact-answer scoring is external and does not exercise the microagent Verifier hook"
+      "status": "PASS",
+      "reason": "verifier-off accepted claimed completion; verifier-on independently read back the absent artifact and refused it"
     },
     {
       "layer": "mode",
@@ -164,5 +164,12 @@
     "evidence": [
       "fixture transient: upstream reset"
     ]
+  },
+  "verifier_ablation": {
+    "without_verifier_completed": true,
+    "with_verifier_completed": false,
+    "with_verifier_caught": true,
+    "readback": "artifact-absent",
+    "evidence": "artifact-absent: independent readback found no claimed artifact"
   }
 }

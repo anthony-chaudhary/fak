@@ -26,7 +26,7 @@ func TestFoldMicroCorpusPreservesUnsupportedCostAndAblationNotYet(t *testing.T) 
 	}
 }
 
-func TestApplyRetryAblationPromotesOnlyRetry(t *testing.T) {
+func TestApplyMeasuredAblationsPromotesOnlyWitnessedLayers(t *testing.T) {
 	r := foldMicroCorpus(nil)
 	r.RetryAblation = microRetryAblation{
 		WithoutRetryCompleted: false,
@@ -35,17 +35,27 @@ func TestApplyRetryAblationPromotesOnlyRetry(t *testing.T) {
 		WithRetryAttempts:     2,
 		Evidence:              []string{retryAblationFailure},
 	}
-	applyRetryAblation(&r)
+	r.VerifierAblation = microVerifierAblation{
+		WithoutVerifierCompleted: true,
+		WithVerifierCompleted:    false,
+		WithVerifierCaught:       true,
+		Readback:                 "artifact-absent",
+		Evidence:                 "artifact-absent: independent readback found no claimed artifact",
+	}
+	applyMeasuredAblations(&r)
 	if r.Ablations[0].Layer != "retry" || r.Ablations[0].Status != "PASS" {
 		t.Fatalf("retry not promoted: %+v", r.Ablations)
 	}
-	for _, a := range r.Ablations[1:] {
-		if a.Status != "NOT_YET" {
-			t.Fatalf("unwitnessed ablation promoted: %+v", a)
+	if r.Ablations[2].Layer != "verify" || r.Ablations[2].Status != "PASS" {
+		t.Fatalf("verifier not promoted: %+v", r.Ablations)
+	}
+	for _, i := range []int{1, 3} {
+		if r.Ablations[i].Status != "NOT_YET" {
+			t.Fatalf("unwitnessed ablation promoted: %+v", r.Ablations[i])
 		}
 	}
 	md := formatMicroCorpusReport(r)
-	for _, want := range []string{"| retry | PASS |", "retry off: completed=false, attempts=1", "evidence re-fed verbatim: `" + retryAblationFailure + "`"} {
+	for _, want := range []string{"| retry | PASS |", "retry off: completed=false, attempts=1", "evidence re-fed verbatim: `" + retryAblationFailure + "`", "| verify | PASS |", "independent readback: `artifact-absent`"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

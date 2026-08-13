@@ -14,3 +14,13 @@ func TestRunMicroRetryAblationWitnessesGroundedContribution(t *testing.T) {
 		t.Fatalf("retry ablation did not isolate contribution: %+v", r)
 	}
 }
+
+func TestRunMicroVerifierAblationCatchesUnsupportedClaim(t *testing.T) {
+	r, err := runMicroVerifierAblation(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifierAblationPassed(r) {
+		t.Fatalf("verifier ablation did not isolate contribution: %+v", r)
+	}
+}
