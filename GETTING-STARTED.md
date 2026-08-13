@@ -46,11 +46,11 @@ These are the shortest path from "I already run Claude Code (or any agent)" to "
 call it makes is adjudicated". Neither needs the rest of this page:
 
 ```bash
-fak guard -- claude                      # your real model, behind the kernel — the one-command proxy
-fak guard --gguf qwen2.5:7b -- claude    # a local GGUF model in-kernel — no API key, no network
+fak manage claude                        # your real model, behind the kernel — the one-command proxy
+fak manage --gguf qwen2.5:7b -- claude   # a local GGUF model in-kernel — no API key, no network
 ```
 
-`fak guard` starts the gateway in-process, injects the base URL into the child only (your
+`fak manage` starts the gateway in-process, injects the base URL into the child only (your
 shell is untouched), and prints what it allowed vs blocked on exit. The per-harness recipes
 are in [`docs/integrations/claude.md`](docs/integrations/claude.md); the fuller versions of
 both bullets are under [Where to go next](#where-to-go-next).

@@ -75,13 +75,13 @@ metadata mirror) — it can never carve a hole in the hardwired block:
 ```
 
 ```bash
-fak guard --policy my-floor.json -- claude   # blocks the metadata class AND your hosts
+fak manage --policy my-floor.json -- claude  # blocks the metadata class AND your hosts
 ```
 
 Wrap a live agent the same way and the floor rides into the VM with it:
 
 ```bash
-fak guard -- claude          # every tool call crosses the floor; metadata SSRF is refused
+fak manage claude            # every tool call crosses the floor; metadata SSRF is refused
 ```
 
 ## Honest boundary

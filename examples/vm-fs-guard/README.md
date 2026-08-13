@@ -117,7 +117,7 @@ widens:
 Wrap a live agent and the FS floor rides into the VM with it:
 
 ```bash
-fak guard -- claude          # every FS tool call crosses the floor; the disk stays the sandbox's
+fak manage claude            # every FS tool call crosses the floor; the disk stays the sandbox's
 ```
 
 ## Honest boundary
