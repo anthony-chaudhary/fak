@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/anthony-chaudhary/fak/internal/memoryindex"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func runMemoryIndex(stdout, stderr io.Writer, args []string) int {
@@ -19,6 +20,7 @@ func runMemoryIndex(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "usage: fak memory index --dir DIR [--write] [--json]")
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	opt := memoryindex.Options{Types: []string{"project", "user", "feedback", "reference"}}
 	rep, ok := memoryindex.Check(*dir, opt)
 	if !ok {
