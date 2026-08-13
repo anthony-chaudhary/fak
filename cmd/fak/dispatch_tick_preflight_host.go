@@ -208,6 +208,11 @@ func dispatchCloseHostProbeShells() {
 // wrong falls back to the historical one-shot spawn, so a probe result is never
 // lost to the pooling. combineStderr applies to the one-shot path only: the
 // warm shell reads stdout, and its bootstrap already swallows script errors.
+var (
+	dispatchRunHostProbeFunc        = dispatchRunHostProbe
+	dispatchRunHostProbeOneShotFunc = runDispatchHostProbeOneShot
+)
+
 func dispatchRunHostProbe(script string, timeout time.Duration, combineStderr bool) ([]byte, error) {
 	if dispatchHostProbeShellEnabled() {
 		if rack := dispatchHostProbeRackHandle(); rack != nil {
@@ -223,7 +228,6 @@ func runDispatchHostProbeOneShot(script string, timeout time.Duration, combineSt
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := windowgate.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	configureDispatchHelperCommand(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	if combineStderr {
 		return cmd.CombinedOutput()
@@ -246,7 +250,6 @@ type dispatchHostProbeShell struct {
 // console creation the reuse spine performs, however many probes run on it.
 func spawnDispatchHostProbeShell(string) (dispatchtick.WarmShell, error) {
 	cmd := windowgate.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", dispatchHostProbeBootstrap)
-	configureDispatchHelperCommand(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -403,10 +406,25 @@ const dispatchProcScanScript = "Get-Process -ErrorAction SilentlyContinue | ForE
 	"} | ConvertTo-Json -Compress"
 
 func dispatchScanProcessesWindows() ([]dispatchtick.ProcInfo, error) {
-	out, err := dispatchRunHostProbe(dispatchProcScanScript, 60*time.Second, true)
+	out, err := dispatchRunHostProbeFunc(dispatchProcScanScript, 60*time.Second, true)
 	if err != nil {
 		return nil, err
 	}
+	rows, decodeErr := decodeDispatchProcessRows(out)
+	if decodeErr == nil {
+		return rows, nil
+	}
+	// A warm PowerShell shell can transiently return an empty/truncated frame while
+	// another fleet probe is turning over. Retry once through the same fallback-aware
+	// probe seam before typing the process dimension unreadable.
+	out, retryErr := dispatchRunHostProbeOneShotFunc(dispatchProcScanScript, 60*time.Second, true)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	return decodeDispatchProcessRows(out)
+}
+
+func decodeDispatchProcessRows(out []byte) ([]dispatchtick.ProcInfo, error) {
 	var rows []struct {
 		PID     int    `json:"pid"`
 		Name    string `json:"name"`
