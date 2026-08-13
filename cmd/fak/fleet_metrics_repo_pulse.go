@@ -78,10 +78,13 @@ func writeRepoPulseMetrics(w *promWriter, dir string) {
 }
 
 type repoPulseCohortReadiness struct {
-	Verdict      string `json:"verdict"`
-	PostLaunches int    `json:"post_launches"`
-	Minimum      int    `json:"minimum"`
-	Reason       string `json:"reason"`
+	Verdict          string `json:"verdict"`
+	PostLaunches     int    `json:"post_launches"`
+	Minimum          int    `json:"minimum"`
+	Reason           string `json:"reason"`
+	DispatchBlocker  string `json:"dispatch_blocker,omitempty"`
+	DispatchEvidence string `json:"dispatch_evidence,omitempty"`
+	NextAction       string `json:"next_action,omitempty"`
 }
 
 func assessRepoPulseCohort(dir string, minimum int) repoPulseCohortReadiness {
@@ -92,6 +95,7 @@ func assessRepoPulseCohort(dir string, minimum int) repoPulseCohortReadiness {
 	r := repoPulseCohortReadiness{Verdict: "not-yet", PostLaunches: t.Launches, Minimum: minimum}
 	if t.Launches < minimum {
 		r.Reason = fmt.Sprintf("need %d more durable post-default launch receipt(s) before outcome comparison", minimum-t.Launches)
+		foldLatestDispatchBlocker(dir, &r)
 		return r
 	}
 	r.Verdict = "ready"
