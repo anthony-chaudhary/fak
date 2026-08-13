@@ -24,7 +24,7 @@ model kecil — GPU tidak wajib.
 Bungkus agen yang sudah Anda pakai dengan fak, dalam satu perintah:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 Anda tidak menulis ulang agen apa pun. Cukup arahkan satu base URL ke `fak serve`, atau

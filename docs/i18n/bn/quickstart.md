@@ -26,7 +26,7 @@ description: "fak-এর বাংলা quickstart: শূন্য থেক�
 আপনার বিদ্যমান এজেন্টকে এক কমান্ডে একটি local model-এর পেছনে wrap করুন:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 এজেন্ট নতুন করে লিখতে হয় না — শুধু একটি base URL `fak serve`-এর দিকে ঘুরিয়ে দিন,

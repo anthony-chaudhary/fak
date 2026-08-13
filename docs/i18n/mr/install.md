@@ -26,7 +26,7 @@ quarantine आणि audit/metrics — एकाच process मध्ये.
 एजंट एका कमांडमध्ये wrap करता:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## 0. पूर्वअटी (Prerequisites)

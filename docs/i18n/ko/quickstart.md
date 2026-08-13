@@ -25,7 +25,7 @@ description: "fak 한국어 빠른 시작: 모든 tool call을 실행 전에 검
 tool call마다 capability floor를 먼저 통과시킵니다.
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak manage --gguf qwen2.5:7b -- claude
 ```
 
 ## 60초 증명 (키 없음, 모델 없음, GPU 없음)

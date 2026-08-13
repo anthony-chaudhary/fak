@@ -25,7 +25,7 @@ KV-cache, policy gate, result quarantine, audit అన్నీ ఒకే proces
 ఇప్పటి ఏజెంట్‌ను ఒకే కమాండ్‌లో wrap చేస్తారు:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ---

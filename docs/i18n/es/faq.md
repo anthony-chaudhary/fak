@@ -29,7 +29,7 @@ cada llamada.
 No. fak gobierna y cachea el modelo que ya usas — no lo reemplaza. Lo envuelves con:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 o reapuntas una sola base URL hacia `fak serve`.

@@ -29,7 +29,7 @@ schreibt für jeden Call ein auditierbares Urteil.
 Nein. fak governt und cached das Modell, das du bereits nutzt. Wickle es ein mit:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 oder richte eine Base-URL auf `fak serve`.

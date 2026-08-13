@@ -24,7 +24,7 @@ description: "fak の日本語入口ページ：AI エージェントとツー�
 tool call はまず capability floor（既定拒否の権限フロア）を通過します。
 
 ```bash
-fak guard -- claude    # 既存のエージェントを 1 コマンドで包む
+fak manage claude      # 既存のエージェントを 1 コマンドで包む
 ```
 
 ## 日本のチームにとってなぜ効くのか

@@ -23,7 +23,7 @@ description: "دليل بدء سريع بالعربية لـ fak: من الصف�
 غلّف وكيلك الحالي بنموذج محلي في أمر واحد — دون مفتاح، دون شبكة:
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak manage --gguf qwen2.5:7b -- claude
 ```
 
 لا تُعيد كتابة وكيلك. إمّا توجّه base URL واحدًا إلى `fak serve`، أو تلفّ الوكيل القائم

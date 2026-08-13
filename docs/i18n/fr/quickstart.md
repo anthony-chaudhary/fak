@@ -27,7 +27,7 @@ l'AI Act européen. Un **CPU suffit** pour les petits modèles ; aucun GPU requi
 Enveloppez votre agent existant avec un modèle local, en une seule commande :
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak manage --gguf qwen2.5:7b -- claude
 ```
 
 `fak` se place entre l'agent et ses tool calls : il vérifie chaque tool call *avant* son

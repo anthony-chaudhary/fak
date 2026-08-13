@@ -75,7 +75,7 @@ No reescribes tu agente: apuntas una base URL hacia `fak`, o envuelves un agente
 un solo comando:
 
 ```bash
-fak guard -- claude    # envuelve tu agente existente en un solo comando
+fak manage claude      # envuelve tu agente existente en un solo comando
 ```
 
 ## 3. La prueba de 60 segundos (sin key, sin modelo, sin GPU)

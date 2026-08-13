@@ -28,7 +28,7 @@ dữ liệu người dùng không đi qua biên giới.
 Bạn không phải viết lại agent — chỉ cần bọc nó lại:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 fak là **một binary Go tĩnh** nằm giữa AI agent và các tool nó gọi. Nó **xét duyệt mọi tool

@@ -35,7 +35,7 @@ Ein lokales Modell hinter deinen bestehenden Coding-Agenten — ohne Key, ohne N
 Befehl:
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak manage --gguf qwen2.5:7b -- claude
 ```
 
 `fak guard` startet deinen Agenten unverändert, schiebt aber ein lokales Modell davor und

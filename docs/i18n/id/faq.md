@@ -28,7 +28,7 @@ Tidak. fak **govern** dan **cache** model yang sudah Anda pakai — bukan mengga
 Bungkus agen Anda dengan satu perintah, atau arahkan ulang satu base URL ke `fak serve`:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## Q3. Ke mana data saya pergi — apakah ini patuh?

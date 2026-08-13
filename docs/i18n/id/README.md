@@ -25,7 +25,7 @@ Anda tidak menulis ulang agen — cukup arahkan satu base URL ke `fak serve`, da
 setiap tool call lebih dulu melewati capability floor.
 
 ```bash
-fak guard -- claude    # membungkus agen Anda yang sudah ada dengan satu perintah
+fak manage claude      # membungkus agen Anda yang sudah ada dengan satu perintah
 ```
 
 ## Mengapa tim di Indonesia perlu peduli

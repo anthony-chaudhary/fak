@@ -24,7 +24,7 @@ description: "fak 한국어 진입 페이지: AI 에이전트와 tool call 사�
 call이 먼저 capability floor를 통과합니다.
 
 ```bash
-fak guard -- claude    # 기존 에이전트를 명령어 하나로 감쌉니다
+fak manage claude      # 기존 에이전트를 명령어 하나로 감쌉니다
 ```
 
 ## 한국 팀이 주목해야 하는 이유

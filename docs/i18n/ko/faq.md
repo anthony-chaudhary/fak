@@ -28,7 +28,7 @@ prompt-cache prefix를 byte 단위로 동일하게 유지한 채 오래된 turn�
 한 줄로 감싸거나:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 base URL 하나를 `fak serve`로 다시 가리키면 됩니다.

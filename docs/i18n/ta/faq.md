@@ -34,7 +34,7 @@ model-களை in-process ஆக இயக்க முடியும், ம�
 wrap செய்யுங்கள்:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 அல்லது ஒரு base URL-ஐ `fak serve` நோக்கித் திருப்புங்கள்.

@@ -30,7 +30,7 @@ tool call, может запускать локальные GGUF-модели в
 командой:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 Либо перенаправьте один base URL на `fak serve`.

@@ -27,7 +27,7 @@ capability floor del kernel, y el trabajo estable de las sesiones largas se reut
 Envuelve tu agente existente con un modelo local en un solo comando:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 Esto pone a fak delante de tu agente: el modelo corre en local (nada sale de tu máquina) y

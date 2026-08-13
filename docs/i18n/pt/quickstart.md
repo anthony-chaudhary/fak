@@ -24,7 +24,7 @@ máquina**, e para modelos pequenos a **CPU é suficiente** — não precisa de 
 Envolva o agente que você já usa com um modelo local, numa única linha:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 Você não reescreve o seu agente — o `fak` senta-se entre o agente e as ferramentas que

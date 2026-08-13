@@ -26,7 +26,7 @@ description: "fak चे मराठी quickstart पान: शून्य�
 तुमचा सध्याचा एजंट एका कमांडमध्ये wrap करा:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 तुम्ही तुमचा एजंट पुन्हा लिहीत नाही — तोच agent loop आता प्रत्येक tool call आधी fak च्या

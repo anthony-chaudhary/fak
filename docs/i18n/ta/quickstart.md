@@ -27,7 +27,7 @@ data-residency-க்கு உகந்தது), மற்றும் சி
 பின்னால் wrap செய்யுங்கள்:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 இது உங்கள் இருக்கும் agent loop-ஐ அப்படியே வைத்து, ஒவ்வொரு tool call-ஐயும் *இயங்கும்

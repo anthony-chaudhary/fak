@@ -79,7 +79,7 @@ Du schreibst deinen Agenten nicht um — du richtest eine Base-URL auf `fak serv
 wickelst deinen bestehenden Agenten in einem einzigen Befehl ein:
 
 ```bash
-fak guard -- claude    # wraps your existing agent in a single command
+fak manage claude      # wraps your existing agent in a single command
 ```
 
 ## Wohin als Nächstes

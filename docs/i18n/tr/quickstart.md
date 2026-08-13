@@ -27,7 +27,7 @@ başlangıç noktasıdır.
 Mevcut ajanınızı tek komutla yerel bir modelin arkasına alın (anahtar yok, ağ yok):
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 Ajanınızı yeniden yazmazsınız — tek bir base URL'i `fak serve`'e yönlendirir ya da

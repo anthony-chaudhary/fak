@@ -22,7 +22,7 @@ Cursor，或任意 OpenAI / Anthropic / MCP 客户端）前面——只需把一
 不用。fak 只是对你**已经在用**的模型做管控与缓存，并不替换它。用一条命令把你现有的智能体包起来即可：
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 或者把一个 base URL 指向 `fak serve` 即可。

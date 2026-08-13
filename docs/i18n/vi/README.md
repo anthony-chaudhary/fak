@@ -25,7 +25,7 @@ Bạn không viết lại agent — chỉ trỏ lại một base URL về `fak s
 qua capability floor trước tiên.
 
 ```bash
-fak guard -- claude    # bọc agent hiện có của bạn chỉ bằng một lệnh
+fak manage claude      # bọc agent hiện có của bạn chỉ bằng một lệnh
 ```
 
 ## Vì sao các đội ngũ Việt Nam nên quan tâm

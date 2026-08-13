@@ -30,7 +30,7 @@ Non. fak **gouverne et met en cache** le modèle que vous utilisez déjà. Vous
 l'enveloppez avec :
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ou vous repointez une seule base URL vers `fak serve`.

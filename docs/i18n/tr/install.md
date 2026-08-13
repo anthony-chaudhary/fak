@@ -23,7 +23,7 @@ yeniden yazmadan. Ajanınızı yeniden yazmazsınız; tek bir base URL'i `fak se
 ya da mevcut ajanı tek komutla sararsınız:
 
 ```bash
-fak guard -- claude    # mevcut ajanınızı tek komutla sarar
+fak manage claude      # mevcut ajanınızı tek komutla sarar
 ```
 
 ## Türkiye için neden önemli

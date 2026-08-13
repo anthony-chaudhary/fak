@@ -32,7 +32,7 @@ fak आपका model नहीं बदलता — वह आपके AI �
 अपने मौजूदा एजेंट को एक ही कमांड में एक local model के साथ wrap कर दें:
 
 ```bash
-fak guard --gguf qwen2.5:7b -- claude
+fak manage --gguf qwen2.5:7b -- claude
 ```
 
 यही काफ़ी है — एजेंट-साइड पर कोई code बदलाव नहीं। हर tool call अब kernel के अंदर बने

@@ -26,7 +26,7 @@ No reescribes tu agente — apuntas una base URL hacia `fak`, y cada tool call p
 por el capability floor.
 
 ```bash
-fak guard -- claude    # envuelve tu agente existente en un solo comando
+fak manage claude      # envuelve tu agente existente en un solo comando
 ```
 
 ## Por qué importa para este mercado

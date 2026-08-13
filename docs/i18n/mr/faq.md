@@ -30,7 +30,7 @@ local models चालवू शकते, आणि प्रत्येक ca
 नाही. fak तुम्ही आधीच वापरत असलेल्या model ला **govern आणि cache** करते. त्याला असे wrap करा:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 किंवा एक base URL `fak serve` कडे वळवा. बाकी काहीही बदलावे लागत नाही.

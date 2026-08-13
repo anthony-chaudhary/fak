@@ -26,7 +26,7 @@ Você não reescreve o seu agente — apenas aponta uma base URL para `fak serve
 call passa primeiro pelo capability floor. Ou envolve um agente existente com um só comando:
 
 ```bash
-fak guard -- claude    # envolve o seu agente atual em um único comando
+fak manage claude      # envolve o seu agente atual em um único comando
 ```
 
 ## Por que times no Brasil e em Portugal deveriam se importar

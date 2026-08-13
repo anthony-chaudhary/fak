@@ -20,7 +20,7 @@ description: "fak 的简体中文快速开始入口页：约 10 分钟从零到�
 ## 最快路径：一条命令，把本地模型包进你现有的智能体
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 这会用 fak 包住你现有的智能体（这里是 `claude`），每次工具调用都先经过内核里的默认拒绝

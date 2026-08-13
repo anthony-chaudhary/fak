@@ -33,7 +33,7 @@ Hayır. fak zaten kullandığınız modeli yönetir (govern) ve önbelleğe alı
 Şununla sararsınız:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 veya tek bir base URL'i `fak serve`'e yönlendirirsiniz.

@@ -26,7 +26,7 @@ description: "صفحة دخول عربية إلى fak: ملف Go ثنائي وا
 لا. fak يحكم ويُخزّن (cache) النموذج الذي تستخدمه أصلًا، ولا يستبدله. لُفّه بأمر واحد:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 أو أعد توجيه عنوان base URL واحد إلى `fak serve`.

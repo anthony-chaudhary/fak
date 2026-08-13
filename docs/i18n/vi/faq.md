@@ -34,7 +34,7 @@ Không. fak **govern và cache** chính model bạn đang dùng — nó không t
 nó bằng một câu lệnh:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 hoặc trỏ một base URL sang `fak serve`.

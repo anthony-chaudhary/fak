@@ -31,7 +31,7 @@ models-ను in-process నడపగలదు, మరియు ప్రతి 
 ఒక్క కమాండ్‌తో wrap చేయండి:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 లేదా ఒక base URL-ను `fak serve` వైపు తిప్పండి.

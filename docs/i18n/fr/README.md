@@ -26,7 +26,7 @@ Vous ne réécrivez pas votre agent — vous pointez une base URL vers `fak`, et
 call passe d'abord par le capability floor.
 
 ```bash
-fak guard -- claude    # enveloppe votre agent existant en une seule commande
+fak manage claude      # enveloppe votre agent existant en une seule commande
 ```
 
 ## Pourquoi c'est pertinent pour les startups européennes

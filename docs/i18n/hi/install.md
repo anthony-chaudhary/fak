@@ -23,7 +23,7 @@ description: "fak का हिन्दी इंस्टॉल-पृष्�
 एजेंट को एक ही कमांड में wrap कर देते हैं:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## 0. पूर्वापेक्षाएँ (Prerequisites)

@@ -28,7 +28,7 @@ Não. O fak **governa e faz cache do modelo que você já usa** — ele não o s
 Envolva seu agente com um único comando, ou reaponte uma base URL para `fak serve`:
 
 ```bash
-fak guard -- claude    # envolve seu agente existente em um único comando
+fak manage claude      # envolve seu agente existente em um único comando
 ```
 
 ## Q3. Para onde vão meus dados — isto é compatível?

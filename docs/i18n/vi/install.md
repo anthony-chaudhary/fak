@@ -22,7 +22,7 @@ trở nên **an toàn, rẻ và nhanh hơn**, mà không phải viết lại gì
 bạn chỉ trỏ một base URL về `fak serve`, hoặc bọc agent hiện có bằng một lệnh:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## Vì sao điều này quan trọng ở Việt Nam

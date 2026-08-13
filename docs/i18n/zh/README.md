@@ -20,7 +20,7 @@ description: "fak 的简体中文入口页：一个位于 AI 智能体与工具�
 （capability floor）。
 
 ```bash
-fak guard -- claude    # 用一条命令包住你现有的智能体
+fak manage claude      # 用一条命令包住你现有的智能体
 ```
 
 ## 为什么中国的创业团队值得一看

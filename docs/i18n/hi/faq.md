@@ -27,7 +27,7 @@ local GGUF models in-process चला सकती है, और हर call �
 wrap करें:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 या एक base URL को `fak serve` की ओर मोड़ दें।

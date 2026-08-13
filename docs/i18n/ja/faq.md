@@ -27,7 +27,7 @@ OpenAI/Anthropic/MCP クライアント）の前に置く、**1 個の静的な 
 base URL を 1 つ `fak serve` に向け直すだけです。
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## Q3. データはどこへ行きますか——コンプライアンスは大丈夫ですか？

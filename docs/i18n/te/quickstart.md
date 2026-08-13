@@ -30,7 +30,7 @@ description: "fak తెలుగు త్వరిత-ప్రారంభ �
 తిరిగి రాయనక్కర్లేదు:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## 60-సెకన్ల రుజువు (key లేదు, model లేదు, GPU లేదు)

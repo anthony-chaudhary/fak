@@ -25,7 +25,7 @@ tanpa menulis ulang apa pun. Anda tidak menulis ulang agen — cukup arahkan sat
 URL ke `fak serve`, atau bungkus agen yang sudah ada dengan satu perintah:
 
 ```bash
-fak guard -- claude
+fak manage claude
 ```
 
 ## Mengapa ini penting untuk Indonesia

@@ -25,7 +25,7 @@ Ajanınızı yeniden yazmazsınız — tek bir base URL'i `fak serve`'e yönelti
 ve her tool call önce capability floor'dan geçer.
 
 ```bash
-fak guard -- claude    # mevcut ajanınızı tek bir komutla sarar
+fak manage claude      # mevcut ajanınızı tek bir komutla sarar
 ```
 
 ## Türkiye'deki ekipler için neden önemli

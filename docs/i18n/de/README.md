@@ -26,7 +26,7 @@ Du schreibst deinen Agenten nicht um — du richtest eine Base-URL auf `fak` und
 Tool-Call passiert zuerst den Capability-Floor.
 
 ```bash
-fak guard -- claude    # wickelt deinen bestehenden Agenten in einem einzigen Befehl ein
+fak manage claude      # wickelt deinen bestehenden Agenten in einem einzigen Befehl ein
 ```
 
 ## Warum das für europäische Startups zählt
