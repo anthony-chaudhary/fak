@@ -1,0 +1,149 @@
+{
+  "note": "Real provider responses recorded by cmd/streamcapture (Go, stdlib-only). Every `observed` field is re-derived from the recorded bytes, not from what the request asked for: run `go run ./cmd/streamcapture -verify -dir <this dir>` to re-check every row offline. No key, header, host credential, or account identifier is recorded here.",
+  "captures": [
+    {
+      "file": "groq--openai-gpt-oss-120b--prose.sse",
+      "provider": "groq",
+      "endpoint_host": "api.groq.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "prose",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:765bde21ffc517049450d6ca7e68286161d69ac668974f5774ee5ab009d4f58a",
+      "capture_sha256": "sha256:4ad313e4f4ec25529a276c5cbb4f8c4c66dfe7adc497ebde18943f81cef32024",
+      "captured_utc": "2026-08-10T22:36:32Z",
+      "bytes": 30126,
+      "observed": {
+        "chunks": 102,
+        "text_deltas": 21,
+        "thinking_deltas": 79,
+        "tool_calls": 0,
+        "tool_arg_deltas": 0,
+        "max_arg_deltas_per_call": 0,
+        "tool_args_fragmented": false,
+        "arguments_complete": false,
+        "finish_reason": "stop",
+        "terminated": true
+      },
+      "scenario_satisfied": true
+    },
+    {
+      "file": "groq--openai-gpt-oss-120b--tool-destructive-nonstream.json",
+      "provider": "groq",
+      "endpoint_host": "api.groq.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "tool-destructive-nonstream",
+      "streaming": false,
+      "http_status": 200,
+      "request_sha256": "sha256:04a7369a6b6d8c8f10e26bd0c3c9fe646783d7b9fd36d2236cf175ab1877c65a",
+      "capture_sha256": "sha256:46c556301f36f6fe902072798cac62f6a5c843773fde16f58d628d1d43938a60",
+      "captured_utc": "2026-08-10T22:39:36Z",
+      "bytes": 2173,
+      "observed": {
+        "chunks": 1,
+        "text_deltas": 0,
+        "thinking_deltas": 1,
+        "tool_calls": 1,
+        "tool_arg_deltas": 1,
+        "max_arg_deltas_per_call": 1,
+        "tool_args_fragmented": false,
+        "tool_names": [
+          "shell"
+        ],
+        "arguments_complete": true,
+        "finish_reason": "tool_calls",
+        "terminated": true
+      },
+      "scenario_satisfied": true
+    },
+    {
+      "file": "groq--openai-gpt-oss-120b--tool-destructive.sse",
+      "provider": "groq",
+      "endpoint_host": "api.groq.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "tool-destructive",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:5039442f14fb35ed563ddf90481a85a9a268db42af87d1b1c002d1052e76fd50",
+      "capture_sha256": "sha256:ccc2f738b8746f0dd6dc75ab255dcd5f40e2c69f2df6d07b2503352cfd2e0bd6",
+      "captured_utc": "2026-08-10T22:36:33Z",
+      "bytes": 20748,
+      "observed": {
+        "chunks": 68,
+        "text_deltas": 0,
+        "thinking_deltas": 65,
+        "tool_calls": 1,
+        "tool_arg_deltas": 1,
+        "max_arg_deltas_per_call": 1,
+        "tool_args_fragmented": false,
+        "tool_names": [
+          "shell"
+        ],
+        "arguments_complete": true,
+        "finish_reason": "tool_calls",
+        "terminated": true
+      },
+      "scenario_satisfied": true
+    },
+    {
+      "file": "nvidia--meta-llama-3.3-70b-instruct--prose.sse",
+      "provider": "nvidia",
+      "endpoint_host": "integrate.api.nvidia.com",
+      "wire": "openai-chat-completions",
+      "model": "meta/llama-3.3-70b-instruct",
+      "scenario": "prose",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:ec0f154951c7f5d5686bcc4915711efec1a4fb84e4eb7267568fb32de051fa53",
+      "capture_sha256": "sha256:575ce218294a44f7c03a35844014f740752c189c95ce7e7388fee0a1b5d335e3",
+      "captured_utc": "2026-08-10T22:41:56Z",
+      "bytes": 11394,
+      "observed": {
+        "chunks": 35,
+        "text_deltas": 34,
+        "thinking_deltas": 0,
+        "tool_calls": 0,
+        "tool_arg_deltas": 0,
+        "max_arg_deltas_per_call": 0,
+        "tool_args_fragmented": false,
+        "arguments_complete": false,
+        "finish_reason": "stop",
+        "terminated": true
+      },
+      "scenario_satisfied": true
+    },
+    {
+      "file": "nvidia--openai-gpt-oss-120b--tool-destructive.sse",
+      "provider": "nvidia",
+      "endpoint_host": "integrate.api.nvidia.com",
+      "wire": "openai-chat-completions",
+      "model": "openai/gpt-oss-120b",
+      "scenario": "tool-destructive",
+      "streaming": true,
+      "http_status": 200,
+      "request_sha256": "sha256:5039442f14fb35ed563ddf90481a85a9a268db42af87d1b1c002d1052e76fd50",
+      "capture_sha256": "sha256:29f85da23596527e114aa72aba258087ef60b9e9c84412d4478519a5e82dc979",
+      "captured_utc": "2026-08-10T22:36:34Z",
+      "bytes": 38960,
+      "observed": {
+        "chunks": 143,
+        "text_deltas": 0,
+        "thinking_deltas": 95,
+        "tool_calls": 1,
+        "tool_arg_deltas": 44,
+        "max_arg_deltas_per_call": 44,
+        "tool_args_fragmented": true,
+        "tool_names": [
+          "shell"
+        ],
+        "arguments_complete": true,
+        "finish_reason": "tool_calls",
+        "terminated": true
+      },
+      "scenario_satisfied": true
+    }
+  ]
+}
