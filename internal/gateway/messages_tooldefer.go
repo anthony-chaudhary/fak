@@ -39,24 +39,21 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-// toolSearchToolType / toolSearchBeta are the standard Anthropic Tool Search Tool
-// wire constants. They are named (not inlined) precisely because they are the live
-// validation gate: a wrong dated type or beta value is a 400 upstream, which the
-// fail-open path below turns into a silent identity — never a broken session — but
-// also never a reduction until these match the account's enabled revision.
+// toolSearchToolType / toolSearchToolName are the current Anthropic Tool Search
+// wire constants. Anthropic retired the 2025-09-17 beta and generic descriptor;
+// the current regex variant is accepted without that beta header. Keep these named:
+// a stale dated type is rejected upstream before a managed session can start.
 const (
-	toolSearchToolType = "tool_search_tool_20250917"
-	toolSearchToolName = "tool_search_tool"
-	toolSearchBeta     = "tool-search-2025-09-17"
+	toolSearchToolType = "tool_search_tool_regex_20251119"
+	toolSearchToolName = "tool_search_tool_regex"
 )
 
 // extendedCacheTTLBeta is the Anthropic beta that admits an extended (1h) cache_control
-// TTL. Like toolSearchBeta it is the LIVE validation gate: a body carrying
+// TTL. It is a LIVE validation gate: a body carrying
 // {"type":"ephemeral","ttl":"1h"} WITHOUT this beta negotiated is 400'd upstream as
 // malformed ("parameter ranges"). The wrapped claude CLI defaults to the 5m tier and does
 // NOT send it, so the served-request transform must union it in itself the turn the
-// managed-cache 1h upgrade (maybeUpgradeAnthropicCacheTTL1H) sets that ttl — exactly the
-// way deferColdTools unions toolSearchBeta for defer_loading.
+// managed-cache 1h upgrade (maybeUpgradeAnthropicCacheTTL1H) sets that ttl — when the managed-cache transform sets defer_loading.
 const extendedCacheTTLBeta = "extended-cache-ttl-2025-04-11"
 
 // defaultHotToolSet is the eager core kept resident: the guard floor's built-in

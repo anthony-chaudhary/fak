@@ -141,20 +141,16 @@ func (s *Server) prepareServedAnthropicRequest(ctx context.Context, r *http.Requ
 	// a tool_search_tool on the outbound body, so the provider loads only the hot core into
 	// context. OFF by default; deterministic + cache-safe + fail-safe identity. Runs AFTER
 	// the deny-prune (disjoint operations on tools[]) and before the passthrough consumers of
-	// req.Raw. deferredCold>0 means the body now carries defer_loading and needs the beta.
-	deferredCold := s.maybeDeferColdTools(req, reqTrace)
+	// req.Raw. The current Tool Search contract needs no beta header.
+	s.maybeDeferColdTools(req, reqTrace)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
 	// Both extracted here, on the HTTP boundary, since the planner layer never sees
 	// the request headers.
 	upstreamKey := s.anthropicUpstreamCredential(r)
-	upstreamBeta := r.Header.Get("anthropic-beta")
-	// Beta union (#3232): when this turn deferred the cold tail, the upstream must accept
-	// defer_loading / tool_search_tool, so union the tool-search beta into the forwarded set.
-	if deferredCold > 0 {
-		upstreamBeta = unionBeta(upstreamBeta, toolSearchBeta)
-	}
+	upstreamBeta := filterRetiredAnthropicBetas(r.Header.Get("anthropic-beta"))
+	migrateRetiredToolSearch(req)
 	// Beta union (managed-cache 1h TTL): when this turn upgraded a stable-head breakpoint to
 	// the 1h tier, the body now carries cache_control ttl:"1h", which Anthropic accepts only
 	// with the extended-cache-ttl beta negotiated. The wrapped claude CLI defaults to the 5m

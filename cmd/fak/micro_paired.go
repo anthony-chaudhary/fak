@@ -125,7 +125,7 @@ func foldPaired(r pairedReport) pairedReport {
 func filteredPairedEnv(env []string) []string {
 	drop := map[string]bool{
 		"FAK_REGISTRATION_ID": true, "FAK_ROOT_REGISTRATION_ID": true, "FAK_PARENT_REGISTRATION_ID": true,
-		"FAK_SPAWN_GRANT_ID": true, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT": true, "ENABLE_TOOL_SEARCH": true,
+		"FAK_SPAWN_GRANT_ID": true, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT": true, "ENABLE_TOOL_SEARCH": true, "FAK_GUARD_AFFORDANCE_MODE": true,
 	}
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
@@ -137,7 +137,7 @@ func filteredPairedEnv(env []string) []string {
 			out = append(out, kv)
 		}
 	}
-	return append(out, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0")
+	return append(out, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0", "FAK_GUARD_AFFORDANCE_MODE=off")
 }
 func runPairedBaseline(ctx context.Context, task, expected, model string) pairedArm {
 	arm := pairedArm{Mechanism: "fak-manage-claude", Provider: "anthropic", Model: model, CostStatus: "provider-unreported", Managed: true}
@@ -146,7 +146,7 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 		arm.Error = err.Error()
 		return arm
 	}
-	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model)
+	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
 	cmd.Env = filteredPairedEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

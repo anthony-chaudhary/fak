@@ -53,7 +53,7 @@ func TestFilteredPairedEnvDropsOnlyStaleRegistrationContext(t *testing.T) {
 	if strings.Contains(joined, "REGISTRATION_ID=") || strings.Contains(joined, "SPAWN_GRANT_ID=") {
 		t.Fatalf("stale registration context survived: %q", joined)
 	}
-	if !strings.Contains(joined, "ANTHROPIC_API_KEY=keep") || !strings.Contains(joined, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0") {
-		t.Fatalf("required environment missing: %q", joined)
+	if !strings.Contains(joined, "ANTHROPIC_API_KEY=keep") || !strings.Contains(joined, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0") || !strings.Contains(joined, "FAK_GUARD_AFFORDANCE_MODE=off") {
+		t.Fatalf("required benchmark environment missing: %q", joined)
 	}
 }
