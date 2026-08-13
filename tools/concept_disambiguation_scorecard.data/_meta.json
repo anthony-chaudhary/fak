@@ -562,10 +562,37 @@
           "category": "incidental",
           "reason": "Implementation symbol of the positioned microagent cache-affinity witness; not a separate cache concept.",
           "token": "TestMicroCacheWitnessCapturesOnOffProviderCounters"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field or helper of the existing dogfood scorecard kernel-value section; not a separate cache concept.",
+          "token": "CacheCachedPromptTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private engine metadata key, not a new operator-facing cache concept",
+          "token": "CodeCacheScope"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private engine metadata key, not a new operator-facing cache concept",
+          "token": "CACHE_SCOPE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation helper of the existing dogfood scorecard kernel-value section; not a separate cache concept.",
+          "token": "cacheWitnessReadback"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI path to the typed cache witness folded by the existing dogfood scorecard.",
+          "token": "cacheReceipt"
         }
       ],
       "id": "cache",
       "ignore": [
+        "CACHE_SCOPE",
+        "CacheCachedPromptTokens",
         "CacheCreationTokensHeadOnly",
         "CacheCreationTokensMessagePrefix",
         "CacheLever",
@@ -577,6 +604,7 @@
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
+        "CodeCacheScope",
         "DefaultCacheBytes",
         "DefaultCacheStateAllowlist",
         "FAK_ORG_POLICY_CACHE_PATH",
@@ -608,9 +636,11 @@
         "builtinCacheLevers",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheReceipt",
         "cacheSeatFlags",
         "cacheStats",
         "cacheValueGateFactsFromReport",
+        "cacheWitnessReadback",
         "cacheWitnessServer",
         "cache_bytes",
         "cache_creation_span",
@@ -1584,6 +1614,16 @@
           "category": "incidental",
           "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate guard-gate concept.",
           "token": "AffinityFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private implementation symbol, not a new operator-facing guard concept",
+          "token": "codeToolGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private implementation synchronization symbol, not a new operator-facing guard concept",
+          "token": "codeToolGateOnce"
         }
       ],
       "exclude": [
@@ -1646,6 +1686,8 @@
         "bindGuardRegistration",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
+        "codeToolGate",
+        "codeToolGateOnce",
         "cooldownGateBlindWarning",
         "coreLockLandGate",
         "dispatchGateProvenance",
@@ -3661,6 +3703,21 @@
           "category": "incidental",
           "reason": "CLI runner for the positioned microagent cache-affinity witness.",
           "token": "runMicroCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field or helper of the existing dogfood scorecard kernel-value section; not a separate witness-proof concept.",
+          "token": "cacheWitnessReadback"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field or helper of the existing dogfood scorecard kernel-value section; not a separate witness-proof concept.",
+          "token": "collectDogfoodKernelValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "field holding the provider continuation evidence inside the existing movement receipt, not a separate proof concept",
+          "token": "ProviderWitness"
         }
       ],
       "id": "witness-proof",
@@ -3681,6 +3738,7 @@
         "NewTreeWitness",
         "POPULATION_LIFT_UNWITNESSED",
         "PROFILE_REQUIRES_WITNESS",
+        "ProviderWitness",
         "QualityWitness",
         "REVOCABLE",
         "ReasonPopulationUnwitnessed",
@@ -3705,10 +3763,12 @@
         "WitnessedProgressFloor",
         "appendGuardCompactionWitnessTo",
         "benchFleetWitnessSeconds",
+        "cacheWitnessReadback",
         "checkWitness",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
         "closeProxyFillWitnesses",
+        "collectDogfoodKernelValue",
         "compactionWitness",
         "conptyWitness",
         "coreLockWitnessFromMessage",
@@ -3946,6 +4006,36 @@
           "category": "incidental",
           "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate gateway-engine concept.",
           "token": "AffinityFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field or helper of the existing dogfood scorecard kernel-value section; not a separate gateway-engine concept.",
+          "token": "dogfoodKernelValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation helper of the existing dogfood scorecard kernel-value section; not a separate gateway-engine concept.",
+          "token": "collectDogfoodKernelValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 concrete engine identifier, not a new gateway engine architecture concept",
+          "token": "EngineRead"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 concrete engine identifier, not a new gateway engine architecture concept",
+          "token": "EngineGrep"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 concrete engine identifier, not a new gateway engine architecture concept",
+          "token": "EngineGlob"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean CLI control for the existing dogfood scorecard kernel-value section.",
+          "token": "kernelValue"
         }
       ],
       "id": "gateway-engine",
@@ -3955,6 +4045,9 @@
         "AffinitySelection",
         "BaselineEngineCalls",
         "DeniedEngineCalls",
+        "EngineGlob",
+        "EngineGrep",
+        "EngineRead",
         "EngineReductionPct",
         "GatewaySeat",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
@@ -3965,8 +4058,10 @@
         "SessionAffinityGateway",
         "WithAffinity",
         "cacheEmitter",
+        "collectDogfoodKernelValue",
         "convkernel",
         "countingEngine",
+        "dogfoodKernelValue",
         "engineTokensPerCall",
         "engineer",
         "engineered",
@@ -3979,6 +4074,7 @@
         "inKernelPlannerEPCoordinated",
         "kernel32",
         "kernelSession",
+        "kernelValue",
         "kernels",
         "kernelwiki",
         "microcache",
@@ -4806,6 +4902,16 @@
           "category": "incidental",
           "reason": "Private typed-context key for the positioned session-affinity router.",
           "token": "affinityContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field or helper of the existing dogfood scorecard kernel-value section; not a separate context-ctx concept.",
+          "token": "ContextTokensSaved"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation helper of the existing dogfood scorecard kernel-value section; not a separate context-ctx concept.",
+          "token": "collectDogfoodKernelValue"
         }
       ],
       "id": "context-ctx",
@@ -4814,6 +4920,7 @@
         "COMPACTION_THRASH",
         "CompactionContract",
         "ContextLimit",
+        "ContextTokensSaved",
         "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
         "MetricFactRecall",
@@ -4824,6 +4931,7 @@
         "appendGuardCompactionWitnessTo",
         "callCtx",
         "cctx",
+        "collectDogfoodKernelValue",
         "compactionContractFrom",
         "compactionContractInstruction",
         "compactionContractMu",

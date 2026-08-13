@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodscore"
 )
@@ -22,6 +23,10 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
+	kernelValue := fs.Bool("kernel-value", true, "fold durable token/turn/cache dogfood evidence into JSON")
+	runsDir := fs.String("runs-dir", filepath.Join(repoRoot(), ".dispatch-runs"), "dispatch receipt archive for --kernel-value")
+	cacheReceipt := fs.String("cache-witness", "", "typed fak-micro-cache-affinity-witness/1 JSON receipt")
+	cohortMinimum := fs.Int("cohort-minimum", 5, "minimum durable post-default launches for outcome comparison")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -52,7 +57,14 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
+		var output any = payload
+		if *kernelValue {
+			output = struct {
+				dogfoodscore.ScorecardPayload
+				KernelValue dogfoodKernelValue `json:"kernel_value"`
+			}{ScorecardPayload: payload, KernelValue: collectDogfoodKernelValue(*runsDir, *cacheReceipt, *cohortMinimum)}
+		}
+		if err := writeIndentedJSON(stdout, output); err != nil {
 			fmt.Fprintf(stderr, "fak dogfood-score: encode json: %v\n", err)
 			return 1
 		}
