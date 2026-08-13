@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func TestWindowsSetupCommandIsDispatched(t *testing.T) {
+	old := windowsSetupGOOS
+	windowsSetupGOOS = "linux"
+	defer func() { windowsSetupGOOS = old }()
+	var out, errb bytes.Buffer
+	if rc := run(&out, &errb, []string{"windows-setup"}); rc != 2 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(errb.String(), "Windows only") {
+		t.Fatalf("command was not dispatched: %s", errb.String())
+	}
+}
+
 func TestWindowsSetupDryRunNamesUACAndFleetSpine(t *testing.T) {
 	old := windowsSetupGOOS
 	windowsSetupGOOS = "windows"

@@ -61,6 +61,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCatchUpScore(stdout, stderr, argv[1:])
 	case "whats-changed":
 		return devcmd.RunWhatsChanged(stdout, stderr, argv[1:])
+	case "windows-setup":
+		return runWindowsSetup(stdout, stderr, argv[1:])
 	case "feature":
 		return devcmd.RunFeature(stdout, stderr, argv[1:])
 	case "capabilities":
