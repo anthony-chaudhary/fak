@@ -1,6 +1,6 @@
 ---
 title: "Native device mesh and collective seam for TP and EP"
-description: "Design-only R3+ scope gate for fak's native DP x TP x PP x EP device mesh: process groups, rank/world-size, CollectiveBackend primitives, CPU-ref single-rank behavior, and the dependency chain from native TP to MoE expert parallelism."
+description: "R3+ design contract and build-gated status for fak's native DP x TP x PP x EP device mesh: process groups, rank/world-size, CollectiveBackend primitives, CPU-ref single-rank behavior, and the dependency chain from native TP to MoE expert parallelism."
 ---
 
 # Native device mesh and collective seam
@@ -9,28 +9,37 @@ This is the design contract for issue #25: a shared device-mesh and collective-c
 substrate under `compute.Backend`, so native tensor parallelism (TP) and MoE expert
 parallelism (EP) do not grow two incompatible communication layers.
 
-**Scope:** design only. No NCCL/RCCL binding, no multi-device CUDA change, and no MoE
-expert sharding lands here. This is R3+ scope-gated. Until the native communicator exists,
-fak rides external TP/EP through Track A (vLLM/SGLang/Dynamo workers) and does not chase raw
-single-GPU throughput parity with vLLM.
+**Scope:** issue #25 remains the design contract; it did not itself land an NCCL/RCCL
+binding, multi-device CUDA change, or MoE expert sharding. Follow-on work has since landed a
+real multi-process NCCL AllReduce process group and per-rank CUDA device binding. That
+substrate is **[PARTIAL]**, not [SHIPPED]: it enters only under `-tags cuda,nccl` with
+`FAK_CUDA_NCCL=1`, is absent from the default and plain `-tags cuda` builds, and self-declares
+`unverified on a GPU-free host`. The default binary contains no NCCL device communicator;
+production device TP/EP therefore still rides external Track A (vLLM/SGLang/Dynamo workers),
+and this document makes no raw single-GPU parity claim.
 
 ## Ground truth
 
 | Claim | Status | Pointer |
 |---|---|---|
-| Base `compute.Backend` whole-op surface is still the forward-loop target (`MatMul`, `BatchedMatMul`, `RMSNorm`, `RoPE`, `SwiGLU`, `Attention`, `Argmax`). | [SHIPPED] | `internal/compute/compute.go:318-344` |
-| The tensor collective seam exists as the optional `compute.CollectiveBackend` interface with `AllReduceSum`, `AllGather`, `ReduceScatter`, and `AllToAll`. | [SEAM-ONLY] | `internal/compute/compute.go:346-408` |
-| CPU reference collectives are single-box, rank-order exact, fail closed on malformed parts, and the single-rank case is identity. | [SHIPPED] | `internal/compute/collective.go:97-179` |
+| Base `compute.Backend` whole-op surface is still the forward-loop target (`MatMul`, `BatchedMatMul`, `RMSNorm`, `RoPE`, `SwiGLU`, `Attention`, `Argmax`). | [SHIPPED] | `internal/compute/compute.go:352-378` |
+| The tensor collective seam exists as the optional `compute.CollectiveBackend` interface with `AllReduceSum`, `AllGather`, `ReduceScatter`, and `AllToAll`. | [SEAM-ONLY] | `internal/compute/compute.go:477-515` |
+| CPU reference collectives are single-box, rank-order exact, fail closed on malformed parts, and the single-rank case is identity. | [SHIPPED] | `internal/compute/collective.go:115` (`AllReduceSum`), `:132` (`ReduceScatter`), `:153` (`AllGather`), `:191` (`AllToAll`) |
 | Cross-process host-f32 collectives exist through `model.DistComm`, but they are not a device/NCCL communicator. | [PARTIAL] | `internal/model/dist_collective.go`, `docs/serving/multi-node-compute.md` |
-| CUDA is single-device by construction today. | [GAP] | `internal/compute/cuda_kernels.cu:52-57` (`cudaSetDevice(0)`) |
-| MoE routing and selected experts run in-process: router top-k, then per-expert SwiGLU, then weighted accumulation. | [PARTIAL] | `internal/model/moe.go:258-289`, `internal/model/moe.go:342-362` |
+| CUDA has per-rank device binding and a real multi-process NCCL process group (`ncclGetUniqueId` -> `ncclCommInitRank` -> `ncclAllReduce`), but only behind the opt-in CUDA+NCCL build gate. The default/plain-CUDA builds exclude it, its source says `unverified on a GPU-free host`, and NCCL ring/tree reduction makes it an Approx peer (argmax-exact + cosine), never a `max|Delta|=0` peer. | [PARTIAL] | `internal/compute/compute.go:434` (`ProcessGroupBackend`); `internal/compute/cuda_collective_pg.go:1-16`; `internal/compute/cuda_nccl_pg.cu:13-30`, `:46-80`; `internal/compute/cuda_kernels.cu:63` (device-0 probe), `:233-244` (per-rank binding/allocation); `internal/compute/build_cuda.sh:212-231` |
+| MoE routing and selected experts run in-process: router top-k, then per-expert SwiGLU, then weighted accumulation. | [PARTIAL] | `internal/model/moe.go:357` (`route`), `:449` (`moeFFN`) |
 | Native TP explicitly refuses MoE/GLM-MoE-DSA instead of mis-serving those decompositions. | [GAP] | `internal/model/tensor_parallel_forward.go:79-82` |
 
 Line numbers drift; re-anchor with:
 
 ```bash
-rg -n 'type Backend interface|type CollectiveBackend interface|func \(c \*cpuBackend\) AllToAll' internal/compute
-rg -n 'cudaSetDevice|func route\(|type moeFFN|ForwardTP does not yet shard MoE' internal
+rg -n 'type Backend interface|type ProcessGroupBackend interface|type CollectiveBackend interface' internal/compute/compute.go
+rg -n 'func \(c \*cpuBackend\) (AllReduceSum|ReduceScatter|AllGather|AllToAll)' internal/compute/collective.go
+rg -n 'cudaSetDevice|fcuda_set_device|fcuda_malloc_on' internal/compute/cuda_kernels.cu
+rg -n 'ncclGetUniqueId|ncclCommInitRank|ncclAllReduce|STATUS:|GPU-free' internal/compute/cuda_nccl_pg.cu
+rg -n 'go:build cuda && nccl|STATUS:|GPU-free' internal/compute/cuda_collective_pg.go
+rg -n 'FAK_CUDA_NCCL|GO_TAGS="cuda,nccl"' internal/compute/build_cuda.sh
+rg -n 'func route\(|type moeFFN|ForwardTP does not yet shard MoE' internal/model
 ```
 
 ## Collective seam
@@ -74,8 +83,10 @@ The four primitives stay exactly the HAL primitives already named:
 
 The CPU reference group is the degenerate group: `rank=0`, `world_size=1`, `local_rank=0`,
 `device_id=0`. All four collectives are identity for one rank, preserving the bit-exact
-single-device path. A real NCCL/RCCL backend is correct only if its single-rank behavior and
-rank-order conformance match the CPU reference before any throughput claim is made.
+single-device path. A real NCCL/RCCL backend must preserve that single-rank identity and the
+same fail-closed shape/type checks. Multi-rank NCCL ring/tree reduction does not preserve the
+CPU reference's rank-ascending addition order, so the build-gated CUDA implementation is an
+Approx peer judged by argmax-exact + cosine, not byte equality, before any throughput claim.
 
 ## Device mesh
 
@@ -108,12 +119,15 @@ Topology is part of placement, not an afterthought:
 
 ## Dependency chain
 
-1. **Collective seam / device mesh** - multi-engineer-month. Land communicator binding,
-   rank/world-size, mesh placement, and a device `CollectiveBackend` over NCCL/RCCL, witnessed
-   against CPU-ref. This issue (#25) is the design gate.
+1. **Collective seam / device mesh** - multi-engineer-month. The optional HAL plus a
+   build-gated NCCL AllReduce/process-group and per-rank device-binding rung now exist. The
+   remaining work is a GPU witness, complete process-group collectives/mesh placement, and an
+   RCCL peer, all checked against the CPU reference at the backend's declared correctness
+   class. This issue (#25) is the design gate.
 2. **Native TP** - multi-engineer-month. Consume the seam for Megatron-style column/row sharding
-   over real device tensors. The host and CPU-ref decomposition exists; the missing rung is the
-   real communicator, per-rank device binding, and measured multi-GPU run.
+   over real device tensors. The host/CPU-ref decomposition, communicator, and per-rank device
+   binding exist, but the device path remains build-gated and GPU-unverified; a measured
+   multi-GPU run is still required before a parity or throughput claim.
 3. **EP-for-MoE** - multi-engineer-month after TP. Add expert ownership and load-aware routing on
    top of the same mesh. The EP delta over TP is `AllToAll` token dispatch to expert owners,
    per-owner expert execution, and dispatch-combine back to token order. It does not mint a
