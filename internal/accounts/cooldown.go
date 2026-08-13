@@ -267,11 +267,44 @@ type cooldownFile struct {
 	Entries []CooldownEntry `json:"entries"`
 }
 
+// shareRetryAttempts/shareRetryDelay bound the retry both ends of the store use for a
+// TRANSIENT sharing failure. On Windows a peer's open handle makes an unrelated process's
+// read fail (ERROR_SHARING_VIOLATION) and its publish rename fail (ERROR_ACCESS_DENIED)
+// for as long as that handle lives — microseconds, since every fak toucher of this store
+// reads or renames it whole and closes. Both failures are silent-but-costly on this file
+// specifically: a failed read folds the gate to cooldown-blind (LoadCooldownStoreFailOpen)
+// and a failed rename DROPS the cool being recorded, re-offering a capped account. ~100ms
+// of total patience buys past the contention; a genuinely permanent permission error just
+// pays that once and still surfaces.
+const (
+	shareRetryAttempts = 12
+	shareRetryDelay    = 8 * time.Millisecond
+)
+
+// retryTransientShare runs op until it succeeds, reports a missing file, or the patience
+// budget is spent, returning op's last error. A missing file returns immediately: absence
+// is a stable answer here, not contention.
+func retryTransientShare(op func() error) error {
+	var err error
+	for attempt := 0; attempt < shareRetryAttempts; attempt++ {
+		if err = op(); err == nil || os.IsNotExist(err) {
+			return err
+		}
+		time.Sleep(shareRetryDelay)
+	}
+	return err
+}
+
 // LoadCooldownStore reads the cooldown file at path. A missing file is not an
 // error — it yields an empty store bound to that path so a later Save creates it.
 func LoadCooldownStore(path string) (*CooldownStore, error) {
 	s := &CooldownStore{path: path, entries: map[string]CooldownEntry{}}
-	raw, err := os.ReadFile(path)
+	var raw []byte
+	err := retryTransientShare(func() error {
+		var readErr error
+		raw, readErr = os.ReadFile(path)
+		return readErr
+	})
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil
@@ -297,6 +330,23 @@ func LoadCooldownStore(path string) (*CooldownStore, error) {
 
 // Save writes the store atomically (temp + rename) so a concurrent reader never
 // sees a half-written file. Entries are sorted by account for a stable diff.
+//
+// The staging file gets a UNIQUE name per Save (#6027 root cause). This store is
+// fleet-shared and written by many processes at once — every checkout, launch exit
+// and watchdog tick — so a FIXED `<path>.tmp` is not a private scratch file but a
+// second shared one: two savers open it concurrently, each writes its own payload
+// from offset 0, and whichever renames last publishes a SPLICE of both. The payload
+// length varies by a byte or two between saves all on its own (RFC3339Nano trims
+// trailing zeros off the reset timestamps), so the longer writer's tail survives the
+// shorter one and the published file ends in a stray `}` — valid JSON followed by a
+// trailing brace, which is precisely the corruption observed in the live fleet store
+// on 2026-08-09 and again on 2026-08-11. Both were sticky: the read then fails, the
+// gate folds to cooldown-blind (LoadCooldownStoreFailOpen), and the write paths
+// refuse to overwrite state they could not read, so nothing self-repairs.
+//
+// A unique staging name makes each writer's payload self-consistent; the renames
+// still race, but each one publishes a WHOLE file, so last-writer-wins is the only
+// loss and readers never see a spliced one.
 func (s *CooldownStore) Save() error {
 	if s.path == "" {
 		return nil
@@ -313,11 +363,29 @@ func (s *CooldownStore) Save() error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".account-cooldown-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	name := tmp.Name()
+	defer os.Remove(name)
+	// 0o644, not CreateTemp's 0o600: the store is read by every fleet process and
+	// the pre-#6027 os.WriteFile published it world-readable.
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// Publishing is where a lost write costs the most: the caller has already decided
+	// an account is capped, and a dropped rename re-offers it. Retry past a peer's
+	// transient handle rather than returning an error the launch path can only log.
+	return retryTransientShare(func() error { return os.Rename(name, s.path) })
 }
 
 // CooledDown reports the active cooldown entry for account at now, and whether one
