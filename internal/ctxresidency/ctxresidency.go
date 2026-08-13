@@ -247,10 +247,15 @@ type LoaderSnapshot struct {
 // The journal is the trust floor; the kernel counters are the authoritative
 // source; reconciliation proves the two are in sync.
 func LoaderJournal(journalPath string, kernelFaults, kernelEvictions, kernelVersionBinds int) (LoaderSnapshot, error) {
-	rows, err := journal.ReadRows(journalPath)
+	// Segment-aware by construction (#6488): this reconciles COUNTS against the
+	// kernel's ledger, so it must fold the whole journal. ReadRows would read only
+	// the live segment of a rotated journal and under-count every capability event
+	// before the last cut, reporting a false discrepancy against the kernel.
+	rows, err := journal.ReadAllSegments(journalPath)
 	if err != nil {
 		return LoaderSnapshot{}, fmt.Errorf("ctxresidency: read journal %s: %w", journalPath, err)
 	}
+	rows = journal.WithoutCutAnchors(rows)
 	if rows == nil {
 		// No journal file (or never enabled): reconcile vacuously true.
 		return LoaderSnapshot{

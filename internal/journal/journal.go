@@ -1102,6 +1102,16 @@ func recoverHead(path string) (seq uint64, lastHash string, err error) {
 // row (mirroring recoverHead), so a reader never errors on a half-written tail.
 // Genuine I/O errors (permission, a read fault) are returned. Verify, not ReadRows,
 // is the surface that detects in-the-middle tampering.
+//
+// It reads the LIVE SEGMENT ONLY. Once a journal has been cut (rotation is armed in
+// production at 64 MB), the live file is a TAIL and this returns a short slice that
+// is indistinguishable from a whole small journal — which is how a roll-up ends up
+// reporting a tail as a total (#6488). So: a consumer that produces a total, a rate,
+// or a roll-up uses ReadAllSegments (fold it through WithoutCutAnchors for a count
+// identical to the same journal unrotated); a consumer that genuinely wants only the
+// recent rows uses ReadTail, which returns the same rows PLUS the TailOmission that
+// says what it skipped. Plain ReadRows is for a caller that already knows it is
+// looking at one specific segment file.
 func ReadRows(path string) ([]Row, error) {
 	f, err := os.Open(path)
 	if err != nil {

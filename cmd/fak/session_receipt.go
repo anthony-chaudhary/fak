@@ -68,11 +68,14 @@ func runSessionReceipt(stdout, stderr io.Writer, argv []string) int {
 	if path == "" {
 		path = defaultGuardJournalPath()
 	}
-	rows, err := journal.ReadRows(path)
+	// Segment-aware (#6488): the receipt totals a whole trace, and a long session is
+	// exactly the one that rotates — reading the live segment alone would bill a tail.
+	rows, err := journal.ReadAllSegments(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak session receipt: read journal %s: %v\n", path, err)
 		return 1
 	}
+	rows = journal.WithoutCutAnchors(rows)
 
 	obs := agent.ObservedUsage{Turns: *turns, PromptTokens: *promptTokens, CompletionTokens: *completionTokens}
 	r := agent.BuildReceipt(trace, rows, obs)

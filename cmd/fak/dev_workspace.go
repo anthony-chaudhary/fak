@@ -149,11 +149,15 @@ func scanStreamView(root string, limit int) (devStreamView, error) {
 			continue
 		}
 		st.Journals++
-		rr, rerr := journal.ReadRows(filepath.Join(dir, e.Name()))
+		// Segment-aware (#6488): the view's counts (Rows/Allowed/Blocked/Decisions) are
+		// totals, so they must span a rotation cut. Only the rendered Last-N is a tail.
+		// The dir walk sees live *.jsonl files only; the sealed .cut-<seq> archives come
+		// in through the segment read, so nothing is counted twice.
+		rr, rerr := journal.ReadAllSegments(filepath.Join(dir, e.Name()))
 		if rerr != nil {
 			continue
 		}
-		rows = append(rows, rr...)
+		rows = append(rows, journal.WithoutCutAnchors(rr)...)
 	}
 	// Merge the per-process chains into one wall-clock stream (ties broken by seq)
 	// so the tail reads as one developer's session, not interleaved by filename.

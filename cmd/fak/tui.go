@@ -442,11 +442,23 @@ func tuiColorEnabled(stdout io.Writer, mode string) (bool, error) {
 // journal carries only decision fields + content digests, never a prompt/arg/result
 // payload, so nothing sensitive can reach the model.
 func runTUIGuardJournal(stdout, stderr io.Writer, path string, at time.Time, width, maxRows int, asJSON, follow bool, style tuiGuardRenderStyle) int {
-	rows, err := journal.ReadRows(path)
+	// This pane is deliberately TAIL-ONLY (#6488): it is a live attention view of what
+	// the guard is deciding now, and --follow continues from the live file, so reading
+	// the sealed segments would only push the recent rows out of the frame. That makes
+	// it the one reader that keeps the live-file read — but it must not pass a tail off
+	// as the whole journal, so ReadTail's omission is stated out loud. Every consumer
+	// that reports a TOTAL uses journal.ReadAllSegments instead.
+	rows, omission, err := journal.ReadTail(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
 		return 1
 	}
+	if omission.Omitted() {
+		fmt.Fprintf(stderr, "fak console guard: showing the live segment of %s only — %s\n", path, omission)
+	}
+	// The rotation anchor is bookkeeping, not an adjudication: it must not render as a
+	// guard row (it would be the first row of every post-cut segment).
+	rows = journal.WithoutCutAnchors(rows)
 	report := buildTUIGuardJournalReport(rows, path, at, maxRows)
 	if asJSON {
 		return encodeJSONOrFail(stdout, stderr, report, "fak console guard")

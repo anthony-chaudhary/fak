@@ -106,11 +106,14 @@ type replayReport struct {
 // and asserts that each identity replayed to a single verdict. Exit: 0 deterministic (the
 // reproducible-trajectory witness), 1 non-determinism findings, 2 read/setup error.
 func runAuditReplay(stdout, stderr io.Writer, path string, asJSON bool) int {
-	rows, err := journal.ReadRows(path)
+	// Segment-aware (#6488): a determinism claim over a rotated journal's live
+	// segment would silently exclude every call adjudicated before the cut.
+	rows, err := journal.ReadAllSegments(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak audit replay: %v\n", err)
 		return 2
 	}
+	rows = journal.WithoutCutAnchors(rows)
 	rep := replayRows(path, rows)
 
 	if asJSON {

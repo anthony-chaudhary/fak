@@ -112,30 +112,45 @@ func (j *Journal) reopen() {
 // path. It is the input to VerifySegments and to any read-fold that must not lose
 // history across a cut. A journal that was never cut returns just [path].
 func Segments(path string) ([]string, error) {
-	matches, err := filepath.Glob(path + cutSuffix + "*")
+	segs, err := archivedSegments(path)
 	if err != nil {
-		return nil, fmt.Errorf("journal: segments %s: %w", path, err)
+		return nil, err
 	}
-	type seg struct {
-		seq  uint64
-		path string
-	}
-	var segs []seg
-	for _, m := range matches {
-		tail := strings.TrimPrefix(m, path+cutSuffix)
-		seq, perr := strconv.ParseUint(tail, 10, 64)
-		if perr != nil {
-			continue // not a <seq> archive (e.g. a further-suffixed sibling) — skip
-		}
-		segs = append(segs, seg{seq: seq, path: m})
-	}
-	sort.Slice(segs, func(a, b int) bool { return segs[a].seq < segs[b].seq })
 	out := make([]string, 0, len(segs)+1)
 	for _, s := range segs {
 		out = append(out, s.path)
 	}
 	out = append(out, path)
 	return out, nil
+}
+
+// archivedSeg is one sealed sibling of a live journal: the final seq the archive
+// name records and the archive's path.
+type archivedSeg struct {
+	seq  uint64
+	path string
+}
+
+// archivedSegments lists the SEALED siblings of the journal at path, oldest-first
+// by their recorded final seq — Segments minus the live file. It is shared by
+// Segments (which appends the live path) and by the tail read, which needs the
+// sealed count and the last sealed seq without opening a single archive.
+func archivedSegments(path string) ([]archivedSeg, error) {
+	matches, err := filepath.Glob(path + cutSuffix + "*")
+	if err != nil {
+		return nil, fmt.Errorf("journal: segments %s: %w", path, err)
+	}
+	var segs []archivedSeg
+	for _, m := range matches {
+		tail := strings.TrimPrefix(m, path+cutSuffix)
+		seq, perr := strconv.ParseUint(tail, 10, 64)
+		if perr != nil {
+			continue // not a <seq> archive (e.g. a further-suffixed sibling) — skip
+		}
+		segs = append(segs, archivedSeg{seq: seq, path: m})
+	}
+	sort.Slice(segs, func(a, b int) bool { return segs[a].seq < segs[b].seq })
+	return segs, nil
 }
 
 // VerifySegments validates a rotated journal split across ordered segment files as
@@ -198,6 +213,10 @@ func VerifySegments(paths ...string) (int, error) {
 // (audit-usage roll-up, loop-health, guard-RSI) uses so it loses NO history across
 // a cut. It is robust like ReadRows (a torn final line stops that segment at its
 // last well-formed row); use VerifySegments for the integrity check.
+//
+// The returned rows are the literal chain, so they include one KindCut anchor per
+// boundary; a consumer whose TOTAL must match the same journal unrotated folds them
+// through WithoutCutAnchors.
 func ReadAllSegments(path string) ([]Row, error) {
 	segs, err := Segments(path)
 	if err != nil {
@@ -212,6 +231,88 @@ func ReadAllSegments(path string) ([]Row, error) {
 		out = append(out, rows...)
 	}
 	return out, nil
+}
+
+// WithoutCutAnchors drops the KindCut anchor rows from a segment-aware read so a
+// fold over a ROTATED journal counts exactly what the same journal would have
+// counted unrotated. The anchor is rotation bookkeeping, not history: it carries no
+// decision, and an uncut journal has none of them. A roll-up that wants its totals
+// to be cut-invariant reads ReadAllSegments and folds through this; a caller that
+// wants the literal chain (verification, seq continuity) uses ReadAllSegments raw.
+// It returns rows unchanged (no copy) when there is nothing to drop.
+func WithoutCutAnchors(rows []Row) []Row {
+	n := 0
+	for _, r := range rows {
+		if r.Kind == KindCut {
+			n++
+		}
+	}
+	if n == 0 {
+		return rows
+	}
+	out := make([]Row, 0, len(rows)-n)
+	for _, r := range rows {
+		if r.Kind == KindCut {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// TailOmission is what a LIVE-FILE-ONLY read of a rotated journal did not see:
+// how many sealed segments sit beside the live file, and how many rows were
+// committed before the most recent cut. It exists so a truncated read cannot be
+// mistaken for a complete one — before rotation shipped, ReadRows on a cut journal
+// returned a short slice that looked exactly like a whole small journal, so a
+// roll-up over it reported a tail as a total and said nothing (#6488).
+type TailOmission struct {
+	// SealedSegments is the number of archived <path>.cut-<seq> siblings the tail
+	// read did NOT open.
+	SealedSegments int `json:"sealed_segments,omitempty"`
+	// RowsBeforeCut is the count of rows committed before the most recent cut, read
+	// off the newest archive's recorded final seq (seq is globally monotonic across
+	// the chain, so that seq IS the number of rows preceding the live segment).
+	RowsBeforeCut uint64 `json:"rows_before_cut,omitempty"`
+}
+
+// Omitted reports whether the tail read left history unread. The zero
+// TailOmission (an uncut journal) is false: the tail WAS the whole journal.
+func (o TailOmission) Omitted() bool { return o.SealedSegments > 0 || o.RowsBeforeCut > 0 }
+
+// String renders the omission as one operator-facing clause, or "" when nothing
+// was omitted, so a complete read prints no disclaimer at all.
+func (o TailOmission) String() string {
+	if !o.Omitted() {
+		return ""
+	}
+	return fmt.Sprintf("%d row(s) before the cut omitted (%d sealed segment(s) not read)", o.RowsBeforeCut, o.SealedSegments)
+}
+
+// ReadTail reads ONLY the live segment at path — the same rows ReadRows returns —
+// and reports what that cost. It is the honest form of the tail read for a consumer
+// that genuinely wants recent rows (a live pane) rather than a total: the returned
+// TailOmission names the sealed segments and the pre-cut row count it skipped, so
+// the truncation is on the record instead of being invisible. A consumer that
+// produces a total, a rate, or a roll-up wants ReadAllSegments, not this.
+//
+// The omission costs no extra file reads: it comes from the archive NAMES (Cut
+// records the archived segment's final seq in the suffix). A read error on the live
+// file is returned as-is with a zero omission.
+func ReadTail(path string) ([]Row, TailOmission, error) {
+	rows, err := ReadRows(path)
+	if err != nil {
+		return rows, TailOmission{}, err
+	}
+	segs, serr := archivedSegments(path)
+	if serr != nil {
+		return rows, TailOmission{}, serr
+	}
+	om := TailOmission{SealedSegments: len(segs)}
+	if len(segs) > 0 {
+		om.RowsBeforeCut = segs[len(segs)-1].seq
+	}
+	return rows, om, nil
 }
 
 // CutIfOversized bounds a live file-backed journal without changing callers'

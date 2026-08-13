@@ -135,11 +135,14 @@ const (
 )
 
 func runAuditDiagnose(stdout, stderr io.Writer, path string, asJSON bool) int {
-	rows, err := journal.ReadRows(path)
+	// Segment-aware (#6488): the diagnosis counts over the whole journal, so a
+	// rotated one must not be diagnosed from its live segment alone.
+	rows, err := journal.ReadAllSegments(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak audit diagnose: %v\n", err)
 		return 2
 	}
+	rows = journal.WithoutCutAnchors(rows)
 	d := diagnoseRows(path, rows)
 	d.Friction = guardrsi.FoldRows([]string{path})
 	if d.Friction.ChildCrash > 0 {

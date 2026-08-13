@@ -96,16 +96,25 @@ func cmdAuditDataset(args []string) {
 		fmt.Fprintln(os.Stderr, "usage: fak audit dataset <journal.jsonl>")
 		os.Exit(2)
 	}
-	if _, err := journal.Verify(fs.Arg(0)); err != nil {
+	// Segment-aware (#6488): the dataset is the WHOLE journal, so both the
+	// refuse-if-unverified gate and the read follow the cut anchors across every
+	// archived segment. (Verify/ReadRows on a rotated live file would refuse a sound
+	// chain, and, past that gate, export only the tail.)
+	segs, serr := journal.Segments(fs.Arg(0))
+	if serr != nil {
+		fmt.Fprintf(os.Stderr, "audit dataset: %v\n", serr)
+		os.Exit(1)
+	}
+	if _, err := journal.VerifySegments(segs...); err != nil {
 		fmt.Fprintf(os.Stderr, "audit dataset: refusing unverified journal: %v\n", err)
 		os.Exit(1)
 	}
-	rows, err := journal.ReadRows(fs.Arg(0))
+	rows, err := journal.ReadAllSegments(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "audit dataset: %v\n", err)
 		os.Exit(1)
 	}
-	dataset, problems := foldAuditDataset(rows)
+	dataset, problems := foldAuditDataset(journal.WithoutCutAnchors(rows))
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
 	for _, row := range dataset {

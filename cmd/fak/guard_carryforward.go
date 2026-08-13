@@ -176,10 +176,13 @@ func guardReadLatestRefusalCarryForwardJournal(auditPath, traceID, root string) 
 	})
 	docs := guardReadReasonDocs(root)
 	for _, cand := range candidates {
-		rows, err := journal.ReadRows(cand.path)
+		// Segment-aware (#6488): the carry-forward rolls up a trace's refusals, and a
+		// trace that predates a rotation cut must still be findable.
+		rows, err := journal.ReadAllSegments(cand.path)
 		if err != nil {
 			continue
 		}
+		rows = journal.WithoutCutAnchors(rows)
 		if len(rows) == 0 {
 			return nil, true
 		}
@@ -220,10 +223,13 @@ func guardWriteRefusalCarryForwardAndReturn(j *journal.Journal, seq0 uint64, tra
 	if err := j.Flush(); err != nil {
 		return nil, err
 	}
-	rows, err := journal.ReadRows(auditPath)
+	// Segment-aware (#6488): a session long enough to rotate would otherwise lose the
+	// part of itself that sits in the sealed segment, even though seq0 still selects it.
+	rows, err := journal.ReadAllSegments(auditPath)
 	if err != nil {
 		return nil, err
 	}
+	rows = journal.WithoutCutAnchors(rows)
 	sessionRows := make([]journal.Row, 0, len(rows))
 	for _, row := range rows {
 		if row.Seq > seq0 {

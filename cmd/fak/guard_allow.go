@@ -621,17 +621,20 @@ func guardAllowPrunedTools(rows []journal.Row) []guardAllowBlockedTool {
 // runGuardAllowFromJournal reads a guard audit journal, lists the DEFAULT_DENY'd tools,
 // and either prints the exact allow command (default) or, with addAll, records them all
 // in the overlay. It fails soft on a missing/empty journal (no blocks to report), the
-// same tolerance journal.ReadRows already gives a missing file.
+// same tolerance journal.ReadRows already gives a missing file. The read is segment-aware
+// (#6488): the list is a roll-up of every tool the guard ever blocked, so a tool blocked
+// before a rotation cut must not drop off it.
 func runGuardAllowFromJournal(stdout, stderr io.Writer, overlayPath string, ov *guardAllowOverlay, journalPath string, addAll bool) int {
 	jp := strings.TrimSpace(journalPath)
 	if jp == "" {
 		jp = guardReadableAuditPath()
 	}
-	rows, err := journal.ReadRows(jp)
+	rows, err := journal.ReadAllSegments(jp)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak guard allow: read journal %s: %v\n", jp, err)
 		return 1
 	}
+	rows = journal.WithoutCutAnchors(rows)
 	blocked := guardAllowBlockedTools(rows)
 	pruned := guardAllowPrunedTools(rows)
 	if len(blocked) == 0 && len(pruned) == 0 {

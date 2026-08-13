@@ -91,13 +91,23 @@ func readDecisionJournalInput(path string) auditusage.DecisionJournalInput {
 		return in
 	}
 	in.Present = true
-	rows, err := journal.ReadRows(path)
+	// Segment-aware (#6488): this is the roll-up, so it must fold the WHOLE journal.
+	// ReadRows would return only the live segment of a rotated journal and report a
+	// tail as the total. WithoutCutAnchors keeps RowCount identical to the same
+	// journal unrotated, and the chain check follows the anchors across the cuts
+	// (Verify on a rotated live file fails at its mid-chain first row).
+	segs, serr := journal.Segments(path)
+	if serr != nil {
+		in.VerifyErr = serr
+		return in
+	}
+	rows, err := journal.ReadAllSegments(path)
 	if err != nil {
 		in.VerifyErr = err
 		return in
 	}
-	in.Rows = rows
-	if _, verr := journal.Verify(path); verr != nil {
+	in.Rows = journal.WithoutCutAnchors(rows)
+	if _, verr := journal.VerifySegments(segs...); verr != nil {
 		in.VerifyErr = verr
 	}
 	return in
