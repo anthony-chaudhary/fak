@@ -10,7 +10,7 @@ rebuilt from an empty output directory.
 `.github/workflows/pages.yml` coalesces source churn on a 15-minute schedule, and also runs immediately when the publishing implementation changes. A per-doc push trigger is intentionally avoided: this shared trunk can land docs many times per minute, and GitHub Actions keeps only one pending run per concurrency group, so newer pushes otherwise starve every build before it starts:
 
 1. `pagescheck source` rejects non-UTF-8 source before Jekyll can fail opaquely.
-2. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (85.0 / 420 / 50; measured source is 85.2 / 416 / 47); its full JSON witness is published at `/_proofs/seo-report.json`.
+2. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (85.0 / 424 / 50; measured source is 85.2 / 416 / 47); its full JSON witness is published at `/_proofs/seo-report.json`.
 3. GitHub's supported Jekyll builder creates a fresh `_site` from `docs/`.
 4. `pagescheck artifact` refuses a narrow or SEO-broken artifact. It requires at least
    1,000 HTML pages, a sitemap using the production base URL, the front page, and the

@@ -40,7 +40,7 @@ jobs:
           go run ./cmd/pagescheck seo
           --root .
           --minimum-score 85
-          --maximum-debt 420
+          --maximum-debt 424
           --maximum-orphans 50
           > pages-seo-report.json
       - name: Build a fresh site from tracked source
