@@ -2850,6 +2850,16 @@
           "category": "incidental",
           "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
           "token": "AffinityFromContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "spawnSession is an unexported helper that starts the local MCP subprocess/session runtime; it is implementation plumbing rather than a declared concept.",
+          "token": "spawnSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "pumpStdinToSession is an unexported I/O helper that forwards stdin frames into an existing MCP session; its precise name is implementation plumbing, not concept vocabulary.",
+          "token": "pumpStdinToSession"
         }
       ],
       "id": "session-runtime",
@@ -2982,6 +2992,7 @@
         "observedSchedulerResult",
         "observedSessionIDs",
         "orderRecords",
+        "pumpStdinToSession",
         "readSessionHandoffBlocks",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
@@ -3048,6 +3059,7 @@
         "simulateScheduler",
         "slots",
         "slotting",
+        "spawnSession",
         "splitSessionMoveCSV",
         "stagesFor",
         "stopDispHandoffSessionGiveUp",
@@ -4419,6 +4431,11 @@
           "category": "incidental",
           "reason": "Typed organization policy decision code, not a distinct capability concept.",
           "token": "POLICY_CONFLICT"
+        },
+        {
+          "category": "incidental",
+          "reason": "SIGNATURE_POLICY is a test fixture capability token used to prove signature-policy enforcement; it is scenario data, not a new production API or concept family.",
+          "token": "SIGNATURE_POLICY"
         }
       ],
       "exclude": [
@@ -4456,6 +4473,7 @@
         "ReviseForCapabilityFailure",
         "RolloutPosture",
         "RunCIPreflight",
+        "SIGNATURE_POLICY",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",
@@ -6649,6 +6667,31 @@
           "category": "incidental",
           "reason": "Local constructor slice used to instantiate the existing bounded seat pool.",
           "token": "poolSeats"
+        },
+        {
+          "category": "incidental",
+          "reason": "The exported Poolable field is a local MCP session-pool eligibility predicate, not a newly declared cross-repository concept or terminology family.",
+          "token": "Poolable"
+        },
+        {
+          "category": "incidental",
+          "reason": "The exported Pooled field reports whether one local MCP session instance came from the pool; it is lifecycle state, not a new conceptual API family.",
+          "token": "Pooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "ErrNotPoolable is the sentinel error for a local failed pool-eligibility check and names an implementation outcome, not a standalone concept.",
+          "token": "ErrNotPoolable"
+        },
+        {
+          "category": "incidental",
+          "reason": "poolability is ordinary prose describing whether a local MCP session can be reused; the established concept remains session pooling.",
+          "token": "poolability"
+        },
+        {
+          "category": "incidental",
+          "reason": "unpoolable is an implementation adjective for a session rejected by the existing pool contract, not a meaningful API to rename or a new concept family.",
+          "token": "unpoolable"
         }
       ],
       "exclude": [
@@ -6656,8 +6699,11 @@
       ],
       "id": "pool",
       "ignore": [
+        "ErrNotPoolable",
         "FLEET_WORKER_WORKTREE_POOL",
         "NewSeatPool",
+        "Poolable",
+        "Pooled",
         "PooledSpeedupPct",
         "defaultPoolCap",
         "kvpoolbytes",
@@ -6668,10 +6714,12 @@
         "poolSeats",
         "poolStateDir",
         "poolStatePath",
+        "poolability",
         "poolspanscores",
         "resetPooled",
         "returnPooled",
-        "spoolsv"
+        "spoolsv",
+        "unpoolable"
       ],
       "min_files": 2,
       "name": "Pool family",

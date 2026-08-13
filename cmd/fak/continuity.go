@@ -17,6 +17,10 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	sub, args := argv[0], argv[1:]
+	if sub == "registry-selfcheck" {
+		jsonOut := len(args) > 0 && args[0] == "--json"
+		return runContinuityRegistrySelfcheck(stdout, stderr, jsonOut)
+	}
 	if sub == "org-selfcheck" {
 		jsonOut := len(args) > 0 && args[0] == "--json"
 		return runContinuityOrgSelfcheck(stdout, stderr, jsonOut)
@@ -155,6 +159,7 @@ Journey (mutations preview unless --commit is present):
   status    behavior read-back of the active context
   rollback  restore the context named by a switch --receipt
   selfcheck capture the clean-room two-home journey
+  registry-selfcheck capture publish, inspect, install, update, rollback, and revoke
 
 Common expert controls: --json, repeatable --select kind[:name], --home DIR.
 Examples: fak profile continuity preview --home HOME
