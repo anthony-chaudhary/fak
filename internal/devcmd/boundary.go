@@ -71,7 +71,13 @@ const boundarySchema = "fak-boundary-lint/1"
 // urllintAllow is the audited-chokepoint allowlist, identical to the one
 // TestBoundaryPolicy enforces: cmd/simpledemo's modelDownload is the single builder
 // whose URLs the reachability test HEAD-checks.
-var urllintAllow = map[string]bool{"cmd/simpledemo/main.go": true}
+var urllintAllow = map[string]bool{
+	"cmd/simpledemo/main.go": true, // the single audited download-url builder
+	// Pinned by immutable repo revision, and main.go refuses the artifact unless
+	// its bytes+sha256 match ModelBytes/ModelSHA256 — the property the chokepoint
+	// exists to enforce. cmd/ mains cannot import simpledemo's builder.
+	"cmd/quantdemo/contract.go": true,
+}
 
 // RunBoundary is the testable core: it returns the process exit code instead of
 // calling os.Exit, and takes its streams explicitly.

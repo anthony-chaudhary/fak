@@ -124,7 +124,11 @@ func TestBoundaryPolicy(t *testing.T) {
 		t.Errorf("boundary tell: %s", o)
 	}
 
-	urlOff, err := urllint.ScanForDownloadURLs(root, map[string]bool{"cmd/simpledemo/main.go": true})
+	urlOff, err := urllint.ScanForDownloadURLs(root, map[string]bool{
+		"cmd/simpledemo/main.go": true, // the single audited download-url builder
+		// Revision-pinned and bytes+sha256-verified at download by cmd/quantdemo/main.go.
+		"cmd/quantdemo/contract.go": true,
+	})
 	if err != nil {
 		t.Fatalf("urllint: %v", err)
 	}
