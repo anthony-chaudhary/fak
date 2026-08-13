@@ -141,7 +141,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			command, injected = nextCommand, nextInjected
 			continue
 		}
-		if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {
+		if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, 0, nil, nil, os.Stderr); ok {
 			command = next
 			continue
 		}
@@ -312,7 +312,16 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command, injected = nextCommand, nextInjected
 				continue
 			}
-			if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, nil, nil, os.Stderr); ok {
+			if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, func() time.Duration {
+				v := serveSessions.QueryTimeBudget(guardTraceID, time.Now())
+				if !v.Bounded {
+					return 0
+				}
+				if v.Exceeded || v.Remaining <= 0 {
+					return -1
+				}
+				return v.Remaining
+			}(), nil, nil, os.Stderr); ok {
 				command = next
 				continue
 			}

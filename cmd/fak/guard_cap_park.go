@@ -262,8 +262,8 @@ func guardCapParkEnabled() bool {
 // agent, the park disabled) returns ok=false and the caller's existing report/exit path proceeds
 // unchanged. runErr must be the child's completed exit error; a nil/success exit never matches.
 // childStarted scopes the transcript search to this session; now/sleep are injectable for tests.
-func guardMaybeRecoverCapCrash(runErr error, command []string, agentName string, childStarted time.Time, quiet bool, now func() time.Time, sleep func(time.Duration), stderr io.Writer) (relaunch []string, ok bool) {
-	if runErr == nil || !guardCapParkEnabled() {
+func guardMaybeRecoverCapCrash(runErr error, command []string, agentName string, childStarted time.Time, quiet bool, maxWait time.Duration, now func() time.Time, sleep func(time.Duration), stderr io.Writer) (relaunch []string, ok bool) {
+	if runErr == nil || maxWait < 0 || !guardCapParkEnabled() {
 		return nil, false
 	}
 	if now == nil {
@@ -290,6 +290,10 @@ func guardMaybeRecoverCapCrash(runErr error, command []string, agentName string,
 	if !quiet && stderr != nil {
 		fmt.Fprintf(stderr, "fak guard: %s exited on a %s — %s\n", agentName, dec.LimitReason, dec.Reason)
 	}
-	guardCapParkWait(dec, guardParkBudget(), now, sleep, stderr)
+	budget := guardParkBudget()
+	if maxWait > 0 && (budget <= 0 || maxWait < budget) {
+		budget = maxWait
+	}
+	guardCapParkWait(dec, budget, now, sleep, stderr)
 	return dec.Relaunch, true
 }

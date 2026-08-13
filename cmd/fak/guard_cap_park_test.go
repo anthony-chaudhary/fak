@@ -330,7 +330,7 @@ func TestGuardMaybeRecoverCapCrash(t *testing.T) {
 		now := func() time.Time { return time.Unix(base.Unix()+60, 0) } // 60s idle — fresh, inside the 5h window
 		slept := false
 		sleep := func(time.Duration) { slept = true }
-		relaunch, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, now, sleep, nil)
+		relaunch, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, 0, now, sleep, nil)
 		if !ok {
 			t.Fatalf("ok = false, want true (a fresh session-cap transcript must recover)")
 		}
@@ -342,11 +342,38 @@ func TestGuardMaybeRecoverCapCrash(t *testing.T) {
 		}
 	})
 
+	t.Run("the session wall-clock runway clamps a longer provider park", func(t *testing.T) {
+		childStarted := time.Unix(1_699_999_900, 0).UTC()
+		base := capTranscriptStore(t, childStarted)
+		now := func() time.Time { return time.Unix(base.Unix()+60, 0) }
+		var slept time.Duration
+		maxWait := 37 * time.Second
+		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, maxWait, now, func(d time.Duration) { slept = d }, nil); !ok {
+			t.Fatalf("ok = false, want the witnessed cap to recover")
+		}
+		if slept != maxWait {
+			t.Fatalf("slept = %s, want wall-clock runway clamp %s", slept, maxWait)
+		}
+	})
+
+	t.Run("an exhausted wall-clock envelope refuses cap recovery", func(t *testing.T) {
+		childStarted := time.Unix(1_699_999_900, 0).UTC()
+		base := capTranscriptStore(t, childStarted)
+		now := func() time.Time { return time.Unix(base.Unix()+60, 0) }
+		slept := false
+		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, -1, now, func(time.Duration) { slept = true }, nil); ok {
+			t.Fatalf("ok = true, want an exhausted session to stop instead of relaunch")
+		}
+		if slept {
+			t.Fatalf("exhausted session parked past its wall-clock envelope")
+		}
+	})
+
 	t.Run("a nil (clean) child exit never recovers", func(t *testing.T) {
 		childStarted := time.Unix(1_699_999_900, 0).UTC()
 		base := capTranscriptStore(t, childStarted)
 		now := func() time.Time { return time.Unix(base.Unix()+60, 0) }
-		if _, ok := guardMaybeRecoverCapCrash(nil, cmd, "claude", childStarted, true, now, func(time.Duration) {}, nil); ok {
+		if _, ok := guardMaybeRecoverCapCrash(nil, cmd, "claude", childStarted, true, 0, now, func(time.Duration) {}, nil); ok {
 			t.Errorf("ok = true on a nil exit, want false")
 		}
 	})
@@ -356,7 +383,7 @@ func TestGuardMaybeRecoverCapCrash(t *testing.T) {
 		base := capTranscriptStore(t, childStarted)
 		t.Setenv("FAK_GUARD_CAP_PARK", "0")
 		now := func() time.Time { return time.Unix(base.Unix()+60, 0) }
-		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, now, func(time.Duration) {}, nil); ok {
+		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, 0, now, func(time.Duration) {}, nil); ok {
 			t.Errorf("ok = true with the park disabled, want false")
 		}
 	})
@@ -364,7 +391,7 @@ func TestGuardMaybeRecoverCapCrash(t *testing.T) {
 	t.Run("no transcript at/after the child launch is a no-op", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // empty store
 		childStarted := time.Unix(1_699_999_900, 0).UTC()
-		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, time.Now, func(time.Duration) {}, nil); ok {
+		if _, ok := guardMaybeRecoverCapCrash(exit, cmd, "claude", childStarted, true, 0, time.Now, func(time.Duration) {}, nil); ok {
 			t.Errorf("ok = true with no witness transcript, want false")
 		}
 	})
