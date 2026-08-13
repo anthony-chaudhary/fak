@@ -109,7 +109,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  fleetcap [flags]                      plan fleet capacity (Little's law, no live worker)")
 	fmt.Fprintln(w, "  catchup [flags]                       measure repository development catch-up debt")
 	fmt.Fprintln(w, "  whats-changed --paths P [flags]       report peer commits under repository paths")
-	fmt.Fprintln(w, "  windows-setup [--apply] [--json]      allow native tests + fleet spine (one UAC prompt)")
+	fmt.Fprintln(w, "  windows-setup [--apply] [--json]      allow native tests + fleet spine; suppress firewall prompts (one UAC prompt)")
 	fmt.Fprintln(w, "  feature query <intent> [flags]        query repository and live capability cards")
 	fmt.Fprintln(w, "  capabilities [intent] [flags]         query product + repository capabilities by outcome")
 	fmt.Fprintln(w, "  issue <subcommand> [flags]             manage repository issue contracts and filing")

@@ -33,17 +33,18 @@ type Result struct {
 	Paths     []Item `json:"paths"`
 	Processes []Item `json:"processes"`
 	Firewall  []Item `json:"firewall"`
+	Profiles  []Item `json:"profiles"`
 }
 
 func (r Result) Complete() bool {
-	for _, set := range [][]Item{r.Paths, r.Processes, r.Firewall} {
+	for _, set := range [][]Item{r.Paths, r.Processes, r.Firewall, r.Profiles} {
 		for _, item := range set {
 			if !item.Present {
 				return false
 			}
 		}
 	}
-	return len(r.Paths) > 0 && len(r.Processes) > 0 && len(r.Firewall) == 2
+	return len(r.Paths) > 0 && len(r.Processes) > 0 && len(r.Firewall) == 2 && len(r.Profiles) == 3
 }
 
 func buildWindowsSetupSpec(repo string) (SetupSpec, error) {
@@ -122,6 +123,7 @@ $processes=%s
 if($apply){
  foreach($x in $paths){if(Test-Path -LiteralPath $x){Add-MpPreference -ExclusionPath $x}}
  foreach($x in $processes){Add-MpPreference -ExclusionProcess $x}
+ Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Allow -DefaultOutboundAction Allow -NotifyOnListen False -AllowInboundRules True -AllowLocalFirewallRules True
  foreach($d in @('Inbound','Outbound')){
   $n='fak-fleet-spine-'+$d.ToLowerInvariant()
   Get-NetFirewallRule -Name $n -ErrorAction SilentlyContinue|Remove-NetFirewallRule
@@ -129,10 +131,11 @@ if($apply){
  }
 }
 $p=Get-MpPreference
-$r=[ordered]@{applied_at=(Get-Date).ToString('o');paths=@();processes=@();firewall=@()}
+$r=[ordered]@{applied_at=(Get-Date).ToString('o');paths=@();processes=@();firewall=@();profiles=@()}
 foreach($x in $paths){$r.paths += [ordered]@{value=$x;present=(@($p.ExclusionPath)-contains $x)}}
 foreach($x in $processes){$r.processes += [ordered]@{value=$x;present=(@($p.ExclusionProcess)-contains $x)}}
 foreach($d in @('inbound','outbound')){$n='fak-fleet-spine-'+$d;$f=Get-NetFirewallRule -Name $n -ErrorAction SilentlyContinue;$a=$f|Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue;$pt=$f|Get-NetFirewallPortFilter -ErrorAction SilentlyContinue;$ok=[bool]($f -and $f.Enabled -eq 'True' -and $f.Action -eq 'Allow' -and @($a.RemoteAddress)-contains %s -and @($pt.LocalPort)-contains '%d');$r.firewall += [ordered]@{value=$n;present=$ok}}
+foreach($name in @('Domain','Private','Public')){$fp=Get-NetFirewallProfile -Name $name;$ok=[bool]($fp.DefaultInboundAction -eq 'Allow' -and $fp.DefaultOutboundAction -eq 'Allow' -and $fp.NotifyOnListen -eq $false -and $fp.AllowInboundRules -eq 'True' -and $fp.AllowLocalFirewallRules -eq 'True');$r.profiles += [ordered]@{value=$name;present=$ok}}
 $r|ConvertTo-Json -Depth 5|Set-Content -LiteralPath %s -Encoding utf8
 `, mode, arr(p.Paths), arr(p.Processes), q(p.Group), p.Port, p.Port, q(p.Group), p.Port, q(resultPath))
 }

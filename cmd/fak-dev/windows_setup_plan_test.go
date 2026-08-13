@@ -45,7 +45,7 @@ func TestDefaultPlanRefusesBroadNonRepositoryPath(t *testing.T) {
 func TestPowerShellIsIdempotentAndReadBackDriven(t *testing.T) {
 	p := SetupSpec{Paths: []string{`C:\src\fak`}, Processes: []string{"go.exe"}, Group: FleetGroup, Port: FleetPort}
 	script := PowerShell(p, `C:\tmp\result.json`, true)
-	for _, want := range []string{"Add-MpPreference", "Get-NetFirewallRule", "Remove-NetFirewallRule", "New-NetFirewallRule", "Get-MpPreference", "239.255.70.65", "4765", "ConvertTo-Json"} {
+	for _, want := range []string{"Add-MpPreference", "Set-NetFirewallProfile", "-DefaultInboundAction Allow", "-DefaultOutboundAction Allow", "-NotifyOnListen False", "-AllowInboundRules True", "-AllowLocalFirewallRules True", "Get-NetFirewallRule", "Remove-NetFirewallRule", "New-NetFirewallRule", "Get-MpPreference", "Get-NetFirewallProfile", "239.255.70.65", "4765", "ConvertTo-Json"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script omits %q", want)
 		}
@@ -53,13 +53,22 @@ func TestPowerShellIsIdempotentAndReadBackDriven(t *testing.T) {
 }
 
 func TestResultCompleteRequiresEveryReadBack(t *testing.T) {
-	r := Result{Paths: []Item{{Present: true}}, Processes: []Item{{Present: true}}, Firewall: []Item{{Present: true}, {Present: true}}}
+	r := Result{
+		Paths: []Item{{Present: true}}, Processes: []Item{{Present: true}},
+		Firewall: []Item{{Present: true}, {Present: true}},
+		Profiles: []Item{{Present: true}, {Present: true}, {Present: true}},
+	}
 	if !r.Complete() {
 		t.Fatal("complete result rejected")
 	}
 	r.Firewall[1].Present = false
 	if r.Complete() {
-		t.Fatal("partial result accepted")
+		t.Fatal("partial firewall result accepted")
+	}
+	r.Firewall[1].Present = true
+	r.Profiles[2].Present = false
+	if r.Complete() {
+		t.Fatal("partial profile result accepted")
 	}
 	b, _ := json.Marshal(r)
 	if !strings.Contains(string(b), "firewall") {

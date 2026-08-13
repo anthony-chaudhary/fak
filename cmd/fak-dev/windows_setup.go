@@ -73,7 +73,7 @@ func runWindowsSetup(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stdout, string(data))
 	}
 	if !result.Complete() {
-		fmt.Fprintln(stderr, "fak-dev windows-setup: NOT READY — one or more Defender/firewall exceptions were not read back")
+		fmt.Fprintln(stderr, "fak-dev windows-setup: NOT READY — one or more Defender exclusions, firewall rules, or firewall profile defaults were not read back")
 		return 1
 	}
 	fmt.Fprintf(stdout, "READY: Windows Security allows native fak tests and fleet-spine multicast (%s:%d).\n", plan.Group, plan.Port)
