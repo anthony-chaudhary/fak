@@ -1,6 +1,6 @@
 ---
 name: study-repo
-description: High-priority deep study of external code and proposals for fak. Invoke proactively whenever a repository, package, PR, issue, release, paper-with-code, or implementation is relevant—not only on explicit study requests. Acquire into scratch and pin revisions; mine code, tests, docs, history, releases, open and closed issues, PRs, discussions, roadmaps, and license/provenance; date every observation; directly port or adapt implementation when licensing permits; and explore both shipped mechanisms and the transferable spirit of proposed or incomplete ideas. Extract many source-anchored candidates, then feed every candidate through field-borrow's current-fak witness before shipping or filing small independently provable effects.
+description: High-priority deep study of external code and proposals for fak. Invoke proactively whenever a repository, package, PR, issue, release, paper-with-code, or implementation is relevant—not only on explicit study requests. Acquire into scratch and pin revisions; mine code, tests, docs, history, releases, open and closed issues, PRs, discussions, roadmaps, and license/provenance; date every observation; directly port or adapt implementation when licensing permits; and explore both shipped mechanisms and the transferable spirit of proposed or incomplete ideas. Extract many source-anchored candidates, then feed every candidate through field-borrow's current-fak witness before shipping or filing small independently provable effects. Also map both the best-default frontier and bounded-superset coverage opportunities so useful cohort-specific alternatives can land behind modular seams without displacing stronger defaults.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob, Write, Edit, WebFetch, WebSearch, Agent, mcp__fak__fak_feature_query, mcp__fak__fak_capabilities, mcp__fak__fak_index_docs, mcp__fak__fak_index_leaves, mcp__fak__fak_index_verbs, mcp__fak__fak_index_claims
@@ -223,6 +223,16 @@ proud-read) tell, not a sparse repo. Steps 4–6 shrink and scope; steps 2–3's
 them enough raw material.
 
 ### 4 — Choose direct port, adaptation, inspiration, or exclusion (the license gate)
+
+Apply `/field-borrow`'s **bounded-superset portfolio rule** before treating the source's
+headline winner as the only useful result. Separate the `DEFAULT` frontier from the coverage
+frontier, and assign each witnessed capability `DEFAULT`, `OPTIONAL-MODULE`, `RECIPE`, `WATCH`,
+or `EXCLUDE`. A technique that loses globally can still be the right optional path for a named
+hardware, provider, privacy, compatibility, topology, cost, or operator-preference cohort.
+Use fak's modular leaves/adapters/integrations to preserve that value without widening the core
+or weakening the common-case default. Do not preserve approaches that are genuinely dominated,
+unsafe, license-incompatible, outside declared scope, or unaffordable to support; date
+moment-in-time findings and give `WATCH`/`EXCLUDE` rows a review or reopening condition.
 
 Read exact-revision root/per-file licenses, NOTICE, provenance, submodules, and contribution terms.
 Public visibility is not permission; repository metadata is insufficient.

@@ -1,6 +1,6 @@
 ---
 name: scout-loop
-description: The super-loop that closes the research→backlog loop — it chains the outward CRAWLERS (the daily `idea-scout` arXiv/GitHub feed, the industry scans, the RESEARCH/CONCEPT corpus) into the STUDY pipeline (`/study-repo` → `/field-borrow`) and runs the whole thing on a cadence. The crawler surfaces repo-shaped leads into a needs-triage queue and stops; turning any one into scoped, witnessed, license-clean backlog is still a manual pass someone has to remember to run. This skill is that seam, automated: once per pass it CRAWLS the freshest outward signal, SELECTS the single highest-value repo-shaped lead, STUDIES it with `/study-repo` (clone into scratch, pin the SHA, read the code not the pitch, decompose small), WITNESSES each borrow with `/field-borrow` (`fak_feature_query`/`fak index` → PRESENT/PARTIAL/ABSENT), FILES the surviving PARTIAL/ABSENT borrows as small independently-shippable leaves under the right epic, and REGISTERS a dated `CONCEPT-STUDY-*` note. It re-implements none of those tools — it orders them, and holds the honesty boundary: a crawl is not a borrow, a study is not a ship. Set it to run unattended with `tools/register_scout_loop.ps1` (plan-by-default, `-Launch` the opt-in). Use when the operator says "keep scouting for new research and turn it into backlog", "run the study loop on new repos", "combine the crawlers with study-repo", "auto-triage the idea-scout queue into real tickets", or "set the research loop running".
+description: The super-loop that closes the research→backlog loop — it chains the outward CRAWLERS (the daily `idea-scout` arXiv/GitHub feed, the industry scans, the RESEARCH/CONCEPT corpus) into the STUDY pipeline (`/study-repo` → `/field-borrow`) and runs the whole thing on a cadence. The crawler surfaces repo-shaped leads into a needs-triage queue and stops; turning any one into scoped, witnessed, license-clean backlog is still a manual pass someone has to remember to run. This skill is that seam, automated: once per pass it CRAWLS the freshest outward signal, SELECTS the single highest-value repo-shaped lead, STUDIES it with `/study-repo` (clone into scratch, pin the SHA, read the code not the pitch, decompose small), WITNESSES each borrow with `/field-borrow` (`fak_feature_query`/`fak index` → PRESENT/PARTIAL/ABSENT), FILES the surviving PARTIAL/ABSENT borrows as small independently-shippable leaves under the right epic, and REGISTERS a dated `CONCEPT-STUDY-*` note. It re-implements none of those tools — it orders them, and holds the honesty boundary: a crawl is not a borrow, a study is not a ship. Set it to run unattended with `tools/register_scout_loop.ps1` (plan-by-default, `-Launch` the opt-in). Use when the operator says "keep scouting for new research and turn it into backlog", "run the study loop on new repos", "combine the crawlers with study-repo", "auto-triage the idea-scout queue into real tickets", or "set the research loop running". Select leads for both best-default improvement and bounded-superset coverage of credible user cohorts, constrained by scope, evidence, and support economics.
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path, honesty-boundary, no-monolith, and scratch-only-clone discipline are load-bearing and not portable per-skill
@@ -85,6 +85,13 @@ Prefer a lead that is *not already studied*: grep `docs/notes/CONCEPT-STUDY-*` a
 prior pass (or a human) already decomposed.
 
 ### 3 — STUDY: hand the lead to `/study-repo` (do not restate it)
+
+Require the returned study to expose both the default frontier and the **bounded-superset
+coverage frontier**. Do not select leads only because they might replace fak's current default;
+a lead is also high-value when it serves a credible user/job/constraint cohort through an
+`OPTIONAL-MODULE` or `RECIPE` seam. Deprioritize feature-count novelty, genuinely superseded
+approaches, and moment-in-time claims without a dated `WATCH` review trigger. This keeps
+scouting broad in user coverage but bounded by fak's scope and support economics.
 
 Invoke [`/study-repo`](../study-repo/SKILL.md) on the selected lead. That skill
 owns the whole acquisition front-half — shallow-clone **into scratch, never the

@@ -77,3 +77,44 @@ func TestStudyAndScoutCannotNarrowInspiredBy(t *testing.T) {
 		"spirit-level",
 	)
 }
+
+// TestBoundedSupersetContract pins the portfolio-level behavior: lead with the strongest
+// reasonable default, preserve useful cohort-specific alternatives behind modular seams,
+// and explicitly bound coverage by evidence, scope, support economics, and freshness.
+func TestBoundedSupersetContract(t *testing.T) {
+	requirePhrases(t, ".claude/skills/field-borrow/SKILL.md",
+		"bounded capability superset",
+		"DEFAULT",
+		"OPTIONAL-MODULE",
+		"RECIPE",
+		"WATCH",
+		"EXCLUDE",
+		"reasonable-coverage budget",
+		"Default frontier",
+		"Coverage frontier",
+		"boiling the ocean",
+	)
+	requirePhrases(t, ".claude/skills/study-repo/SKILL.md",
+		"bounded-superset portfolio rule",
+		"technique that loses globally",
+		"modular leaves/adapters/integrations",
+		"moment-in-time findings",
+	)
+	requirePhrases(t, ".claude/skills/industry-score/SKILL.md",
+		"default and the reasonable coverage envelope",
+		"Default frontier",
+		"Coverage frontier",
+		"feature pile",
+		"support-uneconomic",
+	)
+	requirePhrases(t, ".claude/skills/sota-check/SKILL.md",
+		"best default plus bounded coverage",
+		"globally second-place approach",
+		"boil-the-ocean accumulation",
+	)
+	requirePhrases(t, ".claude/skills/scout-loop/SKILL.md",
+		"bounded-superset",
+		"credible user/job/constraint cohort",
+		"scope and support economics",
+	)
+}

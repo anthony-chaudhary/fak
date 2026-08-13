@@ -1,6 +1,6 @@
 ---
 name: sota-check
-description: One repeatable pass that stops fak from re-inventing known kernel art - before writing or optimizing a compute kernel (a quantized GEMM, a fused attention, a KV-cache reuse, a MoE dispatch, a Metal/CUDA kernel), it checks the SOTA prior-art matrix for the production reference (llama.cpp / Marlin / CUTLASS / FlashInfer / vLLM / SGLang / a named paper), decides the route (borrow / bind / stay-minimal), holds the result to the named oracle, and records what was consulted in a Prior-art trailer. Runs `fak sota <op|file>` to surface the reference, reads it, routes deliberately, and (when the matrix has a blind spot) adds the missing row so the next person inherits the map. The inward kernel-engineering counterpart of industry-score (the outward field map). Use before any kernel-optimization commit, when the PRIOR_ART advisory gate fires, when onboarding a new compute operation, or on a /loop cadence to keep the matrix honest against the tree.
+description: One repeatable pass that stops fak from re-inventing known kernel art - before writing or optimizing a compute kernel (a quantized GEMM, a fused attention, a KV-cache reuse, a MoE dispatch, a Metal/CUDA kernel), it checks the SOTA prior-art matrix for the production reference (llama.cpp / Marlin / CUTLASS / FlashInfer / vLLM / SGLang / a named paper), decides the route (borrow / bind / stay-minimal), holds the result to the named oracle, and records what was consulted in a Prior-art trailer. Runs `fak sota <op|file>` to surface the reference, reads it, routes deliberately, and (when the matrix has a blind spot) adds the missing row so the next person inherits the map. The inward kernel-engineering counterpart of industry-score (the outward field map). Use before any kernel-optimization commit, when the PRIOR_ART advisory gate fires, when onboarding a new compute operation, or on a /loop cadence to keep the matrix honest against the tree. Preserve useful cohort-specific alternatives as bounded optional modules or recipes when they remain supportable, while excluding genuinely superseded approaches.
 ---
 
 # sota-check - the prior-art-before-scratch pass
@@ -51,6 +51,22 @@ as `internal/benchcatalog`). The human front door is
 6. **Stamp the commit.** End the kernel commit with a `Prior-art:` trailer naming what you
    consulted - e.g. `Prior-art: Marlin fused dequant-MMA (IST-DASLab/marlin); cosine >= 0.995
    vs HF AWQ`. This silences the advisory gate AND leaves a durable, greppable record.
+
+## Portfolio output — best default plus bounded coverage
+
+Do not collapse the matrix to one universal winner. Produce both (a) the best net-true default
+for fak's common supported case and (b) a **bounded capability superset** view of useful
+alternatives for named cohorts. Route each viable technique through `/field-borrow` as
+`DEFAULT`, `OPTIONAL-MODULE`, `RECIPE`, `WATCH`, or `EXCLUDE`. A globally second-place approach
+may still deserve an isolated module or recipe for a different accelerator, provider, privacy
+constraint, deployment topology, compatibility requirement, cost envelope, or operator
+preference. It must not displace the default merely to increase feature count.
+
+Bound the exercise: require dated evidence, a supported cohort, a modular seam, incremental
+support cost, and a disconfirming witness. Mark genuinely dominated, unsafe,
+license-incompatible, out-of-scope, and support-uneconomic approaches `EXCLUDE`; mark volatile
+or immature moment-in-time findings `WATCH` with a review trigger. This prevents both ego-driven
+"not invented here" rejection and boil-the-ocean accumulation.
 
 ## What "done" proves
 

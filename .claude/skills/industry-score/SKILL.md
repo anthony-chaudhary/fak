@@ -1,6 +1,6 @@
 ---
 name: industry-score
-description: One repeatable pass that keeps fak's competitive story honest AND complete — graded industry-first, not from what fak happened to measure. Runs the industry scorecard (tools/industry_scorecard.py) over a modular data directory (tools/industry_scorecard.data/): a researched taxonomy of the dimensions the LLM-serving / agent-infra field competes on (vLLM/SGLang/TensorRT-LLM/llama.cpp), the current SOTA bar on each with a dated source, and fak's honest position — mostly named gaps. It drives two numbers, coverage (of the field) and parity-debt (honesty of the rows), and updates on two cadences: as the industry moves (a new dimension drops coverage; --stale lists SOTA bars due a re-check) and as fak moves (a benchmark turns a no-claim into a measured row). Regenerates the modular doc folder docs/industry-scorecard/ and commits only the scorecard lane by explicit path. The OUTWARD-facing counterpart of repo-hygiene/code-quality/appeal. Use after a benchmark lands, when a competitor ships a number, when the field adds a dimension, or on a /loop cadence.
+description: One repeatable pass that keeps fak's competitive story honest AND complete — graded industry-first, not from what fak happened to measure. Runs the industry scorecard (tools/industry_scorecard.py) over a modular data directory (tools/industry_scorecard.data/): a researched taxonomy of the dimensions the LLM-serving / agent-infra field competes on (vLLM/SGLang/TensorRT-LLM/llama.cpp), the current SOTA bar on each with a dated source, and fak's honest position — mostly named gaps. It drives two numbers, coverage (of the field) and parity-debt (honesty of the rows), and updates on two cadences: as the industry moves (a new dimension drops coverage; --stale lists SOTA bars due a re-check) and as fak moves (a benchmark turns a no-claim into a measured row). Regenerates the modular doc folder docs/industry-scorecard/ and commits only the scorecard lane by explicit path. The OUTWARD-facing counterpart of repo-hygiene/code-quality/appeal. Use after a benchmark lands, when a competitor ships a number, when the field adds a dimension, or on a /loop cadence. Score both common-case default quality and bounded-superset coverage for legitimate user cohorts; do not confuse a feature pile with supported coverage.
 ---
 
 # industry-score — keep the competitive map complete and honest, and prove it
@@ -105,7 +105,29 @@ score (0–100, A–F), and prints the data-derived standing (▲ lead · ≈ pa
 · ○ honest gap). It is read-only over the data; the only writes are the doc folder
 under `--markdown-dir`.
 
-## Step 2 — Pick the worst-first move
+## Step 2 — Score both the default and the reasonable coverage envelope
+
+A single aggregate winner is not sufficient evidence of product coverage. For each concern,
+maintain two views:
+
+- **Default frontier:** the strongest net-true industry default for the common supported case.
+- **Coverage frontier:** named user/job/constraint cohorts for which another credible system
+  offers a materially useful path that fak does not yet support.
+
+Classify each coverage row with the `/field-borrow` bounded-superset dispositions: `DEFAULT`,
+`OPTIONAL-MODULE`, `RECIPE`, `WATCH`, or `EXCLUDE`. Count an optional capability as coverage
+only when its modular seam, opt-in behavior, witness, support cost, and owner/review trigger are
+explicit. Do not award points for a feature pile, stale compatibility, or an approach that is
+obviously superseded for every supported cohort. Equally, do not call fak complete merely
+because its default beats a competitor's default while that competitor serves a legitimate
+hardware, provider, privacy, topology, cost, compatibility, or operator-preference cohort that
+fak omits.
+
+The scorecard is a bounded-superset map, not a boil-the-ocean mandate. Record out-of-scope,
+unsafe, license-incompatible, moment-in-time, and support-uneconomic capabilities as dated
+`WATCH` or `EXCLUDE` rows with a reconsideration condition rather than silently dropping them.
+
+## Step 3 — Pick the worst-first move
 
 The scorecard names it. There are two failure modes and the verdict tells you which:
 
@@ -131,7 +153,7 @@ The scorecard names it. There are two failure modes and the verdict tells you wh
 After a batch, **re-run the scorecard** and watch the number fall; that loop is the
 method.
 
-## Step 3 — Keep it current (the two update cadences)
+## Step 4 — Keep it current (the two update cadences)
 
 This is what stops the scorecard rotting — in both directions.
 
@@ -157,14 +179,14 @@ This is what stops the scorecard rotting — in both directions.
 `freshness` KPI flags fak numbers older than `fresh_window_days` (advisory) to
 re-confirm when a bench node is free.
 
-## Step 4 — Verify sources
+## Step 5 — Verify sources
 
 Run `python tools/industry_scorecard.py --verify-sources` — no present artifact may
 `MISMATCH` (an absent one, on a bench node, skips; fine off-box). For any number you
 hand-transcribed, spot-check it against the cited doc (or have a subagent re-read it).
 A wrong number in an honesty instrument is self-defeating.
 
-## Step 5 — Prove the drop, regenerate the doc folder
+## Step 6 — Prove the drop, regenerate the doc folder
 
 ```bash
 python tools/industry_scorecard.py --json > /tmp/after.json
@@ -177,7 +199,7 @@ State the before/after (e.g. "coverage 21% → 100%; parity-debt 0; standing 3 l
 data — never hand-edit a page. Optionally re-run `python tools/scorecard_control_pane.py`
 to confirm the portfolio still folds.
 
-## Step 6 — Commit only the scorecard lane, by explicit path
+## Step 7 — Commit only the scorecard lane, by explicit path
 
 This is a shared trunk; commit *your* lane, never a peer's work:
 

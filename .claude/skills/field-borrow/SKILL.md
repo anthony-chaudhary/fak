@@ -1,6 +1,6 @@
 ---
 name: field-borrow
-description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, roadmap, design discussion, or field practice could improve fak—not only on explicit borrow requests. Mine code, tests, docs, history, releases, open/closed issues, PRs, discussions, roadmaps, and provenance; date observations and source events; directly port/adapt when exact-source licensing permits; explore the spirit of promising proposed or incomplete ideas; then dogfood fak self-query to classify PRESENT/PARTIAL/ABSENT before shipping or filing witnessed gaps.
+description: High-priority default "inspired by" workflow. Invoke proactively whenever an external product, repository, paper, standard, benchmark, release, issue, PR, roadmap, design discussion, or field practice could improve fak—not only on explicit borrow requests. Mine code, tests, docs, history, releases, open/closed issues, PRs, discussions, roadmaps, and provenance; date observations and source events; directly port/adapt when exact-source licensing permits; explore the spirit of promising proposed or incomplete ideas; then dogfood fak self-query to classify PRESENT/PARTIAL/ABSENT before shipping or filing witnessed gaps. Assign each witnessed capability DEFAULT, OPTIONAL-MODULE, RECIPE, WATCH, or EXCLUDE so fak combines strong industry defaults with bounded, supportable user coverage.
 ---
 
 # field-borrow — borrow from the field, but witness the gap against yourself first
@@ -77,6 +77,45 @@ Extract all of these before ranking:
 
 Be expansive in discovery and conservative in claims. A promising unimplemented idea is a valid
 **INFERENCE** when paired with a cheap experiment/falsifier; it is not parity evidence.
+
+## Bounded-superset portfolio rule
+
+The target is not "copy the winner" and not "accumulate every feature." It is a
+**bounded capability superset**: within fak's declared scope and support budget, users should
+be able to trust that fak carries the strongest reasonable industry default **and** preserves
+materially useful alternatives for cohorts whose constraints differ. fak is egoless about
+where those capabilities originated. Its modular leaf/adapter/integration boundaries are an
+advantage: a useful alternative need not displace the default or contaminate the kernel core.
+
+For every witnessed capability, record one portfolio disposition:
+
+| Disposition | Use when | Required form |
+|---|---|---|
+| `DEFAULT` | strongest net-true choice for the common supported case | integrated, documented default with a witness against the real alternative |
+| `OPTIONAL-MODULE` | useful for a named user/job/constraint but not the broad default | isolated leaf, adapter, policy, backend, or integration; explicit opt-in and support owner |
+| `RECIPE` | useful and supportable, but too narrow or environment-specific to ship as maintained code | tested composition/integration guide with prerequisites and dated witness |
+| `WATCH` | promising, moment-in-time, immature, or evidence is not strong enough to support yet | dated source + review trigger; no shipped claim |
+| `EXCLUDE` | outside scope, unsafe, license-incompatible, operationally unaffordable, or genuinely dominated | named reason and the evidence/disconfirming condition that could reopen it |
+
+`DEFAULT` is not the only successful outcome. Do not reject a capability merely because a
+different technique wins overall, is newer, or is already fak's default. Ask whether a real
+supported cohort still benefits under a constraint such as hardware, provider, latency,
+quality, privacy, deployment topology, compatibility, cost, or operator preference. If yes,
+prefer an `OPTIONAL-MODULE` or `RECIPE` seam over deletion. Conversely, age, popularity, or
+"someone might want it" is not enough: an obviously superseded approach with no surviving
+cohort goes to `EXCLUDE`, and a fast-moving snapshot goes to `WATCH` until revalidated.
+
+Each non-excluded row must name: capability axis; user/job/constraint served; observed evidence
+and date; relationship to the default; proposed modular seam; incremental build, test,
+security, documentation, and maintenance cost; owner or review trigger; and a witness that
+would disconfirm usefulness. This is the **reasonable-coverage budget**. Once marginal support
+cost exceeds witnessed user value, stop expanding and register the omission instead of **boiling the ocean**.
+
+A study is coverage-complete only when it reports both:
+
+1. **Default frontier** — where fak's common-case default should lead or change.
+2. **Coverage frontier** — useful supported cohorts still absent even though the default may
+   already be best overall.
 
 ## Required completion evidence
 
