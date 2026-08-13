@@ -552,6 +552,7 @@ var tier = map[string]int{
 	"codexresume":           2,
 	"disambiguation":        1, // stdlib-only terminology schema, validation, and self-test; no policy or model kernel.
 	"sessionregistry":       1, // stdlib-only durable child-lineage record and read-back; no runtime kernel.
+	"grafanacontract":       1, // stdlib-only contract checks for shipped Grafana dashboard JSON.
 	"processforest":         1, // stdlib-only durable logical process-forest identity, ancestry, adoption, and deterministic snapshots.
 	"lifecycleadapter":      1, // stdlib-only process-forest adapter capability negotiation and bounded invocation contract.
 	"terminalbarrier":       3, // #6436 (epic #6432): the fail-closed pause barrier terminal relief must clear before any host replacement. Composes fleetbus(2) durable lifecycle envelopes with processforest(1) identity and lifecycleadapter(1) negotiation; the destructive step is an injected Actuator, so the barrier itself can never kill anything.
