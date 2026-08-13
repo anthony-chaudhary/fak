@@ -21,6 +21,45 @@ import (
 // TestMicroConfigPrecedence pins the flags > env > file > defaults ladder the issue
 // (#2029) requires: a file value survives where nothing above it sets the field, and
 // an env var overrides the file for the field it names.
+
+func TestDriveMicroObservedCapturesTaskAnswerAndProviderUsage(t *testing.T) {
+	var prompt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if len(req.Messages) > 0 {
+			prompt = req.Messages[len(req.Messages)-1].Content
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"paired","model":"provider-model","choices":[{"message":{"role":"assistant","content":"READY"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":1,"total_tokens":12}}`)
+	}))
+	defer srv.Close()
+
+	cfg := defaultMicroConfig(false)
+	cfg.Engine, cfg.Gateway, cfg.Model = "gateway", srv.URL, "requested-model"
+	cfg.Task, cfg.Agents, cfg.Turns = "Reply with exactly READY", 1, 1
+	_, _, results, observed, err := driveMicroObserved(cfg)
+	if err != nil {
+		t.Fatalf("driveMicroObserved: %v", err)
+	}
+	if len(results) != 1 || !results[0].Done {
+		t.Fatalf("results=%+v", results)
+	}
+	got := observed["micro-000"]
+	if prompt != cfg.Task {
+		t.Fatalf("prompt=%q want %q", prompt, cfg.Task)
+	}
+	if got.Answer != "READY" || got.Usage.TotalTokens != 12 || got.Model != "provider-model" {
+		t.Fatalf("observation=%+v", got)
+	}
+}
+
 func TestMicroConfigPrecedence(t *testing.T) {
 	cfg := defaultMicroConfig(true) // host mode: agents defaults to the worker count
 	if cfg.Engine != "mock" || cfg.Isolation != microagent.BackendGoroutine {

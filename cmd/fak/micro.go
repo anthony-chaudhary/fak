@@ -59,6 +59,7 @@ import (
 type microConfig struct {
 	Engine                 string `json:"engine"`                   // model engine seam: mock or a running fak gateway.
 	Gateway                string `json:"gateway,omitempty"`        // fak serve address for engine=gateway.
+	Task                   string `json:"task,omitempty"`           // user task sent identically to every microagent.
 	Model                  string `json:"model,omitempty"`          // model requested through the gateway.
 	Isolation              string `json:"isolation"`                // ToolExec backend name (M13): goroutine | subprocess.
 	Seats                  int    `json:"seats"`                    // slot pool K (M6/M20): max concurrent in-flight model calls; 0 ⇒ derive from workers.
@@ -99,6 +100,10 @@ func (c microConfig) slots() int {
 }
 
 func cmdMicro(args []string) {
+	if len(args) > 0 && args[0] == "paired" {
+		cmdMicroPaired(args[1:])
+		return
+	}
 	if len(args) > 0 && args[0] == "collapse" {
 		cmdMicroCollapse(args[1:])
 		return
@@ -131,6 +136,7 @@ func cmdMicro(args []string) {
 		engine      = fs.String("engine", "", "model engine seam (mock or gateway)")
 		gateway     = fs.String("gateway", "", "running fak serve address for --engine gateway")
 		model       = fs.String("model", "", "model id requested through --engine gateway")
+		task        = fs.String("task", "", "user task sent identically to every microagent")
 		admMax      = fs.Int("admission-max-concurrent", 0, "M19 provider concurrency cap; 0 ⇒ unbounded (resolved here, enforced on the served gateway)")
 		admTok      = fs.Int("admission-token-budget", 0, "M19 provider token budget; 0 ⇒ unbounded (resolved here, enforced on the served gateway)")
 		cfgFile     = fs.String("config", "", "load config from a JSON file (lowest non-default precedence)")
@@ -184,6 +190,9 @@ func cmdMicro(args []string) {
 	if set["model"] {
 		cfg.Model = *model
 	}
+	if set["task"] {
+		cfg.Task = *task
+	}
 	if set["seats"] {
 		cfg.Seats = *seats
 	}
@@ -212,6 +221,13 @@ func cmdMicro(args []string) {
 		cfg.AdmissionTokenBudget = *admTok
 	}
 
+	if len(fs.Args()) > 0 {
+		if strings.TrimSpace(cfg.Task) != "" {
+			fmt.Fprintln(os.Stderr, "fak micro: task supplied both positionally and with --task")
+			os.Exit(2)
+		}
+		cfg.Task = strings.Join(fs.Args(), " ")
+	}
 	if err := validateMicroConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "fak micro: %v\n", err)
 		os.Exit(2)
@@ -245,6 +261,9 @@ func loadMicroConfigFile(path string, cfg *microConfig) error {
 func applyMicroEnv(cfg *microConfig) {
 	if v, ok := os.LookupEnv("FAK_MICRO_ENGINE"); ok && strings.TrimSpace(v) != "" {
 		cfg.Engine = strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv("FAK_MICRO_TASK"); ok && strings.TrimSpace(v) != "" {
+		cfg.Task = strings.TrimSpace(v)
 	}
 	if v, ok := os.LookupEnv("FAK_MICRO_ISOLATION"); ok && strings.TrimSpace(v) != "" {
 		cfg.Isolation = strings.TrimSpace(v)
@@ -371,6 +390,17 @@ func microMode(hostMode bool) string {
 // reaps the results. The returned tracer is the multiplexed per-agent trace store —
 // separable by id even though every agent ran interleaved in one process.
 func driveMicro(cfg microConfig) (*microSink, *metrics.MicroTracer, []microagent.Result, error) {
+	sink, tracer, results, _, err := driveMicroObserved(cfg)
+	return sink, tracer, results, err
+}
+
+type microObservation struct {
+	Answer string
+	Usage  agent.Usage
+	Model  string
+}
+
+func driveMicroObserved(cfg microConfig) (*microSink, *metrics.MicroTracer, []microagent.Result, map[string]microObservation, error) {
 	// One scheduler and one session table wrap the ONE shared planner for the
 	// entire host. The gateway engine points that planner at a running fak serve;
 	// the mock engine keeps the deterministic offline path.
@@ -387,37 +417,42 @@ func driveMicro(cfg microConfig) (*microSink, *metrics.MicroTracer, []microagent
 	tracer := metrics.NewMicroTracer()
 	seat := fmt.Sprintf("slot-pool/%d", cfg.slots())
 	h, err := microagent.NewHost(gw, microagent.Config{
-		Workers:  cfg.Workers,
-		Queue:    cfg.Queue,
-		Sessions: tbl,
-		Audit:    sink,
+		Workers: cfg.Workers, Queue: cfg.Queue, Sessions: tbl, Audit: sink,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	defer h.Close()
 
+	agents := make(map[string]*microTurnAgent, cfg.Agents)
 	for i := 0; i < cfg.Agents; i++ {
 		id := fmt.Sprintf("micro-%03d", i)
-		if err := h.Spawn(id, &microTurnAgent{id: id, turns: cfg.Turns, tracer: tracer, seat: seat}); err != nil {
-			return nil, nil, nil, fmt.Errorf("spawn %s: %w", id, err)
+		runner := &microTurnAgent{id: id, turns: cfg.Turns, task: cfg.Task, tracer: tracer, seat: seat}
+		agents[id] = runner
+		if err := h.Spawn(id, runner); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("spawn %s: %w", id, err)
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := h.Drain(ctx); err != nil {
-		return nil, nil, nil, fmt.Errorf("drain: %w (live=%d)", err, h.Live())
+		return nil, nil, nil, nil, fmt.Errorf("drain: %w (live=%d)", err, h.Live())
 	}
 	results := h.Reap()
 	sort.Slice(results, func(i, j int) bool { return results[i].ID < results[j].ID })
-	return sink, tracer, results, nil
+	observed := make(map[string]microObservation, len(agents))
+	for id, runner := range agents {
+		answer, usage, model := runner.snapshot()
+		observed[id] = microObservation{Answer: answer, Usage: usage, Model: model}
+	}
+	return sink, tracer, results, observed, nil
 }
 
 // runMicro drives the fleet and reports. It optionally persists the per-agent
 // traces to a JSONL file (--trace-out) for a later `fak micro trace <id> --trace-in`
 // readout. This is the live end-to-end witness the acceptance names.
 func runMicro(cfg microConfig, hostMode, jsonOut bool, traceOut string) error {
-	sink, tracer, results, err := driveMicro(cfg)
+	sink, tracer, results, observed, err := driveMicroObserved(cfg)
 	if err != nil {
 		return err
 	}
@@ -438,10 +473,15 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool, traceOut string) error {
 
 	if jsonOut {
 		type resultOut struct {
-			ID    string `json:"id"`
-			Steps int    `json:"steps"`
-			Done  bool   `json:"done"`
-			Err   string `json:"err,omitempty"`
+			ID               string `json:"id"`
+			Steps            int    `json:"steps"`
+			Done             bool   `json:"done"`
+			Err              string `json:"err,omitempty"`
+			Answer           string `json:"answer,omitempty"`
+			Model            string `json:"model,omitempty"`
+			PromptTokens     int    `json:"prompt_tokens,omitempty"`
+			CompletionTokens int    `json:"completion_tokens,omitempty"`
+			TotalTokens      int    `json:"total_tokens,omitempty"`
 		}
 		out := struct {
 			Mode    string      `json:"mode"`
@@ -453,7 +493,8 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool, traceOut string) error {
 			Results []resultOut `json:"results"`
 		}{Mode: microMode(hostMode), Engine: cfg.Engine, Slots: cfg.slots(), Agents: cfg.Agents, Done: done, Failed: failed}
 		for _, r := range results {
-			ro := resultOut{ID: r.ID, Steps: r.Steps, Done: r.Done}
+			obs := observed[r.ID]
+			ro := resultOut{ID: r.ID, Steps: r.Steps, Done: r.Done, Answer: obs.Answer, Model: obs.Model, PromptTokens: obs.Usage.PromptTokens, CompletionTokens: obs.Usage.CompletionTokens, TotalTokens: obs.Usage.TotalTokens}
 			if r.Err != nil {
 				ro.Err = r.Err.Error()
 			}
@@ -499,7 +540,12 @@ func runMicro(cfg microConfig, hostMode, jsonOut bool, traceOut string) error {
 type microTurnAgent struct {
 	id     string
 	turns  int
+	task   string
 	took   int
+	mu     sync.Mutex
+	answer string
+	usage  agent.Usage
+	model  string
 	tracer *metrics.MicroTracer // nil ⇒ no tracing
 	seat   string               // the slot-pool seat this agent's calls draw from
 }
@@ -508,7 +554,11 @@ func (a *microTurnAgent) Step(ctx context.Context, gw microagent.Gateway) (bool,
 	a.took++
 	// Seat leg: every model call draws one seat from the shared slot pool (M6/M20).
 	a.trace(metrics.MicroSpan{Kind: metrics.SpanSeat, Label: "acquire", Seat: a.seat})
-	msg := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("micro %s turn %d", a.id, a.took)}}
+	prompt := strings.TrimSpace(a.task)
+	if prompt == "" {
+		prompt = fmt.Sprintf("micro %s turn %d", a.id, a.took)
+	}
+	msg := []agent.Message{{Role: agent.RoleUser, Content: prompt}}
 	comp, err := gw.Complete(microagent.WithTrace(ctx, a.id), msg, nil)
 	if err != nil {
 		a.trace(metrics.MicroSpan{Kind: metrics.SpanStep, Label: fmt.Sprintf("turn %d", a.took), Verdict: "ERROR"})
@@ -520,6 +570,11 @@ func (a *microTurnAgent) Step(ctx context.Context, gw microagent.Gateway) (bool,
 	tokens := 0
 	if comp != nil {
 		tokens = comp.Usage.TotalTokens
+		a.mu.Lock()
+		a.answer = comp.Message.Content
+		a.usage = comp.Usage
+		a.model = comp.Model
+		a.mu.Unlock()
 	}
 	if tokens == 0 {
 		tokens = len(msg[0].Content)
@@ -529,6 +584,12 @@ func (a *microTurnAgent) Step(ctx context.Context, gw microagent.Gateway) (bool,
 	// flows in on the served-gateway path (#2030).
 	a.trace(metrics.MicroSpan{Kind: metrics.SpanVerdict, Label: "mock-planner", Verdict: "ALLOW"})
 	return a.took >= a.turns, nil
+}
+
+func (a *microTurnAgent) snapshot() (string, agent.Usage, string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.answer, a.usage, a.model
 }
 
 // trace records one span for this agent, if tracing is on.
