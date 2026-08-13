@@ -203,6 +203,14 @@ var readOnlyTools = map[string]bool{
 }
 
 func metaFor(tool string) map[string]string {
+	// A kernel-mediated coding tool carries the scope its OWN catalog declares (#6703):
+	// the read-only bit a Read/Grep/Glob advertises to the planner is the same bit that
+	// keys its vDSO entries, so the catalog and the cache cannot disagree about whether
+	// the tool mutates. Nil when the coding tools are not armed, which leaves the
+	// airline-fixture table below exactly as it was.
+	if m := codeToolMeta(tool); m != nil {
+		return m
+	}
 	if readOnlyTools[tool] {
 		return map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
 	}
@@ -269,11 +277,23 @@ func Configure() {
 	// fresh hit before this ever runs. Confined to the process cwd by default.
 	RegisterReadEngine("")
 
+	// The loop's tool allowlist. The airline fixture's six are the historical set; the
+	// coding read tools are folded in only when ArmCodeTools has armed them (#6703), so
+	// an unarmed loop's policy is byte-for-byte the historical policy. They must be named
+	// HERE and not only in the codetools rung: the rank-100 monitor below denies an
+	// unlisted tool DEFAULT_DENY, and a deny anywhere in the fold outranks the coding
+	// rung's allow — which is the fail-closed behavior we want, and therefore the thing
+	// arming has to open deliberately rather than by accident.
+	allow := map[string]bool{
+		toolGetUser: true, toolSearch: true, toolCalculate: true,
+		toolConvert: true, toolFetchDoc: true, toolBook: true,
+	}
+	for _, name := range codeToolAllow() {
+		allow[name] = true
+	}
+
 	adjudicator.Default.SetPolicy(adjudicator.Policy{
-		Allow: map[string]bool{
-			toolGetUser: true, toolSearch: true, toolCalculate: true,
-			toolConvert: true, toolFetchDoc: true, toolBook: true,
-		},
+		Allow: allow,
 		Deny: map[string]abi.ReasonCode{
 			toolDelete: abi.ReasonPolicyBlock, // the agent must never delete an account
 		},

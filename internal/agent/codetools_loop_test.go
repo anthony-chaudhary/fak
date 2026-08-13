@@ -1,0 +1,364 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/codetools"
+)
+
+// codetools_loop_test.go — the OWNED-LOOP witness for #6703.
+//
+// The other tests in internal/codetools drive the toolset's own methods. This one drives
+// the real agent loop: a scripted planner proposes Read / Grep / Glob (and an escaping
+// Read) exactly as a model would, RunArm carries each through k.Syscall, the codetools
+// rung adjudicates and pins the engine, and the kernel dispatches to the registered
+// engine. That distinction is the whole acceptance criterion — a test that called
+// ts.read() directly would prove the engine works, not that the LOOP reaches it.
+//
+// What makes this a proof of MEDIATION rather than of execution:
+//
+//   - the kernel's own EngineCalls counter (k.Counters(), folded into ArmMetrics by
+//     finalizeFak) is what reports the dispatches, so the number comes from the kernel
+//     rather than from the harness observing itself;
+//   - every allowed call's trace row carries By="codetools", naming the rung that decided
+//     it — a call executed outside the kernel would have no rung and no row;
+//   - the escaping Read is a kernel DENY, counted in Denies, and the loop hands the model
+//     a typed deny receipt instead of file bytes.
+
+var lastRecordingMessages []Message
+
+type recordingCodePlanner struct {
+	turns    []*Completion
+	n        int
+	messages []Message
+}
+
+func (p *recordingCodePlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
+	p.messages = append([]Message(nil), messages...)
+	lastRecordingMessages = p.messages
+	c := p.turns[p.n]
+	if p.n < len(p.turns)-1 {
+		p.n++
+	}
+	return c, nil
+}
+func (p *recordingCodePlanner) Model() string { return "recording-code" }
+
+func resultsFromMessages(messages []Message) (read, grep, glob string) {
+	for _, m := range messages {
+		if m.Role != "tool" {
+			continue
+		}
+		switch m.Name {
+		case codetools.ToolRead:
+			if read == "" {
+				read = m.Content
+			}
+		case codetools.ToolGrep:
+			grep = m.Content
+		case codetools.ToolGlob:
+			glob = m.Content
+		}
+	}
+	return
+}
+
+func lastResultFromMessages(messages []Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "tool" {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
+// codeToolScript is one scripted model turn: the tool the planner emits and its raw args.
+type codeToolScript struct {
+	tool string
+	args string
+}
+
+// runCodeToolLoop arms the coding tools over root, drives RunArm through the scripted
+// turns, and returns the arm metrics plus the trace rows.
+func runCodeToolLoop(t *testing.T, root string, script []codeToolScript) (ArmMetrics, []traceEvent) {
+	t.Helper()
+	catalog, err := ArmCodeTools(root)
+	if err != nil {
+		t.Fatalf("ArmCodeTools: %v", err)
+	}
+	t.Cleanup(DisarmCodeTools)
+	if len(catalog) != 3 {
+		t.Fatalf("armed catalog has %d tools, want 3 (Read/Grep/Glob)", len(catalog))
+	}
+
+	turns := make([]*Completion, 0, len(script)+1)
+	for _, s := range script {
+		turns = append(turns, toolCallTurn(s.tool, s.args))
+	}
+	turns = append(turns, &Completion{Message: Message{Content: "done"}})
+
+	var log []traceEvent
+	planner := &recordingCodePlanner{turns: turns}
+	m, err := RunArm(context.Background(), planner, "inspect the workspace",
+		true, len(turns)+1, &log, WithToolCatalog(catalog))
+	if err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	return m, log
+}
+
+// seedCodeToolFixture builds the scratch workspace the loop reads: a small Go-shaped tree
+// plus a secret OUTSIDE it that the escape turn will try to reach.
+func seedCodeToolFixture(t *testing.T) (root, outside string) {
+	t.Helper()
+	root = t.TempDir()
+	outside = t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	write(filepath.Join(root, "main.go"), "package main\n\nfunc main() {\n\tgreet()\n}\n")
+	write(filepath.Join(root, "greet", "greet.go"), "package greet\n\nfunc Greet() string { return \"hi\" }\n")
+	write(filepath.Join(root, "README.md"), "# fixture\n")
+	write(filepath.Join(outside, "secret.txt"), "CLASSIFIED-OUT-OF-TREE")
+	return root, outside
+}
+
+// TestOwnedLoopDispatchesCodeToolsThroughKernelEngines is the captured #6703 witness: a
+// scratch-fixture coding session driven entirely by the owned loop, proving Read/Grep/Glob
+// reach registered kernel engines and that an escape is refused before one runs.
+func TestOwnedLoopDispatchesCodeToolsThroughKernelEngines(t *testing.T) {
+	root, outside := seedCodeToolFixture(t)
+	escape := filepath.Join(outside, "secret.txt")
+
+	m, log := runCodeToolLoop(t, root, []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"main.go"}`},
+		{codetools.ToolGrep, `{"pattern":"func Greet","glob":"*.go"}`},
+		{codetools.ToolGlob, `{"pattern":"**/*.go"}`},
+		{codetools.ToolRead, `{"file_path":` + mustJSON(t, escape) + `}`},
+	})
+
+	rows := codeToolRows(log)
+	if len(rows) != 4 {
+		t.Fatalf("loop recorded %d coding-tool rows, want 4: %+v", len(rows), rows)
+	}
+
+	// 1. Every call was decided by the codetools rung — the loop did not execute a single
+	//    one outside the kernel.
+	for _, r := range rows {
+		if r.By != codetools.RungName {
+			t.Fatalf("%s row decided By=%q, want %q (call did not cross the codetools rung)",
+				r.Tool, r.By, codetools.RungName)
+		}
+	}
+
+	// 2. The three admitted calls dispatched to registered engines, counted by the KERNEL.
+	if m.EngineCalls < 3 {
+		t.Fatalf("kernel counted %d engine calls, want >= 3 (Read/Grep/Glob dispatched)", m.EngineCalls)
+	}
+
+	// 3. The escaping Read was DENIED — counted by the kernel, never dispatched.
+	if m.Denies != 1 {
+		t.Fatalf("kernel counted %d denies, want exactly 1 (the out-of-tree Read)", m.Denies)
+	}
+	deny := rows[3]
+	if deny.Verdict != "DENY" {
+		t.Fatalf("out-of-tree Read verdict = %q, want DENY", deny.Verdict)
+	}
+
+	// 4. The results the model saw are the engines' real output, and the denied one
+	//    carries no file bytes.
+	read, grep, glob := resultsFromMessages(lastRecordingMessages)
+	if !strings.Contains(read, "func main()") {
+		t.Fatalf("Read result did not carry the fixture's content: %s", read)
+	}
+	if !strings.Contains(grep, "greet/greet.go") {
+		t.Fatalf("Grep result did not name the matching file: %s", grep)
+	}
+	if !strings.Contains(glob, "main.go") || !strings.Contains(glob, "greet/greet.go") {
+		t.Fatalf("Glob result did not list the fixture's Go files: %s", glob)
+	}
+}
+
+// TestOwnedLoopRefusesOutOfTreeReadWithoutReadingIt pins the safety half separately from
+// the happy path: the denied call must not leak the file it was refused, and the refusal
+// must be structural (a kernel verdict) rather than a prose note the model could ignore.
+func TestOwnedLoopRefusesOutOfTreeReadWithoutReadingIt(t *testing.T) {
+	root, outside := seedCodeToolFixture(t)
+	escape := filepath.Join(outside, "secret.txt")
+
+	for _, tc := range []struct{ name, args string }{
+		{"absolute path outside the root", `{"file_path":` + mustJSON(t, escape) + `}`},
+		{"lexical traversal", `{"file_path":"../../etc/passwd"}`},
+		{"traversal through a real subdirectory", `{"file_path":"greet/../../secret.txt"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, log := runCodeToolLoop(t, root, []codeToolScript{{codetools.ToolRead, tc.args}})
+			if m.Denies != 1 {
+				t.Fatalf("denies = %d, want 1", m.Denies)
+			}
+			if m.EngineCalls != 0 {
+				t.Fatalf("engine calls = %d, want 0 — a refused read reached an engine", m.EngineCalls)
+			}
+			body := lastTraceNote(log)
+			if strings.Contains(body, "CLASSIFIED-OUT-OF-TREE") {
+				t.Fatalf("refused Read leaked the out-of-tree file: %s", body)
+			}
+			if !strings.Contains(body, "POLICY_BLOCK") {
+				t.Fatalf("refusal is not a typed policy verdict: %s", body)
+			}
+		})
+	}
+}
+
+// TestOwnedLoopDeniesUnarmedCodeTools pins that the surface is OFF by default: with no
+// ArmCodeTools call, a Read proposed by the model is refused by the loop's default-deny
+// floor rather than quietly reaching a filesystem engine.
+func TestOwnedLoopDeniesUnarmedCodeTools(t *testing.T) {
+	DisarmCodeTools()
+	var log []traceEvent
+	m, err := RunArm(context.Background(), &scriptedPlanner{turns: []*Completion{
+		toolCallTurn(codetools.ToolRead, `{"file_path":"main.go"}`),
+		{Message: Message{Content: "done"}},
+	}}, "read a file", true, 4, &log)
+	if err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	if m.Denies != 1 {
+		t.Fatalf("unarmed Read denies = %d, want 1", m.Denies)
+	}
+	if m.EngineCalls != 0 {
+		t.Fatalf("unarmed Read reached %d engines, want 0", m.EngineCalls)
+	}
+}
+
+// TestCodeToolWitnessArtifact captures the owned-loop run as a machine-readable artifact
+// and checks the artifact itself carries the mediation evidence. Setting
+// FAK_CODETOOLS_WITNESS_OUT writes it to that path, which is how the committed proof under
+// docs/proofs/ is produced; unset, it round-trips through a scratch file so the capture
+// path is exercised on every run rather than only when someone remembers to regenerate.
+func TestCodeToolWitnessArtifact(t *testing.T) {
+	root, outside := seedCodeToolFixture(t)
+	escape := filepath.Join(outside, "secret.txt")
+
+	m, log := runCodeToolLoop(t, root, []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"main.go"}`},
+		{codetools.ToolGrep, `{"pattern":"func Greet","glob":"*.go"}`},
+		{codetools.ToolGlob, `{"pattern":"**/*.go"}`},
+		{codetools.ToolRead, `{"file_path":` + mustJSON(t, escape) + `}`},
+	})
+
+	art := codeToolWitness{
+		Schema:      "fak-codetools-owned-loop-witness/1",
+		Issue:       "#6703",
+		Arm:         m.Arm,
+		Tools:       []string{codetools.ToolRead, codetools.ToolGrep, codetools.ToolGlob},
+		EngineCalls: m.EngineCalls,
+		Denies:      m.Denies,
+		VDSOHits:    m.VDSOHits,
+	}
+	for _, r := range codeToolRows(log) {
+		art.Calls = append(art.Calls, codeToolWitnessCall{
+			Tool: r.Tool, Verdict: r.Verdict, By: r.By, Reason: r.Reason, Args: oneLine(r.RawArgs, 120),
+		})
+	}
+
+	body, err := json.MarshalIndent(art, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal witness: %v", err)
+	}
+	out := os.Getenv("FAK_CODETOOLS_WITNESS_OUT")
+	if out == "" {
+		out = filepath.Join(t.TempDir(), "codetools-owned-loop-witness.json")
+	}
+	if err := os.WriteFile(out, append(body, '\n'), 0o644); err != nil {
+		t.Fatalf("write witness %s: %v", out, err)
+	}
+	t.Logf("owned-loop witness written to %s", out)
+
+	// Read the artifact back and assert on THAT, so what is committed is what was checked.
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read back witness: %v", err)
+	}
+	var got codeToolWitness
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("witness is not valid JSON: %v", err)
+	}
+	if got.Arm != "fak" {
+		t.Fatalf("witness arm = %q, want fak (the kernel-mediated arm)", got.Arm)
+	}
+	if got.EngineCalls+got.VDSOHits < 3 || got.Denies != 1 || len(got.Calls) != 4 {
+		t.Fatalf("witness does not show 3 dispatches + 1 deny over 4 calls: %+v", got)
+	}
+	for _, c := range got.Calls {
+		if c.Verdict == "DENY" && c.By != codetools.RungName {
+			t.Fatalf("witness denied call %+v was not decided by the codetools rung", c)
+		}
+		if c.Verdict == "ALLOW" && c.By != codetools.RungName && c.By != "vdso" {
+			t.Fatalf("witness allowed call %+v bypassed codetools/vDSO", c)
+		}
+	}
+}
+
+// codeToolWitness is the captured artifact's shape.
+type codeToolWitness struct {
+	Schema      string                `json:"schema"`
+	Issue       string                `json:"issue"`
+	Arm         string                `json:"arm"`
+	Tools       []string              `json:"tools"`
+	EngineCalls int                   `json:"engine_calls"`
+	Denies      int                   `json:"denies"`
+	VDSOHits    int                   `json:"vdso_hits"`
+	Calls       []codeToolWitnessCall `json:"calls"`
+}
+
+// codeToolWitnessCall is one adjudicated coding-tool call in the artifact.
+type codeToolWitnessCall struct {
+	Tool    string `json:"tool"`
+	Verdict string `json:"verdict"`
+	By      string `json:"by"`
+	Reason  string `json:"reason,omitempty"`
+	Args    string `json:"args,omitempty"`
+}
+
+// codeToolRows filters a trace to the coding-tool calls on the fak arm.
+func codeToolRows(log []traceEvent) []traceEvent {
+	out := make([]traceEvent, 0, len(log))
+	for _, e := range log {
+		switch e.Tool {
+		case codetools.ToolRead, codetools.ToolGrep, codetools.ToolGlob:
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// mustJSON renders s as a JSON string literal so a Windows path's backslashes survive
+// being embedded in a scripted call's raw arguments.
+func lastTraceNote(log []traceEvent) string {
+	for i := len(log) - 1; i >= 0; i-- {
+		if log[i].Tool != "" {
+			return log[i].Note
+		}
+	}
+	return ""
+}
+func mustJSON(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal %q: %v", s, err)
+	}
+	return string(b)
+}

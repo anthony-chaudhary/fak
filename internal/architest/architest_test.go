@@ -559,6 +559,8 @@ var tier = map[string]int{
 	"depthadmit":            1, // The DEPTH mirror of focusscore(1): focusscore folds how BROAD the fleet is (active objectives vs the WIP cap), this folds how FAR DOWN one line got (declared plan phases vs the ones a W3 commit-progress row witnessed), so a `met` that stopped short is refused as DEPTH_NOT_CARRIED instead of reading clean. Pure over stdlib, no ledger and no git: the impure read lives in cmd/fak/trajctl_depth.go.
 	"quantmeta":             1, // stdlib-only neutral quantization capability descriptor (#6222): typed vocabulary + pure adjudicator; abstains on unknown input, refuses only self-contradiction; no ranking, no runtime, no model kernel.
 	"gardenbudget":          1, // #6493 whole-tick budget/checkpoint primitive: stdlib-only durable cursor plus pure suffix executor/remaining-budget arithmetic; imports nothing internal and stays off the hot path.
+	"armbench":              1, // #6676 provenance-locked multi-arm benchmark harness: strict manifest/corpus/run schemas, deterministic pairing/resume/evidence gates, fake provider, and report fold; stdlib-only, imports nothing internal, off the hot path.
+	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
