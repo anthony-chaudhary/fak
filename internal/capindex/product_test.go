@@ -7,7 +7,9 @@ func TestQueryProductOutcomesPerformanceFirst(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"token savings", []string{"savings-observability", "context-reuse", "model-routing", "turn-savings"}},
+		{"token savings", []string{"savings-observability", "context-reuse", "model-routing", "turn-savings", "context-compression", "portable-session"}},
+		{"context compression", []string{"context-compression"}},
+		{"session replay", []string{"portable-session"}},
 		{"turn control", []string{"session-control", "turn-savings"}},
 		{"model routing", []string{"model-routing"}},
 	}
