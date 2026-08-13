@@ -48,6 +48,9 @@ const (
 	// EventTurn is one served in-kernel turn — the same datum the imperative Observe path
 	// books (prompt / cacheable / reused / eligible token counts for the turn).
 	EventTurn EventKind = iota
+	// EventTierAccess is one cache access against one explicit tier (#6422) — the datum the
+	// imperative ObserveTier path books, carried on the Access field.
+	EventTierAccess
 )
 
 // Event is one datum on the observation bus. It carries the per-turn token counts a
@@ -59,6 +62,11 @@ type Event struct {
 	CacheableTokens float64
 	ReusedTokens    float64
 	EligibleTokens  float64
+	// Access carries the EventTierAccess dimensions (tiers.go) — the tier, operation,
+	// outcome, bytes, latency, and coarse backend class of one cache access. Zero and unread
+	// for an EventTurn, exactly as the token fields are for an EventTierAccess: a spec only
+	// ever sees events of the kind it declares.
+	Access TierAccess
 }
 
 // MetricSpec declares one cache metric as a map-reduce data row (LMCache

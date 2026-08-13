@@ -2753,6 +2753,16 @@
           "category": "incidental",
           "reason": "unexported cmd/fak helper that reads the compute_seconds number out of an already-written bench-fleet witness file; no new concept, just a field accessor for internal/benchloop.SummarizeFleet",
           "token": "benchFleetWitnessSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported per-tier counter naming the sized-access denominator so an unmeasured tier is not reported as measured zero; a counter field, not a witness concept",
+          "token": "witnessedBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported per-tier counter naming the timed-access denominator so an untimed tier is not reported as zero latency; a counter field, not a witness concept",
+          "token": "witnessedLatency"
         }
       ],
       "id": "witness-proof",
@@ -2863,6 +2873,8 @@
         "witness_request",
         "witnessable",
         "witnessed",
+        "witnessedBytes",
+        "witnessedLatency",
         "witnessed_sufficiency",
         "witnessed_sufficiency_slot_released",
         "witnesses",
@@ -4365,6 +4377,11 @@
           "category": "incidental",
           "reason": "Enum member of TierStatus in internal/cacheobs/tiers.go: a cache tier that has a collector in this build, so its zero counters mean idle rather than absent. A plain enum value, not a governed concept.",
           "token": "TierStatusSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "enum member of the cacheobs TierStatus vocabulary marking a tier the backend cannot collect; a collection-state label, not a support-maturity rung",
+          "token": "TierStatusUnsupported"
         }
       ],
       "id": "support-maturity",
@@ -4435,6 +4452,7 @@
         "SetupParityReport",
         "SupportsRoutedExpertKQuant",
         "TierStatusSupported",
+        "TierStatusUnsupported",
         "UNKNOWN_FORMAT",
         "UNKNOWN_RUNTIME",
         "UNSUPPORTED_COMBINATION",

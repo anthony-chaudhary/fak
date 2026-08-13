@@ -39,6 +39,12 @@
 // series (#3391) so a shared gateway can tell WHOSE traffic earns the reuse. Label rows
 // book the SAME clamped per-turn values as the globals, so summing any column across
 // LabeledSnapshot rows always reconciles exactly with the global Stats counter.
+//
+// ObserveTier / TierSnapshot (tiers.go) add the EXPLICIT-TIER axis (#6422): which cache —
+// the in-process prefix tree, a shared KV store, an upstream provider's managed cache —
+// served each access, with its own request / hit / miss / byte / latency totals and a
+// coarse backend class, so multi-tier cache value can never be blended into one flattering
+// aggregate and a tier with no collector reports as unsupported instead of as zero.
 package cacheobs
 
 import (
@@ -109,17 +115,28 @@ type Observer struct {
 	srcLocalCompute     uint64
 	srcLocalHit         uint64
 	srcExternalTransfer uint64
-	frozen              uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
-	partial             uint64 // turns between ColdCeil and FrozenFloor
-	cold                uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
+	// tierRows / tierStatus are the EXPLICIT-TIER axis (#6422, tiers.go): per
+	// (tier, operation, backend class) request/hit/miss/error/byte/latency counters, plus
+	// each tier's collection status so an UNSUPPORTED tier reports as such instead of as a
+	// zero row indistinguishable from an implemented-but-idle one. Fed by ObserveTier and,
+	// for the in-process prefix tier, by observeAttributed below — inside the same critical
+	// section as the aggregate counters, so the two can never desync.
+	tierRows   map[tierKey]*tierTotals
+	tierStatus map[CacheTier]TierStatus
+	frozen     uint64 // turns with reuse ratio >= FrozenFloor (the append-only ceiling)
+	partial    uint64 // turns between ColdCeil and FrozenFloor
+	cold       uint64 // turns with reuse ratio < ColdCeil (cold / head-mutated / fanned-out)
 	// reuseHist[i] counts turns whose ratio fell in (ReuseRatioBuckets[i-1],
 	// ReuseRatioBuckets[i]] — per-bucket (non-cumulative) so each increment touches
 	// one slot; a renderer accumulates left-to-right to emit `le` lines.
 	reuseHist [len(ReuseRatioBuckets)]uint64
 }
 
-// New returns a fresh observer (tests use it for isolation; production uses Default).
-func New() *Observer { return &Observer{} }
+// New returns a fresh observer (tests use it for isolation; production uses Default). It
+// starts from this build's declared tier support (#6422, defaultTierStatus): which cache
+// tiers have a collector at all is a property of the binary, not of one observer, so an
+// unsupported tier reports as unsupported from the first snapshot rather than as a zero row.
+func New() *Observer { return &Observer{tierStatus: defaultTierStatus()} }
 
 // Observe records one served in-kernel turn: promptTokens prefilled, of which
 // reusedPrefixTokens were served from the cached KV prefix (the planner's `matched`).
@@ -240,6 +257,20 @@ func (o *Observer) observeAttributed(labels Labels, promptTokens, cacheablePrefi
 		}
 	}
 	o.reuseHist[idx] = saturatingAddU64(o.reuseHist[idx], 1)
+	// #6422 tier axis: this turn WAS one read against the in-process KV-prefix tier, so book
+	// it as such — the explicit-tier record every existing depth-axis tap now emits, without
+	// its call sites changing. The verdict is the tier's own, not the turn's regime: a lookup
+	// that returned any cached prefix hit the tier, one that returned none missed it (the
+	// depth axis already reports HOW MUCH of the prefix came back). No byte or latency
+	// witness is claimed — the planner measures tokens, not the tree's resident bytes or its
+	// lookup latency — so those accesses book as unsized and untimed rather than as
+	// zero-byte, zero-latency ones. Booked under the SAME lock as the aggregate counters
+	// above so the tier totals can never desync from the aggregate they decompose.
+	tierOutcome := OutcomeMiss
+	if reusedPrefixTokens > 0 {
+		tierOutcome = OutcomeHit
+	}
+	o.observeTierLocked(TierAccess{Tier: TierLocalPrefix, Op: OpRead, Outcome: tierOutcome, Backend: BackendMemory})
 	o.mu.Unlock()
 }
 
