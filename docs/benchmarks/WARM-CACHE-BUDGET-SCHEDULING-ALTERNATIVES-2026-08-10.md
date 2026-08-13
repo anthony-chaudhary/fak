@@ -1,4 +1,4 @@
-# Warm-cache budget scheduling alternatives — 2026-08-10
+# Warm-cache budget scheduling alternatives â€” 2026-08-10
 
 ## Verdict
 

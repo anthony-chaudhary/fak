@@ -1,4 +1,4 @@
-# Bounded cache-snapshot alternatives — 2026-08-10
+# Bounded cache-snapshot alternatives â€” 2026-08-10
 
 ## Verdict
 

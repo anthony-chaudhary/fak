@@ -138,10 +138,10 @@ From a clone, substitute `go run ./cmd/fak` for `fak`. The regression that pins 
 Start the kernel, then point the in-process host at it explicitly:
 
 ```bash
-# terminal 1 — the actual fak policy/session/cache gateway
+# terminal 1 â€” the actual fak policy/session/cache gateway
 fak serve --addr 127.0.0.1:8080
 
-# terminal 2 — two goroutine microagents, one shared session table and gateway
+# terminal 2 â€” two goroutine microagents, one shared session table and gateway
 fak micro --engine gateway --gateway 127.0.0.1:8080 --model kernel-model \
   --agents 2 --workers 2 --seats 1 --turns 1 --trace-out micro-real-kernel.jsonl --json
 ```

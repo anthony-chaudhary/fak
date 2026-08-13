@@ -1,4 +1,4 @@
-# Shared region admission alternatives — 2026-08-10
+# Shared region admission alternatives â€” 2026-08-10
 
 ## Verdict
 

@@ -1,4 +1,4 @@
-# Dedicated cache-warming alternatives — 2026-08-10
+# Dedicated cache-warming alternatives â€” 2026-08-10
 
 ## Verdict
 

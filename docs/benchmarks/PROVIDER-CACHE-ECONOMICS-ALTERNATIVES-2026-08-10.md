@@ -1,4 +1,4 @@
-# Provider-cache economics alternatives — 2026-08-10
+# Provider-cache economics alternatives â€” 2026-08-10
 
 ## Verdict
 

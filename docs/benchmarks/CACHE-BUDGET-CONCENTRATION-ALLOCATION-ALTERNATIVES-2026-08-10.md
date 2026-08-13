@@ -1,4 +1,4 @@
-# Cache-budget concentration allocation alternatives — 2026-08-10
+# Cache-budget concentration allocation alternatives â€” 2026-08-10
 
 ## Verdict
 

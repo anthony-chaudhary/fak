@@ -15,7 +15,7 @@ are separate axes, and `fak index ownership --json` records both.
 | `dev` | `fak-maintainer` | Maintains, measures, documents, tests, or releases fak itself. | fak contributors |
 | `dev` | `lab-operations` | Operates fak's private compute, accounts, or benchmark lab. | fak maintainers with lab access |
 
-This classification is deliberately not named ìpublic/private.î A portable
+This classification is deliberately not named ‚Äúpublic/private.‚Äù A portable
 pattern can be implemented by internal code today; a fak-specific command can
 use generic libraries. The classification describes the command contract and
 why it exists, not where its Go package happens to live.
@@ -35,7 +35,7 @@ The initial inventory marks these families as portable:
 - **Contract-driven planning and dispatch:** shape issues/tasks into checkable
   contracts, dispatch bounded work, and make completion depend on a witness
   rather than worker narration.
-- **Clean evidence:** distinguish committed-tip CI, ìtip plus my named paths,î
+- **Clean evidence:** distinguish committed-tip CI, ‚Äútip plus my named paths,‚Äù
   and the literal working tree. That distinction applies to any repository
   with concurrent agents.
 - **Enforcement at the seam:** hooks can turn those conventions into refusals
@@ -103,4 +103,4 @@ rows back into the source-derived inventory. Representative and negative
 classifications are pinned by tests in `internal/devindex/ownership_test.go`.
 
 The inventory is the audit mechanism; this note is the interpretation contract.
-Neither replaces the extraction and packaging work tracked by #6021ñ#6026.
+Neither replaces the extraction and packaging work tracked by #6021‚Äì#6026.

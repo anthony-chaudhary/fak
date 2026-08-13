@@ -1,4 +1,4 @@
-# Cache reuse trend-gate alternatives — 2026-08-10
+# Cache reuse trend-gate alternatives â€” 2026-08-10
 
 ## Verdict
 

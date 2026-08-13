@@ -1,4 +1,4 @@
-# Cache reuse-divergence detection alternatives — 2026-08-10
+# Cache reuse-divergence detection alternatives â€” 2026-08-10
 
 ## Verdict
 

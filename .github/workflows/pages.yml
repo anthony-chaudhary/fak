@@ -1,0 +1,62 @@
+name: Publish source docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "internal/pagespublish/**"
+      - "cmd/pagescheck/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Reject source that Pages cannot render
+        run: go run ./cmd/pagescheck source --root docs
+      - name: Build a fresh site from tracked source
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+      - name: Prove breadth, sitemap, and SEO-critical page
+        run: >-
+          go run ./cmd/pagescheck artifact
+          --root _site
+          --base-url https://anthony-chaudhary.github.io/fak/
+          --minimum-pages 1000
+          --require index.html
+          --require awesome-token-efficiency.html
+          --write-manifest
+      - name: Upload only this clean build
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy and replace the previous Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4

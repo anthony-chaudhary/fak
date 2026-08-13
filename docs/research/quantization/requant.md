@@ -29,7 +29,7 @@ The v1 evaluator is deliberately bounded (2–256 finite ordered grid levels, 1�
 
 The independently readable golden files under `internal/requanteval/testdata/` are the reproduction artifact. Together they cover three cases on Windows and WSL/Linux:
 
-1. `improves.json` — a coupled two-coordinate quadratic where refinement starts from the same RTN assignment, remains on `[-1,0,1]`, and lowers modeled reconstruction MSE from `0.164` to `0.144` (12.20%); the same pinned three-example linear probe exposes a counterexample�prediction MSE worsens from `0.08` to `0.7467`, so lower reconstruction loss is not reported as a universal quality gain; the artifact records seed, grid, initial/refined codes, sweeps, conversion work, metrics, provenance, and claim-check result.
+1. `improves.json` — a coupled two-coordinate quadratic where refinement starts from the same RTN assignment, remains on `[-1,0,1]`, and lowers modeled reconstruction MSE from `0.164` to `0.144` (12.20%); the same pinned three-example linear probe exposes a counterexample—prediction MSE worsens from `0.08` to `0.7467`, so lower reconstruction loss is not reported as a universal quality gain; the artifact records seed, grid, initial/refined codes, sweeps, conversion work, metrics, provenance, and claim-check result.
 2. `stable.json` — an initialization for which no strictly improving fixed-grid update is accepted.
 3. `delegate.json` — an unknown provider runtime produces a typed delegation and no fabricated metrics.
 
