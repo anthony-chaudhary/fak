@@ -401,6 +401,8 @@ func main() {
 		cmdFleet(os.Args[2:])
 	case "garden":
 		cmdGarden(os.Args[2:])
+	case "stale-work":
+		cmdStaleWork(os.Args[2:])
 	case "cadence":
 		cmdCadence(os.Args[2:])
 	case "operator":

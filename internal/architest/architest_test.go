@@ -220,6 +220,7 @@ var tier = map[string]int{
 
 	"agent": 5, "bench": 5, "turnbench": 5, "gateway": 5, "registrations": 5, "rsiloop": 5,
 	"docfreshrsi": 5, // RSI rung of the docs-freshness loop (#1278/#1284): an rsiloop(4) sibling that imports only shipgate(2)'s keep-bit, off the hot path.
+	"stalework":   5, // Advisory repository-freshness discovery; imports docfreshrsi and never gates or mutates candidates (#6613).
 	"dojocal":     5, // dojo-RSI calibration worktree/proposer: imports rsiloop(4)+shipgate(2), so it belongs at the integrator tier.
 	"capindexgw":  5, // gateway-backed capindex resolvers (MCP tools / A2A methods): the adapter that couples capindex(2) to gateway(4). It lives at the higher tier so the capindex keystone itself stays tier-2 and importable by the tier-3 skill-loader.
 	"tracesink":   5, // imports agent/turnbench/registrations (tier 4) â€” tier forced to 4

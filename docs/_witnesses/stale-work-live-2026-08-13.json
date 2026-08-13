@@ -1,0 +1,112 @@
+{
+  "schema": "fak-stale-work/1",
+  "policy": "advisory; semantic/mechanical evidence is required; insufficient evidence abstains",
+  "provenance": {
+    "centrality": "tracked markdown backlinks",
+    "dependencies": "tracked references changed after artifact commit",
+    "history": "git log, first non-mechanical commit",
+    "repository_head": "343d005d98eada77ed3d345af36b44a0cabf54b9",
+    "version_claims": "internal/docfreshrsi"
+  },
+  "candidates": [
+    {
+      "path": "docs/dev-tooling.md",
+      "batch": "docs",
+      "score": 990,
+      "components": {
+        "dependency_drift": 480,
+        "mechanical_defect": 480,
+        "version_debt": 30,
+        "centrality": 0,
+        "age": 0
+      },
+      "verdict": "review",
+      "last_semantic_commit": "e43285cdc63c9116bcf09b2a8d4ece3829d4152f",
+      "last_semantic_subject": "docs(hygiene): plain-language phrasing / topical-hub indexing — dev-tooling.md (fak docs)",
+      "evidence": [
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/ablate.go",
+          "commit": "cc2cef0b344da68b30709e896cd907e84e8aba43",
+          "detail": "dependency changed after artifact semantic commit (3 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/benchmarks.go",
+          "commit": "e204880caf692be1a8de166bfd38e156eb86ba26",
+          "detail": "dependency changed after artifact semantic commit (2 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/commit.go",
+          "commit": "49ab0fed2fa75127f3c85ef01157ce6186397b61",
+          "detail": "dependency changed after artifact semantic commit (7 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/debug.go",
+          "commit": "cc2cef0b344da68b30709e896cd907e84e8aba43",
+          "detail": "dependency changed after artifact semantic commit (1 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/doctor.go",
+          "commit": "7d3793dce0e0b094d3b768343dc88a66a6937d22",
+          "detail": "dependency changed after artifact semantic commit (2 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/main.go",
+          "commit": "636b3113d2145cb917be7b5c4398833e8f765398",
+          "detail": "dependency changed after artifact semantic commit (59 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/profile.go",
+          "commit": "e204880caf692be1a8de166bfd38e156eb86ba26",
+          "detail": "dependency changed after artifact semantic commit (1 commits)"
+        },
+        {
+          "kind": "dependency_commit",
+          "source": "git log e43285cdc63c9116bcf09b2a8d4ece3829d4152f..HEAD -- cmd/fak/serve.go",
+          "commit": "1b2c9a411ed2230de81e384072fa4ba6d752b3fd",
+          "detail": "dependency changed after artifact semantic commit (21 commits)"
+        },
+        {
+          "kind": "broken_executable_example",
+          "source": "cmd/fak verb registry",
+          "detail": "document invokes unknown verb: fak checkout"
+        },
+        {
+          "kind": "broken_executable_example",
+          "source": "cmd/fak verb registry",
+          "detail": "document invokes unknown verb: fak buildcheck"
+        },
+        {
+          "kind": "broken_executable_example",
+          "source": "cmd/fak verb registry",
+          "detail": "document invokes unknown verb: fak ci-preflight"
+        },
+        {
+          "kind": "broken_executable_example",
+          "source": "cmd/fak verb registry",
+          "detail": "document invokes unknown verb: fak buildcheck"
+        }
+      ],
+      "excerpt": "--- title: \"Developer Tooling — debug, profile, and test fak\" description: \"The hands-on developer-tooling guide for fak: build and run, the test runner (make + WSL), debugging with fak debug and fak doctor, profiling and benchmarking, an",
+      "excerpt_sha256": "sha256:3abafe490c76fd9e1016b95bd3aa71e07b9125c38831fffd418155a0013a82ab",
+      "content_sha256": "sha256:7c47a4ea2684f0ebd6bcdea7368a4e175c39d80448483fa40347f894c59dd290",
+      "dedupe_key": "sha256:98dc546393f21c9123b49ab0f632175c194ed396b98999cb4bb984523a34c82e",
+      "issue_state": "new",
+      "proposed_title": "docs: adjudicate stale-work batch docs",
+      "proposed_dod": [
+        "reproduce each packet evidence item at its cited provenance",
+        "update the artifact or record a dated reaffirmation with source",
+        "run fak stale-work --path docs/dev-tooling.md --json and every cited executable/generated check"
+      ],
+      "verify_with": "fak stale-work --path docs/dev-tooling.md --json"
+    }
+  ],
+  "scanned": 1,
+  "packet_bytes": 4171
+}
