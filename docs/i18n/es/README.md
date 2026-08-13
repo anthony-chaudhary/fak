@@ -32,7 +32,7 @@ fak manage claude      # envuelve tu agente existente en un solo comando
 ## Por qué importa para este mercado
 
 - **Los datos se quedan en tu infraestructura (RGPD/GDPR).** fak es self-host-first: un
-  binario estático que se coloca delante de un **modelo local** (`fak guard --gguf …`) o del
+  binario estático que se coloca delante de un **modelo local** (`fak manage --gguf …`) o del
   provider que elijas — fail-closed en cada backend, capability floor en default-deny, y un
   registro de auditoría a prueba de manipulación para cada tool call. No existe ninguna ruta
   de «reenviado por defecto a un tercer país» que tengas que analizar. En la UE (España

@@ -31,7 +31,7 @@ fak manage claude
 ```
 
 Ajanınızı yeniden yazmazsınız — tek bir base URL'i `fak serve`'e yönlendirir ya da
-mevcut ajanı `fak guard -- claude` ile sararsınız. Aynı ajan döngüsü olduğu gibi kalır;
+mevcut ajanı `fak manage claude` ile sararsınız. Aynı ajan döngüsü olduğu gibi kalır;
 sadece daha güvenli, daha ucuz ve daha hızlı olur.
 
 ## 60 saniyelik kanıt (anahtar yok, model yok, GPU yok)

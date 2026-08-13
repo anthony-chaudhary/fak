@@ -42,7 +42,7 @@ creciente de coste de setup, y **entre una y otra no se instala nada nuevo**:
 |---|---|---|
 | **0 — Probar el kernel** | Ejecutar/medir la frontera de adjudicación offline | `go build` |
 | **1 — Poner delante un modelo real** | El kernel delante de un modelo que sirves en otro sitio (Ollama / vLLM / llama.cpp / un proveedor cloud) | + un servidor compatible con OpenAI |
-| **1b — Modelo local en un comando** | Un modelo GGUF local in-kernel con tu agente existente — sin key, sin red, sin segundo terminal | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — Modelo local en un comando** | Un modelo GGUF local in-kernel con tu agente existente — sin key, sin red, sin segundo terminal | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — El modelo fusionado in-kernel** | La forward pass pura-Go que el kernel posee | + (pesos reales) export en Python |
 
 Si solo quieres **servir un modelo útil con fak por delante**, quieres el **Tier 1**. El

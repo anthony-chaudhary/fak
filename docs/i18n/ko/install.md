@@ -54,7 +54,7 @@ fak manage claude      # 기존 에이전트를 한 명령으로 감쌉니다
 |---|---|---|---|
 | **0 — 커널 체험** | 심사 경계를 오프라인으로 실행·측정 | `go build` | 없음 |
 | **1 — 실제 모델 앞에 세우기** | 다른 곳에서 서빙하는 모델(Ollama / vLLM / llama.cpp / 클라우드) 앞에 커널을 둠 | + OpenAI 호환 서버 실행 | 채팅 모델 하나 |
-| **1b — 한 명령으로 로컬 모델** | 기존 에이전트로 로컬 GGUF 모델을 커널 내부에서 실행 — key·네트워크·두 번째 터미널 불필요 | `fak guard --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (캐시됨) |
+| **1b — 한 명령으로 로컬 모델** | 기존 에이전트로 로컬 GGUF 모델을 커널 내부에서 실행 — key·네트워크·두 번째 터미널 불필요 | `fak manage --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (캐시됨) |
 | **2 — 융합된 커널 내부 모델** | 커널이 소유하는 순수 Go SmolLM2 forward pass | + (실제 가중치) Python export | ~135M 파라미터 |
 
 실용적으로 **쓸모 있는 모델을 fak 뒤에 세우고 싶다면 Tier 1** 입니다. Tier 2의 커널 내부

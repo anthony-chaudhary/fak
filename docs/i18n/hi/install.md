@@ -42,7 +42,7 @@ fak manage claude
 |---|---|---|
 | **0 — कर्नेल आज़माएँ** | adjudication boundary को offline चलाएँ/मापें | `go build` |
 | **1 — असली model के आगे रखें** | कर्नेल को कहीं और serve किए model (Ollama / vLLM / llama.cpp / cloud) के आगे रखें | + एक चलता OpenAI-compatible server |
-| **1b — एक कमांड में local model** | मौजूदा एजेंट के साथ एक local GGUF model in-kernel चलाएँ — न key, न network, न दूसरा terminal | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — एक कमांड में local model** | मौजूदा एजेंट के साथ एक local GGUF model in-kernel चलाएँ — न key, न network, न दूसरा terminal | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — fused in-kernel model** | कर्नेल के अपने address space में चलने वाला pure-Go forward pass | + (असली weights) Python export |
 
 अगर आप बस **fak को सामने रखकर एक उपयोगी model serve** करना चाहते हैं, तो आपको **Tier 1**

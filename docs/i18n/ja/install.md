@@ -56,7 +56,7 @@ fak manage claude      # 既存のエージェントを 1 コマンドで包む
 |---|---|---|
 | **0 — カーネルを試す** | 審査境界（adjudication boundary）をオフラインで動かして測る | `go build` |
 | **1 — 実モデルを前段に置く** | 別で serve するモデル（Ollama / vLLM / llama.cpp / クラウド）の前にカーネルを立てる | + 稼働中の OpenAI 互換サーバー |
-| **1b — ローカルモデルを 1 コマンドで** | 既存エージェントとローカル GGUF モデルを in-kernel で実行——キー・ネットワーク・第 2 端末なし | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — ローカルモデルを 1 コマンドで** | 既存エージェントとローカル GGUF モデルを in-kernel で実行——キー・ネットワーク・第 2 端末なし | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — 融合された in-kernel モデル** | カーネルが所有する pure-Go の forward pass | + （実重み用の）Python export |
 
 モデルを前段に置いて**実用的に serve したいだけ**なら **Tier 1** です。Tier 2 の in-kernel

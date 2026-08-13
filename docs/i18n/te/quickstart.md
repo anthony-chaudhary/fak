@@ -51,7 +51,7 @@ go build -o fak ./cmd/fak
 కూర్చుంటుంది. ప్రతి tool call *నడిచే ముందే* దాన్ని తనిఖీ చేస్తుంది, పొడవైన session-లలో
 పునరావృతమయ్యే పంచుకున్న పనిని తిరిగి వాడుకుంటుంది. ఫలితం: అదే agent loop **మరింత
 సురక్షితం, చౌక, వేగం** — ఇంకేమీ మార్చకుండా. మీరు ఏజెంట్‌ను తిరిగి రాయరు; ఒక base
-URL-ను `fak serve` వైపు తిప్పుతారు, లేదా ఒకే కమాండ్‌లో `fak guard -- claude`.
+URL-ను `fak serve` వైపు తిప్పుతారు, లేదా ఒకే కమాండ్‌లో `fak manage claude`.
 
 సురక్షత structure ద్వారానే వస్తుంది, classifier ద్వారా కాదు: kernel *లోపల*, అదే call
 path-లో నడిచే **default-deny capability floor** (fail-closed) — allow-list-లో ఎప్పుడూ

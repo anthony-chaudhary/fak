@@ -53,7 +53,7 @@ isolou 5/5.
 **fak é um único binário Go** que fica entre o seu agente de IA e as ferramentas que ele
 chama. Você não troca de modelo — o fak **governa e faz cache** do modelo que você já usa.
 Você aponta **uma** base URL para `fak serve`, ou envolve um agente existente com
-`fak guard -- claude`.
+`fak manage claude`.
 
 **Qwen2/Qwen3 e GLM-MoE** estão provados bit-exact no motor de referência in-kernel; todo o
 resto (DeepSeek, Mistral, qualquer modelo de pesos abertos) entra pela wire compatível com

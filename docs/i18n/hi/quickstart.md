@@ -57,7 +57,7 @@ unprotected baseline तक injection 5/5 पहुँची; fak ने 5/5 र
 **fak एक static Go बाइनरी है** जो आपके AI एजेंट और उसके tools के बीच बैठती है। सब कुछ इसी
 एक process के अंदर चलता है — gateway, permission जाँच, cache, quarantine, routing, metrics
 — तो कोई sidecar या अलग authorizer नहीं। आप एजेंट दोबारा नहीं लिखते: या तो एक base URL को
-`fak serve` की ओर मोड़ते हैं, या ऊपर की तरह `fak guard -- claude` से wrap कर देते हैं।
+`fak serve` की ओर मोड़ते हैं, या ऊपर की तरह `fak manage claude` से wrap कर देते हैं।
 
 संदिग्ध tool *results* को एक अलग quarantine में रखा जाता है ताकि वे model के context में
 घुसें ही नहीं — यह **structure** से होता है, किसी classifier से नहीं (जिस detector को

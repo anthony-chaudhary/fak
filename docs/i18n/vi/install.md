@@ -61,7 +61,7 @@ fak manage claude
 |---|---|---|
 | **0 — Thử kernel** | Chạy/đo ranh giới kiểm duyệt (adjudication) offline | `go build` |
 | **1 — Đặt trước một model thật** | Đặt kernel trước một model bạn phục vụ ở nơi khác (Ollama / vLLM / llama.cpp / cloud) | + một OpenAI-compatible server đang chạy |
-| **1b — Model local bằng một lệnh** | Chạy một model GGUF local in-kernel với agent hiện có — không key, không mạng, không cần terminal thứ hai | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — Model local bằng một lệnh** | Chạy một model GGUF local in-kernel với agent hiện có — không key, không mạng, không cần terminal thứ hai | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — Model hợp nhất trong kernel** | Forward pass thuần Go do kernel sở hữu (proven bit-exact) | + export (real weights) |
 
 Nếu bạn chỉ muốn **phục vụ một model hữu ích với fak đứng trước nó**, hãy chọn **Tier 1**.

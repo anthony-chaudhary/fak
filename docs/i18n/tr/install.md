@@ -74,7 +74,7 @@ Yükselen kurulum maliyeti sırasına göre — **aralarında yeni bir şey kuru
 |---|---|---|
 | **0 — Çekirdeği deneyin** | Adjudication sınırını çevrimdışı çalıştırın/ölçün | `go build` |
 | **1 — Gerçek bir model'in önüne geçin** | Kernel'i, başka yerde sunduğunuz bir model'in önüne koyun (Ollama / vLLM / llama.cpp / bulut) | + çalışan bir OpenAI-compatible sunucu |
-| **1b — Tek komutla local model** | Mevcut ajanınızla in-kernel bir local GGUF model — key yok, ağ yok, ikinci terminal yok | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — Tek komutla local model** | Mevcut ajanınızla in-kernel bir local GGUF model — key yok, ağ yok, ikinci terminal yok | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — Kaynaşık in-kernel model** | Kernel'in sahip olduğu saf-Go forward pass | + (gerçek weight) Python export |
 
 Yalnızca **önünde fak olan işe yarar bir model sunmak** istiyorsanız, istediğiniz

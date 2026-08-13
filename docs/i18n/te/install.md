@@ -47,7 +47,7 @@ fak manage claude
 |---|---|---|
 | **0 — kernel-ను ప్రయత్నించండి** | adjudication boundary-ను offline నడపండి/కొలవండి | `go build` |
 | **1 — నిజమైన model ముందు నిలబెట్టండి** | మీరు వేరే చోట serve చేసే model ముందు kernel (Ollama / vLLM / llama.cpp / cloud provider) | + నడుస్తున్న OpenAI-compatible server |
-| **1b — ఒకే కమాండ్‌లో local model** | మీ ఇప్పటి ఏజెంట్‌తో local GGUF model in-kernel — key లేదు, network లేదు, రెండో terminal లేదు | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — ఒకే కమాండ్‌లో local model** | మీ ఇప్పటి ఏజెంట్‌తో local GGUF model in-kernel — key లేదు, network లేదు, రెండో terminal లేదు | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — fused in-kernel model** | kernel స్వంతం చేసుకునే pure-Go forward pass | + (real weights కోసం) Python export |
 
 మీకు కేవలం **fak వెనుక ఒక ఉపయోగకరమైన model serve** చేయాలంటే **Tier 1** కావాలి.

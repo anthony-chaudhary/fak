@@ -40,7 +40,7 @@ Nichts Neues wird zwischen den Tiers installiert — dieselbe Binary, du fügst 
 |---|---|---|
 | **0 — Kernel ausprobieren** | Die Adjudikationsgrenze offline laufen lassen/messen | `go build` |
 | **1 — Vor ein echtes Modell** | Den Kernel vor ein Modell setzen, das du woanders servierst (Ollama / vLLM / llama.cpp / Cloud-Provider) | + ein laufender OpenAI-kompatibler Server |
-| **1b — Lokales Modell in einem Befehl** | Ein lokales GGUF-Modell in-kernel mit deinem bestehenden Agenten — kein Key, kein Netz, kein zweites Terminal | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — Lokales Modell in einem Befehl** | Ein lokales GGUF-Modell in-kernel mit deinem bestehenden Agenten — kein Key, kein Netz, kein zweites Terminal | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — Das fusionierte In-Kernel-Modell** | Der reine-Go-Forward-Pass, den der Kernel selbst besitzt | `go build` (+ echte Gewichte optional) |
 
 Wenn du einfach **ein brauchbares Modell mit fak davor servieren** willst, willst du **Tier 1**.

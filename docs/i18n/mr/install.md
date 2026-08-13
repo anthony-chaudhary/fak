@@ -49,7 +49,7 @@ install होत नाही**:
 |---|---|---|
 | **0 — kernel वापरून पाहा** | adjudication boundary offline चालवा/मोजा | `go build` |
 | **1 — खरा model समोर ठेवा** | दुसरीकडे सर्व्ह केलेल्या model समोर kernel ठेवा (Ollama / vLLM / llama.cpp / cloud) | + एक चालू OpenAI-compatible server |
-| **1b — एका कमांडमध्ये local model** | तुमच्या सध्याच्या एजंटसह local GGUF model in-kernel चालवा — key नाही, network नाही | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — एका कमांडमध्ये local model** | तुमच्या सध्याच्या एजंटसह local GGUF model in-kernel चालवा — key नाही, network नाही | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — fused in-kernel model** | kernel च्या मालकीचा pure-Go forward pass | + (खऱ्या weights साठी) Python export |
 
 फक्त **fak समोर ठेवून एक उपयुक्त model सर्व्ह** करायचे असेल, तर तुम्हाला **Tier 1** हवे.

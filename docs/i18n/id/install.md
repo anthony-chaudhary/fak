@@ -73,7 +73,7 @@ fak manage claude
 |---|---|---|
 | **0 — Coba kernel** | Jalankan/ukur batas adjudikasi secara offline | `go build` |
 | **1 — Fronting model nyata** | Taruh kernel di depan model yang Anda layani sendiri (Ollama / vLLM / llama.cpp / provider cloud) | + server OpenAI-compatible |
-| **1b — Model lokal satu perintah** | Model GGUF lokal in-kernel bersama agen Anda — tanpa key, tanpa jaringan | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — Model lokal satu perintah** | Model GGUF lokal in-kernel bersama agen Anda — tanpa key, tanpa jaringan | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — Model fused in-kernel** | Forward pass murni-Go yang dimiliki kernel | + (bobot nyata) ekspor Python |
 
 Kalau Anda hanya ingin **melayani model yang berguna dengan fak di depannya**, pilih

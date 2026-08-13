@@ -32,7 +32,7 @@ fak manage claude      # wickelt deinen bestehenden Agenten in einem einzigen Be
 ## Warum das für europäische Startups zählt
 
 - **Daten bleiben auf deiner Infrastruktur (DSGVO/GDPR).** fak ist self-host-first: eine
-  statische Binary, die vor einem **lokalen Modell** (`fak guard --gguf …`) oder einem
+  statische Binary, die vor einem **lokalen Modell** (`fak manage --gguf …`) oder einem
   Provider deiner Wahl sitzt — fail-closed auf jedem Backend, default-deny
   Capability-Floor, und ein manipulationsevidentes Audit-Log für jeden Tool-Call. Es gibt
   keinen „standardmäßig an einen Drittstaat weitergereicht"-Pfad, über den du nachdenken

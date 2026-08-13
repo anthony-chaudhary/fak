@@ -32,7 +32,7 @@ fak manage claude      # enveloppe votre agent existant en une seule commande
 ## Pourquoi c'est pertinent pour les startups européennes
 
 - **Les données restent sur votre infrastructure (RGPD/GDPR).** fak est self-host-first :
-  un binaire statique placé devant un **modèle local** (`fak guard --gguf …`) ou le
+  un binaire statique placé devant un **modèle local** (`fak manage --gguf …`) ou le
   provider de votre choix — fail-closed sur chaque backend, capability floor en
   default-deny, et un journal d'audit inviolable pour chaque tool call. Il n'existe aucun
   chemin « transféré par défaut vers un pays tiers » à analyser. Détails :

@@ -47,7 +47,7 @@ kernel *안에서*, 같은 call path 위에서 이루어지므로 **fail-closed*
 앉습니다. 모든 tool call을 *실행되기 전에* 검토하고, 긴 session에서 반복되는 공유 작업을
 재사용합니다. 결과: **같은 에이전트 loop가 재작성 없이 더 안전하고, 더 저렴하고, 더
 빨라집니다.** 에이전트를 다시 쓰지 않습니다 — base URL 하나를 `fak serve`로 돌리거나,
-`fak guard -- claude` 한 명령으로 기존 에이전트를 감싸면 됩니다.
+`fak manage claude` 한 명령으로 기존 에이전트를 감싸면 됩니다.
 
 - **default-deny capability floor** — allow-list에 없는 동작은 kernel 안에서 fail-closed로
   차단됩니다. 공격을 "탐지"하는 데 의존하지 않습니다.
