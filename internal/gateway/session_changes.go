@@ -117,6 +117,20 @@ func (s *Server) sessionChanges(sinceSeq uint64) ([]SessionChangeEvent, uint64) 
 	return s.sessionFeed.drain(sinceSeq)
 }
 
+// sessionChangesFor filters the global drive feed to one logical session while
+// retaining the feed-global cursor. A client attached to A must never receive B's
+// revisions merely because both sessions share one daemon.
+func (s *Server) sessionChangesFor(sessionID string, sinceSeq uint64) ([]SessionChangeEvent, uint64) {
+	events, cursor := s.sessionChanges(sinceSeq)
+	out := events[:0]
+	for _, event := range events {
+		if event.TraceID == sessionID {
+			out = append(out, event)
+		}
+	}
+	return out, cursor
+}
+
 // SessionChangesResponse is the drained drive-state revision slice plus the client's
 // next cursor (mirrors ChangesResponse for the coherence feed).
 type SessionChangesResponse struct {

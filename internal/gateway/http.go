@@ -1229,6 +1229,9 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			s.handleFakSessionSubscribe(w, r, traceID)
 			return
 		}
+		if s.handleFakSessionClient(w, r, traceID, verb) {
+			return
+		}
 		// GET observes one session. A verb on the path is not the observe shape.
 		if verb != "" {
 			writeErr(w, http.StatusMethodNotAllowed, "use GET /v1/fak/session/{trace_id}")
@@ -1279,6 +1282,9 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 		// git tree witness in one record, so it carries its own body and answers its own
 		// document (session_checkpoint.go) rather than the drive-state control shape.
 		if s.handleSessionCheckpointVerb(w, r, traceID, verb) {
+			return
+		}
+		if s.handleFakSessionClient(w, r, traceID, verb) {
 			return
 		}
 		// steer is its own shape (operator input to a RUNNING session, #760): a different

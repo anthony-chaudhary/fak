@@ -81,6 +81,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	}
 	verb := argv[0]
 	args := argv[1:]
+	if verb == "open" {
+		return runSessionOpen(stdout, stderr, args)
+	}
 
 	// reset-diff (#1575) is the one offline verb in this surface: a pure JSON-in,
 	// diff-out render over internal/sessionreset.DiffReset that never dials a live
