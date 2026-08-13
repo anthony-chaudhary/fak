@@ -1461,6 +1461,11 @@
           "category": "incidental",
           "reason": "internal no-I/O selfcheck helper mirroring the package's existing TriageSelfcheck; it asserts the audit gate's invariants and introduces no governed concept of its own",
           "token": "AuditGateSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt boolean proving a prelaunch route did not bind a listener, not a new guard gate.",
+          "token": "GatewayBound"
         }
       ],
       "exclude": [
@@ -1501,6 +1506,7 @@
         "GateProvenance",
         "GateResolved",
         "GateSkewRefusal",
+        "GatewayBound",
         "IsAggregate",
         "LifecycleGate",
         "OutcomeDelegate",
@@ -2161,87 +2167,87 @@
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "renderSessionOpen"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "runSessionOpen"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "runSessionOpenSelfcheck"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SESSION_CLIENT_UNAVAILABLE"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SESSION_NOT_FOUND"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SessionClientActionRequest"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionClientAttachment"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SessionClientAttachRequest"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SessionClientAttachResponse"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionClientCapabilities"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SessionClientDescriptor"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SessionClientDetachRequest"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionClientPage"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionClientRuntime"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionClientRuntimes"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionClientSchema"
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionOpenClient"
         },
         {
@@ -2256,7 +2262,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "capability_digest"
         },
         {
@@ -2266,7 +2272,7 @@
         },
         {
           "category": "incidental",
-          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "renderSessionOpen"
         },
         {
@@ -2288,11 +2294,188 @@
           "category": "incidental",
           "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
           "token": "SessionEffectConfirmed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionEffectKnownNotRun"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionEffectUncertain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionEffectVerdict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionTerminalView"
+        },
+        {
+          "category": "incidental",
+          "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
+          "token": "SessionEffect"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "RestoreSessionClientState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "runSessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "runSessionOpenSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SESSION_CLIENT_UNAVAILABLE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SESSION_NOT_FOUND"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SessionClientActionRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionClientAttachment"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SessionClientAttachRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SessionClientAttachResponse"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionClientCapabilities"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SessionClientDescriptor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "SessionClientDetachRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionClientPage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionClientRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionClientRuntimes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionClientSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "sessionOpenClient"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or imported protocol constant used by the #6547 restart/reconnect witness; not a separate user-facing concept.",
+          "token": "sessionOpenRestartResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or imported protocol constant used by the #6547 restart/reconnect witness; not a separate user-facing concept.",
+          "token": "sessionOpenRestartWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or imported protocol constant used by the #6547 restart/reconnect witness; not a separate user-facing concept.",
+          "token": "WorkSessionOpened"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "authorizeSessionClient"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "ConfigureSessionClientAuth"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "runSessionConPTY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "SESSION_OPENED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "SessionClientTokenHeader"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "WorkSessionView"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment variable carrying the #6547 attachment bearer secret; a wire name, not a separate session concept.",
+          "token": "FAK_SESSION_CLIENT_TOKEN"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private restore helper for the #6547 reconnect spine dependency gating; not a separate session concept.",
+          "token": "RestoreSessionClientStateWithDependency"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire error or request shape within the #6547 full-power attachment decision path; not a separate user-facing concept.",
+          "token": "SessionClientDecisionRequest"
         }
       ],
       "id": "session-runtime",
       "ignore": [
         "BeginSessionEffect",
+        "ConfigureSessionClientAuth",
+        "FAK_SESSION_CLIENT_TOKEN",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
@@ -2302,19 +2485,39 @@
         "ReapMalformedSessionRefs",
         "RecordSessionTerminalOutput",
         "ResolveSessionEffect",
+        "RestoreSessionClientState",
+        "RestoreSessionClientStateWithDependency",
         "RetiredSessions",
         "RunSessionDiag",
+        "SESSION_CLIENT_UNAVAILABLE",
+        "SESSION_NOT_FOUND",
+        "SESSION_OPENED",
         "SchedulerEvents",
         "SchedulerMS",
         "SchedulerOverhead",
         "SessionAutonomous",
         "SessionClass",
+        "SessionClientActionRequest",
+        "SessionClientAttachRequest",
+        "SessionClientAttachResponse",
+        "SessionClientDecisionRequest",
+        "SessionClientDescriptor",
+        "SessionClientDetachRequest",
+        "SessionClientTokenHeader",
+        "SessionEffect",
         "SessionEffectConfirmed",
+        "SessionEffectKnownNotRun",
+        "SessionEffectUncertain",
+        "SessionEffectVerdict",
         "SessionInteractive",
         "SessionShellErrorRate",
+        "SessionTerminalView",
         "SetSessionAffinity",
+        "WorkSessionOpened",
+        "WorkSessionView",
         "adaptive-selective-hedge",
         "attemptHeap",
+        "authorizeSessionClient",
         "blankSessionOpen",
         "boolInt",
         "bumpSessionHandoffBlocks",
@@ -2371,6 +2574,9 @@
         "runSessionAuditBatch",
         "runSessionAuditCodex",
         "runSessionCheckpointWitness",
+        "runSessionConPTY",
+        "runSessionOpen",
+        "runSessionOpenSelfcheck",
         "runtuisessions",
         "sanitizeSessionForPath",
         "scheduled",
@@ -2389,8 +2595,18 @@
         "serveSessionRegistryScopeLabel",
         "sessionAffinity",
         "sessionChangesFor",
+        "sessionClientAttachment",
+        "sessionClientCapabilities",
+        "sessionClientPage",
+        "sessionClientRuntime",
+        "sessionClientRuntimes",
+        "sessionClientSchema",
         "sessionClientSession",
+        "sessionLocked",
         "sessionNameForBatch",
+        "sessionOpenClient",
+        "sessionOpenRestartResult",
+        "sessionOpenRestartWitness",
         "sessionProcess",
         "sessionRegistryRecoveryStage",
         "session_compaction_thrash",
@@ -2956,6 +3172,21 @@
           "category": "incidental",
           "reason": "unexported per-tier counter naming the timed-access denominator so an untimed tier is not reported as zero latency; a counter field, not a witness concept",
           "token": "witnessedLatency"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private restart/reconnect proof helper for the #6547 attachment spine; not a separate witness product concept.",
+          "token": "sessionOpenRestartWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name for a per-candidate executable verification instruction, not a repository concept",
+          "token": "witness_command"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "conptyWitness"
         }
       ],
       "id": "witness-proof",
@@ -3003,6 +3234,7 @@
         "checkpoint_no_tree_witness",
         "closeProxyFillWitnesses",
         "compactionWitness",
+        "conptyWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
         "derivedProxyFillWitness",
@@ -3049,6 +3281,7 @@
         "revocations",
         "revokeProxyFillWitness",
         "runSessionCheckpointWitness",
+        "sessionOpenRestartWitness",
         "setup_not_witnessed",
         "taskQuality",
         "taskSufficient",
@@ -3063,6 +3296,7 @@
         "witnessScriptedFold",
         "witnessSet",
         "witnessStrandedArchiveSuffix",
+        "witness_command",
         "witness_request",
         "witnessable",
         "witnessed",
@@ -3640,6 +3874,16 @@
           "category": "incidental",
           "reason": "Private receipt field, not a new policy capability.",
           "token": "manageParityPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "capability_digest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or imported protocol constant used by the #6547 restart/reconnect witness; not a separate user-facing concept.",
+          "token": "PolicyHash"
         }
       ],
       "exclude": [
@@ -3666,6 +3910,7 @@
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
+        "PolicyHash",
         "PolicyRevision",
         "ProgressCallAdjudicated",
         "RetryPolicy",
@@ -3685,6 +3930,7 @@
         "adjudicators",
         "capabilities",
         "capability_denied",
+        "capability_digest",
         "capability_failure",
         "capability_lines",
         "ciPreflightArchiveTimeout",
@@ -3972,6 +4218,11 @@
           "category": "incidental",
           "reason": "counter of host-restore actuator calls in a terminal-relief barrier report; unrelated to any context/ctx concept",
           "token": "RestoreCalls"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus metric name reporting repo-pulse accounting; not a new managed-context abstraction",
+          "token": "fak_fleet_repo_pulse_context_tokens_saved_total"
         }
       ],
       "id": "context-ctx",
@@ -4004,6 +4255,7 @@
         "ctxAdviceNoteOnce",
         "ctxThrashConsecutiveRefills",
         "ctxsleep",
+        "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
         "formatGuardCompactionWitness",
         "guardCompactionAnchorFirst",
@@ -4603,6 +4855,11 @@
           "category": "incidental",
           "reason": "Command handler for parity evidence, not a support maturity rung.",
           "token": "cmdManageParity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Command handler for parity evidence, not a support maturity rung.",
+          "token": "cmdLaunchParityCheck"
         }
       ],
       "id": "support-maturity",
@@ -4683,6 +4940,7 @@
         "VerdictSetupParityFlagged",
         "achievedMaturity",
         "calendar_coverage",
+        "cmdLaunchParityCheck",
         "cmdManageParity",
         "compareParity",
         "correctnessclass",
@@ -4928,11 +5186,22 @@
           "category": "incidental",
           "reason": "report artifact field value for the documented multi-tool surface",
           "token": "decision_surface"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire error or request shape within the #6547 full-power attachment decision path; not a separate user-facing concept.",
+          "token": "DECISION_INVALID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire error or request shape within the #6547 full-power attachment decision path; not a separate user-facing concept.",
+          "token": "SessionClientDecisionRequest"
         }
       ],
       "id": "decision",
       "ignore": [
         "AddedDecisionOverheadMS",
+        "DECISION_INVALID",
         "DecisionAbstain",
         "DecisionBenchmark",
         "DecisionBoundary",
@@ -4946,6 +5215,7 @@
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
         "ReuseDecision",
+        "SessionClientDecisionRequest",
         "TotalDecisionOverhead",
         "appendsteerdecisions",
         "decisionStderr",
@@ -5173,6 +5443,11 @@
           "category": "incidental",
           "reason": "Private Prometheus renderer helper, not a user-facing render/materialize capability",
           "token": "renderFleetGoalExposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
+          "token": "renderSessionOpen"
         }
       ],
       "id": "render-materialize",
@@ -5215,6 +5490,7 @@
         "renderGitSpawnReport",
         "renderResumeDedup",
         "renderRunaway",
+        "renderSessionOpen",
         "renderShellChoice",
         "renderSweepParkedText",
         "renderValidate",
@@ -5503,6 +5779,16 @@
           "category": "incidental",
           "reason": "planner entry point for the go-build WORK dir sweep, mirroring the package's existing Plan* helpers; adds no governed planning concept",
           "token": "PlanGoTmp"
+        },
+        {
+          "category": "incidental",
+          "reason": "Packet-size telemetry field, not a planning abstraction",
+          "token": "bytes_per_candidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
+          "token": "seedCandidate"
         }
       ],
       "exclude": [
@@ -5545,6 +5831,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "buildMainPlan",
+        "bytes_per_candidate",
         "candidateID",
         "candidateNote",
         "candidatePaths",
@@ -5581,6 +5868,7 @@
         "plants",
         "register_bench_plan_doc",
         "runAblatePlan",
+        "seedCandidate",
         "wipLandOptions",
         "wipLandWith"
       ],

@@ -94,7 +94,7 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 			LastIssueStatus:   dispatchLastIssueStatus(inf.State),
 		},
 	})
-	pulse, pulseErr := dispatchRepoPulseOrientation(root)
+	pulse, pulseReceipt, pulseErr := dispatchRepoPulseOrientation(root)
 	if pulse != "" {
 		rec.Prompt += "\n\nRepository orientation (governed collapsed child; do not rerun these reads unless state changes):\n" + pulse + "\n"
 		rec.PromptChars = len(rec.Prompt)
@@ -112,6 +112,12 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string, cached ...
 		"prompt_chars":       rec.PromptChars,
 		"development_branch": roles.DevelopmentBranch,
 		"repo_pulse_default": pulse != "",
+	}
+	if pulse != "" {
+		out["repo_pulse_receipt"] = map[string]any{
+			"schema": "fak-dispatch-repo-pulse-receipt/1", "saved_tokens": pulseReceipt.SavedTokens,
+			"tool_turns_skipped": pulseReceipt.ToolTurnsSkipped, "journal_rows": pulseReceipt.JournalRows,
+		}
 	}
 	if pulseErr != nil {
 		out["repo_pulse_error"] = pulseErr.Error()

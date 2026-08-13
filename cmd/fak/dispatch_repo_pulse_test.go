@@ -39,7 +39,7 @@ func TestDispatchPromptIncludesCollapsedRepoPulseByDefault(t *testing.T) {
 
 func TestDispatchRepoPulseCanBeDisabled(t *testing.T) {
 	t.Setenv(dispatchRepoPulseEnv, "off")
-	if got, err := dispatchRepoPulseOrientation(t.TempDir()); err != nil || got != "" {
+	if got, _, err := dispatchRepoPulseOrientation(t.TempDir()); err != nil || got != "" {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }

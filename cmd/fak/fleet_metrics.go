@@ -85,14 +85,15 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	src := fleetMetricsSources{
-		registryPath: *registry,
-		fleet:        *fleet,
-		remote:       *remote,
-		staleWindow:  *stale,
-		usageLedger:  *usageLedger,
-		since:        *since,
-		maxSessions:  *maxSessions,
-		stderr:       stderr,
+		registryPath:    *registry,
+		fleet:           *fleet,
+		remote:          *remote,
+		staleWindow:     *stale,
+		usageLedger:     *usageLedger,
+		dispatchRunsDir: filepath.Join(repoRoot(), ".dispatch-runs"),
+		since:           *since,
+		maxSessions:     *maxSessions,
+		stderr:          stderr,
 	}
 
 	if *serve {
@@ -128,6 +129,7 @@ type fleetMetricsSources struct {
 	remote             string
 	staleWindow        time.Duration
 	usageLedger        string
+	dispatchRunsDir    string
 	registrationLedger string
 	since              string
 	maxSessions        int
@@ -154,6 +156,7 @@ func (s fleetMetricsSources) render(now time.Time) string {
 
 	registrations, registrationReadable := s.registrationInventory()
 	renderFleetGoalExposition(w, registrations, usageFold)
+	writeRepoPulseMetrics(w, s.dispatchRunsDir)
 	w.gauge("fak_fleet_registration_registry_readable", "1 when the child-registration lineage ledger was read successfully; 0 means goal-level attribution is unavailable, not that the fleet has no goals.", boolGauge(registrationReadable))
 
 	w.gauge("fak_fleet_registry_readable", "1 when the durable session registry was read successfully; 0 when it could not be read (every live family then reads an honest zero, which is NOT the same as an empty fleet).", boolGauge(readable))

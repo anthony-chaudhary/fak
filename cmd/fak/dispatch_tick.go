@@ -984,6 +984,9 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	promptChars := dispatchMapInt(promptRec, "prompt_chars")
 	labels := dispatchStringSlice(promptRec["labels"])
 	payload["prompt_chars"] = promptChars
+	if receipt, ok := promptRec["repo_pulse_receipt"].(map[string]any); ok {
+		payload["repo_pulse_receipt"] = receipt
+	}
 	payload["issue_title"] = dispatchMapString(promptRec, "title")
 	payload["development_branch"] = dispatchMapString(promptRec, "development_branch")
 	payload["child_curve"] = dispatchtick.ChildCurve(root, target)
