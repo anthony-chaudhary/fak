@@ -54,6 +54,7 @@ type microCorpusReport struct {
 	Cases            []microCorpusCase     `json:"cases"`
 	Totals           microCorpusTotals     `json:"totals"`
 	Ablations        []microCorpusAblation `json:"ablations"`
+	RetryAblation    microRetryAblation    `json:"retry_ablation"`
 }
 
 // pinnedMicroCorpus is deliberately small: one exact instruction, one structured
@@ -78,6 +79,13 @@ func cmdMicroCorpus(args []string) {
 		os.Exit(2)
 	}
 	report := runMicroCorpus(context.Background(), *gateway, *model, *cliModel)
+	retry, err := runMicroRetryAblation(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak micro corpus: retry ablation: %v\n", err)
+		os.Exit(1)
+	}
+	report.RetryAblation = retry
+	applyRetryAblation(&report)
 	if *markdown != "" {
 		if err := os.WriteFile(*markdown, []byte(formatMicroCorpusReport(report)), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "fak micro corpus: write Markdown: %v\n", err)
@@ -153,6 +161,24 @@ func foldMicroCorpus(cases []microCorpusCase) microCorpusReport {
 	return r
 }
 
+func applyRetryAblation(report *microCorpusReport) {
+	if report == nil {
+		return
+	}
+	for i := range report.Ablations {
+		if report.Ablations[i].Layer == "retry" && retryAblationPassed(report.RetryAblation) {
+			report.Ablations[i] = microCorpusAblation{
+				Layer:  "retry",
+				Status: "PASS",
+				Reason: "retry-off failed after one attempt; retry-on completed after exact transient evidence was fed back, bounded at two attempts",
+			}
+		}
+	}
+	if retryAblationPassed(report.RetryAblation) {
+		report.Reason = "paired corpus execution and grounded retry contribution are measured, but gateway dollars and context/verify/mode ablations are not yet available; no quality/$ winner is claimed"
+	}
+}
+
 func formatMicroCorpusReport(r microCorpusReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# fak microagent paired corpus\n\n- Schema: `%s`\n- Corpus: `%s`\n- Execution: **%s**\n- Value: **%s**\n- Reason: %s\n\n", r.Schema, r.Corpus, r.ExecutionVerdict, r.ValueVerdict, r.Reason)
@@ -163,6 +189,12 @@ func formatMicroCorpusReport(r microCorpusReport) string {
 	b.WriteString("\n## Ablation readiness\n\n| Layer | Status | Reason |\n|---|---|---|\n")
 	for _, a := range r.Ablations {
 		fmt.Fprintf(&b, "| %s | %s | %s |\n", a.Layer, a.Status, a.Reason)
+	}
+	if retryAblationPassed(r.RetryAblation) {
+		b.WriteString("\n### Retry witness\n\n")
+		fmt.Fprintf(&b, "- retry off: completed=%t, attempts=%d\n", r.RetryAblation.WithoutRetryCompleted, r.RetryAblation.WithoutRetryAttempts)
+		fmt.Fprintf(&b, "- retry on: completed=%t, attempts=%d\n", r.RetryAblation.WithRetryCompleted, r.RetryAblation.WithRetryAttempts)
+		fmt.Fprintf(&b, "- evidence re-fed verbatim: `%s`\n", r.RetryAblation.Evidence[0])
 	}
 	return b.String()
 }

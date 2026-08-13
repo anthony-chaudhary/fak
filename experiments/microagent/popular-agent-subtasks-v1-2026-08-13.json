@@ -3,7 +3,7 @@
   "corpus": "popular-agent-subtasks-v1",
   "execution_verdict": "PASS",
   "value_verdict": "NOT_YET",
-  "reason": "paired corpus execution is measured, but gateway dollars and retry/context/verify/mode ablations are not yet available; no quality/$ winner is claimed",
+  "reason": "paired corpus execution and grounded retry contribution are measured, but gateway dollars and context/verify/mode ablations are not yet available; no quality/$ winner is claimed",
   "cases": [
     {
       "task": {
@@ -22,7 +22,7 @@
         "answer": "READY",
         "input_tokens": 33,
         "output_tokens": 2,
-        "wall_ms": 1209,
+        "wall_ms": 2043,
         "cost_usd": null,
         "cost_status": "provider-unsupported",
         "managed": true
@@ -34,10 +34,10 @@
         "completed": true,
         "correct": true,
         "answer": "READY",
-        "input_tokens": 9224,
+        "input_tokens": 18756,
         "output_tokens": 4,
-        "wall_ms": 5133,
-        "cost_usd": 0.03464849999999999,
+        "wall_ms": 21682,
+        "cost_usd": 0.0732795,
         "cost_status": "provider-reported",
         "managed": true
       }
@@ -59,7 +59,7 @@
         "answer": "AdmitRequest",
         "input_tokens": 50,
         "output_tokens": 4,
-        "wall_ms": 4105,
+        "wall_ms": 4143,
         "cost_usd": null,
         "cost_status": "provider-unsupported",
         "managed": true
@@ -71,11 +71,11 @@
         "completed": true,
         "correct": true,
         "answer": "AdmitRequest",
-        "input_tokens": 209,
+        "input_tokens": 8371,
         "output_tokens": 9,
-        "cache_read_tokens": 9040,
-        "wall_ms": 5040,
-        "cost_usd": 0.0060592499999999995,
+        "cache_read_tokens": 10410,
+        "wall_ms": 29296,
+        "cost_usd": 0.03707775000000001,
         "cost_status": "provider-reported",
         "managed": true
       }
@@ -97,7 +97,7 @@
         "answer": "DENY",
         "input_tokens": 58,
         "output_tokens": 3,
-        "wall_ms": 4484,
+        "wall_ms": 1343,
         "cost_usd": null,
         "cost_status": "provider-unsupported",
         "managed": true
@@ -109,11 +109,11 @@
         "completed": true,
         "correct": true,
         "answer": "DENY",
-        "input_tokens": 232,
+        "input_tokens": 8394,
         "output_tokens": 5,
-        "cache_read_tokens": 9040,
-        "wall_ms": 4924,
-        "cost_usd": 0.006229499999999999,
+        "cache_read_tokens": 10410,
+        "wall_ms": 15076,
+        "cost_usd": 0.037247999999999996,
         "cost_status": "provider-reported",
         "managed": true
       }
@@ -125,20 +125,20 @@
     "baseline_correct": 3,
     "micro_input_tokens": 141,
     "micro_output_tokens": 9,
-    "baseline_input_tokens": 9665,
+    "baseline_input_tokens": 35521,
     "baseline_output_tokens": 18,
-    "micro_wall_ms": 9798,
-    "baseline_wall_ms": 15097,
+    "micro_wall_ms": 7529,
+    "baseline_wall_ms": 66054,
     "micro_cost_usd": null,
-    "baseline_cost_usd": 0.04693724999999999,
+    "baseline_cost_usd": 0.14760525,
     "micro_cost_status": "provider-unsupported",
     "baseline_cost_status": "provider-reported"
   },
   "ablations": [
     {
       "layer": "retry",
-      "status": "NOT_YET",
-      "reason": "pinned tasks do not inject a witnessed transient failure"
+      "status": "PASS",
+      "reason": "retry-off failed after one attempt; retry-on completed after exact transient evidence was fed back, bounded at two attempts"
     },
     {
       "layer": "context",
@@ -155,5 +155,14 @@
       "status": "NOT_YET",
       "reason": "the real gateway microagent currently exposes completion mode only; #2026 owns bash/tool mode parity"
     }
-  ]
+  ],
+  "retry_ablation": {
+    "without_retry_completed": false,
+    "with_retry_completed": true,
+    "without_retry_attempts": 1,
+    "with_retry_attempts": 2,
+    "evidence": [
+      "fixture transient: upstream reset"
+    ]
+  }
 }

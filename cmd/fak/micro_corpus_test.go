@@ -26,6 +26,32 @@ func TestFoldMicroCorpusPreservesUnsupportedCostAndAblationNotYet(t *testing.T) 
 	}
 }
 
+func TestApplyRetryAblationPromotesOnlyRetry(t *testing.T) {
+	r := foldMicroCorpus(nil)
+	r.RetryAblation = microRetryAblation{
+		WithoutRetryCompleted: false,
+		WithRetryCompleted:    true,
+		WithoutRetryAttempts:  1,
+		WithRetryAttempts:     2,
+		Evidence:              []string{retryAblationFailure},
+	}
+	applyRetryAblation(&r)
+	if r.Ablations[0].Layer != "retry" || r.Ablations[0].Status != "PASS" {
+		t.Fatalf("retry not promoted: %+v", r.Ablations)
+	}
+	for _, a := range r.Ablations[1:] {
+		if a.Status != "NOT_YET" {
+			t.Fatalf("unwitnessed ablation promoted: %+v", a)
+		}
+	}
+	md := formatMicroCorpusReport(r)
+	for _, want := range []string{"| retry | PASS |", "retry off: completed=false, attempts=1", "evidence re-fed verbatim: `" + retryAblationFailure + "`"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, md)
+		}
+	}
+}
+
 func TestFoldMicroCorpusFailsMissingEvidence(t *testing.T) {
 	r := foldMicroCorpus([]microCorpusCase{{Task: microCorpusTask{ID: "bad"}, ExecutionVerdict: "FAIL"}})
 	if r.ExecutionVerdict != "FAIL" || r.Totals.BaselineCostUSD != nil || r.Totals.BaselineCostStatus != "provider-unreported" {

@@ -1,0 +1,93 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/microagent"
+)
+
+const retryAblationFailure = "fixture transient: upstream reset"
+
+type microRetryAblation struct {
+	WithoutRetryCompleted bool     `json:"without_retry_completed"`
+	WithRetryCompleted    bool     `json:"with_retry_completed"`
+	WithoutRetryAttempts  int      `json:"without_retry_attempts"`
+	WithRetryAttempts     int      `json:"with_retry_attempts"`
+	Evidence              []string `json:"evidence"`
+}
+
+// retryAblationAgent is a deterministic fault-injection fixture around the real
+// native Host retry seam. The second attempt can succeed only after the Host
+// passes the exact first error through RetryFeedback, so this is an ablation of
+// grounded retry rather than a synthetic provider-quality comparison.
+type retryAblationAgent struct {
+	attempts int
+	evidence []string
+}
+
+func (a *retryAblationAgent) Step(context.Context, microagent.Gateway) (bool, error) {
+	a.attempts++
+	if len(a.evidence) == 0 {
+		return false, errors.New(retryAblationFailure)
+	}
+	return true, nil
+}
+
+func (a *retryAblationAgent) RetryFeedback(_ context.Context, evidence error) error {
+	if evidence == nil {
+		return errors.New("retry fixture received nil evidence")
+	}
+	a.evidence = append(a.evidence, evidence.Error())
+	return nil
+}
+
+func runMicroRetryAblation(ctx context.Context) (microRetryAblation, error) {
+	offAgent := &retryAblationAgent{}
+	off, err := runRetryAblationArm(ctx, 0, offAgent)
+	if err != nil {
+		return microRetryAblation{}, fmt.Errorf("retry-off arm: %w", err)
+	}
+	onAgent := &retryAblationAgent{}
+	on, err := runRetryAblationArm(ctx, 1, onAgent)
+	if err != nil {
+		return microRetryAblation{}, fmt.Errorf("retry-on arm: %w", err)
+	}
+	return microRetryAblation{
+		WithoutRetryCompleted: off.Done && off.Err == nil,
+		WithRetryCompleted:    on.Done && on.Err == nil,
+		WithoutRetryAttempts:  offAgent.attempts,
+		WithRetryAttempts:     onAgent.attempts,
+		Evidence:              append([]string(nil), onAgent.evidence...),
+	}, nil
+}
+
+func runRetryAblationArm(parent context.Context, maxRetries int, fixture *retryAblationAgent) (microagent.Result, error) {
+	h, err := microagent.NewHost(agent.NewMockPlanner("retry-ablation"), microagent.Config{Workers: 1, MaxRetries: maxRetries})
+	if err != nil {
+		return microagent.Result{}, err
+	}
+	defer h.Close()
+	if err := h.Spawn("retry-ablation", fixture); err != nil {
+		return microagent.Result{}, err
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	if err := h.Drain(ctx); err != nil {
+		return microagent.Result{}, err
+	}
+	results := h.Reap()
+	if len(results) != 1 {
+		return microagent.Result{}, fmt.Errorf("results=%d, want 1", len(results))
+	}
+	return results[0], nil
+}
+
+func retryAblationPassed(r microRetryAblation) bool {
+	return !r.WithoutRetryCompleted && r.WithRetryCompleted &&
+		r.WithoutRetryAttempts == 1 && r.WithRetryAttempts == 2 &&
+		len(r.Evidence) == 1 && r.Evidence[0] == retryAblationFailure
+}
