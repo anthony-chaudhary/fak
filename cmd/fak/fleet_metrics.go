@@ -71,6 +71,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway-usage ledger folded into the historical fak_fleet_usage_* families")
 	since := fs.String("since", "", "fold only usage rows on or after this date (YYYY-MM-DD)")
 	maxSessions := fs.Int("max-sessions", defaultFleetMetricsMaxSessions, "cardinality bound on the per-session label (0 disables the per-session tier entirely)")
+	goalCoverageThreshold := fs.Float64("goal-coverage-threshold", 1, "minimum exact root-goal usage attribution ratio required for efficiency-ready=1 (0..1)")
 	serve := fs.Bool("serve", false, "serve the exposition on --addr /metrics, re-folding on each scrape")
 	addr := fs.String("addr", "127.0.0.1:9098", "with --serve, the host:port to bind /metrics on")
 	textfile := fs.String("textfile", "", "write the exposition atomically to this .prom path (for a node_exporter textfile collector) instead of stdout")
@@ -83,17 +84,22 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 	}
+	if *goalCoverageThreshold < 0 || *goalCoverageThreshold > 1 {
+		fmt.Fprintln(stderr, "fak fleet metrics: --goal-coverage-threshold must be between 0 and 1")
+		return 2
+	}
 
 	src := fleetMetricsSources{
-		registryPath:    *registry,
-		fleet:           *fleet,
-		remote:          *remote,
-		staleWindow:     *stale,
-		usageLedger:     *usageLedger,
-		dispatchRunsDir: filepath.Join(repoRoot(), ".dispatch-runs"),
-		since:           *since,
-		maxSessions:     *maxSessions,
-		stderr:          stderr,
+		registryPath:          *registry,
+		fleet:                 *fleet,
+		remote:                *remote,
+		staleWindow:           *stale,
+		usageLedger:           *usageLedger,
+		dispatchRunsDir:       filepath.Join(repoRoot(), ".dispatch-runs"),
+		since:                 *since,
+		maxSessions:           *maxSessions,
+		goalCoverageThreshold: *goalCoverageThreshold,
+		stderr:                stderr,
 	}
 
 	if *serve {
@@ -124,16 +130,17 @@ const defaultFleetMetricsMaxSessions = 200
 // the serve handler fold from the SAME recipe — what Grafana scrapes is the projection of
 // exactly what `fak session ls --durable` would print for the same instant.
 type fleetMetricsSources struct {
-	registryPath       string
-	fleet              bool
-	remote             string
-	staleWindow        time.Duration
-	usageLedger        string
-	dispatchRunsDir    string
-	registrationLedger string
-	since              string
-	maxSessions        int
-	stderr             io.Writer
+	registryPath          string
+	fleet                 bool
+	remote                string
+	staleWindow           time.Duration
+	usageLedger           string
+	dispatchRunsDir       string
+	registrationLedger    string
+	since                 string
+	maxSessions           int
+	goalCoverageThreshold float64
+	stderr                io.Writer
 }
 
 // render re-reads the registry and the ledger from disk and returns the exposition text.
@@ -155,7 +162,7 @@ func (s fleetMetricsSources) render(now time.Time) string {
 	renderFleetUsageExposition(w, usageFold, s.maxSessions, dupDropped)
 
 	registrations, registrationReadable := s.registrationInventory()
-	renderFleetGoalExposition(w, registrations, usageFold)
+	renderFleetGoalExposition(w, registrations, usageFold, s.goalCoverageThreshold)
 	writeRepoPulseMetrics(w, s.dispatchRunsDir)
 	w.gauge("fak_fleet_registration_registry_readable", "1 when the child-registration lineage ledger was read successfully; 0 means goal-level attribution is unavailable, not that the fleet has no goals.", boolGauge(registrationReadable))
 
@@ -206,7 +213,7 @@ type fleetGoalAgg struct {
 
 // renderFleetGoalExposition joins durable lineage to usage. A session is attributable
 // only when exactly one root claims it; unknown and cross-root claims stay visible.
-func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold) {
+func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold, coverageThreshold float64) {
 	goals := map[string]*fleetGoalAgg{}
 	sessionRoots := map[string]string{}
 	ambiguous := map[string]bool{}
@@ -313,7 +320,10 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 	unattributed := usage.Total.subtract(attributed)
 	w.gauge("fak_fleet_goal_usage_rows", "Gateway-usage rows by root-goal attribution; unattributed includes missing, unknown, and ambiguous lineage.", float64(attributed.Rows), "attribution", "attributed")
 	w.gauge("fak_fleet_goal_usage_rows", "Gateway-usage rows by root-goal attribution; unattributed includes missing, unknown, and ambiguous lineage.", float64(unattributed.Rows), "attribution", "unattributed")
-	w.gauge("fak_fleet_goal_usage_attribution_ratio", "Fraction of usage rows attributable to exactly one root goal; 1 for an empty census.", coverageRatio(attributed.Rows, usage.Total.Rows))
+	ratio := coverageRatio(attributed.Rows, usage.Total.Rows)
+	w.gauge("fak_fleet_goal_usage_attribution_ratio", "Fraction of usage rows attributable to exactly one root goal; 1 for an empty census.", ratio)
+	w.gauge("fak_fleet_goal_efficiency_coverage_threshold", "Configured minimum exact usage attribution ratio for broad root-goal efficiency readiness.", coverageThreshold)
+	w.gauge("fak_fleet_goal_efficiency_ready", "1 only when exact root-goal usage attribution meets the configured threshold and the lineage registry is readable.", boolGauge(ratio >= coverageThreshold))
 	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(attributed.InputTokens), "attribution", "attributed")
 	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(unattributed.InputTokens), "attribution", "unattributed")
 	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(attributed.OutputTokens), "attribution", "attributed")

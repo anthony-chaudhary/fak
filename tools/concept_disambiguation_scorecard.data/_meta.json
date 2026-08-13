@@ -5081,6 +5081,26 @@
           "category": "incidental",
           "reason": "Prometheus arithmetic helper, not a new support maturity concept",
           "token": "coverageRatio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exporter configuration field, not a new support maturity concept",
+          "token": "goalCoverageThreshold"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exporter function parameter, not a new support maturity concept",
+          "token": "coverageThreshold"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus readiness projection, not a new support maturity concept",
+          "token": "fak_fleet_goal_efficiency_ready"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus configuration projection, not a new support maturity concept",
+          "token": "fak_fleet_goal_efficiency_coverage_threshold"
         }
       ],
       "id": "support-maturity",
@@ -5170,6 +5190,7 @@
         "coverageGraded",
         "coveragePath",
         "coverageRatio",
+        "coverageThreshold",
         "coveragebaseline",
         "coveragediscipline",
         "defaultscoreparitytol",
@@ -5177,11 +5198,14 @@
         "errInterleaveUnsupported",
         "errmmapunsupported",
         "errstreamingunsupported",
+        "fak_fleet_goal_efficiency_coverage_threshold",
+        "fak_fleet_goal_efficiency_ready",
         "fak_parity_ratio",
         "fak_parity_value",
         "formatParityValue",
         "gitDailyCoverageKPI",
         "gitDailyCoverageKey",
+        "goalCoverageThreshold",
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",

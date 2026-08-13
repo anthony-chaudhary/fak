@@ -413,6 +413,13 @@ func TestServeUsageSessionIDOnlyStampsSingleSessionServe(t *testing.T) {
 	}
 }
 
+func TestFleetMetricsRejectsInvalidGoalCoverageThreshold(t *testing.T) {
+	var out, errb strings.Builder
+	if got := runFleetMetrics(&out, &errb, []string{"--goal-coverage-threshold", "1.1"}); got != 2 || !strings.Contains(errb.String(), "between 0 and 1") {
+		t.Fatalf("code=%d stderr=%q", got, errb.String())
+	}
+}
+
 func TestFleetMetricsSeparatesRootOutcomesAttemptsAndAttributionCoverage(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -448,13 +455,14 @@ func TestFleetMetricsSeparatesRootOutcomesAttemptsAndAttributionCoverage(t *test
 	if err := os.WriteFile(usagePath, []byte(ledger.String()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	out := fleetMetricsSources{usageLedger: usagePath, registrationLedger: registrationPath, maxSessions: 20, stderr: io.Discard}.render(base.Add(time.Hour))
+	out := fleetMetricsSources{usageLedger: usagePath, registrationLedger: registrationPath, maxSessions: 20, goalCoverageThreshold: 1, stderr: io.Discard}.render(base.Add(time.Hour))
 	want := []string{
 		`fak_fleet_goal_attempts_total{root_registration="root-a",root_issue="#A",task="goal-a"} 2`, `fak_fleet_goal_resumes_total{root_registration="root-a",root_issue="#A",task="goal-a"} 1`,
 		`fak_fleet_goal_terminal_state{root_registration="root-a",root_issue="#A",task="goal-a",state="completed"} 1`, `fak_fleet_goal_outcome_info{root_registration="root-a",root_issue="#A",task="goal-a",outcome="success"} 1`,
 		`fak_fleet_goal_terminal_state{root_registration="root-b",root_issue="#B",task="goal-b",state="failed"} 1`, `fak_fleet_goal_outcome_info{root_registration="root-b",root_issue="#B",task="goal-b",outcome="failure"} 1`,
 		`fak_fleet_goal_input_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 30`, `fak_fleet_goal_input_tokens_total{root_registration="root-b",root_issue="#B",task="goal-b"} 30`,
 		`fak_fleet_goal_usage_rows{attribution="attributed"} 3`, `fak_fleet_goal_usage_rows{attribution="unattributed"} 1`, `fak_fleet_goal_usage_attribution_ratio 0.75`,
+		`fak_fleet_goal_efficiency_coverage_threshold 1`, `fak_fleet_goal_efficiency_ready 0`,
 		`fak_fleet_goal_input_tokens_by_attribution_total{attribution="attributed"} 60`, `fak_fleet_goal_input_tokens_by_attribution_total{attribution="unattributed"} 40`,
 		`fak_fleet_goal_witnessed_registrations{root_registration="root-a",root_issue="#A",task="goal-a"} 1`,
 		`fak_fleet_goal_wall_seconds{root_registration="root-a",root_issue="#A",task="goal-a"} 109`,
