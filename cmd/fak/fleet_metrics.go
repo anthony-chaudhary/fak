@@ -196,6 +196,9 @@ type fleetGoalAgg struct {
 	rootOutcome               string
 	attempts                  map[string]struct{}
 	resumes                   int
+	witnessed                 int
+	wallSeconds               float64
+	activeSeconds             float64
 	states                    map[sessionregistry.State]int
 	sessions                  map[string]struct{}
 	usage                     fleetUsageAgg
@@ -234,6 +237,22 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		if r.ResumeOfAttemptID != "" {
 			g.resumes++
 		}
+		if strings.TrimSpace(r.WitnessRef) != "" {
+			g.witnessed++
+		}
+		end := r.TerminalAt
+		if end.IsZero() {
+			end = r.HeartbeatAt
+		}
+		if end.IsZero() {
+			end = r.StartedAt
+		}
+		if !r.CreatedAt.IsZero() && end.After(r.CreatedAt) {
+			g.wallSeconds += end.Sub(r.CreatedAt).Seconds()
+		}
+		if !r.StartedAt.IsZero() && end.After(r.StartedAt) {
+			g.activeSeconds += end.Sub(r.StartedAt).Seconds()
+		}
 		if sid := strings.TrimSpace(r.Identity.SessionID); sid != "" {
 			g.sessions[sid] = struct{}{}
 			if prior, ok := sessionRoots[sid]; ok && prior != root {
@@ -264,6 +283,9 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		w.gauge("fak_fleet_goal_sessions", "Distinct explicit gateway session IDs registered beneath this root goal.", float64(len(g.sessions)), labels...)
 		w.gauge("fak_fleet_goal_attempts_total", "Distinct authoritative attempt IDs registered beneath this root goal.", float64(len(g.attempts)), labels...)
 		w.gauge("fak_fleet_goal_resumes_total", "Registrations beneath this root goal carrying an explicit resume_of_attempt_id.", float64(g.resumes), labels...)
+		w.gauge("fak_fleet_goal_witnessed_registrations", "Registrations beneath this root goal carrying an explicit witness_ref.", float64(g.witnessed), labels...)
+		w.gauge("fak_fleet_goal_wall_seconds", "Summed durable created-to-latest-event elapsed seconds; absent endpoints contribute zero.", g.wallSeconds, labels...)
+		w.gauge("fak_fleet_goal_active_seconds", "Summed durable started-to-latest-event active seconds; absent endpoints contribute zero.", g.activeSeconds, labels...)
 		for _, state := range states {
 			ls := append(append([]string{}, labels...), "state", string(state))
 			w.gauge("fak_fleet_goal_registration_state", "Registrations beneath this root goal by latest durable lifecycle state.", float64(g.states[state]), ls...)
@@ -280,6 +302,9 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		w.gauge("fak_fleet_goal_input_tokens_total", "Historical gateway input tokens explicitly attributed to a registered session beneath this root goal.", float64(g.usage.InputTokens), labels...)
 		w.gauge("fak_fleet_goal_output_tokens_total", "Historical gateway output tokens explicitly attributed to a registered session beneath this root goal.", float64(g.usage.OutputTokens), labels...)
 		w.gauge("fak_fleet_goal_adjudications_total", "Historical gateway adjudications explicitly attributed to a registered session beneath this root goal.", float64(g.usage.Adjudications), labels...)
+		w.gauge("fak_fleet_goal_tool_boundary_calls_total", "Historical kernel submissions explicitly attributed beneath this root goal; the governed tool boundary, not inferred provider calls.", float64(g.usage.Submits), labels...)
+		w.gauge("fak_fleet_goal_cache_read_tokens_total", "Observed provider cache-read prompt tokens explicitly attributed beneath this root goal.", float64(g.usage.CachedPromptTokens), labels...)
+		w.gauge("fak_fleet_goal_cache_write_tokens_total", "Observed provider cache-creation prompt tokens explicitly attributed beneath this root goal.", float64(g.usage.CacheCreationTokens), labels...)
 	}
 	attributed := fleetUsageAgg{}
 	for _, g := range goals {
@@ -571,6 +596,7 @@ type fleetUsageAgg struct {
 	ObservedTurns        uint64
 	CachedTurns          uint64
 	Adjudications        uint64
+	Submits              uint64
 	Allowed              uint64
 	Denied               uint64
 	Transformed          uint64
@@ -605,6 +631,9 @@ func (a *fleetUsageAgg) add(r gatewayusageledger.Row) {
 	a.ObservedTurns += c.ObservedTurns
 	a.CachedTurns += c.CachedTurns
 	a.Adjudications += c.Total
+	if c.Submits > 0 {
+		a.Submits += uint64(c.Submits)
+	}
 	a.Allowed += c.Allowed
 	a.Denied += c.Denied
 	a.Transformed += c.Transformed
@@ -643,6 +672,7 @@ func (a *fleetUsageAgg) merge(b fleetUsageAgg) {
 	a.ObservedTurns += b.ObservedTurns
 	a.CachedTurns += b.CachedTurns
 	a.Adjudications += b.Adjudications
+	a.Submits += b.Submits
 	a.Allowed += b.Allowed
 	a.Denied += b.Denied
 	a.Transformed += b.Transformed
@@ -652,7 +682,7 @@ func (a *fleetUsageAgg) merge(b fleetUsageAgg) {
 	a.Errored += b.Errored
 }
 func (a fleetUsageAgg) subtract(b fleetUsageAgg) fleetUsageAgg {
-	return fleetUsageAgg{Rows: a.Rows - b.Rows, Sessions: a.Sessions - b.Sessions, Seconds: a.Seconds - b.Seconds, InputTokens: a.InputTokens - b.InputTokens, OutputTokens: a.OutputTokens - b.OutputTokens, CachedPromptTokens: a.CachedPromptTokens - b.CachedPromptTokens, CacheCreationTokens: a.CacheCreationTokens - b.CacheCreationTokens, KVPrefixPromptTokens: a.KVPrefixPromptTokens - b.KVPrefixPromptTokens, KVPrefixReusedTokens: a.KVPrefixReusedTokens - b.KVPrefixReusedTokens, ObservedTurns: a.ObservedTurns - b.ObservedTurns, CachedTurns: a.CachedTurns - b.CachedTurns, Adjudications: a.Adjudications - b.Adjudications, Allowed: a.Allowed - b.Allowed, Denied: a.Denied - b.Denied, Transformed: a.Transformed - b.Transformed, Quarantined: a.Quarantined - b.Quarantined, Deferred: a.Deferred - b.Deferred, Escalated: a.Escalated - b.Escalated, Errored: a.Errored - b.Errored}
+	return fleetUsageAgg{Rows: a.Rows - b.Rows, Sessions: a.Sessions - b.Sessions, Seconds: a.Seconds - b.Seconds, InputTokens: a.InputTokens - b.InputTokens, OutputTokens: a.OutputTokens - b.OutputTokens, CachedPromptTokens: a.CachedPromptTokens - b.CachedPromptTokens, CacheCreationTokens: a.CacheCreationTokens - b.CacheCreationTokens, KVPrefixPromptTokens: a.KVPrefixPromptTokens - b.KVPrefixPromptTokens, KVPrefixReusedTokens: a.KVPrefixReusedTokens - b.KVPrefixReusedTokens, ObservedTurns: a.ObservedTurns - b.ObservedTurns, CachedTurns: a.CachedTurns - b.CachedTurns, Adjudications: a.Adjudications - b.Adjudications, Submits: a.Submits - b.Submits, Allowed: a.Allowed - b.Allowed, Denied: a.Denied - b.Denied, Transformed: a.Transformed - b.Transformed, Quarantined: a.Quarantined - b.Quarantined, Deferred: a.Deferred - b.Deferred, Escalated: a.Escalated - b.Escalated, Errored: a.Errored - b.Errored}
 }
 
 type fleetUsageFold struct {

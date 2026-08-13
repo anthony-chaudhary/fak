@@ -507,6 +507,16 @@
           "category": "incidental",
           "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
           "token": "CacheLineageChanged"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal projection of existing provider cache-read counter",
+          "token": "fak_fleet_goal_cache_read_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal projection of existing provider cache-creation counter",
+          "token": "fak_fleet_goal_cache_write_tokens_total"
         }
       ],
       "id": "cache",
@@ -616,6 +626,8 @@
         "defaultcachesize",
         "detectCacheWarmReplay",
         "droppedcachedtokens",
+        "fak_fleet_goal_cache_read_tokens_total",
+        "fak_fleet_goal_cache_write_tokens_total",
         "fakcachevalueinputpermtokusd",
         "flushcache",
         "formatTurnCachePair",
@@ -3355,6 +3367,11 @@
           "category": "incidental",
           "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
           "token": "conptyWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus projection of existing witness_ref, not a new witness concept",
+          "token": "fak_fleet_goal_witnessed_registrations"
         }
       ],
       "id": "witness-proof",
@@ -3420,6 +3437,7 @@
         "dispatchWitnessStrandedBuildFails",
         "dispatchWitnessStrandedBuildFailsGo",
         "done_not_witnessed",
+        "fak_fleet_goal_witnessed_registrations",
         "formatGuardCompactionWitness",
         "guardCompactionWitnessLedger",
         "guardCompactionWitnessLedgerRel",
@@ -5993,6 +6011,16 @@
           "category": "incidental",
           "reason": "Implementation symbol or wire field admitted with the #6547 terminal/browser attachment and reconnect witness; not a separate user-facing concept.",
           "token": "seedCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI handler name describes replayable portability reconciliation output rather than a new planning subsystem",
+          "token": "runContinuitySyncPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Portability wire type records deterministic merge operations and typed conflicts rather than a planning subsystem",
+          "token": "MergePlan"
         }
       ],
       "exclude": [
@@ -6015,6 +6043,7 @@
         "ExplainFilingPlan",
         "FleetBenchPlanDoc",
         "KindCandidate",
+        "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
         "NoteCandidates",
         "PlanDecodeInterleave",
@@ -6072,6 +6101,7 @@
         "plants",
         "register_bench_plan_doc",
         "runAblatePlan",
+        "runContinuitySyncPlan",
         "seedCandidate",
         "wipLandOptions",
         "wipLandWith"

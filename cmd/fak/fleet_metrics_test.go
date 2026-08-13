@@ -421,9 +421,9 @@ func TestFleetMetricsSeparatesRootOutcomesAttemptsAndAttributionCoverage(t *test
 	store := sessionregistry.Store{Path: registrationPath}
 	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	regs := []sessionregistry.Record{
-		{Schema: sessionregistry.Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", AttemptID: "attempt-a1", LaunchKind: "agent", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-a-root"}, State: sessionregistry.StateCompleted, RootOutcome: "success", CreatedAt: base, TerminalAt: base.Add(time.Minute)},
-		{Schema: sessionregistry.Schema, RegistrationID: "child-a", ParentRegistrationID: "root-a", RootRegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", AttemptID: "attempt-a2", ResumeOfAttemptID: "attempt-a1", LaunchKind: "headless", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-a-child"}, State: sessionregistry.StateCompleted, CreatedAt: base.Add(time.Second), TerminalAt: base.Add(50 * time.Second)},
-		{Schema: sessionregistry.Schema, RegistrationID: "root-b", RootRegistrationID: "root-b", RootIssue: "#B", TaskID: "goal-b", AttemptID: "attempt-b1", LaunchKind: "agent", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-b"}, State: sessionregistry.StateFailed, RootOutcome: "failure", CreatedAt: base.Add(2 * time.Second), TerminalAt: base.Add(40 * time.Second)},
+		{Schema: sessionregistry.Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", AttemptID: "attempt-a1", LaunchKind: "agent", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-a-root"}, State: sessionregistry.StateCompleted, RootOutcome: "success", WitnessRef: "commit:a", CreatedAt: base, StartedAt: base.Add(10 * time.Second), TerminalAt: base.Add(time.Minute)},
+		{Schema: sessionregistry.Schema, RegistrationID: "child-a", ParentRegistrationID: "root-a", RootRegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", AttemptID: "attempt-a2", ResumeOfAttemptID: "attempt-a1", LaunchKind: "headless", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-a-child"}, State: sessionregistry.StateCompleted, CreatedAt: base.Add(time.Second), StartedAt: base.Add(11 * time.Second), TerminalAt: base.Add(50 * time.Second)},
+		{Schema: sessionregistry.Schema, RegistrationID: "root-b", RootRegistrationID: "root-b", RootIssue: "#B", TaskID: "goal-b", AttemptID: "attempt-b1", LaunchKind: "agent", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-b"}, State: sessionregistry.StateFailed, RootOutcome: "failure", WitnessRef: "run:b", CreatedAt: base.Add(2 * time.Second), StartedAt: base.Add(12 * time.Second), TerminalAt: base.Add(40 * time.Second)},
 	}
 	for _, r := range regs {
 		if err := store.Register(r); err != nil {
@@ -431,8 +431,8 @@ func TestFleetMetricsSeparatesRootOutcomesAttemptsAndAttributionCoverage(t *test
 		}
 	}
 	usage := []gatewayusageledger.Row{
-		{Schema: gatewayusageledger.Schema, SessionID: "session-a-root", SessionType: "agent", UnixMillis: base.UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 1, InputTokens: 10, OutputTokens: 1}},
-		{Schema: gatewayusageledger.Schema, SessionID: "session-a-child", SessionType: "headless", UnixMillis: base.Add(time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 2, InputTokens: 20, OutputTokens: 2}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-a-root", SessionType: "agent", UnixMillis: base.UnixMilli(), Counters: gatewayusageledger.Counters{Submits: 2, ObservedTurns: 1, InputTokens: 10, OutputTokens: 1, CachedPromptTokens: 4, CacheCreationTokens: 1}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-a-child", SessionType: "headless", UnixMillis: base.Add(time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{Submits: 3, ObservedTurns: 2, InputTokens: 20, OutputTokens: 2, CachedPromptTokens: 6, CacheCreationTokens: 2}},
 		{Schema: gatewayusageledger.Schema, SessionID: "session-b", SessionType: "agent", UnixMillis: base.Add(2 * time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 3, InputTokens: 30, OutputTokens: 3}},
 		{Schema: gatewayusageledger.Schema, SessionID: "unknown-session", SessionType: "legacy", UnixMillis: base.Add(3 * time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 4, InputTokens: 40, OutputTokens: 4}},
 	}
@@ -456,6 +456,12 @@ func TestFleetMetricsSeparatesRootOutcomesAttemptsAndAttributionCoverage(t *test
 		`fak_fleet_goal_input_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 30`, `fak_fleet_goal_input_tokens_total{root_registration="root-b",root_issue="#B",task="goal-b"} 30`,
 		`fak_fleet_goal_usage_rows{attribution="attributed"} 3`, `fak_fleet_goal_usage_rows{attribution="unattributed"} 1`, `fak_fleet_goal_usage_attribution_ratio 0.75`,
 		`fak_fleet_goal_input_tokens_by_attribution_total{attribution="attributed"} 60`, `fak_fleet_goal_input_tokens_by_attribution_total{attribution="unattributed"} 40`,
+		`fak_fleet_goal_witnessed_registrations{root_registration="root-a",root_issue="#A",task="goal-a"} 1`,
+		`fak_fleet_goal_wall_seconds{root_registration="root-a",root_issue="#A",task="goal-a"} 109`,
+		`fak_fleet_goal_active_seconds{root_registration="root-a",root_issue="#A",task="goal-a"} 89`,
+		`fak_fleet_goal_tool_boundary_calls_total{root_registration="root-a",root_issue="#A",task="goal-a"} 5`,
+		`fak_fleet_goal_cache_read_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 10`,
+		`fak_fleet_goal_cache_write_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 3`,
 	}
 	for _, needle := range want {
 		if !strings.Contains(out, needle) {
