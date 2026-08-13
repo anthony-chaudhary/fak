@@ -240,9 +240,9 @@ jobs:
           go vet ./...
           go run .
 
-      - name: claims-lint (every "- [" line in CLAIMS.md carries exactly one tag)
+      - name: claims-lint (every "- [" line in CLAIMS.md carries exactly one tag + a declared exposure state)
         run: |
-          awk '/^- \[/{n=0; if(index($0,"[SHIPPED]"))n++; if(index($0,"[SIMULATED]"))n++; if(index($0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
+          go test -count=1 -v -run 'TestCLAIMSLedger' ./internal/claimcheck/
 
       - name: repo-hygiene gates (doc-placement · links · hosted-demos · demo-commands · browser-demo-contract · file-admission · secret-shapes · brand-descriptor · hardware-names)
         working-directory: ${{ github.workspace }}

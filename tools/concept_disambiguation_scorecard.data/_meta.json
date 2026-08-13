@@ -1441,6 +1441,21 @@
           "category": "incidental",
           "reason": "Enum member of the selfinstall Role vocabulary: the repo-root fak binary that adjudicates the spawn gate. A deployment-slot label, not a gate.",
           "token": "RoleGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported predicate on a CLAIMS.md line; not a governed concept",
+          "token": "exposureGated"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported helper extracting the stated-reason prose from a gated claim line",
+          "token": "gateProse"
+        },
+        {
+          "category": "incidental",
+          "reason": "unexported helper pairing a gated claim with its stated-reason prose; introduces no governed gate concept",
+          "token": "proseGate"
         }
       ],
       "exclude": [
@@ -1500,12 +1515,14 @@
         "enqueueGuardOperatorQuestionEscalationFailOpen",
         "enqueueGuardSessionThreadNotice",
         "equalAggregate",
+        "exposureGated",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
         "firstGuardEnv",
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
         "gateGitHygieneBypass",
+        "gateProse",
         "gateSkew",
         "gate_test",
         "gate_verbtier",
@@ -1616,6 +1633,7 @@
         "prepareGuardChildRegistration",
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
+        "proseGate",
         "readGuardCompactionWitnesses",
         "readguardstopsledger",
         "readguardstoptranscript",
@@ -3384,6 +3402,11 @@
           "category": "incidental",
           "reason": "Env knob naming the operator override for the #6508 bin-skew refusal. An escape-hatch flag read by the impure shell; the capability it toggles is the refusal itself.",
           "token": "FAK_PREFLIGHT_ALLOW_BIN_SKEW"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field name on the ledger report counting CLAIMS.md capability lines; a count field, not a governed capability concept",
+          "token": "capability_lines"
         }
       ],
       "exclude": [
@@ -3430,6 +3453,7 @@
         "capabilities",
         "capability_denied",
         "capability_failure",
+        "capability_lines",
         "ciPreflightArchiveTimeout",
         "config_posture_budget",
         "contractByCapability",
