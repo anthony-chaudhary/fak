@@ -67,6 +67,11 @@ type runConfig struct {
 	// set-budget verbs at each CLEAN turn boundary. nil => no mailbox wired and every
 	// mid-flight consult is a no-op, so the loop is byte-for-byte the historical loop.
 	midflight *MidflightVerbs
+	// conversation / toolCatalog are the WIRE seam (#6657, loop_wire.go): a served
+	// request's ordered transcript and its request-scoped tool declarations. Both empty
+	// => the historical fixed seed (system prompt + task, ToolCatalog()).
+	conversation []Message
+	toolCatalog  []ToolDef
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal

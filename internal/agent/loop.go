@@ -394,11 +394,12 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	if fak && cfg.spec != nil {
 		sp = newSpecState(cfg.spec, k)
 	}
-	messages := []Message{
-		{Role: RoleSystem, Content: SystemPrompt},
-		{Role: RoleUser, Content: task},
-	}
-	tools := ToolCatalog()
+	// The loop's opening transcript and tool surface. With no wire options these are the
+	// historical pair — system prompt + the single task message, and the built-in
+	// ToolCatalog(). A served request wires its own ordered conversation and
+	// request-scoped catalog through them (#6657, loop_wire.go).
+	messages := cfg.seedMessages(task)
+	tools := cfg.seedTools()
 
 	// Terminate seam (#2758): when a session table/gate wires a terminate signal, the
 	// arm's context is cancelled the moment the session enters Terminating, so the

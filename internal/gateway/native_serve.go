@@ -13,12 +13,17 @@ package gateway
 // the in-kernel syscall boundary is the only tool path. This handler is that ownership,
 // reachable from the wire.
 //
-// Scope of THIS child (honest fence): the loop is seeded with the request's last user
-// message and drives the kernel-owned tool catalog (agent.ToolCatalog over
-// kernel.New("localtools")) to a final answer — the AgentDojo-shaped run the program's
-// definition-of-done names ("an AgentDojo run driven entirely by fak serve --native").
-// Generalizing the served loop to an ARBITRARY inbound tools[] surface remains a tracked
-// follow-on (#1320/#1321 wire the operator console and full session control).
+// Scope of THIS child (honest fence): the loop drives a served turn to a final answer —
+// the AgentDojo-shaped run the program's definition-of-done names ("an AgentDojo run
+// driven entirely by fak serve --native"). The operator console and full session control
+// remain a tracked follow-on (#1320/#1321).
+//
+// #6657 closed the wire seam this file used to narrow: the loop was seeded with
+// lastUserText(req.Messages) alone and req.Tools was never read, so a served turn ran the
+// built-in fixture catalog against a one-line reconstruction of the conversation. Both
+// entry points now run ONE conversion (native_wire.go's newNativeWireSeed) that carries
+// the ordered transcript and the request-scoped catalog across the seam, and refuse a
+// declaration they cannot honor with a typed 400 before the loop runs.
 
 import (
 	"context"
@@ -46,7 +51,17 @@ func nativeMaxTurnsOr(n int) int {
 // on the Anthropic wire. It is the native counterpart to completeAnthropicTurn.
 func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string) {
 	began := time.Now()
-	m, err := s.runNativeArm(r.Context(), req, reqTrace)
+	// Convert the served request BEFORE the loop runs (P3 fail-closed): a tools[]
+	// declaration this seam cannot honor is refused with its closed reason token, so the
+	// caller learns its catalog was rejected instead of watching a turn run against a
+	// catalog it never declared.
+	seed, wireErr := newNativeWireSeed(req)
+	if wireErr != nil {
+		s.logf("gateway: native serve refused request (trace %s): %v", reqTrace, wireErr)
+		writeNativeWireErr(w, wireErr)
+		return
+	}
+	m, err := s.runNativeArmSeed(r.Context(), seed, reqTrace)
 	if err != nil {
 		// An owned-loop failure is classified like any served turn error: a device OOM
 		// becomes an actionable 503, a genuine model failure stays a 502 with the raw
@@ -95,6 +110,18 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	sp, ok := s.planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		s.serveNativeMessages(w, r, req, reqTrace)
+		return
+	}
+
+	// The SAME conversion the buffered handler runs, and — critically — run BEFORE the
+	// 200 and the SSE headers go out. A refusal discovered after the stream opened could
+	// only be an error frame inside a successful response; refusing here keeps it a real
+	// 400 the client can act on. The two fallbacks above delegate to the buffered handler,
+	// which does its own conversion, so no request reaches the loop unconverted.
+	seed, wireErr := newNativeWireSeed(req)
+	if wireErr != nil {
+		s.logf("gateway: native stream refused request (trace %s): %v", reqTrace, wireErr)
+		writeNativeWireErr(w, wireErr)
 		return
 	}
 
@@ -170,7 +197,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		send(string(ev.Kind), payload)
 	}
 
-	m, err := s.runNativeArmStream(r.Context(), req, reqTrace, emitText, onProgress)
+	m, err := s.runNativeArmStreamSeed(r.Context(), seed, reqTrace, emitText, onProgress)
 	if err != nil {
 		s.logf("gateway: native stream loop error (trace %s): %v", reqTrace, err)
 		closeText()
@@ -208,26 +235,57 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 //     the account-bound Target.EngineRoute() and gated on the caller's tenancy — the same
 //     resolveRoute the proxy path runs, rather than a manifest-only route (#5644).
 //
-// The loop is seeded with the request's last user message; the kernel-owned tool catalog
-// is the sole tool path. It returns the per-turn ArmMetrics — the witness that the loop,
+// The loop is seeded with the request's ordered conversation and its request-scoped tool
+// catalog (#6657); a request that declares no tools still drives the kernel-owned
+// agent.ToolCatalog(). It returns the per-turn ArmMetrics — the witness that the loop,
 // not an external harness, drove the turn.
+//
+// This is the conversion-owning entry point for callers that hold only a request (the
+// route-parity and stop-gate tests, and any future non-HTTP caller): it fails closed on a
+// declaration the seam cannot honor rather than running the loop on a partial catalog.
+// The HTTP handlers convert once themselves so they can render that refusal as a typed
+// 400, and call runNativeArmSeed below with the seed they already hold.
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
+	seed, wireErr := newNativeWireSeed(req)
+	if wireErr != nil {
+		return agent.ArmMetrics{}, wireErr
+	}
+	return s.runNativeArmSeed(ctx, seed, reqTrace)
+}
+
+// runNativeArmSeed drives the owned loop for one ALREADY-CONVERTED request. Splitting the
+// conversion out is what lets the wire handlers refuse before they commit a status code
+// while both entry points still share exactly one conversion.
+func (s *Server) runNativeArmSeed(ctx context.Context, seed nativeWireSeed, reqTrace string) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
-	task := lastUserText(req.Messages)
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
 	defer release()
-	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, opts...)
+	opts = append(opts, seed.runOptions()...)
+	return agent.RunArm(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, nil, opts...)
 }
 
 // runNativeArmStream drives the owned loop for one STREAMED request. onProgress (may be
 // nil) receives the loop's typed lifecycle transitions (#5148) so the caller can render
 // them as structured SSE alongside the text deltas; a nil observer leaves the loop
 // byte-for-byte the historical one.
+// It converts the request itself and fails closed on a declaration the seam cannot honor,
+// for the same reason runNativeArm does; the SSE handler converts up front instead so its
+// refusal is a 400 rather than an error frame, and calls runNativeArmStreamSeed.
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
+	seed, wireErr := newNativeWireSeed(req)
+	if wireErr != nil {
+		return agent.ArmMetrics{}, wireErr
+	}
+	return s.runNativeArmStreamSeed(ctx, seed, reqTrace, sink, onProgress)
+}
+
+// runNativeArmStreamSeed is the streamed twin of runNativeArmSeed: one already-converted
+// request, driven with the same wired conversation and request-scoped catalog.
+func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
-	task := lastUserText(req.Messages)
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
 	defer release()
+	opts = append(opts, seed.runOptions()...)
 	if onProgress != nil {
 		opts = append(opts, agent.WithProgressObserver(onProgress))
 	}
@@ -235,13 +293,13 @@ func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMes
 		// A rejected final answer must never leak as an SSE delta. Buffer stop-gated
 		// turns through the non-streaming planner path and emit only the final answer
 		// whose declared witness passed.
-		m, err := agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, opts...)
+		m, err := agent.RunArm(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, nil, opts...)
 		if err == nil && m.FinalAnswer != "" && sink != nil {
 			err = sink(m.FinalAnswer)
 		}
 		return m, err
 	}
-	return agent.RunArmStream(ctx, s.planner, task, true, s.nativeMaxTurns, sink, nil, opts...)
+	return agent.RunArmStream(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, sink, nil, opts...)
 }
 
 // ensureAgentPolicyRung guarantees the agent policy adjudicator is present in the
