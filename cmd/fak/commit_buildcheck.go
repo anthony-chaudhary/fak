@@ -190,7 +190,7 @@ func refuseCommitBuildCheck(stdout, stderr io.Writer, paths []string, bc safecom
 func commitBuildCheckAdvice(reason string) string {
 	switch reason {
 	case safecommit.ReasonBuildCheckTimeout:
-		return "fak commit: the prospective committed tree was NEVER compiled — the build gate timed out, so nothing here says this commit is green. This is retryable (exit 3): re-run it, or pass --allow-build-check-timeout (env FAK_COMMIT_BUILD_CHECK=allow-timeout) to land it UNCHECKED on purpose, or --no-build-check to skip the gate outright. Both opt-ins are recorded in --json as build_check.failed_open and docked in the commit's score."
+		return "fak commit: the prospective committed tree was NEVER compiled — the build gate timed out, so nothing here says this commit is green. This is retryable (exit 3): re-run it, or pass --allow-build-check-timeout (env FAK_COMMIT_BUILD_CHECK=allow-timeout) to land it UNCHECKED on purpose, or --no-build-check to skip the gate outright. --allow-build-check-timeout is recorded in --json as build_check.failed_open and docked in the commit's score; --no-build-check reports build_check.outcome=disabled."
 	default:
 		return "fak commit: the prospective committed tree does not compile under default tags — commit refused so the committed trunk stays green. Commit the missing definition too, or fence not-yet-compiling WIP behind //go:build wip_<feature> (see `fak wip fence`), or pass --no-build-check for an intentional multi-commit landing."
 	}
