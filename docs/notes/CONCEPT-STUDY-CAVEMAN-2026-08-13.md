@@ -77,3 +77,37 @@ Each issue carries both the pinned upstream anchor and the fak seam, the on-axis
 - Existing epics: [#1217](https://github.com/anthony-chaudhary/fak/issues/1217), [#3229](https://github.com/anthony-chaudhary/fak/issues/3229), [#4033](https://github.com/anthony-chaudhary/fak/issues/4033)
 - Existing TOON track: [#3064](https://github.com/anthony-chaudhary/fak/issues/3064)
 
+
+## Addendum — opt-in user profiles, not silent defaults (2026-08-13)
+
+A user follow-up identified a separate product requirement: some operators want the **skill shape itself**, not only lower internal context cost. fak should expose that value, but the two referenced systems affect different axes and must not be collapsed into one switch.
+
+### Existing fak seam
+
+Current trunk already ships the safe base mechanism:
+
+- `internal/syspromptmmu/style.go:10-145` defines `default|concise|terse`, keeps `default` as a no-op, gives explicit user formatting precedence, and preserves code, commands, diagnostics, identifiers, quotations, uncertainty, safety language, and next actions.
+- `cmd/fak/guard_output_style.go:13-63` wires the style through `fak guard --output-style` and rejects unknown values before harness launch.
+
+That makes Caveman response shape **PARTIAL-on-axis**, not absent. The missing piece is a named, intensity-bearing profile with reproducible metadata and a benchmarked quality/cost envelope.
+
+### Two orthogonal feature flags
+
+| Concern | Safe selector | Default | May change | Must never change | Filed |
+|---|---|---|---|---|---|
+| Caveman-like response shape | `--output-style caveman:medium` (later `low|high|auto`) | `default` | sentence/bullet shape, connective prose, response verbosity | facts, qualifiers, safety, code, commands, diagnostics, identifiers, explicit user format | [#6701](https://github.com/anthony-chaudhary/fak/issues/6701) |
+| Ponytail-like implementation restraint | `--work-profile ponytail` | `standard` | planning preference toward no-op/deletion/config/native/stdlib and smallest correct diff | requested scope, correctness, tests, security, authorization, compatibility, migration, proof | [#6700](https://github.com/anthony-chaudhary/fak/issues/6700) |
+
+The flags compose explicitly and never imply each other. `--work-profile ponytail --output-style caveman:medium` requests both; selecting only one leaves the other axis unchanged. Precedence is structural: system policy and explicit user requirements > repository instructions > work profile > output style. Unknown names fail closed. Every active profile records its name, pinned inspiration revision, injected-fragment digest, selection reason, and exact disable command in session metadata.
+
+Ponytail was checked at [`DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3`](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3). Its operational mechanism is the simplicity ladder in `skills/ponytail/SKILL.md:13-92` with explicit safety carve-outs at lines 115-124. Unlike Caveman response shape, this changes implementation decisions, so treating it as `terse` would be unsafe and semantically wrong. Ponytail is MIT at the pin; #6700 uses an attributed fak-native **ADAPT** route without the persona or always-on hook behavior.
+
+### Superset claim gate
+
+The architecture can make fak's selectable envelope a strict functional superset, but the phrase **“without question a superset” remains a gated claim, not current marketing**. It becomes supportable only when:
+
+1. #6701 and #6700 ship through the governed `syspromptmmu` seam with default-off/fail-closed tests, precedence tests, preservation/safety fixtures, captured context plans, and visible disable paths;
+2. benchmark epic [#6674](https://github.com/anthony-chaudhary/fak/issues/6674), especially Caveman ablation #6683 and Ponytail correctness/robustness tracks #6687-#6691, proves task quality and net-true cost against pinned comparator configurations; and
+3. the compatibility matrix distinguishes `behavioral coverage`, `safe composition`, and `measured advantage` rather than using one undifferentiated “compatible” badge.
+
+Until those witnesses exist, the honest wording is: **fak has the governed substrate and filed opt-in profiles needed to cover both user experiences; comparative parity is not yet proven.**
