@@ -72,6 +72,9 @@ func writeRepoPulseMetrics(w *promWriter, dir string) {
 	w.gauge("fak_fleet_repo_pulse_tool_turns_skipped_total", "Parent-visible tool turns avoided by default-on governed repository orientation.", float64(t.ToolTurnsSkipped))
 	w.gauge("fak_fleet_repo_pulse_journal_rows_total", "Governed child-call journal rows represented by repository orientation receipts.", float64(t.JournalRows))
 	w.gauge("fak_fleet_repo_pulse_duplicate_receipts_dropped_total", "Duplicate launch receipts excluded from cumulative repository-orientation savings.", float64(t.DuplicateRows))
+	readiness := assessRepoPulseCohort(dir, 5)
+	w.gauge("fak_fleet_repo_pulse_cohort_ready", "1 when durable post-default repository-orientation launches meet the minimum sample floor for outcome comparison; this does not itself prove improvement.", boolGauge(readiness.Verdict == "ready"))
+	w.gauge("fak_fleet_repo_pulse_cohort_sample_deficit", "Additional durable post-default launches required before repository-orientation outcome comparison.", float64(max(readiness.Minimum-readiness.PostLaunches, 0)))
 }
 
 type repoPulseCohortReadiness struct {

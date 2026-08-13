@@ -43,6 +43,9 @@ func (b collapseBackend) Dispatch(_ context.Context, act microagent.ToolAction) 
 }
 
 func cmdMicroCollapse(args []string) {
+	if len(args) > 0 && args[0] == "readiness" {
+		os.Exit(runMicroDogfoodReadiness(os.Stdout, os.Stderr, args[1:]))
+	}
 	if len(args) > 0 && args[0] == "repo-pulse" {
 		cmdMicroCollapseRepoPulse(args[1:])
 		return
