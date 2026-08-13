@@ -1,6 +1,13 @@
-ultracode — use the Workflow tool for exhaustive, adversarially-verified multi-agent
-orchestration on the ONE leaf you take. Optimize for the most correct result; token
-cost is not a constraint. Breadth across leaves is the wave's job, not yours.
+BUDGET FIRST. Your `fak guard --context-budget-tokens` allowance is CUMULATIVE, not a
+per-turn ceiling: every turn debits your ENTIRE resident window (prompt + cache_read +
+cache_creation, `internal/session/usage.go DebitUsage`), so ~2.0M at a ~100k window funds
+~20 turns TOTAL. On drain the guard restarts you with a ~900-token seed — you wake nearly
+blank, re-pay the same discovery, and drain again. Exhaustion loses the work. Therefore:
+  - SHIP EARLY: first commit inside ~10 turns; smallest correct change first, then iterate.
+  - You are ONE leaf: do NOT use the Workflow tool or multi-agent orchestration.
+  - Grep to the line. Do not read a whole file you can grep, and never re-read one.
+  - The per-turn `ctx:<n>/96.0k` nudge is the COMPACTION shed-line, NOT your session
+    budget. Different scales — never read one as the other.
 
 WAVE: {{WAVE}}
 LANDING DEADLINE: {{DEADLINE}} — land or park by then, then STOP.
@@ -32,9 +39,8 @@ collision reads rc=0 and you burn the dispatch. rc=0 take it; rc=3 a live peer h
 it, pick the next leaf; anything else, treat as held and pick the next leaf. Release
 with `fak intent release --target "issue #<N>"` when it ships or you abandon it.
 
-LANDING DEADLINE — the wave's only schedule rule, and it beats polish. Depth buys
-nothing here: a worker 120 turns deep produces no more per turn than one at turn 30
-while its context bill per turn has risen ~1.6x. At the deadline:
+LANDING DEADLINE — beats polish. Depth buys nothing: a worker 120 turns deep produces
+no more per turn than one at turn 30, at ~1.6x the context bill. At the deadline:
   - work committed → report the SHA and stop.
   - work uncommitted → PARK it (refusals.md § Park) and report the tag. A finding
     that is not committed, not commented on an issue, and not parked did not happen.
@@ -49,10 +55,10 @@ REPORT (last message, these fields, one per line — the orchestrator parses the
     FOLLOWUPS: #<n> #<n>   (or `none`)
     TREE: clean | dirty <paths>
 
-Do NOT end by narrating leftover work. Any out-of-scope follow-up you would list as
-"two more things" MUST be filed as an open gh issue first (dedupe → done-condition →
-leak-check → label) — a named-but-unfiled follow-up is silently-deferred work this
-repo forbids. Self-check with `fak headless-lint --leftovers --issues-filed <N>`.
+Do NOT end by narrating leftover work. Any out-of-scope follow-up MUST be filed as an
+open gh issue first (dedupe → done-condition → leak-check → label); a named-but-unfiled
+follow-up is silently-deferred work this repo forbids. Self-check with
+`fak headless-lint --leftovers --issues-filed <N>`.
 
 Never publish a machine-absolute path, hostname, or personal identifier (PUBLIC_LEAK).
 A launch is not a ship — only a witnessed commit on the trunk resolves an issue.

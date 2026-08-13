@@ -23,7 +23,7 @@ metadata:
 | [`super-loop`](../super-loop/SKILL.md) | the raw bulk launcher and its regimes. `/fleet-wave` is the **goal-shaped** door over it: one wave, one closing target, one deadline. |
 | [`wave-harvest`](../wave-harvest/SKILL.md) | the reconcile half. Phase 5 **calls it**; it is not copied here. |
 | [`refusals.md`](refusals.md) | the worker refusal + park rules — the one canonical copy, read by every worker **by path**. |
-| [`fuel-ultracode-wave.md`](fuel-ultracode-wave.md) | the fuel pointer template rendered per wave. |
+| [`fuel-wave.md`](fuel-wave.md) | the fuel pointer template rendered per wave — budget-aware by construction; `go test ./internal/wavefuel/...` refuses a regression. |
 | [`monitor.md`](monitor.md) | the read-only watcher preamble. |
 | [`RATIONALE.md`](RATIONALE.md) | the evidence behind every rule here. **No worker loads it** — keep it that way. |
 
@@ -151,7 +151,7 @@ WAVE=fw$(date -u +%m%d%H%M)                       # single-use; never reuse a wa
 DEADLINE=$(date -u -d '+4 hours' +%Y-%m-%dT%H:%MZ)
 mkdir -p .fak/wave
 sed -e "s/{{WAVE}}/$WAVE/g" -e "s/{{DEADLINE}}/$DEADLINE/g" \
-    .claude/skills/fleet-wave/fuel-ultracode-wave.md > ".fak/wave/$WAVE.md"
+    .claude/skills/fleet-wave/fuel-wave.md > ".fak/wave/$WAVE.md"
 
 # ⛔ THE GATE. Over 4000 and every spawn throws; the wave is zero workers.
 b=$(wc -c < ".fak/wave/$WAVE.md"); echo "cond=$((b+6)) cap=4000"; [ $((b+6)) -lt 4000 ] || echo "REFUSING — shrink the fuel"
