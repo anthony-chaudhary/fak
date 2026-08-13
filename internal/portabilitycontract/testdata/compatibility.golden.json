@@ -1,0 +1,14 @@
+{
+  "schema": "fak.portability/v1",
+  "rules": {
+    "reader": "A v1 reader MUST reject schema majors newer than the reader and unknown critical extensions; it MUST preserve unknown non-critical extensions.",
+    "writer": "A v1 writer MUST emit explicit schema/type versions and canonical content/package identities.",
+    "types": "Unknown object types MUST remain opaque and inert while round-tripping byte-equivalent JSON meaning.",
+    "identity": "Stable IDs name logical objects; content IDs name canonical type/version/payload. Package IDs cover only portable content, excluding signatures, receipts, machine scope, secret sensitivity, and local fields.",
+    "precedence": "machine > user > project > team > corporate > public; explicit integer precedence then stable ID break ties.",
+    "transactions": "apply/switch/merge require preview hash, expected state, idempotency key, recovery mode, and rollback operations. State mismatch or changed preview aborts before mutation.",
+    "translation": "Cross-harness translation MUST enumerate each semantic loss with object, feature, severity, lost meaning, and fallback; exact is false whenever degradations are non-empty.",
+    "migration": "Each migration declares from/to, a stable migration ID, and reversibility. Non-reversible migration cannot satisfy rollback without a retained before-state receipt."
+  }
+}
+

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/portability/contract/v1.schema.json",
+  "title": "fak managed-agent portability contract v1",
+  "type": "object",
+  "required": ["schema", "stable_id", "package_id", "collections", "compatibility"],
+  "properties": {
+    "schema": {"const": "fak.portability/v1"},
+    "stable_id": {"type": "string", "minLength": 1},
+    "package_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "collections": {"type": "array", "items": {"$ref": "#/$defs/collection"}},
+    "compatibility": {"$ref": "#/$defs/compatibility"},
+    "signatures": {"type": "array", "items": {"$ref": "#/$defs/signature"}},
+    "extensions": {"$ref": "#/$defs/extensions"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "scope": {"enum": ["machine", "user", "project", "team", "corporate", "public"]},
+    "compatibility": {"type":"object","required":["min_reader"],"properties":{"min_reader":{"type":"string"},"harnesses":{"type":"array","items":{"type":"string"}},"features":{"type":"array","items":{"type":"string"}}},"additionalProperties":false},
+    "dependency": {"type":"object","required":["id"],"properties":{"id":{"type":"string"},"content_id":{"type":"string"},"optional":{"type":"boolean"}},"additionalProperties":false},
+    "signature": {"type":"object","required":["algorithm","key_id","value"],"properties":{"algorithm":{"type":"string"},"key_id":{"type":"string"},"value":{"type":"string"}},"additionalProperties":false},
+    "extensions": {"type":"object","additionalProperties":{"type":"object","required":["critical","data"],"properties":{"critical":{"type":"boolean"},"data":{}},"additionalProperties":false}},
+    "object": {
+      "type":"object", "required":["schema","type","type_version","stable_id","content_id","provenance","scope","sensitivity","compatibility","payload"],
+      "properties": {
+        "schema":{"const":"fak.portability/v1"},"type":{"type":"string"},"type_version":{"type":"string"},"stable_id":{"type":"string"},"content_id":{"pattern":"^sha256:[0-9a-f]{64}$"},
+        "provenance":{"type":"object","required":["producer","created"],"properties":{"producer":{"type":"string"},"source":{"type":"string"},"created":{"type":"string"},"derived_from":{"type":"array","items":{"type":"string"}}},"additionalProperties":false},
+        "dependencies":{"type":"array","items":{"$ref":"#/$defs/dependency"}},"scope":{"$ref":"#/$defs/scope"},"sensitivity":{"enum":["public","internal","confidential","secret"]},"compatibility":{"$ref":"#/$defs/compatibility"},"precedence":{"type":"integer"},"signatures":{"type":"array","items":{"$ref":"#/$defs/signature"}},
+        "migration":{"type":"object","required":["from","to","id","reversible"],"properties":{"from":{"type":"string"},"to":{"type":"string"},"id":{"type":"string"},"reversible":{"type":"boolean"}},"additionalProperties":false},
+        "receipts":{"type":"array"},"extensions":{"$ref":"#/$defs/extensions"},"payload":{}
+      }, "additionalProperties":false
+    },
+    "collection": {"type":"object","required":["schema","stable_id","version","objects"],"properties":{"schema":{"const":"fak.portability/v1"},"stable_id":{"type":"string"},"version":{"type":"string"},"objects":{"type":"array","items":{"$ref":"#/$defs/object"}},"dependencies":{"type":"array","items":{"$ref":"#/$defs/dependency"}},"extensions":{"$ref":"#/$defs/extensions"}},"additionalProperties":false}
+  },
+  "x-fak-concepts": {
+    "Context": "active collection set and deterministic scope selection",
+    "Channel": "transport capability and compatibility declaration",
+    "Transaction": "previewed apply/switch/merge journal with rollback and degradation report"
+  }
+}

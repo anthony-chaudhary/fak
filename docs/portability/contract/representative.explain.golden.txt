@@ -1,0 +1,12 @@
+Portability package pkg:representative-managed-context
+Schema: fak.portability/v1
+Identity: sha256:7b4222ff4d1a991e95ec16dad4e9385f73ff10da736b60ab96de91d8ac806259
+
+Collection collection:working-set (4 objects)
+- secret:api: secret-reference@1.0.0, scope=machine, sensitivity=secret, precedence=0, active
+- skill:review: skill@1.0.0, scope=user, sensitivity=internal, precedence=0, active
+- policy:safe-shell: policy@1.0.0, scope=project, sensitivity=internal, precedence=10, active
+- vendor:opaque-1: vendor.future-widget@7.2.0, scope=team, sensitivity=confidential, precedence=0, INERT (unknown type; preserved)
+
+Transport identity omits signatures, receipts, machine-scope and secret objects.
+Precedence: machine > user > project > team > corporate > public; explicit precedence then stable ID break ties.

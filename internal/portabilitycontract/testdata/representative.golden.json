@@ -1,0 +1,149 @@
+{
+  "schema": "fak.portability/v1",
+  "stable_id": "pkg:representative-managed-context",
+  "package_id": "sha256:7b4222ff4d1a991e95ec16dad4e9385f73ff10da736b60ab96de91d8ac806259",
+  "collections": [
+    {
+      "schema": "fak.portability/v1",
+      "stable_id": "collection:working-set",
+      "version": "1",
+      "objects": [
+        {
+          "schema": "fak.portability/v1",
+          "type": "policy",
+          "type_version": "1.0.0",
+          "stable_id": "policy:safe-shell",
+          "content_id": "sha256:40a2a986b458332875ca0d65e2610c7477a67d14d430214627954ef711df052e",
+          "provenance": {
+            "producer": "fak",
+            "source": "repo:examples/policy",
+            "created": "2026-08-13T00:00:00Z"
+          },
+          "dependencies": [
+            {
+              "id": "skill:review"
+            }
+          ],
+          "scope": "project",
+          "sensitivity": "internal",
+          "compatibility": {
+            "min_reader": "1.0.0",
+            "harnesses": [
+              "codex",
+              "claude"
+            ]
+          },
+          "precedence": 10,
+          "migration": {
+            "from": "0.9.0",
+            "to": "1.0.0",
+            "id": "policy-v1",
+            "reversible": true
+          },
+          "extensions": {
+            "fak.audit": {
+              "critical": true,
+              "data": {
+                "mode": "strict"
+              }
+            }
+          },
+          "payload": {
+            "allow": [
+              "read",
+              "build"
+            ]
+          }
+        },
+        {
+          "schema": "fak.portability/v1",
+          "type": "skill",
+          "type_version": "1.0.0",
+          "stable_id": "skill:review",
+          "content_id": "sha256:7adf48b80df397431b28237400f566f8db9a9ba95ce937775f2802500c114f3f",
+          "provenance": {
+            "producer": "operator",
+            "created": "2026-08-13T00:00:00Z"
+          },
+          "scope": "user",
+          "sensitivity": "internal",
+          "compatibility": {
+            "min_reader": "1.0.0"
+          },
+          "payload": {
+            "instruction": "review before write"
+          }
+        },
+        {
+          "schema": "fak.portability/v1",
+          "type": "vendor.future-widget",
+          "type_version": "7.2.0",
+          "stable_id": "vendor:opaque-1",
+          "content_id": "sha256:905144bdc741ef76089d0f37bdb2269bc71aba0a20a0b536f5b34e739fcf52ee",
+          "provenance": {
+            "producer": "other-harness",
+            "created": "2026-08-13T00:00:00Z"
+          },
+          "scope": "team",
+          "sensitivity": "confidential",
+          "compatibility": {
+            "min_reader": "1.0.0",
+            "harnesses": [
+              "future-harness"
+            ]
+          },
+          "payload": {
+            "activate": true,
+            "opaque": [
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        {
+          "schema": "fak.portability/v1",
+          "type": "secret-reference",
+          "type_version": "1.0.0",
+          "stable_id": "secret:api",
+          "content_id": "sha256:85746d774e5d8307e61e107adafbb4285bd2e0939569c9e8c8a906d4f0ccaed5",
+          "provenance": {
+            "producer": "local",
+            "created": "2026-08-13T00:00:00Z"
+          },
+          "scope": "machine",
+          "sensitivity": "secret",
+          "compatibility": {
+            "min_reader": "1.0.0"
+          },
+          "payload": {
+            "provider": "environment",
+            "name": "API_TOKEN"
+          }
+        }
+      ]
+    }
+  ],
+  "compatibility": {
+    "min_reader": "1.0.0",
+    "harnesses": [
+      "codex",
+      "claude"
+    ]
+  },
+  "signatures": [
+    {
+      "algorithm": "ed25519",
+      "key_id": "team:release",
+      "value": "fixture-signature"
+    }
+  ],
+  "extensions": {
+    "vendor.note": {
+      "critical": false,
+      "data": {
+        "note": "preserve me"
+      }
+    }
+  }
+}

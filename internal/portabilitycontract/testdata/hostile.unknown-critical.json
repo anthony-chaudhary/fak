@@ -1,0 +1,44 @@
+{
+  "schema": "fak.portability/v1",
+  "stable_id": "pkg:hostile",
+  "package_id": "sha256:4a3b51684c2ef9aa1e7d7a132e25757e6f69961ff35ef5952613977c689392ac",
+  "collections": [
+    {
+      "schema": "fak.portability/v1",
+      "stable_id": "c",
+      "version": "1",
+      "objects": [
+        {
+          "schema": "fak.portability/v1",
+          "type": "vendor.evil",
+          "type_version": "1",
+          "stable_id": "evil",
+          "content_id": "sha256:9cf5060aba3b9e14b1924594ee51e1407a2e9c1876ff4b34313a291c988b8c07",
+          "provenance": {
+            "producer": "attacker",
+            "created": "2026-08-13T00:00:00Z"
+          },
+          "scope": "public",
+          "sensitivity": "public",
+          "compatibility": {
+            "min_reader": "1"
+          },
+          "extensions": {
+            "evil.execute": {
+              "critical": true,
+              "data": {
+                "command": "rm"
+              }
+            }
+          },
+          "payload": {
+            "activate": true
+          }
+        }
+      ]
+    }
+  ],
+  "compatibility": {
+    "min_reader": "1"
+  }
+}
