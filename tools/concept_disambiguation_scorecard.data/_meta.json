@@ -592,6 +592,11 @@
           "category": "incidental",
           "reason": "Issue #6703 private consistency helper, not a new cache architecture concept",
           "token": "cacheScopeConsistent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider-reported cache accounting DTO in an armbench trial row; measurement fields, not a cache mechanism or cache taxonomy concept.",
+          "token": "CacheCounters"
         }
       ],
       "id": "cache",
@@ -762,7 +767,8 @@
         "turnCacheStatsMu",
         "turnCacheSummary",
         "uncached",
-        "usercachedir"
+        "usercachedir",
+        "CacheCounters"
       ],
       "min_files": 3,
       "name": "Cache family",
@@ -4562,6 +4568,46 @@
           "category": "incidental",
           "reason": "SIGNATURE_POLICY is a test fixture capability token used to prove signature-policy enforcement; it is scenario data, not a new production API or concept family.",
           "token": "SIGNATURE_POLICY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire value for armbench's single-capability arm kind; benchmark schema vocabulary, not a policy capability concept.",
+          "token": "fak_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constant for armbench's single-capability benchmark arm kind; local schema symbol, not a policy capability concept.",
+          "token": "ArmFakCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constant naming an armbench manifest refusal; local benchmark validation symbol, not a policy capability concept.",
+          "token": "ReasonArmCapabilityBundled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench manifest refusal token for a multi-capability benchmark arm; a benchmark validation code, not a policy capability concept.",
+          "token": "ARM_CAPABILITY_BUNDLED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constant naming an armbench manifest refusal; local benchmark validation symbol, not a policy capability concept.",
+          "token": "ReasonArmCapabilityUnnamed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench manifest refusal token for an unnamed benchmark capability arm; a benchmark validation code, not a policy capability concept.",
+          "token": "ARM_CAPABILITY_UNNAMED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selfcheck assertion label for the bundled-arm refusal; test evidence name, not a policy capability concept.",
+          "token": "bundled_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selfcheck assertion label for the unnamed-arm refusal; test evidence name, not a policy capability concept.",
+          "token": "unnamed_capability"
         }
       ],
       "exclude": [
@@ -4667,7 +4713,15 @@
         "tool_policy_grammar",
         "verifyTailPolicyMatrix",
         "windowReceipt",
-        "windowResult"
+        "windowResult",
+        "fak_capability",
+        "ArmFakCapability",
+        "ReasonArmCapabilityBundled",
+        "ARM_CAPABILITY_BUNDLED",
+        "ReasonArmCapabilityUnnamed",
+        "ARM_CAPABILITY_UNNAMED",
+        "bundled_capability",
+        "unnamed_capability"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
@@ -6671,6 +6725,11 @@
           "category": "incidental",
           "reason": "Deterministic hash helper for an adapter preview plan; it is implementation vocabulary and not a planning concept.",
           "token": "stablePlanID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure armbench execution-order planner for task/trial pairs; local benchmark scheduling helper, not a planning-system concept.",
+          "token": "PlanUnits"
         }
       ],
       "exclude": [
@@ -6758,7 +6817,8 @@
         "seedCandidate",
         "stablePlanID",
         "wipLandOptions",
-        "wipLandWith"
+        "wipLandWith",
+        "PlanUnits"
       ],
       "min_files": 2,
       "name": "Plan family",

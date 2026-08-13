@@ -767,6 +767,8 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                 make hygiene / make index-sync backstop; exit 2 lets make fall back)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
+  fak armbench  run --manifest M.json --corpus C.json --out RUN.json [--resume PRIOR.json]
+                (provenance-locked paired multi-arm runner; selfcheck is deterministic/offline)
   fak dojo      run --corpus DIR | list    (prediction-vs-reality calibration gym)
   fak score     <name> [--json] [--markdown] [--compare FILE]   (#1505)
                  (parent verb for the meta-scorecards / RSI loops -- one grouped surface for the

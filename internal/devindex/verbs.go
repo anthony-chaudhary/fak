@@ -80,6 +80,7 @@ var verbManifest = []Verb{
 	{Name: "answer-shape", Synopsis: "degeneration/verbosity witness: grade how repetitive and how long a candidate answer is", Lane: "cmd"},
 	{Name: "antipattern-scorecard", Synopsis: "the unified work-loss card: fold REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt", Lane: "cmd", Doc: "docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md"},
 	{Name: "api-host", Synopsis: "probe an API-host target (base_url/api_key/model) for readiness + acceptance, JSON/Markdown reports", Lane: "cmd"},
+	{Name: "armbench", Synopsis: "run provenance-locked paired benchmark arms from one immutable manifest", Lane: "cmd", Doc: "docs/armbench.md"},
 	{Name: "assume", Synopsis: "check a declared assumption against its witness: seat-launchable (doctor claim vs accounts-next authority)", Lane: "cmd"},
 	{Name: "attest", Synopsis: "compliance attestation generator: prove the policy capability floor from preflight", Lane: "cmd"},
 	{Name: "audit", Synopsis: "audit-trail consumer: verify/export a fak guard decision journal's hash chain", Lane: "cmd"},

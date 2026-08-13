@@ -1,0 +1,1365 @@
+{
+  "schema": "fak.armbench.selfcheck/1",
+  "ok": true,
+  "checks": [
+    {
+      "name": "spine.end_to_end",
+      "ok": true,
+      "detail": "ran 24 rows (24 executed), want 24",
+      "evidence": "baseline,caveman-upstream,fak-ctxmmu,fak-passthrough"
+    },
+    {
+      "name": "spine.covers_baseline_treatment_and_fak",
+      "ok": true,
+      "detail": "arm kinds present: [baseline upstream_treatment fak_passthrough fak_capability]"
+    },
+    {
+      "name": "identity.changes_on_model",
+      "ok": true,
+      "detail": "model snapshot swapped: identity moved",
+      "evidence": "sha256:dd9bb881bf7ebbc9e9e02d23dc232fde5b4c599fb1e792dfbdd5f294c18f7d4a"
+    },
+    {
+      "name": "identity.changes_on_prompt",
+      "ok": true,
+      "detail": "baseline arm prompt hash swapped: identity moved",
+      "evidence": "sha256:4686dd1f134121059b496953952ca4a6ab3b044fc0d45828c3a653f8f2b1bc1c"
+    },
+    {
+      "name": "identity.changes_on_judge",
+      "ok": true,
+      "detail": "judge hash swapped: identity moved",
+      "evidence": "sha256:33f87cdf9d9e2fae3ded578ab1dcd5563c5f70a47798d9f491bdcc0730bdcd01"
+    },
+    {
+      "name": "identity.changes_on_corpus",
+      "ok": true,
+      "detail": "corpus hash swapped: identity moved",
+      "evidence": "sha256:b0fa202a1c3cd77ac0dd28c9e163d957d96a642af4dd1f994f3d76eeba988f49"
+    },
+    {
+      "name": "identity.changes_on_capability",
+      "ok": true,
+      "detail": "isolated capability swapped: identity moved",
+      "evidence": "sha256:f6e19f2ea267df599704e8a320308b3badc192336c8b8bf3fd6559ce57dc7a0e"
+    },
+    {
+      "name": "identity.stable_when_unchanged",
+      "ok": true,
+      "detail": "an unmutated copy of the demo manifest hashes to the same identity",
+      "evidence": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b"
+    },
+    {
+      "name": "identity.changes_on_environment",
+      "ok": true,
+      "detail": "changing the recorded host class moves the immutable-manifest identity",
+      "evidence": "sha256:21019e9118211ce0b58bafd91f2297ff500507dfdd9680c12849de55cb3e40fa"
+    },
+    {
+      "name": "failclosed.missing_raw_evidence",
+      "ok": true,
+      "detail": "refused with MISSING_RAW_EVIDENCE as required",
+      "evidence": "arm fak-ctxmmu task task-charlie trial 1: MISSING_RAW_EVIDENCE: trial recorded no raw response and no failure reason — a usage/latency row with no response behind it is not evidence"
+    },
+    {
+      "name": "failclosed.bundled_capability",
+      "ok": true,
+      "detail": "refused with ARM_CAPABILITY_BUNDLED as required",
+      "evidence": "ARM_CAPABILITY_BUNDLED: arms[3] (fak-ctxmmu) bundles 2 capabilities [ctxmmu-paging toon-encoding] — one arm isolates exactly one capability; bundle only after each has an isolated arm"
+    },
+    {
+      "name": "failclosed.unnamed_capability",
+      "ok": true,
+      "detail": "refused with ARM_CAPABILITY_UNNAMED as required",
+      "evidence": "ARM_CAPABILITY_UNNAMED: arms[3] (fak-ctxmmu) is kind \"fak_capability\" but names no capability"
+    },
+    {
+      "name": "resume.no_duplicate_trials",
+      "ok": true,
+      "detail": "resume executed 0 new trial(s), carried 24 row(s), 0 duplicate key(s)"
+    },
+    {
+      "name": "resume.refuses_foreign_ledger",
+      "ok": true,
+      "detail": "refused with RESUME_IDENTITY_MISMATCH as required",
+      "evidence": "RESUME_IDENTITY_MISMATCH: resume ledger was produced under identity sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b but this manifest is sha256:dd9bb881bf7ebbc9e9e02d23dc232fde5b4c599fb1e792dfbdd5f294c18f7d4a — resuming would mix two experiments"
+    },
+    {
+      "name": "comparability.refuses_drifted_manifest",
+      "ok": true,
+      "detail": "refused with INCOMPARABLE_MANIFEST as required",
+      "evidence": "corpus.hash"
+    },
+    {
+      "name": "comparability.admits_identical_manifest",
+      "ok": true,
+      "detail": "two identical manifests are comparable"
+    },
+    {
+      "name": "pairing.counterbalanced_order",
+      "ok": true,
+      "detail": "4 of 4 arms occupied first position across 6 paired units",
+      "evidence": "map[baseline:1 caveman-upstream:2 fak-ctxmmu:2 fak-passthrough:1]"
+    }
+  ],
+  "report": "armbench armbench-spine-demo\n  identity     sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\n  model        fake fake-deterministic-2026-08-13 (local) temp=0 top_p=1 max_tokens=4096\n  corpus       spine-demo-corpus (3 tasks) sha256:964f2c4066a3635220283f2e66d830997c764e27aa972e3e657a9c190fc86c48\n  judge        fake/contains-task-id sha256:ea454898290afd6e96bf91eea7fb72996acb7653b46ab351b92e0f044cbcb9e4\n  trials       2 per task, order=counterbalanced seed=11 concurrency=2\n  pricing date 2026-08-13   env any/any armbench@r1\n  source       caveman JuliusBrussee/caveman@c72984e439 benchmarks/run.py sha256:530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce\n  source       ponytail DietrichGebert/ponytail@2ed6c52c9d benchmarks/arms/baseline.js sha256:ef0f81f670425705ab3195609947aa64890890cb078d7669780afe2228da8740\n  rows         24 total (24 executed, 0 resumed, 0 failed)\n\n  ARM                    KIND                   N  FAIL  PASS%     IN_TOK    OUT_TOK  TOTAL_TOK  COST_USD   WALL_MS   TTFT_MS\n  baseline               baseline               6     0 100.0%       7200       5400      12600    0.1026     900.4     150.4\n  caveman-upstream       upstream_treatment     6     0 100.0%       8040       3120      11160    0.0709     780.8     130.8\n  fak-ctxmmu[ctxmmu-pag~ fak_capability         6     0 100.0%       7560       3660      11220    0.0776     700.6     117.2\n  fak-passthrough        fak_passthrough        6     0 100.0%       7290       5400      12690    0.1029     936.1     156.9\n\n  setup cost (charged once per arm, amortized over its graded trials)\n    baseline               wall      0.0 ms  tokens      0  cost   0.0000  -\u003e  per-trial wall    0.00 ms  cost  0.00000\n    caveman-upstream       wall   2500.0 ms  tokens    400  cost   0.0004  -\u003e  per-trial wall  416.67 ms  cost  0.00007\n    fak-ctxmmu             wall   2500.0 ms  tokens    400  cost   0.0004  -\u003e  per-trial wall  416.67 ms  cost  0.00007\n    fak-passthrough        wall   2500.0 ms  tokens    400  cost   0.0004  -\u003e  per-trial wall  416.67 ms  cost  0.00007\n\n  input and output tokens are never blended: read both columns before quoting a saving.\n",
+  "spine_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+  "spine": {
+    "schema": "fak.armbench.report/1",
+    "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+    "manifest_id": "armbench-spine-demo",
+    "model": {
+      "provider": "fake",
+      "snapshot": "fake-deterministic-2026-08-13",
+      "region": "local",
+      "sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "seed": 7
+      },
+      "max_tokens": 4096
+    },
+    "corpus": {
+      "id": "spine-demo-corpus",
+      "hash": "sha256:964f2c4066a3635220283f2e66d830997c764e27aa972e3e657a9c190fc86c48",
+      "task_count": 3
+    },
+    "judge": {
+      "id": "fake/contains-task-id",
+      "hash": "sha256:ea454898290afd6e96bf91eea7fb72996acb7653b46ab351b92e0f044cbcb9e4",
+      "kind": "deterministic"
+    },
+    "trials": {
+      "count": 2,
+      "seed": 11,
+      "order": "counterbalanced",
+      "concurrency": 2
+    },
+    "environment": {
+      "os": "any",
+      "arch": "any",
+      "host_class": "dev",
+      "fak_version": "armbench@r1",
+      "pricing_date": "2026-08-13"
+    },
+    "sources": [
+      {
+        "name": "caveman",
+        "repo": "JuliusBrussee/caveman",
+        "sha": "c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+        "path": "benchmarks/run.py",
+        "content_hash": "sha256:530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce",
+        "retrieved_at": "2026-08-13"
+      },
+      {
+        "name": "ponytail",
+        "repo": "DietrichGebert/ponytail",
+        "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+        "path": "benchmarks/arms/baseline.js",
+        "content_hash": "sha256:ef0f81f670425705ab3195609947aa64890890cb078d7669780afe2228da8740",
+        "retrieved_at": "2026-08-13"
+      }
+    ],
+    "arms": [
+      {
+        "arm_id": "baseline",
+        "kind": "baseline",
+        "trials": 6,
+        "resumed": 0,
+        "failures": 0,
+        "retries": 0,
+        "graded": 6,
+        "passes": 6,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "input_tokens": 7200,
+        "output_tokens": 5400,
+        "total_tokens": 12600,
+        "cost_usd": 0.10260000000000001,
+        "mean_wall_ms": 900.4000000000001,
+        "mean_ttft_ms": 150.4,
+        "ttft_samples": 6,
+        "ttft_available": true,
+        "mean_inter_token_ms": 1,
+        "inter_token_samples": 6,
+        "inter_token_available": true,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_hits": 0,
+        "cache_misses": 6,
+        "setup": {
+          "wall_ms": 0,
+          "tokens": 0,
+          "cost_usd": 0,
+          "note": "no setup required for baseline"
+        },
+        "setup_amortized_wall_ms": 0,
+        "setup_amortized_cost_usd": 0
+      },
+      {
+        "arm_id": "caveman-upstream",
+        "kind": "upstream_treatment",
+        "trials": 6,
+        "resumed": 0,
+        "failures": 0,
+        "retries": 0,
+        "graded": 6,
+        "passes": 6,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "input_tokens": 8040,
+        "output_tokens": 3120,
+        "total_tokens": 11160,
+        "cost_usd": 0.07092,
+        "mean_wall_ms": 780.8000000000001,
+        "mean_ttft_ms": 130.79999999999998,
+        "ttft_samples": 6,
+        "ttft_available": true,
+        "mean_inter_token_ms": 1.5,
+        "inter_token_samples": 6,
+        "inter_token_available": true,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_hits": 0,
+        "cache_misses": 6,
+        "setup": {
+          "wall_ms": 2500,
+          "tokens": 400,
+          "cost_usd": 0.0004,
+          "note": "synthetic one-time install for caveman-upstream"
+        },
+        "setup_amortized_wall_ms": 416.6666666666667,
+        "setup_amortized_cost_usd": 0.00006666666666666667
+      },
+      {
+        "arm_id": "fak-ctxmmu",
+        "kind": "fak_capability",
+        "capabilities": [
+          "ctxmmu-paging"
+        ],
+        "trials": 6,
+        "resumed": 0,
+        "failures": 0,
+        "retries": 0,
+        "graded": 6,
+        "passes": 6,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "input_tokens": 7560,
+        "output_tokens": 3660,
+        "total_tokens": 11220,
+        "cost_usd": 0.07758,
+        "mean_wall_ms": 700.5500000000001,
+        "mean_ttft_ms": 117.21666666666665,
+        "ttft_samples": 6,
+        "ttft_available": true,
+        "mean_inter_token_ms": 1.1475409836065573,
+        "inter_token_samples": 6,
+        "inter_token_available": true,
+        "cache_read_tokens": 6600,
+        "cache_write_tokens": 0,
+        "cache_hits": 6,
+        "cache_misses": 0,
+        "setup": {
+          "wall_ms": 2500,
+          "tokens": 400,
+          "cost_usd": 0.0004,
+          "note": "synthetic one-time install for fak-ctxmmu"
+        },
+        "setup_amortized_wall_ms": 416.6666666666667,
+        "setup_amortized_cost_usd": 0.00006666666666666667
+      },
+      {
+        "arm_id": "fak-passthrough",
+        "kind": "fak_passthrough",
+        "trials": 6,
+        "resumed": 0,
+        "failures": 0,
+        "retries": 0,
+        "graded": 6,
+        "passes": 6,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "input_tokens": 7290,
+        "output_tokens": 5400,
+        "total_tokens": 12690,
+        "cost_usd": 0.10286999999999999,
+        "mean_wall_ms": 936.0833333333334,
+        "mean_ttft_ms": 156.91666666666666,
+        "ttft_samples": 6,
+        "ttft_available": true,
+        "mean_inter_token_ms": 1.038888888888889,
+        "inter_token_samples": 6,
+        "inter_token_available": true,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 7200,
+        "cache_hits": 0,
+        "cache_misses": 6,
+        "setup": {
+          "wall_ms": 2500,
+          "tokens": 400,
+          "cost_usd": 0.0004,
+          "note": "synthetic one-time install for fak-passthrough"
+        },
+        "setup_amortized_wall_ms": 416.6666666666667,
+        "setup_amortized_cost_usd": 0.00006666666666666667
+      }
+    ],
+    "total_trials": 24,
+    "executed": 24,
+    "resumed": 0,
+    "failures": 0
+  },
+  "spine_run": {
+    "schema": "fak.armbench.run/1",
+    "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+    "manifest": {
+      "schema": "fak.armbench.manifest/1",
+      "id": "armbench-spine-demo",
+      "sources": [
+        {
+          "name": "caveman",
+          "repo": "JuliusBrussee/caveman",
+          "sha": "c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+          "path": "benchmarks/run.py",
+          "content_hash": "sha256:530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce",
+          "retrieved_at": "2026-08-13"
+        },
+        {
+          "name": "ponytail",
+          "repo": "DietrichGebert/ponytail",
+          "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+          "path": "benchmarks/arms/baseline.js",
+          "content_hash": "sha256:ef0f81f670425705ab3195609947aa64890890cb078d7669780afe2228da8740",
+          "retrieved_at": "2026-08-13"
+        }
+      ],
+      "model": {
+        "provider": "fake",
+        "snapshot": "fake-deterministic-2026-08-13",
+        "region": "local",
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 7
+        },
+        "max_tokens": 4096
+      },
+      "corpus": {
+        "id": "spine-demo-corpus",
+        "hash": "sha256:964f2c4066a3635220283f2e66d830997c764e27aa972e3e657a9c190fc86c48",
+        "task_count": 3
+      },
+      "judge": {
+        "id": "fake/contains-task-id",
+        "hash": "sha256:ea454898290afd6e96bf91eea7fb72996acb7653b46ab351b92e0f044cbcb9e4",
+        "kind": "deterministic"
+      },
+      "trials": {
+        "count": 2,
+        "seed": 11,
+        "order": "counterbalanced",
+        "concurrency": 2
+      },
+      "environment": {
+        "os": "any",
+        "arch": "any",
+        "host_class": "dev",
+        "fak_version": "armbench@r1",
+        "pricing_date": "2026-08-13"
+      },
+      "arms": [
+        {
+          "id": "baseline",
+          "kind": "baseline",
+          "prompt_hash": "sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb"
+        },
+        {
+          "id": "caveman-upstream",
+          "kind": "upstream_treatment",
+          "prompt_hash": "sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0",
+          "source_name": "caveman"
+        },
+        {
+          "id": "fak-passthrough",
+          "kind": "fak_passthrough",
+          "prompt_hash": "sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb"
+        },
+        {
+          "id": "fak-ctxmmu",
+          "kind": "fak_capability",
+          "capabilities": [
+            "ctxmmu-paging"
+          ],
+          "prompt_hash": "sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb"
+        }
+      ]
+    },
+    "setup": {
+      "baseline": {
+        "wall_ms": 0,
+        "tokens": 0,
+        "cost_usd": 0,
+        "note": "no setup required for baseline"
+      },
+      "caveman-upstream": {
+        "wall_ms": 2500,
+        "tokens": 400,
+        "cost_usd": 0.0004,
+        "note": "synthetic one-time install for caveman-upstream"
+      },
+      "fak-ctxmmu": {
+        "wall_ms": 2500,
+        "tokens": 400,
+        "cost_usd": 0.0004,
+        "note": "synthetic one-time install for fak-ctxmmu"
+      },
+      "fak-passthrough": {
+        "wall_ms": 2500,
+        "tokens": 400,
+        "cost_usd": 0.0004,
+        "note": "synthetic one-time install for fak-passthrough"
+      }
+    },
+    "trials": [
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "baseline",
+        "arm_kind": "baseline",
+        "task_id": "task-alpha",
+        "trial": 0,
+        "position": 0,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"baseline\",\"arm_kind\":\"baseline\",\"task_id\":\"task-alpha\",\"trial\":0,\"position\":0,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(baseline/task-alpha/t0)\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":900,\"cost_usd\":0.0171}}",
+          "text": "answer(baseline/task-alpha/t0)",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 900,
+            "cost_usd": 0.0171
+          },
+          "latency": {
+            "wall_ms": 900,
+            "ttft_ms": 150,
+            "ttft_available": true,
+            "inter_token_ms": 1,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"baseline\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "caveman-upstream",
+        "arm_kind": "upstream_treatment",
+        "task_id": "task-alpha",
+        "trial": 0,
+        "position": 1,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"caveman-upstream\",\"arm_kind\":\"upstream_treatment\",\"task_id\":\"task-alpha\",\"trial\":0,\"position\":1,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(caveman-upstream/task-alpha/t0)\",\"usage\":{\"input_tokens\":1340,\"output_tokens\":520,\"cost_usd\":0.01182}}",
+          "text": "answer(caveman-upstream/task-alpha/t0)",
+          "usage": {
+            "input_tokens": 1340,
+            "output_tokens": 520,
+            "cost_usd": 0.01182
+          },
+          "latency": {
+            "wall_ms": 780.8,
+            "ttft_ms": 130.8,
+            "ttft_available": true,
+            "inter_token_ms": 1.5,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"caveman-upstream\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-ctxmmu",
+        "arm_kind": "fak_capability",
+        "task_id": "task-alpha",
+        "trial": 0,
+        "position": 2,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-ctxmmu\",\"arm_kind\":\"fak_capability\",\"capabilities\":[\"ctxmmu-paging\"],\"task_id\":\"task-alpha\",\"trial\":0,\"position\":2,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-ctxmmu/task-alpha/t0)\",\"usage\":{\"input_tokens\":1260,\"output_tokens\":610,\"cost_usd\":0.01293}}",
+          "text": "answer(fak-ctxmmu/task-alpha/t0)",
+          "usage": {
+            "input_tokens": 1260,
+            "output_tokens": 610,
+            "cost_usd": 0.01293
+          },
+          "latency": {
+            "wall_ms": 701.1,
+            "ttft_ms": 117.76666666666667,
+            "ttft_available": true,
+            "inter_token_ms": 1.1475409836065573,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 1100,
+            "write_tokens": 0,
+            "hits": 1,
+            "misses": 0
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-ctxmmu\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-passthrough",
+        "arm_kind": "fak_passthrough",
+        "task_id": "task-alpha",
+        "trial": 0,
+        "position": 3,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-passthrough\",\"arm_kind\":\"fak_passthrough\",\"task_id\":\"task-alpha\",\"trial\":0,\"position\":3,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-passthrough/task-alpha/t0)\",\"usage\":{\"input_tokens\":1215,\"output_tokens\":900,\"cost_usd\":0.017145}}",
+          "text": "answer(fak-passthrough/task-alpha/t0)",
+          "usage": {
+            "input_tokens": 1215,
+            "output_tokens": 900,
+            "cost_usd": 0.017145
+          },
+          "latency": {
+            "wall_ms": 936.6,
+            "ttft_ms": 157.43333333333334,
+            "ttft_available": true,
+            "inter_token_ms": 1.038888888888889,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 1200,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-passthrough\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "baseline",
+        "arm_kind": "baseline",
+        "task_id": "task-alpha",
+        "trial": 1,
+        "position": 3,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"baseline\",\"arm_kind\":\"baseline\",\"task_id\":\"task-alpha\",\"trial\":1,\"position\":3,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(baseline/task-alpha/t1)\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":900,\"cost_usd\":0.0171}}",
+          "text": "answer(baseline/task-alpha/t1)",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 900,
+            "cost_usd": 0.0171
+          },
+          "latency": {
+            "wall_ms": 900.3,
+            "ttft_ms": 150.3,
+            "ttft_available": true,
+            "inter_token_ms": 1,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"baseline\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "caveman-upstream",
+        "arm_kind": "upstream_treatment",
+        "task_id": "task-alpha",
+        "trial": 1,
+        "position": 0,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"caveman-upstream\",\"arm_kind\":\"upstream_treatment\",\"task_id\":\"task-alpha\",\"trial\":1,\"position\":0,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(caveman-upstream/task-alpha/t1)\",\"usage\":{\"input_tokens\":1340,\"output_tokens\":520,\"cost_usd\":0.01182}}",
+          "text": "answer(caveman-upstream/task-alpha/t1)",
+          "usage": {
+            "input_tokens": 1340,
+            "output_tokens": 520,
+            "cost_usd": 0.01182
+          },
+          "latency": {
+            "wall_ms": 780.6,
+            "ttft_ms": 130.6,
+            "ttft_available": true,
+            "inter_token_ms": 1.5,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"caveman-upstream\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-ctxmmu",
+        "arm_kind": "fak_capability",
+        "task_id": "task-alpha",
+        "trial": 1,
+        "position": 1,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-ctxmmu\",\"arm_kind\":\"fak_capability\",\"capabilities\":[\"ctxmmu-paging\"],\"task_id\":\"task-alpha\",\"trial\":1,\"position\":1,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-ctxmmu/task-alpha/t1)\",\"usage\":{\"input_tokens\":1260,\"output_tokens\":610,\"cost_usd\":0.01293}}",
+          "text": "answer(fak-ctxmmu/task-alpha/t1)",
+          "usage": {
+            "input_tokens": 1260,
+            "output_tokens": 610,
+            "cost_usd": 0.01293
+          },
+          "latency": {
+            "wall_ms": 700,
+            "ttft_ms": 116.66666666666667,
+            "ttft_available": true,
+            "inter_token_ms": 1.1475409836065573,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 1100,
+            "write_tokens": 0,
+            "hits": 1,
+            "misses": 0
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-ctxmmu\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-passthrough",
+        "arm_kind": "fak_passthrough",
+        "task_id": "task-alpha",
+        "trial": 1,
+        "position": 2,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-passthrough\",\"arm_kind\":\"fak_passthrough\",\"task_id\":\"task-alpha\",\"trial\":1,\"position\":2,\"input\":\"summarize the build log\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-passthrough/task-alpha/t1)\",\"usage\":{\"input_tokens\":1215,\"output_tokens\":900,\"cost_usd\":0.017145}}",
+          "text": "answer(fak-passthrough/task-alpha/t1)",
+          "usage": {
+            "input_tokens": 1215,
+            "output_tokens": 900,
+            "cost_usd": 0.017145
+          },
+          "latency": {
+            "wall_ms": 936.3,
+            "ttft_ms": 157.13333333333335,
+            "ttft_available": true,
+            "inter_token_ms": 1.038888888888889,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 1200,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-passthrough\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-alpha\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "baseline",
+        "arm_kind": "baseline",
+        "task_id": "task-bravo",
+        "trial": 0,
+        "position": 3,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"baseline\",\"arm_kind\":\"baseline\",\"task_id\":\"task-bravo\",\"trial\":0,\"position\":3,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(baseline/task-bravo/t0)\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":900,\"cost_usd\":0.0171}}",
+          "text": "answer(baseline/task-bravo/t0)",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 900,
+            "cost_usd": 0.0171
+          },
+          "latency": {
+            "wall_ms": 900.5,
+            "ttft_ms": 150.5,
+            "ttft_available": true,
+            "inter_token_ms": 1,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"baseline\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "caveman-upstream",
+        "arm_kind": "upstream_treatment",
+        "task_id": "task-bravo",
+        "trial": 0,
+        "position": 0,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"caveman-upstream\",\"arm_kind\":\"upstream_treatment\",\"task_id\":\"task-bravo\",\"trial\":0,\"position\":0,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(caveman-upstream/task-bravo/t0)\",\"usage\":{\"input_tokens\":1340,\"output_tokens\":520,\"cost_usd\":0.01182}}",
+          "text": "answer(caveman-upstream/task-bravo/t0)",
+          "usage": {
+            "input_tokens": 1340,
+            "output_tokens": 520,
+            "cost_usd": 0.01182
+          },
+          "latency": {
+            "wall_ms": 780.9,
+            "ttft_ms": 130.9,
+            "ttft_available": true,
+            "inter_token_ms": 1.5,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"caveman-upstream\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-ctxmmu",
+        "arm_kind": "fak_capability",
+        "task_id": "task-bravo",
+        "trial": 0,
+        "position": 1,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-ctxmmu\",\"arm_kind\":\"fak_capability\",\"capabilities\":[\"ctxmmu-paging\"],\"task_id\":\"task-bravo\",\"trial\":0,\"position\":1,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-ctxmmu/task-bravo/t0)\",\"usage\":{\"input_tokens\":1260,\"output_tokens\":610,\"cost_usd\":0.01293}}",
+          "text": "answer(fak-ctxmmu/task-bravo/t0)",
+          "usage": {
+            "input_tokens": 1260,
+            "output_tokens": 610,
+            "cost_usd": 0.01293
+          },
+          "latency": {
+            "wall_ms": 700.5,
+            "ttft_ms": 117.16666666666667,
+            "ttft_available": true,
+            "inter_token_ms": 1.1475409836065573,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 1100,
+            "write_tokens": 0,
+            "hits": 1,
+            "misses": 0
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-ctxmmu\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-passthrough",
+        "arm_kind": "fak_passthrough",
+        "task_id": "task-bravo",
+        "trial": 0,
+        "position": 2,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-passthrough\",\"arm_kind\":\"fak_passthrough\",\"task_id\":\"task-bravo\",\"trial\":0,\"position\":2,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-passthrough/task-bravo/t0)\",\"usage\":{\"input_tokens\":1215,\"output_tokens\":900,\"cost_usd\":0.017145}}",
+          "text": "answer(fak-passthrough/task-bravo/t0)",
+          "usage": {
+            "input_tokens": 1215,
+            "output_tokens": 900,
+            "cost_usd": 0.017145
+          },
+          "latency": {
+            "wall_ms": 936.6,
+            "ttft_ms": 157.43333333333334,
+            "ttft_available": true,
+            "inter_token_ms": 1.038888888888889,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 1200,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-passthrough\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "baseline",
+        "arm_kind": "baseline",
+        "task_id": "task-bravo",
+        "trial": 1,
+        "position": 2,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"baseline\",\"arm_kind\":\"baseline\",\"task_id\":\"task-bravo\",\"trial\":1,\"position\":2,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(baseline/task-bravo/t1)\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":900,\"cost_usd\":0.0171}}",
+          "text": "answer(baseline/task-bravo/t1)",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 900,
+            "cost_usd": 0.0171
+          },
+          "latency": {
+            "wall_ms": 900.8,
+            "ttft_ms": 150.8,
+            "ttft_available": true,
+            "inter_token_ms": 1,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"baseline\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "caveman-upstream",
+        "arm_kind": "upstream_treatment",
+        "task_id": "task-bravo",
+        "trial": 1,
+        "position": 3,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"caveman-upstream\",\"arm_kind\":\"upstream_treatment\",\"task_id\":\"task-bravo\",\"trial\":1,\"position\":3,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(caveman-upstream/task-bravo/t1)\",\"usage\":{\"input_tokens\":1340,\"output_tokens\":520,\"cost_usd\":0.01182}}",
+          "text": "answer(caveman-upstream/task-bravo/t1)",
+          "usage": {
+            "input_tokens": 1340,
+            "output_tokens": 520,
+            "cost_usd": 0.01182
+          },
+          "latency": {
+            "wall_ms": 781.1,
+            "ttft_ms": 131.1,
+            "ttft_available": true,
+            "inter_token_ms": 1.5,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"caveman-upstream\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-ctxmmu",
+        "arm_kind": "fak_capability",
+        "task_id": "task-bravo",
+        "trial": 1,
+        "position": 0,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-ctxmmu\",\"arm_kind\":\"fak_capability\",\"capabilities\":[\"ctxmmu-paging\"],\"task_id\":\"task-bravo\",\"trial\":1,\"position\":0,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-ctxmmu/task-bravo/t1)\",\"usage\":{\"input_tokens\":1260,\"output_tokens\":610,\"cost_usd\":0.01293}}",
+          "text": "answer(fak-ctxmmu/task-bravo/t1)",
+          "usage": {
+            "input_tokens": 1260,
+            "output_tokens": 610,
+            "cost_usd": 0.01293
+          },
+          "latency": {
+            "wall_ms": 701.1,
+            "ttft_ms": 117.76666666666667,
+            "ttft_available": true,
+            "inter_token_ms": 1.1475409836065573,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 1100,
+            "write_tokens": 0,
+            "hits": 1,
+            "misses": 0
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-ctxmmu\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-passthrough",
+        "arm_kind": "fak_passthrough",
+        "task_id": "task-bravo",
+        "trial": 1,
+        "position": 1,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-passthrough\",\"arm_kind\":\"fak_passthrough\",\"task_id\":\"task-bravo\",\"trial\":1,\"position\":1,\"input\":\"explain the failing test\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-passthrough/task-bravo/t1)\",\"usage\":{\"input_tokens\":1215,\"output_tokens\":900,\"cost_usd\":0.017145}}",
+          "text": "answer(fak-passthrough/task-bravo/t1)",
+          "usage": {
+            "input_tokens": 1215,
+            "output_tokens": 900,
+            "cost_usd": 0.017145
+          },
+          "latency": {
+            "wall_ms": 935.6,
+            "ttft_ms": 156.43333333333334,
+            "ttft_available": true,
+            "inter_token_ms": 1.038888888888889,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 1200,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-passthrough\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-bravo\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "baseline",
+        "arm_kind": "baseline",
+        "task_id": "task-charlie",
+        "trial": 0,
+        "position": 2,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"baseline\",\"arm_kind\":\"baseline\",\"task_id\":\"task-charlie\",\"trial\":0,\"position\":2,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(baseline/task-charlie/t0)\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":900,\"cost_usd\":0.0171}}",
+          "text": "answer(baseline/task-charlie/t0)",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 900,
+            "cost_usd": 0.0171
+          },
+          "latency": {
+            "wall_ms": 900.3,
+            "ttft_ms": 150.3,
+            "ttft_available": true,
+            "inter_token_ms": 1,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"baseline\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "caveman-upstream",
+        "arm_kind": "upstream_treatment",
+        "task_id": "task-charlie",
+        "trial": 0,
+        "position": 3,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"caveman-upstream\",\"arm_kind\":\"upstream_treatment\",\"task_id\":\"task-charlie\",\"trial\":0,\"position\":3,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(caveman-upstream/task-charlie/t0)\",\"usage\":{\"input_tokens\":1340,\"output_tokens\":520,\"cost_usd\":0.01182}}",
+          "text": "answer(caveman-upstream/task-charlie/t0)",
+          "usage": {
+            "input_tokens": 1340,
+            "output_tokens": 520,
+            "cost_usd": 0.01182
+          },
+          "latency": {
+            "wall_ms": 781.4,
+            "ttft_ms": 131.4,
+            "ttft_available": true,
+            "inter_token_ms": 1.5,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"caveman-upstream\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-ctxmmu",
+        "arm_kind": "fak_capability",
+        "task_id": "task-charlie",
+        "trial": 0,
+        "position": 0,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-ctxmmu\",\"arm_kind\":\"fak_capability\",\"capabilities\":[\"ctxmmu-paging\"],\"task_id\":\"task-charlie\",\"trial\":0,\"position\":0,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-ctxmmu/task-charlie/t0)\",\"usage\":{\"input_tokens\":1260,\"output_tokens\":610,\"cost_usd\":0.01293}}",
+          "text": "answer(fak-ctxmmu/task-charlie/t0)",
+          "usage": {
+            "input_tokens": 1260,
+            "output_tokens": 610,
+            "cost_usd": 0.01293
+          },
+          "latency": {
+            "wall_ms": 700.5,
+            "ttft_ms": 117.16666666666667,
+            "ttft_available": true,
+            "inter_token_ms": 1.1475409836065573,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 1100,
+            "write_tokens": 0,
+            "hits": 1,
+            "misses": 0
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-ctxmmu\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-passthrough",
+        "arm_kind": "fak_passthrough",
+        "task_id": "task-charlie",
+        "trial": 0,
+        "position": 1,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-passthrough\",\"arm_kind\":\"fak_passthrough\",\"task_id\":\"task-charlie\",\"trial\":0,\"position\":1,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-passthrough/task-charlie/t0)\",\"usage\":{\"input_tokens\":1215,\"output_tokens\":900,\"cost_usd\":0.017145}}",
+          "text": "answer(fak-passthrough/task-charlie/t0)",
+          "usage": {
+            "input_tokens": 1215,
+            "output_tokens": 900,
+            "cost_usd": 0.017145
+          },
+          "latency": {
+            "wall_ms": 935.8,
+            "ttft_ms": 156.63333333333335,
+            "ttft_available": true,
+            "inter_token_ms": 1.038888888888889,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 1200,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-passthrough\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":0}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "baseline",
+        "arm_kind": "baseline",
+        "task_id": "task-charlie",
+        "trial": 1,
+        "position": 1,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"baseline\",\"arm_kind\":\"baseline\",\"task_id\":\"task-charlie\",\"trial\":1,\"position\":1,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(baseline/task-charlie/t1)\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":900,\"cost_usd\":0.0171}}",
+          "text": "answer(baseline/task-charlie/t1)",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 900,
+            "cost_usd": 0.0171
+          },
+          "latency": {
+            "wall_ms": 900.5,
+            "ttft_ms": 150.5,
+            "ttft_available": true,
+            "inter_token_ms": 1,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"baseline\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "caveman-upstream",
+        "arm_kind": "upstream_treatment",
+        "task_id": "task-charlie",
+        "trial": 1,
+        "position": 2,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"caveman-upstream\",\"arm_kind\":\"upstream_treatment\",\"task_id\":\"task-charlie\",\"trial\":1,\"position\":2,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:8d4a135d28f78ef22b8b138c4b88d5c4c29fc4ff36d0cb257d7b04ba0c2f72c0\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(caveman-upstream/task-charlie/t1)\",\"usage\":{\"input_tokens\":1340,\"output_tokens\":520,\"cost_usd\":0.01182}}",
+          "text": "answer(caveman-upstream/task-charlie/t1)",
+          "usage": {
+            "input_tokens": 1340,
+            "output_tokens": 520,
+            "cost_usd": 0.01182
+          },
+          "latency": {
+            "wall_ms": 780,
+            "ttft_ms": 130,
+            "ttft_available": true,
+            "inter_token_ms": 1.5,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 0,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"caveman-upstream\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-ctxmmu",
+        "arm_kind": "fak_capability",
+        "task_id": "task-charlie",
+        "trial": 1,
+        "position": 3,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-ctxmmu\",\"arm_kind\":\"fak_capability\",\"capabilities\":[\"ctxmmu-paging\"],\"task_id\":\"task-charlie\",\"trial\":1,\"position\":3,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-ctxmmu/task-charlie/t1)\",\"usage\":{\"input_tokens\":1260,\"output_tokens\":610,\"cost_usd\":0.01293}}",
+          "text": "answer(fak-ctxmmu/task-charlie/t1)",
+          "usage": {
+            "input_tokens": 1260,
+            "output_tokens": 610,
+            "cost_usd": 0.01293
+          },
+          "latency": {
+            "wall_ms": 700.1,
+            "ttft_ms": 116.76666666666667,
+            "ttft_available": true,
+            "inter_token_ms": 1.1475409836065573,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 1100,
+            "write_tokens": 0,
+            "hits": 1,
+            "misses": 0
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-ctxmmu\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":1}"
+        },
+        "resumed": false
+      },
+      {
+        "manifest_identity": "sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b",
+        "arm_id": "fak-passthrough",
+        "arm_kind": "fak_passthrough",
+        "task_id": "task-charlie",
+        "trial": 1,
+        "position": 0,
+        "response": {
+          "raw_request": "{\"manifest_identity\":\"sha256:1100a442a867849a4e2ac1f078da8533880d8c14207d933d5ad4e7e288888d1b\",\"arm_id\":\"fak-passthrough\",\"arm_kind\":\"fak_passthrough\",\"task_id\":\"task-charlie\",\"trial\":1,\"position\":0,\"input\":\"list the changed files\",\"prompt_hash\":\"sha256:eafc5013311a3bbd74cf654065de9550733f302b8c9affadab1db715005a87eb\",\"model\":{\"provider\":\"fake\",\"snapshot\":\"fake-deterministic-2026-08-13\",\"region\":\"local\",\"sampling\":{\"temperature\":0,\"top_p\":1,\"seed\":7},\"max_tokens\":4096}}",
+          "raw_response": "{\"stop_reason\":\"end_turn\",\"text\":\"answer(fak-passthrough/task-charlie/t1)\",\"usage\":{\"input_tokens\":1215,\"output_tokens\":900,\"cost_usd\":0.017145}}",
+          "text": "answer(fak-passthrough/task-charlie/t1)",
+          "usage": {
+            "input_tokens": 1215,
+            "output_tokens": 900,
+            "cost_usd": 0.017145
+          },
+          "latency": {
+            "wall_ms": 935.6,
+            "ttft_ms": 156.43333333333334,
+            "ttft_available": true,
+            "inter_token_ms": 1.038888888888889,
+            "inter_token_available": true
+          },
+          "cache": {
+            "read_tokens": 0,
+            "write_tokens": 1200,
+            "hits": 0,
+            "misses": 1
+          },
+          "retries": 0
+        },
+        "judgment": {
+          "pass": true,
+          "score": 1,
+          "reason": "answer names the task",
+          "raw_judgment": "{\"arm\":\"fak-passthrough\",\"checker\":\"fake/contains-task-id\",\"pass\":true,\"task\":\"task-charlie\",\"trial\":1}"
+        },
+        "resumed": false
+      }
+    ],
+    "executed": 24,
+    "resumed": 0
+  }
+}

@@ -46,6 +46,7 @@ var maintainerDevCommands = []string{
 	"answer-shape",
 	"antipattern-scorecard",
 	"api-host",
+	"armbench",
 	"assume",
 	"backend",
 	"balance",
