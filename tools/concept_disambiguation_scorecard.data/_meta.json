@@ -497,6 +497,11 @@
           "category": "incidental",
           "reason": "Unexported bound of the closed CacheTier enum in internal/cacheobs/tiers.go: it marks the end of the tier vocabulary so an out-of-range tier can be rejected. Not a cache tier and never reported.",
           "token": "numCacheTiers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "CacheLineage"
         }
       ],
       "id": "cache",
@@ -505,6 +510,7 @@
         "CacheCreationTokensMessagePrefix",
         "CacheLever",
         "CacheLevers",
+        "CacheLineage",
         "CacheReadRate",
         "CacheStateAllowlist",
         "CacheValueBaseline",
@@ -2489,6 +2495,11 @@
           "category": "incidental",
           "reason": "Audit issue code, not a new session runtime concept",
           "token": "ambiguous_session_root"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local exporter join index, not a new session runtime concept",
+          "token": "sessionRoots"
         }
       ],
       "id": "session-runtime",
@@ -2633,6 +2644,7 @@
         "sessionOpenRestartWitness",
         "sessionProcess",
         "sessionRegistryRecoveryStage",
+        "sessionRoots",
         "session_compaction_thrash",
         "session_registry_recovery",
         "sessionids",
@@ -4890,6 +4902,11 @@
           "category": "incidental",
           "reason": "Command handler for parity evidence, not a support maturity rung.",
           "token": "cmdLaunchParityCheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus arithmetic helper, not a new support maturity concept",
+          "token": "coverageRatio"
         }
       ],
       "id": "support-maturity",
@@ -4978,6 +4995,7 @@
         "coverageBlock",
         "coverageGraded",
         "coveragePath",
+        "coverageRatio",
         "coveragebaseline",
         "coveragediscipline",
         "defaultscoreparitytol",

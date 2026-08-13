@@ -191,21 +191,22 @@ func (s fleetMetricsSources) registrationInventory() ([]sessionregistry.Record, 
 }
 
 type fleetGoalAgg struct {
-	rootID    string
-	rootIssue string
-	taskID    string
-	states    map[sessionregistry.State]int
-	sessions  map[string]struct{}
-	usage     fleetUsageAgg
+	rootID, rootIssue, taskID string
+	rootState                 sessionregistry.State
+	rootOutcome               string
+	attempts                  map[string]struct{}
+	resumes                   int
+	states                    map[sessionregistry.State]int
+	sessions                  map[string]struct{}
+	usage                     fleetUsageAgg
 }
 
-// renderFleetGoalExposition is the root-goal join: every descendant registration is
-// folded under its durable root_registration_id, and historical gateway usage joins by
-// the registered session id. A parent, a headless child, and a micro-context grandchild
-// therefore contribute to one bounded, queryable goal series without relying on process
-// nesting or an agent's self-report.
+// renderFleetGoalExposition joins durable lineage to usage. A session is attributable
+// only when exactly one root claims it; unknown and cross-root claims stay visible.
 func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold) {
 	goals := map[string]*fleetGoalAgg{}
+	sessionRoots := map[string]string{}
+	ambiguous := map[string]bool{}
 	for _, r := range rows {
 		root := strings.TrimSpace(r.RootRegistrationID)
 		if root == "" {
@@ -213,7 +214,7 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		}
 		g := goals[root]
 		if g == nil {
-			g = &fleetGoalAgg{rootID: root, states: map[sessionregistry.State]int{}, sessions: map[string]struct{}{}}
+			g = &fleetGoalAgg{rootID: root, attempts: map[string]struct{}{}, states: map[sessionregistry.State]int{}, sessions: map[string]struct{}{}}
 			goals[root] = g
 		}
 		if g.rootIssue == "" {
@@ -222,66 +223,89 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		if g.taskID == "" {
 			g.taskID = strings.TrimSpace(r.TaskID)
 		}
+		if r.RegistrationID == root {
+			g.rootState = r.State
+			g.rootOutcome = strings.TrimSpace(r.RootOutcome)
+		}
 		g.states[r.State]++
-		sid := strings.TrimSpace(r.Identity.SessionID)
-		if sid != "" {
+		if r.AttemptID != "" {
+			g.attempts[r.AttemptID] = struct{}{}
+		}
+		if r.ResumeOfAttemptID != "" {
+			g.resumes++
+		}
+		if sid := strings.TrimSpace(r.Identity.SessionID); sid != "" {
 			g.sessions[sid] = struct{}{}
-			if a, ok := usage.BySession[sid]; ok {
-				g.usage.merge(*a)
+			if prior, ok := sessionRoots[sid]; ok && prior != root {
+				ambiguous[sid] = true
+			} else {
+				sessionRoots[sid] = root
 			}
 		}
 	}
-	for _, root := range fleetSortedKeys(goals) {
-		g := goals[root]
-		labels := []string{"root_registration", g.rootID, "root_issue", fleetDashIfEmpty(g.rootIssue), "task", fleetDashIfEmpty(g.taskID)}
-		w.gauge("fak_fleet_goal_info", "Durable root-goal identity. Descendant registrations and joined usage share these labels.", 1, labels...)
-		w.gauge("fak_fleet_goal_registrations", "Latest child registrations attributed to this root goal across all descendant depths.", float64(sumGoalStates(g.states)), labels...)
-		w.gauge("fak_fleet_goal_sessions", "Distinct non-empty session ids registered under this root goal.", float64(len(g.sessions)), labels...)
-		for _, state := range sortedGoalStates(g.states) {
-			w.gauge("fak_fleet_goal_registration_state", "Registrations under a root goal by latest lifecycle state.", float64(g.states[state]), append(labels, "state", string(state))...)
+	for sid, agg := range usage.BySession {
+		if !ambiguous[sid] {
+			if g := goals[sessionRoots[sid]]; g != nil {
+				g.usage.merge(*agg)
+			}
 		}
-		w.gauge("fak_fleet_goal_observed_turns_total", "Historical observed turns joined from every registered session under this root goal.", float64(g.usage.ObservedTurns), labels...)
-		w.gauge("fak_fleet_goal_input_tokens_total", "Historical input tokens joined from every registered session under this root goal.", float64(g.usage.InputTokens), labels...)
-		w.gauge("fak_fleet_goal_output_tokens_total", "Historical output tokens joined from every registered session under this root goal.", float64(g.usage.OutputTokens), labels...)
-		w.gauge("fak_fleet_goal_adjudications_total", "Historical policy adjudications joined from every registered session under this root goal.", float64(g.usage.Adjudications), labels...)
 	}
+	ids := make([]string, 0, len(goals))
+	for id := range goals {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	states := []sessionregistry.State{sessionregistry.StateRegistered, sessionregistry.StateActive, sessionregistry.StateCompleted, sessionregistry.StateFailed, sessionregistry.StateCancelled, sessionregistry.StateLost, sessionregistry.StateReaped, sessionregistry.StateUnknown}
+	for _, id := range ids {
+		g := goals[id]
+		labels := []string{"root_registration", g.rootID, "root_issue", g.rootIssue, "task", g.taskID}
+		w.gauge("fak_fleet_goal_info", "Root-goal identity from the durable child-registration ledger. Value is always 1.", 1, labels...)
+		w.gauge("fak_fleet_goal_registrations", "Registrations attributed to this root goal, including the root registration.", float64(sumGoalStates(g.states)), labels...)
+		w.gauge("fak_fleet_goal_sessions", "Distinct explicit gateway session IDs registered beneath this root goal.", float64(len(g.sessions)), labels...)
+		w.gauge("fak_fleet_goal_attempts_total", "Distinct authoritative attempt IDs registered beneath this root goal.", float64(len(g.attempts)), labels...)
+		w.gauge("fak_fleet_goal_resumes_total", "Registrations beneath this root goal carrying an explicit resume_of_attempt_id.", float64(g.resumes), labels...)
+		for _, state := range states {
+			ls := append(append([]string{}, labels...), "state", string(state))
+			w.gauge("fak_fleet_goal_registration_state", "Registrations beneath this root goal by latest durable lifecycle state.", float64(g.states[state]), ls...)
+		}
+		if g.rootState != "" {
+			ls := append(append([]string{}, labels...), "state", string(g.rootState))
+			w.gauge("fak_fleet_goal_terminal_state", "Latest authoritative lifecycle state of the root registration. No series means the root registration is absent.", 1, ls...)
+		}
+		if g.rootOutcome != "" {
+			ls := append(append([]string{}, labels...), "outcome", g.rootOutcome)
+			w.gauge("fak_fleet_goal_outcome_info", "Explicit root outcome recorded by the root registration; never inferred from child state.", 1, ls...)
+		}
+		w.gauge("fak_fleet_goal_observed_turns_total", "Historical gateway turns explicitly attributed to a registered session beneath this root goal.", float64(g.usage.ObservedTurns), labels...)
+		w.gauge("fak_fleet_goal_input_tokens_total", "Historical gateway input tokens explicitly attributed to a registered session beneath this root goal.", float64(g.usage.InputTokens), labels...)
+		w.gauge("fak_fleet_goal_output_tokens_total", "Historical gateway output tokens explicitly attributed to a registered session beneath this root goal.", float64(g.usage.OutputTokens), labels...)
+		w.gauge("fak_fleet_goal_adjudications_total", "Historical gateway adjudications explicitly attributed to a registered session beneath this root goal.", float64(g.usage.Adjudications), labels...)
+	}
+	attributed := fleetUsageAgg{}
+	for _, g := range goals {
+		attributed.merge(g.usage)
+	}
+	unattributed := usage.Total.subtract(attributed)
+	w.gauge("fak_fleet_goal_usage_rows", "Gateway-usage rows by root-goal attribution; unattributed includes missing, unknown, and ambiguous lineage.", float64(attributed.Rows), "attribution", "attributed")
+	w.gauge("fak_fleet_goal_usage_rows", "Gateway-usage rows by root-goal attribution; unattributed includes missing, unknown, and ambiguous lineage.", float64(unattributed.Rows), "attribution", "unattributed")
+	w.gauge("fak_fleet_goal_usage_attribution_ratio", "Fraction of usage rows attributable to exactly one root goal; 1 for an empty census.", coverageRatio(attributed.Rows, usage.Total.Rows))
+	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(attributed.InputTokens), "attribution", "attributed")
+	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(unattributed.InputTokens), "attribution", "unattributed")
+	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(attributed.OutputTokens), "attribution", "attributed")
+	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(unattributed.OutputTokens), "attribution", "unattributed")
 }
-
-func (a *fleetUsageAgg) merge(b fleetUsageAgg) {
-	a.Sessions += b.Sessions
-	a.Seconds += b.Seconds
-	a.InputTokens += b.InputTokens
-	a.OutputTokens += b.OutputTokens
-	a.CachedPromptTokens += b.CachedPromptTokens
-	a.CacheCreationTokens += b.CacheCreationTokens
-	a.KVPrefixPromptTokens += b.KVPrefixPromptTokens
-	a.KVPrefixReusedTokens += b.KVPrefixReusedTokens
-	a.ObservedTurns += b.ObservedTurns
-	a.CachedTurns += b.CachedTurns
-	a.Adjudications += b.Adjudications
-	a.Allowed += b.Allowed
-	a.Denied += b.Denied
-	a.Transformed += b.Transformed
-	a.Quarantined += b.Quarantined
-	a.Deferred += b.Deferred
-	a.Escalated += b.Escalated
-	a.Errored += b.Errored
-}
-
-func sumGoalStates(states map[sessionregistry.State]int) int {
+func sumGoalStates(m map[sessionregistry.State]int) int {
 	n := 0
-	for _, v := range states {
+	for _, v := range m {
 		n += v
 	}
 	return n
 }
-func sortedGoalStates(states map[sessionregistry.State]int) []sessionregistry.State {
-	out := make([]sessionregistry.State, 0, len(states))
-	for state := range states {
-		out = append(out, state)
+func coverageRatio(a, t int) float64 {
+	if t == 0 {
+		return 1
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
+	return float64(a) / float64(t)
 }
 
 // usagePath resolves the ledger flag the same way every other nightrun reader does, so a
@@ -534,6 +558,7 @@ func fleetSessionRank(r sessionInventoryRow) int {
 // charts are summed; the arithmetic is spelled out (rather than reusing the ledger's own
 // unexported summer) so every number on a panel is auditable from this one function.
 type fleetUsageAgg struct {
+	Rows                 int
 	Sessions             int
 	Seconds              float64
 	SessionType          string
@@ -556,6 +581,7 @@ type fleetUsageAgg struct {
 }
 
 func (a *fleetUsageAgg) add(r gatewayusageledger.Row) {
+	a.Rows++
 	c := r.Counters
 	// A carryforward row is a CUT's fold witness, not one session: it stands for
 	// FoldedRows real sessions whose individual rows were replaced. Counting it as one
@@ -604,6 +630,31 @@ func (a *fleetUsageAgg) CacheReadRatio() float64 {
 // fleetUsageFold is the whole historical fold: fleet total, the by-session_type split,
 // and the per-session index — plus the identification census that says how much of the
 // corpus the per-session tier can actually speak for.
+func (a *fleetUsageAgg) merge(b fleetUsageAgg) {
+	a.Rows += b.Rows
+	a.Sessions += b.Sessions
+	a.Seconds += b.Seconds
+	a.InputTokens += b.InputTokens
+	a.OutputTokens += b.OutputTokens
+	a.CachedPromptTokens += b.CachedPromptTokens
+	a.CacheCreationTokens += b.CacheCreationTokens
+	a.KVPrefixPromptTokens += b.KVPrefixPromptTokens
+	a.KVPrefixReusedTokens += b.KVPrefixReusedTokens
+	a.ObservedTurns += b.ObservedTurns
+	a.CachedTurns += b.CachedTurns
+	a.Adjudications += b.Adjudications
+	a.Allowed += b.Allowed
+	a.Denied += b.Denied
+	a.Transformed += b.Transformed
+	a.Quarantined += b.Quarantined
+	a.Deferred += b.Deferred
+	a.Escalated += b.Escalated
+	a.Errored += b.Errored
+}
+func (a fleetUsageAgg) subtract(b fleetUsageAgg) fleetUsageAgg {
+	return fleetUsageAgg{Rows: a.Rows - b.Rows, Sessions: a.Sessions - b.Sessions, Seconds: a.Seconds - b.Seconds, InputTokens: a.InputTokens - b.InputTokens, OutputTokens: a.OutputTokens - b.OutputTokens, CachedPromptTokens: a.CachedPromptTokens - b.CachedPromptTokens, CacheCreationTokens: a.CacheCreationTokens - b.CacheCreationTokens, KVPrefixPromptTokens: a.KVPrefixPromptTokens - b.KVPrefixPromptTokens, KVPrefixReusedTokens: a.KVPrefixReusedTokens - b.KVPrefixReusedTokens, ObservedTurns: a.ObservedTurns - b.ObservedTurns, CachedTurns: a.CachedTurns - b.CachedTurns, Adjudications: a.Adjudications - b.Adjudications, Allowed: a.Allowed - b.Allowed, Denied: a.Denied - b.Denied, Transformed: a.Transformed - b.Transformed, Quarantined: a.Quarantined - b.Quarantined, Deferred: a.Deferred - b.Deferred, Escalated: a.Escalated - b.Escalated, Errored: a.Errored - b.Errored}
+}
+
 type fleetUsageFold struct {
 	Rows            int
 	Total           fleetUsageAgg
