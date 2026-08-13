@@ -215,6 +215,11 @@ type guardInfoManagedCache = guardvars.ManagedCacheVars
 // decode cannot drift.
 type guardInfoCacheAttribution = guardvars.CacheAttributionVars
 
+func writerIsTerminal(w io.Writer) bool {
+	f, ok := w.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
 func cmdInfo(argv []string) {
 	os.Exit(runInfo(os.Stdout, os.Stderr, argv))
 }
@@ -291,6 +296,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	keyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the gateway bearer; loopback /debug/vars is auth-exempt so a local guard gateway needs none")
 	interval := fs.Duration("interval", 2*time.Second, "refresh interval")
 	once := fs.Bool("once", false, "print one snapshot line and exit (no watch loop)")
+	watch := fs.Bool("watch", false, "refresh continuously even when stdout is not a terminal")
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	maxIdle := fs.Duration("max-idle", 0, "issue #2340: in watch mode, self-exit (with a closing line) after the gateway has been unreachable for about this long WITHOUT ever answering — a self-terminating backstop so an auto-spawned pane (e.g. from `fak guard --split`) whose gateway never comes up cannot poll a dead URL forever and leak a terminal pane. 0 (default) polls indefinitely, the manual-run behavior. Ignored with --once/--json. Rounds up to a whole --interval tick.")
@@ -306,6 +312,28 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	color := fs.String("color", "auto", "colorize the info overlay on a TTY: auto (TTY && NO_COLOR unset), always (force on unless NO_COLOR), or never")
 	if !parseFlags(fs, argv) {
 		return 2
+	}
+	var onceSet, watchSet, intervalSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "once":
+			onceSet = true
+		case "watch":
+			watchSet = true
+		case "interval":
+			intervalSet = true
+		}
+	})
+	if *once && *watch {
+		fmt.Fprintln(stderr, "fak info: --once and --watch cannot be used together")
+		return 2
+	}
+	if *watch {
+		*once = false
+	} else if !onceSet && !watchSet && !intervalSet && !writerIsTerminal(stdout) {
+		// A non-interactive consumer has nobody watching a refresh loop. Preserve
+		// the interactive default, while explicit --watch/--interval opts back in.
+		*once = true
 	}
 	if *negationTax {
 		if *negationTaxTop < 0 {
@@ -378,7 +406,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	// in place instead of scrolling a new line every tick — the difference between a clean
 	// dashboard and a spam-filled pane. A redirected/piped stdout keeps append-per-line so a
 	// captured log stays intact. term.IsTerminal is the same probe guard uses (guard.go).
-	infoTTY := !*once && term.IsTerminal(int(os.Stdout.Fd()))
+	infoTTY := !*once && writerIsTerminal(stdout)
 	// The pane WIDTH lets the in-place redraw cap the status line so it can never wrap onto a
 	// second row — the scroll corruptor in a narrow split pane (the --split right column). 0
 	// means the size is unknown (non-TTY, or GetSize failed): "no cap", which is correct since

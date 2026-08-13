@@ -74,6 +74,20 @@ func runPS(stdout, stderr io.Writer, argv []string, watchDefault bool) int {
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
+	var watchSet, intervalSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "watch":
+			watchSet = true
+		case "interval":
+			intervalSet = true
+		}
+	})
+	if !watchSet && !intervalSet && !writerIsTerminal(stdout) {
+		// `top` watches by default only for an operator terminal. Pipes and agent
+		// harnesses get the same bounded snapshot as `ps` unless they opt in.
+		*watch = false
+	}
 	// `fak ps` takes only flags; a stray positional is almost always a mistake (a
 	// session id meant for `fak session`), so reject it loudly rather than ignore it.
 	if fs.NArg() > 0 {

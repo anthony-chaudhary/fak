@@ -197,3 +197,20 @@ func TestPSTopWatchDefaultIsOverridable(t *testing.T) {
 		t.Fatalf("single-shot rendered %d frames, want 1:\n%s", n, out)
 	}
 }
+
+func TestPSTopNonTTYDefaultsToOneSnapshot(t *testing.T) {
+	g := &stubGateway{}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	out, errb, code := runPSAt(t, ts.URL, true)
+	if code != 0 {
+		t.Fatalf("fak top non-TTY exit = %d (%s)", code, errb)
+	}
+	if strings.Contains(out, psClearScreen) || strings.Contains(out, "Ctrl-C to stop") {
+		t.Fatalf("non-TTY top entered the watch renderer:\n%s", out)
+	}
+	if n := strings.Count(out, "TRACE"); n != 1 {
+		t.Fatalf("non-TTY top rendered %d frames, want 1:\n%s", n, out)
+	}
+}
