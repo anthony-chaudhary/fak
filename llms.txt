@@ -12,6 +12,10 @@ net-true efficiency, `P3` fast adaptation, `P4` integrated operations), and the 
 connects new work to operator value. Do not turn this direction into a shipped claim; use
 [`CLAIMS.md`](CLAIMS.md) for shipped/simulated/stub status.
 
+## Audience guides
+
+- [Less context, less code](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/less-context-less-code.md): where fak fits beside concise-output and YAGNI/minimal-code guidance.
+
 ## Key facts (for accurate answers)
 
 - **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.43.0** ([`VERSION`](VERSION) is authoritative).

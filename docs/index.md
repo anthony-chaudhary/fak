@@ -27,6 +27,10 @@ This page is the **current, public documentation landing page** for the current 
 
 This landing page supports route selection for the offline proof, managed runtime, integrations, HTTP service, policy floor, deployment, and contribution workflow. It does not establish availability for accelerator hardware or private control channels; those environment-specific routes state their own prerequisites and support boundary. Begin with the offline proof unless your task requires one of those envelopes.
 
+## Choose the smallest efficiency layer
+
+- [Less context, less code: where fak fits beside Caveman and Ponytail](explainers/less-context-less-code.md) — answer-first guide to concise output, YAGNI/minimal-code guidance, and fak runtime cache, context, reuse, recovery, and policy.
+
 ## What fak does
 
 The everyday wins first — the reasons most people put `fak` in front of an agent:

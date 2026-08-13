@@ -85,6 +85,8 @@ Claude Code / Codex / OpenCode / your client
 
 Every model request and proposed tool call crosses this checkpoint, so reuse happens before another inference, compaction before another context window is consumed, and policy before a tool runs. fak manages the boundaries without becoming the agent or model.
 
+**Like Caveman’s fewer-token instinct or Ponytail’s “code you never wrote” instinct?** fak applies the same economy at the runtime boundary: keep repeated setup out of prompts, shed stale context, serve repeated work locally, and prevent unnecessary effects before they execute. It complements prompt/output compression and YAGNI-style coding guidance rather than replacing either. [See the plain-language comparison and choose the smallest useful layer.](docs/explainers/less-context-less-code.md)
+
 After trying `guard`, `fak launch install --provider all --default claude` can install reversible provider shims so bare `claude`, `codex`, or `fak` uses the managed path. It never overwrites the original binaries; bypass it with `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable`. See the [zero-adoption guide](docs/zero-adoption-launch.md).
 
 ## Next steps
