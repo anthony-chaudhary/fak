@@ -123,7 +123,10 @@ func TestNativeHelpMatchesTheGatewayRouting(t *testing.T) {
 	if strings.Count(nativeServe, "s.serveNativeMessages(w, r, req, reqTrace)") < 2 {
 		t.Fatal("the streaming handler's non-flushable-writer / no-streaming-planner fallbacks no longer degrade to the buffered NATIVE turn; re-check what the --native help promises")
 	}
-	if !strings.Contains(nativeServe, "agent.RunArmStream(ctx, s.planner, task,") {
+	// Pinned to the call and its receiver, not to the argument spelling: the seed the loop
+	// is handed is refactored independently of who drives the stream (it went task ->
+	// seed.Task with the native wire), and that is not a fact this help text asserts.
+	if !strings.Contains(nativeServe, "agent.RunArmStream(ctx, s.planner,") {
 		t.Fatal("runNativeArmStream no longer calls agent.RunArmStream — the help names it as the streamed driver")
 	}
 	if !strings.Contains(nativeServe, "if s.stopGate != nil {") {
