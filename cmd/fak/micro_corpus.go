@@ -57,6 +57,7 @@ type microCorpusReport struct {
 	RetryAblation    microRetryAblation    `json:"retry_ablation"`
 	VerifierAblation microVerifierAblation `json:"verifier_ablation"`
 	HistoryAblation  microHistoryAblation  `json:"history_ablation"`
+	ModeAblation     microModeAblation     `json:"mode_ablation"`
 }
 
 // pinnedMicroCorpus is deliberately small: one exact instruction, one structured
@@ -94,6 +95,12 @@ func cmdMicroCorpus(args []string) {
 	}
 	report.VerifierAblation = verifier
 	report.HistoryAblation = runMicroHistoryAblation()
+	mode, err := runMicroModeAblation()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak micro corpus: mode ablation: %v\n", err)
+		os.Exit(1)
+	}
+	report.ModeAblation = mode
 	applyMeasuredAblations(&report)
 	if *markdown != "" {
 		if err := os.WriteFile(*markdown, []byte(formatMicroCorpusReport(report)), 0o644); err != nil {
@@ -188,10 +195,14 @@ func applyMeasuredAblations(report *microCorpusReport) {
 			if verifierAblationPassed(report.VerifierAblation) {
 				report.Ablations[i] = microCorpusAblation{Layer: "verify", Status: "PASS", Reason: "verifier-off accepted claimed completion; verifier-on independently read back the absent artifact and refused it"}
 			}
+		case "mode":
+			if modeAblationPassed(report.ModeAblation) {
+				report.Ablations[i] = microCorpusAblation{Layer: "mode", Status: "PASS", Reason: "the same structured extraction task completed through portable string action and provider-native typed-tool action modes"}
+			}
 		}
 	}
-	if retryAblationPassed(report.RetryAblation) && historyAblationPassed(report.HistoryAblation) && verifierAblationPassed(report.VerifierAblation) {
-		report.Reason = "paired corpus execution plus retry, bounded context compaction, and independent verification contributions are measured, but gateway dollars and mode ablation are not yet available; no quality/$ winner is claimed"
+	if retryAblationPassed(report.RetryAblation) && historyAblationPassed(report.HistoryAblation) && verifierAblationPassed(report.VerifierAblation) && modeAblationPassed(report.ModeAblation) {
+		report.Reason = "paired corpus execution plus retry, bounded history, verification, and action-mode contributions are measured, but gateway dollars remain unavailable; no quality/$ winner is claimed"
 	}
 }
 
@@ -217,6 +228,11 @@ func formatMicroCorpusReport(r microCorpusReport) string {
 		fmt.Fprintf(&b, "- same cap: %d tokens across %d long-history turns\n", r.HistoryAblation.TokenCap, r.HistoryAblation.Turns)
 		fmt.Fprintf(&b, "- durable pointer retained: naive=%t, compacted=%t\n", r.HistoryAblation.NaiveRetainedPointer, r.HistoryAblation.CompactedRetainedPointer)
 		fmt.Fprintf(&b, "- managed compactions=%d, peak tokens=%d, final tokens=%d\n", r.HistoryAblation.Compactions, r.HistoryAblation.PeakTokens, r.HistoryAblation.FinalTokens)
+	}
+	if modeAblationPassed(r.ModeAblation) {
+		b.WriteString("\n### Mode witness\n\n")
+		fmt.Fprintf(&b, "- same extraction task correct: string=%t, typed-tool=%t\n", r.ModeAblation.StringCorrect, r.ModeAblation.ToolCorrect)
+		fmt.Fprintf(&b, "- fixture-reported tokens: string=%d, typed-tool=%d\n", r.ModeAblation.StringTokens, r.ModeAblation.ToolTokens)
 	}
 	if verifierAblationPassed(r.VerifierAblation) {
 		b.WriteString("\n### Verifier witness\n\n")

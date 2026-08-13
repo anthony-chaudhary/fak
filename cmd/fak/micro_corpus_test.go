@@ -44,6 +44,7 @@ func TestApplyMeasuredAblationsPromotesOnlyWitnessedLayers(t *testing.T) {
 		PeakTokens:               64,
 		FinalTokens:              61,
 	}
+	r.ModeAblation = microModeAblation{StringCorrect: true, ToolCorrect: true, StringTokens: 23, ToolTokens: 19}
 	r.VerifierAblation = microVerifierAblation{
 		WithoutVerifierCompleted: true,
 		WithVerifierCompleted:    false,
@@ -61,11 +62,11 @@ func TestApplyMeasuredAblationsPromotesOnlyWitnessedLayers(t *testing.T) {
 	if r.Ablations[2].Layer != "verify" || r.Ablations[2].Status != "PASS" {
 		t.Fatalf("verifier not promoted: %+v", r.Ablations)
 	}
-	if r.Ablations[3].Status != "NOT_YET" {
-		t.Fatalf("unwitnessed ablation promoted: %+v", r.Ablations[3])
+	if r.Ablations[3].Layer != "mode" || r.Ablations[3].Status != "PASS" {
+		t.Fatalf("mode not promoted: %+v", r.Ablations)
 	}
 	md := formatMicroCorpusReport(r)
-	for _, want := range []string{"| retry | PASS |", "retry off: completed=false, attempts=1", "evidence re-fed verbatim: `" + retryAblationFailure + "`", "| context | PASS |", "durable pointer retained: naive=false, compacted=true", "| verify | PASS |", "independent readback: `artifact-absent`"} {
+	for _, want := range []string{"| retry | PASS |", "retry off: completed=false, attempts=1", "evidence re-fed verbatim: `" + retryAblationFailure + "`", "| context | PASS |", "durable pointer retained: naive=false, compacted=true", "| verify | PASS |", "independent readback: `artifact-absent`", "| mode | PASS |", "same extraction task correct: string=true, typed-tool=true"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

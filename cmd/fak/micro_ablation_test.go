@@ -31,3 +31,13 @@ func TestRunMicroHistoryAblationRetainsDurablePointerWithinCap(t *testing.T) {
 		t.Fatalf("context ablation did not isolate contribution: %+v", r)
 	}
 }
+
+func TestRunMicroModeAblationSameTask(t *testing.T) {
+	r, err := runMicroModeAblation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !modeAblationPassed(r) {
+		t.Fatalf("bad mode receipt: %+v", r)
+	}
+}

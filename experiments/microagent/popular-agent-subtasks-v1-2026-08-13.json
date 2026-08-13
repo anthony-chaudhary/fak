@@ -3,7 +3,7 @@
   "corpus": "popular-agent-subtasks-v1",
   "execution_verdict": "PASS",
   "value_verdict": "NOT_YET",
-  "reason": "paired corpus execution plus retry, bounded context compaction, and independent verification contributions are measured, but gateway dollars and mode ablation are not yet available; no quality/$ winner is claimed",
+  "reason": "paired corpus execution plus retry, bounded history, verification, and action-mode contributions are measured, but gateway dollars remain unavailable; no quality/$ winner is claimed",
   "cases": [
     {
       "task": {
@@ -152,8 +152,8 @@
     },
     {
       "layer": "mode",
-      "status": "NOT_YET",
-      "reason": "the real gateway microagent currently exposes completion mode only; #2026 owns bash/tool mode parity"
+      "status": "PASS",
+      "reason": "the same structured extraction task completed through portable string action and provider-native typed-tool action modes"
     }
   ],
   "retry_ablation": {
@@ -180,6 +180,11 @@
     "compactions": 20,
     "peak_tokens": 64,
     "final_tokens": 57
+  },
+  "mode_ablation": {
+    "string_correct": true,
+    "tool_correct": true,
+    "string_tokens": 23,
+    "tool_tokens": 19
   }
 }
-
