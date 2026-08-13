@@ -105,33 +105,40 @@ func guardBannerBuildStamp() string {
 	return strings.TrimPrefix(buildProvenanceLine(bi), "build: ")
 }
 
-// guardShortBuildID is the compact build identity for space-constrained surfaces (the fak info
-// pane header): the short VCS revision plus a "+" marker when the binary was built from a dirty
-// tree, or "" when no VCS stamp is embedded. The FULL stamp (commit time included) is
+// guardShortBuildID is the compact build identity for space-constrained surfaces (the guard's
+// compact/animated launch identity, the fak info pane header): the short commit the binary was
+// built from plus a "+" marker when that build carried uncommitted changes, or "" when the
+// binary carries no commit stamp at all. The FULL stamp (commit time included) is
 // guardBannerBuildStamp — this is the abbreviated tell for places one line is all there is room
 // for.
+//
+// It folds the SAME binaryIdentity `fak version` publishes rather than re-reading bi.Settings
+// itself, and that is load-bearing rather than tidiness. A source-install / `fak self-update`
+// build carries its commit in the -X-injected appversion.BuildCommit, NOT in vcs.revision (the
+// toolchain stamps no VCS settings when it builds from an export rather than the checkout), so
+// a hand-rolled vcs.revision-only read rendered "fak guard 0.43.0 (no stamp)" on a freshly
+// self-updated binary whose `fak version` said `build: 0c96937b61ac` (#6537) — the compact
+// banner's stale-binary tell firing on the one binary that had just been made current. Two
+// readers of one fact drift; one reader cannot.
 func guardShortBuildID() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
+	bi, _ := debug.ReadBuildInfo()
+	return guardShortBuildIDOf(buildIdentity(bi))
+}
+
+// guardShortBuildIDOf renders the compact build id for an already-resolved identity, so a render
+// witness can drive the guard identity from the same fixture provenance as the version surface.
+// An unstamped identity yields "" — the surfaces spell that out as "(no stamp)" themselves. That
+// includes the `go install …@vX` module path, which carries a module version but no commit to
+// abbreviate; `fak version` renders it as "build: module vX", which has no short form either.
+func guardShortBuildIDOf(id binaryIdentity) string {
+	if !id.Stamped {
 		return ""
 	}
-	var rev string
-	dirty := false
-	for _, s := range bi.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			rev = s.Value
-		case "vcs.modified":
-			dirty = s.Value == "true"
-		}
-	}
-	if rev == "" {
-		return ""
-	}
+	rev := id.Commit
 	if len(rev) > 8 {
 		rev = rev[:8]
 	}
-	if dirty {
+	if id.Dirty {
 		rev += "+"
 	}
 	return rev
