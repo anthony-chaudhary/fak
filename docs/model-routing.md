@@ -113,7 +113,8 @@ the default-deny floor intact (see the contract below).
 1. **Classify.** The host turns the thing it is about to do into a `Subject` — the
    aspect (a whole request, one tool call, a sub-query, a step), the tool name, an
    estimated prompt length, a latency/complexity hint, and any labels (domain,
-   tenant, language).
+   tenant, language). If it holds the admitted turn, it also stamps the turn's input
+   shape once here with `AdmitTurn` (see the input-trigger section below).
 2. **Route.** `Manifest.Route(Subject)` walks the rules top-to-bottom; the first
    `Match` that fires returns its `Plan`, else the fail-closed `Default`. This is
    pure and side-effect-free — the same subject always yields the same decision.
@@ -156,6 +157,7 @@ prints a starter; `--check` validates one (unknown fields are rejected).
 | `min_prompt_tokens` / `max_prompt_tokens` | int | token band; `max=0` is unbounded |
 | `latency` | enum | `interactive` / `batch` (closed) |
 | `min_complexity` | enum | floor: `low` < `medium` < `high` (closed) |
+| `input_trigger` | enum | the turn's input shape: `tool_result` / `user_message` / `assistant_prefill` / `system_only` / `other` (closed — see below) |
 | `labels` | map | every pair must equal the subject's label |
 
 **Plan** = `{ members, reduce, scout, reason }`
@@ -173,14 +175,14 @@ prints a starter; `--check` validates one (unknown fields are rejected).
 
 ## The matching primitive (`Match.Matches` — the envelope-matching spine)
 
-`Match.Matches(Subject)` (`internal/modelroute/modelroute.go:297`) is the single
+`Match.Matches(Subject)` (`internal/modelroute/modelroute.go:311`) is the single
 tag-matching primitive every routing rule reduces to. It has the *shape* of MPI's
 point-to-point envelope match, without the point-to-point delivery:
 
 - **A set field is a required tag; an unset field is a wildcard.** `Match` tests the
   `Subject` field-by-field under logical AND — every field the rule sets must hold, and
   a field the rule leaves empty matches anything. An empty `aspect`, `tool`, `latency`,
-  or `min_complexity`, or an unbounded token band (`max_prompt_tokens=0`), each play the
+  `min_complexity`, or `input_trigger`, or an unbounded token band (`max_prompt_tokens=0`), each play the
   `MPI_ANY_SOURCE` / `MPI_ANY_TAG` wildcard role for their own dimension — "match any
   value of this field." This is the only wildcard discipline in the routing spine:
   anchor here, do not reinvent a parallel matcher.
@@ -203,6 +205,46 @@ required tag, unset = wildcard, first-match-wins — from MPI's `MPI_ANY_SOURCE`
 `MPI_ANY_TAG` receive. It does **not** borrow point-to-point delivery, source ranks, or
 rendezvous: there is no message queue and no source-rank ordering behind a match. The
 match decides *which model runs*; the wiring contract above is what actually runs it.
+
+## The input trigger (the turn's shape, classified once at ingress)
+
+`input_trigger` is the one routing dimension that comes from the turn's **envelope**
+rather than from what the host declares about the work. It answers "what opened this
+turn" — a returning tool result, a fresh user message, a prefilled assistant
+continuation, a bare system load — so a policy can send an agent-loop continuation to a
+cheap local model while a human-waiting turn goes to the frontier.
+
+- **Classified exactly once, at ingress.** `modelroute.AdmitTurn(subject, turn)`
+  (`internal/modelroute/inputtrigger_subject.go`) folds the admitted messages through
+  `inputtrigger.Classify` and stamps the answer on `Subject.InputTrigger`; `Route` echoes
+  the subject into the `Decision`, so the trigger a route was taken under is in the audit
+  trace. Rules match the **enum**. Nothing downstream re-reads the prompt to re-decide the
+  shape — a second derivation is a second taxonomy, and two taxonomies drift.
+- **Shape, never text.** The classifier reads only each message's role, whether its
+  content is blank, and (for a tool message) the `tool_call_id` linking it to a real call.
+  No prompt text can steer a route, and an assistant message whose *text* claims to be a
+  tool result stays `assistant_prefill`.
+- **Fail-conservative.** An empty turn, a turn carrying a role outside
+  `system`/`user`/`assistant`/`tool`, an unlinked tool message, or an empty trailing
+  assistant message all classify as `other` and fall to the general rules or the
+  fail-closed default. A malformed turn can never talk its way into the cheap
+  tool-result lane. A subject that was never classified matches no trigger rule at all.
+- **A routing hint, never an authorization fact.** The trigger may select a model, a
+  provider, or a cache route. It may **not** decide whether a tool call is permitted,
+  whether a payload may leave the box, or which capability floor applies. The turn's
+  messages are attacker-influenced, so a shape buys a route, never a permission:
+  `ClassOf` / `PolicyFor` (the work class and its tier floor) deliberately do not read
+  this field, and the witness test pins that two turns differing only in trigger take
+  different routes under a **bit-identical** tier policy.
+
+```json
+{"name": "tool-result-continuation",
+ "match": {"aspect": "request", "input_trigger": "tool_result"},
+ "plan":  {"members": [{"model": "local-small"}]}}
+```
+
+Witness: `go test ./internal/modelroute -run TestRouteInputTrigger` and
+`go test ./internal/modelroute/inputtrigger`.
 
 ## The 60-second proof (no key, no model, no GPU)
 

@@ -83,6 +83,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/maputil"
+	"github.com/anthony-chaudhary/fak/internal/modelroute/inputtrigger"
 )
 
 // Version is the current manifest schema tag. A manifest MAY omit it (treated as
@@ -190,6 +191,13 @@ type Subject struct {
 	Latency      Latency           `json:"latency,omitempty"`
 	Complexity   Complexity        `json:"complexity,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
+	// InputTrigger is the SHAPE of the input that triggered this turn (tool result /
+	// user message / assistant prefill / system-only / other), classified ONCE at
+	// ingress by AdmitTurn and carried from there. Empty means "never classified" —
+	// a subject built by a seam that does not see a turn at all — which every Match
+	// on this field simply fails to match. It is a ROUTING HINT, never an
+	// authorization fact: see inputtrigger's package doc and AdmitTurn.
+	InputTrigger inputtrigger.Trigger `json:"input_trigger,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +300,11 @@ type Match struct {
 	Latency         Latency           `json:"latency,omitempty"`
 	MinComplexity   Complexity        `json:"min_complexity,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"` // every pair must equal
+	// InputTrigger is an exact match on the turn's classified input shape (closed
+	// vocabulary; unset is the wildcard). This is how a rule reads the trigger —
+	// the whole point of classifying once at ingress is that a policy never
+	// re-derives the shape from prompt text.
+	InputTrigger inputtrigger.Trigger `json:"input_trigger,omitempty"`
 }
 
 // Matches reports whether the Subject satisfies the Match predicate.
@@ -312,6 +325,9 @@ func (m Match) Matches(s Subject) bool {
 		return false
 	}
 	if m.MinComplexity != "" && complexityRank(s.Complexity) < complexityRank(m.MinComplexity) {
+		return false
+	}
+	if m.InputTrigger != "" && m.InputTrigger != s.InputTrigger {
 		return false
 	}
 	for k, v := range m.Labels {
@@ -409,6 +425,9 @@ func (m Manifest) Validate() error {
 		}
 		if !validComplexity(r.Match.MinComplexity) {
 			return fmt.Errorf("modelroute: rule %q has unknown min_complexity %q", r.Name, r.Match.MinComplexity)
+		}
+		if r.Match.InputTrigger != "" && !inputtrigger.Known(r.Match.InputTrigger) {
+			return fmt.Errorf("modelroute: rule %q has unknown input_trigger %q", r.Name, r.Match.InputTrigger)
 		}
 		if err := validatePlan("rule "+r.Name, r.Plan); err != nil {
 			return err
