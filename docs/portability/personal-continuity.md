@@ -24,3 +24,11 @@ fak profile continuity selfcheck
 ```
 
 It builds three real managed object files in the source home, drives the real export/apply/switch/read-back/rollback objects in a second isolated home, and prints the four durable receipt IDs.
+
+## Sensitivity and egress gate
+
+`fak profile continuity preview --home H --channel public --json` runs the source-boundary egress planner on discovered objects. `export --channel CHANNEL` runs the same gate before package digest/ID creation and before any future signing or upload seam. A denied plan creates no package identity and writes no bytes.
+
+Adapters classify leaves with the typed vocabulary `public`, `organization`, `private`, `machine-local`, `credential-reference`, and `forbidden`. An adapter may implement `portability.SensitivityAdapter`, or an object may use the stable `{"sensitivity":"public","value":...}` envelope. Built-in credential/token/path/PII/private-host checks cannot be weakened by adapters. Credential material is always forbidden; only references such as `env:NAME`, `keychain:NAME`, or `vault:NAME` can receive `credential-reference`.
+
+Plans choose `include`, `reference`, `redact`, or `deny`. Public and organization channels deny unclassified leaves. Explanations contain JSON paths, classes, actions, and stable reason codes only; they never include field values. Redaction markers are deterministic. The adversarial machine-readable corpus is `internal/portability/egress_test.go`.

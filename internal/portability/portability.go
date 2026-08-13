@@ -63,7 +63,14 @@ func (s Store) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (s Store) Discover(selectors []string) (Preview, error) {
+func (s Store) Discover(selectors []string) (Preview, error) { return s.discover(selectors, true) }
+
+// DiscoverForEgress retains candidates inside the source boundary for typed planning.
+func (s Store) DiscoverForEgress(selectors []string) (Preview, error) {
+	return s.discover(selectors, false)
+}
+
+func (s Store) discover(selectors []string, legacyUnsafeFilter bool) (Preview, error) {
 	out := Preview{}
 	root := filepath.Join(s.Home, "managed")
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -95,7 +102,7 @@ func (s Store) Discover(selectors []string) (Preview, error) {
 			out.Rejected = append(out.Rejected, fmt.Sprintf("%s: invalid JSON", rel))
 			return nil
 		}
-		if why := unsafe(v); why != "" {
+		if why := unsafe(v); legacyUnsafeFilter && why != "" {
 			out.Rejected = append(out.Rejected, fmt.Sprintf("%s: %s", rel, why))
 			return nil
 		}
@@ -384,4 +391,48 @@ func singular(s string) string {
 		return "policy"
 	}
 	return strings.TrimSuffix(s, "s")
+}
+
+// ExportEgress applies the source-boundary plan before package identity is computed.
+// A denied plan cannot be signed, attested, written, or uploaded by this seam.
+func (s Store) ExportEgress(out string, selectors []string, channel Channel, commit bool, adapters ...SensitivityAdapter) (Package, Receipt, []EgressPreview, error) {
+	pview, err := s.DiscoverForEgress(selectors)
+	if err != nil {
+		return Package{}, Receipt{}, nil, err
+	}
+	if len(pview.Rejected) > 0 {
+		return Package{}, Receipt{}, nil, fmt.Errorf("egress refused: source policy rejected %d object(s)", len(pview.Rejected))
+	}
+	if len(pview.Objects) < 1 {
+		return Package{}, Receipt{}, nil, errors.New("egress refused: no selected managed objects")
+	}
+	previews := make([]EgressPreview, 0, len(pview.Objects))
+	for i := range pview.Objects {
+		plan, e := PreviewEgress(channel, pview.Objects[i].Payload, adapters...)
+		if e != nil {
+			return Package{}, Receipt{}, previews, e
+		}
+		previews = append(previews, plan)
+		if !plan.Allowed {
+			return Package{}, Receipt{}, previews, fmt.Errorf("egress refused: object %s has denied fields", pview.Objects[i].ID)
+		}
+		pview.Objects[i].Payload = plan.Payload
+		h := sha256.Sum256(plan.Payload)
+		pview.Objects[i].Digest = "sha256:" + hex.EncodeToString(h[:])
+	}
+	// Identity is intentionally below the successful egress gate.
+	p := Package{Schema: Schema, Objects: pview.Objects}
+	p.Digest = packageDigest(p)
+	p.ID = "pkg-" + strings.TrimPrefix(p.Digest, "sha256:")[:16]
+	r := s.receipt("export", p.ID, "", "", map[bool]string{true: "committed", false: "preview"}[commit], "egress-checked:"+string(channel))
+	if commit {
+		b, _ := json.MarshalIndent(p, "", "  ")
+		if err = atomicWrite(out, b); err != nil {
+			return Package{}, Receipt{}, previews, err
+		}
+		if err = s.writeReceipt(r); err != nil {
+			return Package{}, Receipt{}, previews, err
+		}
+	}
+	return p, r, previews, nil
 }

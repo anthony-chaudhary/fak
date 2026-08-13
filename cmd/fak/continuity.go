@@ -28,6 +28,7 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "output package path")
 	receipt := fs.String("receipt", "", "switch receipt ID")
 	interrupt := fs.Int("interrupt-after", 0, "test-only interruption after N staged objects")
+	channel := fs.String("channel", "", "egress channel: public, organization, private, machine-local")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -43,15 +44,25 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 	var err error
 	switch sub {
 	case "preview":
-		v, err = s.Discover(selectors)
+		if *channel == "" {
+			v, err = s.Discover(selectors)
+		} else {
+			v, err = continuityEgressPreview(s, selectors, portability.Channel(*channel))
+		}
 	case "export":
 		if *out == "" {
 			*out = filepath.Join(*home, "exports", "continuity.fakpkg.json")
 		}
 		var p portability.Package
 		var r portability.Receipt
-		p, r, err = s.Export(*out, selectors, *commit)
-		v = map[string]any{"package": p, "receipt": r, "path": *out}
+		if *channel == "" {
+			p, r, err = s.Export(*out, selectors, *commit)
+			v = map[string]any{"package": p, "receipt": r, "path": *out}
+		} else {
+			var previews []portability.EgressPreview
+			p, r, previews, err = s.ExportEgress(*out, selectors, portability.Channel(*channel), *commit)
+			v = map[string]any{"package": p, "receipt": r, "path": *out, "egress_previews": previews}
+		}
 	case "apply":
 		if *pkg == "" {
 			fmt.Fprintln(stderr, "--package is required")
@@ -138,4 +149,20 @@ Examples: fak profile continuity preview --home HOME
           fak profile continuity export --home HOME --out context.fakpkg.json --commit
           fak profile continuity apply --home SECOND --package context.fakpkg.json --commit
 `)
+}
+
+func continuityEgressPreview(s portability.Store, selectors []string, channel portability.Channel) (any, error) {
+	preview, err := s.DiscoverForEgress(selectors)
+	if err != nil {
+		return nil, err
+	}
+	previews := make([]portability.EgressPreview, 0, len(preview.Objects))
+	for _, object := range preview.Objects {
+		plan, err := portability.PreviewEgress(channel, object.Payload)
+		if err != nil {
+			return nil, err
+		}
+		previews = append(previews, plan)
+	}
+	return map[string]any{"channel": channel, "previews": previews, "source_rejected_count": len(preview.Rejected)}, nil
 }
