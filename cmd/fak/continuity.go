@@ -17,6 +17,12 @@ func runContinuity(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	sub, args := argv[0], argv[1:]
+	if sub == "sync-plan" {
+		return runContinuitySyncPlan(stdout, stderr, args)
+	}
+	if sub == "sync-apply" {
+		return runContinuitySyncApply(stdout, stderr, args)
+	}
 	fs := flag.NewFlagSet("fak profile continuity "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	home := fs.String("home", "", "isolated fak home (required)")
@@ -138,6 +144,8 @@ func continuityHelp(w io.Writer) {
 Journey (mutations preview unless --commit is present):
   preview   discover/redact managed skill, workflow, and policy objects
   export    write a portable package and durable receipt
+  sync-plan preview a typed three-way merge from base/local/remote packages
+  sync-apply replay an approved plan atomically with receipt/recovery
   apply     restore package inactive into a second --home
   switch    activate an applied package; --package is its package ID
   status    behavior read-back of the active context
@@ -165,4 +173,99 @@ func continuityEgressPreview(s portability.Store, selectors []string, channel po
 		previews = append(previews, plan)
 	}
 	return map[string]any{"channel": channel, "previews": previews, "source_rejected_count": len(preview.Rejected)}, nil
+}
+
+func runContinuitySyncPlan(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("continuity sync-plan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	base := fs.String("base", "", "common-base package")
+	local := fs.String("local", "", "local package")
+	remote := fs.String("remote", "", "remote package")
+	out := fs.String("out", "", "replayable plan path")
+	channel := fs.String("channel", string(portability.ChannelPrivate), "egress channel")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	if err := fs.Parse(args); err != nil || *base == "" || *local == "" || *remote == "" {
+		fmt.Fprintln(stderr, "usage: fak continuity sync-plan --base P --local P --remote P [--out PLAN] [--channel private] [--json]")
+		return 2
+	}
+	bp, err := portability.ReadPackage(*base)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	lp, err := portability.ReadPackage(*local)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	rp, err := portability.ReadPackage(*remote)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	plan, err := portability.PreviewMerge(&bp, lp, rp, portability.Channel(*channel))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *out != "" {
+		if err := portability.WriteMergePlan(*out, plan); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	if *jsonOut {
+		emitContinuity(stdout, plan, true)
+		if len(plan.Conflicts) > 0 {
+			return 3
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "SYNC PLAN %s: %d step(s), %d conflict(s), channel=%s\n", plan.ID, len(plan.Steps), len(plan.Conflicts), plan.Channel)
+	for _, s := range plan.Steps {
+		fmt.Fprintf(stdout, "  %-18s %-9s %s", s.ObjectID, s.Action, s.Source)
+		if len(s.Paths) > 0 {
+			fmt.Fprintf(stdout, " (%s)", strings.Join(s.Paths, ", "))
+		}
+		fmt.Fprintln(stdout)
+	}
+	for _, c := range plan.Conflicts {
+		fmt.Fprintf(stdout, "  CONFLICT %-20s %s %s: %s\n", c.Kind, c.ObjectID, c.Path, c.Explanation)
+	}
+	if len(plan.Conflicts) > 0 {
+		fmt.Fprintln(stdout, "BLOCKED: resolve typed conflicts; no bytes were written and no last-writer-wins was used")
+		return 3
+	}
+	fmt.Fprintln(stdout, "READY: replay with fak continuity sync-apply --plan PLAN --out PACKAGE --home HOME --commit")
+	return 0
+}
+
+func runContinuitySyncApply(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("continuity sync-apply", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	home := fs.String("home", "", "continuity home")
+	planPath := fs.String("plan", "", "merge plan")
+	out := fs.String("out", "", "merged package export")
+	commit := fs.Bool("commit", false, "atomically commit")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	interrupt := fs.Int("interrupt-after", 0, "test-only interruption before commit")
+	if err := fs.Parse(args); err != nil || *home == "" || *planPath == "" || *out == "" {
+		fmt.Fprintln(stderr, "usage: fak continuity sync-apply --home DIR --plan PLAN --out PACKAGE [--commit] [--json]")
+		return 2
+	}
+	p, err := portability.ReadMergePlan(*planPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	r, err := portability.New(*home).CommitMerge(p, *out, *commit, *interrupt)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *jsonOut {
+		return emitContinuity(stdout, r, true)
+	}
+	fmt.Fprintf(stdout, "%s %s receipt=%s package=%s\n", r.Operation, r.Status, r.ID, r.PackageID)
+	return 0
 }

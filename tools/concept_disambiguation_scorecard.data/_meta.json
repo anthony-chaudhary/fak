@@ -6021,6 +6021,21 @@
           "category": "incidental",
           "reason": "Portability wire type records deterministic merge operations and typed conflicts rather than a planning subsystem",
           "token": "MergePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serializer writes a portability merge record rather than a planning subsystem",
+          "token": "WriteMergePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Digest helper canonicalizes a portability merge record rather than performing planning",
+          "token": "mergePlanDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deserializer reads a portability merge record rather than a planning subsystem",
+          "token": "ReadMergePlan"
         }
       ],
       "exclude": [
@@ -6055,6 +6070,7 @@
         "PlanRemoteDrain",
         "PlanResolver",
         "PlanStepDecision",
+        "ReadMergePlan",
         "ReconcilePlan",
         "RecoveryReplan",
         "RemoteDrainCandidate",
@@ -6063,6 +6079,7 @@
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
+        "WriteMergePlan",
         "buildMainPlan",
         "bytes_per_candidate",
         "candidateID",
@@ -6079,6 +6096,7 @@
         "inKernelPlannerEPCoordinated",
         "indexPlanSteps",
         "indexedPlanStep",
+        "mergePlanDigest",
         "motifDetectPlanFanoutReconcile",
         "notplanned",
         "nplan",

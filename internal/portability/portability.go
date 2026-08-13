@@ -341,8 +341,8 @@ func (s Store) Rollback(receiptID string, commit bool) (Receipt, error) {
 	if e = json.Unmarshal(b, &prior); e != nil {
 		return Receipt{}, e
 	}
-	if prior.Operation != "switch" || prior.Status != "committed" {
-		return Receipt{}, errors.New("receipt is not a committed switch")
+	if (prior.Operation != "switch" && prior.Operation != "merge") || prior.Status != "committed" {
+		return Receipt{}, errors.New("receipt is not a committed switch or merge")
 	}
 	cur, _ := s.Active()
 	r := s.receipt("rollback", "", cur, prior.From, map[bool]string{true: "committed", false: "preview"}[commit], "reverses "+receiptID)
