@@ -79,4 +79,21 @@
   ]
 }
 </script>
+{% if page.type == "CollectionPage" %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": {{ page.title | jsonify }},
+  "description": {{ page.description | jsonify }},
+  "url": {{ page.url | absolute_url | jsonify }},
+  "dateModified": {{ page.last_modified_at | date_to_xmlschema | jsonify }},
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": {{ site.title | jsonify }},
+    "url": {{ site.url | append: site.baseurl | jsonify }}
+  }
+}
+</script>
+{% endif %}
 <!-- STRUCTURED-DATA:END -->
