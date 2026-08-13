@@ -10,22 +10,29 @@ package main
 // when FAK_GARDEN is off (the env-side governor brake).
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/commitlifecycle"
+	"github.com/anthony-chaudhary/fak/internal/gardenbudget"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/growthgate"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -37,6 +44,12 @@ func runGarden(stdout, stderr io.Writer, argv []string) int {
 	// reporting. The default `fak garden` (no subcommand) stays the read-only fold.
 	if len(argv) > 0 && argv[0] == "tick" {
 		return runGardenTick(stdout, stderr, argv[1:])
+	}
+	// `fak garden watchdog` is the Go-native scheduled stale-work janitor. It owns
+	// the hard outer deadline around `garden tick`, emits one typed JSON envelope
+	// even when the child times out, and reaps the child's whole process tree.
+	if len(argv) > 0 && argv[0] == "watchdog" {
+		return runGardenWatchdog(stdout, stderr, argv[1:])
 	}
 	// `fak garden walk` is the ITEM pass (#item-walk): one resource-aware fold over
 	// the HUNDREDS of individual garden items (issues today) a member surfaces — it
@@ -117,7 +130,10 @@ func emitGardenJSON(w io.Writer, p gardenbundle.Payload) {
 // run in the loop ledger and registers itself in the loop registry, so the tick
 // is visible in `fak loop health` and re-arms at boot (the #1281 durable-loop
 // registration precedent: a schedule definition that survives a restart).
-var gardenReclaimInspect = inspectGardenReclaim
+var (
+	gardenReclaimInspect = inspectGardenReclaim
+	gardenCollectBounded = gardenbundle.CollectBounded
+)
 
 const gardenTickLoopID = "garden-stale-work-tick"
 
@@ -150,6 +166,8 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	growthApplyFlag := fs.Bool("growth-apply", false, "growthgate collect: actually delete the reapable set (default: ledger-only soak, delete nothing; also honored: FAK_GARDEN_GROWTH_COLLECT=apply)")
 	register := fs.Bool("register", false, "register the durable garden-tick loop unit in the loop registry and return")
 	timeout := fs.Int("timeout", 240, "per-member timeout seconds")
+	budget := fs.Int("budget", gardenTickBudgetSeconds, "wall-clock budget seconds for the WHOLE tick; phases past the budget are deferred to the next tick via the resume checkpoint (0 = unbounded)")
+	cursor := fs.String("cursor", "", "resume-checkpoint path for the bounded collection/action cycle (default: <workspace>/.dos/garden/tick-cursor.json)")
 	ledger := fs.String("ledger", "", "loop JSONL ledger path (default: the loop ledger)")
 	registry := fs.String("registry", "", "loop registry JSON path (default: the loop registry)")
 	dir := fs.String("dir", "", "lease store repo dir (default: git discovery from cwd)")
@@ -185,34 +203,252 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
-	results := gardenbundle.Collect(root, "", time.Duration(*timeout)*time.Second, false)
-	results = append(results, gardenReclaimInspect(stderr, root))
-	plan := gardenbundle.PlanTick(results, *dryRun)
-
-	growthApply := growthApplyEnabled(*growthApplyFlag)
-	reaped, sessions, surfaced, lockFiles, collected, intents, folded := performGardenTick(stdout, stderr, plan, *dir, root, *dryRun, growthApply)
-	witnessGardenTick(ledgerPath, plan, reaped, sessions, surfaced, lockFiles, collected, intents, folded)
-
-	if *asJSON {
-		out := map[string]any{
-			"schema":                "fak.garden-tick.v1",
-			"workspace":             root,
-			"commit":                gardenbundle.HeadCommit(root),
-			"dry_run":               plan.DryRun,
-			"acted":                 plan.Acted(),
-			"reaped_leases":         reaped,
-			"reaped_sessions":       sessions,
-			"reaped_lock_files":     lockFiles,
-			"reaped_intents":        intents,
-			"reaped_growth_logs":    collected,
-			"folded_sentinel_lines": folded,
-			"surfaced_runs":         surfaced,
-			"plan":                  plan,
-		}
-		return encodeJSONOrFail(stdout, stderr, out, "fak garden tick")
+	tickStart := time.Now()
+	tickBudget := time.Duration(*budget) * time.Second
+	cursorPath := firstNonEmpty(*cursor, defaultGardenTickCursor(root))
+	resume, cerr := gardenbudget.LoadCursor(cursorPath)
+	if cerr != nil {
+		fmt.Fprintf(stderr, "fak garden tick: read resume checkpoint %s: %v (restarting the cycle)\n", cursorPath, cerr)
 	}
-	renderGardenTick(stdout, plan, reaped, sessions, surfaced, lockFiles, collected, intents, folded)
-	return 0
+	// A report-only invocation must not consume or mutate the acting checkpoint.
+	if *dryRun {
+		resume = gardenbudget.Cursor{}
+	}
+	resume = gardenbudget.Stamp(resume, gardenTickStageCollect, tickStart)
+	state := decodeGardenTickState(resume.Payload)
+	if !validGardenTickStage(resume.Stage) {
+		resume.Stage, resume.Next = gardenTickStageCollect, ""
+		state = gardenTickState{}
+	}
+
+	save := func(cur gardenbudget.Cursor) error {
+		cur.Payload = encodeGardenTickState(state)
+		cur.UpdatedUnix = time.Now().Unix()
+		resume = cur
+		if *dryRun {
+			return nil
+		}
+		return gardenbudget.SaveCursor(cursorPath, cur)
+	}
+	finish := func(status, reason string, complete bool, plan gardenbundle.TickPlan,
+		collection gardenbundle.CollectProgress, action gardenbudget.Result, code int) int {
+		counts := state.Counts
+		if *asJSON {
+			out := map[string]any{
+				"schema":                "fak.garden-tick.v2",
+				"status":                status,
+				"reason":                reason,
+				"complete":              complete,
+				"workspace":             root,
+				"commit":                gardenbundle.HeadCommit(root),
+				"dry_run":               plan.DryRun,
+				"acted":                 complete && !plan.DryRun && (plan.Acted() || counts.acted()),
+				"reaped_leases":         counts.Reaped,
+				"reaped_sessions":       counts.Sessions,
+				"reaped_lock_files":     counts.LockFiles,
+				"reaped_intents":        counts.Intents,
+				"reaped_growth_logs":    counts.Collected,
+				"folded_sentinel_lines": counts.Folded,
+				"surfaced_runs":         counts.Surfaced,
+				"budget_seconds":        *budget,
+				"elapsed_millis":        time.Since(tickStart).Milliseconds(),
+				"progress": map[string]any{
+					"stage":      resume.Stage,
+					"next":       resume.Next,
+					"cursor":     cursorPath,
+					"ticks":      resume.Ticks,
+					"collection": collection,
+					"action":     action,
+				},
+				"plan": plan,
+			}
+			if rc := encodeJSONOrFail(stdout, stderr, out, "fak garden tick"); rc != 0 {
+				return rc
+			}
+			return code
+		}
+		renderGardenTick(stdout, plan, counts.Reaped, counts.Sessions, counts.Surfaced,
+			counts.LockFiles, counts.Collected, counts.Intents, counts.Folded)
+		if !complete {
+			fmt.Fprintf(stdout, "  -> %s: %s; resume stage=%s next=%q checkpoint=%s\n",
+				status, reason, resume.Stage, resume.Next, cursorPath)
+		}
+		writeGardenTickBudgetLine(stdout, action, cursorPath)
+		return code
+	}
+
+	var collection gardenbundle.CollectProgress
+	var action gardenbudget.Result
+	plan := gardenbundle.PlanTick(state.Results, *dryRun)
+
+	// Stage 1: member collection. It is a durable prefix, not one unbounded
+	// prelude: every returned member advances the checkpoint and each member gets
+	// at most the global time remaining.
+	if resume.Stage == gardenTickStageCollect {
+		results, progress := gardenCollectBounded(root, gardenbundle.CollectOptions{
+			PerMemberTimeout: time.Duration(*timeout) * time.Second,
+			Budget:           tickBudget,
+			Start:            tickStart,
+			Next:             string(resume.Next),
+			Prior:            state.Results,
+			Checkpoint: func(next string, results []gardenbundle.MemberResult) error {
+				state.Results = results
+				resume.Stage = gardenTickStageCollect
+				resume.Next = gardenbudget.Phase(next)
+				return save(resume)
+			},
+		})
+		state.Results, collection = results, progress
+		plan = gardenbundle.PlanTick(state.Results, *dryRun)
+		if progress.CheckpointError != "" {
+			return finish("error", "GARDEN_TICK_CHECKPOINT_FAILED", false, plan, collection, action, 1)
+		}
+		if !progress.Complete {
+			return finish("partial", "GARDEN_TICK_BUDGET_EXHAUSTED", false, plan, collection, action, 0)
+		}
+		resume.Stage, resume.Next = gardenTickStageReclaim, gardenbudget.Phase(gardenTickReclaimKey)
+		if err := save(resume); err != nil {
+			fmt.Fprintf(stderr, "fak garden tick: checkpoint collection: %v\n", err)
+			return finish("error", "GARDEN_TICK_CHECKPOINT_FAILED", false, plan, collection, action, 1)
+		}
+	}
+
+	// Stage 2: the in-process commit-lifecycle inspection. It has its own
+	// checkpoint so a hard outer kill retries it rather than replaying collection.
+	if resume.Stage == gardenTickStageReclaim {
+		if gardenbudget.Remaining(tickBudget, tickStart, time.Now) == 0 {
+			return finish("partial", "GARDEN_TICK_BUDGET_EXHAUSTED", false, plan, collection, action, 0)
+		}
+		state.Results = append(state.Results, gardenReclaimInspect(stderr, root))
+		plan = gardenbundle.PlanTick(state.Results, *dryRun)
+		resume.Stage, resume.Next = gardenTickStageAct, gardenActionPhases(*dryRun)[0]
+		if err := save(resume); err != nil {
+			fmt.Fprintf(stderr, "fak garden tick: checkpoint reclaim inspection: %v\n", err)
+			return finish("error", "GARDEN_TICK_CHECKPOINT_FAILED", false, plan, collection, action, 1)
+		}
+	}
+
+	plan = gardenbundle.PlanTick(state.Results, *dryRun)
+	if !*dryRun && resume.Stage == gardenTickStageAct && resume.Next != "" {
+		var checkpointErr error
+		state.Counts, action = performGardenTickBounded(stdout, stderr, plan, *dir, root,
+			false, growthApplyEnabled(*growthApplyFlag), state.Counts, resume,
+			gardenbudget.Options{Budget: tickBudget, Start: tickStart},
+			func(cur gardenbudget.Cursor, counts gardenTickCounts) error {
+				state.Counts = counts
+				resume = cur
+				checkpointErr = save(cur)
+				return checkpointErr
+			})
+		if checkpointErr != nil || action.CheckpointError != "" {
+			fmt.Fprintf(stderr, "fak garden tick: checkpoint action phase: %v\n", checkpointErr)
+			return finish("error", "GARDEN_TICK_CHECKPOINT_FAILED", false, plan, collection, action, 1)
+		}
+		if !action.Complete {
+			return finish("partial", "GARDEN_TICK_BUDGET_EXHAUSTED", false, plan, collection, action, 0)
+		}
+	}
+
+	// A complete action suffix checkpoints Next="" before this reset. If a
+	// process dies in the tiny gap, the next invocation sees act+empty and comes
+	// straight here instead of replaying mutations.
+	completedCounts := state.Counts
+	if !*dryRun {
+		resume.Stage, resume.Next = gardenTickStageCollect, ""
+		state = gardenTickState{}
+		if err := save(resume); err != nil {
+			fmt.Fprintf(stderr, "fak garden tick: reset completed cycle: %v\n", err)
+			return finish("error", "GARDEN_TICK_CHECKPOINT_FAILED", false, plan, collection, action, 1)
+		}
+	}
+	// The durable reset intentionally clears the next cycle's payload; keep the
+	// just-completed counts in memory for this invocation's renderer and witness.
+	state.Counts = completedCounts
+	witnessGardenTick(ledgerPath, plan, state.Counts.Reaped, state.Counts.Sessions,
+		state.Counts.Surfaced, state.Counts.LockFiles, state.Counts.Collected,
+		state.Counts.Intents, state.Counts.Folded)
+	return finish("complete", "GARDEN_TICK_COMPLETE", true, plan, collection, action, 0)
+}
+
+// gardenTickBudgetSeconds bounds ONE tick's wall clock. It is deliberately far below
+// the hourly cadence (gardenTickIntervalSeconds): a maintenance pass that outlives its
+// own interval overlaps the next scheduled tick and monopolizes the process tree — the
+// exact failure #6493 reports, where an hourly janitor sat blocked for 17 minutes.
+// Nothing is dropped when the budget runs out: the phases that did not fit are deferred
+// to the next tick through the resume checkpoint, so a large first drain converges
+// across ticks instead of inside one. 0 (via --budget 0) restores unbounded ticks.
+const gardenTickBudgetSeconds = 45
+
+const (
+	gardenTickStageCollect = "collect"
+	gardenTickStageReclaim = "reclaim"
+	gardenTickStageAct     = "act"
+	gardenTickReclaimKey   = "commit_lifecycle"
+)
+
+// The garden tick's resumable phases, in rotation order. Each name is one of the
+// tick's independent, idempotent, best-effort sweeps: splitting them this way is what
+// lets a budgeted tick stop between sweeps and resume at the next one (#6493).
+const (
+	gardenPhaseLeases   gardenbudget.Phase = "leases"
+	gardenPhaseLocks    gardenbudget.Phase = "lock-files"
+	gardenPhaseIntents  gardenbudget.Phase = "intents"
+	gardenPhaseGrowth   gardenbudget.Phase = "growth-logs"
+	gardenPhaseSentinel gardenbudget.Phase = "sentinel-fold"
+)
+
+// defaultGardenTickCursor is where the budgeted rotation checkpoints its resume point:
+// a gitignored per-workspace state file next to the rest of the .dos ephemera.
+func defaultGardenTickCursor(root string) string {
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, ".dos", "garden", "tick-cursor.json")
+}
+
+// writeGardenTickBudgetLine prints which phases this tick could not afford and
+// where the next scheduled pass resumes.
+func writeGardenTickBudgetLine(w io.Writer, spend gardenbudget.Result, cursorPath string) {
+	if !spend.Exhausted {
+		return
+	}
+	fmt.Fprintf(w, "  -> budget spent after %d phase(s) in %dms; deferred %v to the next tick (resume at %q, checkpoint %s)\n",
+		len(spend.Ran), spend.Millis, spend.Deferred, spend.Next.Next, cursorPath)
+}
+
+type gardenTickState struct {
+	Results []gardenbundle.MemberResult `json:"results,omitempty"`
+	Counts  gardenTickCounts            `json:"counts,omitempty"`
+}
+
+func validGardenTickStage(stage string) bool {
+	return stage == gardenTickStageCollect || stage == gardenTickStageReclaim || stage == gardenTickStageAct
+}
+
+func decodeGardenTickState(raw json.RawMessage) gardenTickState {
+	var state gardenTickState
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &state)
+	}
+	return state
+}
+
+func encodeGardenTickState(state gardenTickState) json.RawMessage {
+	b, _ := json.Marshal(state)
+	return b
+}
+
+func gardenActionPhases(dryRun bool) []gardenbudget.Phase {
+	if dryRun {
+		return []gardenbudget.Phase{gardenPhaseLeases}
+	}
+	return []gardenbudget.Phase{
+		gardenPhaseLeases,
+		gardenPhaseLocks,
+		gardenPhaseIntents,
+		gardenPhaseGrowth,
+		gardenPhaseSentinel,
+	}
 }
 
 // performGardenTick executes the side effects the plan calls for. Under dry-run no
@@ -223,6 +459,54 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 // reaped (the reap-parity sweep, #5345), and the count of decision-note lines folded
 // off the empty-tree sentinel note (census row 12, #5361).
 func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir, root string, dryRun, growthApply bool) (reaped, sessions, surfaced, lockFiles, collected, intents, folded int) {
+	c, _ := performGardenTickBounded(stdout, stderr, plan, dir, root, dryRun, growthApply,
+		gardenTickCounts{}, gardenbudget.Cursor{}, gardenbudget.Options{}, nil)
+	return c.Reaped, c.Sessions, c.Surfaced, c.LockFiles, c.Collected, c.Intents, c.Folded
+}
+
+// gardenTickCounts is what one tick actually did, one field per reaper. It exists so
+// the budgeted rotation can hand each phase a shared accumulator instead of threading
+// seven return values through every closure.
+type gardenTickCounts struct {
+	Reaped    int `json:"reaped_leases,omitempty"`
+	Sessions  int `json:"reaped_sessions,omitempty"`
+	Surfaced  int `json:"surfaced_runs,omitempty"`
+	LockFiles int `json:"reaped_lock_files,omitempty"`
+	Collected int `json:"reaped_growth_logs,omitempty"`
+	Intents   int `json:"reaped_intents,omitempty"`
+	Folded    int `json:"folded_sentinel_lines,omitempty"`
+}
+
+func (c gardenTickCounts) acted() bool {
+	return c.Reaped+c.Sessions+c.Surfaced+c.LockFiles+c.Collected+c.Intents+c.Folded > 0
+}
+
+// performGardenTickBounded executes the durable action suffix. initial carries
+// counts from phases completed by earlier ticks; checkpoint persists both the
+// next phase and the updated cumulative counts after every returned phase.
+func performGardenTickBounded(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir, root string, dryRun, growthApply bool, initial gardenTickCounts, resume gardenbudget.Cursor, opt gardenbudget.Options, checkpoint func(gardenbudget.Cursor, gardenTickCounts) error) (gardenTickCounts, gardenbudget.Result) {
+	c := initial
+	work := map[gardenbudget.Phase]func() error{
+		gardenPhaseLeases:   func() error { return gardenPhaseReapLeases(stderr, plan, dir, &c) },
+		gardenPhaseLocks:    func() error { return gardenPhaseReapLockFiles(stderr, dir, &c) },
+		gardenPhaseIntents:  func() error { return gardenPhaseReapIntents(stderr, dir, &c) },
+		gardenPhaseGrowth:   func() error { return gardenPhaseCollectGrowth(stderr, root, growthApply, &c) },
+		gardenPhaseSentinel: func() error { return gardenPhaseFoldSentinel(stderr, root, &c) },
+	}
+	if checkpoint != nil {
+		opt.Checkpoint = func(cur gardenbudget.Cursor) error {
+			return checkpoint(cur, c)
+		}
+	}
+	res := gardenbudget.Execute(gardenActionPhases(dryRun), resume, opt, func(p gardenbudget.Phase) error { return work[p]() })
+	_ = stdout
+	return c, res
+}
+
+// gardenPhaseReapLeases walks the plan's decisions: the expired lease/session reap and
+// the orphan-worklist surfacing. Under dry-run no decision has Perform=true, so this
+// is a pure report.
+func gardenPhaseReapLeases(stderr io.Writer, plan gardenbundle.TickPlan, dir string, c *gardenTickCounts) error {
 	for _, d := range plan.Decisions {
 		if !d.Perform {
 			continue
@@ -239,74 +523,87 @@ func performGardenTick(stdout, stderr io.Writer, plan gardenbundle.TickPlan, dir
 			if lerr != nil {
 				fmt.Fprintf(stderr, "fak garden tick: reap leases: %v\n", lerr)
 			} else {
-				reaped += len(leases)
+				c.Reaped += len(leases)
 			}
 			sess, serr := store.ReapSessions(ctx, now)
 			if serr != nil {
 				fmt.Fprintf(stderr, "fak garden tick: reap sessions: %v\n", serr)
 			} else {
-				sessions += len(sess)
+				c.Sessions += len(sess)
 			}
 		case gardenbundle.ActSurface:
 			// The worklist is already in the member's surfaced detail; surfacing
 			// it means recording the witnessed condition (the ledger event, below)
 			// — re-dispatch stays the gated operator action, never automatic here.
-			surfaced++
+			c.Surfaced++
 		}
 	}
-	// Orphan .lock sweep (#5348): run ONCE PER TICK, unconditionally — independent
-	// of whether any lease RECORD is expired. A ghost <git-common-dir>/refs/fak/locks/
-	// *.lock (a holder killed mid-CAS) can outlive its lease even when no lease record
-	// is stale, so gating this on the stale_leases ActReap decision above would leave
-	// it uncollected. ReapLockFiles is fail-safe by construction (namespace-confined,
-	// age-bounded at the lease TTL, future-mtime kept). Dry-run performs no delete,
-	// mirroring the reap decisions above (which never Perform under dry-run).
-	if !dryRun {
-		store := leaseref.NewInDir(dir)
-		locks, _, lerr := store.ReapLockFiles(context.Background(), time.Now(), 0)
-		if lerr != nil {
-			fmt.Fprintf(stderr, "fak garden tick: reap orphan locks: %v\n", lerr)
-		} else {
-			lockFiles += len(locks)
-		}
-		// Intent-lease reap (#5345 reap parity): run ONCE PER TICK, unconditionally —
-		// closing the same reaper asymmetry that bit sessions (#5344). A lapsed
-		// refs/fak/locks/intent-<key> accretes independently of whether any lease RECORD
-		// is expired, so gating this on the ActReap decision above (as the lease/session
-		// reaps are) would leave the intent namespace uncollected on the automatic loop —
-		// the CLI's `fak leaseref reap` already sweeps all three kinds. Same best-effort,
-		// idempotent contract as the ReapLockFiles sweep just above.
-		ints, ierr := store.ReapIntents(context.Background(), time.Now())
-		if ierr != nil {
-			fmt.Fprintf(stderr, "fak garden tick: reap intents: %v\n", ierr)
-		} else {
-			intents += len(ints)
-		}
-		// growthgate collect (#5349): run ONCE PER TICK over the repo + Fleet trees,
-		// the acting half of the ActGrowthReap edge. DELETE-SAFE by default: it appends
-		// the would-reap set to the reap ledger every tick (the soak evidence) but
-		// removes NOTHING unless the apply opt-in is set. Dry-run skips it entirely,
-		// mirroring the lock sweep above (which never deletes under dry-run).
-		collected += collectGrowthLogs(stderr, growthCensusRoots(root), growthApply, growthReapLedgerPath())
-		// Decisions-note fold (#5361, census row 12): run ONCE PER TICK, bounding the ONE
-		// unbounded producer on refs/notes/fak/decisions — the empty-tree sentinel note that
-		// every pre-commit refusal (OFF_TRUNK / PATHSPEC_RACE / LEASE_HELD) appends to
-		// forever. CompactSentinelNote keeps the most-recent sentinelNoteKeepLines lines
-		// (recency = forensic value) and force-overwrites ONLY that one sentinel note on the
-		// side ref; commit-anchored notes are bounded per-object evidence and are NEVER
-		// touched, and it never touches main / HEAD / refs/heads and never pushes. Bind the
-		// recorder to `root` (the gardened repo) so the fold hits its decisions ref, not the
-		// process cwd's. Best-effort + idempotent, same contract as the sweeps above: a fold
-		// error is logged and swallowed so it never fails the tick. Dry-run skips it.
-		fold, ferr := witness.NewRecorderForDir(root).CompactSentinelNote(context.Background(), sentinelKeepLines())
-		if ferr != nil {
-			fmt.Fprintf(stderr, "fak garden tick: fold decisions sentinel note: %v\n", ferr)
-		} else {
-			folded += fold
-		}
+	return nil
+}
+
+// gardenPhaseReapLockFiles is the orphan .lock sweep (#5348): run ONCE PER TICK,
+// unconditionally — independent of whether any lease RECORD is expired. A ghost
+// <git-common-dir>/refs/fak/locks/*.lock (a holder killed mid-CAS) can outlive its
+// lease even when no lease record is stale, so gating this on the stale_leases ActReap
+// decision would leave it uncollected. ReapLockFiles is fail-safe by construction
+// (namespace-confined, age-bounded at the lease TTL, future-mtime kept). This phase is
+// not in the dry-run rotation, mirroring the reap decisions (which never Perform under
+// dry-run).
+func gardenPhaseReapLockFiles(stderr io.Writer, dir string, c *gardenTickCounts) error {
+	locks, _, lerr := leaseref.NewInDir(dir).ReapLockFiles(context.Background(), time.Now(), 0)
+	if lerr != nil {
+		fmt.Fprintf(stderr, "fak garden tick: reap orphan locks: %v\n", lerr)
+		return lerr
 	}
-	_ = stdout
-	return reaped, sessions, surfaced, lockFiles, collected, intents, folded
+	c.LockFiles += len(locks)
+	return nil
+}
+
+// gardenPhaseReapIntents is the intent-lease reap (#5345 reap parity): run ONCE PER
+// TICK, unconditionally — closing the same reaper asymmetry that bit sessions (#5344).
+// A lapsed refs/fak/locks/intent-<key> accretes independently of whether any lease
+// RECORD is expired, so gating this on the ActReap decision (as the lease/session reaps
+// are) would leave the intent namespace uncollected on the automatic loop — the CLI's
+// `fak leaseref reap` already sweeps all three kinds. Same best-effort, idempotent
+// contract as the ReapLockFiles sweep.
+func gardenPhaseReapIntents(stderr io.Writer, dir string, c *gardenTickCounts) error {
+	ints, ierr := leaseref.NewInDir(dir).ReapIntents(context.Background(), time.Now())
+	if ierr != nil {
+		fmt.Fprintf(stderr, "fak garden tick: reap intents: %v\n", ierr)
+		return ierr
+	}
+	c.Intents += len(ints)
+	return nil
+}
+
+// gardenPhaseCollectGrowth is the growthgate collect (#5349) over the repo + Fleet
+// trees, the acting half of the ActGrowthReap edge. DELETE-SAFE by default: it appends
+// the would-reap set to the reap ledger every tick (the soak evidence) but removes
+// NOTHING unless the apply opt-in is set. Not in the dry-run rotation, mirroring the
+// lock sweep (which never deletes under dry-run).
+func gardenPhaseCollectGrowth(stderr io.Writer, root string, growthApply bool, c *gardenTickCounts) error {
+	c.Collected += collectGrowthLogs(stderr, growthCensusRoots(root), growthApply, growthReapLedgerPath())
+	return nil
+}
+
+// gardenPhaseFoldSentinel is the decisions-note fold (#5361, census row 12), bounding
+// the ONE unbounded producer on refs/notes/fak/decisions — the empty-tree sentinel note
+// that every pre-commit refusal (OFF_TRUNK / PATHSPEC_RACE / LEASE_HELD) appends to
+// forever. CompactSentinelNote keeps the most-recent sentinelNoteKeepLines lines
+// (recency = forensic value) and force-overwrites ONLY that one sentinel note on the
+// side ref; commit-anchored notes are bounded per-object evidence and are NEVER
+// touched, and it never touches main / HEAD / refs/heads and never pushes. The recorder
+// binds to `root` (the gardened repo) so the fold hits its decisions ref, not the
+// process cwd's. Best-effort + idempotent, same contract as the sweeps above: a fold
+// error is logged and swallowed so it never fails the tick. Not in the dry-run rotation.
+func gardenPhaseFoldSentinel(stderr io.Writer, root string, c *gardenTickCounts) error {
+	fold, ferr := witness.NewRecorderForDir(root).CompactSentinelNote(context.Background(), sentinelKeepLines())
+	if ferr != nil {
+		fmt.Fprintf(stderr, "fak garden tick: fold decisions sentinel note: %v\n", ferr)
+		return ferr
+	}
+	c.Folded += fold
+	return nil
 }
 
 // witnessGardenTick records the tick's run in the loop ledger as the claim+verdict
@@ -624,6 +921,540 @@ func collectGrowthLogs(stderr io.Writer, roots []string, apply bool, ledgerPath 
 		fmt.Fprintf(stderr, "fak garden tick: growth census heartbeat %s: %v\n", ledgerPath, err)
 	}
 	return reaped
+}
+
+const (
+	// The child gets 35 seconds and the supervisor deadline is 45 seconds,
+	// leaving a ten-second process-tree reap/JSON flush margin while the entire
+	// default live watchdog remains below the issue's 60-second ceiling.
+	gardenWatchdogTimeoutSeconds    = 45
+	gardenWatchdogTickBudgetSeconds = 35
+)
+
+type gardenWatchdogEphemeralFile struct {
+	Path    string  `json:"path"`
+	Rel     string  `json:"rel"`
+	Label   string  `json:"label"`
+	AgeDays float64 `json:"age_days"`
+	Size    int64   `json:"size"`
+}
+
+type gardenWatchdogStuck struct {
+	Session     string `json:"session"`
+	Rel         string `json:"rel"`
+	Consecutive int    `json:"consecutive"`
+	Total       int    `json:"total"`
+}
+
+type gardenWatchdogWIP struct {
+	Count          int     `json:"count"`
+	OldestAgeHours float64 `json:"oldest_age_hours"`
+	OldestPath     string  `json:"oldest_path,omitempty"`
+	Stale          bool    `json:"stale"`
+	ThresholdHours int     `json:"threshold_hours"`
+}
+
+type gardenWatchdogSweep struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
+}
+
+type gardenWatchdogGarden struct {
+	Invoked       bool   `json:"invoked"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason"`
+	TimedOut      bool   `json:"timed_out"`
+	BudgetSeconds int64  `json:"budget_seconds"`
+	ElapsedMillis int64  `json:"elapsed_millis"`
+	ExitCode      *int   `json:"exit_code,omitempty"`
+	Error         string `json:"error,omitempty"`
+	Progress      any    `json:"progress,omitempty"`
+}
+
+type gardenWatchdogEnvelope struct {
+	Schema         string                `json:"schema"`
+	Status         string                `json:"status"`
+	Reason         string                `json:"reason"`
+	Repo           string                `json:"repo"`
+	Live           bool                  `json:"live"`
+	MaxAgeDays     int                   `json:"max_age_days"`
+	AgeGC          gardenWatchdogAgeGC   `json:"age_gc"`
+	Stuck          []gardenWatchdogStuck `json:"stuck"`
+	WIP            gardenWatchdogWIP     `json:"wip"`
+	HasStale       bool                  `json:"has_stale"`
+	Garden         gardenWatchdogGarden  `json:"garden"`
+	OverlapRefused bool                  `json:"overlap_refused,omitempty"`
+}
+
+type gardenWatchdogAgeGC struct {
+	Files      int                           `json:"files"`
+	Bytes      int64                         `json:"bytes"`
+	Swept      gardenWatchdogSweep           `json:"swept"`
+	Candidates []gardenWatchdogEphemeralFile `json:"candidates"`
+}
+
+type gardenWatchdogConfig struct {
+	Repo           string
+	MaxAgeDays     int
+	StuckThreshold int
+	WIPStaleHours  int
+	Live           bool
+	FailOnStale    bool
+	AsJSON         bool
+	Timeout        time.Duration
+	TickBudget     time.Duration
+	Now            func() time.Time
+}
+
+type gardenWatchdogCommandFactory func(root, cursor string, tickBudget time.Duration) *exec.Cmd
+
+var gardenWatchdogCommand gardenWatchdogCommandFactory = defaultGardenWatchdogCommand
+
+func runGardenWatchdog(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("garden watchdog", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	repo := fs.String("repo", "", "repo root to garden (default: repo root)")
+	maxAgeDays := fs.Int("max-age-days", 7, "GC gitignored ephemera older than this many days")
+	stuckThreshold := fs.Int("stuck-threshold", 3, "flag stop-failure sessions at/above this consecutive count")
+	wipStaleHours := fs.Int("wip-stale-hours", 24, "flag shared-tree WIP older than this many hours")
+	live := fs.Bool("live", false, "delete over-age ephemera and invoke the acting garden tick")
+	failOnStale := fs.Bool("fail-on-stale", false, "exit 2 when stale work is found")
+	asJSON := fs.Bool("json", false, "emit one machine-readable envelope")
+	watchdogTimeout := fs.Int("watchdog-timeout", gardenWatchdogTimeoutSeconds, "hard outer watchdog bound in seconds")
+	tickBudget := fs.Int("tick-budget", gardenWatchdogTickBudgetSeconds, "whole-child garden tick budget in seconds")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak garden watchdog: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	root := *repo
+	if root == "" {
+		root = repoRoot()
+	} else if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return runGardenWatchdogConfigured(stdout, stderr, gardenWatchdogConfig{
+		Repo: root, MaxAgeDays: *maxAgeDays, StuckThreshold: *stuckThreshold,
+		WIPStaleHours: *wipStaleHours, Live: *live, FailOnStale: *failOnStale,
+		AsJSON: *asJSON, Timeout: time.Duration(*watchdogTimeout) * time.Second,
+		TickBudget: time.Duration(*tickBudget) * time.Second,
+	})
+}
+
+func runGardenWatchdogConfigured(stdout, stderr io.Writer, cfg gardenWatchdogConfig) int {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = gardenWatchdogTimeoutSeconds * time.Second
+	}
+	if cfg.TickBudget <= 0 {
+		cfg.TickBudget = gardenWatchdogTickBudgetSeconds * time.Second
+	}
+	start := time.Now()
+	lock, acquired, err := acquireGardenWatchdogLock(cfg.Repo, cfg.Now(), 2*cfg.Timeout)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak garden watchdog: acquire overlap lock: %v\n", err)
+		return 1
+	}
+	if !acquired {
+		env := gardenWatchdogEnvelope{
+			Schema: "fak.garden-watchdog.v2", Status: "refused", Reason: "SKIPPED_CONTENDED",
+			Repo: cfg.Repo, Live: cfg.Live, MaxAgeDays: cfg.MaxAgeDays,
+			Stuck: []gardenWatchdogStuck{}, OverlapRefused: true,
+			Garden: gardenWatchdogGarden{Status: "skipped", Reason: "SKIPPED_CONTENDED"},
+		}
+		return emitGardenWatchdog(stdout, stderr, env, cfg.AsJSON, 0)
+	}
+	defer lock.release()
+
+	candidates := scanGardenWatchdogEphemera(cfg.Repo, cfg.Now(), cfg.MaxAgeDays)
+	stuck := scanGardenWatchdogStuck(cfg.Repo, cfg.StuckThreshold)
+	if candidates == nil {
+		candidates = []gardenWatchdogEphemeralFile{}
+	}
+	if stuck == nil {
+		stuck = []gardenWatchdogStuck{}
+	}
+	wip := scanGardenWatchdogWIP(cfg.Repo, cfg.Now(), cfg.WIPStaleHours)
+	swept := sweepGardenWatchdog(cfg.Repo, candidates, cfg.Live)
+	var ageBytes int64
+	for _, c := range candidates {
+		ageBytes += c.Size
+	}
+	hasStale := len(candidates) > 0 || len(stuck) > 0 || wip.Stale
+
+	garden := gardenWatchdogGarden{
+		Invoked:       false,
+		Status:        "skipped",
+		Reason:        "DRY_RUN",
+		BudgetSeconds: int64(cfg.Timeout.Seconds()),
+	}
+	if cfg.Live {
+		remaining := cfg.Timeout - time.Since(start)
+		cursorPath := defaultGardenTickCursor(cfg.Repo)
+		if remaining <= 0 {
+			garden = timedOutGardenWatchdog(cursorPath, cfg.Timeout, time.Since(start))
+		} else {
+			garden = runGardenWatchdogChild(cfg.Repo, cursorPath, cfg.TickBudget, remaining)
+		}
+	}
+
+	env := gardenWatchdogEnvelope{
+		Schema:     "fak.garden-watchdog.v2",
+		Status:     "complete",
+		Reason:     "GARDEN_WATCHDOG_COMPLETE",
+		Repo:       cfg.Repo,
+		Live:       cfg.Live,
+		MaxAgeDays: cfg.MaxAgeDays,
+		AgeGC: gardenWatchdogAgeGC{
+			Files: len(candidates), Bytes: ageBytes, Swept: swept, Candidates: candidates,
+		},
+		Stuck:    stuck,
+		WIP:      wip,
+		HasStale: hasStale,
+		Garden:   garden,
+	}
+	code := 0
+	if cfg.FailOnStale && hasStale {
+		code = 2
+	}
+	return emitGardenWatchdog(stdout, stderr, env, cfg.AsJSON, code)
+}
+
+func emitGardenWatchdog(stdout, stderr io.Writer, env gardenWatchdogEnvelope, asJSON bool, code int) int {
+	if asJSON {
+		if rc := encodeJSONOrFail(stdout, stderr, env, "fak garden watchdog"); rc != 0 {
+			return rc
+		}
+		return code
+	}
+	mode := "dry-run"
+	if env.Live {
+		mode = "LIVE sweep"
+	}
+	fmt.Fprintf(stdout, "stale-work watchdog (%s)\n", mode)
+	fmt.Fprintf(stdout, "  repo: %s\n", env.Repo)
+	fmt.Fprintf(stdout, "  AGE-GC (> %dd): %d files, %.1f MB\n",
+		env.MaxAgeDays, env.AgeGC.Files, float64(env.AgeGC.Bytes)/1e6)
+	fmt.Fprintf(stdout, "  STUCK: %d session(s)\n", len(env.Stuck))
+	fmt.Fprintf(stdout, "  WIP: %d uncommitted, oldest %.1fh, stale=%v\n",
+		env.WIP.Count, env.WIP.OldestAgeHours, env.WIP.Stale)
+	fmt.Fprintf(stdout, "  garden tick: %s (%s), %dms\n",
+		env.Garden.Status, env.Garden.Reason, env.Garden.ElapsedMillis)
+	fmt.Fprintf(stdout, "  result: %s\n", env.Reason)
+	return code
+}
+
+func defaultGardenWatchdogCommand(root, cursor string, tickBudget time.Duration) *exec.Cmd {
+	bin := "fak"
+	if self, err := os.Executable(); err == nil && self != "" {
+		bin = self
+	}
+	seconds := int64((tickBudget + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	return exec.Command(bin,
+		"garden", "tick",
+		"--workspace", root,
+		"--cursor", cursor,
+		"--budget", strconv.FormatInt(seconds, 10),
+		"--timeout", strconv.FormatInt(seconds, 10),
+		"--json",
+	)
+}
+
+func runGardenWatchdogChild(root, cursor string, tickBudget, timeout time.Duration) gardenWatchdogGarden {
+	start := time.Now()
+	cmd := gardenWatchdogCommand(root, cursor, tickBudget)
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	job, err := windowgate.StartInNewJob(cmd)
+	if err != nil {
+		return gardenWatchdogGarden{
+			Invoked: true, Status: "error", Reason: "GARDEN_TICK_SPAWN_FAILED",
+			BudgetSeconds: int64(timeout.Seconds()), ElapsedMillis: time.Since(start).Milliseconds(),
+			Error: err.Error(), Progress: gardenWatchdogCursorProgress(cursor),
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		// Windows: closing the KILL_ON_JOB_CLOSE handle reaps every descendant.
+		// POSIX: procguard walks/kills the descendant tree (or the process group).
+		_ = job.Close()
+		killed := make(chan struct{})
+		go func() {
+			_, _ = procguard.KillPID(cmd.Process.Pid)
+			close(killed)
+		}()
+		select {
+		case <-done:
+		case <-killed:
+		case <-time.After(5 * time.Second):
+		}
+		return timedOutGardenWatchdog(cursor, timeout, time.Since(start))
+	case err := <-done:
+		_ = job.Close()
+		code := cmd.ProcessState.ExitCode()
+		var progress any = gardenWatchdogCursorProgress(cursor)
+		var child map[string]any
+		if json.Unmarshal(stdout.Bytes(), &child) == nil {
+			if p, ok := child["progress"]; ok {
+				progress = p
+			}
+		}
+		status, reason := "complete", "GARDEN_TICK_COMPLETE"
+		if childStatus, _ := child["status"].(string); childStatus == "partial" {
+			status, reason = "partial", "GARDEN_TICK_PARTIAL"
+			if childReason, _ := child["reason"].(string); childReason != "" {
+				reason = childReason
+			}
+		} else if code != 0 || err != nil {
+			status, reason = "error", "GARDEN_TICK_FAILED"
+		}
+		result := gardenWatchdogGarden{
+			Invoked: true, Status: status, Reason: reason,
+			BudgetSeconds: int64(timeout.Seconds()), ElapsedMillis: time.Since(start).Milliseconds(),
+			ExitCode: &code, Progress: progress,
+		}
+		if status == "error" {
+			result.Error = strings.TrimSpace(stderr.String())
+			if result.Error == "" && err != nil {
+				result.Error = err.Error()
+			}
+		}
+		return result
+	}
+}
+
+func timedOutGardenWatchdog(cursor string, budget, elapsed time.Duration) gardenWatchdogGarden {
+	return gardenWatchdogGarden{
+		Invoked: true, Status: "timeout", Reason: "GARDEN_TICK_TIMEOUT",
+		TimedOut: true, BudgetSeconds: int64(budget.Seconds()),
+		ElapsedMillis: elapsed.Milliseconds(), Progress: gardenWatchdogCursorProgress(cursor),
+	}
+}
+
+func gardenWatchdogCursorProgress(path string) map[string]any {
+	cur, err := gardenbudget.LoadCursor(path)
+	out := map[string]any{"cursor": path, "checkpoint": cur}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	return out
+}
+
+type gardenWatchdogLock struct{ path string }
+
+func (l *gardenWatchdogLock) release() {
+	if l != nil && l.path != "" {
+		_ = os.Remove(l.path)
+	}
+}
+
+func acquireGardenWatchdogLock(root string, now time.Time, staleAfter time.Duration) (*gardenWatchdogLock, bool, error) {
+	path := filepath.Join(root, ".dos", "garden", "watchdog.lock")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, false, err
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			_, _ = fmt.Fprintf(f, `{"pid":%d,"started_unix":%d}`+"\n", os.Getpid(), now.Unix())
+			if cerr := f.Close(); cerr != nil {
+				_ = os.Remove(path)
+				return nil, false, cerr
+			}
+			return &gardenWatchdogLock{path: path}, true, nil
+		}
+		if !os.IsExist(err) {
+			return nil, false, err
+		}
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return nil, false, statErr
+		}
+		if staleAfter > 0 && now.Sub(info.ModTime()) > staleAfter {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return nil, false, err
+			}
+			continue
+		}
+		return nil, false, nil
+	}
+	return nil, false, nil
+}
+
+var gardenWatchdogEphemeralGlobs = []struct {
+	label string
+	glob  string
+}{
+	{"markers", filepath.Join(".dos", "markers", "*.jsonl")},
+	{"streams", filepath.Join(".dos", "streams", "*.jsonl")},
+	{"stop-failures", filepath.Join(".dos", "stop-failures", "*.json")},
+	{"watchdog-logs", filepath.Join("tools", "_watchdog", "*.log")},
+	{"watchdog-errs", filepath.Join("tools", "_watchdog", "*.err")},
+	{"watchdog-jsonl", filepath.Join("tools", "_watchdog", "*.jsonl")},
+}
+
+var gardenWatchdogEphemeralDirs = []string{
+	filepath.Join(".dos", "markers"),
+	filepath.Join(".dos", "streams"),
+	filepath.Join(".dos", "stop-failures"),
+	filepath.Join("tools", "_watchdog"),
+}
+
+func scanGardenWatchdogEphemera(root string, now time.Time, maxAgeDays int) []gardenWatchdogEphemeralFile {
+	var out []gardenWatchdogEphemeralFile
+	for _, spec := range gardenWatchdogEphemeralGlobs {
+		paths, _ := filepath.Glob(filepath.Join(root, spec.glob))
+		for _, path := range paths {
+			info, err := os.Stat(path)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			age := now.Sub(info.ModTime()).Hours() / 24
+			if age < 0 {
+				age = 0
+			}
+			if age < float64(maxAgeDays) {
+				continue
+			}
+			rel, _ := filepath.Rel(root, path)
+			out = append(out, gardenWatchdogEphemeralFile{
+				Path: path, Rel: filepath.ToSlash(rel), Label: spec.label,
+				AgeDays: float64(int(age*10+0.5)) / 10, Size: info.Size(),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AgeDays > out[j].AgeDays })
+	return out
+}
+
+func scanGardenWatchdogStuck(root string, threshold int) []gardenWatchdogStuck {
+	paths, _ := filepath.Glob(filepath.Join(root, ".dos", "stop-failures", "*.json"))
+	var out []gardenWatchdogStuck
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var row struct {
+			Consecutive int `json:"consecutive"`
+			Total       int `json:"total"`
+		}
+		if json.Unmarshal(b, &row) != nil || row.Consecutive < threshold {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		out = append(out, gardenWatchdogStuck{
+			Session: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			Rel:     filepath.ToSlash(rel), Consecutive: row.Consecutive, Total: row.Total,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Consecutive > out[j].Consecutive })
+	return out
+}
+
+func scanGardenWatchdogWIP(root string, now time.Time, thresholdHours int) gardenWatchdogWIP {
+	out := gardenWatchdogWIP{ThresholdHours: thresholdHours}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := windowgate.CommandContext(ctx, "git", "-C", root, "status", "--porcelain")
+	b, err := cmd.Output()
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		rel := ""
+		if len(line) > 3 {
+			rel = line[3:]
+		}
+		if i := strings.LastIndex(rel, " -> "); i >= 0 {
+			rel = rel[i+4:]
+		}
+		rel = strings.Trim(strings.TrimSpace(rel), `"`)
+		if rel == "" {
+			continue
+		}
+		out.Count++
+		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			continue
+		}
+		age := now.Sub(info.ModTime()).Hours()
+		if age < 0 {
+			age = 0
+		}
+		if age > out.OldestAgeHours {
+			out.OldestAgeHours, out.OldestPath = age, rel
+		}
+	}
+	out.OldestAgeHours = float64(int(out.OldestAgeHours*10+0.5)) / 10
+	out.Stale = out.Count > 0 && out.OldestAgeHours >= float64(thresholdHours)
+	return out
+}
+
+func sweepGardenWatchdog(root string, candidates []gardenWatchdogEphemeralFile, live bool) gardenWatchdogSweep {
+	var out gardenWatchdogSweep
+	for _, candidate := range candidates {
+		if !insideGardenWatchdogEphemera(root, candidate.Path) {
+			continue
+		}
+		size := candidate.Size
+		if live {
+			info, err := os.Stat(candidate.Path)
+			if err != nil {
+				continue
+			}
+			size = info.Size()
+			if err := os.Remove(candidate.Path); err != nil {
+				continue
+			}
+		}
+		out.Files++
+		out.Bytes += size
+	}
+	return out
+}
+
+func insideGardenWatchdogEphemera(root, path string) bool {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		resolvedRoot, err = filepath.Abs(root)
+		if err != nil {
+			return false
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	for _, dir := range gardenWatchdogEphemeralDirs {
+		if rel != dir && strings.HasPrefix(rel, dir+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // repoRoot resolves the repo root the way the Python tool did: the parent of

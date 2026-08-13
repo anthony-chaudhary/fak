@@ -218,16 +218,16 @@ func GardenOff() bool {
 //   - "red"     -- the member's gate tripped (a hard regression)
 //   - "errored" -- the member could not run / produced no usable payload
 type MemberResult struct {
-	Key      string
-	Label    string
-	Gates    bool
-	ExitCode int
-	State    string
-	OK       bool
-	Verdict  string
-	Detail   string
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Gates    bool   `json:"gates"`
+	ExitCode int    `json:"exit_code"`
+	State    string `json:"state"`
+	OK       bool   `json:"ok"`
+	Verdict  string `json:"verdict"`
+	Detail   string `json:"detail"`
 	// Counts carries the loop-audit bucket counts; nil for envelope members.
-	Counts map[string]int
+	Counts map[string]int `json:"counts,omitempty"`
 }
 
 // MarshalJSON emits the same field set and order as the Python member row.
@@ -585,16 +585,179 @@ func Collect(root, python string, timeout time.Duration, deep bool) []MemberResu
 	if python == "" {
 		python = defaultPython()
 	}
-	members := append([]Member{}, Members...)
-	if deep {
-		members = append(members, DeepMember)
-	}
+	members := CollectionMembers(deep)
 	results := make([]MemberResult, 0, len(members))
 	for _, m := range members {
 		payload, code, err := RunMember(root, m, python, timeout)
 		results = append(results, Interpret(m, payload, code, err))
 	}
 	return results
+}
+
+// CollectionMembers returns a copy of the ordered member list one collection
+// cycle must visit. Callers may safely append or slice the result.
+func CollectionMembers(deep bool) []Member {
+	members := append([]Member{}, Members...)
+	if deep {
+		members = append(members, DeepMember)
+	}
+	return members
+}
+
+// MemberRunner is the injectable RunMember seam used by CollectBounded tests.
+type MemberRunner func(root string, member Member, python string, timeout time.Duration) (map[string]any, int, string)
+
+// CollectOptions makes member collection part of the tick's GLOBAL budget.
+type CollectOptions struct {
+	Python           string
+	PerMemberTimeout time.Duration
+	Budget           time.Duration
+	Start            time.Time
+	Deep             bool
+	// Next names the next member to run. Empty starts a fresh collection.
+	Next string
+	// Prior is the already-checkpointed prefix from previous ticks.
+	Prior []MemberResult
+	Now   func() time.Time
+	Run   MemberRunner
+	// Checkpoint is called after each returned member with the accumulated prefix
+	// and the key of the next member (empty when collection completed).
+	Checkpoint func(next string, results []MemberResult) error
+}
+
+func (o CollectOptions) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now()
+}
+
+// CollectProgress is the typed resume account for one bounded collection pass.
+type CollectProgress struct {
+	Total           int      `json:"total"`
+	Completed       int      `json:"completed"`
+	Ran             []string `json:"ran"`
+	Deferred        []string `json:"deferred"`
+	Next            string   `json:"next,omitempty"`
+	Complete        bool     `json:"complete"`
+	Exhausted       bool     `json:"exhausted"`
+	Millis          int64    `json:"millis"`
+	CheckpointError string   `json:"checkpoint_error,omitempty"`
+}
+
+// CollectBounded runs a checkpointed suffix of the member list. Collection used
+// to run every member sequentially with a full per-member timeout, before the
+// tick's phase budget even began. With ten members, that made a 900-second
+// timeout an hours-scale aggregate allowance. This function instead:
+//
+//   - never starts a member after the whole-tick budget is spent;
+//   - caps each member to min(per-member timeout, global time remaining);
+//   - checkpoints after every returned member; and
+//   - resumes at the first member not yet checkpointed.
+//
+// A member killed by RunMember's timeout returns an errored row and collection
+// advances best-effort. If the OUTER watchdog kills RunMember itself, the
+// checkpoint remains on that member and the next tick retries it.
+func CollectBounded(root string, opt CollectOptions) ([]MemberResult, CollectProgress) {
+	members := CollectionMembers(opt.Deep)
+	progress := CollectProgress{Total: len(members)}
+	start := opt.Start
+	if start.IsZero() {
+		start = opt.now()
+	}
+	python := opt.Python
+	if python == "" {
+		python = defaultPython()
+	}
+	run := opt.Run
+	if run == nil {
+		run = RunMember
+	}
+
+	begin := collectionStart(members, opt.Next)
+	results := append([]MemberResult{}, opt.Prior...)
+	if opt.Next == "" && len(results) == len(members) {
+		progress.Completed = len(results)
+		progress.Complete = true
+		progress.Millis = opt.now().Sub(start).Milliseconds()
+		return results, progress
+	}
+	// The durable payload must be an exact prefix. If the member roster changed
+	// under an old checkpoint, restart collection rather than joining mismatched
+	// rows and claiming a complete fold.
+	if begin != len(results) {
+		begin = 0
+		results = nil
+	}
+	progress.Completed = len(results)
+
+	for i := begin; i < len(members); i++ {
+		remaining := collectRemaining(opt.Budget, start, opt.now)
+		if remaining == 0 {
+			progress.Next = members[i].Key
+			for _, m := range members[i:] {
+				progress.Deferred = append(progress.Deferred, m.Key)
+			}
+			break
+		}
+
+		memberTimeout := opt.PerMemberTimeout
+		if memberTimeout <= 0 || memberTimeout > remaining {
+			memberTimeout = remaining
+		}
+		payload, code, errText := run(root, members[i], python, memberTimeout)
+		results = append(results, Interpret(members[i], payload, code, errText))
+		progress.Ran = append(progress.Ran, members[i].Key)
+		progress.Completed = len(results)
+
+		next := ""
+		if i+1 < len(members) {
+			next = members[i+1].Key
+		}
+		progress.Next = next
+		if opt.Checkpoint != nil {
+			if err := opt.Checkpoint(next, append([]MemberResult{}, results...)); err != nil {
+				progress.CheckpointError = err.Error()
+				if i+1 < len(members) {
+					for _, m := range members[i+1:] {
+						progress.Deferred = append(progress.Deferred, m.Key)
+					}
+				}
+				break
+			}
+		}
+	}
+
+	progress.Complete = len(results) == len(members) && progress.CheckpointError == ""
+	if progress.Complete {
+		progress.Next = ""
+	}
+	progress.Exhausted = !progress.Complete && len(progress.Deferred) > 0
+	progress.Millis = opt.now().Sub(start).Milliseconds()
+	return results, progress
+}
+
+func collectionStart(members []Member, next string) int {
+	if next == "" {
+		return 0
+	}
+	for i, m := range members {
+		if m.Key == next {
+			return i
+		}
+	}
+	return 0
+}
+
+func collectRemaining(budget time.Duration, start time.Time, now func() time.Time) time.Duration {
+	if budget <= 0 {
+		return time.Duration(1<<63 - 1)
+	}
+	left := budget - now().Sub(start)
+	if left < 0 {
+		return 0
+	}
+	return left
 }
 
 // HeadCommit returns the short HEAD commit of root, or "unknown".

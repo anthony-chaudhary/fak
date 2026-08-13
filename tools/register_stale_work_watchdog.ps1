@@ -1,21 +1,17 @@
 <#
-register_stale_work_watchdog.ps1 - install/remove the Scheduled Task that runs the
-stale-work watchdog (tools/stale_work_watchdog.py) on a cadence: it GCs this clone's
-own gitignored per-session ephemera (.dos/markers|streams|stop-failures, tools/_watchdog
-logs) once they age past the floor, and reports stuck stop-failure sessions + stale
-shared-tree WIP. Nothing else prunes THIS clone's .dos (DOS-cleanup-sweep targets
-dos-kernel-public; FakFleetJanitor reaps GCP VMs), so without this the dir grows
-without bound.
+register_stale_work_watchdog.ps1 - install/remove the Scheduled Task that runs
+the Go-native `fak garden watchdog` stale-work janitor.
 
-  .\register_stale_work_watchdog.ps1                 # install DRY-RUN (reports, deletes nothing)
-  .\register_stale_work_watchdog.ps1 -Live            # install LIVE (actually GCs over-age ephemera)
+  .\register_stale_work_watchdog.ps1
+  .\register_stale_work_watchdog.ps1 -Live
   .\register_stale_work_watchdog.ps1 -Action status
   .\register_stale_work_watchdog.ps1 -Action remove
-  .\register_stale_work_watchdog.ps1 -Live -MaxAgeDays 14 -EveryHours 12
 
-A janitor only ever deletes gitignored ephemera older than -MaxAgeDays, and only files
-provably inside the known ephemeral dirs (the python refuses anything else). It NEVER
-touches git state -- shared-tree WIP is reported, never committed.
+The live path deletes only over-age files inside the declared gitignored
+ephemeral directories. Shared-tree WIP is report-only. The Go watchdog owns a
+45-second hard child bound, typed timeout/progress JSON, a process-tree reap,
+and an O_EXCL overlap refusal. Task Scheduler independently carries
+MultipleInstances=IgnoreNew as a second overlap fence.
 #>
 [CmdletBinding()]
 param(
@@ -23,16 +19,9 @@ param(
   [switch]$Live,
   [int]$MaxAgeDays = 7,
   [int]$EveryHours = 6,
-  # The live task is named FleetStaleWorkGarden (the canonical label emitted by
-  # `fak cron emit --label FleetStaleWorkGarden`, targeted by the autoheal set in
-  # watchdog_autoheal.go and by migrate_fleet_tasks_to_s4u.ps1). Keep this default
-  # aligned so a reinstall UPDATES the existing task in place instead of spawning a
-  # second, differently-named stale-work loop (#3323).
   [string]$TaskName = 'FleetStaleWorkGarden',
-  # Resolve the sibling watchdog in THIS clone so registering from any checkout
-  # schedules that checkout's script -- not a hardcoded operator path.
-  [string]$Watchdog = (Join-Path $PSScriptRoot 'stale_work_watchdog.py'),
-  [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$Fak = $env:FAK_BIN
 )
 $ErrorActionPreference = 'Stop'
 
@@ -50,20 +39,25 @@ if ($Action -eq 'remove') {
   Write-Output "removed $TaskName"; return
 }
 
-# Resolve a python launcher: prefer the fleet convention, then python3, then python.
-$py = $env:FLEET_PYTHON
-if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
-if (-not $py) { $py = (Get-Command python  -ErrorAction SilentlyContinue).Source }
-if (-not $py) { $py = 'python' }
+if (-not $Fak) {
+  $found = Get-Command fak -ErrorAction SilentlyContinue
+  if ($found) { $Fak = $found.Source }
+}
+if (-not $Fak) {
+  $repoBinary = Join-Path $RepoRoot 'fak.exe'
+  if (Test-Path -LiteralPath $repoBinary) { $Fak = $repoBinary }
+}
+if (-not $Fak) {
+  throw 'fak binary not found; install fak or pass -Fak <absolute path>'
+}
 
 $logDir = Join-Path $env:LOCALAPPDATA 'Fleet\watchdog'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'stale_work_watchdog.log'
 
 $liveArg = if ($Live) { ' --live' } else { '' }
-# A wrapper that timestamps each run into the watchdog log, then runs the janitor
-# against THIS repo. --json so the log line is machine-greppable.
-$inner = "& '$py' -X utf8 `"$Watchdog`" --repo `"$RepoRoot`" --max-age-days $MaxAgeDays$liveArg --json"
+$inner = "& '$Fak' garden watchdog --repo `"$RepoRoot`" --max-age-days $MaxAgeDays" +
+         "$liveArg --watchdog-timeout 45 --tick-budget 35 --json"
 $cmd = "`"===== `$((Get-Date -Format o)) =====`" | Out-File -FilePath '$log' -Append -Encoding UTF8; " +
        "$inner 2>&1 | Out-File -FilePath '$log' -Append -Encoding UTF8"
 
@@ -71,20 +65,16 @@ $pwsh = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
 if (-not $pwsh) { $pwsh = 'powershell.exe' }
 $psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$cmd`""
 $taskAction = New-ScheduledTaskAction -Execute $pwsh -Argument $psArgs -WorkingDirectory $RepoRoot
-$trigger    = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
-                -RepetitionInterval (New-TimeSpan -Hours $EveryHours) `
-                -RepetitionDuration (New-TimeSpan -Days 3650)
-# S4U (windowless session 0) so the periodic run never flashes a console window, same
-# pattern as register_runaway_reaper.ps1; -StartWhenAvailable resumes a missed tick.
-# Registering an S4U principal can require elevation; if that is denied, fall back to a
-# current-user Interactive principal, which registers unelevated (a 6h cadence makes the
-# occasional console flash a non-issue). Either way the janitor runs as THIS user.
-# The execution limit must comfortably exceed the watchdog's own garden-tick
-# subprocess cap (1020 s): a PT10M limit guillotined the tick mid-reap right after
-# its ~10-minute measure phase, so the wired collectors never acted (#5355). PT25M
-# leaves headroom for the tick plus the file sweep on a loaded box.
-$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 25)
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
+             -RepetitionInterval (New-TimeSpan -Hours $EveryHours) `
+             -RepetitionDuration (New-TimeSpan -Days 3650)
+
+# The task-level two-minute ceiling is intentionally just above the Go watchdog's
+# 45-second hard bound and its reap/flush margin. IgnoreNew prevents Task Scheduler
+# from queueing or overlapping a second scheduled instance; the verb's lock emits
+# SKIPPED_CONTENDED when a manual or foreign launcher races it.
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+              -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
 $principalMode = 'S4U (windowless)'
 try {
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
@@ -101,5 +91,6 @@ try {
 $mode = if ($Live) { "LIVE (GCs ephemera > $MaxAgeDays d)" } else { 'DRY-RUN (reports only)' }
 Write-Output "installed $TaskName - every $EveryHours h, $mode, $principalMode, restart-durable"
 Write-Output "  repo: $RepoRoot"
+Write-Output "  fak:  $Fak"
 Write-Output "  log:  $log"
 Write-Output "flip to live later:  .\tools\register_stale_work_watchdog.ps1 -Live"

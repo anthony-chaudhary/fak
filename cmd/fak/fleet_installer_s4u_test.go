@@ -37,6 +37,7 @@ func TestFleetInstallersAreS4UWithStartWhenAvailable(t *testing.T) {
 	// principal/SWA bar so a future edit cannot silently regress the set.
 	alreadyS4U := []string{
 		"register_resume_watchdog.ps1",
+		"register_stale_work_watchdog.ps1",
 	}
 
 	// Every reboot-survival installer must carry the S4U principal + SWA settings.
@@ -76,6 +77,31 @@ func TestFleetInstallersAreS4UWithStartWhenAvailable(t *testing.T) {
 	}
 	for _, name := range alreadyS4U {
 		t.Run(name, func(t *testing.T) { assertPrincipal(t, name) })
+	}
+}
+
+func TestStaleWorkWatchdogInstallerUsesGoBoundAndOverlapFences(t *testing.T) {
+	path := filepath.Join("..", "..", "tools", "register_stale_work_watchdog.ps1")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installer: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"garden watchdog",
+		"--watchdog-timeout 45",
+		"--tick-budget 35",
+		"-MultipleInstances IgnoreNew",
+		"-ExecutionTimeLimit (New-TimeSpan -Minutes 2)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("stale-work installer missing %q", want)
+		}
+	}
+	if strings.Contains(s, "stale_work_watchdog.py") ||
+		strings.Contains(s, "Get-Command python") ||
+		strings.Contains(s, "FLEET_PYTHON") {
+		t.Fatal("scheduled stale-work path must invoke the Go verb directly, not Python")
 	}
 }
 
