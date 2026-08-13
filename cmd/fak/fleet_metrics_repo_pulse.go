@@ -73,3 +73,25 @@ func writeRepoPulseMetrics(w *promWriter, dir string) {
 	w.gauge("fak_fleet_repo_pulse_journal_rows_total", "Governed child-call journal rows represented by repository orientation receipts.", float64(t.JournalRows))
 	w.gauge("fak_fleet_repo_pulse_duplicate_receipts_dropped_total", "Duplicate launch receipts excluded from cumulative repository-orientation savings.", float64(t.DuplicateRows))
 }
+
+type repoPulseCohortReadiness struct {
+	Verdict      string `json:"verdict"`
+	PostLaunches int    `json:"post_launches"`
+	Minimum      int    `json:"minimum"`
+	Reason       string `json:"reason"`
+}
+
+func assessRepoPulseCohort(dir string, minimum int) repoPulseCohortReadiness {
+	if minimum < 1 {
+		minimum = 1
+	}
+	t := foldDispatchRepoPulseReceipts(dir)
+	r := repoPulseCohortReadiness{Verdict: "not-yet", PostLaunches: t.Launches, Minimum: minimum}
+	if t.Launches < minimum {
+		r.Reason = fmt.Sprintf("need %d more durable post-default launch receipt(s) before outcome comparison", minimum-t.Launches)
+		return r
+	}
+	r.Verdict = "ready"
+	r.Reason = "post-default cohort meets the sample floor; match a pre-default cohort before claiming throughput change"
+	return r
+}

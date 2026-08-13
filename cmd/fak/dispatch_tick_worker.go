@@ -500,6 +500,13 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 	}
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick-"+backend+".json"), blob, 0o644)
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick.json"), blob, 0o644)
+	if receipt, ok := payload["repo_pulse_receipt"].(map[string]any); ok && dispatchMapString(receipt, "schema") == "fak-dispatch-repo-pulse-receipt/1" {
+		issue, pid := dispatchMapInt(payload, "issue"), dispatchMapInt(payload, "pid")
+		if issue > 0 && pid > 0 {
+			name := fmt.Sprintf("repo-pulse-launch-%d-%d.json", issue, pid)
+			_ = os.WriteFile(filepath.Join(runsDir, name), blob, 0o644)
+		}
+	}
 }
 
 func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, leaseID string, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool, cooldownStatus []map[string]any) map[string]any {

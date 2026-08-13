@@ -2717,3 +2717,21 @@ func TestDispatchStampSubBuckets(t *testing.T) {
 		t.Fatalf("timings=%v", m)
 	}
 }
+
+func TestRecordDispatchPayloadPersistsRepoPulsePerLaunch(t *testing.T) {
+	dir := t.TempDir()
+	payload := map[string]any{"schema": "fleet-issue-resolve-dispatch/1", "action": "spawned", "issue": 123, "pid": 456, "repo_pulse_receipt": map[string]any{"schema": "fak-dispatch-repo-pulse-receipt/1", "saved_tokens": 900, "tool_turns_skipped": 2, "journal_rows": 3}}
+	recordDispatchPayload(dir, "codex", payload)
+	path := filepath.Join(dir, "repo-pulse-launch-123-456.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"saved_tokens": 900`) {
+		t.Fatalf("sidecar=%s", b)
+	}
+	recordDispatchPayload(dir, "codex", map[string]any{"issue": 124, "pid": 457})
+	if _, err := os.Stat(filepath.Join(dir, "repo-pulse-launch-124-457.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy/no-receipt sidecar err=%v", err)
+	}
+}

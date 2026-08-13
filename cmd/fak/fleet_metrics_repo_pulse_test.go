@@ -33,3 +33,10 @@ func TestFleetMetricsAggregatesRepoPulseReceiptsWithoutDoubleCount(t *testing.T)
 		}
 	}
 }
+
+func TestRepoPulseCohortReadinessRefusesThinEvidence(t *testing.T) {
+	dir := t.TempDir()
+	if got := assessRepoPulseCohort(dir, 5); got.Verdict != "not-yet" || got.PostLaunches != 0 || !strings.Contains(got.Reason, "need 5") {
+		t.Fatalf("got=%+v", got)
+	}
+}
