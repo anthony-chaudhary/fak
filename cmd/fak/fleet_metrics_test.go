@@ -413,6 +413,57 @@ func TestServeUsageSessionIDOnlyStampsSingleSessionServe(t *testing.T) {
 	}
 }
 
+func TestFleetMetricsSeparatesRootOutcomesAttemptsAndAttributionCoverage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	usagePath := filepath.Join(dir, "usage.jsonl")
+	registrationPath := filepath.Join(dir, "registrations.jsonl")
+	store := sessionregistry.Store{Path: registrationPath}
+	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	regs := []sessionregistry.Record{
+		{Schema: sessionregistry.Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", AttemptID: "attempt-a1", LaunchKind: "agent", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-a-root"}, State: sessionregistry.StateCompleted, RootOutcome: "success", CreatedAt: base, TerminalAt: base.Add(time.Minute)},
+		{Schema: sessionregistry.Schema, RegistrationID: "child-a", ParentRegistrationID: "root-a", RootRegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", AttemptID: "attempt-a2", ResumeOfAttemptID: "attempt-a1", LaunchKind: "headless", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-a-child"}, State: sessionregistry.StateCompleted, CreatedAt: base.Add(time.Second), TerminalAt: base.Add(50 * time.Second)},
+		{Schema: sessionregistry.Schema, RegistrationID: "root-b", RootRegistrationID: "root-b", RootIssue: "#B", TaskID: "goal-b", AttemptID: "attempt-b1", LaunchKind: "agent", Identity: sessionregistry.Identity{Runtime: "test", SessionID: "session-b"}, State: sessionregistry.StateFailed, RootOutcome: "failure", CreatedAt: base.Add(2 * time.Second), TerminalAt: base.Add(40 * time.Second)},
+	}
+	for _, r := range regs {
+		if err := store.Register(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage := []gatewayusageledger.Row{
+		{Schema: gatewayusageledger.Schema, SessionID: "session-a-root", SessionType: "agent", UnixMillis: base.UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 1, InputTokens: 10, OutputTokens: 1}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-a-child", SessionType: "headless", UnixMillis: base.Add(time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 2, InputTokens: 20, OutputTokens: 2}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-b", SessionType: "agent", UnixMillis: base.Add(2 * time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 3, InputTokens: 30, OutputTokens: 3}},
+		{Schema: gatewayusageledger.Schema, SessionID: "unknown-session", SessionType: "legacy", UnixMillis: base.Add(3 * time.Second).UnixMilli(), Counters: gatewayusageledger.Counters{ObservedTurns: 4, InputTokens: 40, OutputTokens: 4}},
+	}
+	var ledger strings.Builder
+	for _, row := range usage {
+		b, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ledger.Write(b)
+		ledger.WriteByte('\n')
+	}
+	if err := os.WriteFile(usagePath, []byte(ledger.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := fleetMetricsSources{usageLedger: usagePath, registrationLedger: registrationPath, maxSessions: 20, stderr: io.Discard}.render(base.Add(time.Hour))
+	want := []string{
+		`fak_fleet_goal_attempts_total{root_registration="root-a",root_issue="#A",task="goal-a"} 2`, `fak_fleet_goal_resumes_total{root_registration="root-a",root_issue="#A",task="goal-a"} 1`,
+		`fak_fleet_goal_terminal_state{root_registration="root-a",root_issue="#A",task="goal-a",state="completed"} 1`, `fak_fleet_goal_outcome_info{root_registration="root-a",root_issue="#A",task="goal-a",outcome="success"} 1`,
+		`fak_fleet_goal_terminal_state{root_registration="root-b",root_issue="#B",task="goal-b",state="failed"} 1`, `fak_fleet_goal_outcome_info{root_registration="root-b",root_issue="#B",task="goal-b",outcome="failure"} 1`,
+		`fak_fleet_goal_input_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 30`, `fak_fleet_goal_input_tokens_total{root_registration="root-b",root_issue="#B",task="goal-b"} 30`,
+		`fak_fleet_goal_usage_rows{attribution="attributed"} 3`, `fak_fleet_goal_usage_rows{attribution="unattributed"} 1`, `fak_fleet_goal_usage_attribution_ratio 0.75`,
+		`fak_fleet_goal_input_tokens_by_attribution_total{attribution="attributed"} 60`, `fak_fleet_goal_input_tokens_by_attribution_total{attribution="unattributed"} 40`,
+	}
+	for _, needle := range want {
+		if !strings.Contains(out, needle) {
+			t.Errorf("missing %q\n%s", needle, out)
+		}
+	}
+}
+
 func TestFleetMetricsAttributesDescendantUsageToRootGoal(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	registrationPath := filepath.Join(t.TempDir(), "child-registrations.jsonl")
