@@ -14,6 +14,9 @@ import (
 
 func cmdStaleWork(args []string) { os.Exit(runStaleWork(args, os.Stdout, os.Stderr)) }
 func runStaleWork(args []string, out, errw io.Writer) int {
+	if len(args) > 0 && args[0] == "loop" {
+		return runStaleWorkLoop(args[1:], out, errw)
+	}
 	fs := flag.NewFlagSet("stale-work", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	root := fs.String("root", ".", "repository root")

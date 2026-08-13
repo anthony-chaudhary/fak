@@ -952,4 +952,11 @@ Research basis: [`research/coding-workload-vocabulary.md`](research/coding-workl
 
 Ranks tracked documentation into bounded, issue-ready, provenance-bearing review packets without
 mutating candidates. See [`docs/stale-work.md`](stale-work.md). `--selfcheck` proves dependency
-drift outranks age-only history; `--state` folds prior garden/issue-policy adjudication.
+drift outranks age-only history.
+
+`fak stale-work loop` consumes that packet and renders one contract-valid dedicated issue unit per
+candidate. It is dry-run by default, deduplicates against an `--issues` snapshot, serializes
+overlapping paths into waves, and refuses dispatch until an existing issue passes the shared issue
+contract. `--state`/`--state-out` read and explicitly persist evidence-digest adjudications;
+`--witnesses` reconciles only independent issue/git/test evidence. GitHub creation and worker
+launch are separately armed by `--live-issues` and `--live-launch`.
