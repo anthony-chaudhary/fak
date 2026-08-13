@@ -2,18 +2,20 @@
 package sessionregistry
 
 import (
-	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 const Schema = "fak-child-registration/1"
@@ -94,8 +96,6 @@ type NewInput struct {
 
 type Store struct{ Path string }
 
-var appendMu sync.Mutex
-
 func DefaultPath() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_SESSION_REGISTRY")); v != "" {
 		return v
@@ -164,7 +164,11 @@ func Validate(r Record) error {
 }
 
 func (s Store) Register(r Record) error {
-	records, err := s.ReadAll()
+	return s.withLock(func() error { return s.registerLocked(r) })
+}
+
+func (s Store) registerLocked(r Record) error {
+	records, err := s.readAllUnlocked()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -216,7 +220,17 @@ func (s Store) Terminal(id string, state State, reason, witness string, at time.
 	})
 }
 func (s Store) update(id string, fn func(*Record)) (Record, error) {
-	rows, err := s.ReadAll()
+	var updated Record
+	err := s.withLock(func() error {
+		var err error
+		updated, err = s.updateLocked(id, fn)
+		return err
+	})
+	return updated, err
+}
+
+func (s Store) updateLocked(id string, fn func(*Record)) (Record, error) {
+	rows, err := s.readAllUnlocked()
 	if err != nil {
 		return Record{}, err
 	}
@@ -242,9 +256,10 @@ func (s Store) append(r Record) error {
 	if err := Validate(r); err != nil {
 		return err
 	}
-	appendMu.Lock()
-	defer appendMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+		return err
+	}
+	if err := s.repairIncompleteTail(); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -261,28 +276,76 @@ func (s Store) append(r Record) error {
 	}
 	return f.Sync()
 }
+
+func (s Store) repairIncompleteTail() error {
+	data, err := os.ReadFile(s.Path)
+	if errors.Is(err, os.ErrNotExist) || len(data) == 0 || data[len(data)-1] == '\n' {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	start := bytes.LastIndexByte(data, '\n') + 1
+	var event Event
+	decodeErr := json.Unmarshal(data[start:], &event)
+	switch {
+	case decodeErr == nil:
+		f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		_, writeErr := f.Write([]byte{'\n'})
+		closeErr := f.Close()
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	case isUnexpectedEnd(decodeErr):
+		return os.Truncate(s.Path, int64(start))
+	default:
+		return fmt.Errorf("decode registry: %w", decodeErr)
+	}
+}
+
+func isUnexpectedEnd(err error) bool {
+	return errors.Is(err, io.ErrUnexpectedEOF) || err != nil && err.Error() == "unexpected end of JSON input"
+}
+
 func (s Store) ReadAll() ([]Record, error) {
-	f, err := os.Open(s.Path)
+	var rows []Record
+	err := s.withLock(func() error {
+		var err error
+		rows, err = s.readAllUnlocked()
+		return err
+	})
+	return rows, err
+}
+
+func (s Store) readAllUnlocked() ([]Record, error) {
+	data, err := os.ReadFile(s.Path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	latest := map[string]Record{}
-	sc := bufio.NewScanner(f)
-	buf := make([]byte, 64*1024)
-	sc.Buffer(buf, 4*1024*1024)
-	for sc.Scan() {
+	lines := bytes.Split(data, []byte{'\n'})
+	terminated := len(data) == 0 || data[len(data)-1] == '\n'
+	for i, line := range lines {
+		if len(line) == 0 && i == len(lines)-1 && terminated {
+			continue
+		}
 		var e Event
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+		if err := json.Unmarshal(line, &e); err != nil {
+			// An append killed between writes leaves an unterminated JSON tail. It
+			// never became a durable event, so retain the preceding valid ledger.
+			if i == len(lines)-1 && !terminated && isUnexpectedEnd(err) {
+				break
+			}
 			return nil, fmt.Errorf("decode registry: %w", err)
 		}
 		if err := Validate(e.Record); err != nil {
 			return nil, err
 		}
 		latest[e.Record.RegistrationID] = e.Record
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
 	}
 	out := make([]Record, 0, len(latest))
 	for _, r := range latest {
@@ -296,6 +359,34 @@ func (s Store) ReadAll() ([]Record, error) {
 	})
 	return out, nil
 }
+
+func (s Store) withLock(fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open registry lock: %w", err)
+	}
+	defer f.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err = flock.TryLock(f)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, flock.ErrLockBusy) {
+			return fmt.Errorf("lock registry: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return errors.New("lock registry: timed out")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer func() { _ = flock.Unlock(f) }()
+	return fn()
+}
+
 func Chain(rows []Record, id string) []Record {
 	by := map[string]Record{}
 	children := map[string][]Record{}

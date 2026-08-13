@@ -1,6 +1,7 @@
 package sessionregistry
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -121,5 +122,50 @@ func TestPIDReuseRequiresProcessStartIdentity(t *testing.T) {
 	missing := ReconcileObserved(rows, []ObservedProcess{{PID: 7, ProcessStartedAt: n.Add(time.Hour), Runtime: "codex"}})
 	if len(missing) != 1 {
 		t.Fatalf("pid reuse matched old row: %+v", missing)
+	}
+}
+
+func TestRegisterRepairsInterruptedFinalAppend(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	s := Store{Path: filepath.Join(t.TempDir(), "registry.jsonl")}
+	root, err := New(NewInput{RegistrationID: "root", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "attempt-root", LaunchKind: "guarded_tui", Runtime: "codex", Lane: "sessionregistry", Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Register(root); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"schema":"fak-child-registration/1","record":`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.ReadAll()
+	if err != nil {
+		t.Fatalf("read should retain events before interrupted append: %v", err)
+	}
+	if len(rows) != 1 || rows[0].RegistrationID != "root" {
+		t.Fatalf("rows = %#v, want surviving root", rows)
+	}
+
+	child, err := New(NewInput{RegistrationID: "child", ParentRegistrationID: "root", RootRegistrationID: "root", RootIssue: "6458", TaskID: "issue-6458", AttemptID: "attempt-child", LaunchKind: "headless_worker", Runtime: "codex", Lane: "sessionregistry", Now: now.Add(time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Register(child); err != nil {
+		t.Fatalf("register after interrupted append: %v", err)
+	}
+	rows, err = s.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want repaired root and child", len(rows))
 	}
 }
