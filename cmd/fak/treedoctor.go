@@ -37,6 +37,8 @@ func cmdTreeDoctor(argv []string) {
 	root := fs.String("root", "", "repo root to inspect (default: discover from cwd)")
 	trunk := fs.String("trunk", "", "merge target a worktree must be folded into to be prunable (default: origin/main)")
 	build := fs.Bool("build", false, "probe each untracked file's package with `go build` to flag build poison (opt-in: spawns go, adds host load)")
+	scratchDir := fs.String("scratch-dir", "", "create and print a directory below _scratch for generated artifacts")
+	scratchPath := fs.String("scratch-path", "", "create the parent and print a file path below _scratch for a generated artifact")
 	abandonAfter := fs.Duration("abandon-after", treedoctor.DefaultAbandonAfter, "an untracked source file older than this and not held by a live owner is surfaced as an abandonment candidate")
 	sweepScratch := fs.Bool("sweep-scratch", false, "reap gitignored scratch under the repo root via `git clean -Xdf` (ignored-only: can never touch a tracked file or a real untracked WIP file)")
 	dryRun := fs.Bool("dry-run", false, "with --sweep-scratch, preview via `git clean -Xdn` — list what would be reaped, delete nothing")
@@ -49,6 +51,35 @@ func cmdTreeDoctor(argv []string) {
 	if repoRoot == "" {
 		fmt.Fprintln(os.Stderr, "tree-doctor: could not resolve a git repo root (pass --root)")
 		os.Exit(2)
+	}
+
+	if *scratchDir != "" || *scratchPath != "" {
+		if *scratchDir != "" && *scratchPath != "" {
+			fmt.Fprintln(os.Stderr, "tree-doctor: choose only one of --scratch-dir or --scratch-path")
+			os.Exit(2)
+		}
+		var (
+			dest string
+			err  error
+		)
+		if *scratchDir != "" {
+			dest, err = treedoctor.PrepareScratchDir(repoRoot, *scratchDir)
+		} else {
+			dest, err = treedoctor.PrepareScratchPath(repoRoot, *scratchPath)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tree-doctor:", err)
+			os.Exit(2)
+		}
+		if *asJSON {
+			if err := json.NewEncoder(os.Stdout).Encode(map[string]string{"schema": "fak-scratch-path/1", "path": dest}); err != nil {
+				fmt.Fprintln(os.Stderr, "tree-doctor: encode json:", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Fprintln(os.Stdout, dest)
+		}
+		return
 	}
 
 	if *sweepScratch {

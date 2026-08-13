@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,5 +100,16 @@ func TestTreeDoctorTrunkDefault(t *testing.T) {
 	}
 	if got := treeDoctorTrunk("origin/dev"); got != "origin/dev" {
 		t.Fatalf("explicit trunk = %q", got)
+	}
+}
+
+func TestCmdTreeDoctorScratchPathCreatesNamespacedParent(t *testing.T) {
+	repo := t.TempDir()
+	path, err := treedoctor.PrepareScratchPath(repo, "fleet-loop/tick.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(path), "/_scratch/fleet-loop/tick.json") {
+		t.Fatalf("path = %q", path)
 	}
 }
