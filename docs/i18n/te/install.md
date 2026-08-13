@@ -1,6 +1,6 @@
 ---
 title: "fak — install & getting started (తెలుగు / install & getting started)"
-description: "fak తెలుగు install-and-run ప్రవేశ పేజీ: ఒకే static Go binary — go build తో Tier 0, local model కోసం fak guard; Go 1.26+, Tier 0-కి GPU/key/network అవసరం లేదు; DPDP-అనుకూల self-host."
+description: "fak తెలుగు install-and-run ప్రవేశ పేజీ: ఒకే static Go binary — go build తో Tier 0, local model కోసం fak manage; Go 1.26+, Tier 0-కి GPU/key/network అవసరం లేదు; DPDP-అనుకూల self-host."
 ---
 
 # fak — install & getting started (తెలుగు)

@@ -38,7 +38,7 @@ Befehl:
 fak manage --gguf qwen2.5:7b -- claude
 ```
 
-`fak guard` startet deinen Agenten unverändert, schiebt aber ein lokales Modell davor und
+`fak manage` startet deinen Agenten unverändert, schiebt aber ein lokales Modell davor und
 prüft jeden Tool-Call, bevor er läuft.
 
 ## Der 60-Sekunden-Beweis (kein Key, kein Modell, keine GPU)
