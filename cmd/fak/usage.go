@@ -324,7 +324,7 @@ const usageCoreText = `usage:
   fak check-tool-failure [--list | TOKEN | --message TEXT] [--json]
                 (closed NON-GUARD tool-failure vocabulary: hangs, timeouts, shell
                  mismatches, hang/shell-mismatch exit-143 cases, and partial applies.
-                 Prints the check-reason-shaped summary/fix/retryable row)
+                 Prints a DOS-wedge-shaped summary/fix/retryable row)
   fak index     lane <path>... | leaf [<query>] | docs <query> | refs <pkg>.<Sym>   [--json] [--limit N] [--root DIR]
                 (the QUERYABLE SELF-INDEX: query fak's own dev facts instead of
                  re-surveying prose. 'lane' resolves which lane/leaf owns a path

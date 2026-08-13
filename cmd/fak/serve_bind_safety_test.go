@@ -224,7 +224,8 @@ func repoDosToml(t *testing.T) string {
 
 // A structured refusal is only structured if the vocabulary KNOWS the token. This gate shipped
 // with its matrix well before UNAUTHENTICATED_OFF_HOST_BIND was declared in dos.toml, so
-// `dos check-reason` classified fak's own security refusal as UNCLASSIFIED prose drift — the
+// `dos man wedge UNAUTHENTICATED_OFF_HOST_BIND --explain` classified fak's own security refusal
+// as UNCLASSIFIED prose drift — the
 // exact failure a closed vocabulary exists to kill, on the one refusal where a reader most needs
 // a classification and a fix. This binds the emitted token to its declaration (#5373).
 func TestServeBindRefusalTokenIsDeclaredInTheClosedVocabulary(t *testing.T) {
@@ -232,7 +233,7 @@ func TestServeBindRefusalTokenIsDeclaredInTheClosedVocabulary(t *testing.T) {
 	header := "[reasons." + serveBindRefusalToken + "]"
 	i := strings.Index(body, header)
 	if i < 0 {
-		t.Fatalf("dos.toml declares no %s, so `dos check-reason %s` answers UNCLASSIFIED: "+
+		t.Fatalf("dos.toml declares no %s, so `dos man wedge %s --explain` answers UNCLASSIFIED: "+
 			"fak would emit a refusal token its own closed vocabulary does not recognise",
 			header, serveBindRefusalToken)
 	}

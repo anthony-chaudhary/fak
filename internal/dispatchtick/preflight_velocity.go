@@ -17,7 +17,7 @@ package dispatchtick
 // recent delta; this term reads that velocity per lane and RAISES the collision prior for the
 // hot ones, as an advisory the arbiter can surface, never a hold. It reuses the existing
 // COLLISION_RISK closed-vocabulary class as both the advisory token and the prior it raises,
-// mirroring how the focus term reuses FOCUS_WIP_SATURATED -- so `dos check-reason COLLISION_RISK`
+// mirroring how the focus term reuses FOCUS_WIP_SATURATED -- so `dos man wedge COLLISION_RISK --explain`
 // still binds it and no NEW refusal token enters the vocabulary.
 //
 // Pure: state in, decision out; no I/O, no git, no clock. The impure shell (cmd/fak) folds the
@@ -30,7 +30,7 @@ import "fmt"
 
 // CollisionRisk is the closed-vocabulary class the velocity prior raises. It MUST stay
 // byte-identical to the dos.toml [reasons.COLLISION_RISK] declaration so the token this term
-// emits is the one `dos check-reason` verifies -- this term ADVISES on that class (raises its
+// emits is the one `dos man wedge <TOKEN> --explain` verifies -- this term ADVISES on that class (raises its
 // prior for a hot lane), it does not mint a new refusal.
 const CollisionRisk = "COLLISION_RISK"
 
@@ -106,7 +106,7 @@ func EvaluateVelocityPrior(v VelocityCheck) VelocityPrior {
 }
 
 // velocityHotReason names the closed COLLISION_RISK class and cites the measured velocity (revs
-// per week vs the hot floor) plus the raised prior, so a reader -- and `dos check-reason` -- can
+// per week vs the hot floor) plus the raised prior, so a reader -- and `dos man wedge <TOKEN> --explain` -- can
 // bind both the class and its evidence. It is explicit that this is advisory, not a hold.
 func velocityHotReason(p VelocityPrior) string {
 	return fmt.Sprintf("%s: lane %q is moving %.1f revs/week (>= hot floor %.1f) -- a hotter collision surface than a dormant lane; raising the advisory collision prior to %.2f for concurrent arbitration. Advisory only: still safe to launch, but prefer a disjoint lane or wait for the lease if a peer is already here.",

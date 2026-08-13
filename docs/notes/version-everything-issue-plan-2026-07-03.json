@@ -120,7 +120,7 @@
       "key": "modver-dostoml-keyspace",
       "title": "modver: version the dos.toml refusal vocabulary",
       "why_now": "The closed reasons vocabulary evolves; agents recovering from refusals should be able to detect they hold a stale vocabulary rev.",
-      "in_scope": "dos.toml (and per-[reasons.*] block if cheap) as a versioned unit; rev exposed via dos check-reason plumbing.",
+      "in_scope": "dos.toml (and per-[reasons.*] block if cheap) as a versioned unit; rev exposed through `dos man wedge <TOKEN> --explain` lookup.",
       "done_condition": "dos.toml rev in ledger; dos doctor can report vocabulary rev.",
       "witness": "unit test + ledger row for dos.toml.",
       "lane": "modver",
@@ -609,7 +609,7 @@
       "title": "dos.toml: MODULE_REV_STALE refusal token — recall pinned to an old module rev",
       "why_now": "STALE_RECALL exists for status/plan memory; the module-rev analogue is mechanical: a loop acting on analysis of internal/x@r40 while the tree holds r45 should be refused with a named reason.",
       "in_scope": "New [reasons.MODULE_REV_STALE] with summary+fix; a checker comparing recalled rev vs live rev; wire into the recall gate advisory-first.",
-      "done_condition": "dos check-reason MODULE_REV_STALE resolves; gate fires on a fixture stale recall.",
+      "done_condition": "dos man wedge MODULE_REV_STALE --explain resolves; gate fires on a fixture stale recall.",
       "witness": "gate unit test.",
       "lane": "modver",
       "paths": [

@@ -142,7 +142,7 @@ so no naive-baseline strawman is smuggled in.
 The self-tax plane declares an **envelope** per lifecycle rung — a scope-stated ceiling, not a
 promise of zero cost (the epic's explicit non-goal: a gate that costs 8% and saves 40% is a net
 win). A breach names ONE closed-vocabulary token, `OVERHEAD_BUDGET_EXCEEDED`
-(`internal/turntaxmeter/overheadbudget.go`), verifiable via `dos check-reason`. The measured
+(`internal/turntaxmeter/overheadbudget.go`), verifiable via `dos man wedge <TOKEN> --explain`. The measured
 overhead sits **within** that envelope:
 
 | Rung / meter | Measured overhead | Declared envelope | Verdict | Provenance |
@@ -198,7 +198,7 @@ not a narrated claim:
   zero-alloc cost cap). Run green on win/amd64, 2026-07-19.
 - `go test ./internal/loopgate -count=1` → `ok` (the verified-vs-naive false-done demonstrator).
   Run green on win/amd64, 2026-07-19.
-- `dos check-reason OVERHEAD_BUDGET_EXCEEDED` / `dos check-reason GATE_LATENCY_REGRESSION`
+- `dos man wedge OVERHEAD_BUDGET_EXCEEDED --explain` / `dos man wedge GATE_LATENCY_REGRESSION --explain`
   resolve both breach tokens as real closed-vocabulary members (declared in `dos.toml`).
 - Green-trunk only: `go run ./cmd/turntaxdemo -selfcheck` asserts the safety-floor invariants and
   exits non-zero on drift; `go run ./cmd/turntaxdemo -print` renders the governed-vs-ungoverned

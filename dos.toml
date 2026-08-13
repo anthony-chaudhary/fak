@@ -1319,7 +1319,8 @@ see_also = ["internal/adjudicator/reversibility.go", "internal/gateway/reversibi
 # Blast-radius containment W4 (#2716, epic #2712): the dispatch router scope-holds an
 # issue whose declared paths intersect a LIVE known-bad signature (the internal/knownbad
 # ledger, #2713), so a worker is not sent to walk straight into a shared bug. This is the
-# structured, `dos check-reason`-verifiable refusal the skip carries. It is DISTINCT from
+# structured refusal the skip carries, verifiable with
+# `dos man wedge BLOCKED_BY_KNOWN_BAD --explain`. It is DISTINCT from
 # BLOCKED_BY_HUMAN: dynamic (clears when the signature is released, not by a human action)
 # and it holds ONLY the intersecting subset -- disjoint issues keep dispatching, so the
 # fleet makes progress instead of a global stall.
@@ -1348,7 +1349,8 @@ see_also = ["internal/dispatchorder", "internal/dispatchtick", "fak dispatch rou
 # so the losing agent gets a pointer to the elected fixer instead of racing a second edit to
 # the shared tree. Exactly-one is enforced by the EXCLUSIVE dos lease
 # (refs/fak/locks/knownbad-<sig>), not by ledger bookkeeping; this is the structured,
-# `dos check-reason`-verifiable form of that refusal. DISTINCT from BLOCKED_BY_KNOWN_BAD:
+# verifiable form of that refusal (`dos man wedge KNOWN_BAD_ALREADY_CLAIMED --explain`).
+# DISTINCT from BLOCKED_BY_KNOWN_BAD:
 # that holds a DISPATCH candidate off an intersecting tree; this elects the single agent that
 # OWNS the fix (so the held issues have a nameable owner to park behind).
 [reasons.KNOWN_BAD_ALREADY_CLAIMED]
@@ -2007,7 +2009,7 @@ see_also = ["internal/toon/decide.go", "issue #3066"]
 # The assumecheck outcome-class refusal bindings (#3822, epic #3818 C4): the pure
 # kernel's three BLOCKING outcomes (internal/assumecheck Outcome.blocksReliance --
 # everything except HOLDS) each resolve to ONE closed token here, so a caller refusing
-# on a guarded assumption emits a reason `dos check-reason` resolves, instead of the
+# on a guarded assumption emits a reason `dos man wedge <TOKEN> --explain` resolves, instead of the
 # per-assumption label (e.g. SEAT_NOT_LAUNCHABLE), which is folded into the verdict's
 # reason text as detail. Bound to the Go floor by internal/assumecheck/dosreasons_test.go,
 # mirroring toon's #3066 gate.
@@ -2016,21 +2018,21 @@ category = "OPERATOR_GATE"
 refusal  = true
 summary  = "A guarded assumption a caller relies on was checked and the declared witness REFUTED it: the assumed condition is provably false, so proceeding on it is refused."
 fix      = "Fix the violated condition (or retire the assumption), re-witness with `fak assume check <id>` until the outcome is HOLDS, then retry the refused action. Floor: internal/assumecheck GuardAssumption."
-see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos man wedge ASSUMPTION_VIOLATED --explain", "fak assume check", "issue #3822"]
 
 [reasons.ASSUMPTION_UNVERIFIABLE]
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "A guarded assumption could not be witnessed either way -- the declared witness could not run, the evidence came from the wrong witness kind, or the only evidence is a self-report. Fail-closed: unverifiable is NOT holds."
 fix      = "Wire or repair the assumption's declared witness so it can adjudicate, gather fresh evidence, then re-run `fak assume check <id>` until the outcome is HOLDS before relying on it. Floor: internal/assumecheck GuardAssumption."
-see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos man wedge ASSUMPTION_UNVERIFIABLE --explain", "fak assume check", "issue #3822"]
 
 [reasons.ASSUMPTION_STALE]
 category = "STALE_CLAIM"
 refusal  = true
 summary  = "A guarded assumption is about to be relied on, but its backing evidence has aged past its declared freshness bound relative to the witness's source of truth."
 fix      = "Re-witness the assumption from its declared source (`fak assume check <id>` gathers fresh evidence), discard the stale evidence, then retry once the fresh witness confirms HOLDS. Floor: internal/assumecheck GuardAssumption."
-see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos check-reason", "fak assume check", "issue #3822"]
+see_also = ["internal/assumecheck/assumecheck.go", "internal/assumecheck", "dos man wedge ASSUMPTION_STALE --explain", "fak assume check", "issue #3822"]
 
 # A2A push-notification delivery rides an admission floor before any dial: the webhook
 # host must be allowlisted, the scheme must be http(s), and an SSRF-range IP literal is
@@ -2043,7 +2045,7 @@ category = "OPERATOR_GATE"
 refusal  = true
 summary  = "an A2A push-notification webhook target is not admissible -- a non-allowlisted host, a non-http(s) scheme, a malformed URL, or an SSRF-range IP literal that was not explicitly permitted -- so delivery is refused and the outbound client is never dialed."
 fix      = "register the receiver's host on the delivery allowlist (Server.SetA2APushWebhookAllowlist); use an http(s) URL with a public host, or explicitly enable loopback delivery for a deliberately-internal receiver. Floor: internal/gateway a2aWebhookAdmit refuses before any dial."
-see_also = ["internal/gateway/a2a_pushnotify.go", "internal/gateway/a2a.go", "dos check-reason"]
+see_also = ["internal/gateway/a2a_pushnotify.go", "internal/gateway/a2a.go", "dos man wedge WEBHOOK_URL_NOT_ALLOWLISTED --explain"]
 
 [reasons.LESSON_OVERCLAIMS]
 category = "OPERATOR_GATE"
@@ -2069,7 +2071,7 @@ category = "OPERATOR_GATE"
 refusal  = true
 summary  = "A change would wire the read-mostly steer/prplan overlay into a blocking path: an overlay code path reaching a git mutation (commit/push/reset/revert/merge/rebase/force-push), an overlay call that can fail a commit, or a --check exit code consumed by a commit, hook, or promotion path. The overlay's contract is observability WITHOUT a merge gate; a gating overlay is refused as a class, not patched as an instance."
 fix      = "Keep the overlay advisory: derive git state only through read-only verbs (log/rev-parse/show/...), let --check report RESIDUAL solely from an operator or CI reporting invocation, and keep commit/hook/promotion paths free of overlay references (fold/render helpers stay fair game -- rendering is the overlay's job). If a gate is genuinely wanted, build it in the kernel's witness path (dos commit-audit / shipgate), never in the overlay. Floor: `go test ./internal/architest -run Overlay`."
-see_also = ["internal/steerpr", "internal/architest/steer_overlay_floor_test.go", "cmd/fak/steer_prs.go", "cmd/fak/release_prplan.go", "dos check-reason"]
+see_also = ["internal/steerpr", "internal/architest/steer_overlay_floor_test.go", "cmd/fak/steer_prs.go", "cmd/fak/release_prplan.go", "dos man wedge OVERLAY_WOULD_GATE --explain"]
 
 # The SPINNING progress verdict (#4956): the superloop walk's liveness verdict answers
 # "is the loop ticking?", never "is it PRODUCING?" -- a loop that fires on cadence while

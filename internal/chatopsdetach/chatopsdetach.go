@@ -43,7 +43,7 @@ type Admission struct {
 	// Reason is a closed refusal token set iff !Admitted — one of the preflight's
 	// vocabulary (REFUSE_AT_CAP, REFUSE_NO_SEAT, REFUSE_NO_ACCOUNT, REFUSE_HOST,
 	// REFUSE_GATE/GATE_PRESSURE). The kernel treats it as opaque and threads it
-	// verbatim so `dos check-reason` can still bind the token downstream.
+	// verbatim so `dos man wedge <TOKEN> --explain` can still bind the token downstream.
 	Reason string
 }
 
@@ -158,7 +158,7 @@ func ackText(cmd Command, runID, lane string) string {
 }
 
 // refuseText is the structured refusal line: it names the closed refusal token
-// verbatim (so `dos check-reason` can bind it) and states plainly that nothing
+// verbatim (so `dos man wedge <TOKEN> --explain` can bind it) and states plainly that nothing
 // was started and no seat was taken — a refusal is a first-class, auditable
 // answer, not a dropped command.
 func refuseText(cmd Command, reason string) string {

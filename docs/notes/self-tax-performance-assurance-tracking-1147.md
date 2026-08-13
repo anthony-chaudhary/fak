@@ -178,7 +178,7 @@ win, and the plane must say so rather than red on the 8% alone.
 - **T2 · overhead **budget** envelope.** Declare expected per-rung/per-method ns + token cost (a
   dos.toml-style table or a typed Go table beside the reasons vocabulary). This is the missing
   "expected" a breach is defined against. *Witness:* committed table; a synthetic over-budget
-  span reads back as `OVERHEAD_BUDGET_EXCEEDED`; `dos check-reason` resolves the token.
+  span reads back as `OVERHEAD_BUDGET_EXCEEDED`; `dos man wedge <TOKEN> --explain` resolves the token.
 
 ### L1 — turn-by-turn meter
 - **T3 · promote `cmd/turntaxdemo` → first-class `fak turntax` meter.** Per-turn tax: kernel-ns

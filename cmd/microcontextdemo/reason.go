@@ -20,7 +20,7 @@ import (
 )
 
 // LedgerRefusedReason is the closed-vocabulary code every -verify-* refusal in this leaf
-// carries. It is the token dos.toml declares and `dos check-reason` resolves.
+// carries. It is the token dos.toml declares and `dos man wedge <TOKEN> --explain` resolves.
 const LedgerRefusedReason = "MICROCONTEXT_LEDGER_REFUSED"
 
 // ledgerRefusal renders one machine-routable refusal line. The reason code leads so a consumer

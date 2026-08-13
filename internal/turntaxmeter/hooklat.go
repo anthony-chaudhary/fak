@@ -44,7 +44,7 @@ import (
 // GateLatencyRegression is the closed-vocabulary alarm token a hook-latency budget
 // breach names. It MUST stay byte-identical to the dos.toml
 // [reasons.GATE_LATENCY_REGRESSION] declaration so the token this fold emits is the
-// same one `dos check-reason` verifies and the loop routes to a replan.
+// same one `dos man wedge <TOKEN> --explain` verifies and the loop routes to a replan.
 const GateLatencyRegression = "GATE_LATENCY_REGRESSION"
 
 // DefaultHookP99BudgetMS is the v0.1 declared per-observation p99 ceiling in

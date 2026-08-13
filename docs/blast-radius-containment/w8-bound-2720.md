@@ -59,7 +59,7 @@ A record past its `ttl_seconds` reports `matched:false` (hold auto-lifts); `fak 
 
 ## Acceptance gate
 
-`make ci` green; the TTL + revoke cases green; the refuse reason resolves in the closed vocabulary (`dos check-reason`).
+`make ci` green; the TTL + revoke cases green; the refuse reason resolves in the closed vocabulary (`dos man wedge <TOKEN> --explain`).
 
 ## Closure binding
 

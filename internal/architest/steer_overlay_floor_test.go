@@ -507,7 +507,7 @@ func TestSteerOverlayCheckStaysOffCommitAndPromotionPaths(t *testing.T) {
 // TestSteerOverlayRefusalReasonDeclared pins the vocabulary half of #5032:
 // OVERLAY_WOULD_GATE is declared in dos.toml [reasons.*] with a summary and a
 // fix, so a refusal of this class speaks the closed vocabulary
-// (`dos check-reason OVERLAY_WOULD_GATE` resolves) instead of free-text.
+// (`dos man wedge OVERLAY_WOULD_GATE --explain` resolves) instead of free-text.
 func TestSteerOverlayRefusalReasonDeclared(t *testing.T) {
 	tomlPath := filepath.Join(filepath.Dir(internalDir(t)), "dos.toml")
 	raw, err := os.ReadFile(tomlPath)
@@ -537,7 +537,7 @@ func TestSteerOverlayRefusalReasonDeclared(t *testing.T) {
 	}
 	for _, want := range []string{"summary", "fix", "category"} {
 		if !keys[want] {
-			t.Errorf("dos.toml [reasons.OVERLAY_WOULD_GATE] lacks a non-empty %q — the token must carry its own explanation and cure so `dos check-reason OVERLAY_WOULD_GATE` teaches, not just names.", want)
+			t.Errorf("dos.toml [reasons.OVERLAY_WOULD_GATE] lacks a non-empty %q — the token must carry its own explanation and cure so `dos man wedge OVERLAY_WOULD_GATE --explain` teaches, not just names.", want)
 		}
 	}
 }

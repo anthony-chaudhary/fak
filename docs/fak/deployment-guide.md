@@ -99,7 +99,7 @@ no silent cap:
   shedding new load by design.
 - **Backpressure** past the ceiling: a **new** session's admission is refused with
   HTTP `503` + `Retry-After` and the closed reason `SESSION_CEILING_SATURATED`
-  (`dos check-reason SESSION_CEILING_SATURATED`). Sessions **already in flight are never
+  (`dos man wedge SESSION_CEILING_SATURATED --explain`). Sessions **already in flight are never
   refused** — saturation sheds *new* load rather than degrading the loops already running.
 
 This is the deployment-boundary projection of the fleet's admission machinery, scoped to

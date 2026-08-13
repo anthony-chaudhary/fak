@@ -153,7 +153,7 @@ func (p Page) Class() SurvivalClass { return ClassOf(p.Kind) }
 
 // ReasonPinEvictRefused is the closed refusal token for "this plan would evict a PINNED page".
 // It is registered in the repo's refusal vocabulary (dos.toml [reasons.PIN_EVICT_REFUSED], so
-// `dos check-reason PIN_EVICT_REFUSED` resolves it) and is the same token the gateway's
+// `dos man wedge PIN_EVICT_REFUSED --explain` resolves it) and is the same token the gateway's
 // compaction path returns, so one string names the refusal from the planner through the wire to
 // the operator.
 const ReasonPinEvictRefused = "PIN_EVICT_REFUSED"

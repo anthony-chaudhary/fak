@@ -19,7 +19,7 @@ package dispatchtick
 // Posture is WARN by default (advise + still spawn) so the live fleet stays
 // byte-identical to today until an operator opts into HOLD via --focus-hold /
 // FLEET_DISPATCH_FOCUS_HOLD. The advisory carries the closed FOCUS_WIP_SATURATED refusal
-// token so `dos check-reason` can verify it and a loop can route/report on it distinctly
+// token so `dos man wedge <TOKEN> --explain` can verify it and a loop can route/report on it distinctly
 // from a rate-limit or collision hold.
 //
 // Pure: state in, decision out; no I/O. The impure shell (cmd/fak) reads the focusscore
@@ -30,7 +30,7 @@ import "fmt"
 // FocusWIPSaturated is the closed-vocabulary refusal token the focus backpressure term
 // emits on a new-objective spawn while breadth is at/over the WIP cap. It MUST stay
 // byte-identical to the dos.toml [reasons.FOCUS_WIP_SATURATED] declaration so the token
-// this fold emits is the one `dos check-reason` verifies and a loop routes on. It also
+// this fold emits is the one `dos man wedge <TOKEN> --explain` verifies and a loop routes on. It also
 // doubles as the refusal VERDICT the tick reports under the HOLD posture (mirroring how
 // the collision term reuses COLLISION_RISK as both token and verdict).
 const FocusWIPSaturated = "FOCUS_WIP_SATURATED"
@@ -105,7 +105,7 @@ func EvaluateFocusAdmission(f FocusCheck) FocusAdmission {
 }
 
 // focusSaturatedReason names the closed FOCUS_WIP_SATURATED token and cites the measured
-// breadth (active vs cap) plus the posture, so a reader -- and `dos check-reason` -- can
+// breadth (active vs cap) plus the posture, so a reader -- and `dos man wedge <TOKEN> --explain` -- can
 // bind both the refusal class and its evidence.
 func focusSaturatedReason(a FocusAdmission) string {
 	verb, tail := "WARNING", "still spawning (warn-first, bounded breadth not a hard cap) -- set --focus-hold / FLEET_DISPATCH_FOCUS_HOLD=1 to hold new-objective spawns while over cap"

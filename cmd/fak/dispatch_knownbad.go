@@ -26,7 +26,7 @@ import (
 // reasonBlockedByKnownBad is the closed-vocabulary skip reason a SkippedIssue carries when
 // it was held back from dispatch because its declared paths intersect a LIVE known-bad
 // signature. It is registered in dos.toml [reasons.BLOCKED_BY_KNOWN_BAD] so the skip is a
-// structured, `dos check-reason`-verifiable refusal, not free text.
+// structured refusal verifiable with `dos man wedge BLOCKED_BY_KNOWN_BAD --explain`, not free text.
 const reasonBlockedByKnownBad = "BLOCKED_BY_KNOWN_BAD"
 
 // holdKnownBadForRoute is the impure wrapper the dispatch verbs call: it loads the live

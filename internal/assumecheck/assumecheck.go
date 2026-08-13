@@ -165,7 +165,7 @@ func (o Outcome) blocksReliance() bool { return o != OutcomeHolds }
 
 // RefusalReason maps an outcome onto the closed, dos-registered refusal token a
 // refusing caller emits (#3822, epic #3818 C4): the OUTCOME CLASS — not the
-// per-assumption label — is what `dos check-reason` resolves against the workspace
+// per-assumption label — is what `dos man wedge <TOKEN> --explain` resolves against the workspace
 // dos.toml [reasons] vocabulary. Total over the blocking set; OutcomeHolds (and any
 // foreign value) maps to "" because a holding assumption refuses nothing.
 func (o Outcome) RefusalReason() string {

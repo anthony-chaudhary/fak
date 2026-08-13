@@ -54,7 +54,7 @@ A/B; the ~10.7s → ~0.3s commit-gate fusion, `AGENTS.md:97-98`).
 **W1 — One closed refusal vocabulary spans every band.** `STALE_LEASE` at a fence
 (`internal/leaseref/fence.go:49-69`), `COLLISION_RISK` at a spawn,
 `LOOP_DONE_UNWITNESSED` at a loop turn, `CI_BASE_RED` at a release: all tokens in one
-declared set (`dos.toml [reasons]`, lookup via `dos check-reason`). A refusal minted at
+declared set (`dos.toml [reasons]`, lookup via `dos man wedge <TOKEN> --explain`). A refusal minted at
 any clock is machine-readable at every other clock — the B4 sweep terminates *because*
 a B0-shaped refusal is a first-class value ("the loop never needs to know the cap, so
 it can never exceed it", `internal/dispatchsweep/dispatchsweep.go:18-21`). No

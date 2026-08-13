@@ -56,7 +56,7 @@ const PreflightRefuseRateLimit = "REFUSE_RATE_LIMIT"
 // RateLimitBackoff is the closed-vocabulary refusal token PreflightRefuseRateLimit
 // carries in its reason. It MUST stay byte-identical to the dos.toml
 // [reasons.RATE_LIMIT_BACKOFF] declaration so the token this fold emits is the one
-// `dos check-reason` verifies and the loop routes on.
+// `dos man wedge <TOKEN> --explain` verifies and the loop routes on.
 const RateLimitBackoff = "RATE_LIMIT_BACKOFF"
 
 // DefaultRateLimitMin429 is the burst threshold: the fewest recent rate_limit-classified
@@ -171,7 +171,7 @@ func ApplyRateLimitBackpressure(res PreflightResult, r RateLimitCheck) Preflight
 
 // rateLimitBackoffReason names the closed RATE_LIMIT_BACKOFF refusal token and cites the
 // measured burst (count within the window) plus the load-bearing disambiguation, so a
-// reader -- and `dos check-reason` -- can bind both the refusal class and its evidence.
+// reader -- and `dos man wedge <TOKEN> --explain` -- can bind both the refusal class and its evidence.
 func rateLimitBackoffReason(r RateLimitCheck, live int) string {
 	return fmt.Sprintf("%s: %d recent concurrency rate-limit worker exit(s) (reason=rate_limit, a transient 429/529 overload) within %s on this backend -- holding it at %d live worker(s); admit no new concurrent load onto a throttled seat until the burst ages out. Weekly/usage caps, model caps, and login walls are excluded (they need a seat reset / model downgrade / re-login, not concurrency backoff) -- route new work to a different provider/backend instead.",
 		RateLimitBackoff, r.Recent, r.Window, live)

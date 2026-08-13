@@ -129,7 +129,7 @@ func TestVDSOServeBudgetDeclaredAndBreaches(t *testing.T) {
 }
 
 // TestBudgetTokenIsStable pins the breach token's spelling: it is the contract the
-// dos.toml [reasons.OVERHEAD_BUDGET_EXCEEDED] declaration and `dos check-reason` rely
+// dos.toml [reasons.OVERHEAD_BUDGET_EXCEEDED] declaration and `dos man wedge <TOKEN> --explain` rely
 // on, so a rename here that drifts from the vocabulary must fail the build.
 func TestBudgetTokenIsStable(t *testing.T) {
 	if OverheadBudgetExceeded != "OVERHEAD_BUDGET_EXCEEDED" {

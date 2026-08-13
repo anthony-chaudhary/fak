@@ -14,7 +14,7 @@
 //     does not return free-text prose, it names ONE token — OverheadBudgetExceeded
 //     ("OVERHEAD_BUDGET_EXCEEDED") — so a breach is emittable, verifiable, and
 //     refusable the same way a deny is. The token is declared in dos.toml so
-//     `dos check-reason OVERHEAD_BUDGET_EXCEEDED` resolves it as a real member of the
+//     `dos man wedge OVERHEAD_BUDGET_EXCEEDED --explain` resolves it as a real member of the
 //     vocabulary rather than UNCLASSIFIED prose-drift.
 //
 //   - A budget is an ENVELOPE WITH A STATED SCOPE, not a promise of zero cost (the
@@ -29,7 +29,7 @@ package turntaxmeter
 
 // OverheadBudgetExceeded is the closed-vocabulary refusal token a budget breach
 // names. It MUST stay byte-identical to the dos.toml [reasons.OVERHEAD_BUDGET_EXCEEDED]
-// declaration so the same token that a producer stamps is the one `dos check-reason`
+// declaration so the same token that a producer stamps is the one `dos man wedge <TOKEN> --explain`
 // verifies and the deny-loopback routes — never two spellings of one reason.
 const OverheadBudgetExceeded = "OVERHEAD_BUDGET_EXCEEDED"
 

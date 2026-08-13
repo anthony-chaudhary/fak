@@ -83,7 +83,7 @@ The contract change shipped with this note (`land_worktree_diff`, apply-reject a
 ```
 
 `COLLISION_RISK` is verified against the closed refusal vocabulary
-(`dos check-reason COLLISION_RISK` → `known: true`, `refusal: true`, category
+(`dos man wedge COLLISION_RISK --explain` → `VALID reason`, `REFUSAL? yes`, category
 OPERATOR_GATE, "route to replan"). The semantics fit: at land time the *risk* the
 arbiter admits against has **materialized** — the trunk moved inside the worker's leased
 region despite disjoint-lease admission, which means either a lease-taxonomy hole or an

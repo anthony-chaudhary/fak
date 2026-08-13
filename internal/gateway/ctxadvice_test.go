@@ -231,7 +231,7 @@ func TestCompactionThrashStopIsOptIn(t *testing.T) {
 }
 
 // TestCompactionThrashIsARegisteredReason: the verdict is not free text. It has to resolve
-// in the repo's refusal vocabulary (dos.toml — what `dos check-reason COMPACTION_THRASH`
+// in the repo's refusal vocabulary (dos.toml — what `dos man wedge COMPACTION_THRASH --explain`
 // reads), so the token the wire carries is the token an operator can look up.
 func TestCompactionThrashIsARegisteredReason(t *testing.T) {
 	toml, err := os.ReadFile(filepath.Join("..", "..", "dos.toml"))

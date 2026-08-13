@@ -12,7 +12,7 @@ with its own maintenance witness, before any relay refuses or drains on these
 tokens.
 
 The vocabulary is closed so relay legs never explain their state with prose.
-Every row follows the `dos check-reason` shape: a token, a category, a summary,
+Every row follows the `dos man wedge <TOKEN> --explain` shape: a token, a category, a summary,
 and a fix that tells the next leg or operator what action is valid.
 
 ## Shape

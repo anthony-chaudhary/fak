@@ -127,10 +127,11 @@ dos.toml \ cookbook                                                             
 
 **All 63 of the cookbook's refusal tokens already resolve as `[reasons.*]`
 records**, live over MCP through `dos_check_reason` / `dos_refuse_reasons` and on
-the CLI as `dos check-reason <TOKEN>` — each with a `summary` and a `fix`. Live
+the CLI as `dos man wedge <TOKEN> --explain` — each with a `summary` and a `fix`. Live
 spot-check of two rows, a commit-lane one and the table's last: `BARE_COMMIT_SWEEP`
-and `WEBHOOK_URL_NOT_ALLOWLISTED` both return `known: true` with a summary and a
-fix, and both carry richer recovery text in the store than the row inlines.
+and `WEBHOOK_URL_NOT_ALLOWLISTED` both return `known: true` over MCP; the CLI reports
+each as a `VALID reason` with its category and fix. Both carry richer recovery text in
+the store than the row inlines.
 
 Two consequences, one of which corrects the framing #5445 was filed with:
 
@@ -198,7 +199,7 @@ contract, and the regeneration command above is how a reader gets a current one.
 ## Open follow-ons (#5445 in scope, not yet done)
 
 1. **Serve the cookbook by query.** Replace the 25,215 B table with a short pointer
-   (*you were refused `X` → `dos check-reason X`, or `dos_check_reason` over MCP*)
+   (*you were refused `X` → `dos man wedge X --explain`, or `dos_check_reason` over MCP*)
    plus the handful of rules that must be known *before* a refusal rather than
    after. The recovery text is already in the store — see above — so this is a
    deletion, not a migration. Two gates block doing it blind:

@@ -81,7 +81,7 @@ Each was found by reading fak, not the downstream. The first six were re-derived
 4. ✅ **Five catalog rows ground themselves** against a generated README built from those rows.
 5. ✅ **Two disjoint sets are both called "the closed vocabulary."** `internal/abi/reasons.go`
    carries 19 tokens; `dos.toml` carries 75 `[reasons.*]`; the overlap is **zero**. `docs/FAQ.md`
-   and `AGENTS.md` each claim the phrase for their own set, so `dos check-reason DEFAULT_DENY`
+   and `AGENTS.md` each claim the phrase for their own set, so `dos man wedge DEFAULT_DENY --explain`
    reads `UNCLASSIFIED`.
 6. ✅ **`docs/explainers/README.md` does not exist**, though it is referenced as a front door.
 7. **`tools/dos_fleet_lease.py` `do_acquire` leaks an auto-picked lane** — it journals the acquire

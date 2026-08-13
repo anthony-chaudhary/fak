@@ -12,7 +12,7 @@ import (
 // ablate fail-loud posture (a refusal names a checkable condition, never free text).
 //
 // NOTE (#3066): each token here is registered in the repo-root dos.toml [reasons] table, so
-// `dos check-reason <TOKEN>` resolves it (known, refusable) and `dos refuse-reasons` lists it.
+// `dos man wedge <TOKEN> --explain` resolves it (valid, refusable) and `dos refuse-reasons` lists it.
 // This file is the producer of record; the Go set and the dos.toml registration are bound by
 // TestKnownSkipReasonsRegisteredInDosToml so neither can drift from the other.
 type SkipReason string

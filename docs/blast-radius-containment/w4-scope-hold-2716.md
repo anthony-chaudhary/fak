@@ -55,7 +55,7 @@ With one live known-bad over tree T, `fak dispatch route` skips exactly the issu
 
 ## Witness
 
-`go test ./internal/dispatchtick/... ./cmd/fak/...` green; a captured `fak dispatch route --json` (or the skipped card) over a fixture with one live signature, showing the scoped skip + a disjoint dispatchable issue. `dos check-reason BLOCKED_BY_KNOWN_BAD` returns known. Cite in the commit body.
+`go test ./internal/dispatchtick/... ./cmd/fak/...` green; a captured `fak dispatch route --json` (or the skipped card) over a fixture with one live signature, showing the scoped skip + a disjoint dispatchable issue. `dos man wedge BLOCKED_BY_KNOWN_BAD --explain` reports a valid, refusable reason. Cite in the commit body.
 
 ## Acceptance gate
 

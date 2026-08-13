@@ -25,7 +25,7 @@ import (
 // reasonBlockedByOpenPrereq is the closed-vocabulary skip reason a SkippedIssue carries when it was
 // held back because a prerequisite it named ("depends-on:/blocked-by: #N") is still an open candidate
 // this tick. Registered in dos.toml [reasons.BLOCKED_BY_OPEN_PREREQ] so the skip is a structured,
-// `dos check-reason`-verifiable refusal, not free text.
+// refusal verifiable with `dos man wedge BLOCKED_BY_OPEN_PREREQ --explain`, not free text.
 const reasonBlockedByOpenPrereq = "BLOCKED_BY_OPEN_PREREQ"
 
 // holdOpenPrereqForRoute is the pure dependency soft-hold fold: given a routed payload, it moves every

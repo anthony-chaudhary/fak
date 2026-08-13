@@ -181,7 +181,7 @@ func TestPinEvictRefused(t *testing.T) {
 }
 
 // TestPinEvictRefusedIsARegisteredRefusal: the token is not free text. It has to resolve in the
-// repo's refusal vocabulary (dos.toml, what `dos check-reason PIN_EVICT_REFUSED` reads) AND in the
+// repo's refusal vocabulary (dos.toml, what `dos man wedge PIN_EVICT_REFUSED --explain` reads) AND in the
 // compaction bail vocabulary the gateway's own metric HELP enumerates as a closed set — one token
 // from the planner, through the wire, to the operator.
 func TestPinEvictRefusedIsARegisteredRefusal(t *testing.T) {
@@ -208,7 +208,7 @@ func TestPinEvictRefusedIsARegisteredRefusal(t *testing.T) {
 		t.Fatalf("read dos.toml: %v", err)
 	}
 	if !bytes.Contains(toml, []byte("[reasons."+ctxplan.ReasonPinEvictRefused+"]")) {
-		t.Fatalf("dos.toml has no [reasons.%s] block — `dos check-reason %s` would not resolve the token this gate refuses with",
+		t.Fatalf("dos.toml has no [reasons.%s] block — `dos man wedge %s --explain` would not resolve the token this gate refuses with",
 			ctxplan.ReasonPinEvictRefused, ctxplan.ReasonPinEvictRefused)
 	}
 }

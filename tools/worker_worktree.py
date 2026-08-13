@@ -464,7 +464,7 @@ def land_worktree_diff(root: Path, wt_path: str | Path, *,
     (already-verified) delta. That arm returns a STRUCTURED REFUSAL —
     ``{"reason": "COLLISION_RISK", "detail": <git evidence>, "next_action": ...}``
     — where ``reason`` is a recognized token from the closed refusal vocabulary
-    (``dos check-reason COLLISION_RISK``: refusal, route-to-replan), so the
+    (``dos man wedge COLLISION_RISK --explain``: refusal, route-to-replan), so the
     caller's loop replans (re-pin the worktree onto current trunk HEAD, re-verify
     there, re-land) instead of losing the work. Contract and the chosen
     serialized-apply-with-auto-rebase-on-reject reconcile algorithm:
@@ -508,7 +508,7 @@ def land_worktree_diff(root: Path, wt_path: str | Path, *,
     if not proc.get("ok"):
         # STRUCTURED REFUSAL, not a fail-open drop (#3207). A rejected apply
         # means the trunk moved inside the worker's diff region since base_sha —
-        # a MATERIALIZED lease collision (`dos check-reason COLLISION_RISK`:
+        # a MATERIALIZED lease collision (`dos man wedge COLLISION_RISK --explain`:
         # known, refusal, route-to-replan). The LANDING SESSION owns the
         # conflict: keep the worktree (never reap on refusal — the preserved
         # work is the evidence), re-pin it onto current trunk HEAD, re-run the

@@ -55,7 +55,7 @@ import (
 // target names when it is not admissible — a non-allowlisted host, a non-http(s) scheme, a
 // malformed URL, or an SSRF-range IP literal that was not explicitly permitted. It MUST stay
 // byte-identical to the dos.toml [reasons.WEBHOOK_URL_NOT_ALLOWLISTED] declaration so the same
-// token a producer stamps is the one `dos check-reason` verifies and a deny-loopback routes.
+// token a producer stamps is the one `dos man wedge <TOKEN> --explain` verifies and a deny-loopback routes.
 const a2aReasonWebhookNotAllowlisted = "WEBHOOK_URL_NOT_ALLOWLISTED"
 
 // a2aWebhookOverheadBudget is the DECLARED per-transition webhook-POST overhead envelope —

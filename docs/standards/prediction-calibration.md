@@ -143,7 +143,7 @@ bound to a witness:
 1. **The verdict vocabulary is closed and validatable.** The four verdicts above are
    the whole set; an out-of-set token is `UNCLASSIFIED` and refused, never coerced to
    a pass — the same fail-closed posture
-   [`dos check-reason`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) keeps for a refusal token. Membership is
+   [`dos man wedge <TOKEN> --explain`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) keeps for a refusal token. Membership is
    decided by a finite switch, not a lookup against a live service. The
    [`prediction-calibration.json`](prediction-calibration.json) schema publishes the
    `enum` so the claim is machine-checkable, not asserted; the reference

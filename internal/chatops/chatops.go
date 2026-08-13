@@ -119,7 +119,7 @@ const (
 )
 
 // The closed refusal vocabulary. Every rejection carries exactly one of these tokens,
-// so the reason is a first-class value a downstream audit or `dos check-reason` can
+// so the reason is a first-class value a downstream audit or `dos man wedge <TOKEN> --explain` can
 // bind rather than free-text prose.
 const (
 	ReasonBotLoop        = "BOT_LOOP"
@@ -189,7 +189,7 @@ func Grammar() []VerbSpec { return append([]VerbSpec(nil), grammar...) }
 // Reasons returns the package's closed refusal vocabulary — every token Parse or
 // Adjudicate can emit. The first seven are the door's ordered parse fence; the rest are
 // the approval gate's OPERATOR_GATE family (see approval.go). One flat set, so a
-// downstream audit or `dos check-reason` can bind any refusal this package produces
+// downstream audit or `dos man wedge <TOKEN> --explain` can bind any refusal this package produces
 // without knowing which half emitted it.
 func Reasons() []string {
 	return []string{

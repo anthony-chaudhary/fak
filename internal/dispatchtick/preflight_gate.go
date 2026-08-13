@@ -40,7 +40,7 @@ const PreflightRefuseGate = "REFUSE_GATE"
 
 // GatePressure is the closed-vocabulary refusal token PreflightRefuseGate carries in
 // its reason. It MUST stay byte-identical to the dos.toml [reasons.GATE_PRESSURE]
-// declaration so the token this fold emits is the one `dos check-reason` verifies and
+// declaration so the token this fold emits is the one `dos man wedge <TOKEN> --explain` verifies and
 // the loop routes to a replan.
 const GatePressure = "GATE_PRESSURE"
 
@@ -159,7 +159,7 @@ func ApplyGateBackpressure(res PreflightResult, g GateCheck) PreflightResult {
 
 // gatePressureReason names the closed GATE_PRESSURE refusal token and cites the
 // measured cause (GATE_LATENCY_REGRESSION or OVERHEAD_BUDGET_EXCEEDED) so a reader --
-// and `dos check-reason` -- can bind both the refusal class and its evidence.
+// and `dos man wedge <TOKEN> --explain` -- can bind both the refusal class and its evidence.
 func gatePressureReason(cause string, g GateCheck, live int) string {
 	if cause == turntaxmeter.OverheadBudgetExceeded {
 		return fmt.Sprintf("%s: a lifecycle rung breached its overhead budget (%s); holding the fleet at %d live worker(s) - admit no new load onto a slow kernel until the regression clears",

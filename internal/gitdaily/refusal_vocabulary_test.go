@@ -4,7 +4,7 @@ package gitdaily
 // they are supposed to speak (#5589, a follow-on of the spine in #5577).
 //
 // #5589 wired every RefusalCode in this package into dos.toml's [reasons.*] table so that
-// `dos check-reason TICK_BUSY` resolves instead of classifying fak's own structured refusal as
+// `dos man wedge TICK_BUSY --explain` resolves instead of classifying fak's own structured refusal as
 // UNCLASSIFIED prose drift. That wiring is a snapshot: it was true the day it landed and nothing
 // keeps it true. Add a seventh RefusalCode below without a matching dos.toml row and the tick
 // starts emitting a token the kernel cannot route on — silently, because the other six still
@@ -93,14 +93,14 @@ func declarationProblems(codes []string, rows map[string]vocabRow) []string {
 		row, declared := rows[code]
 		if !declared {
 			problems = append(problems, "gitdaily emits RefusalCode "+code+" but dos.toml declares no [reasons."+code+"]: "+
-				"`dos check-reason "+code+"` classifies the tick's own structured refusal as UNCLASSIFIED prose drift, "+
+				"`dos man wedge "+code+" --explain` classifies the tick's own structured refusal as UNCLASSIFIED prose drift, "+
 				"so a fleet cannot route or recover from it mechanically. Declare the row with category/refusal/summary/fix/see_also (#5589).")
 			continue
 		}
 		for _, key := range requiredReasonKeys {
 			if value := strings.Trim(row[key], `"`); strings.TrimSpace(value) == "" || value == "[]" {
 				problems = append(problems, "dos.toml [reasons."+code+"] lacks a non-empty "+key+
-					" — the token must carry its own class, explanation, and cure so `dos check-reason "+code+"` teaches an operator rather than just naming the failure (#5589).")
+					" — the token must carry its own class, explanation, and cure so `dos man wedge "+code+" --explain` teaches an operator rather than just naming the failure (#5589).")
 			}
 		}
 	}

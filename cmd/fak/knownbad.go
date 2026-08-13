@@ -248,7 +248,8 @@ func runKnownBadMatch(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 // reasonKnownBadAlreadyClaimed is the closed-vocabulary refusal a LOSING claim
 // carries: a DIFFERENT agent already holds the exclusive lease electing it as this
 // signature's sole fixer. Registered in dos.toml [reasons.KNOWN_BAD_ALREADY_CLAIMED]
-// so the refusal is `dos check-reason`-verifiable, not free text. The loser is always
+// so the refusal is verifiable with `dos man wedge KNOWN_BAD_ALREADY_CLAIMED --explain`, not free
+// text. The loser is always
 // handed the WINNER's identity (a pointer to the fixer), never a bare "refused".
 const reasonKnownBadAlreadyClaimed = "KNOWN_BAD_ALREADY_CLAIMED"
 
@@ -259,7 +260,7 @@ const reasonKnownBadAlreadyClaimed = "KNOWN_BAD_ALREADY_CLAIMED"
 // distinct from the plain usage error for a signature that was NEVER recorded (a typo'd
 // or made-up id), which stays a bare exit-2 because there is nothing to point the caller
 // at. Registered in dos.toml [reasons.KNOWN_BAD_EXPIRED_OR_REVOKED] so the refusal is
-// `dos check-reason`-verifiable, not free text.
+// verifiable with `dos man wedge KNOWN_BAD_EXPIRED_OR_REVOKED --explain`, not free text.
 const reasonKnownBadExpiredOrRevoked = "KNOWN_BAD_EXPIRED_OR_REVOKED"
 
 // knownBadNotLiveResult is the --json envelope a `claim`/`resolve` emits when the target
@@ -469,7 +470,8 @@ func runKnownBadClaim(stdout, stderr io.Writer, argv []string, nowUnix int64) in
 // the fix has NO independent witness: the green over the broken tree (and/or the dos
 // verify) did not pass, so the signature stays open and the parked fleet is NOT released.
 // Registered in dos.toml [reasons.KNOWN_BAD_NOT_WITNESSED] so the refusal is
-// `dos check-reason`-verifiable, not free text. Clearing a known-bad on a self-report is
+// verifiable with `dos man wedge KNOWN_BAD_NOT_WITNESSED --explain`, not free text. Clearing a
+// known-bad on a self-report is
 // the exact failure W6 exists to forbid.
 const reasonKnownBadNotWitnessed = "KNOWN_BAD_NOT_WITNESSED"
 

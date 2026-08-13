@@ -41,7 +41,7 @@ const PreflightRefuseChurn = "REFUSE_HOST_CHURN"
 
 // HostChurnBackoff is the closed-vocabulary refusal token PreflightRefuseChurn carries in its
 // reason. It MUST stay byte-identical to the dos.toml [reasons.HOST_CHURN_BACKOFF] declaration
-// so the token this fold emits is the one `dos check-reason` verifies and the loop routes on.
+// so the token this fold emits is the one `dos man wedge <TOKEN> --explain` verifies and the loop routes on.
 const HostChurnBackoff = "HOST_CHURN_BACKOFF"
 
 // DefaultChurnBurstThreshold is the WINDOW-UNKNOWN burst floor: the fewest processes born on
@@ -199,7 +199,7 @@ func ApplyChurnBackpressure(res PreflightResult, c ChurnCheck) PreflightResult {
 }
 
 // hostChurnBackoffReason names the closed HOST_CHURN_BACKOFF refusal token and cites the
-// measured burst (processes born in one interval) so a reader -- and `dos check-reason` -- can
+// measured burst (processes born in one interval) so a reader -- and `dos man wedge <TOKEN> --explain` -- can
 // bind both the refusal class and its evidence.
 func hostChurnBackoffReason(c ChurnCheck, live int) string {
 	const tail = " -- a whole-host spawn storm, typically several dispatchers co-launching waves at once; holding the fleet at %d live worker(s). Admit no new concurrent load onto a saturated scheduler until the burst subsides. This is a CROSS-dispatcher gate the per-loop cadence floor cannot see (each loop passes its own floor yet they still co-arrive)."
