@@ -35,7 +35,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-func cmdProfile(argv []string) { os.Exit(runProfile(os.Stdout, os.Stderr, argv)) }
+func cmdProfile(argv []string) {
+	if len(argv) > 0 && argv[0] == "continuity" {
+		os.Exit(runContinuity(os.Stdout, os.Stderr, argv[1:]))
+	}
+	os.Exit(runProfile(os.Stdout, os.Stderr, argv))
+}
 
 // profilePlan is the resolved, reproducible command a `fak profile` invocation will run.
 type profilePlan struct {

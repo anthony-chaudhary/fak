@@ -1,0 +1,141 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/portability"
+)
+
+func runContinuity(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 || argv[0] == "help" || argv[0] == "-h" || argv[0] == "--help" {
+		continuityHelp(stdout)
+		return 0
+	}
+	sub, args := argv[0], argv[1:]
+	fs := flag.NewFlagSet("fak profile continuity "+sub, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	home := fs.String("home", "", "isolated fak home (required)")
+	jsonOut := fs.Bool("json", false, "emit machine-readable JSON")
+	commit := fs.Bool("commit", false, "perform mutation (mutation previews by default)")
+	var selectors stringListFlag
+	fs.Var(&selectors, "select", "object selector kind or kind:name (repeatable)")
+	pkg := fs.String("package", "", "portable package path")
+	out := fs.String("out", "", "output package path")
+	receipt := fs.String("receipt", "", "switch receipt ID")
+	interrupt := fs.Int("interrupt-after", 0, "test-only interruption after N staged objects")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if sub == "selfcheck" {
+		return runContinuitySelfcheck(stdout, stderr, *jsonOut)
+	}
+	if *home == "" {
+		fmt.Fprintln(stderr, "--home is required (use an isolated directory)")
+		return 2
+	}
+	s := portability.New(*home)
+	var v any
+	var err error
+	switch sub {
+	case "preview":
+		v, err = s.Discover(selectors)
+	case "export":
+		if *out == "" {
+			*out = filepath.Join(*home, "exports", "continuity.fakpkg.json")
+		}
+		var p portability.Package
+		var r portability.Receipt
+		p, r, err = s.Export(*out, selectors, *commit)
+		v = map[string]any{"package": p, "receipt": r, "path": *out}
+	case "apply":
+		if *pkg == "" {
+			fmt.Fprintln(stderr, "--package is required")
+			return 2
+		}
+		v, err = s.Apply(*pkg, *commit, *interrupt)
+	case "switch":
+		id := strings.TrimSpace(*pkg)
+		if id == "" {
+			fmt.Fprintln(stderr, "--package must name the applied package ID")
+			return 2
+		}
+		v, err = s.Switch(id, *commit)
+	case "status":
+		id, e := s.Active()
+		err = e
+		if e == nil {
+			var behavior map[string]string
+			if id != "" {
+				behavior, err = s.Readback()
+			}
+			v = map[string]any{"active": id, "behavior": behavior}
+		}
+	case "rollback":
+		if *receipt == "" {
+			fmt.Fprintln(stderr, "--receipt is required")
+			return 2
+		}
+		v, err = s.Rollback(*receipt, *commit)
+	default:
+		fmt.Fprintf(stderr, "unknown continuity task %q\n", sub)
+		continuityHelp(stderr)
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak profile continuity %s: %v\n", sub, err)
+		return 1
+	}
+	return emitContinuity(stdout, v, *jsonOut)
+}
+
+type stringListFlag []string
+
+func (s *stringListFlag) String() string     { return strings.Join(*s, ",") }
+func (s *stringListFlag) Set(v string) error { *s = append(*s, v); return nil }
+func emitContinuity(w io.Writer, v any, j bool) int {
+	b, _ := json.MarshalIndent(v, "", "  ")
+	if j {
+		fmt.Fprintln(w, string(b))
+		return 0
+	}
+	switch x := v.(type) {
+	case portability.Preview:
+		fmt.Fprintf(w, "Preview: %d portable object(s), %d rejected\n", len(x.Objects), len(x.Rejected))
+		for _, o := range x.Objects {
+			state := "active-compatible"
+			if !o.Active {
+				state = "inspect-only"
+			}
+			fmt.Fprintf(w, "  %s  %s\n", o.ID, state)
+		}
+		for _, r := range x.Rejected {
+			fmt.Fprintf(w, "  REJECT %s\n", r)
+		}
+	default:
+		fmt.Fprintln(w, string(b))
+	}
+	return 0
+}
+func continuityHelp(w io.Writer) {
+	fmt.Fprint(w, `fak profile continuity — move a safe managed context between homes
+
+Journey (mutations preview unless --commit is present):
+  preview   discover/redact managed skill, workflow, and policy objects
+  export    write a portable package and durable receipt
+  apply     restore package inactive into a second --home
+  switch    activate an applied package; --package is its package ID
+  status    behavior read-back of the active context
+  rollback  restore the context named by a switch --receipt
+  selfcheck capture the clean-room two-home journey
+
+Common expert controls: --json, repeatable --select kind[:name], --home DIR.
+Examples: fak profile continuity preview --home HOME
+          fak profile continuity export --home HOME --out context.fakpkg.json --commit
+          fak profile continuity apply --home SECOND --package context.fakpkg.json --commit
+`)
+}
