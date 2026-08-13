@@ -100,9 +100,15 @@ func (c microConfig) slots() int {
 }
 
 func cmdMicro(args []string) {
-	if len(args) > 0 && args[0] == "paired" {
-		cmdMicroPaired(args[1:])
-		return
+	if len(args) > 0 {
+		switch args[0] {
+		case "paired":
+			cmdMicroPaired(args[1:])
+			return
+		case "corpus":
+			cmdMicroCorpus(args[1:])
+			return
+		}
 	}
 	if len(args) > 0 && args[0] == "collapse" {
 		cmdMicroCollapse(args[1:])
