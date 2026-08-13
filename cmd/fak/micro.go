@@ -132,11 +132,13 @@ func cmdMicro(args []string) {
 		cfgFile     = fs.String("config", "", "load config from a JSON file (lowest non-default precedence)")
 		dryRun      = fs.Bool("dry-run", false, "resolve and print the plan (backends, seats, caps) without spending")
 		jsonOut     = fs.Bool("json", false, "emit JSON instead of a human-readable report")
+		selfcheck   = fs.Bool("selfcheck", false, "run the offline kernel-to-microagent value-chain witness")
 		traceOut    = fs.String("trace-out", "", "write per-agent structured traces to a JSONL file for a later `fak micro trace <id> --trace-in` readout (#2031)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak micro [host] [flags]")
 		fmt.Fprintln(os.Stderr, "  fak micro              run ONE microagent end-to-end on the Mock engine")
+		fmt.Fprintln(os.Stderr, "  fak micro --selfcheck  prove kernel -> session gateway -> scheduler -> two microagents offline")
 		fmt.Fprintln(os.Stderr, "  fak micro host         boot the in-process host (M2) and run a small fleet")
 		fmt.Fprintln(os.Stderr, "  fak micro trace <id>   print ONE microagent's structured timeline (legs, tokens, seat, verdicts)")
 		fmt.Fprintln(os.Stderr, "  add --dry-run to print the resolved plan (backends, seats, caps) without spending")
@@ -146,6 +148,13 @@ func cmdMicro(args []string) {
 	}
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
+	}
+	if *selfcheck {
+		if err := cmdMicroSelfcheck(*jsonOut); err != nil {
+			fmt.Fprintf(os.Stderr, "fak micro selfcheck: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
