@@ -165,3 +165,26 @@ Refresh this plan when one of the source contracts changes (`SessionFleet`, `fle
 trajectory hierarchy, or control vocabulary), or when a generation exit witness lands. A refresh
 must update the current-state table and issue links; adding a new mockup without reconciling the
 source contract is not a refresh.
+
+## Drill-in constraint: Fleet observes; a session attachment operates
+
+This generation map governs the Fleet **overview**. It must not become a second, progressively
+richer session product. The cross-client invariant is defined in
+[`session-client-contract.md`](session-client-contract.md): selecting a first-party session
+resolves its logical `session_id` and opens a full attachment to the same authoritative state a
+terminal client operates.
+
+Consequences for every generation:
+
+- G0 rows remain projections and copyable diagnostics.
+- G1/G2 may improve selection and attention ordering, but session controls belong to the shared
+  attachment protocol rather than Fleet-only handlers.
+- G3 external/mobile clients discover and attach by logical session ID. A gateway URL, PID,
+  provider thread, account, model, or compute host is a replaceable execution-epoch binding, not
+  the bookmark or identity shown as “the session.”
+- A deliberately reduced dashboard or integration must identify itself as a projection and offer
+  a handoff to a full client; it must not present drill-in as though it were the session.
+
+The required drill-in witness is cross-client: select one Fleet row, attach at the row's event
+address, act through the shared capability set, and observe that addressed effect from the
+reference terminal client without transcript copying or state reconstruction in the renderer.

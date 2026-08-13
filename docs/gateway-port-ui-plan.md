@@ -349,3 +349,29 @@ Refresh when `debugVarsResponse`, `guardsessions.Row`, `microagent.Descriptor`, 
 table, or the auth-exemption list changes. A refresh must reconcile the verified-inventory
 table against the tree; adding a mockup without re-verifying those five contracts is not a
 refresh.
+
+## Contract constraint: the port is transport, not session identity
+
+This plan is a same-machine bootstrap for a first browser client. It does **not** define a separate
+browser product contract. The normative session/client boundary is
+[`session-client-contract.md`](session-client-contract.md).
+
+Reconcile the generations as follows:
+
+- `gateway_url`, bearer, PID, and provider runtime ID identify how to reach the **current execution
+  epoch**. The durable thing a user opens is the logical `session_id`.
+- P0 may use the per-agent URL for discovery, but its successful path must resolve/describe/attach
+  and replay from a logical event address. Refresh or a new client must not infer state from the
+  current socket lifetime.
+- P1/P2 controls are capability-described typed session actions shared with `fak session open`, not
+  bespoke page endpoints or browser-owned pending state.
+- “Not a terminal emulator” remains a rendering rule, not a permission to expose a weaker session.
+  Structured native events are preferred; a wrapped runtime may advertise a truthful lossless PTY
+  capability where that is its only complete interface.
+- Provider, account, model, compute, and gateway changes create a new execution epoch while keeping
+  logical session identity and journal lineage. Credentials are destination-resolved references,
+  never copied browser state.
+
+Before this plan can claim “open session,” its witness must attach terminal and browser clients to
+one session, compare epoch/event-head/capability digests, submit one action from either side, and
+show the other side replaying the single addressed effect after reconnect.
