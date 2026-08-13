@@ -41,6 +41,7 @@ type config struct {
 	APIShape       microagent.APIProviderShape
 	LiveInput      string
 	WorkUnits      []liveWorkUnit
+	Lineage        *microagent.Lineage
 }
 
 type report struct {
@@ -272,7 +273,8 @@ func run(ctx context.Context, cfg config) (report, error) {
 		if cfg.ControlledSoak {
 			retries = 2
 		}
-		if err := host.Spawn(id, &shardAgent{id: id, exact: live == nil, maxRetries: retries}); err != nil {
+		shard := microagent.WithLineage(id, &shardAgent{id: id, exact: live == nil, maxRetries: retries}, cfg.Lineage)
+		if err := host.Spawn(id, shard); err != nil {
 			return report{}, fmt.Errorf("spawn %s: %w", id, err)
 		}
 	}
@@ -1242,6 +1244,12 @@ func main() {
 		}
 		return
 	}
+	lineage, lineageErr := microagent.LineageFromEnv()
+	if lineageErr != nil {
+		fmt.Fprintln(os.Stderr, lineageErr)
+		os.Exit(1)
+	}
+	cfg.Lineage = lineage
 	ctx, cancel := overallDeadline(context.Background(), cfg.RunTimeout)
 	defer cancel()
 	r, err := run(ctx, cfg)

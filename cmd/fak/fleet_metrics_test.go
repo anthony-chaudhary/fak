@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -496,5 +497,41 @@ func TestFleetMetricsAttributesDescendantUsageToRootGoal(t *testing.T) {
 	}
 	if !strings.Contains(raw, "fak_fleet_registration_registry_readable 1") {
 		t.Errorf("registration ledger readability missing\n%s", raw)
+	}
+}
+
+func TestFleetMetricsConsumesInProcessMicroagentRegistrations(t *testing.T) {
+	now := time.Date(2026, 8, 13, 20, 0, 0, 0, time.UTC)
+	registrationPath := filepath.Join(t.TempDir(), "child-registrations.jsonl")
+	store := sessionregistry.Store{Path: registrationPath}
+	root, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: "root-micro-goal", RootIssue: "6583", TaskID: "micro-fleet-goal", LaunchKind: "guard", Runtime: "codex", SessionID: "top", Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Register(root); err != nil {
+		t.Fatal(err)
+	}
+	for i, sid := range []string{"micro-session-a", "micro-session-b"} {
+		row, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: fmt.Sprintf("micro-reg-%d", i), ParentRegistrationID: root.RegistrationID, RootRegistrationID: root.RootRegistrationID, RootIssue: root.RootIssue, TaskID: root.TaskID, LaunchKind: "in_process_microagent", Runtime: "microagent", SessionID: sid, Now: now.Add(time.Duration(i+1) * time.Second)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Register(row); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Terminal(row.RegistrationID, sessionregistry.StateCompleted, "", "", now.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := fleetMetricsSources{registryPath: filepath.Join(t.TempDir(), "sessions.json"), registrationLedger: registrationPath, usageLedger: filepath.Join(t.TempDir(), "usage.jsonl"), maxSessions: 100, stderr: io.Discard}.render(now.Add(2 * time.Minute))
+	labels := `root_registration="root-micro-goal",root_issue="6583",task="micro-fleet-goal"`
+	for _, want := range []string{
+		"fak_fleet_goal_registrations{" + labels + "} 3",
+		"fak_fleet_goal_sessions{" + labels + "} 3",
+		"fak_fleet_goal_registration_state{" + labels + `,state="completed"} 2`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("micro-context registration missing from goal fold: %q\n%s", want, raw)
+		}
 	}
 }

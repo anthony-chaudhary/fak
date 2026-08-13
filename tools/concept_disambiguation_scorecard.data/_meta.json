@@ -2138,10 +2138,161 @@
           "category": "incidental",
           "reason": "Prometheus sample name for a distinct-session count, not a session runtime abstraction",
           "token": "fak_fleet_goal_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "blankSessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "decodeSessionClientJSON"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "handleFakSessionClient"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "handleSessionClientPage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "renderSessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "runSessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "runSessionOpenSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SESSION_CLIENT_UNAVAILABLE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SESSION_NOT_FOUND"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionClientActionRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientAttachment"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionClientAttachRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionClientAttachResponse"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientCapabilities"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionClientDescriptor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionClientDetachRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientPage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientRuntimes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionOpenClient"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private deterministic identity helper for the positioned microagent lineage edge, not a separate session runtime concept",
+          "token": "microagentSessionID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "BeginSessionEffect"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "capability_digest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "RecordSessionTerminalOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "renderSessionOpen"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "ResolveSessionEffect"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionChangesFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "sessionClientSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
+          "token": "SessionEffectConfirmed"
         }
       ],
       "id": "session-runtime",
       "ignore": [
+        "BeginSessionEffect",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
@@ -2149,6 +2300,8 @@
         "ModelSlotsDuringToolWait",
         "NarrowsSessions",
         "ReapMalformedSessionRefs",
+        "RecordSessionTerminalOutput",
+        "ResolveSessionEffect",
         "RetiredSessions",
         "RunSessionDiag",
         "SchedulerEvents",
@@ -2156,18 +2309,22 @@
         "SchedulerOverhead",
         "SessionAutonomous",
         "SessionClass",
+        "SessionEffectConfirmed",
         "SessionInteractive",
         "SessionShellErrorRate",
         "SetSessionAffinity",
         "adaptive-selective-hedge",
         "attemptHeap",
+        "blankSessionOpen",
         "boolInt",
         "bumpSessionHandoffBlocks",
+        "capability_digest",
         "compactThrashSessions",
         "conceptSessions",
         "confusedsessions",
         "control-window",
         "deadline_released_slot",
+        "decodeSessionClientJSON",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "enqueueGuardSessionThreadNotice",
@@ -2187,8 +2344,10 @@
         "guardSessionStartNodeWrapsDriver",
         "guardSessionStartProcIsDriver",
         "guardsessiontempdir",
+        "handleFakSessionClient",
         "handleFakSessionMidflight",
         "handleSessionCheckpointVerb",
+        "handleSessionClientPage",
         "handoff_session_give_up",
         "hashUnit",
         "hedge_loser_slot_released",
@@ -2199,9 +2358,11 @@
         "loadSchedulerRecords",
         "matchedSessions",
         "member_sessions",
+        "microagentSessionID",
         "observedSchedulerResult",
         "orderRecords",
         "readSessionHandoffBlocks",
+        "renderSessionOpen",
         "repairMalformedLooseSessionRef",
         "repository-read",
         "requireminimaxsession",
@@ -2227,6 +2388,8 @@
         "serveSessionRegistryPath",
         "serveSessionRegistryScopeLabel",
         "sessionAffinity",
+        "sessionChangesFor",
+        "sessionClientSession",
         "sessionNameForBatch",
         "sessionProcess",
         "sessionRegistryRecoveryStage",
@@ -2262,7 +2425,25 @@
         "slot",
         "scheduler"
       ],
-      "tokens": []
+      "tokens": [
+        "renderSessionOpen",
+        "runSessionOpen",
+        "runSessionOpenSelfcheck",
+        "SESSION_CLIENT_UNAVAILABLE",
+        "SESSION_NOT_FOUND",
+        "SessionClientActionRequest",
+        "sessionClientAttachment",
+        "SessionClientAttachRequest",
+        "SessionClientAttachResponse",
+        "sessionClientCapabilities",
+        "SessionClientDescriptor",
+        "SessionClientDetachRequest",
+        "sessionClientPage",
+        "sessionClientRuntime",
+        "sessionClientRuntimes",
+        "sessionClientSchema",
+        "sessionOpenClient"
+      ]
     },
     {
       "classifications": [
@@ -3454,6 +3635,11 @@
           "category": "incidental",
           "reason": "Prometheus counter name aggregating existing adjudications by goal, not a new policy capability",
           "token": "fak_fleet_goal_adjudications_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private receipt field, not a new policy capability.",
+          "token": "manageParityPosture"
         }
       ],
       "exclude": [
@@ -3516,6 +3702,7 @@
         "guardPolicyOriginEvidencePath",
         "guardWindowsArgvPreflight",
         "liveToolPolicy",
+        "manageParityPosture",
         "multi_capability",
         "naturalAdjudicator",
         "naturalPolicySummary",
@@ -4406,6 +4593,16 @@
           "category": "incidental",
           "reason": "enum member of the cacheobs TierStatus vocabulary marking a tier the backend cannot collect; a collection-state label, not a support-maturity rung",
           "token": "TierStatusUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private receipt field, not a support maturity concept.",
+          "token": "manageParityPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Command handler for parity evidence, not a support maturity rung.",
+          "token": "cmdManageParity"
         }
       ],
       "id": "support-maturity",
@@ -4486,6 +4683,7 @@
         "VerdictSetupParityFlagged",
         "achievedMaturity",
         "calendar_coverage",
+        "cmdManageParity",
         "compareParity",
         "correctnessclass",
         "correctnessdependson",
@@ -4507,6 +4705,7 @@
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",
+        "manageParityPosture",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
         "parityPanelHeader",
