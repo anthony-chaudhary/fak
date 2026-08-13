@@ -149,6 +149,9 @@ func (r SpawnTreeRunner) TreeState(ctx context.Context) (TreeState, error) {
 	// Windows fleet, and an unhooked spawn flashes a console window
 	// (DESKTOP_POPUP_REGRESSION).
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// An inherited GIT_DIR/GIT_WORK_TREE would report a different tree's
+	// dirtiness under this repository's name. See childEnv.
+	cmd.Env = childEnv(os.Environ(), nil)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

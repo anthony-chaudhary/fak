@@ -145,6 +145,9 @@ func (r SpawnRunner) Object(ctx context.Context, rev string) (Object, error) {
 	// no-window hook each one flashes a console; the DESKTOP_POPUP_REGRESSION
 	// gate refuses a push that reintroduces that.
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// The fallback must read the repository -C names, not one an inherited
+	// GIT_DIR names. See childEnv.
+	cmd.Env = childEnv(os.Environ(), nil)
 	cmd.Stdin = strings.NewReader(rev + "\n")
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out

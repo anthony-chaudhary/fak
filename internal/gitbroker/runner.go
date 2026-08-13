@@ -66,10 +66,13 @@ type Invocation struct {
 	// gitOut used -C; gitOutput and gitRunner set cmd.Dir. Both are preserved.
 	DirAsFlag bool
 
-	// Env is appended to the parent environment. gitRunner's GIT_OPTIONAL_LOCKS=0
-	// is the only production user: its burst-time reads run exactly when peers
-	// are committing, and a plain read that opportunistically refreshes the
-	// index would contend with them on .git/index.lock.
+	// Env is appended to the environment childEnv builds — the parent's, minus
+	// git's own steering variables. gitRunner's GIT_OPTIONAL_LOCKS=0 is the only
+	// production user: its burst-time reads run exactly when peers are
+	// committing, and a plain read that opportunistically refreshes the index
+	// would contend with them on .git/index.lock. Because it is applied last, a
+	// caller can still steer deliberately — GIT_INDEX_FILE, a one-off
+	// GIT_CONFIG_* — where the parent process no longer can.
 	Env []string
 
 	// Stdin, when non-empty, is fed to git on standard input.
@@ -313,8 +316,8 @@ const (
 // The refusals are the interesting part. Stdin, extra environment, combined
 // stderr and an unnamed directory each mean the pool would be answering a
 // subtly different question than the spawn would: the pool runs `-C dir` with
-// the parent environment and a clean stderr, so any invocation that tunes those
-// is left to spawn rather than approximated.
+// the brokered environment childEnv builds and a clean stderr, so any
+// invocation that tunes those is left to spawn rather than approximated.
 func objectReadShape(inv Invocation) (rev string, kind int, ok bool) {
 	if inv.Dir == "" || inv.Stdin != "" || len(inv.Env) > 0 || inv.Combined {
 		return "", 0, false
@@ -393,9 +396,11 @@ func spawn(ctx context.Context, inv Invocation) (Output, error) {
 	if !inv.DirAsFlag {
 		cmd.Dir = inv.Dir
 	}
-	if len(inv.Env) > 0 {
-		cmd.Env = append(os.Environ(), inv.Env...)
-	}
+	// Never the parent environment wholesale: an inherited GIT_DIR, GIT_CONFIG_*
+	// or GIT_SSH_COMMAND would re-aim or re-configure an operation the broker
+	// resolved, and a missing GIT_TERMINAL_PROMPT=0 turns a credential-needing
+	// call into a headless hang. See childEnv.
+	cmd.Env = childEnv(os.Environ(), inv.Env)
 	if inv.Stdin != "" {
 		cmd.Stdin = strings.NewReader(inv.Stdin)
 	}

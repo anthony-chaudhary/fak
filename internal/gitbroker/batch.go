@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -145,6 +146,12 @@ func (p *batchProc) start() error {
 	// The pool exists to remove spawns from background automation on a Windows
 	// fleet; the one spawn it does make must still not flash a console.
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// The same scrub spawn gets, and for a sharper reason: an inherited GIT_DIR
+	// would make this long-lived process read objects out of a DIFFERENT
+	// repository than the -C above names, while the spawn fallback reads the
+	// right one. That is the one failure mode this package must not have — not
+	// a slower answer, a different one.
+	cmd.Env = childEnv(os.Environ(), nil)
 	cmd.Stderr = io.Discard
 
 	in, err := cmd.StdinPipe()
