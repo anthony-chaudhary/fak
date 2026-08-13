@@ -5,6 +5,7 @@ package gateway
 // typed action route. Transport coordinates remain descriptor metadata, never identity.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -101,6 +102,11 @@ type sessionClientSession struct {
 	transcript         []byte
 	effects            map[string]SessionEffect
 	recoveryDependency string
+	executionEpoch     string
+	placement          SessionPlacement
+	moveHooks          SessionMoveHooks
+	moving             bool
+	lastMove           []SessionMoveTransition
 }
 
 type sessionClientRuntime struct {
@@ -129,7 +135,7 @@ func (s *Server) clientRuntime() *sessionClientRuntime {
 func (rt *sessionClientRuntime) sessionLocked(sessionID string) *sessionClientSession {
 	sess := rt.sessions[sessionID]
 	if sess == nil {
-		sess = &sessionClientSession{effects: map[string]SessionEffect{}}
+		sess = &sessionClientSession{effects: map[string]SessionEffect{}, executionEpoch: rt.epoch}
 		rt.sessions[sessionID] = sess
 	}
 	return sess
@@ -275,13 +281,35 @@ func (s *Server) clientDescriptor(r *http.Request, sessionID string) (SessionCli
 	}
 	_, head := s.sessionChangesFor(sessionID, 0)
 	caps := append([]string(nil), sessionClientCapabilities...)
-	terminal, effects, dependency := s.clientRuntime().sessionView(sessionID)
+	rt := s.clientRuntime()
+	terminal, effects, dependency := rt.sessionView(sessionID)
+	rt.mu.Lock()
+	epoch := rt.sessionLocked(sessionID).executionEpoch
+	rt.mu.Unlock()
 	return SessionClientDescriptor{
-		Schema: sessionClientSchema, SessionID: sessionID, ExecutionEpoch: s.clientRuntime().epoch,
+		Schema: sessionClientSchema, SessionID: sessionID, ExecutionEpoch: epoch,
 		EventHead: head, Capabilities: caps, CapabilityDigest: capabilityDigest(caps),
 		Endpoint: requestBaseURL(r) + "/v1/fak/session/" + sessionID, State: st,
 		Terminal: terminal, Effects: effects, RecoveryDependency: dependency,
 	}, true
+}
+
+func (s *Server) sessionClientDescriptorForContext(ctx context.Context, sessionID string) (SessionClientDescriptor, bool) {
+	if s == nil || s.observeSession == nil || s.sessionFeed == nil {
+		return SessionClientDescriptor{}, false
+	}
+	st := s.observeSession(ctx, sessionID)
+	if st.TraceID == "" {
+		return SessionClientDescriptor{}, false
+	}
+	_, head := s.sessionChangesFor(sessionID, 0)
+	caps := append([]string(nil), sessionClientCapabilities...)
+	rt := s.clientRuntime()
+	terminal, effects, dependency := rt.sessionView(sessionID)
+	rt.mu.Lock()
+	epoch := rt.sessionLocked(sessionID).executionEpoch
+	rt.mu.Unlock()
+	return SessionClientDescriptor{Schema: sessionClientSchema, SessionID: sessionID, ExecutionEpoch: epoch, EventHead: head, Capabilities: caps, CapabilityDigest: capabilityDigest(caps), State: st, Terminal: terminal, Effects: effects, RecoveryDependency: dependency}, true
 }
 
 func requestBaseURL(r *http.Request) string {
@@ -306,7 +334,7 @@ func decodeSessionClientJSON(w http.ResponseWriter, r *http.Request, dst any) bo
 }
 
 func (s *Server) handleFakSessionClient(w http.ResponseWriter, r *http.Request, sessionID, verb string) bool {
-	known := verb == "client" || verb == "attach" || verb == "input" || verb == "decision" || verb == "close" || verb == "detach" || verb == "open"
+	known := verb == "client" || verb == "attach" || verb == "move" || verb == "input" || verb == "decision" || verb == "close" || verb == "detach" || verb == "open"
 	if !known {
 		return false
 	}
@@ -369,6 +397,10 @@ func (s *Server) handleFakSessionClient(w http.ResponseWriter, r *http.Request, 
 		events, cursor, _ := s.sessionFeed.drainTrace(sessionID, req.Since)
 		desc.EventHead = cursor
 		writeJSON(w, http.StatusOK, SessionClientAttachResponse{Schema: sessionClientSchema, Descriptor: desc, AttachmentID: id, InputLease: lease, Events: events, Cursor: cursor})
+	case "move":
+		if r.Method == http.MethodPost {
+			return s.handleSessionMove(w, r, sessionID)
+		}
 	case "input":
 		var req SessionClientActionRequest
 		if !decodeSessionClientJSON(w, r, &req) {

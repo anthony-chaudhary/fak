@@ -20,10 +20,11 @@ const WorkEventSchema = "fak.work-session.event.v1"
 type WorkEventKind string
 
 const (
-	WorkSessionOpened  WorkEventKind = "SESSION_OPENED"
-	WorkTerminalOutput WorkEventKind = "TERMINAL_OUTPUT"
-	WorkEffectIntent   WorkEventKind = "EFFECT_INTENT"
-	WorkEffectResolved WorkEventKind = "EFFECT_RESOLVED"
+	WorkSessionOpened       WorkEventKind = "SESSION_OPENED"
+	WorkTerminalOutput      WorkEventKind = "TERMINAL_OUTPUT"
+	WorkEffectIntent        WorkEventKind = "EFFECT_INTENT"
+	WorkEffectResolved      WorkEventKind = "EFFECT_RESOLVED"
+	WorkMoveTransitionEvent WorkEventKind = "MOVE_TRANSITION"
 )
 
 type EffectVerdict string
@@ -45,6 +46,27 @@ type WorkEvent struct {
 	Check       string             `json:"check,omitempty"`
 	Verdict     EffectVerdict      `json:"verdict,omitempty"`
 	Residency   *ResidencyIdentity `json:"residency,omitempty"`
+	MovePhase   string             `json:"move_phase,omitempty"`
+	SourceEpoch string             `json:"source_epoch,omitempty"`
+	Destination *PlacementIdentity `json:"destination,omitempty"`
+	Checkpoint  string             `json:"checkpoint_hash,omitempty"`
+}
+
+type PlacementIdentity struct {
+	Provider             string   `json:"provider"`
+	AccountRef           string   `json:"account_ref"`
+	Model                string   `json:"model"`
+	Compute              string   `json:"compute"`
+	Capabilities         []string `json:"capabilities,omitempty"`
+	CacheLineage         string   `json:"cache_lineage,omitempty"`
+	SemanticDegradations []string `json:"semantic_degradations,omitempty"`
+}
+
+type WorkMoveTransition struct {
+	Phase          string            `json:"phase"`
+	SourceEpoch    string            `json:"source_epoch"`
+	Destination    PlacementIdentity `json:"destination"`
+	CheckpointHash string            `json:"checkpoint_hash,omitempty"`
 }
 
 type ResidencyIdentity struct {
@@ -107,6 +129,7 @@ type WorkSessionView struct {
 	Effects            map[string]WorkEffect `json:"effects"`
 	Residency          ResidencyIdentity     `json:"residency"`
 	RecoveryDependency string                `json:"recovery_dependency,omitempty"`
+	MoveTransitions    []WorkMoveTransition  `json:"move_transitions,omitempty"`
 }
 
 type WorkReplay struct {
@@ -241,6 +264,11 @@ func ReplayWork(path string) (WorkReplay, error) {
 				}
 				effect.Verdict = event.Verdict
 				view.Effects[event.EffectID] = effect
+			case WorkMoveTransitionEvent:
+				if event.Destination == nil {
+					return result, fmt.Errorf("sessionjournal: move transition missing destination")
+				}
+				view.MoveTransitions = append(view.MoveTransitions, WorkMoveTransition{Phase: event.MovePhase, SourceEpoch: event.SourceEpoch, Destination: *event.Destination, CheckpointHash: event.Checkpoint})
 			default:
 				return result, fmt.Errorf("sessionjournal: unknown work event kind %q", event.Kind)
 			}

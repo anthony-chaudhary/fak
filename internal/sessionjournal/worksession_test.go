@@ -3,6 +3,7 @@ package sessionjournal
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -90,5 +91,34 @@ func TestResidencyIdentityEveryUnsafeDimensionInvalidates(t *testing.T) {
 				t.Fatalf("mismatch=%v", got)
 			}
 		})
+	}
+}
+
+func TestWorkSessionReplayPreservesMovementLineageWithoutCredentialMaterial(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "move.journal")
+	identity := ResidencyIdentity{WorkspaceHead: "head", WorkspaceDirty: "clean", PolicyHash: "policy", ToolSchema: "tools", CredentialEpoch: "credential-epoch-reference", AdapterIdentity: "adapter"}
+	if err := AppendWorkEvent(path, WorkEvent{SessionID: "portable", Kind: WorkSessionOpened, WriterEpoch: "writer-1", Residency: &identity}); err != nil {
+		t.Fatal(err)
+	}
+	destination := PlacementIdentity{Provider: "provider-b", AccountRef: "account-ref-b", Model: "model-b", Compute: "compute-b", Capabilities: []string{"tools"}, CacheLineage: "cache-b", SemanticDegradations: []string{"vision unavailable"}}
+	for _, phase := range []string{"SAFE_POINT_REQUESTED", "CHECKPOINTED", "DESTINATION_ADMITTED", "RESTORED", "CUTOVER_COMMITTED"} {
+		if err := AppendWorkEvent(path, WorkEvent{SessionID: "portable", Kind: WorkMoveTransitionEvent, WriterEpoch: "writer-1", MovePhase: phase, SourceEpoch: "epoch-a", Destination: &destination, Checkpoint: "sha256:checkpoint"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replay, err := ReplayWork(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := replay.Sessions["portable"]
+	if len(view.MoveTransitions) != 5 || view.MoveTransitions[4].Phase != "CUTOVER_COMMITTED" || view.MoveTransitions[4].Destination.AccountRef != "account-ref-b" {
+		t.Fatalf("lineage=%+v", view.MoveTransitions)
+	}
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bytes), "secret") || strings.Contains(string(bytes), "token") {
+		t.Fatalf("credential material leaked: %s", bytes)
 	}
 }

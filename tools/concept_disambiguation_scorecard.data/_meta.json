@@ -502,6 +502,11 @@
           "category": "incidental",
           "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
           "token": "CacheLineage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "CacheLineageChanged"
         }
       ],
       "id": "cache",
@@ -511,6 +516,7 @@
         "CacheLever",
         "CacheLevers",
         "CacheLineage",
+        "CacheLineageChanged",
         "CacheReadRate",
         "CacheStateAllowlist",
         "CacheValueBaseline",
@@ -2500,18 +2506,125 @@
           "category": "incidental",
           "reason": "Local exporter join index, not a new session runtime concept",
           "token": "sessionRoots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "ConfigureSessionMove"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "handleSessionMove"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "MoveSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "sessionClientDescriptorForContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveCheckpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveCheckpointed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveCutoverCommitted"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveDelta"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveDestinationAdmitted"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveError"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveHooks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveJournalHooks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMovePhase"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveResponse"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveRestored"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveSafePointRequested"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "sessionMoveSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "sessionMoveState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionMoveTransition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "SessionPlacement"
         }
       ],
       "id": "session-runtime",
       "ignore": [
         "BeginSessionEffect",
         "ConfigureSessionClientAuth",
+        "ConfigureSessionMove",
         "FAK_SESSION_CLIENT_TOKEN",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
         "MalformedSessionRef",
         "ModelSlotsDuringToolWait",
+        "MoveSession",
         "NarrowsSessions",
         "ObservedSessions",
         "ReapMalformedSessionRefs",
@@ -2543,6 +2656,21 @@
         "SessionEffectUncertain",
         "SessionEffectVerdict",
         "SessionInteractive",
+        "SessionMoveCheckpoint",
+        "SessionMoveCheckpointed",
+        "SessionMoveCutoverCommitted",
+        "SessionMoveDelta",
+        "SessionMoveDestinationAdmitted",
+        "SessionMoveError",
+        "SessionMoveHooks",
+        "SessionMoveJournalHooks",
+        "SessionMovePhase",
+        "SessionMoveRequest",
+        "SessionMoveResponse",
+        "SessionMoveRestored",
+        "SessionMoveSafePointRequested",
+        "SessionMoveTransition",
+        "SessionPlacement",
         "SessionShellErrorRate",
         "SessionTerminalView",
         "SetSessionAffinity",
@@ -2585,6 +2713,7 @@
         "handleFakSessionMidflight",
         "handleSessionCheckpointVerb",
         "handleSessionClientPage",
+        "handleSessionMove",
         "handoff_session_give_up",
         "hashUnit",
         "hedge_loser_slot_released",
@@ -2632,12 +2761,15 @@
         "sessionChangesFor",
         "sessionClientAttachment",
         "sessionClientCapabilities",
+        "sessionClientDescriptorForContext",
         "sessionClientPage",
         "sessionClientRuntime",
         "sessionClientRuntimes",
         "sessionClientSchema",
         "sessionClientSession",
         "sessionLocked",
+        "sessionMoveSchema",
+        "sessionMoveState",
         "sessionNameForBatch",
         "sessionOpenClient",
         "sessionOpenRestartResult",
@@ -3920,6 +4052,16 @@
           "category": "incidental",
           "reason": "Implementation symbol or imported protocol constant used by the #6547 restart/reconnect witness; not a separate user-facing concept.",
           "token": "PolicyHash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "CapabilityAdded"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "CapabilityRemoved"
         }
       ],
       "exclude": [
@@ -3929,7 +4071,9 @@
       "ignore": [
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
+        "CapabilityAdded",
         "CapabilityDocument",
+        "CapabilityRemoved",
         "CapabilitySnapshot",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
@@ -4259,12 +4403,23 @@
           "category": "incidental",
           "reason": "Prometheus metric name reporting repo-pulse accounting; not a new managed-context abstraction",
           "token": "fak_fleet_repo_pulse_context_tokens_saved_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "ContextLimit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
+          "token": "sessionClientDescriptorForContext"
         }
       ],
       "id": "context-ctx",
       "ignore": [
         "COMPACTION_THRASH",
         "CompactionContract",
+        "ContextLimit",
         "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
         "MetricFactRecall",
@@ -4313,6 +4468,7 @@
         "recalls",
         "recordCompactionThrash",
         "recordGuardCompactionWitness",
+        "sessionClientDescriptorForContext",
         "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
         "takeCompactionContract",
