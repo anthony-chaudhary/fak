@@ -18,16 +18,19 @@ import (
 const microSelfcheckAgents = 2
 
 type microSelfcheckReceipt struct {
-	Verdict        string `json:"verdict"`
-	Path           string `json:"path"`
-	Kernel         string `json:"kernel"`
-	Agents         int    `json:"agents"`
-	Done           int    `json:"done"`
-	HTTPCount      int64  `json:"http_count"`
-	ProviderTokens int64  `json:"provider_tokens"`
-	StoppedCount   int    `json:"stopped"`
-	ConcurrencyCap int    `json:"concurrency_cap"`
-	Offline        bool   `json:"offline"`
+	Schema         string              `json:"schema"`
+	ParentTaskID   string              `json:"parent_task_id"`
+	Verdict        string              `json:"verdict"`
+	Path           string              `json:"path"`
+	Kernel         string              `json:"kernel"`
+	Agents         int                 `json:"agents"`
+	Done           int                 `json:"done"`
+	HTTPCount      int64               `json:"http_count"`
+	ProviderTokens int64               `json:"provider_tokens"`
+	StoppedCount   int                 `json:"stopped"`
+	ConcurrencyCap int                 `json:"concurrency_cap"`
+	Offline        bool                `json:"offline"`
+	Children       []microChildReceipt `json:"children"`
 }
 
 type receiptMeter struct {
@@ -63,6 +66,10 @@ func runMicroSelfcheck(ctx context.Context) (microSelfcheckReceipt, error) {
 	}))
 	defer httpServer.Close()
 
+	children, err := foldMicroSelfcheckChildren()
+	if err != nil {
+		return microSelfcheckReceipt{}, fmt.Errorf("plan child leases: %w", err)
+	}
 	table := session.NewTable()
 	base := &receiptMeter{inner: agent.NewHTTPPlanner(gatewayBaseURL(httpServer.URL), "selfcheck", "")}
 	scheduler := microagent.NewScheduler(1)
@@ -74,9 +81,12 @@ func runMicroSelfcheck(ctx context.Context) (microSelfcheckReceipt, error) {
 	}
 	defer host.Close()
 
+	runners := make(map[string]*microTurnAgent, microSelfcheckAgents)
 	for i := 0; i < microSelfcheckAgents; i++ {
 		id := fmt.Sprintf("value-%03d", i)
-		if err := host.Spawn(id, &microTurnAgent{id: id, turns: 1}); err != nil {
+		runner := &microTurnAgent{id: id, turns: 1}
+		runners[id] = runner
+		if err := host.Spawn(id, runner); err != nil {
 			return microSelfcheckReceipt{}, fmt.Errorf("spawn %s: %w", id, err)
 		}
 	}
@@ -96,13 +106,26 @@ func runMicroSelfcheck(ctx context.Context) (microSelfcheckReceipt, error) {
 			retired++
 		}
 	}
+	for i := range children {
+		answer, _, model := runners[children[i].SessionID].snapshot()
+		if answer == "" {
+			answer = fmt.Sprintf("session=%s model=%s stopped=done", children[i].SessionID, model)
+		}
+		children[i].EffectDigest, children[i].Witnessed = digestMicroReadback(answer)
+		children[i].State = "stopped"
+	}
 	receipt := microSelfcheckReceipt{
+		Schema: "fak-micro-selfcheck/2", ParentTaskID: microParentTaskID,
 		Verdict: "PASS", Path: "kernel->session-gateway->scheduler->microagents",
 		Kernel: "in-process-http/mock", Agents: microSelfcheckAgents, Done: done,
 		HTTPCount: requests.Load(), ProviderTokens: base.tokens.Load(),
-		StoppedCount: retired, ConcurrencyCap: 1, Offline: true,
+		StoppedCount: retired, ConcurrencyCap: 1, Offline: true, Children: children,
 	}
-	if done != microSelfcheckAgents || receipt.HTTPCount != microSelfcheckAgents || retired != microSelfcheckAgents || receipt.ProviderTokens <= 0 {
+	completeChildren := len(children) == microSelfcheckAgents
+	for _, child := range children {
+		completeChildren = completeChildren && child.LeaseID != "" && child.SessionID != "" && child.State == "stopped" && child.Witnessed && child.EffectDigest != ""
+	}
+	if done != microSelfcheckAgents || receipt.HTTPCount != microSelfcheckAgents || retired != microSelfcheckAgents || receipt.ProviderTokens <= 0 || !completeChildren {
 		receipt.Verdict = "FAIL"
 		return receipt, fmt.Errorf("incomplete value chain: done=%d requests=%d retired=%d tokens=%d", done, receipt.HTTPCount, retired, receipt.ProviderTokens)
 	}
