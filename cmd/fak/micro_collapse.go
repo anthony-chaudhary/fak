@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // microCollapseReport is the captured dogfood receipt for one governed child
@@ -132,15 +132,12 @@ func (b repoPulseBackend) Dispatch(ctx context.Context, act microagent.ToolActio
 	default:
 		return microagent.ToolResult{}, fmt.Errorf("unknown repo-pulse tool %q", act.Tool)
 	}
-	cmd := exec.CommandContext(ctx, "git", argv...)
+	cmd := windowgate.CommandContext(ctx, "git", argv...)
 	cmd.Dir = b.dir
 	out, err := cmd.Output()
 	res := microagent.ToolResult{Ran: true, Stdout: boundedPulseOutput(out), ExitCode: 0}
 	if err != nil {
 		res.ExitCode = 1
-		if ee, ok := err.(*exec.ExitError); ok {
-			res.Stderr = boundedPulseOutput(ee.Stderr)
-		}
 		return res, err
 	}
 	return res, nil
