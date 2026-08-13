@@ -1,0 +1,15 @@
+{
+  "outcome": "unsupported",
+  "reasons": [
+    "BITNETRUNTIME_KERNEL_ARCH_MISMATCH"
+  ],
+  "claim": "",
+  "delegation": {
+    "runtime": "",
+    "version": "",
+    "build": "",
+    "kernel": "unknown",
+    "host_os": "",
+    "host_arch": ""
+  }
+}

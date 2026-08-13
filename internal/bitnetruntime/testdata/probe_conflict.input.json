@@ -1,0 +1,16 @@
+{
+  "probe": "bitnet.cpp: 1.2.0\nbitnet.cpp: 1.3.0\nversion: b1876\nkernels: i2_s\n",
+  "host": {
+    "os": "linux",
+    "arch": "amd64",
+    "features": [
+      "avx2"
+    ]
+  },
+  "model": {
+    "id": "bitnet-b1.58-2B-4T",
+    "alphabet": "ternary",
+    "kernel": "i2_s",
+    "bits_per_weight_stored": 2
+  }
+}

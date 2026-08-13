@@ -1,0 +1,16 @@
+{
+  "probe": "loading model...\nwarming up\n",
+  "host": {
+    "os": "linux",
+    "arch": "amd64",
+    "features": [
+      "avx2"
+    ]
+  },
+  "model": {
+    "id": "bitnet-b1.58-2B-4T",
+    "alphabet": "ternary",
+    "kernel": "i2_s",
+    "bits_per_weight_stored": 2
+  }
+}

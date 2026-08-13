@@ -1,0 +1,15 @@
+{
+  "outcome": "refuse",
+  "reasons": [
+    "BITNETRUNTIME_PACKING_NARROWER_THAN_KERNEL"
+  ],
+  "claim": "",
+  "delegation": {
+    "runtime": "",
+    "version": "",
+    "build": "",
+    "kernel": "unknown",
+    "host_os": "",
+    "host_arch": ""
+  }
+}

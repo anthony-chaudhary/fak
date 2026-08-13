@@ -1,0 +1,15 @@
+{
+  "outcome": "delegate",
+  "reasons": [
+    "BITNETRUNTIME_ADMITTED"
+  ],
+  "claim": "runtime-delegated",
+  "delegation": {
+    "runtime": "bitnet.cpp",
+    "version": "1.2.0",
+    "build": "b1876",
+    "kernel": "tl2",
+    "host_os": "linux",
+    "host_arch": "amd64"
+  }
+}

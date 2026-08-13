@@ -1,0 +1,15 @@
+{
+  "probe": "bitnet.cpp: 1.2.0\nversion: b1876\nkernels: i2_s,tl2\n",
+  "host": {
+    "os": "linux",
+    "arch": "amd64",
+    "features": [
+      "avx2"
+    ]
+  },
+  "model": {
+    "id": "llama-3-8B-gptq-int4",
+    "alphabet": "int4",
+    "bits_per_weight_stored": 4
+  }
+}

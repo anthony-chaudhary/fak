@@ -1,0 +1,15 @@
+{
+  "outcome": "abstain",
+  "reasons": [
+    "BITNETRUNTIME_HOST_ARCH_UNDECLARED"
+  ],
+  "claim": "",
+  "delegation": {
+    "runtime": "",
+    "version": "",
+    "build": "",
+    "kernel": "unknown",
+    "host_os": "",
+    "host_arch": ""
+  }
+}

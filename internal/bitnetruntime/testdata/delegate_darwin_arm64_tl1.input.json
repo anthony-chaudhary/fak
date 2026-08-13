@@ -1,0 +1,16 @@
+{
+  "probe": "bitnet.cpp: 1.1.0\nversion: b1720\nkernels: i2_s,tl1\n",
+  "host": {
+    "os": "darwin",
+    "arch": "arm64",
+    "features": [
+      "neon"
+    ]
+  },
+  "model": {
+    "id": "bitnet-b1.58-700M",
+    "alphabet": "ternary",
+    "kernel": "tl1",
+    "bits_per_weight_stored": 2
+  }
+}

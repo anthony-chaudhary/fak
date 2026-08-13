@@ -1,0 +1,15 @@
+{
+  "probe": "bitnet.cpp: 1.2.0\nversion: b1876\nkernels: i2_s,tl2\n",
+  "host": {
+    "os": "linux",
+    "arch": "amd64",
+    "features": [
+      "avx2"
+    ]
+  },
+  "model": {
+    "id": "mystery-checkpoint",
+    "kernel": "i2_s",
+    "bits_per_weight_stored": 2
+  }
+}
