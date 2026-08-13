@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Fleet repository-targeting incident — 2026-08-13](docs/notes/FLEET-REPOSITORY-TARGETING-INCIDENT-2026-08-13.md) -- auto-indexed dated note.
 - [Deterministic AMOProf-to-Confluence publication rerun — 2026-08-12](docs/notes/CONFLUENCE-AMOPROF-PUBLICATION-RERUN-2026-08-12.md) -- auto-indexed dated note.
 - [NVIDIA-hosted Nemo API demo fleet audit — 2026-08-11..12](docs/notes/NVIDIA-NEMO-API-DEMO-FLEET-AUDIT-2026-08-12.md) -- auto-indexed dated note.
 - [Terminal relief runs inside a managed pause barrier](docs/notes/TERMINAL-RELIEF-PAUSE-BARRIER-2026-08-12.md) -- auto-indexed dated note.

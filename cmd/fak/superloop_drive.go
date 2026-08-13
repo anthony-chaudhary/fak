@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -126,6 +127,7 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the drive report as JSON")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	repo := fs.String("repo", "", "expected GitHub repository identity (owner/name); required with --execute and verified against the selected workspace origin")
 	lane := fs.String("lane", "", "dos.toml lane the driven member's writes stay inside; arms region admission (COLLISION_RISK on lease overlap) against the live lease fabric")
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger the drive records its admission witness to")
 	batch := fs.Int("batch", 1, "admit up to N worst-first members whose regions are mutually disjoint (and disjoint from live leases) in one invocation, through the SAME admission gate; 1 (default) is the historical one-member drive, <=0 offers every worklist member")
@@ -133,7 +135,7 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	execTimeoutMin := fs.Int("exec-timeout", int(defaultSuperloopExecTimeout/time.Minute), "with --execute, per-member front-door timeout in minutes (0 = no timeout)")
 	var tree repeatedString
 	fs.Var(&tree, "tree", "region glob the driven member's writes stay inside (repeatable); arms region admission against the live lease fabric")
-	if err := fs.Parse(superloopInterspersedFlagArgs(argv, map[string]bool{"workspace": true, "lane": true, "ledger": true, "tree": true, "batch": true, "exec-timeout": true})); err != nil {
+	if err := fs.Parse(superloopInterspersedFlagArgs(argv, map[string]bool{"workspace": true, "repo": true, "lane": true, "ledger": true, "tree": true, "batch": true, "exec-timeout": true})); err != nil {
 		return 2
 	}
 	execTimeout := time.Duration(*execTimeoutMin) * time.Minute
@@ -148,6 +150,16 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	} else if abs, err := filepath.Abs(root); err == nil {
 		root = abs
+	}
+
+	// A live drive is repository-scoped authority, not path-scoped intent. Carry the
+	// operator's immutable owner/repo into the selected workspace and fail before WALK,
+	// admission, leases, ledger writes, or execution when origin does not corroborate it.
+	if *execute {
+		if err := verifyDriveRepositoryTarget(root, *repo); err != nil {
+			fmt.Fprintf(stderr, "fak superloop drive: %v\n", err)
+			return 2
+		}
 	}
 
 	// BATCH — a fan-out drive admits up to N worst-first members whose regions are
@@ -293,6 +305,37 @@ type superloopDriveBatchEntry struct {
 	// Exec, when set, records the `--execute` run of this admitted member's front door
 	// behind its member-scoped lease (nil when not requested or the member was refused).
 	Exec *superloopDriveExec `json:"exec,omitempty"`
+}
+
+// verifyDriveRepositoryTarget binds a live drive to ONE declared GitHub identity.
+// Repository scope is authority, not intent: the operator's immutable owner/repo must be
+// corroborated by the selected workspace's own origin before the drive walks candidates,
+// takes a lease, writes a ledger line, or runs a front door. Missing, malformed, unknown,
+// and mismatched targets all refuse with a typed token so an operator can tell "you did
+// not declare a target" from "this checkout is not the repository you declared"
+// (docs/notes/FLEET-REPOSITORY-TARGETING-INCIDENT-2026-08-13.md).
+func verifyDriveRepositoryTarget(root, expected string) error {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return fmt.Errorf("REPO_TARGET_REQUIRED: --execute requires --repo owner/name")
+	}
+	if !validOwnerRepo(expected) {
+		return fmt.Errorf("REPO_TARGET_INVALID: --repo must be owner/name, got %q", expected)
+	}
+	cmd := exec.Command("git", "-C", root, "config", "--get", "remote.origin.url")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("REPO_TARGET_UNKNOWN: cannot resolve origin for workspace %q", root)
+	}
+	actual := repoFromRemoteURL(strings.TrimSpace(string(out)))
+	if !validOwnerRepo(actual) {
+		return fmt.Errorf("REPO_TARGET_UNKNOWN: workspace %q origin does not resolve to GitHub owner/name", root)
+	}
+	if !strings.EqualFold(expected, actual) {
+		return fmt.Errorf("REPO_TARGET_MISMATCH: requested %s, workspace resolves %s", expected, actual)
+	}
+	return nil
 }
 
 // runSuperloopDriveBatch is the impure shell for a fan-out drive. It WALKs the

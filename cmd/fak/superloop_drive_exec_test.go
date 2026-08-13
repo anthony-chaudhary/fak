@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,58 @@ import (
 // code as the member's witness, and lands a running→witnessed_done pair on the loop
 // ledger. The runner is injected so nothing real spawns — the test asserts the drive
 // hands the member's OWN declared command to the executor and folds exit 0 to a witness.
+func TestSuperloopDriveExecuteRequiresRepositoryTargetBeforeEffects(t *testing.T) {
+	root := t.TempDir()
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+	code := runSuperloopDrive(&out, &errb, []string{"drain-throughput", "--workspace", root, "--ledger", ledger, "--execute", "--json"})
+	if code != 2 || !strings.Contains(errb.String(), "REPO_TARGET_REQUIRED") {
+		t.Fatalf("code=%d stderr=%q, want REPO_TARGET_REQUIRED", code, errb.String())
+	}
+	if _, err := os.Stat(ledger); !os.IsNotExist(err) {
+		t.Fatalf("target refusal must precede ledger side effects, stat err=%v", err)
+	}
+}
+
+func TestSuperloopDriveExecuteRejectsRepositoryMismatchBeforeEffects(t *testing.T) {
+	root := t.TempDir()
+	initSuperloopTargetRepo(t, root, "https://github.com/anthony-chaudhary/fleet-public.git")
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var out, errb bytes.Buffer
+	code := runSuperloopDrive(&out, &errb, []string{"drain-throughput", "--workspace", root, "--repo", "anthony-chaudhary/fak", "--ledger", ledger, "--execute", "--json"})
+	if code != 2 || !strings.Contains(errb.String(), "REPO_TARGET_MISMATCH") || !strings.Contains(errb.String(), "anthony-chaudhary/fleet-public") {
+		t.Fatalf("code=%d stderr=%q, want typed mismatch with actual repo", code, errb.String())
+	}
+	if _, err := os.Stat(ledger); !os.IsNotExist(err) {
+		t.Fatalf("target mismatch must precede ledger side effects, stat err=%v", err)
+	}
+}
+
+func TestSuperloopRepositoryTargetNormalizesHTTPSAndSSH(t *testing.T) {
+	for _, remote := range []string{
+		"https://github.com/anthony-chaudhary/fak.git",
+		"git@github.com:anthony-chaudhary/fak.git",
+	} {
+		t.Run(remote, func(t *testing.T) {
+			root := t.TempDir()
+			initSuperloopTargetRepo(t, root, remote)
+			if err := verifyDriveRepositoryTarget(root, "anthony-chaudhary/fak"); err != nil {
+				t.Fatalf("verify target for %q: %v", remote, err)
+			}
+		})
+	}
+}
+
+func initSuperloopTargetRepo(t *testing.T, root, remote string) {
+	t.Helper()
+	for _, args := range [][]string{{"init", root}, {"-C", root, "remote", "add", "origin", remote}} {
+		cmd := exec.Command("git", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+}
+
 func TestSuperloopDriveExecuteRunsRunnableMemberAndWitnesses(t *testing.T) {
 	orig := superloopFrontDoorRunner
 	t.Cleanup(func() { superloopFrontDoorRunner = orig })
@@ -31,11 +84,12 @@ func TestSuperloopDriveExecuteRunsRunnableMemberAndWitnesses(t *testing.T) {
 	}
 
 	root := t.TempDir()
+	initSuperloopTargetRepo(t, root, "https://github.com/anthony-chaudhary/fak.git")
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	var out, errb bytes.Buffer
 	// drain-throughput's worst-first member is the runnable `go run ./cmd/fak dispatch
 	// auto --goal throughput`; an empty workspace leaves it unmeasured so it is selected.
-	code := runSuperloopDrive(&out, &errb, []string{"drain-throughput", "--workspace", root, "--ledger", ledger, "--execute", "--json"})
+	code := runSuperloopDrive(&out, &errb, []string{"drain-throughput", "--workspace", root, "--repo", "anthony-chaudhary/fak", "--ledger", ledger, "--execute", "--json"})
 
 	var rep superloopDriveReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
@@ -107,9 +161,10 @@ func TestSuperloopDriveExecuteSurfacesSkillNeverFakes(t *testing.T) {
 	}
 
 	root := t.TempDir()
+	initSuperloopTargetRepo(t, root, "git@github.com:anthony-chaudhary/fak.git")
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 	var out, errb bytes.Buffer
-	runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--ledger", ledger, "--execute", "--json"})
+	runSuperloopDrive(&out, &errb, []string{"sweep-surfaces", "--workspace", root, "--repo", "anthony-chaudhary/fak", "--ledger", ledger, "--execute", "--json"})
 
 	var rep superloopDriveReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
