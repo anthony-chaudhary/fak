@@ -40,6 +40,8 @@ jobs:
         with:
           source: ./docs
           destination: ./_site
+      - name: Make the container-built artifact writable for its manifest
+        run: sudo chown -R "$(id -u):$(id -g)" _site
       - name: Prove breadth, sitemap, and SEO-critical page
         run: >-
           go run ./cmd/pagescheck artifact
