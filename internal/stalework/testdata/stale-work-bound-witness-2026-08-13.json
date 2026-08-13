@@ -1,0 +1,55 @@
+{
+  "schema": "fak.stale-work.bound-witness.v1",
+  "issue": 6711,
+  "captured_at": "2026-08-13",
+  "before": {
+    "command": "fak stale-work --json",
+    "elapsed_millis": 124000,
+    "json_status": "NO_OUTPUT",
+    "source": "GitHub issue #6711 observed failure"
+  },
+  "after": {
+    "command": "go test ./cmd/fak -run TestStaleWorkJSONBoundCheckpointResumeWitness -count=1 -v",
+    "budget_millis": 25,
+    "elapsed_millis": 25,
+    "packet_elapsed_millis": 26,
+    "json_status": "VALID",
+    "discovery_status": "PARTIAL",
+    "reason": "STALE_WORK_DISCOVERY_BUDGET",
+    "files_scanned": 1,
+    "files_total": 3,
+    "next_path": "docs/b.md",
+    "resume_status": "COMPLETE",
+    "resumed_members": [
+      "docs/b.md",
+      "docs/c.md"
+    ]
+  },
+  "repository_after": {
+    "command": "fak stale-work --json",
+    "source": "clean local clone",
+    "head": "1331a1865ebdcf3accfebba64ef0b5ad5b704581",
+    "budget_millis": 60000,
+    "elapsed_millis": 60002,
+    "wall_elapsed_millis": 60160,
+    "json_status": "VALID",
+    "discovery_status": "PARTIAL",
+    "reason": "STALE_WORK_DISCOVERY_BUDGET",
+    "files_scanned": 679,
+    "files_total": 1902,
+    "next_index": 679,
+    "next_path": "docs/i18n/vi/faq.md"
+  },
+  "repository_resume": {
+    "command": "fak stale-work --resume <prior-packet> --budget 1s --json",
+    "wall_elapsed_millis": 1190,
+    "json_status": "VALID",
+    "prior_next_index": 679,
+    "next_index": 689,
+    "advanced_members": 10,
+    "files_scanned": 689,
+    "next_path": "docs/industry-scorecard/README.md",
+    "discovery_status": "PARTIAL",
+    "reason": "STALE_WORK_DISCOVERY_BUDGET"
+  }
+}

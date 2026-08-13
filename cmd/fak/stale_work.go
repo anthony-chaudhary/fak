@@ -12,6 +12,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/stalework"
 )
 
+var staleWorkScanner = stalework.Scan
+
 func cmdStaleWork(args []string) { os.Exit(runStaleWork(args, os.Stdout, os.Stderr)) }
 func runStaleWork(args []string, out, errw io.Writer) int {
 	if len(args) > 0 && args[0] == "loop" {
@@ -23,13 +25,27 @@ func runStaleWork(args []string, out, errw io.Writer) int {
 	limit := fs.Int("limit", 10, "maximum candidates")
 	path := fs.String("path", "", "scan one tracked artifact")
 	open := fs.String("open-issues", "", "JSON file containing open stale-work dedupe keys")
+	budget := fs.Duration("budget", stalework.DefaultDiscoveryBudget, "repository discovery wall-clock budget")
+	resume := fs.String("resume", "", "resume from a prior PARTIAL stale-work JSON packet")
 	self := fs.Bool("selfcheck", false, "run deterministic dependency-drift spine")
 	_ = fs.Bool("json", true, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(errw, "fak stale-work: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
 	if *self {
 		return staleWorkSelfcheck(out, errw)
+	}
+	if *budget <= 0 {
+		fmt.Fprintln(errw, "fak stale-work: --budget must be greater than zero")
+		return 2
+	}
+	if *resume != "" && *path != "" {
+		fmt.Fprintln(errw, "fak stale-work: --resume and --path are mutually exclusive")
+		return 2
 	}
 	keys := map[string]bool{}
 	if *open != "" {
@@ -51,7 +67,23 @@ func runStaleWork(args []string, out, errw io.Writer) int {
 	if *path != "" {
 		paths = []string{*path}
 	}
-	p, err := stalework.Scan(context.Background(), stalework.Options{Root: *root, Limit: *limit, Paths: paths, OpenDedupe: keys})
+	var prior *stalework.Packet
+	if *resume != "" {
+		b, e := os.ReadFile(*resume)
+		if e != nil {
+			fmt.Fprintf(errw, "fak stale-work: resume: %v\n", e)
+			return 1
+		}
+		var packet stalework.Packet
+		if e = json.Unmarshal(b, &packet); e != nil {
+			fmt.Fprintf(errw, "fak stale-work: resume: %v\n", e)
+			return 1
+		}
+		prior = &packet
+	}
+	p, err := staleWorkScanner(context.Background(), stalework.Options{
+		Root: *root, Limit: *limit, Paths: paths, OpenDedupe: keys, Budget: *budget, Resume: prior,
+	})
 	if err != nil {
 		fmt.Fprintf(errw, "fak stale-work: %v\n", err)
 		return 1
