@@ -74,6 +74,111 @@ type SessionMoveCheckpoint struct {
 	Digest      string           `json:"digest"`
 }
 
+type SessionMoveProviderWitness struct {
+	Provider       string    `json:"provider"`
+	Model          string    `json:"model"`
+	RequestDigest  string    `json:"request_digest"`
+	ResponseDigest string    `json:"response_digest"`
+	CompletedAt    time.Time `json:"completed_at"`
+}
+
+type SessionMoveDestinationReceipt struct {
+	Schema                  string                      `json:"schema"`
+	Phase                   SessionMovePhase            `json:"phase"`
+	SessionID               string                      `json:"session_id"`
+	SourceEpoch             string                      `json:"source_epoch"`
+	DestinationEpoch        string                      `json:"destination_epoch,omitempty"`
+	CheckpointHash          string                      `json:"checkpoint_hash"`
+	MaterializedStateDigest string                      `json:"materialized_state_digest,omitempty"`
+	Destination             SessionPlacement            `json:"destination"`
+	TranscriptDigest        string                      `json:"transcript_digest"`
+	EffectCount             int                         `json:"effect_count"`
+	ProviderWitness         *SessionMoveProviderWitness `json:"provider_witness,omitempty"`
+	AdmittedAt              time.Time                   `json:"admitted_at"`
+	ReceiptDigest           string                      `json:"receipt_digest"`
+}
+
+// FinalizeSessionMoveCheckpoint applies the canonical movement schema and digest.
+// It is shared by source-side exporters and destination-side verification.
+func FinalizeSessionMoveCheckpoint(checkpoint SessionMoveCheckpoint) SessionMoveCheckpoint {
+	checkpoint.Schema = sessionMoveSchema
+	checkpoint.Digest = checkpointDigest(checkpoint)
+	return checkpoint
+}
+
+// AdmitSessionMoveCheckpoint is the destination-side adapter. It validates the
+// checkpoint against the destination's concrete placement and emits a receipt
+// bound to the logical ID, source epoch, checkpoint, transcript, and effects.
+func AdmitSessionMoveCheckpoint(checkpoint SessionMoveCheckpoint, destination SessionPlacement) (SessionMoveDestinationReceipt, error) {
+	if checkpoint.Schema != sessionMoveSchema || checkpoint.SessionID == "" || checkpoint.SourceEpoch == "" {
+		return SessionMoveDestinationReceipt{}, errors.New("invalid movement checkpoint identity")
+	}
+	if checkpoint.Digest == "" || checkpointDigest(checkpoint) != checkpoint.Digest {
+		return SessionMoveDestinationReceipt{}, errors.New("movement checkpoint digest mismatch")
+	}
+	if err := validatePlacement(destination, checkpoint.Destination.Capabilities, checkpoint.Destination.ContextLimit, 0); err != nil {
+		return SessionMoveDestinationReceipt{}, fmt.Errorf("destination admission: %w", err)
+	}
+	if destination.Provider != checkpoint.Destination.Provider || destination.AccountRef != checkpoint.Destination.AccountRef || destination.Model != checkpoint.Destination.Model || destination.Compute != checkpoint.Destination.Compute {
+		return SessionMoveDestinationReceipt{}, errors.New("destination placement does not match checkpoint")
+	}
+	transcript := sha256.Sum256(checkpoint.Terminal)
+	receipt := SessionMoveDestinationReceipt{Schema: sessionMoveSchema, Phase: SessionMoveDestinationAdmitted, SessionID: checkpoint.SessionID, SourceEpoch: checkpoint.SourceEpoch, CheckpointHash: checkpoint.Digest, Destination: publicPlacement(destination), TranscriptDigest: "sha256:" + hex.EncodeToString(transcript[:]), EffectCount: len(checkpoint.Effects), AdmittedAt: time.Now().UTC()}
+	receipt.ReceiptDigest = moveReceiptDigest(receipt)
+	return receipt, nil
+}
+
+// RestoreSessionMoveCheckpoint verifies destination materialization and a real
+// provider continuation before upgrading an admission receipt to RESTORED.
+func RestoreSessionMoveCheckpoint(checkpoint, materialized SessionMoveCheckpoint, destination SessionPlacement, provider SessionMoveProviderWitness) (SessionMoveDestinationReceipt, error) {
+	receipt, err := AdmitSessionMoveCheckpoint(checkpoint, destination)
+	if err != nil {
+		return SessionMoveDestinationReceipt{}, err
+	}
+	if materialized.Digest != checkpoint.Digest || checkpointDigest(materialized) != checkpoint.Digest {
+		return SessionMoveDestinationReceipt{}, errors.New("materialized destination state does not match checkpoint")
+	}
+	if provider.Provider != destination.Provider || provider.Model != destination.Model || provider.RequestDigest == "" || provider.ResponseDigest == "" || provider.CompletedAt.IsZero() {
+		return SessionMoveDestinationReceipt{}, errors.New("provider continuation does not bind destination placement")
+	}
+	receipt.Phase = SessionMoveRestored
+	receipt.DestinationEpoch = moveEpoch(checkpoint.SessionID, checkpoint.SourceEpoch, checkpoint.Digest)
+	receipt.MaterializedStateDigest = materialized.Digest
+	receipt.ProviderWitness = &provider
+	receipt.ReceiptDigest = moveReceiptDigest(receipt)
+	return receipt, nil
+}
+
+func VerifySessionMoveDestinationReceipt(checkpoint SessionMoveCheckpoint, receipt SessionMoveDestinationReceipt) error {
+	if receipt.Schema != sessionMoveSchema || receipt.SessionID != checkpoint.SessionID || receipt.SourceEpoch != checkpoint.SourceEpoch || receipt.CheckpointHash != checkpoint.Digest {
+		return errors.New("destination receipt does not bind checkpoint identity")
+	}
+	if receipt.ReceiptDigest == "" || moveReceiptDigest(receipt) != receipt.ReceiptDigest {
+		return errors.New("destination receipt digest mismatch")
+	}
+	transcript := sha256.Sum256(checkpoint.Terminal)
+	if receipt.TranscriptDigest != "sha256:"+hex.EncodeToString(transcript[:]) || receipt.EffectCount != len(checkpoint.Effects) {
+		return errors.New("destination receipt does not bind restored state")
+	}
+	if receipt.Destination.Provider != checkpoint.Destination.Provider || receipt.Destination.AccountRef != checkpoint.Destination.AccountRef || receipt.Destination.Model != checkpoint.Destination.Model || receipt.Destination.Compute != checkpoint.Destination.Compute {
+		return errors.New("destination receipt does not bind destination placement")
+	}
+	switch receipt.Phase {
+	case SessionMoveDestinationAdmitted:
+		return nil
+	case SessionMoveRestored:
+		if receipt.DestinationEpoch == "" || receipt.DestinationEpoch == checkpoint.SourceEpoch || receipt.MaterializedStateDigest != checkpoint.Digest || receipt.ProviderWitness == nil {
+			return errors.New("restored receipt lacks destination epoch, materialized state, or provider witness")
+		}
+		if receipt.ProviderWitness.Provider != receipt.Destination.Provider || receipt.ProviderWitness.Model != receipt.Destination.Model || receipt.ProviderWitness.RequestDigest == "" || receipt.ProviderWitness.ResponseDigest == "" || receipt.ProviderWitness.CompletedAt.IsZero() {
+			return errors.New("restored receipt provider witness does not bind destination")
+		}
+		return nil
+	default:
+		return errors.New("destination receipt has unsupported phase")
+	}
+}
+
 type SessionMoveDelta struct {
 	CapabilityAdded      []string `json:"capability_added,omitempty"`
 	CapabilityRemoved    []string `json:"capability_removed,omitempty"`
@@ -335,6 +440,12 @@ func sortedUnique(in []string) []string {
 func checkpointDigest(c SessionMoveCheckpoint) string {
 	c.Digest = ""
 	b, _ := json.Marshal(c)
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+func moveReceiptDigest(receipt SessionMoveDestinationReceipt) string {
+	receipt.ReceiptDigest = ""
+	b, _ := json.Marshal(receipt)
 	sum := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

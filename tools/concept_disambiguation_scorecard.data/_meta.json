@@ -587,6 +587,11 @@
           "category": "incidental",
           "reason": "CLI path to the typed cache witness folded by the existing dogfood scorecard.",
           "token": "cacheReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6703 private consistency helper, not a new cache architecture concept",
+          "token": "cacheScopeConsistent"
         }
       ],
       "id": "cache",
@@ -637,6 +642,7 @@
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheReceipt",
+        "cacheScopeConsistent",
         "cacheSeatFlags",
         "cacheStats",
         "cacheValueGateFactsFromReport",

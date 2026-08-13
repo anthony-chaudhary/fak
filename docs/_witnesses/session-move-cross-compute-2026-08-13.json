@@ -1,0 +1,93 @@
+{
+  "schema": "fak.session-move-cross-placement-witness.v1",
+  "captured_at": "2026-08-13T20:22:52Z",
+  "provenance": {
+    "source": "interactive Codex session on operator control point",
+    "destination": "sanctioned remote model-serving node",
+    "transport": "authenticated cloud CLI SSH/SCP",
+    "public_scrubbing": "physical hostname, project identity, credentials, and bearer material omitted",
+    "credential_material_present": false
+  },
+  "logical_session": {
+    "session_id": "portable-session-20260813",
+    "source_epoch": "epoch-local-openai-account-current",
+    "destination_epoch": "epoch-271a2240a6fc0b9f",
+    "event_head": 42,
+    "identity_preserved": true,
+    "epoch_changed": true
+  },
+  "placement": {
+    "source": {
+      "provider": "openai",
+      "account_ref": "operator-account-current",
+      "model": "codex",
+      "compute": "local:operator-workstation"
+    },
+    "destination": {
+      "provider": "ollama",
+      "account_ref": "sanctioned-node-local-runtime",
+      "model": "qwen2.5:14b",
+      "compute": "gcp:sanctioned-model-node/us-central1-a",
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "context_limit": 32768,
+      "budget_available": 1,
+      "compute_available": true,
+      "cache_lineage": "destination-cold"
+    },
+    "provider_changed": true,
+    "account_ref_changed": true,
+    "model_changed": true,
+    "compute_changed": true
+  },
+  "state": {
+    "checkpoint_digest": "sha256:436aa9b55a10489150b1be1c9d6e30610f8ff1495e5497d0218ea8a423a3cd89",
+    "materialized_state_digest": "sha256:436aa9b55a10489150b1be1c9d6e30610f8ff1495e5497d0218ea8a423a3cd89",
+    "transcript_digest": "sha256:93046e837a55c00a6e5b3656b307bf80cc462e9362a22b6309b58e2e2cdebedf",
+    "effect_count": 0,
+    "destination_state_read_back": true,
+    "receipt_digest": "sha256:3f8096024f4f732a57280f6e7c36822c7ea3142d8c901c4f9c6beb81a00fe083"
+  },
+  "provider_continuation": {
+    "provider": "ollama",
+    "model": "qwen2.5:14b",
+    "request_digest": "sha256:e2d56474b1b7cbe09f655c98e207d4836ee8b343134da574470adfe684281151",
+    "response_digest": "sha256:271a3cd0236a5c889a90fda21e3dcc9b065b80cd7cbe25629b91efcc672a33cc",
+    "completed_at": "2026-08-13T20:22:52.505983804Z"
+  },
+  "protocol": {
+    "declared_phases": [
+      "SAFE_POINT_REQUESTED",
+      "CHECKPOINTED",
+      "DESTINATION_ADMITTED",
+      "RESTORED",
+      "CUTOVER_COMMITTED"
+    ],
+    "live_destination_phase": "RESTORED",
+    "state_machine_witness": "internal/gateway/session_move_test.go exercises all five phases and rollback/fencing; this artifact independently witnesses destination materialization plus a real provider continuation on sanctioned compute",
+    "typed_contract": "fak.session-move.v1"
+  },
+  "capability_and_cache_delta": {
+    "destination_capabilities": [
+      "completion",
+      "tools"
+    ],
+    "destination_context_limit": 32768,
+    "source_cache_lineage": "provider-local/not portable",
+    "destination_cache_lineage": "destination-cold",
+    "cache_lineage_changed": true,
+    "semantic_degradation": [
+      "provider-local cache is not portable",
+      "destination model/provider semantics may differ"
+    ]
+  },
+  "commands": [
+    "fak session move checkpoint --session-id portable-session-20260813 --source-epoch epoch-local-openai-account-current --source-provider openai --source-account-ref operator-account-current --source-model codex --source-compute local:operator-workstation --provider ollama --account-ref sanctioned-node-local-runtime --model qwen2.5:14b --compute gcp:sanctioned-model-node/us-central1-a --capabilities completion,tools --context-limit 32768 --budget 1 --cache-lineage destination-cold < transcript.txt",
+    "cloud-cli scp fak-linux-amd64-sessionmove checkpoint.json sanctioned-node:/tmp/",
+    "cloud-cli ssh sanctioned-node -- fak session move restore --provider ollama --account-ref sanctioned-node-local-runtime --model qwen2.5:14b --compute gcp:sanctioned-model-node/us-central1-a --provider-endpoint http://127.0.0.1:11434 --state-file /tmp/materialized-checkpoint.json < checkpoint.json > receipt.json",
+    "cloud-cli scp sanctioned-node:/tmp/receipt.json .",
+    "fak session move verify --receipt receipt.json < checkpoint.json"
+  ]
+}
