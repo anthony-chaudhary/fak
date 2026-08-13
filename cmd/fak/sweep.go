@@ -77,6 +77,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 		origin = originProbeFor(ctx(), root)
 	}
 	plan := classifyDirty(entries, hooksLaneResolver(root), origin)
+	plan.Parked = collectSweepParked(root)
 
 	if *cleanJunk {
 		res := cleanSweepJunk(root, plan)
@@ -396,6 +397,7 @@ func originProbeFor(ctx context.Context, root string) originProbe {
 func renderSweepPlan(w io.Writer, plan sweepPlan) {
 	if plan.TotalDirty == 0 {
 		fmt.Fprintln(w, "working tree is clean — nothing to sweep")
+		writeSweepParkedText(w, plan.Parked)
 		return
 	}
 	fmt.Fprintf(w, "dirty paths: %d  (%d stampable across %d lane(s), %d no-lane, %d junk)\n",
@@ -403,6 +405,7 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 	if plan.OldestDirtyPath != "" {
 		fmt.Fprintf(w, "oldest dirty: %s at %s\n", sweepAgeLabel(plan.OldestDirtyAgeSeconds), plan.OldestDirtyPath)
 	}
+	writeSweepParkedText(w, plan.Parked)
 	if plan.NextAction != "" {
 		fmt.Fprintf(w, "next: %s\n", plan.NextAction)
 	}
