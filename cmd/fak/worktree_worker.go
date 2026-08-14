@@ -47,8 +47,10 @@ fak worktree <subcommand>
 
   worker <op>   Per-worker git worktree isolation (#3182). Ops:
       prepare --lane <l> --key <k> [--base-sha S] [--wt-root D]
+              [--lease-id ID] [--owner-pid PID]
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
-                   (or --base-sha). Prints {ok, path, base_sha, reused, env, ...}.
+                   (or --base-sha), stamped with owner PID, lease, and timestamp.
+                   Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
            [--require-remote-recovery]
@@ -68,6 +70,10 @@ fak worktree <subcommand>
                    DRY-RUN by default — reports the would-reap set and deletes nothing;
                    pass --apply (or FAK_WORKTREE_COLD_COLLECT=apply) to actually collect.
                    --even-if-unlanded also collects the held ones, DESTROYING that work.
+      gc [--max-age D] [--dry-run|--apply]
+                   Owner-stamped leak GC. Selects only old, clean worktrees whose
+                   owner PID is dead AND stamped lease is released. DRY-RUN by default;
+                   --apply force-removes selected worktrees and prunes git admin entries.
       list         List the live per-worker worktrees. Prints {count, paths}.
       recover [--remote R] [--fetch] [--cleanup REF] [--force]
               [--cleanup-remote REF] [--apply] [--allow-peer] [--worktree-name NAME]
@@ -93,6 +99,8 @@ func cmdWorktreeWorker(argv []string) {
 		worktreeWorkerLand(argv[1:])
 	case "reap":
 		worktreeWorkerReap(argv[1:])
+	case "gc":
+		worktreeWorkerGC(argv[1:])
 	case "list":
 		worktreeWorkerList(argv[1:])
 	case "recover":
@@ -144,6 +152,8 @@ func worktreeWorkerPrepare(argv []string) {
 	lane := fs.String("lane", "", "worker's lane (e.g. cmd, gateway) — a segment of the worktree dir name")
 	key := fs.String("key", "", "worker's unique key (issue number, wave id, pid) — hashed into the dir name")
 	baseSHA := fs.String("base-sha", "", "commit to pin the detached worktree at (default: trunk HEAD)")
+	leaseID := fs.String("lease-id", "", "lease identity to retain in the owner stamp (default: FAK_LEASE_ID or resolve-<lane>)")
+	ownerPID := fs.Int("owner-pid", os.Getpid(), "owner process PID to retain in the owner stamp")
 	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
 	var paths repeatedString
 	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
@@ -152,7 +162,14 @@ func worktreeWorkerPrepare(argv []string) {
 	fs.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
-	res := workerworktree.Prepare(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), nil)
+	owner := workerworktree.OwnerStamp{PID: *ownerPID, LeaseID: strings.TrimSpace(*leaseID), CreatedAt: time.Now().UTC()}
+	if owner.LeaseID == "" {
+		owner.LeaseID = strings.TrimSpace(os.Getenv("FAK_LEASE_ID"))
+	}
+	if owner.LeaseID == "" && strings.TrimSpace(*lane) != "" {
+		owner.LeaseID = "resolve-" + strings.TrimSpace(*lane)
+	}
+	res := workerworktree.PrepareOwned(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), nil, owner)
 	out := worktreePrepareOut{Result: res}
 	if res.OK && res.Path != "" {
 		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
@@ -249,6 +266,33 @@ func worktreeWorkerReap(argv []string) {
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)
+	}
+}
+
+func worktreeWorkerGC(argv []string) {
+	flags := flag.NewFlagSet("worktree worker gc", flag.ExitOnError)
+	maxAge := flags.Duration("max-age", workerworktree.DefaultColdAgeFloor, "minimum owner-stamp age before a dead-owner/released-lease worktree is eligible (for example 30m, 24h)")
+	dryRun := flags.Bool("dry-run", false, "list candidates and delete nothing (this is already the default)")
+	apply := flags.Bool("apply", false, "force-remove selected worktrees and prune git administrative entries")
+	root := flags.String("root", "", "repo root (default: discover from cwd)")
+	flags.Parse(argv)
+	if *dryRun && *apply {
+		fmt.Fprintln(os.Stderr, "fak worktree worker gc: --dry-run and --apply are mutually exclusive")
+		os.Exit(2)
+	}
+	repoRoot := worktreeWorkerRoot(*root)
+	report := workerworktree.GarbageCollect(repoRoot, nil, workerworktree.GCOptions{
+		Now:          time.Now(),
+		MaxAge:       *maxAge,
+		Apply:        *apply,
+		ProcessAlive: dispatchPIDAlive,
+		LeaseLive:    worktreeStampedLeaseOracle(repoRoot, time.Now()),
+	})
+	worktreeWorkerEmit(report)
+	if *apply {
+		fmt.Fprintf(os.Stderr, "reaped %d/%d owner-dead, lease-released worktrees (apply)\n", report.Reaped, report.WouldReap)
+	} else {
+		fmt.Fprintf(os.Stderr, "would reap %d owner-dead, lease-released worktrees, 0 deleted (dry-run; pass --apply to collect)\n", report.WouldReap)
 	}
 }
 
@@ -391,6 +435,40 @@ func worktreeLiveLeaseOracle(root string, now time.Time) workerworktree.LeaseLiv
 			return true // unclassifiable worktree -> keep
 		}
 		return lanes[strings.ToLower(lane)]
+	}
+}
+
+// worktreeStampedLeaseOracle resolves a stamp's exact lease id while preserving the
+// later cold sweep's lane-level protection: a coarse resolve-<lane> stamp is live when
+// any live issue lease on that lane exists, and an exact issue stamp is live when its
+// exact record or a coarse lane record exists. Read failures fail toward LIVE.
+func worktreeStampedLeaseOracle(root string, now time.Time) workerworktree.LeaseIDLiveFn {
+	live, _, err := leaseref.NewInDir(root).Live(context.Background(), now)
+	if err != nil {
+		return func(string) bool { return true }
+	}
+	ids := map[string]bool{}
+	lanes := map[string]bool{}
+	for _, rec := range live {
+		ids[strings.ToLower(strings.TrimSpace(rec.ID))] = true
+		for _, lane := range dispatchLeaseLanes(rec.ID) {
+			lanes[strings.ToLower(lane)] = true
+		}
+	}
+	return func(leaseID string) bool {
+		leaseID = strings.ToLower(strings.TrimSpace(leaseID))
+		if leaseID == "" {
+			return true
+		}
+		if ids[leaseID] {
+			return true
+		}
+		for _, lane := range dispatchLeaseLanes(leaseID) {
+			if lanes[strings.ToLower(lane)] {
+				return true
+			}
+		}
+		return false
 	}
 }
 

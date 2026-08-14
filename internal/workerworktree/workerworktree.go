@@ -376,15 +376,36 @@ func TrunkHeadSHA(root string, git GitRunner) string {
 // check alone never allowed (#3572). Result.Path is authoritative; a leased member does
 // NOT sit at Path(lane, key, wtRoot).
 func Prepare(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
-	return PrepareWithBackend(root, lane, key, baseSHA, wtRoot, git, defaultIsolationBackend)
+	return PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot, git, defaultIsolationBackend, defaultOwnerStamp(lane))
+}
+
+// PrepareOwned is Prepare with an explicit owner stamp. Dispatch/CLI seams that know
+// the exact lease identity use this form; older callers retain Prepare's conservative
+// coarse-lane stamp.
+func PrepareOwned(root, lane, key, baseSHA, wtRoot string, git GitRunner, owner OwnerStamp) Result {
+	return PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot, git, defaultIsolationBackend, owner)
 }
 
 // PrepareWithBackend is the injectable form of Prepare.
 func PrepareWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend) Result {
+	return PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot, git, backend, defaultOwnerStamp(lane))
+}
+
+// PrepareOwnedWithBackend combines the backend seam with an explicit owner stamp.
+func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp) Result {
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
-	return backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
+	res := backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
+	if !res.OK || res.Path == "" {
+		return res
+	}
+	if err := writeOwnerStamp(res.Path, owner); err != nil {
+		res.OK = false
+		res.Reason = "could not write owner stamp — fail open"
+		res.Detail = err.Error()
+	}
+	return res
 }
 
 func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
@@ -449,7 +470,11 @@ func ReapWithBackend(root, wtPath string, git GitRunner, backend IsolationBacken
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
-	return backend.Release(root, wtPath, git)
+	res := backend.Release(root, wtPath, git)
+	if res.Removed {
+		removeOwnerStamp(wtPath)
+	}
+	return res
 }
 
 func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
@@ -466,13 +491,30 @@ func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
 			return res
 		}
 	}
+	return ForceReap(root, wtPath, git)
+}
+
+// ForceReap destroys one worker worktree even when the warm pool is enabled. Normal
+// Reap preserves the pool's return-on-release behavior; owner-stamped GC uses this
+// explicit destructive path because its selected member is old, owner-dead,
+// lease-released, and clean. It also clears pool/owner sidecars after a successful
+// removal so a collected member cannot remain advertised as reusable.
+func ForceReap(root, wtPath string, git GitRunner) Result {
+	if !IsWorkerWorktree(wtPath) {
+		return Result{OK: false, Path: wtPath, Removed: false,
+			Reason: "refusing to reap a non-worker worktree"}
+	}
 	rc, out := run(git, root, []string{"worktree", "remove", "--force", wtPath})
 	removed := rc == 0
 	run(git, root, []string{"worktree", "prune"})
 	res := Result{OK: removed, Path: wtPath, Removed: removed}
 	if !removed {
 		res.Detail = tail(out, 300)
+		return res
 	}
+	wtRoot := filepath.Dir(filepath.Clean(wtPath))
+	_ = os.Remove(poolMarker(wtRoot, filepath.Base(filepath.Clean(wtPath))))
+	removeOwnerStamp(wtPath)
 	return res
 }
 

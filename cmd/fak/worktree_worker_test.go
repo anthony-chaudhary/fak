@@ -85,6 +85,21 @@ func TestReapJSONShape(t *testing.T) {
 	mustKeys(t, res, "ok", "path", "removed")
 }
 
+// TestGCJSONShape pins the owner-stamped GC CLI's stable top-level report contract.
+func TestGCJSONShape(t *testing.T) {
+	out := workerworktree.GCReport{
+		Mode:      "dry-run",
+		MaxAgeSec: 1800,
+		Worktrees: []workerworktree.GCWorktree{},
+		WouldReap: 0,
+		Reaped:    0,
+	}
+	got := mustKeys(t, out, "mode", "max_age_sec", "worktrees", "would_reap", "reaped")
+	if got["mode"] != "dry-run" {
+		t.Fatalf("mode = %v, want dry-run", got["mode"])
+	}
+}
+
 // TestListJSONShape proves `fak worktree worker list` emits {count, paths} and
 // that an empty listing renders paths as [] (never null), so a JSON consumer can
 // always range it.
