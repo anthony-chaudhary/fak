@@ -955,15 +955,16 @@ type guardRestartBaton struct {
 }
 
 type guardBudgetRestartEvent struct {
-	Schema      string            `json:"schema"`
-	FromTraceID string            `json:"from_trace_id"`
-	ToTraceID   string            `json:"to_trace_id"`
-	Reason      string            `json:"reason,omitempty"`
-	SeedFile    string            `json:"seed_file,omitempty"`
-	Seed        []agent.Message   `json:"seed_messages,omitempty"`
-	SeedText    string            `json:"seed_text,omitempty"`
-	Baton       guardRestartBaton `json:"baton,omitempty,omitzero"`
-	Note        string            `json:"note"`
+	Schema             string                   `json:"schema"`
+	FromTraceID        string                   `json:"from_trace_id"`
+	ToTraceID          string                   `json:"to_trace_id"`
+	Reason             string                   `json:"reason,omitempty"`
+	SourceReadRecovery *guardSourceReadRecovery `json:"source_read_recovery,omitempty"`
+	SeedFile           string                   `json:"seed_file,omitempty"`
+	Seed               []agent.Message          `json:"seed_messages,omitempty"`
+	SeedText           string                   `json:"seed_text,omitempty"`
+	Baton              guardRestartBaton        `json:"baton,omitempty,omitzero"`
+	Note               string                   `json:"note"`
 }
 
 type guardBudgetRestarter struct {
@@ -1014,6 +1015,10 @@ func (r *guardBudgetRestarter) OnBudgetExhausted(ctx context.Context, st gateway
 		Seed:        seed,
 		SeedText:    guardSeedText(seed),
 		Note:        "context budget exhausted; fak guard is relaunching the child under the continuation trace",
+	}
+	if text, recovery, ok := guardQuarantinedReadRecovery(messages); ok {
+		ev.SeedText = strings.TrimSpace(ev.SeedText + "\n\n" + text)
+		ev.SourceReadRecovery = &recovery
 	}
 	pin := serveSessions.Get(st.TraceID).ObjectivePin
 	if pin.Verify() && r.progressCursor != nil {

@@ -1750,6 +1750,26 @@
           "category": "incidental",
           "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
           "token": "guardInfo"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardQuarantinedReadRecovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardReadPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardSourceReadRecovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardSourceReadRecoverySchema"
         }
       ],
       "exclude": [
@@ -1882,6 +1902,8 @@
         "guardOperatorQuestionNormalizedOrWarn",
         "guardOperatorQuestionOptionLabels",
         "guardPolicyOriginEvidencePath",
+        "guardQuarantinedReadRecovery",
+        "guardReadPath",
         "guardRegistration",
         "guardRegistrations",
         "guardRuntime",
@@ -1898,6 +1920,8 @@
         "guardSessionStartProcIsDriver",
         "guardShortBuildIDOf",
         "guardShrinkLeverInputs",
+        "guardSourceReadRecovery",
+        "guardSourceReadRecoverySchema",
         "guardSplitAppleCloseOnExit",
         "guardSplitAppleCloseTail",
         "guardSplitAppleTerminalCommand",
@@ -5460,6 +5484,26 @@
           "category": "incidental",
           "reason": "Issue #6689 armbench-specific helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
           "token": "shedOldContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardQuarantinedReadRecovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardReadPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardSourceReadRecovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
+          "token": "guardSourceReadRecoverySchema"
         }
       ],
       "id": "context-ctx",
@@ -5512,6 +5556,10 @@
         "guardCompactionWitnessLedger",
         "guardCompactionWitnessLedgerRel",
         "guardCompactionWitnessSchema",
+        "guardQuarantinedReadRecovery",
+        "guardReadPath",
+        "guardSourceReadRecovery",
+        "guardSourceReadRecoverySchema",
         "latestGuardCompactionWitness",
         "newGuardCompactionWitness",
         "noteCompactionContract",
