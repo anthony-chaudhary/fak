@@ -1,0 +1,54 @@
+{
+  "schema": "fak-codetools-owned-loop-witness/2",
+  "issue": "#6658",
+  "arm": "fak",
+  "tools": [
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Grep",
+    "Glob"
+  ],
+  "engine_calls": 6,
+  "denies": 0,
+  "vdso_hits": 0,
+  "calls": [
+    {
+      "tool": "Write",
+      "verdict": "ALLOW",
+      "by": "codetools",
+      "args": "{\"file_path\":\"pkg/value.go\",\"content\":\"package pkg\\n\\nconst Value = 1\\n\",\"mode\":\"create\"}"
+    },
+    {
+      "tool": "Read",
+      "verdict": "ALLOW",
+      "by": "codetools",
+      "args": "{\"file_path\":\"pkg/value.go\"}"
+    },
+    {
+      "tool": "Grep",
+      "verdict": "ALLOW",
+      "by": "codetools",
+      "args": "{\"pattern\":\"Value = 1\",\"glob\":\"*.go\"}"
+    },
+    {
+      "tool": "Edit",
+      "verdict": "ALLOW",
+      "by": "codetools",
+      "args": "{\"file_path\":\"pkg/value.go\",\"old_string\":\"Value = 1\",\"new_string\":\"Value = 2\"}"
+    },
+    {
+      "tool": "Glob",
+      "verdict": "ALLOW",
+      "by": "codetools",
+      "args": "{\"pattern\":\"**/*.go\"}"
+    },
+    {
+      "tool": "Bash",
+      "verdict": "ALLOW",
+      "by": "codetools",
+      "args": "{\"command\":\"echo processed\\u003eprocessed.txt\",\"cwd\":\".\"}"
+    }
+  ]
+}

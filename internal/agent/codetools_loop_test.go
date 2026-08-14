@@ -338,7 +338,7 @@ func codeToolRows(log []traceEvent) []traceEvent {
 	out := make([]traceEvent, 0, len(log))
 	for _, e := range log {
 		switch e.Tool {
-		case codetools.ToolRead, codetools.ToolGrep, codetools.ToolGlob:
+		case codetools.ToolRead, codetools.ToolWrite, codetools.ToolEdit, codetools.ToolBash, codetools.ToolGrep, codetools.ToolGlob:
 			out = append(out, e)
 		}
 	}
@@ -413,5 +413,69 @@ func TestOwnedLoopRunsBashThroughKernelEngine(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no kernel-mediated Bash trace: %+v", log)
+	}
+}
+
+func TestIntegratedCodeToolWitnessArtifact(t *testing.T) {
+	root := t.TempDir()
+	command := "printf processed>processed.txt"
+	if runtime.GOOS == "windows" {
+		command = "echo processed>processed.txt"
+	}
+	m, log := runCodeToolLoop(t, root, []codeToolScript{
+		{tool: codetools.ToolWrite, args: `{"file_path":"pkg/value.go","content":"package pkg\n\nconst Value = 1\n","mode":"create"}`},
+		{tool: codetools.ToolRead, args: `{"file_path":"pkg/value.go"}`},
+		{tool: codetools.ToolGrep, args: `{"pattern":"Value = 1","glob":"*.go"}`},
+		{tool: codetools.ToolEdit, args: `{"file_path":"pkg/value.go","old_string":"Value = 1","new_string":"Value = 2"}`},
+		{tool: codetools.ToolGlob, args: `{"pattern":"**/*.go"}`},
+		{tool: codetools.ToolBash, args: `{"command":` + mustJSON(t, command) + `,"cwd":"."}`},
+	})
+	art := codeToolWitness{Schema: "fak-codetools-owned-loop-witness/2", Issue: "#6658", Arm: m.Arm,
+		Tools:       []string{codetools.ToolRead, codetools.ToolWrite, codetools.ToolEdit, codetools.ToolBash, codetools.ToolGrep, codetools.ToolGlob},
+		EngineCalls: m.EngineCalls, Denies: m.Denies, VDSOHits: m.VDSOHits}
+	for _, r := range codeToolRows(log) {
+		art.Calls = append(art.Calls, codeToolWitnessCall{Tool: r.Tool, Verdict: r.Verdict, By: r.By, Reason: r.Reason, Args: oneLine(r.RawArgs, 120)})
+	}
+	body, err := json.MarshalIndent(art, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := os.Getenv("FAK_CODETOOLS_INTEGRATED_WITNESS_OUT")
+	if out == "" {
+		out = filepath.Join(t.TempDir(), "integrated.json")
+	}
+	if err = os.WriteFile(out, append(body, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got codeToolWitness
+	if err = json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Arm != "fak" || len(got.Calls) != 6 || got.EngineCalls+got.VDSOHits < 6 {
+		t.Fatalf("integrated witness=%+v", got)
+	}
+	seen := map[string]bool{}
+	for _, c := range got.Calls {
+		if c.Verdict != "ALLOW" || (c.By != codetools.RungName && c.By != "vdso") {
+			t.Fatalf("bypass=%+v", c)
+		}
+		seen[c.Tool] = true
+	}
+	for _, tool := range got.Tools {
+		if !seen[tool] {
+			t.Fatalf("tool %s absent: %+v", tool, got)
+		}
+	}
+	mutated, _ := os.ReadFile(filepath.Join(root, "pkg", "value.go"))
+	if !strings.Contains(string(mutated), "Value = 2") {
+		t.Fatalf("mutation=%q", mutated)
+	}
+	processed, _ := os.ReadFile(filepath.Join(root, "processed.txt"))
+	if !strings.Contains(string(processed), "processed") {
+		t.Fatalf("process=%q", processed)
 	}
 }
