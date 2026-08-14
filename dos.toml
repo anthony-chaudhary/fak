@@ -372,6 +372,7 @@ concurrent = [
   "mixedprecision",
   "depthadmit",
   "managedocs",
+  "humanctl",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -510,6 +511,7 @@ autopick = [
   "codexresume",
   "depthadmit",
   "managedocs",
+  "humanctl",
   # new-leaf:lane
 ]
 
@@ -1099,6 +1101,7 @@ codexresume = ["internal/codexresume/**"]
 mixedprecision = ["internal/mixedprecision/**"] # #6407: see the [lanes].concurrent note.
 depthadmit = ["internal/depthadmit/**"]
 managedocs = ["internal/managedocs/**"]
+humanctl = ["internal/humanctl/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
