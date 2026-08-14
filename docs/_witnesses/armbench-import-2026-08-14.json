@@ -1,0 +1,47 @@
+{
+  "schema": "fak.armbench.fixture-import/1",
+  "retrieved_at": "2026-08-14",
+  "store": "content-addressed external store (paths relative to store root)",
+  "results": [
+    {
+      "suite": "caveman",
+      "input_id": "sha256:63c9f400e64e6ff2432e16d761fb0df70f50172ef080730291a449f16fd95f2d",
+      "input_dir": "inputs/sha256/63c9f400e64e6ff2432e16d761fb0df70f50172ef080730291a449f16fd95f2d",
+      "manifest_path": "inputs/sha256/63c9f400e64e6ff2432e16d761fb0df70f50172ef080730291a449f16fd95f2d/manifest.json",
+      "corpus_path": "inputs/sha256/63c9f400e64e6ff2432e16d761fb0df70f50172ef080730291a449f16fd95f2d/corpus.json",
+      "manifest_identity": "sha256:be303a39ff6d30bccacd6813e079dcb08ac18c18d44289b7afd677cb176cee4e",
+      "source_set_hash": "sha256:9f8e7dec5b7a4c73f28b0e11fc1e5c470f35f4b048b3a1c0cf4a68af8efebd48",
+      "source_count": 9,
+      "source_bytes": 35184,
+      "license_reviews": [
+        {
+          "repo": "JuliusBrussee/caveman",
+          "sha": "c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+          "license": "MIT",
+          "boundary": "LICENSE + LICENSING.md",
+          "status": "explicit:JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4=MIT"
+        }
+      ]
+    },
+    {
+      "suite": "ponytail",
+      "input_id": "sha256:78896ef88c8bf674b8a03ee593f3bfa5201607fd7533bb525c4b5963b4ce32af",
+      "input_dir": "inputs/sha256/78896ef88c8bf674b8a03ee593f3bfa5201607fd7533bb525c4b5963b4ce32af",
+      "manifest_path": "inputs/sha256/78896ef88c8bf674b8a03ee593f3bfa5201607fd7533bb525c4b5963b4ce32af/manifest.json",
+      "corpus_path": "inputs/sha256/78896ef88c8bf674b8a03ee593f3bfa5201607fd7533bb525c4b5963b4ce32af/corpus.json",
+      "manifest_identity": "sha256:ccd06f91058d3ccdec1cf0e0b5f2b7d77c32af10fd002f547e469609405e0a50",
+      "source_set_hash": "sha256:c1a27897c6e276fcfc202ae462f64a9841a5640c87f9205360d9984a6964402b",
+      "source_count": 18,
+      "source_bytes": 109612,
+      "license_reviews": [
+        {
+          "repo": "DietrichGebert/ponytail",
+          "sha": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+          "license": "MIT",
+          "boundary": "LICENSE",
+          "status": "repository-asserted"
+        }
+      ]
+    }
+  ]
+}

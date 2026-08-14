@@ -7,6 +7,7 @@ package main
 //
 //	fak armbench selfcheck [--json]                     # deterministic spine + every fail-closed proof
 //	fak armbench emit-demo --dir <d>                    # write a runnable manifest+corpus pair
+//	fak armbench import-fixtures [--suite all]           # pinned Caveman/Ponytail input importer
 //	fak armbench validate --manifest <m> [--json]       # refuse an unpinned manifest
 //	fak armbench identity --manifest <m> [--json]       # the sha256 that decides comparability
 //	fak armbench run --manifest <m> --corpus <c> --out <run.json> [--resume <prior.json>]
@@ -40,10 +41,12 @@ import (
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
+  import-fixtures
+              fetch the pinned Caveman/Ponytail allowlists into an out-of-repo CAS
   validate    refuse a manifest that is not fully pinned
   identity    print the manifest identity that decides comparability
   run         execute the arms and write the raw trial ledger
@@ -63,6 +66,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchSelfcheck(stdout, stderr, argv[1:])
 	case "emit-demo":
 		return armbenchEmitDemo(stdout, stderr, argv[1:])
+	case "import-fixtures":
+		return armbenchImportFixtures(stdout, stderr, argv[1:])
 	case "validate":
 		return armbenchValidate(stdout, stderr, argv[1:])
 	case "identity":
@@ -80,6 +85,72 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak armbench: unknown subcommand %q\n%s\n", argv[0], armbenchUsage)
 		return 2
 	}
+}
+
+func armbenchImportFixtures(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("armbench import-fixtures", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	suite := fs.String("suite", string(armbench.FixtureSuiteAll), "fixture suite: caveman, ponytail, or all")
+	store := fs.String("store", "", "out-of-repository content-addressed store (default: user cache)")
+	asJSON := fs.Bool("json", false, "emit the import report as strict JSON")
+	var licenseReviews stringListFlag
+	fs.Var(&licenseReviews, "review-license", "repeatable revision-bound license review token")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak armbench import-fixtures: positional arguments are not accepted")
+		return 2
+	}
+	storeRoot := *store
+	if storeRoot == "" {
+		var err error
+		storeRoot, err = armbench.DefaultFixtureStore()
+		if err != nil {
+			fmt.Fprintln(stderr, "fak armbench import-fixtures:", err)
+			return 1
+		}
+	}
+	storeRoot, err := filepath.Abs(storeRoot)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak armbench import-fixtures:", err)
+		return 1
+	}
+	report, err := armbench.ImportFixtures(context.Background(), armbench.FixtureSuite(*suite), armbench.ImportOptions{
+		StoreRoot:      storeRoot,
+		WorkspaceRoot:  resolveRoot(""),
+		FakVersion:     guardBannerVersion(),
+		LicenseReviews: licenseReviews,
+	})
+	if err != nil {
+		var refusal *armbench.RefusalError
+		if errors.As(err, &refusal) {
+			fmt.Fprintf(stderr, "refused (%s): %s\n", refusal.Reason, refusal)
+			return 3
+		}
+		fmt.Fprintln(stderr, "fak armbench import-fixtures:", err)
+		return 1
+	}
+	if *asJSON {
+		blob, err := armbench.MarshalFixtureImportReport(report)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak armbench import-fixtures:", err)
+			return 1
+		}
+		_, _ = stdout.Write(blob)
+		return 0
+	}
+	fmt.Fprintf(stdout, "store %s\n", storeRoot)
+	for _, result := range report.Results {
+		manifestPath := filepath.Join(storeRoot, filepath.FromSlash(result.ManifestPath))
+		corpusPath := filepath.Join(storeRoot, filepath.FromSlash(result.CorpusPath))
+		runPath := filepath.Join(storeRoot, filepath.FromSlash(result.InputDir), "run.json")
+		fmt.Fprintf(stdout,
+			"%s: %d pinned sources (%d bytes)\nmanifest %s\ncorpus %s\nnext: fak armbench run --manifest %q --corpus %q --out %q\n",
+			result.Suite, result.SourceCount, result.SourceBytes,
+			manifestPath, corpusPath, manifestPath, corpusPath, runPath)
+	}
+	return 0
 }
 
 func armbenchSelfcheck(stdout, stderr io.Writer, argv []string) int {

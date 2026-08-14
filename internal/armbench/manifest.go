@@ -84,13 +84,19 @@ const (
 // is what makes the pin checkable — a repo/SHA pair alone still permits a
 // hand-edited local copy.
 type Source struct {
-	Name        string `json:"name"`
-	Repo        string `json:"repo"`
-	SHA         string `json:"sha"`
-	Path        string `json:"path"`
-	ContentHash string `json:"content_hash"`
-	License     string `json:"license,omitempty"`
-	RetrievedAt string `json:"retrieved_at,omitempty"`
+	Name                string `json:"name"`
+	Repo                string `json:"repo"`
+	URL                 string `json:"url,omitempty"`
+	SHA                 string `json:"sha"`
+	Path                string `json:"path"`
+	ContentHash         string `json:"content_hash"`
+	License             string `json:"license,omitempty"`
+	LicenseBoundary     string `json:"license_boundary,omitempty"`
+	LicenseBoundaryHash string `json:"license_boundary_hash,omitempty"`
+	LicenseReview       string `json:"license_review,omitempty"`
+	RetrievedAt         string `json:"retrieved_at,omitempty"`
+	Normalization       string `json:"normalization,omitempty"`
+	LocalPath           string `json:"local_path,omitempty"`
 }
 
 // Sampling pins the decode parameters. Temperature and TopP are pointers-free

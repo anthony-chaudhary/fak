@@ -63,6 +63,25 @@ func TestArmbenchCLIRefusesProviderManifestMismatch(t *testing.T) {
 	}
 }
 
+func TestArmbenchCLIImporterRequiresExplicitCavemanLicenseReview(t *testing.T) {
+	var out, stderr bytes.Buffer
+	code := runArmbench(&out, &stderr, []string{
+		"import-fixtures",
+		"--suite", "caveman",
+		"--store", t.TempDir(),
+		"--json",
+	})
+	if code != 3 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), armbench.ReasonFixtureLicenseReview) {
+		t.Fatalf("missing refusal reason: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), armbench.CavemanLicenseReviewToken) {
+		t.Fatalf("missing exact revision-bound review token: %s", stderr.String())
+	}
+}
+
 func TestArmbenchCommittedWitnessMatchesSelfcheck(t *testing.T) {
 	res, err := armbench.Selfcheck()
 	if err != nil {
