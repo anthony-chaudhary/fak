@@ -378,7 +378,7 @@ concurrent = [
 exclusive = ["abi", "release", "dos", "global"]
 autopick = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
-  "cachemeta",,
+  "cachemeta",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
