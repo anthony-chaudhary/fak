@@ -183,6 +183,8 @@ fak agent --output-style full
 
 Unknown or not-yet selections fail before the run. Response profiles do not change work policy or tool authorization.
 
+`fak agent --work-profile standard|ponytail:{low|medium|high}` independently selects implementation-policy pressure. `standard` is the off/default state; `ponytail:*` expands to the fak-native canonical form. Mix it with `--output-style` without either axis implying the other. See [Work profiles](work-profiles.md).
+
 ## Verbs
 
 The verb surface is **two-tier** (epic #2228). The **frontdoor** tier is the

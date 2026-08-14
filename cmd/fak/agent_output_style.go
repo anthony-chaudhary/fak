@@ -56,6 +56,16 @@ func agentOutputProfiles() []agentOutputProfile {
 	}
 }
 
+func agentWorkProfiles() []agentOutputProfile {
+	return []agentOutputProfile{
+		{Selection: "standard", Canonical: "standard", Family: "standard", Implementation: "native", Intensity: "off", Status: "shipped", Meaning: "No implementation-policy steering."},
+		{Selection: "ponytail:low", Canonical: "ponytail:native:low", Family: "ponytail", Implementation: "native", Intensity: "low", Status: "shipped", Meaning: "Briefly check for a simpler route before adding machinery."},
+		{Selection: "ponytail:medium", Canonical: "ponytail:native:medium", Family: "ponytail", Implementation: "native", Intensity: "medium", Status: "shipped", Meaning: "Recommended simplicity ladder with full correctness carve-outs."},
+		{Selection: "ponytail:high", Canonical: "ponytail:native:high", Family: "ponytail", Implementation: "native", Intensity: "high", Status: "shipped", Meaning: "Actively resist avoidable complexity; require justification for machinery."},
+		{Selection: "ponytail:original:*", Family: "ponytail", Implementation: "original", Intensity: "low|medium|high", Status: "not-yet", Meaning: "Reserved for a pinned, attributed upstream adapter."},
+	}
+}
+
 func printAgentOutputProfiles(w io.Writer, argv []string) error {
 	fs := flag.NewFlagSet("agent profiles", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -76,10 +86,15 @@ func printAgentOutputProfiles(w io.Writer, argv []string) error {
 	for _, p := range profiles {
 		fmt.Fprintf(w, "  %-24s %-8s %s\n", p.Selection, p.Status, p.Meaning)
 	}
+	fmt.Fprintln(w, "\nWork profiles (independent opt-in; default is standard):")
+	for _, p := range agentWorkProfiles() {
+		fmt.Fprintf(w, "  %-24s %-8s %s\n", p.Selection, p.Status, p.Meaning)
+	}
 	fmt.Fprintln(w, "\nExamples:")
 	fmt.Fprintln(w, "  fak agent --output-style caveman:medium")
-	fmt.Fprintln(w, "  fak agent --output-style native:high")
-	fmt.Fprintln(w, "  fak agent --output-style full        # disable")
-	fmt.Fprintln(w, "\nResponse shape does not change work policy. Ponytail composition is tracked in #6700/#6707.")
+	fmt.Fprintln(w, "  fak agent --work-profile ponytail:medium")
+	fmt.Fprintln(w, "  fak agent --output-style caveman:high --work-profile ponytail:low  # mix independently")
+	fmt.Fprintln(w, "  fak agent --output-style full --work-profile standard             # disable both")
+	fmt.Fprintln(w, "\nPrecedence: policy and explicit requirements > repository instructions > work profile > response profile.")
 	return nil
 }

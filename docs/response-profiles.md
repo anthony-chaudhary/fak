@@ -1,6 +1,7 @@
 # Response profiles: concise, Caveman-compatible, and composable
 
 Response profiles are an **opt-in presentation control** for fak's owned agent loop. They let a user ask for shorter answers without changing tool authorization, work scope, tests, diagnostics, or evidence requirements.
+They compose independently with [work profiles](work-profiles.md): Caveman can shape the response while Ponytail shapes implementation decisions, and neither selection implies the other.
 
 ## Start here
 
@@ -74,7 +75,7 @@ The shipped flag drives `fak agent`, the owned in-process loop. External harness
 
 ## Troubleshooting
 
-- **`invalid --output-style`** — run `fak agent profiles`; the requested family, implementation, or intensity is not shipped.
-- **Asked for `original`** — this is an intentional refusal, not an installation problem. Track #6706 or choose `caveman:medium` for the safe native implementation.
-- **Output is still detailed** — explicit user/repository requirements and required diagnostics outrank the profile. Try `caveman:high`, but required content remains.
-- **Using Claude Code, Codex, Cursor, or another external harness through `fak guard`** — the current profile flag does not propagate there yet. Do not set unrelated environment variables and assume coverage; use the owned `fak agent` loop until the guard integration ships.
+- **`invalid --output-style`** ï¿½ run `fak agent profiles`; the requested family, implementation, or intensity is not shipped.
+- **Asked for `original`** ï¿½ this is an intentional refusal, not an installation problem. Track #6706 or choose `caveman:medium` for the safe native implementation.
+- **Output is still detailed** ï¿½ explicit user/repository requirements and required diagnostics outrank the profile. Try `caveman:high`, but required content remains.
+- **Using Claude Code, Codex, Cursor, or another external harness through `fak guard`** ï¿½ the current profile flag does not propagate there yet. Do not set unrelated environment variables and assume coverage; use the owned `fak agent` loop until the guard integration ships.

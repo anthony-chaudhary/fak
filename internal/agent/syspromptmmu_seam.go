@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
@@ -55,6 +56,11 @@ type SystemBlock struct {
 	// StyleFamily and StyleIntensity make mixed profile captures reproducible.
 	StyleFamily    string
 	StyleIntensity string
+	// WorkProfile is an independently selected implementation-policy overlay.
+	WorkProfile               string
+	WorkProfileFamily         string
+	WorkProfileImplementation string
+	WorkProfileIntensity      string
 }
 
 // CacheStable is the one-bit verdict the owned loop checks before sending: the realized
@@ -76,7 +82,7 @@ func (b SystemBlock) CacheStable() bool {
 // ApplyEdit never mutates its input, so the resident plan can never be corrupted by an
 // authored overlay item.
 func BuildOwnedSystemBlock(items [][]byte, witness func(syspromptmmu.BaseEdit) bool) SystemBlock {
-	return buildOwnedSystemBlockWithStyle(items, witness, styleReadoutFromEnv())
+	return buildOwnedSystemBlockWithProfiles(items, witness, styleReadoutFromEnv(), syspromptmmu.WorkProfileFromEnv(os.Getenv))
 }
 
 // styleReadoutFromEnv resolves the named response profile first, then the legacy numeric
@@ -146,6 +152,10 @@ func buildOwnedSystemBlockAt(items [][]byte, witness func(syspromptmmu.BaseEdit)
 }
 
 func buildOwnedSystemBlockWithStyle(items [][]byte, witness func(syspromptmmu.BaseEdit) bool, style syspromptmmu.StyleReadout) SystemBlock {
+	return buildOwnedSystemBlockWithProfiles(items, witness, style, syspromptmmu.DescribeWorkProfile(""))
+}
+
+func buildOwnedSystemBlockWithProfiles(items [][]byte, witness func(syspromptmmu.BaseEdit) bool, style syspromptmmu.StyleReadout, work syspromptmmu.WorkProfileReadout) SystemBlock {
 	residentPlan := syspromptmmu.BaseContextPlan() // spine + policy floor, fak-concepts first
 
 	var overlayBase []syspromptmmu.Segment // dynamically authored overlay layer, starts empty
@@ -161,24 +171,24 @@ func buildOwnedSystemBlockWithStyle(items [][]byte, witness func(syspromptmmu.Ba
 	}
 
 	overlayPlan := syspromptmmu.PlanOf(overlayBase)
+	if work.Applied && work.Segment != "" {
+		overlayPlan = append(overlayPlan, cachemeta.PromptSegment{Content: []byte(work.Segment)})
+	}
 	steering := syspromptmmu.SteeringOff
 	if style.Known {
 		if seg, ok := syspromptmmu.StyleSegment(style.Style); ok {
-			overlayPlan = append(overlayPlan, seg) // strictly after the queried cards, past the breakpoint
+			overlayPlan = append(overlayPlan, seg) // strictly after work policy and queried cards, past the breakpoint
 			steering = style.Level
 		}
 	}
 
 	value := syspromptmmu.BuildSystemValue(residentPlan, overlayPlan)
 	return SystemBlock{
-		Value:          value,
-		Audit:          syspromptmmu.AuditRealizedPrefix(systemRequestBody(value), residentPlan),
-		Overlays:       len(overlayBase),
-		Refused:        refused,
-		Steering:       steering,
-		Style:          style.Style,
-		StyleFamily:    style.Family,
-		StyleIntensity: style.Intensity,
+		Value: value, Audit: syspromptmmu.AuditRealizedPrefix(systemRequestBody(value), residentPlan),
+		Overlays: len(overlayBase), Refused: refused, Steering: steering,
+		Style: style.Style, StyleFamily: style.Family, StyleIntensity: style.Intensity,
+		WorkProfile: work.Profile, WorkProfileFamily: work.Family,
+		WorkProfileImplementation: work.Implementation, WorkProfileIntensity: work.Intensity,
 	}
 }
 

@@ -32,6 +32,7 @@ New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes 
 ## Start here
 
 - [Response profiles: concise, Caveman-compatible, and composable](docs/response-profiles.md) -- choose low/medium/high, distinguish native from original, and understand the safety and composition boundaries.
+- [Work profiles: Ponytail-inspired implementation policy](docs/work-profiles.md) -- independently choose low/medium/high simplicity pressure, mix it with response shape, and keep correctness carve-outs explicit.
 - **Micro-context fabric research** — one immutable agent base, bounded physical model slots, and 100 / 1,000 / 10,000 logical contexts; start with the [research contract](docs/research/micro-context-fabrics.md), run the floor with `go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64`, and follow the [research witness index](docs/research/README.md).
 
 
