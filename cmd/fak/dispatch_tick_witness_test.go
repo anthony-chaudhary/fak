@@ -834,3 +834,19 @@ func TestWitnessExitedWorkersGradesCommittedFootprintAgainstLeaseTree(t *testing
 		})
 	}
 }
+
+func TestDispatchWitnessLogTailRetainsUsageCapBeforeGuardEpilogue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.log")
+	marker := "fak guard: account cooled by a live usage cap until 2026-08-14T02:17:35Z\n"
+	epilogue := strings.Repeat("guard summary row with bounded diagnostic text\n", 180)
+	if len(epilogue) <= 4096 {
+		t.Fatalf("fixture epilogue=%d, want > legacy 4096-byte window", len(epilogue))
+	}
+	if err := os.WriteFile(path, []byte(marker+epilogue), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tail, size := dispatchWitnessLogTail(path)
+	if got := dispatchtick.ClassifyNoCommitReason(tail, size); got != dispatchtick.NoCommitUsageCap {
+		t.Fatalf("classification=%q tail_bytes=%d size=%d", got, len(tail), size)
+	}
+}

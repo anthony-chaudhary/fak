@@ -90,7 +90,7 @@ const WitnessSidecarSuffix = ".witness"
 
 // WitnessTailBytes bounds how much of a (possibly multi-MB) worker log the no-commit
 // classifier inspects — the guard summary and final turn live at the end.
-const WitnessTailBytes = 4096
+const WitnessTailBytes = 16 << 10
 
 // StubLogMaxBytes is the banner-no-op size floor shared with the live-lane reap: a
 // genuinely live worker streams kilobytes within seconds, so a log at or under this
@@ -98,7 +98,7 @@ const WitnessTailBytes = 4096
 const StubLogMaxBytes = 512
 
 var (
-	capBannerRE  = regexp.MustCompile(`(?i)hit your[\w\s]*limit|limit\s+exhausted`)
+	capBannerRE  = regexp.MustCompile(`(?i)hit your[\w\s]*limit|limit\s+exhausted|account cooled by a live usage cap`)
 	glmWallRE    = regexp.MustCompile(`(?i)Limit Exhausted|limit will reset at|usage limit reached`)
 	noopBannerRE = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
 )
