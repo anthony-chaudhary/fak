@@ -8,7 +8,7 @@
 
 fak is one Go binary between an agent and its model/tools. Keep Claude Code, Codex, OpenCode, or your own client—and its UI, login, and model—while fak reuses stable work, compacts long sessions, enforces tool policy, journals activity, and recovers interrupted runs. The same native modules can also compose fleets of small, bounded agents in one process.
 
-> **Start here:** install fak, then run `fak manage claude` (or `fak m claude`). No API key or new agent framework is required.
+> **Start here:** install fak, then run `fak guard -- claude` to wrap the agent you already use with one drop-in command. It forwards your existing subscription credential—no separate API key—and places fak's managed-context decisions plus default-deny policy floor in front of every turn. The deterministic no-key proof remains below.
 
 [![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
 
