@@ -398,6 +398,7 @@ var tier = map[string]int{
 	"fusedturn":           1, // executable "one turn spawns both": classifies each abi.ToolCall into its concept-family (classical / weight-based) + folds a FusedTurn (fused iff it spans both) whose Adjudicate proves both families cross ONE floor via an injected Decider (*kernel.Kernel.BatchDecide); imports only abi(0), off the hot path.
 	"workerenvelope":      1, // machine-readable worker-result envelope (sha/issue/tests/blocker/witness) + witness-gated validation; stdlib-only, off the hot path.
 	"workerworktree":      2, // native port of tools/worker_worktree.py (#3168): per-worker git worktree isolation (prepare detached-at-SHA / land diff onto trunk / reap) that the Go dispatch spawn wires in behind a default-off flag; imports windowgate(1) for the no-window git runner + stdlib, off the hot path.
+	"speedab":             1, // pure pinned fast-vs-standard manifest grader; stdlib-only, off the hot path.
 	"launchlatency":       2, // dispatch→heartbeat worker launch-latency histogram + p50/p95 (reuses fleetmetrics percentiles); stdlib-only, off the hot path.
 	"closurerate":         1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
 	"issuecost":           2, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
