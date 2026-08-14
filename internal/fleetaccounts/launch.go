@@ -15,6 +15,7 @@ type LaunchRequest struct {
 	InvokedModel  string
 	Prompt        string
 	Tier3Override bool
+	Speed         string
 }
 
 // LaunchDecision contains only non-secret launch metadata plus argv/environment.
@@ -26,6 +27,7 @@ type LaunchDecision struct {
 	ConfiguredModel  string            `json:"configured_model,omitempty"`
 	InvokedModel     string            `json:"invoked_model,omitempty"`
 	EndpointClass    string            `json:"endpoint_class,omitempty"`
+	Speed            string            `json:"speed,omitempty"`
 	TaskTier         int               `json:"task_tier,omitempty"`
 	Argv             []string          `json:"argv,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
@@ -65,6 +67,18 @@ func DecideLaunch(req LaunchRequest) LaunchDecision {
 		d.Argv = []string{"claude", "-p", req.Prompt}
 		if model != "" {
 			d.Argv = append(d.Argv, "--model", model)
+		}
+		speed := strings.ToLower(strings.TrimSpace(req.Speed))
+		if speed == "" || speed == "auto" {
+			speed = "fast"
+		}
+		if speed != "fast" && speed != "standard" {
+			d.Reason = fmt.Sprintf("invalid Claude speed %q (want auto, fast, or standard)", req.Speed)
+			return d
+		}
+		d.Speed = speed
+		if speed == "fast" {
+			d.Argv = append(d.Argv, "--settings", `{"fastMode":true}`)
 		}
 		d.Env = map[string]string{"CLAUDE_CONFIG_DIR": a.ConfigDir}
 	case "codex":

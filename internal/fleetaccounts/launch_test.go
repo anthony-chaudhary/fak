@@ -9,6 +9,41 @@ func resolved(product, account, model, dir string, tier int) Resolved {
 	return Resolved{OK: true, Account: account, Product: product, Model: model, ModelTier: &tier, ConfigDir: dir}
 }
 
+func TestDecideLaunchClaudeSpeedPosture(t *testing.T) {
+	seat := resolved("claude", "claude-tier1", "opus", "/accounts/claude", 1)
+	tests := []struct {
+		name, speed string
+		wantFast    bool
+	}{
+		{name: "fast", speed: "fast", wantFast: true},
+		{name: "standard", speed: "standard", wantFast: false},
+		{name: "auto interactive", speed: "auto", wantFast: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DecideLaunch(LaunchRequest{Account: seat, TaskTier: 1, Prompt: "interactive task", Speed: tt.speed})
+			if !d.OK {
+				t.Fatalf("decision=%+v", d)
+			}
+			hasFast := false
+			for i := 0; i+1 < len(d.Argv); i++ {
+				if d.Argv[i] == "--settings" && d.Argv[i+1] == `{"fastMode":true}` {
+					hasFast = true
+				}
+			}
+			if hasFast != tt.wantFast || d.Speed != map[bool]string{true: "fast", false: "standard"}[tt.wantFast] {
+				t.Fatalf("argv=%v speed=%q", d.Argv, d.Speed)
+			}
+		})
+	}
+}
+
+func TestDecideLaunchSpeedIgnoredForNonClaude(t *testing.T) {
+	d := DecideLaunch(LaunchRequest{Account: resolved("codex", "codex-tier1", "gpt", "/accounts/codex", 1), TaskTier: 1, Prompt: "task", Speed: "fast"})
+	if d.Speed != "" {
+		t.Fatalf("codex speed=%q, want empty", d.Speed)
+	}
+}
 func TestDecideLaunchAllProductsCaptureArgvEnvAndMetadata(t *testing.T) {
 	tests := []struct{ product, envKey, binary string }{
 		{"claude", "CLAUDE_CONFIG_DIR", "claude"},

@@ -90,6 +90,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	waveID := fs.String("wave-id", "", "(wave) override the deterministic wave id")
 	taskTier := fs.Int("task-tier", 0, "(launch/exec) required task tier 1|2|3")
 	invokedModel := fs.String("invoked-model", "", "(launch/exec) model passed to the worker; defaults to account model")
+	speed := fs.String("speed", firstNonEmpty(strings.TrimSpace(os.Getenv("FAK_CLAUDE_SPEED")), "auto"), "(launch/exec) Claude speed posture auto|fast|standard; non-Claude ignored")
 	prompt := fs.String("prompt", "", "(launch/exec) worker prompt")
 	tier3Override := fs.Bool("allow-tier3-narrow", false, "(launch/exec) explicitly authorize a restricted tier-3 seat for narrow tier-3 work")
 	launchLedger := fs.String("launch-ledger", ".fak/fleet-launches.jsonl", "(launch/exec) non-secret launch ledger path")
@@ -186,7 +187,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		req := fleetaccounts.ResolveRequest{Pin: *account, WorkKind: *workKind, TaskText: *task, Product: *product, TaskClass: fmt.Sprintf("tier%d", *taskTier), StrictTier: true, AllowTierFallback: *allowFallback, FaklocalOK: *faklocalOK}
 		resolved := fleetaccounts.Resolve(rows, paths.Home, req, pol)
-		decision := fleetaccounts.DecideLaunch(fleetaccounts.LaunchRequest{Account: resolved, TaskTier: *taskTier, InvokedModel: *invokedModel, Prompt: *prompt, Tier3Override: *tier3Override})
+		decision := fleetaccounts.DecideLaunch(fleetaccounts.LaunchRequest{Account: resolved, TaskTier: *taskTier, InvokedModel: *invokedModel, Prompt: *prompt, Tier3Override: *tier3Override, Speed: *speed})
 		if err := appendFleetLaunchLedger(*launchLedger, decision); err != nil {
 			fmt.Fprintf(stderr, "fleet-accounts launch ledger: %v\n", err)
 			return 1
