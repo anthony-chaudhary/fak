@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/toolcatalog"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
@@ -70,6 +71,16 @@ func pluginDecisionFromVerdict(v abi.Verdict) toolplugin.Decision {
 	}
 }
 
+// syscallCatalogTool resolves the provider-visible name through the exact
+// request snapshot before policy or plugins see the proposal. Only the
+// canonical name reaches the existing kernel/toolplugin execution path.
+func (s *Server) syscallCatalogTool(ctx context.Context, snapshot toolcatalog.Snapshot, registrations []toolcatalog.Registration, visibleName, rawArgs string, readOnly bool, witness, traceID string, callPreference toolplugin.Preference) (wv WireVerdict, env *ResultEnvelope, trace []toolplugin.TraceEvent, pref *toolplugin.ResolvedPreference, err error) {
+	registration, err := toolcatalog.ResolveRegistration(snapshot, visibleName, registrations)
+	if err != nil {
+		return WireVerdict{Kind: "DENY", Reason: err.Error(), By: "toolcatalog", Disposition: "TERMINAL"}, nil, nil, nil, nil
+	}
+	return s.syscallWithPlugins(ctx, registration.Program.Name, rawArgs, readOnly, witness, traceID, callPreference)
+}
 func (s *Server) syscallWithPlugins(ctx context.Context, tool, rawArgs string, readOnly bool, witness, traceID string, callPreference toolplugin.Preference) (wv WireVerdict, env *ResultEnvelope, trace []toolplugin.TraceEvent, pref *toolplugin.ResolvedPreference, err error) {
 	layers := s.toolPreferences
 	layers.Call = callPreference

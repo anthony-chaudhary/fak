@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/toolcatalog"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
@@ -131,5 +132,61 @@ func TestGatewayPluginMCPResponseExposesTraceAndPreferenceProvenance(t *testing.
 		if !strings.Contains(string(body), want) {
 			t.Errorf("wire missing %s: %s", want, body)
 		}
+	}
+}
+
+func gatewayCatalogRegistration(t *testing.T) (toolcatalog.Registration, toolcatalog.Snapshot) {
+	t.Helper()
+	skill := `---
+name: allow_echo
+description: echo through the canonical gateway tool
+---
+` + "```fak-program" + `
+{"version":"fak.skill-program/v1","name":"allow_echo","input_schema":{"type":"object"},"executor":{"argv":["fak","echo"]},"aliases":{"codex":"functions.shell_command"}}
+` + "```"
+	registration, err := toolcatalog.CompileSkill([]byte(skill), "skills/allow-echo/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := toolcatalog.Expose([]toolcatalog.Registration{registration}, []string{"allow_echo"}, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registration, snapshot
+}
+
+func TestCatalogAliasRunsCanonicalPolicyPluginAndExecutionPath(t *testing.T) {
+	srv := newTestServer(t)
+	registration, snapshot := gatewayCatalogRegistration(t)
+	wv, env, trace, _, err := srv.syscallCatalogTool(context.Background(), snapshot, []toolcatalog.Registration{registration}, "functions.shell_command", `{"raw":"yes"}`, false, "", "trace-catalog", toolplugin.Preference{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wv.Kind != "ALLOW" || env == nil || env.Content != `{"raw":"yes"}` {
+		t.Fatalf("verdict=%+v env=%+v", wv, env)
+	}
+	if len(trace) != 2 || trace[0].Stage != "floor" || trace[1].Stage != "execute" {
+		t.Fatalf("plugin trace = %+v", trace)
+	}
+}
+
+func TestCatalogAliasUnknownAndStaleFailBeforeExecution(t *testing.T) {
+	srv := newTestServer(t)
+	registration, snapshot := gatewayCatalogRegistration(t)
+	for _, tc := range []struct {
+		name          string
+		visible       string
+		registrations []toolcatalog.Registration
+	}{
+		{name: "unknown alias", visible: "allow_echo", registrations: []toolcatalog.Registration{registration}},
+		{name: "missing registration", visible: "functions.shell_command"},
+		{name: "stale registration", visible: "functions.shell_command", registrations: []toolcatalog.Registration{func() toolcatalog.Registration { r := registration; r.Program.Description = "mutated"; return r }()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wv, env, trace, _, err := srv.syscallCatalogTool(context.Background(), snapshot, tc.registrations, tc.visible, `{}`, false, "", "trace-refused", toolplugin.Preference{})
+			if err != nil || wv.Kind != "DENY" || wv.By != "toolcatalog" || env != nil || trace != nil {
+				t.Fatalf("verdict=%+v env=%+v trace=%+v err=%v", wv, env, trace, err)
+			}
+		})
 	}
 }
