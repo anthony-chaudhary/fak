@@ -82,7 +82,7 @@ everything else is sensed and made coherent, or suppressed.
 This is the load-bearing honesty section. From a wiring survey at HEAD (a component is
 "live" when a non-test file in `cmd/fak` or `internal/gateway` imports it):
 
-- **Live, default-on, on the `fak guard`/`serve` wire** — the
+- **Live, default-on, on the `fak manage`/`serve` wire** — the
   `internal/gateway/messages.go` pipeline: a 1-hour cache-TTL upgrade → an `ctxplan`
   O(1) planned resident view → a cache-prefix-preserving compaction shed (the shed is
   suffix-shaped so the warm prefix splices through byte-for-byte, and each dropped span

@@ -18,7 +18,7 @@ description: "A pending, projected benchmark-authority row for fak guard-hop ove
 
 ## What it measures
 
-When a worker is fronted with `fak guard` (the dogfood default), every tool call crosses
+When a worker is fronted with `fak manage` (the dogfood default), every tool call crosses
 the kernel before reaching the provider. A serving stack's value proposition is that this
 safety hop (a) adds negligible latency and (b) does **not** break the provider prompt-cache.
 This row quantifies both.
@@ -30,7 +30,7 @@ This row quantifies both.
 | **prompt-cache preservation** | provider `cache_read` tokens, guarded vs direct | **PENDING** | — | needs a live provider that reports cache tokens (hardware/credential gated); the structural byte-for-byte `cache_control` forwarding is already exercised by `internal/gateway` tests |
 
 The two bounds on the PROJECTED arm are deliberate: the guard process is long-lived (one
-`fak guard` fronts the whole session), so the marginal cost of the hop is the **in-process**
+`fak manage` fronts the whole session), so the marginal cost of the hop is the **in-process**
 adjudication per tool call, not the ~6.9 ms spawned-`fak hook` boundary the in-process path
 replaces. Floor = the cheapest ALLOW (`Decide`, 362 ns); ceil = the full in-process syscall
 p50 (2.427 µs). Even the ceil is **sub-millisecond per 50-turn session** — the projection's

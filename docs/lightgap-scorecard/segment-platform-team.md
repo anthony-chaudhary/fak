@@ -57,7 +57,7 @@ A small team that operates agent infrastructure their colleagues depend on. They
 - **β** `+0.000` → `w` `+0.000`  ·  mode `parity_at_ceiling`
 - **adoption** 12 h fak vs 40 h alternative, of 40 h → load `-0.70` → `τ` `-0.867`
 - **w_net** `+0.867`
-- **cost basis** fak: POLICY.md 1,726 w plus wiring the existing agent behind `fak guard` -- no change to the agent's data flow; alternative: a formal-isolation defense requires restructuring the agent so untrusted data cannot reach the control path; one engineer-week is a conservative floor for an existing production agent
+- **cost basis** fak: POLICY.md 1,726 w plus wiring the existing agent behind `fak manage` -- no change to the agent's data flow; alternative: a formal-isolation defense requires restructuring the agent so untrusted data cannot reach the control path; one engineer-week is a conservative floor for an existing production agent
 - **Read** The sharpest and least intuitive cell on the board. fak does NOT beat the state of the art on attack success -- it TIES it, at the definitional floor, so beta is 0 and the axis itself offers no reason to switch. The entire positive score here comes from the differential adoption cost: same result, one third the integration work, because fak is a wrapper and the alternative is a rewrite. That is a real reason to buy, and it is not a security claim.
 - **Fence** Benign and under-attack UTILITY on the same suite is NEEDS_KEY -- unmeasured. A system that refuses everything also scores ASR 0. Until utility is measured, 0/38 bounds the harm but does not establish that the agent still does its job.
 
@@ -71,7 +71,7 @@ A small team that operates agent infrastructure their colleagues depend on. They
 - **β** `+0.760` → `w` `+0.996`
 - **adoption** 12 h fak vs 0 h alternative, of 40 h → load `+0.30` → `τ` `+0.310`
 - **w_net** `+0.687` → **capped at RELATIVISTIC** (OBSERVED evidence) → `w_eff` `+0.687`
-- **cost basis** compaction is on by default once `fak guard` is running; no additional configuration beyond the serve setup
+- **cost basis** compaction is on by default once `fak manage` is running; no additional configuration beyond the serve setup
 - **Read** The alternative here is a floor, not a peer: it is where a self-built harness sits until someone implements summarization. A team that rolls its own summarizer lands somewhere between the two poles, and nobody has measured where.
 - **Fence** This scores the resident-context BUDGET, which is what fak enforces, not delivered task quality across a compaction boundary. Compaction that holds 24% of the window while losing the thread is not a win, and no committed artifact measures work-preserved across a fire.
 

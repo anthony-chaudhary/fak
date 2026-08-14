@@ -389,7 +389,7 @@ cooldown advances the picker past it.
 
 ## Managed-cache posture for the worker's guard session
 
-Each worker runs under `fak guard`, and the tick threads a **managed-cache posture** onto
+Each worker runs under `fak manage`, and the tick threads a **managed-cache posture** onto
 that child's guard argv from two fleet env knobs read in the tick process:
 `FAK_MANAGED_CACHE=on|off|auto` (default `auto`) and `FAK_GUARD_API_KEY_ENV=ANTHROPIC_API_KEY`.
 On a subscription-OAuth seat `auto` stays **passive** by design (guard never speculates on a

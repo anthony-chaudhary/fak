@@ -9,8 +9,8 @@ fak m codex
 fak manage claude
 ```
 
-`manage` currently provides the complete command surface historically exposed as
-`fak guard`: all launch flags, wrapped-agent behavior, and operator subcommands such
+`manage` provides the complete command surface historically exposed by the
+legacy compatibility spelling: all launch flags, wrapped-agent behavior, and operator subcommands such
 as `allow`, `deny`, `policy`, `compile`, `sessions`, `resume`, and `restart-audit` use
 the same implementation. The optional `--` separator remains supported when flags
 or child arguments make the boundary useful:
@@ -22,7 +22,7 @@ fak m --policy examples/customer-support-readonly-policy.json -- claude
 
 ## Guard sunset
 
-`fak guard` remains a behavior-compatible compatibility alias. Its help points to
+The legacy `guard` front-door spelling remains a behavior-compatible alias. Its help points to
 `manage`/`m`, and it is not removed in this migration. New documentation, scripts,
 and operator instructions should use `fak manage` or `fak m`; existing automation
 can migrate without an immediate flag or behavior change.

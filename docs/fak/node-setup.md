@@ -39,7 +39,7 @@ fak manage claude                       # guarded interactive session
 ```
 
 `install` with no flags binds loopback only — nothing is exposed off-host, and no bearer key
-is needed. `fak guard` wraps the agent so the kernel adjudicates every tool call locally.
+is needed. `fak manage` wraps the agent so the kernel adjudicates every tool call locally.
 
 ## At home — a host plus other devices (Tailscale)
 

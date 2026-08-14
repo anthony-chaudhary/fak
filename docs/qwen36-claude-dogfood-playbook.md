@@ -21,7 +21,7 @@ llama-server -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
 fak manage --local -- claude
 ```
 
-`fak guard --local` auto-detects the server above (it probes Ollama, LM Studio, the
+`fak manage --local` auto-detects the server above (it probes Ollama, LM Studio, the
 Qwen3.6 dogfood port `8131`, then llama.cpp, in that order) and injects
 `ANTHROPIC_BASE_URL` into the Claude Code child process only — no manual exports, no
 second `fak serve` command. Everything below this section is the detailed reference:
@@ -367,7 +367,7 @@ curl -sS http://127.0.0.1:8131/v1/chat/completions \
 If `/v1/models` works but `/v1/chat/completions` fails, the Qwen server is alive but
 not ready for this dogfood path. Fix that before debugging Claude Code.
 
-The generic guard path now carries the Qwen preset tuning too: when `fak guard --local`
+The generic guard path now carries the Qwen preset tuning too: when `fak manage --local`
 detects the Qwen3.6 dogfood endpoint or a Qwen3.6 model id, it sets
 `FAK_PROVIDER_EXTRA_BODY_JSON` for that guard process to
 `{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}`. If you already set
@@ -654,7 +654,7 @@ repo-local binary automatically.
 - `fak/DOGFOOD-CLAUDE.md` documents the general Claude Code dogfood launcher,
   policy floor, isolation, and live evidence.
 - `docs/integrations/claude.md` has the "simplest command" quickstart for
-  `fak guard --local -- claude` fronting a Qwen3.6 server.
+  `fak manage --local -- claude` fronting a Qwen3.6 server.
 - `tools/qwen36_surface_smoke.py` runs the Qwen3.6 `agent`, `gateway-openai`, and
   `mcp-http` surface smoke against a model server you already started; see e.g.
   `fak/experiments/qwen36/gpu-server-r4-20260622/surface-smoke.json` for a captured run.

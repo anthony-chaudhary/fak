@@ -5,11 +5,11 @@ description: "The operating plan for turning every fak guarded session into one 
 
 # Guard-session dataset — operating plan
 
-**Goal.** Turn *every* `fak guard -- <agent>` session — now and for future
+**Goal.** Turn *every* `fak manage -- <agent>` session — now and for future
 sessions — into one **durable, curated dataset** the fleet can (1) learn from and
 train on, (2) run **regression tests** against (a policy change must not silently
 flip a historical verdict), and (3) mine to **understand how the guard loop and
-its policies behave**. The near-term forcing function is getting the `fak guard`
+its policies behave**. The near-term forcing function is getting the `fak manage`
 RSI loops *better used*: they already fold our own journals, but the raw journals
 they read are host-local, gitignored, and pruned — so the signal evaporates before
 it becomes a durable, shareable corpus.
@@ -28,7 +28,7 @@ raw material for the dataset. The pieces already in the tree:
 
 | Layer | Where | What it gives us |
 |---|---|---|
-| **Decision journal** (raw rows) | `internal/journal/journal.go` — package doc `:1`, `Row` schema `:63`, append `:236`, `Verify` `:856` | Per-adjudication rows: `kind`, `tool`, `trace_id`, `verdict`, `reason`, `by` (deciding gate), `taint`, `args_label`, `witness`, `args_digest`/`result_digest`, `call_seq`; hash-chained + tamper-evident. Off by default; `fak guard` defaults it on to `.dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl` (`cmd/fak/guard_support.go:461`, `:530`). |
+| **Decision journal** (raw rows) | `internal/journal/journal.go` — package doc `:1`, `Row` schema `:63`, append `:236`, `Verify` `:856` | Per-adjudication rows: `kind`, `tool`, `trace_id`, `verdict`, `reason`, `by` (deciding gate), `taint`, `args_label`, `witness`, `args_digest`/`result_digest`, `call_seq`; hash-chained + tamper-evident. Off by default; `fak manage` defaults it on to `.dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl` (`cmd/fak/guard_support.go:461`, `:530`). |
 | **Verdict RSI fold** | `internal/guardrsi/guardrsi.go` (`FoldRows` `:150`, `VerdictQuality` `:237`, `WorstBucket` `:248`) | Folds journals → `verdict_quality` + worst honesty hole (blank-reason-on-deny, unknown-verdict, witnessless-block, child-crash). This is "getting the guard loop used", scored by `fak guard-rsi-scorecard`. |
 | **Cross-session usage rollup** | `internal/auditusage/auditusage.go` (`Fold` `:300`, `GuardRollup` `:113`) | Pure fold of the journal + 6 other sinks into one `fak audit usage` report, with a `witnessed`/`observed` basis tag per section. |
 | **Durable central mirror** | `internal/logvault` (read via `auditusage.VaultInput`) | Hash-chained + mirror-verified backup of every journal — the durable *backup*, not a curated dataset. |
@@ -140,7 +140,7 @@ with reason+witness, quarantine, a blank-reason deny, a child-crash) and asserts
 folded record's counts, honesty-holes, outcome, policy attribution, and example
 redaction — same discipline as `guardrsi_test.go` and the `dispatch sessions` fold.
 
-Later (fan-out): the CLI surface `fak guard corpus build|verify` that reads the real
+Later (fan-out): the CLI surface `fak manage corpus build|verify` that reads the real
 `.dispatch-runs/guard-audit/*` (via `guardrsi.JournalPaths`) + logvault, writes the
 committed dataset under `docs/nightrun/guard-corpus.jsonl`, and bounds it with a `Cut`.
 
@@ -167,7 +167,7 @@ payoff the dataset promised — it fell out of the first real fold.
 
 ### Track A fan-out backlog (file under the epic)
 - **A-advisory** — add `ADVISORY` to `guardrsi.KnownVerdicts` (+ its verdict-quality test), so the RSI loop stops counting monitor advisories as honesty holes; re-baseline the `guard_rsi_debt` scorecard under the corrected metric.
-- **A3** — CLI `fak guard corpus build|verify|stats`; wire into `fak garden` tick so every session appends (mirrors the `guard-verdict-rsi route` auto-tick).
+- **A3** — CLI `fak manage corpus build|verify|stats`; wire into `fak garden` tick so every session appends (mirrors the `guard-verdict-rsi route` auto-tick).
 - **A4** — durable policy attribution: emit a `SESSION_BOUNDARY` journal row (or extend `Row`) carrying `policy_digest`, so aggregated/mirrored journals stay attributable with no sidecar. Keep it out of the hash-chain pre-image (like the crash/restart fields, `journal.go:106`+) so existing journals verify byte-for-byte.
 - **A5 (regression harness)** — golden-dataset replay: re-adjudicate recorded inputs at a pinned policy digest, diff verdicts, fail on an unintended flip. The regression-test deliverable.
 - **A6** — bound + commit: `Cut`-style compaction (`internal/gatewayusageledger/cut.go` pattern) so the committed corpus stays diffable; class-balanced sampling of allows.

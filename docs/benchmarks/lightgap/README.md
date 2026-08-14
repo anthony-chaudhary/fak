@@ -9,7 +9,7 @@ Run one real task twice with byte-identical initial prompt, repository, tool ava
 ```powershell
 fak lightgap-bench init --kind session-longevity --out _scratch/session-long.json
 fak lightgap-bench arm --spec _scratch/session-long.json --arm bare -- claude
-fak lightgap-bench arm --spec _scratch/session-long.json --arm fak -- fak guard -- claude
+fak lightgap-bench arm --spec _scratch/session-long.json --arm fak -- fak manage -- claude
 fak lightgap-bench check --artifact _scratch/session-long.json
 ```
 

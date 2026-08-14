@@ -63,7 +63,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 ### The harness's own bypass flag does not reach the floor
 
 Claude Code's `--dangerously-skip-permissions` disables *Claude Code's own*
-permission prompt. `fak guard` **passes it through to the child unchanged and never
+permission prompt. `fak manage` **passes it through to the child unchanged and never
 consumes it** (asserted in `cmd/fak/guard_codex_test.go`), so a child launched with
 its own permission bypass *still* has every proposed tool call cross fak's floor.
 The harness can turn off its prompts; it cannot turn off the kernel.

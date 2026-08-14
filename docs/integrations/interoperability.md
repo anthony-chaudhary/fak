@@ -7,11 +7,11 @@ description: "fak's interoperability stance — it adopts the agent, model, and 
 
 fak does not ask you to adopt its agent, its model, or its way of building agents. It
 puts a capability floor in front of the stack you already run. You point one base URL at
-`fak serve` (or wrap your agent with `fak guard`), and every tool call your agent
+`fak serve` (or wrap your agent with `fak manage`), and every tool call your agent
 proposes crosses that floor before it runs. Your prompts, your tools, and your framework
 stay exactly as they were.
 
-> TL;DR: keep your agent, your model, and your framework. Run `fak guard -- claude`, or
+> TL;DR: keep your agent, your model, and your framework. Run `fak manage -- claude`, or
 > point one base URL at `fak serve`, and every tool call crosses a default-deny floor
 > first. The full sourced table of what connects is the
 > [compatibility matrix](compatibility-matrix.md).
@@ -40,7 +40,7 @@ model, so it can referee your model's tool calls with no conflict of interest. A
 own guardrail grades its own homework. fak is the disinterested party in the room.
 
 So the suggested path stays small. Keep your stack, and add the floor. Start from the
-built-in fail-closed policy (`fak guard --dump-policy`), narrow it to the tools your agent
+built-in fail-closed policy (`fak manage --dump-policy`), narrow it to the tools your agent
 genuinely needs, then switch on the audit journal when you want a durable record.
 Everything else about how you build the agent is yours.
 
@@ -62,7 +62,7 @@ Those are the wires fak serves to clients. It can proxy on to more than it expos
 `--provider` flag selects an upstream of OpenAI, Anthropic, Gemini, or xAI, so the same
 gate sits in front of whichever model actually serves your tokens.
 
-`fak guard -- <agent>` automates the wiring for the agents it recognizes. Name a known
+`fak manage -- <agent>` automates the wiring for the agents it recognizes. Name a known
 agent and guard injects the right wire and base URL into the child process only, leaving
 your shell untouched:
 
@@ -83,7 +83,7 @@ The [compatibility matrix](compatibility-matrix.md) answers a narrow question fo
 surveyed tools: does it let you set a base URL? This page adds the sharper one. Can fak
 actually adjudicate that wire, and how cleanly? The grades below are a **connect grade** — a
 wire fact about how cleanly fak adjudicates that wire. They are **not** support status: that
-has one canonical vocabulary (**`fak guard` + guide** / **guide** / **universal recipe**),
+has one canonical vocabulary (**`fak manage` + guide** / **guide** / **universal recipe**),
 defined once in the
 [integration index](README.md#support-status-the-canonical-vocabulary), which is
 authoritative. A tool carries one support label from there *and* one connect grade from
@@ -104,9 +104,9 @@ guide (✓):
 
 | Tool | Connects via | Grade |
 |---|---|---|
-| Claude Code ✓ | `ANTHROPIC_BASE_URL`, or `fak guard -- claude` | Drop-in |
-| OpenAI Codex ✓ | `OPENAI_BASE_URL`, or `fak guard -- codex` | Drop-in |
-| OpenCode ✓ | `OPENAI_BASE_URL` / `opencode.json`, or `fak guard -- opencode` | Drop-in |
+| Claude Code ✓ | `ANTHROPIC_BASE_URL`, or `fak manage -- claude` | Drop-in |
+| OpenAI Codex ✓ | `OPENAI_BASE_URL`, or `fak manage -- codex` | Drop-in |
+| OpenCode ✓ | `OPENAI_BASE_URL` / `opencode.json`, or `fak manage -- opencode` | Drop-in |
 | Cursor ✓ | `fak serve --stdio` (MCP) or an OpenAI-compatible proxy base URL | Drop-in |
 | OpenAI / Anthropic SDK (raw) | `base_url=` | Drop-in |
 

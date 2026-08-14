@@ -19,7 +19,7 @@ will create or sync GitHub issues by default.
   and either one or two `next_steps` or a `no_next_step_reason`.
 - `internal/taskmgr.HandoffIssueBody` already renders a stable dedupe marker,
   task identity, completion witness, current state, "why next", and evidence.
-- `fak guard` Stop hooks can enforce that handoff before a clean stop, and can
+- `fak manage` Stop hooks can enforce that handoff before a clean stop, and can
   optionally run `fak task handoff --live` before allowing the stop.
 - `fak maturity route` turns maturity backlog rows into deduped public issues,
   but its body is narrower: lane, rung, gap, source, suggested action, witness.
@@ -78,7 +78,7 @@ Default behavior should be context-specific:
 
 | Context | Default | Create/update only if |
 |---|---|---|
-| `fak guard` clean Stop handoff | validate by default; live GitHub sync only when `--task-handoff-live` is set | handoff is verified done, strict-scoped, public-routeable, and has 1-2 next steps |
+| `fak manage` clean Stop handoff | validate by default; live GitHub sync only when `--task-handoff-live` is set | handoff is verified done, strict-scoped, public-routeable, and has 1-2 next steps |
 | `fak loop drive` witnessed completion | validate handoff by default; issue sync remains explicit | loop witness passed and handoff strict-scope review passed |
 | `fak task handoff` CLI | dry-run by default; `--live` opt-in | candidate contract passes and marker dedupe has been checked |
 | `score-signal` | schedule-live allowed | self-test green, cap applied, dedupe/update path proven, regression is measured |
@@ -176,7 +176,7 @@ Apply the same review before live creation in:
 - `bench-signal`
 - `gate-signal`
 - `idea-scout`
-- any future `fak task handoff --live` call from `fak guard`
+- any future `fak task handoff --live` call from `fak manage`
 
 For Python-era feeders, the near-term gate is a `fak issue contract` subprocess
 right before `gh issue create/edit`. The long-term direction is to port the core

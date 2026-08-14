@@ -124,7 +124,7 @@ the `--addr` port.
 **Related:** [`GETTING-STARTED.md`](../../GETTING-STARTED.md) (the full first-session
 walkthrough and the build-time troubleshooting table) ·
 [`docs/integrations/claude.md`](../integrations/claude.md) (the one-command
-`fak guard -- claude` front door) ·
+`fak manage -- claude` front door) ·
 [`docs/fak/tutorial.md`](../fak/tutorial.md) (the guided first session with captured
 output).
 

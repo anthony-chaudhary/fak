@@ -50,7 +50,7 @@ setup செலவின் ஏறுவரிசையில் நான்க
 |---|---|---|
 | **0 — kernel-ஐ முயற்சிக்க** | adjudication எல்லையை offline-இல் இயக்கி/அளக்க | `go build` — key/GPU/network தேவையில்லை |
 | **1 — உண்மையான model-க்கு முன்** | வேறெங்கோ serve செய்யும் model-க்கு (Ollama / vLLM / llama.cpp / cloud) முன் kernel-ஐ வைக்க | + இயங்கும் OpenAI-compatible server |
-| **1b — ஒரே கட்டளையில் local model** | இருக்கும் agent-உடன் local GGUF model-ஐ in-kernel இயக்க — key இல்லை, network இல்லை, இரண்டாவது terminal இல்லை | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — ஒரே கட்டளையில் local model** | இருக்கும் agent-உடன் local GGUF model-ஐ in-kernel இயக்க — key இல்லை, network இல்லை, இரண்டாவது terminal இல்லை | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — இணைந்த in-kernel model** | kernel சொந்தமாகக் கொண்டிருக்கும் pure-Go SmolLM2 forward pass | + (real weights) Python export |
 
 நீங்கள் வெறுமனே **fak-ஐ முன் வைத்து ஒரு பயனுள்ள model-ஐ serve** செய்ய விரும்பினால்,

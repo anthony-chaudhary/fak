@@ -1,12 +1,12 @@
 ---
 title: "Local-model coding witness — the runbook for issue #1061"
-description: "The exact, end-to-end command sequence to measure a small local model behind fak guard on a minimal coding task, with an honest local-vs-frontier A/B comparison."
+description: "The exact, end-to-end command sequence to measure a small local model behind fak manage on a minimal coding task, with an honest local-vs-frontier A/B comparison."
 ---
 
-# Local-model coding witness runbook — `fak guard --gguf <coder>`
+# Local-model coding witness runbook — `fak manage --gguf <coder>`
 
 > **What this is.** The executable path to a *witnessed* local-model coding task: a tiny
-> Python project with one failing unit test, run through `fak guard --gguf <coder>` on CPU,
+> Python project with one failing unit test, run through `fak manage --gguf <coder>` on CPU,
 > with an honest A/B comparison against a frontier model. This is the minimal, reproducible
 > coding task the issue #1061 acceptance criteria demand.
 >
@@ -23,8 +23,8 @@ description: "The exact, end-to-end command sequence to measure a small local mo
 |---|---|---|
 | Minimal coding fixture | **landed** | `testdata/coding_smoke/` — a tiny Python project with one failing test |
 | Coding agent policy | **landed** | `examples/coding-agent-safe.json` — denies dangerous calls (rm -rf, sudo, git push) |
-| `fak guard --gguf` path | **landed** | `fak guard --gguf <path> -- <agent>` loads a local model and guards the agent |
-| Decision journal | **landed** | `fak guard --audit FILE` writes a hash-chained verdict journal |
+| `fak manage --gguf` path | **landed** | `fak manage --gguf <path> -- <agent>` loads a local model and guards the agent |
+| Decision journal | **landed** | `fak manage --audit FILE` writes a hash-chained verdict journal |
 | **Local-model completion rate** | **`pending real run`** | this runbook |
 | **Local-vs-frontier A/B numbers** | **`pending real run`** | this runbook |
 
@@ -45,7 +45,7 @@ The honest fence: the fixture is real (`python -m unittest test_calculator.py` f
 
 ---
 
-## 3. The local-model arm: `fak guard --gguf <coder>`
+## 3. The local-model arm: `fak manage --gguf <coder>`
 
 Serve a small local model through the in-kernel engine, then guard an agent:
 
@@ -55,9 +55,9 @@ cd testdata/coding_smoke
 python -m unittest test_calculator.py
 # Expected: 1 test fails (test_add_buggy), 1 passes (test_subtract_correct)
 
-# Then, run the agent through fak guard
+# Then, run the agent through fak manage
 cd ../..
-fak guard \
+fak manage \
   --gguf ~/.cache/huggingface/hub/models--Qwen--Qwen2.5-Coder-1.5B-Instruct/snapshots/*/Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf \
   --policy examples/coding-agent-safe.json \
   --audit coding-smoke-local.jsonl \
@@ -67,11 +67,11 @@ fak guard \
 ```
 
 What happens:
-1. `fak guard` starts an in-process gateway on a private port
+1. `fak manage` starts an in-process gateway on a private port
 2. The gateway loads the GGUF model via `--gguf` (no `--base-url` = in-kernel engine)
 3. Every tool call the agent proposes is adjudicated against the policy floor
 4. Verdicts are written to `coding-smoke-local.jsonl` (hash-chained, tamper-evident)
-5. On exit, `fak guard` prints a summary of ALLOW/DENY counts
+5. On exit, `fak manage` prints a summary of ALLOW/DENY counts
 
 Capture the outcome:
 - Did the agent complete? (Y/N)
@@ -81,12 +81,12 @@ Capture the outcome:
 
 ---
 
-## 4. The frontier arm: `fak guard --provider anthropic`
+## 4. The frontier arm: `fak manage --provider anthropic`
 
 Run the *same* task against a frontier model, with the same policy floor:
 
 ```bash
-fak guard \
+fak manage \
   --provider anthropic \
   --model claude-3-5-haiku-20241022 \
   --policy examples/coding-agent-safe.json \
@@ -125,7 +125,7 @@ This is exactly the point: **the kernel gives you frontier-grade safety on a loc
 
 - Fixture: `testdata/coding_smoke/` — minimal Python project with one failing test
 - Policy: `examples/coding-agent-safe.json` — denies destructive calls (`rm -rf`, `sudo`, `git push`, etc.)
-- Guard path: `fak guard --gguf <path> -- <agent>` — documented in GETTING-STARTED.md §5
+- Guard path: `fak manage --gguf <path> -- <agent>` — documented in GETTING-STARTED.md §5
 - Decision journal: `coding-smoke-{local,frontier}.jsonl` — hash-chained, replayable with `fak audit verify`
 
 ---

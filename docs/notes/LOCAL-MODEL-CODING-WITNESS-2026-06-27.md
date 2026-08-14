@@ -1,6 +1,6 @@
 ---
 title: "Local-model coding witness — results (MEASURED)"
-description: "The measured results of running a small local model behind fak guard on a minimal coding task, with an honest local-vs-frontier A/B comparison. Capability axis measured live against Qwen2.5-Coder via a local Ollama server on 2026-06-27; governance axis witnessed via the replay-trace adjudication path."
+description: "The measured results of running a small local model behind fak manage on a minimal coding task, with an honest local-vs-frontier A/B comparison. Capability axis measured live against Qwen2.5-Coder via a local Ollama server on 2026-06-27; governance axis witnessed via the replay-trace adjudication path."
 ---
 
 # Local-model coding witness — results (2026-06-27)
@@ -13,7 +13,7 @@ description: "The measured results of running a small local model behind fak gua
 > The `add()`-bug fixture below was driven through a real local `Qwen2.5-Coder` model
 > served by Ollama on 2026-06-27; both the 3B and 7B rungs produced the correct fix and
 > the fixture's test went from 1-fail to 2-pass. The kernel's governance axis was
-> witnessed separately via `fak guard --replay-trace` (8 adjudicated verdicts, 3 dangerous
+> witnessed separately via `fak manage --replay-trace` (8 adjudicated verdicts, 3 dangerous
 > calls denied, hash-chained journal). The honest gaps surfaced by the run — which client
 > wires route through fak, and why a no-tool-call chat turn records zero verdicts — are
 > stated plainly in [Findings](#findings--what-the-real-run-taught-us). To reproduce, see
@@ -26,7 +26,7 @@ description: "The measured results of running a small local model behind fak gua
 ```bash
 # Local model, OpenAI-wire harness (codex/aider/opencode) — auto-detect a running server.
 # This is the path measured in this witness: --local found Ollama and proxied qwen2.5-coder.
-fak guard --local \
+fak manage --local \
   --policy examples/coding-agent-safe.json \
   --audit coding-smoke-local.jsonl \
   -- codex "Fix the failing test in testdata/coding_smoke and run the tests to verify."
@@ -34,14 +34,14 @@ fak guard --local \
 # Local model, Anthropic-wire harness (claude) — no server needed, fak runs it in-kernel.
 # Use --gguf (NOT --local) for claude: fak serves the model on the /v1/messages wire claude
 # speaks, so the turn actually routes through the kernel. (See Findings #1.)
-fak guard --gguf qwen2.5-coder:3b \
+fak manage --gguf qwen2.5-coder:3b \
   --policy examples/coding-agent-safe.json \
   --audit coding-smoke-local.jsonl \
   -- claude --allow-exec \
   -p "Fix the failing test in testdata/coding_smoke. Run the tests to verify."
 
 # Frontier model (same task), for the cost/capability A/B.
-fak guard --provider anthropic --model claude-3-5-haiku-20241022 \
+fak manage --provider anthropic --model claude-3-5-haiku-20241022 \
   --policy examples/coding-agent-safe.json \
   --audit coding-smoke-frontier.jsonl \
   -- claude --allow-exec \
@@ -80,7 +80,7 @@ python -m unittest test_calculator.py
 
 Run date: **2026-06-27**. Host: a Windows dev box (no GPU) with a local **Ollama** server
 on `127.0.0.1:11434` serving `qwen2.5-coder` GGUFs. The model was driven over the
-OpenAI-compatible `/v1/chat/completions` wire — the same wire `fak guard --local` detects
+OpenAI-compatible `/v1/chat/completions` wire — the same wire `fak manage --local` detects
 and proxies. Temperature 0, so the capability result is deterministic for this fixture.
 
 ### Capability — does the local model fix the bug?
@@ -100,9 +100,9 @@ capability ramp only shows up on harder tasks (see the honest-fence note below).
 ### Governance — does the kernel adjudicate the loop?
 
 The safety floor fires on **tool calls**, not on plain chat. Witnessed via the
-`fak guard --replay-trace internal/gateway/testdata/guard-trace-e2e.json` path, which posts
+`fak manage --replay-trace internal/gateway/testdata/guard-trace-e2e.json` path, which posts
 a fixture of real `tool_use` turns through the exact same adjudication code
-`fak guard -- <agent>` uses:
+`fak manage -- <agent>` uses:
 
 | Decisions | Allowed | Denied | Denied calls | Journal |
 |---:|---:|---:|---|---|
@@ -121,11 +121,11 @@ stated here rather than smoothed over, because the witness exists to be honest a
 capability ramp.
 
 1. **Historical `--local` / `claude` gap.** At the time of this 2026-06-27 witness,
-   `fak guard --local` wired only the child's `OPENAI_BASE_URL`/`OPENAI_API_BASE` to
+   `fak manage --local` wired only the child's `OPENAI_BASE_URL`/`OPENAI_API_BASE` to
    the in-process gateway. That governed **codex / aider / opencode** — OpenAI-wire
-   clients — but not `claude`, which reads `ANTHROPIC_BASE_URL`. A `fak guard --local
+   clients — but not `claude`, which reads `ANTHROPIC_BASE_URL`. A `fak manage --local
    -- claude` turn therefore silently used Claude's own upstream, so the gateway saw
-   zero traffic and the journal stayed empty. Current `fak guard` now also injects
+   zero traffic and the journal stayed empty. Current `fak manage` now also injects
    `ANTHROPIC_BASE_URL` when the upstream is OpenAI-compatible, so `--local` can route
    Claude Code through the guard's Anthropic `/v1/messages` surface while proxying
    inference to a detected local OpenAI-compatible model server.
@@ -149,7 +149,7 @@ capability ramp.
   temperature 0. Latency and token counts are the server's own `usage` numbers (OBSERVED,
   relayed from Ollama — not fak-authored). Correctness is the fixture's own
   `python -m unittest` oracle (WITNESSED).
-- **Governance row:** **WITNESSED** via `fak guard --replay-trace` on the same box — the
+- **Governance row:** **WITNESSED** via `fak manage --replay-trace` on the same box — the
   verdicts and the 8-row hash-chained journal are fak-authored (the kernel computed them).
 - **Frontier arm:** Not run head-to-head here. The capability claim is *not* "local beats
   frontier"; on a one-line bug both solve it, so the interesting number is cost ($0 local
@@ -174,7 +174,7 @@ capability ramp.
 - Runbook: `docs/benchmarks/LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md` — the exact commands to run
 - Fixture: `testdata/coding_smoke/` — the minimal Python project
 - Policy: `examples/coding-agent-safe.json` — the safety floor
-- Artifacts: `coding-smoke-{local,frontier}.jsonl` — the hash-chained decision journals (written by `fak guard --audit`)
+- Artifacts: `coding-smoke-{local,frontier}.jsonl` — the hash-chained decision journals (written by `fak manage --audit`)
 - BENCHMARK-AUTHORITY row: See `BENCHMARK-AUTHORITY.md` → **Local-model coding witness (2026-06-27)**
 
 ---

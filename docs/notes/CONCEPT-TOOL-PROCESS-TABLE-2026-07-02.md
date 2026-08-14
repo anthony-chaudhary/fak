@@ -19,7 +19,7 @@ cancel → post-kill quarantine) is witnessed end-to-end in-process. What
 remains of seam 1 is the wire adapter (the gateway/guard observation
 plumbing). Seam 4 is **shipped and auto-installed**: `fak toolproc hook
 (pre|post|stop)` turns any hook-capable harness's firings into journal
-events, and `fak guard` now installs the PreToolUse/PostToolUse/SessionEnd
+events, and `fak manage` now installs the PreToolUse/PostToolUse/SessionEnd
 hooks for Claude children by default (observe mode, fail-open,
 `--toolproc-hooks off` to disable) — a default guarded session carries a
 live `fak toolproc ps` table with zero setup, and SessionEnd (never Stop,
@@ -74,7 +74,7 @@ Concretely, on today's floor:
   runtime deadline, notice a stall, or reap an orphan at tool-call
   granularity. All existing watchdog machinery sits one or more levels up:
   `internal/procguard` (OS processes), `internal/taskmgr` (fak's own process
-  tasks), `internal/timeoutphase` (worker post-mortems), `fak guard
+  tasks), `internal/timeoutphase` (worker post-mortems), `fak manage
   --max-duration` and the resume watchdog (sessions/runs), `fleetmon` (fleet).
 - The no-babysitting doctrine
   ([CONCEPT-NO-BABYSITTING-2026-07-01](CONCEPT-NO-BABYSITTING-2026-07-01.md))
@@ -205,7 +205,7 @@ and advice stream. None of this is wired yet.
    for repeated identical calls; fail-open — observation never wedges the
    harness). The journal is the same one `fak toolproc ps --events` folds,
    so a hooked session has a live table today: a call that never posts stays
-   RUNNING, and session end flags survivors `TOOL_ORPHANED`. `fak guard`
+   RUNNING, and session end flags survivors `TOOL_ORPHANED`. `fak manage`
    auto-installs the three hook lines for Claude children (`--toolproc-hooks`,
    observe by default). The streamed-output pulse source is **bridged**:
    a launch post announcing a background id spawns a second proc `bg:<id>`
@@ -253,6 +253,6 @@ and advice stream. None of this is wired yet.
 | `internal/procguard` | OS process | runaway CPU/threads/handles, orphan sprawl |
 | `internal/taskmgr` | fak's own process | task/step progress, ETA, liveness |
 | `internal/timeoutphase` | dispatch worker | post-mortem phase of a timeout |
-| `fak guard --max-duration`, resume watchdog | session/run | wall-clock budget, stalled runs |
+| `fak manage --max-duration`, resume watchdog | session/run | wall-clock budget, stalled runs |
 | `internal/fleetmon` | fleet | janitor over worker process trees |
 | **`internal/toolproc` (this note)** | **tool call** | **deadline, stall, orphan, post-kill admission** |

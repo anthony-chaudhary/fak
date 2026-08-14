@@ -14,5 +14,5 @@
 [16.4, "o", "$ ./fak preflight --tool get_user_details --args \"{}\"\r\n"]
 [17.1, "o", "verdict=ALLOW reason=NONE by=monitor\r\n"]
 [18.5, "o", "\r\n# That's the whole boundary: default-deny, fail-closed, model-independent.\r\n"]
-[19.3, "o", "# Same binary next wraps your agent:  fak guard -- claude\r\n"]
+[19.3, "o", "# Same binary next wraps your agent:  fak manage -- claude\r\n"]
 [21.0, "o", "$ \r\n"]

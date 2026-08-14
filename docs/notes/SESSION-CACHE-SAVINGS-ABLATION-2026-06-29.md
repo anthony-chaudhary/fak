@@ -5,12 +5,12 @@ description: "Anthropic's prompt cache saved the ~25.5M tokens, not fak; fak onl
 
 # Cache savings in one session: what fak did, and what it didn't
 
-*2026-06-29 — a read of the `fak guard` exit summary for resumed session `c6723f7c`.*
+*2026-06-29 — a read of the `fak manage` exit summary for resumed session `c6723f7c`.*
 
 The guard printed a big number on the way out:
 
 ```
-fak guard: cache saving — saved ~25.5M input-token-equiv across 122 turn(s)
+fak manage: cache saving — saved ~25.5M input-token-equiv across 122 turn(s)
            (NET of the write premium, 86% of the uncached cost)
 ```
 
@@ -27,7 +27,7 @@ attribution is clear, then shows the small set of things fak actually changed.
 |---|---|---|
 | **No cache** — projected, every prompt token billed cold at 1× | **~29.65M** | baseline |
 | **Normal cache** — plain `claude`, Anthropic prompt cache on | **~4.15M** | **−86%** |
-| **fak guard** — the same cache, plus fak's floor | **~4.15M** on the token axis | **−86%, identical** + 1,104 round-trips saved |
+| **fak manage** — the same cache, plus fak's floor | **~4.15M** on the token axis | **−86%, identical** + 1,104 round-trips saved |
 
 The first two columns are the whole story on the token axis. fak's column is the
 interesting one *because it is the same as the column to its left* — by design.
@@ -37,7 +37,7 @@ ASCII, for a terminal:
 ```
 No cache    (projected)  ████████████████████████████████  29.65M
 Normal cache (claude)    ████▌                              4.15M   ── 86% saved
-fak guard   (cache+floor)████▌                              4.15M   ── identical
+fak manage   (cache+floor)████▌                              4.15M   ── identical
                               └─ req.Raw forwarded verbatim, prefix byte-identical
 ```
 
@@ -78,9 +78,9 @@ comment in `cache_pricing.go` is explicit: *"fak relays the provider's token cou
 it does not author them."* So "fak saved 25.5M" is the wrong sentence. The right one
 is **"the provider cache saved 25.5M; fak made it legible."**
 
-## Why "normal cache" and "fak guard" are identical on the token axis
+## Why "normal cache" and "fak manage" are identical on the token axis
 
-`fak guard -- claude` runs in **passthrough**: it forwards `req.Raw` byte-for-byte to
+`fak manage -- claude` runs in **passthrough**: it forwards `req.Raw` byte-for-byte to
 the real Anthropic API (`internal/gateway/messages.go:512`). The client's
 `cache_control` breakpoint — and every byte before it — is unchanged through the
 kernel hop. So the prefix the provider hashes for its cache is identical to what
@@ -131,7 +131,7 @@ not savings.
 No. The natural follow-up to "fak didn't move the 25.5M" is *"so are its features
 off?"* They are not. Re-derived from the entrypoint source (`cmd/fak/token_defaults.go`,
 which locks the defaults against regression), **all six token-savers are default-on**
-on the `fak guard -- claude` route:
+on the `fak manage -- claude` route:
 
 ![fak feature enablement on the guard route](session-feature-enablement-2026-06-29.svg)
 
@@ -168,7 +168,7 @@ Two honest caveats this audit surfaces:
   referee), not a dark switch.
 
 If you *want* fak to reclaim more on this route, the knob is to tighten the budgets, e.g.
-`fak guard --compact-history-budget 8000 -- claude` (vs the ~48k default), at the cost of
+`fak manage --compact-history-budget 8000 -- claude` (vs the ~48k default), at the cost of
 a larger blast radius on the uncached tail. The defaults are deliberately conservative.
 
 ## Reproduce / verify

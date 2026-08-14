@@ -7,7 +7,7 @@ keywords:
   - migrate to fak
   - put fak in front of an existing agent
   - repoint base URL
-  - fak guard
+  - fak manage
   - dos init hooks
   - 10-minute migration checklist
 date: 2026-07-03
@@ -34,11 +34,11 @@ Read this first, because it is most of the reassurance:
 
 - **Your model and your keys stay put.** fak fronts the engine you already run
   (Ollama, vLLM, llama-server, or a cloud API); it is not a replacement token
-  engine. On the Claude path `fak guard` uses your logged-in Pro/Max
+  engine. On the Claude path `fak manage` uses your logged-in Pro/Max
   **subscription** by default — no API key needed.
 - **Your prompts, tool definitions, and agent loop stay put.** fak returns only the
   admitted (or repaired) tool calls; your existing loop still executes them.
-- **Your IDE and harness stay put.** `fak guard` injects the base URL into the
+- **Your IDE and harness stay put.** `fak manage` injects the base URL into the
   **child process only**, so your shell, your `settings.json`, and any other agent
   in another terminal are untouched.
 
@@ -71,7 +71,7 @@ config-file edit:
 fak manage claude
 ```
 
-`fak guard` starts an in-process gateway on a private loopback port, loads a secure
+`fak manage` starts an in-process gateway on a private loopback port, loads a secure
 capability floor embedded in the binary, injects `ANTHROPIC_BASE_URL` into the child
 only, and proxies to the real Anthropic API on your subscription. Every tool call
 your agent proposes crosses the floor first.
@@ -122,7 +122,7 @@ Shipped starting points to copy from live in
 [examples/](https://github.com/anthony-chaudhary/fak/tree/main/examples):
 `dev-agent-policy.json`, `customer-support-readonly-policy.json`,
 `research-agent-policy.json`. Load your floor with `--policy policy.json` on either
-`fak guard` or `fak serve`. Honest scope: the floor bounds which tools run by tool
+`fak manage` or `fak serve`. Honest scope: the floor bounds which tools run by tool
 name; it does not yet filter the arguments of an allow-listed tool, so keep
 irreversible operations off the allow-list rather than allow-listing broadly. The
 full discussion is in
@@ -141,11 +141,11 @@ fak preflight --policy policy.json --tool search_kb --args "{}"
 ```
 
 The refusal is a decision, not an error. When you run a real turn under
-`fak guard`, the same verdicts show up in the exit summary it prints when the agent
+`fak manage`, the same verdicts show up in the exit summary it prints when the agent
 exits:
 
 ```
-fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
+fak manage: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
   blocked: SELF_MODIFY      x1
 ```

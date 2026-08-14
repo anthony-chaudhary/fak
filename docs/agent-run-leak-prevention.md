@@ -230,7 +230,7 @@ arrives after revocation is already covered by `TOOL_RESULT_AFTER_KILL`.
 | Gateway proposed tool calls | Mint or preserve ToolCallID; attach parent AgentRun; run SpawnAttempt for launch-capable tools. |
 | Anthropic `tool_use` / `tool_result` | Preserve `tool_use_id` as ToolCallID through result admission. |
 | MCP server/client adapters | Map request, progress, cancellation, and completion to ToolCallID plus AgentRun owner. |
-| `fak guard` hook adapter | Stamp hook-observed launches with parent AgentRun and ToolCallID before they enter the toolproc journal. |
+| `fak manage` hook adapter | Stamp hook-observed launches with parent AgentRun and ToolCallID before they enter the toolproc journal. |
 | Native agent loop | Mint root AgentRun at loop start and child AgentRuns through SpawnAttempt only. |
 | Remote or background launch adapters | Report SpawnAttempt before dispatch, then bind returned pid/job id to ToolCallID. |
 

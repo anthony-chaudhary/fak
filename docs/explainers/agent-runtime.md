@@ -70,7 +70,7 @@ result admission → continuation**. For the syscall analogy behind the contract
 | Exercise the reference loop with a live compatible provider | `fak agent` plus provider configuration | The same turn-and-tool path with live model calls; use the CLI help and environment/config authorities for the selected provider. |
 | Host the native managed runtime as a service | `fak serve --native` | A long-lived agent application runtime that hosts sessions and the loop. Start with [Runtime vs client](runtime-vs-client.md), then the [server quickstart](../fak/server-quickstart.md). |
 | Put an existing model client behind fak | `fak serve` | The gateway runtime for compatible model traffic; this governs calls but does not move the client's own agent loop into fak. See [Gateway](gateway.md). |
-| Govern an existing local harness | `fak guard` | A governed client path for a harness you already run. It is a client relationship, not a second server layer. See [Runtime vs client](runtime-vs-client.md). |
+| Govern an existing local harness | `fak manage` | A governed client path for a harness you already run. It is a client relationship, not a second server layer. See [Runtime vs client](runtime-vs-client.md). |
 
 The runtime's inputs are the task/conversation, tool definitions and dispatcher, policy,
 and planner/model configuration. Its observable outputs are the answer or completion,

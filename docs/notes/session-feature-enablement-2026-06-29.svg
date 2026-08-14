@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1180" height="634" viewBox="0 0 1180 634" font-family="Segoe UI,Helvetica,Arial,sans-serif">
 <rect x="0.0" y="0.0" width="1180.0" height="634.0" rx="0" fill="#ffffff" />
 <text x="44.0" y="46.0" font-size="25" fill="#0b1f3a" text-anchor="start" font-weight="700">Is fak actually turned on?</text>
-<text x="44.0" y="72.0" font-size="13.5" fill="#5b6b82" text-anchor="start" font-weight="normal">Feature enablement on  fak guard -- claude  — verified against HEAD, 2026-06-29</text>
+<text x="44.0" y="72.0" font-size="13.5" fill="#5b6b82" text-anchor="start" font-weight="normal">Feature enablement on  fak manage -- claude  — verified against HEAD, 2026-06-29</text>
 <text x="44.0" y="95.0" font-size="12.5" fill="#14233b" text-anchor="start" font-weight="600">All six token-savers are DEFAULT-ON (source-locked in cmd/fak/token_defaults.go). Small savings on this route is NOT "features off" — it's the cached-prefix structure below.</text>
 <rect x="28.0" y="116.0" width="1124.0" height="26.0" rx="6" fill="#eef2f7" />
 <text x="44.0" y="134.0" font-size="11.5" fill="#5b6b82" text-anchor="start" font-weight="700">LEVER</text>

@@ -1,13 +1,13 @@
 ---
 title: "compress default-on witness: the native context-compressor is safe to ship enabled (2026-07-06)"
-description: "The no-model, re-runnable evidence that flipping fak guard's --compress from off-by-default to ON is a net-true, do-no-harm default: a WITNESSED 81.6% aggregate corpus saving (recoverable), a deterministic pure-function compressor, a poison-skip + Quarantine-outranked security order, a clear one-flag opt-out, and a cache-safe wire no-op on the flagship Anthropic passthrough. Answers the six net-true-value questions."
+description: "The no-model, re-runnable evidence that flipping fak manage's --compress from off-by-default to ON is a net-true, do-no-harm default: a WITNESSED 81.6% aggregate corpus saving (recoverable), a deterministic pure-function compressor, a poison-skip + Quarantine-outranked security order, a clear one-flag opt-out, and a cache-safe wire no-op on the flagship Anthropic passthrough. Answers the six net-true-value questions."
 slug: compress-default-on-witness
 date: 2026-07-06
 ---
 
 # compress default-on witness (2026-07-06)
 
-`fak guard`'s efficiency levers already ship ON by default — `managed-cache=auto`,
+`fak manage`'s efficiency levers already ship ON by default — `managed-cache=auto`,
 `ctx-view-budget`, `compact-history-budget`, `elide-result-bytes`, `mcp-register`. The
 **native context-compressor** (`--compress`, `internal/headroom`) was the last one still
 default-OFF. This note is the evidence that flipping it ON is a **net-true, do-no-harm**
@@ -32,7 +32,7 @@ value ON by default — safely, or gate it honestly").
 
 3. **Scope — where it holds, where it vanishes.** The gate rewrites the DECODED messages the
    kernel adjudicates (`req.Messages`), so its saving reaches the model **only on wires that
-   re-serialize those messages** — codex / OpenAI / local / dual. On the `fak guard -- claude`
+   re-serialize those messages** — codex / OpenAI / local / dual. On the `fak manage -- claude`
    **Anthropic passthrough the client's raw bytes are forwarded verbatim (`req.Raw`)**, so the
    compressor is a **wire no-op** there: it cannot shrink the forwarded tokens, and equally
    cannot disturb the provider prompt-cache. The scope *is* the claim: savings on the
@@ -48,7 +48,7 @@ value ON by default — safely, or gate it honestly").
    - `go test ./cmd/fak -run Compress` — `TestCompressActivates` (opt-out semantics) and
      `TestCompressDefaultsOn` (the flag's registered default is `true`, source-pinned).
 
-6. **Realized — on by default, honestly.** Now ON by default in `fak guard`. Opt out with
+6. **Realized — on by default, honestly.** Now ON by default in `fak manage`. Opt out with
    `--compress=false` **or** `FAK_COMPRESSOR=noop` (an explicit `FAK_COMPRESSOR` always wins).
    Auto-disables (admits the original as-is) on incompressible input, on poison, and on the
    passthrough wire.

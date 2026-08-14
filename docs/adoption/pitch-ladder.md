@@ -46,7 +46,7 @@ Everything else fak does unpacks from that one move.
 ## Rung 2 — one paragraph (the HN comment)
 
 > fak is a fused agent kernel: one static Go binary you drop in front of the
-> agent you already run (`fak guard -- claude` — repoint one base URL, keep your
+> agent you already run (`fak manage -- claude` — repoint one base URL, keep your
 > model, IDE, and keys). It treats every tool call like a syscall — the model
 > proposes, the kernel disposes — giving each call a reviewable verdict while
 > the kernel reuses the stable work in the session. On a 50-turn × 5-agent run it
@@ -76,7 +76,7 @@ on an Apple M3 Pro), and the novelty concession up front.
 > defers it at a boundary the program cannot reach around. fak applies that
 > exact design to AI agents. It is one static Go binary that sits in front of
 > the agent you already run — Claude Code, Codex, Cursor, or any
-> OpenAI/Anthropic/MCP client. `fak guard -- claude` wraps your normal agent in
+> OpenAI/Anthropic/MCP client. `fak manage -- claude` wraps your normal agent in
 > one command; your model, IDE, and keys stay exactly as they are.
 >
 > From that seat, the kernel provides five things:
@@ -121,7 +121,7 @@ derived from rung 1:
 | Claim | Sentence | Paragraph | Page |
 |---|---|---|---|
 | Tool call as syscall (model proposes, kernel disposes) | ✔ anchor | ✔ | ✔ |
-| One static Go binary, drop-in | ✔ | ✔ (`fak guard -- claude`) | ✔ |
+| One static Go binary, drop-in | ✔ | ✔ (`fak manage -- claude`) | ✔ |
 | Controlled: verdicts, policy, quarantine | "controlled" | ✔ mechanism | ✔ + classifier caveat |
 | Cheaper: reuse, tuned ~4.1×, `max\|Δ\| = 0` | "cheaper" | ✔ numbers | ✔ numbers + naive-multiplier fence |
 | Faster: ~362 ns in-process decision | "faster" | ✔ number | ✔ number |

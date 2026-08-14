@@ -26,7 +26,7 @@ simultaneously **expensive** (billed tokens grow superlinearly) and
 
 ## The mechanism, in one paragraph
 
-fak's lever is one flag: `fak guard --compact-history-budget <tokens>` (default
+fak's lever is one flag: `fak manage --compact-history-budget <tokens>` (default
 **on** at a 48,000-token resident budget, `gateway.DefaultCompactHistoryBudget`,
 `internal/gateway/gateway.go`; `0` disables). Past the budget it **drops whole
 old middle turns and splices the original bytes back together** — a memcpy of
@@ -81,7 +81,7 @@ is shipped and witnessed by a replayed 6/12-turn sample
 [`relayvscompaction_observed_report.json`](../internal/bench/testdata/relayvscompaction_observed_report.json)
 — per its own note, a loader/schema witness, **not** a live provider-billed
 run). The controlled 100/200/300-turn A/B capture (fak compaction ON via
-`fak guard --compact-history-budget` vs plain `claude` auto-compact, same task,
+`fak manage --compact-history-budget` vs plain `claude` auto-compact, same task,
 matched length) is open work: [#2708](https://github.com/anthony-chaudhary/fak/issues/2708).
 When it lands, its leg-ledger JSON feeds the same report shape and either
 confirms or demotes the modeled numbers above.
@@ -98,7 +98,7 @@ A/B) at long horizons:
   (`verdict: PASS`). Replayed against a mock upstream through the real splice
   code — it witnesses the byte-splice and prefix preservation, not provider
   billing.
-- **Live `fak guard -- claude` sessions**:
+- **Live `fak manage -- claude` sessions**:
   [`docs/nightrun/cache-savings.jsonl`](nightrun/cache-savings.jsonl) — the
   longest 2026-07-06 session fired compaction 7 times at the default 48,000
   budget, shedding **≈106,708 tokens per fire** (746,956 cumulative ÷ 7).

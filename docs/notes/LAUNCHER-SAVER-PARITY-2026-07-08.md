@@ -1,13 +1,13 @@
 ---
 title: "Token-savers stay on by default across every launch surface — headless and ultracode too (2026-07-08)"
-description: "The token-defaults scorecard locks the on-by-default savers for the interactive fak guard / fak serve front doors. This note extends that guarantee to the launch surfaces the fleet's own automated sessions use — the headless dispatch worker, the account-switch / ultracode launch, and the codex launcher — with a behavioral regression lock proving none of them strip a saver."
+description: "The token-defaults scorecard locks the on-by-default savers for the interactive fak manage / fak serve front doors. This note extends that guarantee to the launch surfaces the fleet's own automated sessions use — the headless dispatch worker, the account-switch / ultracode launch, and the codex launcher — with a behavioral regression lock proving none of them strip a saver."
 ---
 
 # The savers stay on for our own automated sessions, not just a human at the keyboard
 
 > **`fak token-defaults-scorecard` proves the token-savers are ON by default — but only for the
 > two front doors it reads (`cmd/fak/guard.go`, `cmd/fak/serve.go`).** The fleet's own automated
-> sessions don't reach guard through those front doors: each assembles its OWN `fak guard … --`
+> sessions don't reach guard through those front doors: each assembles its OWN `fak manage … --`
 > argv. This note closes that gap with a behavioral invariant + regression lock so "on by default"
 > holds for **headless dispatch and ultracode sessions** too, not just an interactive launch.
 
@@ -24,7 +24,7 @@ own guard argv:
 
 | Surface | Builder | What it is |
 |---|---|---|
-| **Headless dispatch worker** | `dispatchtick.GuardedLaunchCommand` → `guardedDispatchCommand` (`cmd/fak/dispatch_tick.go`) | the unattended fleet turn — `fak guard -- claude -p …` |
+| **Headless dispatch worker** | `dispatchtick.GuardedLaunchCommand` → `guardedDispatchCommand` (`cmd/fak/dispatch_tick.go`) | the unattended fleet turn — `fak manage -- claude -p …` |
 | **Account-switch / ultracode launch** | `buildLaunchArgv` (`cmd/fak/accounts_launch.go`), `ultracode:true` ⇒ `--settings '{"ultracode":true}'` | the `f` shortcut / `fak accounts launch` — workflow mode |
 | **Codex launcher** | `buildCodexLaunchArgv` (`cmd/fak/codex_launcher.go`) | `fak codex` — guarded Codex |
 

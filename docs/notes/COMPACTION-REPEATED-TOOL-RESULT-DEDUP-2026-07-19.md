@@ -144,12 +144,12 @@ code* — was run. It does not hold.
 
 The naive check is misleading in fak's favour and must not be used: `~/.codex/config.toml`
 carries **no** `[model_providers.*]` table and no `base_url`. That is *not* evidence of
-non-routing, because `fak guard -- codex` never writes one — it injects the provider via
+non-routing, because `fak manage -- codex` never writes one — it injects the provider via
 per-invocation `-c model_providers.fak.*` argv overrides on the child command
 (`cmd/fak/guard_codex.go`), which leave no durable config trace. Config absence is
 therefore uninformative in both directions.
 
-The actual discriminator is the guard witness ledger `fak guard` writes per session
+The actual discriminator is the guard witness ledger `fak manage` writes per session
 (`cmd/fak/sessions_codex_loop.go` → `~/.codex/fak-guarded-sessions/<session-id>.json`,
 schema `fak.codex_guard_witness.v1`). Intersecting it with the rollout corpus the
 2026-07-18 witness mined:

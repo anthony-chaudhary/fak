@@ -20,7 +20,7 @@ description: "Every autonomous-coding harness has some way to suppress or redire
 
 Three parts:
 
-1. **Work on how the fak guard handles "ask user question"–type end states.** A turn that ends
+1. **Work on how the fak manage handles "ask user question"–type end states.** A turn that ends
    by asking a human — Claude Code's `AskUserQuestion` / `ExitPlanMode`, Codex's
    `request_user_input` / `update_plan`, or just prose ("Do you want me to push?") — is a *stop*
    the agent did not have to take. On an unattended run there is no one to answer, so the work
@@ -31,7 +31,7 @@ Three parts:
 ## 1. What fak already does at this seam (audit)
 
 The guard already senses and acts on this end state in **two Stop-hook rungs**, both gated by
-`fak guard --operator-directed off|shadow|warn|enforce` (default **warn**), and both capped so
+`fak manage --operator-directed off|shadow|warn|enforce` (default **warn**), and both capped so
 an *attended* interactive session is never blocked (`guardOperatorDirectedEffectiveMode`: an
 `enforce` ever reaching the hook implies the child was headless — the operator is absent by
 construction, so continuing the false stop cannot silence a real human question).
@@ -69,7 +69,7 @@ the tree at HEAD:**
    so most clarify questions fall through to `FRESH_CONTEXT` for want of an oracle that speaks to
    them.
 3. **The gate has no first-class dial.** Rung 2 rides `--operator-directed`, the *linguistic*
-   rung's flag. There is no `fak guard --operator-question off|shadow|warn|enforce` an operator
+   rung's flag. There is no `fak manage --operator-question off|shadow|warn|enforce` an operator
    can reach to disable or tune *just* the structured adjudicator — which is exactly the shape of
    knob every surveyed harness exposes for its own ask-user tool (§2).
 
@@ -193,7 +193,7 @@ That is what neither native shape offers. So fak does not *replace* the native k
   the question inline, before the turn stalls.** fak already installs a `PreToolUse` commit-gate
   hook — the same seam can carry an evidence-first `AskUserQuestion` answerer.
 - **A first-class dial, because operators expect one.** Every harness exposes a named knob to
-  turn its ask-user handling off or tune it. fak should too: `fak guard --operator-question
+  turn its ask-user handling off or tune it. fak should too: `fak manage --operator-question
   off|shadow|warn|enforce`, split from the linguistic `--operator-directed` rung, so the
   structured adjudicator is independently disableable. (Feeds the mode-debt census, #4397.)
 - **Native-suppression awareness.** If the operator already set `disallowedTools:AskUserQuestion`
@@ -215,7 +215,7 @@ A distinct **harness-integration / operability** theme, separate from #4701's pr
   auto-approves, an irreversible/unwitnessable step escalates — end-to-end through the Stop hook,
   not just the pure package. (References #4704, epic #4701; adjacent to the plan-regime epic
   #2390.)
-- **T2 (#4884) — first-class `fak guard --operator-question off|shadow|warn|enforce` dial.** Split Rung 2
+- **T2 (#4884) — first-class `fak manage --operator-question off|shadow|warn|enforce` dial.** Split Rung 2
   from the linguistic `--operator-directed` flag so the structured adjudicator is independently
   disableable/tunable, mirroring the native ask-user knobs (§2). Keep the operator-absent cap.
   DoD: the flag exists, is documented in `guard_help`, defaults to today's behavior, and `off`

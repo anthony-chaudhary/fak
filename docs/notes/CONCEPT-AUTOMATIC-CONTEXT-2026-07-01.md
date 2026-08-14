@@ -108,7 +108,7 @@ From a wiring survey at HEAD (imported by a non-test file in `cmd/fak` or
   demand paging for finished sessions and MCP resources.
 - **Built, CLI-reachable, off the default path:** `fak session
   budget|envelope|reset-diff`, `fak vcache` prove/observe/score,
-  `fak headroom`, `fak debug --cmd context-plan-preview`, `fak guard
+  `fak headroom`, `fak debug --cmd context-plan-preview`, `fak manage
   --managed-cache` posture (AUTO only for API-key-billed Anthropic).
 - **Dormant (no live importer):** `syspromptmmu` (fak authoring its own base
   context — the authorship dual of promptmmu), `memview` (derived memory
@@ -199,7 +199,7 @@ harness-authored while `syspromptmmu` sleeps).
 
 | Surface | Automatic looks like | Exists at HEAD | Gap |
 |---|---|---|---|
-| `fak guard` (proxy) | full pipeline fires; harness compaction coherent or suppressed | pipeline live; compactcohere senses | PreCompact actuator #1133; dynamic budget #1142 |
+| `fak manage` (proxy) | full pipeline fires; harness compaction coherent or suppressed | pipeline live; compactcohere senses | PreCompact actuator #1133; dynamic budget #1142 |
 | `fak serve` (native) | KV auto-sized; kvmmu evicts; no window error reaches a user | kvmmu bridges; #1045 designed | auto-fit live wiring; `RunArm` live caller #1316 |
 | dispatch/fleet workers | headless goal ⇒ relay by default; workers never die of window | relay epic #1860 filed | tracks E–H, then default-on admission |
 | `fak session` verbs | envelope derived, not typed | budget/envelope/reset-diff verbs | auto-envelope from model window + task class |

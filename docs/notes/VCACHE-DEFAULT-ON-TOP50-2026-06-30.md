@@ -15,7 +15,7 @@ Each item: **what · why · where (file) · default-on lever · witness**. "Witn
 is the artifact that proves it shipped — a test, a metric, a ledger row, a demo —
 never a self-report. Every item is sized to one disjoint lane.
 
-Acceptance gate for the whole list (the north-star): on a normal `fak guard --
+Acceptance gate for the whole list (the north-star): on a normal `fak manage --
 claude` run with **no flags**, the operator sees one attribution line —
 `avoided spend = provider P% + fak F% (compaction C, kv-reuse K, vdso V)` — and
 `F` is non-zero on a multi-turn session because M2 fired by default.
@@ -322,5 +322,5 @@ The one-ticket-per-item backlog is also filed as **#1519-#1568**
 this note.
 Every gate-enablement item (section B) carries a paired **QA** acceptance
 (honesty test + witness) and **dogfood** acceptance (it runs on our own
-`fak guard`/`fak serve` sessions and writes a ledger/journal row), so a gate can
+`fak manage`/`fak serve` sessions and writes a ledger/journal row), so a gate can
 only flip default-on once it is proven on our own traffic.

@@ -1,9 +1,9 @@
 ---
-title: "Run fak guard as a server-side client (unattended / container)"
-description: "Operator route for running `fak guard -- <harness>` server-side — a hosted Claude Code / Codex / batch harness in a container or CI runner, governed by the kernel with adjudication, a hash-chained audit journal, a cost cap, and no TTY. The complement to embed-in-your-product.md: that page governs your own direct API call; this page governs a harness someone else drives."
+title: "Run fak manage as a server-side client (unattended / container)"
+description: "Operator route for running `fak manage -- <harness>` server-side — a hosted Claude Code / Codex / batch harness in a container or CI runner, governed by the kernel with adjudication, a hash-chained audit journal, a cost cap, and no TTY. The complement to embed-in-your-product.md: that page governs your own direct API call; this page governs a harness someone else drives."
 ---
 
-# Run `fak guard` as a server-side client (unattended / container)
+# Run `fak manage` as a server-side client (unattended / container)
 
 **Reader:** a platform or SRE operator running a *hosted harness* — a Claude Code or Codex
 worker in a container, a CI runner, or a batch agent — and you want the kernel governing it
@@ -18,15 +18,15 @@ stop being conflated:
 | Role | Who drives the loop | fak surface | This page |
 |---|---|---|---|
 | **Agent application runtime** | fak drives a loop *you* POST goals to | `fak serve --native` / `fak run` | no — see [embed-in-your-product.md](integrations/embed-in-your-product.md) |
-| **Governed client of someone else's harness** | the *harness* (Claude Code, Codex) drives its own loop; fak wraps and governs the child process | `fak guard -- <harness>` | **yes** |
+| **Governed client of someone else's harness** | the *harness* (Claude Code, Codex) drives its own loop; fak wraps and governs the child process | `fak manage -- <harness>` | **yes** |
 
-`fak guard` is documented elsewhere as a local-dev wrapper ("wrap the agent you already run
+`fak manage` is documented elsewhere as a local-dev wrapper ("wrap the agent you already run
 on your laptop"). The same seam runs server-side unchanged: the flags and env below are
 already shipped — this page ties them into one unattended, containerized posture.
 
 ## The unattended posture is already the default off a TTY
 
-`fak guard` auto-detects a headless launch (no color TTY, piped, or CI) and drops every
+`fak manage` auto-detects a headless launch (no color TTY, piped, or CI) and drops every
 interactive affordance without a flag:
 
 - **Banner** resolves to the full captured report instead of the interactive icon

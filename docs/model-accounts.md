@@ -105,7 +105,7 @@ shows the same status in its `LOGIN` column, and `fak accounts sync` materialize
 `login_status` plus `can_serve` into the generated dos/job roster rows. That keeps the account
 switcher from guessing at login readiness from directory names or scattered credential booleans.
 The same vocabulary is carried through `fak fleet-accounts roster/resolve`, `fak dispatch
-tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak guard` auth warnings, so callers
+tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak manage` auth warnings, so callers
 can gate on `can_serve` and surface the closed login status instead of re-deriving readiness from
 raw credential files.
 
@@ -148,7 +148,7 @@ to want this: the seat is there for the one job that asked for it.
 
 ### Why a vendor seat launches with `--guard=false`
 
-`fak guard` fronts its child with its **own** `ANTHROPIC_BASE_URL` pointing at guard's loopback
+`fak manage` fronts its child with its **own** `ANTHROPIC_BASE_URL` pointing at guard's loopback
 gateway, and proxies upstream with the credential guard holds. Under guard a vendor seat's
 endpoint is therefore not unused — it is *replaced*, and the traffic bills a different account
 than the operator named. Nothing looks wrong from the outside: the agent starts and answers.
@@ -159,7 +159,7 @@ already implies: no kernel adjudication, no vCache hop.
 Three further adjustments happen on that path, each because the default is a first-party
 assumption that is wrong here:
 
-- **Inherited first-party credentials are dropped.** A `fak guard` session exports its own
+- **Inherited first-party credentials are dropped.** A `fak manage` session exports its own
   `ANTHROPIC_API_KEY` into every child, so a vendor seat launched from one would carry a
   first-party key next to the vendor endpoint and could present the wrong tenant's token.
   Overriding the endpoint alone is not enough. The variable the seat itself names is kept, and
@@ -749,7 +749,7 @@ in fak's vocabulary.
 ## A note on codex and Anthropic subscriptions
 
 Codex's native wire is the OpenAI Responses API, so bind it to `kind: openai-responses`,
-not plain `openai`. (`fak guard -- codex` autodetects the chat-completions `openai`
+not plain `openai`. (`fak manage -- codex` autodetects the chat-completions `openai`
 wire today; the roster lets you pick the Responses wire explicitly.)
 
 An Anthropic Pro/Max subscription token (`sk-ant-oat…`) rides as
@@ -759,7 +759,7 @@ header choice is made downstream by the Anthropic adapter at dispatch.
 
 ## Managed-cache posture across launchers
 
-Every fak launcher that fronts an agent with `fak guard` — `fak accounts launch`,
+Every fak launcher that fronts an agent with `fak manage` — `fak accounts launch`,
 `fak codex`, and the dispatch worker (`fak dispatch tick`/`auto`) — can hand guard a
 **managed-cache posture** that decides whether the gateway upgrades the stable-prefix
 `cache_control` breakpoint to the **1h-TTL** tier on the outbound Anthropic wire.

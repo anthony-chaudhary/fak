@@ -1531,7 +1531,7 @@ paths:
         excluded from auto-reselection for the rest of the session and the next
         available sibling seat (enabled, logged in, live token) is adopted; the swap
         takes effect on the session's next upstream request. Inert (404) unless the
-        host wired a swap function (`SetAccountRehomeFunc`) — `fak guard` does on the
+        host wired a swap function (`SetAccountRehomeFunc`) — `fak manage` does on the
         pinned Claude-subscription path. The response carries seat display metadata
         only, never a credential. Operator CLI: `fak accounts rehome`.
       requestBody:

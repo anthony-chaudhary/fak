@@ -52,7 +52,7 @@ There are three adjacent epics. They are layers, not overlaps:
 
 | Epic | Owns | Verb |
 |---|---|---|
-| **#751 promptmmu** | the inbound prompt as it *passes through* `fak guard -- claude` | **prunes** (drops denied tool defs, cache-prefix-safe) |
+| **#751 promptmmu** | the inbound prompt as it *passes through* `fak manage -- claude` | **prunes** (drops denied tool defs, cache-prefix-safe) |
 | **#1103 skill loader** | capabilities (skill / MCP tool / A2A agent) as paged objects | **faults in** by query, not menu |
 | **#1217 context-safety** | the *observability* of what got paged/cached/evicted | **witnesses** (divergence = alarm) |
 | **this epic (system-prompt MMU)** | the *authorship and layering* of the base context itself | **assembles** (fak spine + queried harness overlay) |
@@ -278,7 +278,7 @@ Numbered so the keystone lands first and each rung holds all five invariants.
   segment plan into wire bytes via `promptmmu`, anchoring the breakpoint between
   the policy floor and the overlay, asserting `bytes.Equal(prefix)` and
   fail-safe identity. Proves invariants 1 and 2 end-to-end on the
-  `fak guard -- claude` passthrough.
+  `fak manage -- claude` passthrough.
 
 - **Rung 3 — queried harness overlay (wire the dead keystone).** Drive
   `contextq.QueryCapabilities` / `capindex.Catalog` from the turn's intent to
@@ -475,7 +475,7 @@ verbs target and the residency rule that bounds promote/demote are not yet in-tr
 |---|---|---|---|
 | the tiered spine + policy + overlay model | `internal/syspromptmmu` segment plan (Rung 1, [#1259](https://github.com/anthony-chaudhary/fak/issues/1259)) | the `SegStable` spine / versioned policy floor / overlay tiers a verb may (or may not) target | OPEN ([#1259](https://github.com/anthony-chaudhary/fak/issues/1259)) — **blocker** (no package yet) |
 | the next-rebuild seam (when a swap takes effect) | Rung-2 splice adapter ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260)) + `internal/promptmmu` `bytes.Equal(prefix)` floor + `internal/sessionreset` `Contributor` re-pin | where a versioned swap lands at the *next prefix rebuild*, never mid-prefix (invariants 1–2) | promptmmu + sessionreset **BUILT**; the Rung-2 adapter is OPEN ([#1260](https://github.com/anthony-chaudhary/fak/issues/1260)) — **blocker** |
-| the witness gate (acceptance) | `dos verify` / the `fak guard` decision journal | the independent gate a self-authored delta must pass before it can become resident — the agent never grades its own edit (invariant 5) | **BUILT** (`dos verify` + the hash-chained guard journal are live) |
+| the witness gate (acceptance) | `dos verify` / the `fak manage` decision journal | the independent gate a self-authored delta must pass before it can become resident — the agent never grades its own edit (invariant 5) | **BUILT** (`dos verify` + the hash-chained guard journal are live) |
 | the residency rule (what may move) | Rung-4 residency policy ([#1262](https://github.com/anthony-chaudhary/fak/issues/1262)) over `ctxresidency.MeasureBlastRadius` | which blocks are promotable/demotable vs spine-pinned; refuses an edit whose blast radius crosses the spine | OPEN ([#1262](https://github.com/anthony-chaudhary/fak/issues/1262)) — **blocker** for `promote`/`demote` |
 | the auto-demote routing | guard-RSI worst-bucket routing (`cmd/fak/guardrsi.go`) | demote a learned rule that later correlates with worse witnessed outcomes, and leave a journal row | **BUILT** as a routing shape; needs the syspromptmmu version-log binding |
 | the versioned-delta store + rollback | NEW in `internal/syspromptmmu` (this rung's own surface) | the append-mostly version log (ACE incremental deltas, never a full rewrite) that preserves prior versions for bit-for-bit rollback | the rung's one genuinely new surface |

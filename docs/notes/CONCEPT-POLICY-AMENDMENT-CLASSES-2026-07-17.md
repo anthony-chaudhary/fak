@@ -1,6 +1,6 @@
 ---
 title: "Policy amendment classes: who may amend the guard floor, in which direction, through which channel"
-description: "Makes the fak guard floor's implicit per-knob mutability discipline explicit as a capability = (direction × channels). Four amendment classes — FROZEN, RATCHET, GATED-WIDEN, SELF-AMENDABLE — replace the scattered clamps and doc comments with one model, a registry, and a conformance test that fails the build if a knob is unclassified."
+description: "Makes the fak manage floor's implicit per-knob mutability discipline explicit as a capability = (direction × channels). Four amendment classes — FROZEN, RATCHET, GATED-WIDEN, SELF-AMENDABLE — replace the scattered clamps and doc comments with one model, a registry, and a conformance test that fails the build if a knob is unclassified."
 date: 2026-07-17
 ---
 
@@ -13,7 +13,7 @@ the committed prose the code points back to.
 
 ## The problem
 
-`fak guard` already enforces a rich, per-knob mutability discipline — but it is
+`fak manage` already enforces a rich, per-knob mutability discipline — but it is
 **implicit**. It lives in scattered doc comments (`decide.go`, `guard_allow.go`,
 `policy_reload_widen.go`) and is enforced by scattered clamps (`sanitizeProfile`,
 `sanitizeAdvisoryReasons`, `AdvisoryEligible`, `mustRun`, `diffPolicyWidening`,
@@ -58,13 +58,13 @@ channels authorized to move it)**, aligned with the lock-class ladder in
   Members: `EgressExtraDenyHosts`, `EgressBlockHosts` / `EgressBlockLists`,
   `SecretPatterns` (unioned, extend-never-replace), `ArgPredicates`
   (restrict-only), added `SelfModifyGlobs`, `RedactFields`, `LintWrites` (opt-in),
-  the `ResearchEgressAllowHosts` restrict allowlist, and the `fak guard deny`
+  the `ResearchEgressAllowHosts` restrict allowlist, and the `fak manage deny`
   overlay.
 
 - **GATED-WIDEN (out-of-band only).** May loosen the *convenience* surface — but
   only via a channel the wrapped agent cannot reach, and every widening is
   journaled (and, per Track D, optionally TTL'd and scope-bounded). Members: the
-  `fak guard allow` overlay (`Allow` / `AllowPrefix`), `POST /v1/fak/policy/reload`
+  `fak manage allow` overlay (`Allow` / `AllowPrefix`), `POST /v1/fak/policy/reload`
   under `FAK_POLICY_RELOAD_ALLOW_WIDEN`, `Complain`, `AdvisoryReasons` (clamped to
   heuristic reasons), `Posture` fail_closed→admit_and_log, `SecretPosture`, the
   read-class `RungProfile`, `EgressAllowHosts`, `EgressRestrict`, and
@@ -115,8 +115,8 @@ channels authorized to move it)**, aligned with the lock-class ladder in
 its `Class`, `Direction`, authorized `Channels`, and a one-line `Doc`. It imports
 nothing from `internal/adjudicator` (keeping it a clean, cycle-free leaf); the
 conformance test imports the adjudicator only to reflect over `Policy` and prove
-coverage. Every observability verb built on top — `fak guard policy explain`
-(#5172), `fak guard policy diff` (#5173), the exit-summary amendment posture
+coverage. Every observability verb built on top — `fak manage policy explain`
+(#5172), `fak manage policy diff` (#5173), the exit-summary amendment posture
 (#5184) — reads the registry, so the model is described in exactly one place.
 
 ## Anchor files

@@ -79,7 +79,7 @@ exact public preflight and selected requirement to the authorized operator.
 ## Enforcement and related routes
 
 `fak hwgate-lint` detects a final answer that treats missing local hardware as terminal
-and redirects it to this selection route. `fak guard` can enforce the same rule at Stop,
+and redirects it to this selection route. `fak manage` can enforce the same rule at Stop,
 and `fak guard-stops` reports the resulting redirects. These gates select a route; they do
 not fabricate a hardware witness.
 

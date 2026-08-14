@@ -24,7 +24,7 @@ practice, and the honest limits. It is grounded in the official DeepSeek docs
 
 | Route | When to use it | Model id | Base URL |
 |---|---|---|---|
-| **Hosted OpenAI-compatible** | Any OpenAI-Chat-Completions client through `fak serve`/`fak guard` | `deepseek-v4-pro` | `https://api.deepseek.com` |
+| **Hosted OpenAI-compatible** | Any OpenAI-Chat-Completions client through `fak serve`/`fak manage` | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | **Anthropic-compatible** | Claude Code-style clients that speak Anthropic Messages | `deepseek-v4-pro` | `https://api.deepseek.com/anthropic` |
 | **Self-hosted (vLLM/SGLang/NIM)** | Your own GPUs (Hopper/Blackwell-class node) | `deepseek-ai/DeepSeek-V4-Pro` / `-Flash` | `http://<host>:8000/v1` |
 

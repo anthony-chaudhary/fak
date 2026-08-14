@@ -34,9 +34,9 @@ call — the cheapest possible test, no model, no server.
 
 ---
 
-## The permissive default and the operator allow overlay (`fak guard`)
+## The permissive default and the operator allow overlay (`fak manage`)
 
-When you wrap an agent with **`fak guard -- claude`** and name no `--policy`, the built-in
+When you wrap an agent with **`fak manage -- claude`** and name no `--policy`, the built-in
 floor is deliberately **permissive**: it admits the whole standard coding-agent tool set
 (Read/Edit/Write/Bash/Grep/…) plus the harness's own orchestration plumbing, and refuses
 only the genuine-danger classes — recursive/forced delete, `sudo`, disk wipe, fork bomb,
@@ -47,34 +47,34 @@ tool, a harness verb, an orchestration name), *not* a danger refusal.
 Allowing such a tool is a one-line **operator** action, run out-of-band from the agent:
 
 ```sh
-fak guard allow <tool>            # always-allow a DEFAULT_DENY'd tool, for every future session
-fak guard allow --list            # show what the overlay currently adds
-fak guard allow --remove <tool>   # take one back out
-fak guard allow --from-journal    # list what THIS session blocked + the exact command to allow each
-fak guard allow --from-journal --add-all   # allow every blocked tool in one step
+fak manage allow <tool>            # always-allow a DEFAULT_DENY'd tool, for every future session
+fak manage allow --list            # show what the overlay currently adds
+fak manage allow --remove <tool>   # take one back out
+fak manage allow --from-journal    # list what THIS session blocked + the exact command to allow each
+fak manage allow --from-journal --add-all   # allow every blocked tool in one step
 ```
 
-`fak guard allow` writes a small, operator-authored **allow overlay** (default
+`fak manage allow` writes a small, operator-authored **allow overlay** (default
 `.fak/guard/allow.json`; point it elsewhere with `$FAK_GUARD_ALLOW_OVERLAY`) that
-`fak guard` **unions into its floor at launch** and re-applies on `--policy` hot-reload.
+`fak manage` **unions into its floor at launch** and re-applies on `--policy` hot-reload.
 Three properties make it safe:
 
 - **It only widens `allow`.** The danger arg-rules (`rm -rf`, `sudo`, …) and any explicit
   `deny` are untouched, so re-admitting a `DEFAULT_DENY`'d tool never loosens the danger
-  floor. `fak guard allow --from-journal` deliberately lists only `DEFAULT_DENY` tools — a
+  floor. `fak manage allow --from-journal` deliberately lists only `DEFAULT_DENY` tools — a
   `POLICY_BLOCK` is a danger refusal the overlay can't and shouldn't lift.
 - **It is out-of-band from the agent by construction.** *You* run it in your own shell, so
   the wrapped agent can never grant itself a capability — the whole point of running the
   operator control outside the agent's loop.
 - **The block points back at the fix.** When a guarded session ends with a `DEFAULT_DENY`,
-  the exit summary prints the exact `fak guard allow --from-journal` command, closing the
+  the exit summary prints the exact `fak manage allow --from-journal` command, closing the
   loop from "the floor blocked X" to "allow X for next time".
 
 The overlay is a separate file from the base floor on purpose: the base floor is the shipped
 default (or your `--policy` manifest), and the overlay is *this host's operator decisions*,
 diffable on its own. For a permanent, reviewed change to a deployed floor, fold the tool into
 the `allow` list of a `--policy` manifest instead (below); the overlay is the fast,
-out-of-band path for the interactive `fak guard` operator.
+out-of-band path for the interactive `fak manage` operator.
 
 ### Logged trials for default-deny false positives
 

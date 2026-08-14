@@ -37,7 +37,7 @@ Everything below is the per-provider detail and the exact repoint recipe.
 
 ## Tier 1: Native provider wires
 
-These are the `--provider` values `fak serve` and `fak guard` accept. Each value selects a transcript adapter that translates the canonical agent transcript into that provider's request and response wire. The values, wires, and aliases are sourced from `internal/agent/adapters.go` (the `Provider` constants and `ParseProvider`).
+These are the `--provider` values `fak serve` and `fak manage` accept. Each value selects a transcript adapter that translates the canonical agent transcript into that provider's request and response wire. The values, wires, and aliases are sourced from `internal/agent/adapters.go` (the `Provider` constants and `ParseProvider`).
 
 | Provider | `--provider` value | Wire | Notes |
 |---|---|---|---|
@@ -47,7 +47,7 @@ These are the `--provider` values `fak serve` and `fak guard` accept. Each value
 | Google Gemini | `gemini` | Gemini `generateContent` API | Alias: `google`. Auth via `x-goog-api-key`. Also served to clients as an inbound wire — see [APIs, wires & MCP](apis-and-protocols.md). |
 | xAI (Grok) | `xai` | OpenAI-compatible chat completions | Alias: `grok`. Shares the OpenAI chat adapter. |
 
-The native default front door for Claude Code is `fak guard -- claude`, which runs over the `anthropic` wire and uses your logged-in Claude Pro/Max subscription by default, no API key needed. See [Run Claude Code through the fak gateway](../integrations/claude.md).
+The native default front door for Claude Code is `fak manage -- claude`, which runs over the `anthropic` wire and uses your logged-in Claude Pro/Max subscription by default, no API key needed. See [Run Claude Code through the fak gateway](../integrations/claude.md).
 
 ## Tier 2: Cloud gateways over the OpenAI-compatible wire
 

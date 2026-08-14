@@ -39,7 +39,7 @@ guard/witness path; after running it, fix the named loop gap before claiming loo
 
 | ok | criterion | detail |
 |---|---|---|
-| no | loop runs route through `fak guard` (guard_enabled=1) — the containment wrapper, not raw exec | 0/2 (0%) runs guard-wrapped |
+| no | loop runs route through `fak manage` (guard_enabled=1) — the containment wrapper, not raw exec | 0/2 (0%) runs guard-wrapped |
 | yes | the loops append to the canonical hash-chained loop ledger (fak loop), not an ad-hoc log | ledger present with events |
 | yes | loop runs reach a witnessed-done verdict — the loop dogfoods the witness contract | 1/7 loop(s) reached a witnessed-done verdict |
 
@@ -66,7 +66,7 @@ dogfood: shows guard-wrapped and witnessed loop runs
 The debt is concentrated in one structural gap: the loops that actually fire are driven by **external schedulers + ad-hoc logging**, not by `fak loop run`. This is an OPEN improvement program, not a shipped multiplier claim. So they are unregistered (a reboot re-launches nobody), often dark (the registry's own jobs have never been observed ticking), and unguarded (no `guard_enabled=1` run). A 3× is NOT hand-appending events during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the durability + observability a **byproduct of how the loop is driven**, so the score rises structurally:
 
 1. **Register every firing loop.** Add the issue-dispatch / resolve-progress / smoke loops to `tools/loop-registry.json` with a cadence (`fak loop` registry). A registered job re-arms at boot — that is the auto-restart on system restart. Then `fak cron emit --target launchd|systemd|taskscheduler` projects it to a real OS unit that survives the reboot.
-2. **Drive them through `fak loop run`.** Replacing the raw scheduler call with `fak loop run --loop ID --source cron -- <cmd>` records fire/admit/start/**end** around every run under `fak guard` (guard_enabled=1) and posts a witnessed dispatch-result card — closing the self-report and dogfood gaps in one move.
+2. **Drive them through `fak loop run`.** Replacing the raw scheduler call with `fak loop run --loop ID --source cron -- <cmd>` records fire/admit/start/**end** around every run under `fak manage` (guard_enabled=1) and posts a witnessed dispatch-result card — closing the self-report and dogfood gaps in one move.
 3. **Let them witness.** A run that ends with a `fak loop append --kind witness --status witnessed_done` (the resolve-progress loop already does this once) makes the keep-rate real, so the loop dogfoods the witness contract instead of trusting its own exit code.
 
 Re-run after a loop session and `--compare` against a pinned `--json` baseline: the verdict reports the multiple on the composite (the lever), so a real 3× (composite ~33 → ~99, debt → 0) is provable, not asserted.

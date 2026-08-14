@@ -100,7 +100,7 @@ hand-building the binary and noticing the gate stay silent.
 
 **The symptom witness — [`28dd3b33`](https://github.com/anthony-chaudhary/fak/commit/28dd3b33)**
 ([`cmd/fak/guard_login_e2e_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/guard_login_e2e_test.go)). It re-execs the
-real `fak guard -- claude` entry point headless with stdin driven from `os.DevNull` — the
+real `fak manage -- claude` entry point headless with stdin driven from `os.DevNull` — the
 Windows char-device shape — and asserts exit-2-with-guidance within a hard 20s deadline (a
 hang = a timeout = a test failure). The `DevNull` stdin is load-bearing: it is the shape the
 original `os.ModeCharDevice` gate mishandled, and it was verified standalone that

@@ -10,7 +10,7 @@ name.
 
 ## 1. What was reviewed
 
-A private, contract-built deployment adopted fak's substrate wholesale — `fak guard`,
+A private, contract-built deployment adopted fak's substrate wholesale — `fak manage`,
 `fak worktree worker prepare`, `fak orient`, `fak sweep`, `fak index work`, `fak intent`, and the
 DOS kernel — then ran roughly 30 concurrent agents against **one shared checkout** and instrumented
 the cost. In several places it extended a fak mechanism or solved the same problem differently.

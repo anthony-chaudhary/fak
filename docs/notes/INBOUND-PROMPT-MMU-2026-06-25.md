@@ -20,7 +20,7 @@ fak already controls the **outbound / result** half of the context window end-to
   preserving the cached prefix to the byte.
 
 But the **inbound composition** of the window is forwarded **byte-identical** on the flagship
-`fak guard -- claude` passthrough. Verified: `req.Raw` is mutated in exactly two places —
+`fak manage -- claude` passthrough. Verified: `req.Raw` is mutated in exactly two places —
 `max_tokens` (messages.go:269) and old-turn compaction (messages.go:284). The `tools` array
 (tool DEFINITIONS the model is offered), the `system` prompt, and any harness-injected skill
 or memory text all pass through untouched. Nobody curates **what goes in** per turn — only

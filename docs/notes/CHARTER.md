@@ -79,7 +79,7 @@ principle, or `— none yet` where the stick is missing.
 - **#1 Agentic by default — A.** Verified: `agent_readiness_scorecard.py` scores
   100/100, grade A, `friction_debt = 0` across 23 KPIs, with a live witness
   (`experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json`) of
-  Claude Code running through `fak guard` with a dangerous call denied and useful work
+  Claude Code running through `fak manage` with a dangerous call denied and useful work
   continued in the same session. The only gap is *adoption in the wild*, which is not
   the same thing as *readiness for adoption*.
 - **#2 Industry value — B+ (honesty A, realized value B+).** The industry scorecard

@@ -78,7 +78,7 @@ default `90s` — safely under that ~300s client timeout — clamped to `[0, 1h]
 disables the ceiling and restores absorb-everything). The total retry budget
 (`FAK_PLANNER_RETRY_BUDGET`, default 4h) still bounds the loop overall, but on this
 proxy path it is deliberately **not** reachable in-handler: riding out a longer
-window is a supervisor's job (`fak guard`), not a sleeping request handler's.
+window is a supervisor's job (`fak manage`), not a sleeping request handler's.
 
 ## Try the boundary first
 
@@ -245,7 +245,7 @@ fak ablate    --sweep vdso                             # N-arm self-ablation: on
 fak ablate    --rungs --trace TRACE.json               # per-rung attribution: replay a frozen turnbench trace, mask one adjudicator rung per arm, diff the kernel counters (--rungs=grammar,ifc-sink restricts; default suite turntax-airline)
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
-fak manage    [--session-pressure-gate high,report=pressure.json] [--] <agent command>  # primary managed-agent front door; short alias: fak m; legacy fak guard remains compatible during sunset
+fak manage    [--session-pressure-gate high,report=pressure.json] [--] <agent command>  # primary managed-agent front door; short alias: fak m; legacy guard spelling remains compatible during sunset
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
 fak ps        [--json] [--watch] [--interval D] [--frames N] [--addr URL] [--key K]   # the read-only process table: one aligned row per live served session (`fak top` is `--watch`)
 fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."   # job control for a running session over the control plane: the OS process-model names, one running session at a time
@@ -260,8 +260,8 @@ fak commit    --path P... (-m STR | -F FILE/-) [--push] [--json]   # path-scoped
 fak sweep     [--json] | --clean-junk [--json] | --apply --lane L -m "SUBJECT" [--path P...] [--push]   # dirty-tree lane planner; guarded junk cleanup; lane groups carry score + score_notes before apply
 fak sync      [check|apply|push] [--fetch] [--json]   # safe shared-trunk sync/push; preserves unrelated dirty work and reports the sweep next action
 fak profile   <pkg> [--bench RE] [--cpuprofile F] [--memprofile F] [--top] [-n]   # host-aware Go benchmark profiler; captures pprof CPU + allocation profiles
-fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-plan for real Claude Code through fak guard, using a selected Claude config home
-fak codex     [--dry-run] [--split off] [--managed-cache on] -- exec --json "task"  # launch OpenAI Codex through fak guard; guard injects Codex -c model_provider=fak / wire_api=responses overrides; --managed-cache posture (default $FAK_MANAGED_CACHE) forwarded to guard
+fak console agent --account claude-seat --dry-run -- -p "task"  # native launch-plan for real Claude Code through fak manage, using a selected Claude config home
+fak codex     [--dry-run] [--split off] [--managed-cache on] -- exec --json "task"  # launch OpenAI Codex through fak manage; guard injects Codex -c model_provider=fak / wire_api=responses overrides; --managed-cache posture (default $FAK_MANAGED_CACHE) forwarded to guard
 fak c <target>|--target NAME|--auto|--list-targets      # pick a named compute backend (mac/gcp/local/anthropic + ~/.fak/targets.json); --auto ranks by health then cheapest/most-local (cost local<mac<gcp<anthropic), fails over past a DOWN target. quota is a [stub] (not a live fak accounts read) and never excludes
 fak snapshot  kinds | demo | info | dump-fleet | restore-fleet   # dump/restore any primitive (turn|tool|session|fleet|RSI loop) to a portable sha256-integrity bundle
 fak serve     --addr :8080 [--require-key-env VAR] [--fleet-bus [--fleet-bus-dir DIR]] [--session-registry PATH|off]   # OpenAI-compatible HTTP + MCP gateway (any-language agents). `--session-registry` scopes WHICH SESSIONS this serve can see and write (#5825): unset keeps today's shared per-user default (`FAK_SESSION_REGISTRY`, else `<UserConfigDir>/fak/session-registry.json` — the single file EVERY serve on the box shares), which is the right reach for a real fleet but means a serve started only to drive its own sessions still adopts every live session on the host, so a fanned `fak fleet control send --op pause --all` writes to peers' work. `--fleet-bus-dir` does NOT narrow this: it scopes the BUS (announcements, directives, claims, acks) and nothing about which sessions get written, so a private bus over the shared registry reads like a sandbox and is not one. Pass a path to hydrate from and mirror to that file alone, or `off` for a pure in-memory table that adopts nothing and persists nothing. An armed `--fleet-bus` serve prints its own reach — session count and registry — before it drains a single directive
@@ -300,7 +300,7 @@ fak chatops   --channel C0X --admins U07A,U07B [--bot-user <@U07BOT> --audit FIL
 fak fleet control send --op OP [--payload|--text TEXT] (--all | --instance I,I | --machine M | --role R) [--lane L --wave W --label X] [--ttl 5m] [--wait 10s] [--reason R] [--bus DIR] [--json] | status --directive ID | instances [--ttl D]   # the centralized control point (#5600): fan ONE op to every announced fleet instance over a shared bus directory (`fak serve --fleet-bus` arms an instance), then fold the ACKS back — `send` exits 0 only when every addressed instance witnessed the apply, 1 when it published but nobody has answered (including `--wait 0`), and 2 when the selector addresses nobody (`FLEETBUS_NO_TARGET`) rather than accepting a directive that can never apply. Instance axes (`--all`/`--instance`/`--machine`/`--role`) pick WHICH processes; session axes (`--lane`/`--wave`/`--label`) narrow WITHIN each one. An instance that matched nothing acks REFUSED, never a hollow "applied". The selectors pick which INSTANCES and which sessions within them, but the set an instance can write at all is its own `fak serve --session-registry` scope — neither `--bus` here nor `--fleet-bus-dir` there narrows it (#5825), so `--all` against the default shared per-user registry reaches every session on each addressed host, including peers'
 fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | session-publish --session S [--ttl SEC] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR] | sync [--remote R] [--push-only|--fetch-only] [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's heartbeat (#2164); `session-publish` refreshes that heartbeat as a side ref; `audit` is the read-only staleness report; `sync` converges the namespace with a remote (push-then-fetch, side refs only)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
-fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak guard decision journal's hash chain, or export it
+fak audit     verify <journal.jsonl> | export <journal.jsonl>   # audit-trail consumer: re-verify a fak manage decision journal's hash chain, or export it
 fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)   # prove the network-egress floor on one destination — the cloud-metadata / SSRF class
 fak self-update [--check] [--force] [--root DIR] [--target PATH]   # converge a built-from-source fak binary on origin/main; --check reports staleness vs HEAD and exits without building
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
@@ -766,7 +766,7 @@ machine-readable shape behind that `vcache status --sessions` block. `fak
 session-audit actions --here --since-days 7 --max 40 --json` lowers its Fable/Opus
 and long-context recommendations into a stable advisory action ledger with witness
 commands; add `--fail-on high` to make that ledger a guard gate that exits 1 when
-recent cost/context pressure should block more high-cost turns. `fak guard
+recent cost/context pressure should block more high-cost turns. `fak manage
 --session-pressure-gate high --model claude-fable-5` treats the explicit Fable
 route as satisfying those current high-pressure actions while explicit Opus or
 unknown routes still refuse; append `,justify=...` to the same spec with an

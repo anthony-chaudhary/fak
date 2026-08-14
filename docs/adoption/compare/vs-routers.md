@@ -64,7 +64,7 @@ being accurate about that rather than flattening them:
   compiled gateway binary/service you operate.
 
 fak is a single static Go binary you drop in with one base-URL change (`fak serve
---base-url <router>/v1`, or `fak guard -- claude`). So on "is it one binary" the router
+--base-url <router>/v1`, or `fak manage -- claude`). So on "is it one binary" the router
 category is honestly mixed: Kong is a gateway binary, LiteLLM is a Python proxy, OpenRouter
 is hosted. That mixed packaging is why the whole-category [matrix](matrix.md) scores the
 gateway column *Partial* on the single-binary row rather than yes or no. None of this is a

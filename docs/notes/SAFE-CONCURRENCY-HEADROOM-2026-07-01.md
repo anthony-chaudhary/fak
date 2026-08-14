@@ -58,10 +58,10 @@ the fleet runs zero workers.
    PROTECTED list intact) keeps ~67-worker thread headroom real.
 5. **Recalibrate per-worker charge constants from measurement.** host_cap
    charges 200 threads + 1,500 MB per worker — conservative guesses. Measured
-   footprints of a `fak guard -- claude -p` worker would let the constants be
+   footprints of a `fak manage -- claude -p` worker would let the constants be
    honest instead of cautious.
 6. **Scale the safety scaffolding with the worker count** (this is what makes
-   the levers above *safe*): fak guard fronts every worker (9,690 witnessed
+   the levers above *safe*): fak manage fronts every worker (9,690 witnessed
    decisions across 157 dispatch sessions today: 98 DENY, 447 QUARANTINE);
    waves of ~3 spawns (burst fan-out has tripped provider limits at ~28);
    lane leases + pairwise-disjoint lane trees for collision isolation

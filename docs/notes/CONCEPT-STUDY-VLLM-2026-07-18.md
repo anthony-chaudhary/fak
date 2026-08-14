@@ -60,7 +60,7 @@ Witness grain = the narrow axis, not the capability name. `path:line@b6ff8a2f`.
 | LoRA two-tier LRU adapter cache + load-before-evict + on-demand resolver + Punica batched GEMM | `vllm/lora/model_manager.py:106` | serve N fine-tunes from a fixed GPU slot pool | SaaS hosting hundreds of fine-tunes | **DIVERGENT** — fak governs agents over a small model set, not a LoRA zoo; the pin-hot + load-before-evict discipline already exists in `expert_residency_lfu.go` + `expert_warmpins.go` | noted |
 | Jump-forward / token-healing | `vllm/v1/structured_output/backend_xgrammar.py:141` (doc only) | emit forced-deterministic tokens with no model step | (designed, **unimplemented** in vllm) | **fak AHEAD** — `internal/model/fastforward.go` implements schema fast-forward drafting | noted |
 | Chunked-prefill token-budget + recompute-preemption scheduler | `vllm/v1/core/sched/scheduler.py:503,558` | pack mixed prefill+decode under one budget; evict least-important on OOM | high-QPS multi-tenant GPU throughput | **DIVERGENT** — fak's worldview is governed single-stream turns + fleet orchestration; admission is per-turn cache-coverage pricing (#3893) + P/D planner (#2242) | noted |
-| Deny-by-default network-facing plugin allowlist | `vllm/plugins/__init__.py:93` | minimize attack surface for route-adding plugins | multi-tenant untrusted plugins | PRESENT — fak guard/allowlist floor (`guard_allow_proposals`, trust-floor #5170) | drop |
+| Deny-by-default network-facing plugin allowlist | `vllm/plugins/__init__.py:93` | minimize attack surface for route-adding plugins | multi-tenant untrusted plugins | PRESENT — fak manage/allowlist floor (`guard_allow_proposals`, trust-floor #5170) | drop |
 
 ## Filed
 

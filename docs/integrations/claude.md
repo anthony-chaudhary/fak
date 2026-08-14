@@ -7,13 +7,13 @@ description: "Wire Claude Code or the Anthropic API to fak serve, a kernel-adjud
 
 **Reader:** a Claude Code or Anthropic SDK user putting the fak kernel in front of the
 Claude they already run.
-**Lifecycle:** current · **Generation:** the `fak guard` launch path and the Anthropic
+**Lifecycle:** current · **Generation:** the `fak manage` launch path and the Anthropic
 `/v1/messages` wire are release-independent; the per-seat limits below track the
 current build.
 **Authority:** [supported agent harnesses](../supported/agent-harnesses.md) ·
 [APIs, wires & MCP that fak supports](../supported/apis-and-protocols.md) ·
 [compatibility matrix](compatibility-matrix.md).
-**Proof:** `fak guard --probe -- claude -p "Reply with exactly the word: pong"` — one
+**Proof:** `fak manage --probe -- claude -p "Reply with exactly the word: pong"` — one
 headless kernel-adjudicated turn on your logged-in subscription (needs `claude` on your
 `PATH`); the deeper four-check gateway-transit proof is
 [below](#prove-it-the-request-really-transited-the-gateway-over-your-subscription).
@@ -33,7 +33,7 @@ This guide explains how to put **fak** in front of the Claude Code you already r
 
 ## Put fak in front of Claude Code in 3 steps
 
-The whole integration is **one command**: `fak guard` injects the gateway base URL into
+The whole integration is **one command**: `fak manage` injects the gateway base URL into
 the Claude Code child for you, proxies your existing subscription byte-for-byte, and
 adjudicates every tool call. Copy-paste:
 
@@ -50,7 +50,7 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 fak manage claude
 ```
 
-No API key needed — `fak guard` uses your logged-in Claude Pro/Max **subscription** by
+No API key needed — `fak manage` uses your logged-in Claude Pro/Max **subscription** by
 default. It starts an in-process gateway on a private `127.0.0.1` port, injects
 `ANTHROPIC_BASE_URL` into the **child process only** (your shell and other terminals are
 untouched), and forwards your credential + prompt-cache breakpoints unchanged — no cost
@@ -59,7 +59,7 @@ regression.
 **3. Watch a verdict.** Work as usual; on exit fak prints what the kernel decided:
 
 ```
-fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
+fak manage: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
   blocked: SELF_MODIFY      x1
 ```
@@ -73,7 +73,7 @@ fak manage --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
 That's the whole loop. Everything below is the detail behind these three steps — the
-`fak guard` internals, running a local model with `--gguf`, an end-to-end proof, manual
+`fak manage` internals, running a local model with `--gguf`, an end-to-end proof, manual
 two-terminal wiring, and the capability floor.
 
 ---
@@ -105,10 +105,10 @@ two-terminal wiring, and the capability floor.
 
 ---
 
-## The one command: `fak guard`
+## The one command: `fak manage`
 
 The fastest way to put the kernel in front of the Claude Code you already run is the
-`fak guard` verb. It is one cross-platform command — no shell script, no second
+`fak manage` verb. It is one cross-platform command — no shell script, no second
 terminal, no config-file edits:
 
 ```bash
@@ -121,15 +121,15 @@ For a quick live smoke that does not ask the agent to write a fleet handoff, run
 fak manage --probe -- claude -p "Reply with exactly the word: pong"
 ```
 
-(No API key needed — `fak guard` uses your logged-in Claude Pro/Max subscription by
+(No API key needed — `fak manage` uses your logged-in Claude Pro/Max subscription by
 default, **even if `ANTHROPIC_API_KEY` is exported**. To use API billing instead, name the
 key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
 
-`fak guard`:
+`fak manage`:
 
 1. Starts the gateway **in-process** on a private `127.0.0.1` port (the OS picks a free one).
 2. Loads a sensible secure capability floor embedded in the binary (so it works from any
-   directory — print it with `fak guard --dump-policy`, override with `--policy FILE`).
+   directory — print it with `fak manage --dump-policy`, override with `--policy FILE`).
 3. Injects `ANTHROPIC_BASE_URL` into the **child process only** — your shell, your
    `settings.json`, and any other `claude` in another terminal are untouched.
 4. Proxies to the **real Anthropic API**: your credential (subscription OAuth by default,
@@ -139,7 +139,7 @@ key explicitly: `--api-key-env ANTHROPIC_API_KEY`.)
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
 
 ```
-fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
+fak manage: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
   blocked: SELF_MODIFY      x1
 ```
@@ -151,16 +151,16 @@ normal outcome, not an error.)
 A launcher is first-class only when its exact host-tool dialect is covered, not merely
 when its provider wire connects: Claude Code's PascalCase tools, Codex's snake_case
 tools, OpenCode's lowercase tools, danger-bearing argument names, and each harness's
-stop/continue behavior after a denial. New `fak guard` launcher claims are gated by the
+stop/continue behavior after a denial. New `fak manage` launcher claims are gated by the
 [harness integration acceptance checklist](harness-acceptance-checklist.md).
 
 > **Your Claude Pro/Max subscription is the default — no API key needed.** When the
-> upstream is Anthropic, `fak guard` uses your **subscription** unless you explicitly name
+> upstream is Anthropic, `fak manage` uses your **subscription** unless you explicitly name
 > an API key: it sources the OAuth token (from `CLAUDE_CODE_OAUTH_TOKEN`, then
 > `<claude-config>/.oauth-token`, then `~/.claude/.credentials.json`) and sends it
 > upstream as `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` — the scheme
 > the API accepts an `sk-ant-oat…` token under (sent as `x-api-key` it 401s). So
-> `fak guard -- claude` just works on a logged-in subscription. fak holds the token and
+> `fak manage -- claude` just works on a logged-in subscription. fak holds the token and
 > ignores the client's own credential (it injects a placeholder key into the child). A
 > bare `ANTHROPIC_API_KEY` exported in your shell **no longer** switches this — a global
 > SDK key must not silently bill your API account when you hold a subscription; guard
@@ -182,7 +182,7 @@ fak manage --policy my-floor.json -- claude     # enforce your own reviewed allo
 
 ### Local model: no key, no network, one command
 
-`fak guard --gguf` runs a local GGUF model in-kernel as the upstream for your agent. No API key, no network, no second terminal — the whole stack (local model + your harness + kernel floor) is one command:
+`fak manage --gguf` runs a local GGUF model in-kernel as the upstream for your agent. No API key, no network, no second terminal — the whole stack (local model + your harness + kernel floor) is one command:
 
 ```bash
 fak manage --gguf qwen2.5:7b -- claude
@@ -191,13 +191,13 @@ fak manage --gguf qwen2.5:7b -- claude
 What you'll see on first run (the GGUF is cached locally after the first pull):
 
 ```
-fak guard: --gguf qwen2.5:7b → hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+fak manage: --gguf qwen2.5:7b → hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf
 GET https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf
-fak guard: listening on http://127.0.0.1:54321 (in-process gateway)
-fak guard: loading in-kernel model: Qwen2.5-7B-Instruct-Q4_K_M.gguf
-fak guard: Claude child started (PID 12345)
+fak manage: listening on http://127.0.0.1:54321 (in-process gateway)
+fak manage: loading in-kernel model: Qwen2.5-7B-Instruct-Q4_K_M.gguf
+fak manage: Claude child started (PID 12345)
 [... Claude session runs with the local model ...]
-fak guard: 23 kernel decision(s) — 19 allowed, 2 denied, 0 repaired, 0 quarantined, 2 deferred
+fak manage: 23 kernel decision(s) — 19 allowed, 2 denied, 0 repaired, 0 quarantined, 2 deferred
   blocked: POLICY_BLOCK     x2
 ```
 
@@ -230,17 +230,17 @@ FAK_GGUF_LOAD_WORKERS=8 fak manage --gguf qwen2.5:7b --backend cuda -- claude
 
 **The honest fence:**
 
-Small-model agentic quality is a ramp. `qwen2.5:7b` (or any 7B-class local model) can answer well-formed questions and follow simple instructions, but for complex coding tasks, frontier-quality reasoning, or multi-step refactoring, the proxy path (`fak guard -- claude`, which reaches Claude Sonnet/Opus via Anthropic's API) is still the default. Use `--gguf` for:
+Small-model agentic quality is a ramp. `qwen2.5:7b` (or any 7B-class local model) can answer well-formed questions and follow simple instructions, but for complex coding tasks, frontier-quality reasoning, or multi-step refactoring, the proxy path (`fak manage -- claude`, which reaches Claude Sonnet/Opus via Anthropic's API) is still the default. Use `--gguf` for:
 - Offline development on air-gapped systems
 - Privacy-sensitive work where data cannot leave the box
 - Testing the kernel floor without API costs
 - Learning how local agentic models behave
 
-When you need the best coding quality and you have a subscription, use `fak guard -- claude` (proxy).
+When you need the best coding quality and you have a subscription, use `fak manage -- claude` (proxy).
 
 ### Long-context reset budget
 
-`fak guard` can also seed a stable served-session budget for wrapped Claude Code:
+`fak manage` can also seed a stable served-session budget for wrapped Claude Code:
 
 ```bash
 fak manage --context-budget-tokens 150000 --reset-on-budget -- claude
@@ -294,7 +294,7 @@ or model-fixable tool shape errors, increment `fak_guard_tool_feedback_*` instea
 are per-tool feedback turns and the model should fix the arguments/tool choice and keep
 going.
 
-`fak guard` fixes this in two layers — the wire stays correct, the harness keeps moving:
+`fak manage` fixes this in two layers — the wire stays correct, the harness keeps moving:
 
 1. **It's counted separately.** Hard deny-all turns increment
    `fak_guard_deny_all_stops_total` and the live `fak_guard_deny_all_consecutive` gauge on
@@ -375,7 +375,7 @@ fak manage --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY 
 
 ### Observability
 
-**The observable debug layer is on by default.** `fak guard` prints one compact,
+**The observable debug layer is on by default.** `fak manage` prints one compact,
 payload-free line per served turn to stderr whose first job is to answer **"did this turn
 work?"** at a glance:
 
@@ -441,7 +441,7 @@ your subscription OAuth token. Copy-paste it.
 **Prerequisites:**
 
 - `claude` is on your `PATH` (`claude --version` works).
-- A subscription token is reachable, in the order `fak guard` reads them: the
+- A subscription token is reachable, in the order `fak manage` reads them: the
   `CLAUDE_CODE_OAUTH_TOKEN` env var (a `claude setup-token` value), then
   `<claude-config>/.oauth-token`, then `<claude-config>/.credentials.json` (the
   interactive login token, which expires — prefer a setup token for anything
@@ -514,7 +514,7 @@ proof the swap happened.
 stderr counts it:
 
 ```
-fak guard: 2 kernel decision(s) — 1 allowed, 0 denied, 0 repaired, 0 quarantined, 1 deferred
+fak manage: 2 kernel decision(s) — 1 allowed, 0 denied, 0 repaired, 0 quarantined, 1 deferred
 ```
 
 `allowed` is the proposed `Bash` call crossing the capability floor; `deferred` is its
@@ -537,7 +537,7 @@ gateway swapped in your OAuth token (3), with the tool call adjudicated and reco
 
 ### Current limits on the subscription seat
 
-The proof above runs the default `fak guard -- claude` path. The honest limits and
+The proof above runs the default `fak manage -- claude` path. The honest limits and
 in-flight rungs on that seat:
 
 - **Streaming.** The Anthropic `/v1/messages` wire synthesizes the SSE from a
@@ -550,7 +550,7 @@ in-flight rungs on that seat:
   lives upstream, so there is no local KV prefix to drop. A quarantined tool result is
   still paged out before the model reads it; the in-kernel evictor is the local-model
   (`--gguf`) path.
-- **The OpenAI-wire seat** (`fak guard --provider openai -- codex` / `opencode`) is
+- **The OpenAI-wire seat** (`fak manage --provider openai -- codex` / `opencode`) is
   unit-tested for provider inference and the tool floor, and now has a recorded live
   gateway-transited witness of the four checks above:
   `experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json` (#1329,
@@ -559,7 +559,7 @@ in-flight rungs on that seat:
 
 The rest of this guide covers the **local-model** dogfood path (point fak at
 ollama / a shim / a large local OpenAI-compatible server) and the manual two-terminal
-wiring `fak guard` automates.
+wiring `fak manage` automates.
 
 ---
 
@@ -666,12 +666,12 @@ For every tool call the model proposes, the kernel evaluates:
 
 If you want to wire Claude Code to `fak serve` manually:
 
-> **Simpler alternative:** `fak guard --local -- claude` replaces steps 2 and 3 below —
+> **Simpler alternative:** `fak manage --local -- claude` replaces steps 2 and 3 below —
 > it starts the gateway, auto-detects the model server from step 1, and injects
 > `ANTHROPIC_BASE_URL` into the Claude Code child process for you (see
 > [Large local models](#large-local-models-qwen36-preset)). Use the manual steps below
 > when you need a long-running gateway process (e.g. a second machine, or a client
-> other than `fak guard`'s own child-process launch).
+> other than `fak manage`'s own child-process launch).
 
 ### 1. Start a model server
 

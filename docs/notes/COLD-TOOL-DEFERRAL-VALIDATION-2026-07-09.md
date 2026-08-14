@@ -6,7 +6,7 @@ description: "The three synthetic QA gates for the DeferColdTools default-on fli
 # Cold-tool deferral (epic #3229) — validation status
 
 **Date:** 2026-07-09. **Scope:** the `DeferColdTools` lever (#3232) and the four QA gates that
-block flipping it default-on for the flagship `fak guard -- claude` path (#3537).
+block flipping it default-on for the flagship `fak manage -- claude` path (#3537).
 
 `DeferColdTools` marks every allowed-but-cold custom tool `defer_loading:true` on the outbound
 Anthropic body and injects one `tool_search_tool`, so the provider loads only the hot core into
@@ -49,9 +49,9 @@ then default-off — same model and same issue:
 
 ```
 # ARM (deferral on)
-fak guard --defer-cold-tools --model claude-fable-5 --debug-stats -- claude -p "<resolve target issue N>"
+fak manage --defer-cold-tools --model claude-fable-5 --debug-stats -- claude -p "<resolve target issue N>"
 # ABLATE (default off — the current shipping behavior)
-fak guard --model claude-fable-5 --debug-stats -- claude -p "<resolve target issue N>"
+fak manage --model claude-fable-5 --debug-stats -- claude -p "<resolve target issue N>"
 ```
 
 Capture, per run, from the guard exit summary (the #3531 surface) and `/metrics`:

@@ -20,7 +20,7 @@ fak has a 241-family observability plane that grades **96.8/100 (grade A)**
 the *served-gateway* metric families exist and correlate — **not** the wall-clock a user actually
 feels at the two lifecycle boundaries the loop lives on:
 
-- **First launch** — how long `fak guard` takes before the wrapped `claude` is usable.
+- **First launch** — how long `fak manage` takes before the wrapped `claude` is usable.
 - **Concurrency** — how long each dispatch tick takes to evaluate and admit/spawn a worker.
 
 Both boundaries *have* a stopwatch. Neither boundary's wall-clock is **persisted, folded to
@@ -70,7 +70,7 @@ Every row is a real seam; the plan extends, folds, and gates them.
 | `internal/turntaxmeter/hooklat.go` `FoldHookLatency` → p50/p90/p99 + `DefaultHookP99BudgetMS=250` + closed token `GateLatencyRegression` | **point it at the dispatch `timings_ms` stream and the usagelog `DurationMS` stream** — the percentile+budget machinery already exists |
 | `internal/turntaxmeter/overheadbudget.go` `Span.ElapsedNS` + `Budget.MaxNS` + closed token `OverheadBudgetExceeded` | the declared-envelope shape for a first-launch / per-phase budget |
 | `internal/gateway/metrics_render.go` / `metrics_http.go` (`withMetrics`) | the `/metrics` histogram + timing-middleware template for a new `fak_hotpath_*` family |
-| `internal/bench` `MeasureSpawnedBaseline` (`bench.go:136`) — spawns + wall-clocks the real binary | the harness to wall-clock a real `fak guard`/`fak dispatch` invocation for the 5× before/after |
+| `internal/bench` `MeasureSpawnedBaseline` (`bench.go:136`) — spawns + wall-clocks the real binary | the harness to wall-clock a real `fak manage`/`fak dispatch` invocation for the 5× before/after |
 | `internal/usagelog/fold.go` (`FoldRows`, p50 only at ms res) | enrich to p90/p99 — the `DurationMS` data is already on disk |
 
 ## 4. The maturity ladder (the plan)

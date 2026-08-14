@@ -122,5 +122,5 @@ Each keeps the Heartbeat wire, the Registry, and the merge intact; only the reac
   an OS loopback limitation, not a code defect: the shipped transport sends out the NIC and a
   packet reaches a *different* machine's socket normally. Verifying it needs two machines on one
   LAN (`TestEndToEndTwoSpinesDiscoverEachOther` is the ready live probe; run it on two boxes, or
-  run two `fak guard` sessions on two hosts sharing the group/port and confirm each appears in the
+  run two `fak manage` sessions on two hosts sharing the group/port and confirm each appears in the
   other's `fak info` fleet panel with no shared git remote).

@@ -78,7 +78,7 @@ $ ./fak preflight --tool get_user_details --args "{}"
 verdict=ALLOW reason=NONE by=monitor
 
 # That's the whole boundary: default-deny, fail-closed, model-independent.
-# Same binary next wraps your agent:  fak guard -- claude
+# Same binary next wraps your agent:  fak manage -- claude
 ```
 
 ## What just happened

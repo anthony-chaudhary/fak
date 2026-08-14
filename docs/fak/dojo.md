@@ -117,7 +117,7 @@ fak dojo post --rollup trend --dry-run
 - **run** scores the levers over the corpus, folds the episodes, and (with
   `--append-history`) trends the mean calibration error in `docs/dojo/history.jsonl`.
   With `--live` (auto-selected when no `--corpus` is given and a live corpus exists)
-  it discovers the `.dojo/live-episodes` markers that `fak guard --dojo` /
+  it discovers the `.dojo/live-episodes` markers that `fak manage --dojo` /
   `fak serve --dojo` write. Those markers are start-only today, so the live path
   *surfaces what it found and reports what is missing to score it* rather than
   inventing a calibration.

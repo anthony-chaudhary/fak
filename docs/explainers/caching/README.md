@@ -32,7 +32,7 @@ ladder splits the difference: each rung assumes exactly what the one below it ta
 | Level | Who it's for | What you'll get |
 |---|---|---|
 | **[1 · What is caching?](level-1-what-is-caching.md)** | A newcomer, or a small/8B agent that needs the one-screen version. No jargon. | What a prompt cache is, why it matters, what to type, how to tell it helped. |
-| **[2 · Managed cache in practice](level-2-managed-cache-in-practice.md)** | A competent dev or mid-tier agent running `fak guard -- claude`. | `--managed-cache on\|off\|auto`, the defaults, Pro/Max headroom, how to verify. |
+| **[2 · Managed cache in practice](level-2-managed-cache-in-practice.md)** | A competent dev or mid-tier agent running `fak manage -- claude`. | `--managed-cache on\|off\|auto`, the defaults, Pro/Max headroom, how to verify. |
 | **[3 · Cache economics & the wire](level-3-cache-economics-and-the-wire.md)** | A senior engineer / capable agent who wants the mechanism and the money. | Sliding window vs 1h tier, the read/write multipliers, byte-exact prefix, provider matrix. |
 | **[4 · The kernel-owned KV cache](level-4-kernel-kv-cache.md)** | A platform engineer / strong agent running the model in-kernel. | Addressable KV cache, bit-exact span eviction, prefix cloning, WITNESSED vs OBSERVED accounting. |
 | **[5 · The caching frontier](level-5-the-caching-frontier.md)** | A `fable`-tier reader / researcher who wants the SOTA and the open problems. | vCache enablement, SOTA optimizations, cross-provider futures, the honest open edges. |

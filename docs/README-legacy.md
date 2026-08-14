@@ -47,7 +47,7 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 
 Each row is a starter policy floor: a reviewable allow-list you copy, trim, and run
 `fak preflight` against to watch the floor bite. Point your agent at one with
-`fak guard --policy examples/<file>` (or `fak serve --policy …` for a gateway). The
+`fak manage --policy examples/<file>` (or `fak serve --policy …` for a gateway). The
 full catalogue, with a witness command per floor, is in
 [examples/README.md](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md).
 
@@ -146,7 +146,7 @@ The at-a-glance surface table (moved off the front page 2026-07-01):
 
 | Surface | What it gives you | Status |
 |---|---|---|
-| `fak guard` | Drop-in guard around an existing CLI agent | shipped |
+| `fak manage` | Drop-in guard around an existing CLI agent | shipped |
 | `fak node` | Install/connect an always-on `fak serve` gateway as a system service | shipped |
 | `fak console` | Native operator/client panes for issues, live sessions, guard artifacts | shipped |
 | `fak serve` | OpenAI, Anthropic, fak-native HTTP, plus MCP over HTTP/stdio | shipped |
@@ -183,11 +183,11 @@ audit, and the capability floor.
 
 ## The front-page diagrams
 
-How `fak guard -- claude` sits in the loop:
+How `fak manage -- claude` sits in the loop:
 
 ```mermaid
 flowchart LR
-  you["<b>fak guard -- claude</b><br/>one command"]
+  you["<b>fak manage -- claude</b><br/>one command"]
   subgraph one["one binary, on loopback"]
     direction TB
     agent["your agent<br/>Claude Code · Codex · opencode"]
@@ -236,7 +236,7 @@ flowchart LR
     direction LR
     h2["prefix<br/><b>byte-identical</b><br/>cache hit preserved"] --> t2["recent turns"]
   end
-  s1 -->|"fak guard (on by default)"| s2
+  s1 -->|"fak manage (on by default)"| s2
 ```
 
 ## `fak serve` in front of any compatible client

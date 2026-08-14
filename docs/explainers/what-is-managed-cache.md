@@ -6,7 +6,7 @@ keywords:
   - fak managed cache
   - managed cache
   - FAK_MANAGED_CACHE
-  - fak guard --managed-cache
+  - fak manage --managed-cache
   - prompt cache
   - Anthropic prompt cache
   - 1h TTL cache
@@ -33,7 +33,7 @@ date: 2026-07-10
 > the *other* family members — the 1h tier is rejected on subscription-OAuth in practice,
 > so the guard keeps those seats passive. It **never changes your model's answers**.
 
-*Who this is for: anyone running `fak guard -- claude` (or another agent) who has seen
+*Who this is for: anyone running `fak manage -- claude` (or another agent) who has seen
 the words "managed cache" in the startup banner or the docs and wants to know, in plain
 terms, what it does, whether they should turn it on, and how to check it's working.*
 
@@ -112,9 +112,9 @@ There are **two layers** of default, and they differ — this is the one subtle 
   the 1h upgrade on API-key-billed Anthropic seats** and **downgrades to passive on a
   subscription-OAuth seat** (the guard refuses the 1h tier there, with the reason in the
   banner; see below) — unless you set `FAK_MANAGED_CACHE=off` (or `=auto`).
-- **A bare `fak guard`** still reads only the `--managed-cache` flag, whose own default is
+- **A bare `fak manage`** still reads only the `--managed-cache` flag, whose own default is
   **`auto`** (fak's billing-gated auto — passive on a subscription unless you pass `on`).
-  Exporting `FAK_MANAGED_CACHE` does nothing for a bare `fak guard`.
+  Exporting `FAK_MANAGED_CACHE` does nothing for a bare `fak manage`.
 
 ```bash
 fak manage --managed-cache on   -- claude  # request the 1h upgrade (API key: active; subscription-OAuth: downgrades to passive)
@@ -224,7 +224,7 @@ how the provider bills the unchanged prefix.
 
 Three places tell you, from quickest to most detailed:
 
-1. **The startup banner.** `fak guard` prints one line at launch. A fleet-launched
+1. **The startup banner.** `fak manage` prints one line at launch. A fleet-launched
    API-key seat reads `managed cache — ACTIVE (forced by --managed-cache on):
    stable-prefix cache_control upgraded to the 1h TTL tier…`. A subscription-OAuth seat —
    even under `--managed-cache on` — reads `passive (…)` with the refusal reason (the
@@ -269,7 +269,7 @@ keep caching). Set `FAK_MANAGED_CACHE=off` only on a seat where it misbehaves.
 Through fak's fleet launchers, **yes** — since 2026-07-10 an unset `FAK_MANAGED_CACHE`
 resolves to `on`. That arms the 1h upgrade on API-key seats; on a subscription-OAuth
 seat the guard downgrades `on` to passive (the provider rejects the 1h tier on that
-credential class), and the family's other levers do the caching. A bare `fak guard`
+credential class), and the family's other levers do the caching. A bare `fak manage`
 still defaults its own flag to `auto` (active on an API-key Anthropic session, passive
 on a Pro/Max subscription).
 

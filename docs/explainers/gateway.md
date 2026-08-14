@@ -113,7 +113,7 @@ begin flowing through the syscall boundary.
 The gateway governs *model traffic* while your existing harness still owns the
 agent loop. That is a different role from the **agent application runtime**
 (`fak serve --native`), which owns the loop itself, and from a **client** (a
-harness wrapped by `fak guard`, or your own SDK code). This page is about the
+harness wrapped by `fak manage`, or your own SDK code). This page is about the
 gateway; the full three-role distinction and the *which do I run* decision live in
 [Two runtimes, one binary](runtime-vs-client.md).
 
@@ -134,7 +134,7 @@ is what the gateway relies on. See
 
 ## Generation and support context
 
-`gen/now`. The gateway runtime (`fak serve` / `fak guard`) is the mature, shipped
+`gen/now`. The gateway runtime (`fak serve` / `fak manage`) is the mature, shipped
 path, witnessed live in front of Claude Code, Codex, and OpenCode. The agent
 application runtime (`fak serve --native`) is the emerging sibling surface; prefer
 the gateway path unless you specifically want fak to own the loop. This page is
@@ -143,7 +143,7 @@ documentation-only and orthogonal to the runtime implementation gates.
 ## Next action
 
 Route your existing agent through the gateway with no rewrite: follow the
-[Claude Code / Anthropic API guide](../integrations/claude.md) (`fak guard -- claude`
+[Claude Code / Anthropic API guide](../integrations/claude.md) (`fak manage -- claude`
 starts a private kernel gateway and points the child at it), or start a shared
 `fak serve` and repoint one base URL. Confirm it is live by scraping the gateway's
 Prometheus `/metrics`.

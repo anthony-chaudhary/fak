@@ -34,7 +34,7 @@ correct (a GPU kernel is checked against a bit-exact reference, not eyeballed).
    lanes & leases (dos.toml, `dos arbitrate`) · done-claims (`dos verify`)
         |
  FLOOR 5 — THE TWO FRONT DOORS (the session boundary)
-   `fak guard` — wraps an agent harness, adjudicates every tool call
+   `fak manage` — wraps an agent harness, adjudicates every tool call
    `fak serve` — OpenAI-compatible gateway; repoint one base URL
         |
  FLOOR 4 — THE KERNEL (the DOS)
@@ -84,7 +84,7 @@ Everything below this floor is invisible until an **agent** (Claude Code,
 Codex, any OpenAI-compatible client) tries to *do* something. There are exactly
 two ways in:
 
-- **`fak guard -- <agent>`** wraps the agent harness itself, so every tool call
+- **`fak manage -- <agent>`** wraps the agent harness itself, so every tool call
   the agent proposes is adjudicated in-process before it executes.
 - **`fak serve`** is the gateway: you repoint one base URL and your existing
   agent's model traffic flows through the kernel unchanged.
@@ -184,7 +184,7 @@ You type "fix the failing test" into your agent.
 | Floor | You touch | The seam | Source of truth |
 |---|---|---|---|
 | 6 — work | `fak help`, issues, lanes, `dos verify` | lease + diff-witnessed claims | `dos.toml`, [`CLAIMS.md`](../../CLAIMS.md) |
-| 5 — doors | `fak guard`, `fak serve` | one wrapped harness / one base URL | [`README.md`](../../README.md) |
+| 5 — doors | `fak manage`, `fak serve` | one wrapped harness / one base URL | [`README.md`](../../README.md) |
 | 4 — kernel | policies, `fak audit`, `fak preflight` | syscall + closed verdict set | `internal/abi`, [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
 | 3 — memory | session resume, restore handles | context MMU + memory cells | `internal/ctxmmu`, `internal/memq` |
 | 2 — model | `fak model`, engine config | `RegisterEngine` | `internal/model`, `internal/modelengine` |

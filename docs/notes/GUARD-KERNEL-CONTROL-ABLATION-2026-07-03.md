@@ -1,11 +1,11 @@
 ---
 title: "Guard value under a kernel we control — the GPU server GLM-5.2 vs API"
-description: "Design for a benchmark ablating fak guard value with fak's own GLM-5.2 kernel on GPU servers versus API upstreams; no results yet, box-gated on GPU access."
+description: "Design for a benchmark ablating fak manage value with fak's own GLM-5.2 kernel on GPU servers versus API upstreams; no results yet, box-gated on GPU access."
 ---
 
 # Guard value under a kernel we control — the GPU server GLM-5.2 vs API ablation (2026-07-03)
 
-**Goal.** Prove *real* `fak guard` value in the one regime where every number is ours:
+**Goal.** Prove *real* `fak manage` value in the one regime where every number is ours:
 the wrapped agent's upstream is **fak's own inference kernel** serving GLM-5.2 on GPU server class
 compute, ablated against the same guarded workload pointed at **API-based sessions**
 (Z.ai's GLM-5.2 API; the Anthropic API the guard proxies today). This note is the
@@ -22,7 +22,7 @@ labeled runnable-today / not-yet.
 
 ## 1. Why "kernel we control" is the guard-value lever
 
-`fak guard -- <agent>` today is a loopback proxy + supervisor: the gate
+`fak manage -- <agent>` today is a loopback proxy + supervisor: the gate
 (`internal/gateway/gateway.go` `adjudicate()` → `k.Decide`) sits at the tool-call /
 HTTP boundary, and the model upstream is someone else's. That shape caps what
 "guard value" can *mean*:
@@ -110,7 +110,7 @@ Each axis names its seam (shipped today) and its witness.
    empty. **Witness:** child env dump per arm (names only), zero credential
    env-vars present in K-arms.
 5. **Deterministic replay adjudication.** The fak kernel decodes greedy-argmax
-   by default: replaying the identical session (`fak guard --replay-trace` /
+   by default: replaying the identical session (`fak manage --replay-trace` /
    `internal/guardtrace`) should reproduce the identical journal —
    byte-comparable verdict streams, which turns guard-policy changes into
    regression-diffable artifacts. Impossible against an API (sampling +

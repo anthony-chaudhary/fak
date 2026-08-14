@@ -191,7 +191,7 @@ python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 \
     --out experiments/glm52/full-size-serving-witness.json \
     --markdown docs/notes/GLM52-FULL-SIZE-SERVING-WITNESS.md
 # then drive Claude Code end-to-end through the fak local guard against the same endpoint:
-fak guard --provider openai --base-url http://127.0.0.1:8000/v1 -- claude
+fak manage --provider openai --base-url http://127.0.0.1:8000/v1 -- claude
 ```
 
 `tools/private GLM-5.2 stage runner` self-stages

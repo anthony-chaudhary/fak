@@ -199,7 +199,7 @@ never resident; a pin cannot launder poison.
   `recall.PersistIndex`/`LoadIndex`, a sibling `index.json` next to `manifest.json`/`cas.json`,
   #558 half a), so a resumed session re-attaches its index instead of rebuilding it.
   **The gateway live-loop wiring SHIPPED (#555, commit `7f3ae40`) and is now DEFAULT-ON
-  (2026-06-28):** `fak serve`/`fak guard` default `--ctx-view-budget` to a conservative 8000
+  (2026-06-28):** `fak serve`/`fak manage` default `--ctx-view-budget` to a conservative 8000
   resident tokens (pass 0 to disable, byte-for-byte unchanged); the per-turn buffered path
   (`gateway.Server.complete` → `maybePlanMessages`, keyed per-session) re-materializes the
   forwarded history as an O(1) planned view in place of appending the whole transcript. It is
@@ -208,7 +208,7 @@ never resident; a pin cannot launder poison.
   (`internal/gateway/gateway_ctxview_http_test.go`: OFF forwards the full history, ON forwards the
   bounded planned view, both read off the upstream body). The flip's witness is
   [CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28](CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md).
-  The flagship `fak guard -- claude` **Anthropic passthrough** now ALSO plans: the deferred
+  The flagship `fak manage -- claude` **Anthropic passthrough** now ALSO plans: the deferred
   `req.Raw` cache-prefix-preserving transform shipped (#927, `agent.CompactAnthropicHistoryToView`),
   so when the budget elides older history the passthrough rewrites `req.Raw` IN PLACE with same-role
   `[fak] ctxview-elided` stubs while keeping the `cache_control` prefix and every resident message

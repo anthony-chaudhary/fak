@@ -125,13 +125,13 @@ GPU device compute is witnessed real on several backends (CUDA on an RTX 4070 an
 | Dynamic attack battery | Shipped | `internal/agentdojo` is an ASR-gated AgentDojo-style red-team replacing the static poison fixture; 3 of 4 arrows shipped, the RL red-team generator is a documented seam. |
 | `normgate` admission driver | Shipped | The rank-5 canonicalize-and-decode ResultAdmitter; lifts agent-evasion catch 0 to 20 of 24 and cuts private-transcript false positives with 0 new FPs and 0 leaks. |
 
-## Gateway (`fak serve` / `fak guard`)
+## Gateway (`fak serve` / `fak manage`)
 
 | Feature | Status | What it does |
 |---|---|---|
 | `fak serve` OpenAI-compatible surface | Shipped | An HTTP surface (`/v1/chat/completions` adjudication proxy, `/v1/fak/{syscall,adjudicate}`, `/v1/models`, `/healthz`) plus MCP over stdio/HTTP; mints a tainted agent-scoped Ref so the IFC/secret/self-modify rungs stay armed; optional constant-time bearer auth. |
 | Served result-side stack (`fak_admit`) | Shipped | `POST /v1/fak/admit` runs a client-produced result through the context-MMU quarantine + IFC taint ledger, with a `TraceID` threaded end-to-end. |
-| `fak guard -- <agent>` front door | Shipped | Starts the in-process gateway on a private loopback port, injects its URL into the child only, execs the real agent, and prints a verdict roll-up from the same counters `/metrics` exposes. Default upstream is the Anthropic API in passthrough. |
+| `fak manage -- <agent>` front door | Shipped | Starts the in-process gateway on a private loopback port, injects its URL into the child only, execs the real agent, and prints a verdict roll-up from the same counters `/metrics` exposes. Default upstream is the Anthropic API in passthrough. |
 
 The gateway fronts any OpenAI-compatible upstream (a local engine or a cloud provider). The exact list of harnesses, wires, and backends that have been sourced is in the [compatibility matrix](../integrations/compatibility-matrix.md); the streaming and endpoint detail is in the [gateway API reference](../fak/api-reference.md) and the [MCP tool-result wire](../mcp-tool-result.md). One streaming caveat: `stream:true` SSE on the OpenAI proxy is synthesized from the finished, already-adjudicated turn (the Anthropic `/v1/messages` passthrough does live token streaming).
 

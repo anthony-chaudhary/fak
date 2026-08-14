@@ -19,7 +19,7 @@ Sources:
 
 - [`docs/integrations/adopter-playbook.md`](integrations/adopter-playbook.md): the
   external-adopter playbook, with shapes A/B/C and the production checklist.
-- [`docs/integrations/CLAUDE.md`](integrations/CLAUDE.md): the `fak guard` front door,
+- [`docs/integrations/CLAUDE.md`](integrations/CLAUDE.md): the `fak manage` front door,
   the per-turn debug line, and the gateway-transit proof.
 - [`docs/concepts-and-story.md`](concepts-and-story.md): the two-gate trust model and
   the "when does the win kick in" tables.
@@ -86,7 +86,7 @@ flowchart LR
 
 **Terms used:**
 
-- "injected into the child only": `fak guard` sets the base URL in the wrapped
+- "injected into the child only": `fak manage` sets the base URL in the wrapped
   process's environment. Your shell, your `settings.json`, and any other agent in
   another terminal are untouched.
 - "hash-chained journal opt-in": the durable audit trail exists when
@@ -104,7 +104,7 @@ keep everything the previous rung proved.
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
 flowchart TB
-  r0["Rung 0 - wrap what you already run<br/>fak guard -- claude<br/>gain: embedded default-deny floor, exit summary of every verdict,<br/>429 absorption - on your existing subscription"]
+  r0["Rung 0 - wrap what you already run<br/>fak manage -- claude<br/>gain: embedded default-deny floor, exit summary of every verdict,<br/>429 absorption - on your existing subscription"]
   r1["Rung 1 - own the floor<br/>fak policy --dump then edit, fak policy --check<br/>gain: the allow-list is a reviewed JSON file in YOUR git,<br/>checkable offline with no model and no key"]
   r2["Rung 2 - turn on the record<br/>FAK_AUDIT_JOURNAL=audit.jsonl, --log FILE, GET /metrics<br/>gain: a hash-chained decision trail an auditor re-verifies,<br/>plus Prometheus counters per verdict"]
   r3["Rung 3 - front your own stack<br/>fak serve --base-url (production checklist) or serve --stdio (MCP)<br/>or --gguf (local model in-kernel)<br/>gain: the same floor for every client of your endpoint"]
@@ -191,7 +191,7 @@ flowchart TB
 
 **Terms used:**
 
-- "prov= / fak=": the two token-saving slices on the per-turn debug line `fak guard`
+- "prov= / fak=": the two token-saving slices on the per-turn debug line `fak manage`
   prints. `prov=` is the provider prompt-cache net saving, read rebate minus write
   premium, relayed from provider counters. `fak=` is the slice fak itself authored:
   compaction shed, plus in-kernel KV-prefix reuse on a local model.
@@ -221,7 +221,7 @@ flowchart TB
   q3{"An agent that executes its own tools<br/>and should ask for a verdict first?"}
   q4{"No model in the loop -<br/>you just want the floor checked?"}
 
-  guard["fak guard -- your-agent<br/>in-process gateway on a private loopback port;<br/>base URL injected into the child only; zero config"]
+  guard["fak manage -- your-agent<br/>in-process gateway on a private loopback port;<br/>base URL injected into the child only; zero config"]
   serve["fak serve --base-url ...<br/>the bare-serve production path:<br/>policy file + auth-key env + /healthz + /metrics"]
   mcp["fak serve --stdio<br/>manual MCP server: the agent asks the kernel<br/>about a call before running it itself"]
   ci["fak policy --check / fak preflight<br/>no model, no key, no listener -<br/>author and gate the floor in CI"]
@@ -257,7 +257,7 @@ flowchart TB
 
 - "shape": one of the four integration forms from the
   [adopter playbook](integrations/adopter-playbook.md). Wrap an agent CLI with
-  `fak guard`. Front a model endpoint with `serve --base-url`. Advise a
+  `fak manage`. Front a model endpoint with `serve --base-url`. Advise a
   self-executing agent over `serve --stdio` MCP. Or check the policy floor in CI
   with no model at all.
 
@@ -324,7 +324,7 @@ flowchart TB
 
 ## The honest scope, in one place
 
-- The figures describe mechanisms that exist today: `fak guard`, `fak serve`,
+- The figures describe mechanisms that exist today: `fak manage`, `fak serve`,
   `serve --stdio`, `policy --check`, `--gguf`, the audit journal, and `/metrics`.
   None of this claims market adoption. The on-ramp is what an adopter *would* climb,
   and never a report that anyone has.

@@ -1,6 +1,6 @@
 ---
 title: "fak UI/UX-quality scorecard - the terminal-surface stick"
-description: "fak's deterministic UI/UX-quality scorecard: does every fak console pane, the fak info overlay, and fak guard --split render correctly and legibly - rune-safe truncation, cell-aware column pads, empty-state branches, full info-legend and console-help coverage - folded into a ui_quality_debt count."
+description: "fak's deterministic UI/UX-quality scorecard: does every fak console pane, the fak info overlay, and fak manage --split render correctly and legibly - rune-safe truncation, cell-aware column pads, empty-state branches, full info-legend and console-help coverage - folded into a ui_quality_debt count."
 ---
 
 # UI/UX-quality scorecard
@@ -13,7 +13,7 @@ The sibling scorecards each watch one surface — `code_quality_scorecard` the G
 module, `observability_scorecard` the metrics plane, `docs_scorecard` the curated
 docs. None of them watch the surface an operator actually **looks at**: the
 `fak console` panes, the `fak info` overlay beside a guarded session, and the
-`fak guard --split` launcher. "Improve the guard TUI" was a vibe; this is the
+`fak manage --split` launcher. "Improve the guard TUI" was a vibe; this is the
 number that makes it a falsifiable target.
 
 ## How it grades

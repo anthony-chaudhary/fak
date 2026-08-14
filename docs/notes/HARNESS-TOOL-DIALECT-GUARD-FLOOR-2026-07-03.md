@@ -1,5 +1,5 @@
 ---
-title: "Harness tool dialects: why fak guard worked for Claude but looped under Codex/fakc"
+title: "Harness tool dialects: why fak manage worked for Claude but looped under Codex/fakc"
 description: "Postmortem note for the 2026-07-03 fakc Codex repeat loop: Claude Code's host-tool names were on the embedded guard floor, Codex's snake_case planning/tool names were not. Captures integration implications, architectural limits, anti-patterns, and ticket-ready follow-ups for future harnesses."
 ---
 
@@ -9,7 +9,7 @@ Date: 2026-07-03 local / 2026-07-04 UTC.
 
 ## TL;DR
 
-`fak guard` did what it was designed to do: it fail-closed on a tool name that the embedded
+`fak manage` did what it was designed to do: it fail-closed on a tool name that the embedded
 floor did not affirmatively allow. The bug was not the provider wire, OAuth, or Codex model
 routing. The bug was **harness dialect coverage**:
 
@@ -29,10 +29,10 @@ routing. The bug was **harness dialect coverage**:
 Observed impact from the audited session:
 
 - Codex thread: `019f2af4-fe54-7451-ba23-3b59a1f8c840`.
-- Launch chain was structurally correct: `fakc -> fak codex -> fak guard -> codex`.
+- Launch chain was structurally correct: `fakc -> fak codex -> fak manage -> codex`.
 - Guard journal: repeated `DENY tool=update_plan reason=DEFAULT_DENY`.
 - Codex session ended paused/interrupted after **211,527 tokens** and **257 seconds**.
-- No DOS stop failure was responsible; the root refusal came from the `fak guard`
+- No DOS stop failure was responsible; the root refusal came from the `fak manage`
   capability floor.
 
 The narrow fix is to admit Codex's host-orchestration tool names — bare and
@@ -43,7 +43,7 @@ supporting its tool dialect, not only its model wire.**
 
 ## What happened
 
-`fak codex` correctly wrapped Codex with `fak guard` and injected the Responses provider
+`fak codex` correctly wrapped Codex with `fak manage` and injected the Responses provider
 override:
 
 ```text
@@ -91,7 +91,7 @@ powerful, but it is not ownership of the loop:
 
 - The external harness owns planning, auto-continue, stop hooks, transcript persistence, and
   sometimes tool execution.
-- `fak guard` owns the capability floor at the tool-call boundary.
+- `fak manage` owns the capability floor at the tool-call boundary.
 - If the harness proposes an unknown host-tool name, the floor must deny it.
 - If the harness treats that denial as a retryable planning failure while the goal remains
   active, the session can spin.
@@ -199,4 +199,4 @@ inspect..." without tool progress:
    a harness-dialect coverage bug.
 4. If the tool is effectful (`shell_command`, `write`, MCP mutation), verify the dangerous
    arg rules before allow-listing anything.
-5. Do not solve it by disabling `fak guard`; solve it by making the harness profile explicit.
+5. Do not solve it by disabling `fak manage`; solve it by making the harness profile explicit.

@@ -1,11 +1,11 @@
 ---
-title: "The fak-OWN cache-value path in fak guard (and why F is often ~0)"
-description: "Explains fak guard's two cache acts (preserve vs compaction-shed), why fak's own cache-value slice F is often ~0 in proxy mode, and how to see it."
+title: "The fak-OWN cache-value path in fak manage (and why F is often ~0)"
+description: "Explains fak manage's two cache acts (preserve vs compaction-shed), why fak's own cache-value slice F is often ~0 in proxy mode, and how to see it."
 ---
 
-# The fak-OWN cache-value path in `fak guard` (and why F is often ~0)
+# The fak-OWN cache-value path in `fak manage` (and why F is often ~0)
 
-**One question this answers:** when I run `fak guard -- claude`, is fak delivering
+**One question this answers:** when I run `fak manage -- claude`, is fak delivering
 its *own* cache value, or just relaying the provider's? And if the exit summary says
 "fak-slice diagnostic — F is ~0", what do I do about it?
 
@@ -13,7 +13,7 @@ This note exists so an agent does not have to re-trace five files to learn the p
 
 ## Two different cache acts, opposite verbs — keep them straight
 
-`fak guard` on the Anthropic passthrough does **two** distinct things to the cache.
+`fak manage` on the Anthropic passthrough does **two** distinct things to the cache.
 They are easy to conflate; they are not the same, and they do not conflict.
 
 | act | verb | who owns the saving | how it's labelled | measured on |
@@ -35,7 +35,7 @@ conversation — can still shed its middle.
 
 ## Why F (fak's slice) is frequently ~0 in guard mode
 
-`fak guard -- claude` is a **proxy**: fak runs no KV kernel of its own, so the
+`fak manage -- claude` is a **proxy**: fak runs no KV kernel of its own, so the
 in-kernel KV-prefix reuse witness (Track 1, `docs/nightrun/cache-value.jsonl`) is
 structurally 0 — there is no fak kernel to reuse a prefix. That is honest, not a bug.
 
@@ -59,7 +59,7 @@ fak cachevalue report            # two-track P&L + owner split over ALL sessions
   own slice. In pure proxy sessions this is often 0 by the structure above; a session
   where compaction shed a real middle shows a non-zero `fak_teq` / `compaction_shed`.
 
-The per-session `fak guard` exit summary also prints:
+The per-session `fak manage` exit summary also prints:
 - the **cache attribution** line (`provider ~X + fak ~Y`, OBSERVED vs WITNESSED), and
 - the **fak-slice diagnostic** naming *why* F is ~0 this session, now pointing back
   at `fak cachevalue report`.
@@ -76,7 +76,7 @@ ground) can now diagnose the real-session population after the fact.
 
 The goal is a non-zero `fak_share`. The path:
 
-1. Run a real long `fak guard -- claude` session (history must sprawl past ~48k
+1. Run a real long `fak manage -- claude` session (history must sprawl past ~48k
    resident tokens for there to be a middle worth shedding).
 2. On the exit summary (or live `/metrics`), read `CompactionBailReasons` /
    `CompactionAnchorStarved`. That names the exact gate holding shed at 0.

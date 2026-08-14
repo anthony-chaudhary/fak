@@ -1,17 +1,17 @@
 ---
 title: "Zero-adoption provider launch with fak launch"
-description: "Put the fak guard in front of an existing Claude Code or Codex install using PATH shims, without changing the command your users already type."
+description: "Put the fak manage in front of an existing Claude Code or Codex install using PATH shims, without changing the command your users already type."
 ---
 
 # Zero-adoption provider launch
 
-`fak launch` can put the fak guard in front of an existing Claude Code or Codex
+`fak launch` can put the fak manage in front of an existing Claude Code or Codex
 installation without changing the command users type.
 
 ```sh
 fak launch install --provider all --default claude
 # Ensure the printed shim directory precedes the provider's own directory on PATH.
-claude                 # now: fak guard -- <original claude> ...
+claude                 # now: fak manage -- <original claude> ...
 fak                    # launches the configured default provider
 ```
 

@@ -5,13 +5,13 @@ description: "Why a long Claude Code session gets expensive, why the obvious fix
 
 # Long sessions: shed history, keep the cache hit
 
-> **Audience.** Anyone running a long Claude Code (or similar) session and watching the cost climb. By the end you'll know the one `fak guard` flag that stops a growing session from getting more expensive every turn, and exactly what it does and does not promise.
+> **Audience.** Anyone running a long Claude Code (or similar) session and watching the cost climb. By the end you'll know the one `fak manage` flag that stops a growing session from getting more expensive every turn, and exactly what it does and does not promise.
 
 > The sibling explainers ([addressable KV cache](addressable-kv-cache.md),
 > [the frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md)) cover the
 > theory of cache reuse, and [long-session economics](long-session-economics.md) is
 > the cost/why version. This one is the practical version: the one flag on
-> `fak guard` that stops a growing session from getting more expensive every turn,
+> `fak manage` that stops a growing session from getting more expensive every turn,
 > and exactly what it does and does not promise.
 
 *For anyone running a long Claude Code (or similar) session and watching the cost
@@ -41,7 +41,7 @@ went up.
 
 ## What fak does instead
 
-`fak guard` takes a different route, **on by default**. Instead of rewriting the
+`fak manage` takes a different route, **on by default**. Instead of rewriting the
 prompt, it **drops** the old middle turns and splices the bytes back together. The
 cacheable front of the prompt is copied through untouched, byte-for-byte (a `memcpy`,
 never a re-serialize), so the provider's cache prefix still matches and the discount
@@ -96,7 +96,7 @@ cache is the provider's decision.
 
 So `fak` reports both numbers side by side instead of claiming the win. `/metrics`
 exposes `fak_gateway_compaction_*`: the tokens `fak` shed (what it sent) next to the
-provider's reported `cache_read` (what came back). The `fak guard` exit line summarizes
+provider's reported `cache_read` (what came back). The `fak manage` exit line summarizes
 both. If `cache_read` is low while the prefix was byte-identical, the miss is
 provider-side: a cache TTL expiry, an eviction, or your client moving its own
 breakpoint. It is not something `fak` broke, and you see it either way instead of

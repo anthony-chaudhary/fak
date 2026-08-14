@@ -19,14 +19,14 @@ at creation time under the epic.
 ## What exists today (grounding)
 
 A dispatch **worker** is not a bare agent CLI — the tick wraps the agent in
-`fak guard` (`dispatch_tick.go:912` → `dispatchtick.GuardedLaunchCommand`), which
+`fak manage` (`dispatch_tick.go:912` → `dispatchtick.GuardedLaunchCommand`), which
 runs an in-process adjudicating gateway. That produces **two disjoint
 observability planes that are never cross-referenced**:
 
 | Plane | Keyed by | Written by | Read by |
 |---|---|---|---|
 | `.dispatch-runs/` sidecars (`resolve-<issue>-<stamp>.{log,pid,backend,lease-id,lease-tree.json,…}`) | issue + timestamp, PID liveness | `spawnDispatchIssueWorker` (`dispatch_tick.go:1043`) | `dispatch status` / `audit` / `evidence` / `progress` |
-| `guard_sessions.jsonl` (handle, trace-id, agent, pid, cwd, audit-path) | handle / trace-id | `recordGuardSessionIndex` (`guard_sessions.go:35`) | `fak guard sessions` only |
+| `guard_sessions.jsonl` (handle, trace-id, agent, pid, cwd, audit-path) | handle / trace-id | `recordGuardSessionIndex` (`guard_sessions.go:35`) | `fak manage sessions` only |
 
 Read verbs today:
 - **`fak dispatch status`** — live-worker card (issue/lane/pid/worker), `fleet-dispatch-status/1`. Pure fold over the runs dir via `liveResolutionScopes` (`dispatch_tick_livescan.go:100`). Liveness is *derived* (log matches `resolve-*.log` + `.pid` alive + not a banner-noop), never self-reported.

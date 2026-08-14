@@ -125,21 +125,21 @@ These concise answers cover the decisions people most often make when configurin
       ],
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak guard --policy.",
+        "text": "Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak manage --policy.",
         "citation": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md"
       }
     },
     {
       "@type": "Question",
-      "name": "How do I configure fak guard for a local coding agent?",
+      "name": "How do I configure fak manage for a local coding agent?",
       "keywords": [
-        "fak guard config",
+        "fak manage config",
         "configure coding agent",
         "local agent guard"
       ],
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Start with fak guard followed by the agent command. fak guard discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.",
+        "text": "Start with fak manage followed by the agent command. fak manage discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.",
         "citation": "https://github.com/anthony-chaudhary/fak/blob/main/README.md#manage-one-local-agent-fak-guard"
       }
     },
@@ -247,13 +247,13 @@ Use fak serve --print-effective-config to parse the manifest, reject unsupported
 
 ## How do I configure which tools an agent may call?
 
-Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak guard --policy.
+Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak manage --policy.
 
 [Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md)
 
-## How do I configure fak guard for a local coding agent?
+## How do I configure fak manage for a local coding agent?
 
-Start with fak guard followed by the agent command. fak guard discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.
+Start with fak manage followed by the agent command. fak manage discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.
 
 [Authoritative details](https://github.com/anthony-chaudhary/fak/blob/main/README.md#manage-one-local-agent-fak-guard)
 

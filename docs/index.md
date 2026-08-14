@@ -204,7 +204,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 ---
 
 <sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: Fused
-Agent Kernel, fak agent kernel, fak guard, fak serve, fak-certified, agent kernel,
+Agent Kernel, fak agent kernel, fak manage, fak serve, fak-certified, agent kernel,
 AI agent runtime boundary, long-session prompt cache, model routing for agents, MCP
 tool-call boundary, local GGUF, KV cache, addressable KV cache, self-hosted LLM,
 LLM agent fleet, agentic AI, Go.</sub>

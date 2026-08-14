@@ -5,7 +5,7 @@ description: "Configure one signed fak capability-floor policy for a team, enrol
 
 # Centralized policy for a team
 
-`fak guard` gives one developer a capability floor on one machine. This page is about
+`fak manage` gives one developer a capability floor on one machine. This page is about
 the next problem: you have twenty developers, each with their own `.fak/guard/allow.json`,
 and you want one answer to "what is every agent on this team allowed to do?"
 
@@ -14,7 +14,7 @@ floor for every enrolled machine. Local operators can still tighten it. They can
 loosen it past what you granted.
 
 **Status:** the plane is built and inspectable end to end (`fak enroll`, `fak org status`),
-and the composed floor is not yet installed into a running `fak guard` session. See
+and the composed floor is not yet installed into a running `fak manage` session. See
 [What is wired today](#what-is-wired-today) before you plan a rollout.
 
 ## Who this is for
@@ -26,7 +26,7 @@ production surface, and you have caught yourself asking any of these:
 - Which machine allowed the agent to run `terraform apply`, and who approved that?
 - If our policy endpoint goes down, does the fleet fall open?
 
-If you are one developer on one laptop, you do not need this. `fak guard` and
+If you are one developer on one laptop, you do not need this. `fak manage` and
 [policy-guide.md](policy-guide.md) cover you.
 
 ## The rule that makes it safe
@@ -122,7 +122,7 @@ org policy plane: FRESH — a verified org manifest is in force
   freshness:  fresh (verified just now) (refuse-to-widen after 12h0m0s)
   enrollment: /home/dev/.config/fak/org-enrollment.json
 
-capability floor: built-in guard floor (fak guard --dump-policy to see it)
+capability floor: built-in guard floor (fak manage --dump-policy to see it)
   operator overlay: /repo/.fak/guard/allow.json
   central widened: added_allow=deploy_stage
   central tightened: added_deny=curl
@@ -196,7 +196,7 @@ Being precise about the seam, because a rollout plan depends on it:
 - Pull, verify, cache, age out, refuse to widen. **Shipped** (`internal/policy/orgpull.go`).
 - The precedence fold and the composed floor. **Shipped** (`internal/policy/orgcompose.go`).
 - `fak org status`. **Shipped.**
-- Installing the composed floor into a running `fak guard` session. **Not yet.**
+- Installing the composed floor into a running `fak manage` session. **Not yet.**
   `loadGuardCapabilityFloor` still assembles compiled-in → operator with no central stage.
 
 So today `fak org status` reports the floor the lattice *would* produce. Use it to

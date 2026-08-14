@@ -15,7 +15,7 @@ description: "fak 的简体中文安装入口页：从干净的检出到跑起�
 fak 是**一个静态 Go 二进制程序**，零外部依赖：它位于 AI 智能体与其所调用的工具之间，在每次
 tool call *执行之前*进行审查，并在长会话中复用重复的共享工作。同一个智能体循环因此变得更安全、
 更省、更快，且无需重写——你只需把一个 base URL 重新指向 `fak serve`，或用一条命令封装现有智能体：
-`fak guard -- claude`。
+`fak manage -- claude`。
 
 > **成本与毛利（人民币视角）。** token 账单按上游计价侵蚀你的人民币毛利；在 50 轮 × 5 智能体的
 > 会话中，fak 相比一套**已调优的 warm-cache 栈**约**少做 4.1×** 的工作。约 60×（约 19 小时→约
@@ -41,7 +41,7 @@ tool call *执行之前*进行审查，并在长会话中复用重复的共享�
 |---|---|---|
 | **Tier 0 — try the kernel** | 离线运行/度量裁决边界 | `go build`，零下载 |
 | **Tier 1 — front a real model** | 把内核挡在你自己部署的模型前（Ollama / vLLM / llama.cpp / 云厂商） | + 一个运行中的 OpenAI 兼容服务 |
-| **Tier 1b — local model in one command** | 用现有智能体在内核内跑本地 GGUF 模型——无需 key、无需网络、无需第二个终端 | `fak guard --gguf qwen2.5:7b -- claude` |
+| **Tier 1b — local model in one command** | 用现有智能体在内核内跑本地 GGUF 模型——无需 key、无需网络、无需第二个终端 | `fak manage --gguf qwen2.5:7b -- claude` |
 | **Tier 2 — the fused in-kernel model** | 内核自有的纯 Go 前向推理（reference forward pass） | + 权重导出 |
 
 若你只想**让 fak 挡在一个真实模型前面**，就选 **Tier 1**。Tier 2 的 in-kernel 模型是与 Hugging Face 逐位一致的*参考前向推理*，

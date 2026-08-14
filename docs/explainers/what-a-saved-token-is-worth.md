@@ -172,7 +172,7 @@ are the whole discipline of this page.
   why the honest number is per-fire, and the retracted-75% lesson.
 - [Long-session economics](long-session-economics.md) — why the transcript is
   re-sent every turn and why the cache discount depends on a byte-identical prefix.
-- [fak guard's share of cache value on real sessions](../notes/FAK-GUARD-CACHE-VALUE-SHARE-2026-07-01.md)
+- [fak manage's share of cache value on real sessions](../notes/FAK-GUARD-CACHE-VALUE-SHARE-2026-07-01.md)
   — the measured fak-vs-provider split, the number this valuation feeds.
 - `internal/gateway/cache_pricing.go` — the canonical `CacheReadMultiplier` and the
   write-premium economics, in code.

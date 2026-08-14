@@ -1636,6 +1636,36 @@
           "category": "incidental",
           "reason": "Issue #6703 private implementation synchronization symbol, not a new operator-facing guard concept",
           "token": "codeToolGateOnce"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
+          "token": "buildguardchild"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
+          "token": "guardinjectedenv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
+          "token": "renderguardstartupreport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
+          "token": "fleetDogfoodGuardBaseURL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
+          "token": "guardTimeoutFloors"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific internal; not a new operator-facing concept.",
+          "token": "guardInfo"
         }
       ],
       "exclude": [
@@ -1696,6 +1726,7 @@
         "aggregateTail",
         "appendGuardCompactionWitnessTo",
         "bindGuardRegistration",
+        "buildguardchild",
         "cacheValueGateFactsFromReport",
         "cmdCacheValueGateScore",
         "codeToolGate",
@@ -1711,6 +1742,7 @@
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
         "firstGuardEnv",
+        "fleetDogfoodGuardBaseURL",
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
         "gateGitHygieneBypass",
@@ -1751,6 +1783,7 @@
         "guardHandoffBlockCounterPath",
         "guardHandoffBlockCounterRel",
         "guardHeadlessChildWindowMode",
+        "guardInfo",
         "guardKeychainAPIKey",
         "guardKeychainAccessToken",
         "guardKeychainCred",
@@ -1786,6 +1819,7 @@
         "guardSplitAppleTerminalCommand",
         "guardStopHookOperatorQuestionEnvMode",
         "guardTerminalIntents",
+        "guardTimeoutFloors",
         "guardWindowsArgvPreflight",
         "guardWindowsCommandLineUnits",
         "guardWindowsQuotedArgUnits",
@@ -1800,6 +1834,7 @@
         "guarddefaultaccountsregistrypath",
         "guarded",
         "guarding",
+        "guardinjectedenv",
         "guardoperatordirectedeffectivemode",
         "guardrails",
         "guards",
@@ -1830,6 +1865,7 @@
         "readguardstopsledger",
         "readguardstoptranscript",
         "recordGuardCompactionWitness",
+        "renderguardstartupreport",
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
         "saveGuardSelfTightenOverlay",
@@ -3024,6 +3060,11 @@
           "category": "incidental",
           "reason": "Private conformance decoder for the existing gateway SessionState wire projection; it introduces no new session runtime concept.",
           "token": "endpointSessionState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific session hook; not a new operator-facing concept.",
+          "token": "guardSessionStart"
         }
       ],
       "id": "session-runtime",
@@ -3142,6 +3183,7 @@
         "filterToolSchedulerTrials",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
+        "guardSessionStart",
         "guardSessionStartDriverEntrypointBases",
         "guardSessionStartDriverEntrypointDirs",
         "guardSessionStartNodeWrapsDriver",

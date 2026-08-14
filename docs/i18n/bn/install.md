@@ -1,6 +1,6 @@
 ---
 title: "fak — install ও শুরু করা (বাংলা প্রবেশ-পৃষ্ঠা / Bengali install guide)"
-description: "fak install করে চালানোর বাংলা প্রবেশ-পৃষ্ঠা: go build দিয়ে kernel, Ollama/vLLM/llama.cpp দিয়ে সত্যিকারের model, বা fak guard দিয়ে এক কমান্ডে local model; DPDP-সহায়ক self-host, Apache-2.0।"
+description: "fak install করে চালানোর বাংলা প্রবেশ-পৃষ্ঠা: go build দিয়ে kernel, Ollama/vLLM/llama.cpp দিয়ে সত্যিকারের model, বা fak manage দিয়ে এক কমান্ডে local model; DPDP-সহায়ক self-host, Apache-2.0।"
 ---
 
 # fak — install ও শুরু করা (বাংলা)
@@ -39,7 +39,7 @@ fak হলো **একটিই Go binary** — শূন্য বাহ্য�
 |---|---|---|---|
 | **0 — kernel পরখ করুন** | adjudication boundary offline চালান/মাপুন | `go build` | কিছু না |
 | **1 — সত্যিকারের model-এর সামনে** | অন্যত্র serve করা model-এর সামনে kernel বসান (Ollama / vLLM / llama.cpp / cloud) | + একটি চালু OpenAI-compatible server | একটি chat model |
-| **1b — এক কমান্ডে local model** | বিদ্যমান এজেন্টের সঙ্গে in-kernel local GGUF — key নেই, network নেই | `fak guard --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (cached) |
+| **1b — এক কমান্ডে local model** | বিদ্যমান এজেন্টের সঙ্গে in-kernel local GGUF — key নেই, network নেই | `fak manage --gguf qwen2.5:7b -- claude` | ~5 GB GGUF (cached) |
 | **2 — fused in-kernel model** | kernel-এর নিজস্ব pure-Go SmolLM2 forward pass | + (real weights) Python export | ~135M params |
 
 শুধু **fak-কে সামনে রেখে একটি কাজের model serve** করতে চাইলে **Tier 1** দরকার।

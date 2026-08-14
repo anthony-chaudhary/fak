@@ -1,18 +1,18 @@
 ---
 title: "fak guarded sessions from Slack"
-description: "Two shipped, public Slack surfaces: watch every fak guard session as a durable run-card in a Slack channel, and chat with a fak serve-hosted model from a channel. Your own workspace bot, no lab identifiers, nothing baked into source."
+description: "Two shipped, public Slack surfaces: watch every fak manage session as a durable run-card in a Slack channel, and chat with a fak serve-hosted model from a channel. Your own workspace bot, no lab identifiers, nothing baked into source."
 ---
 
 # fak guarded sessions from Slack
 
-> **Audience.** Anyone who runs `fak guard` or `fak serve` and has (or can create) a
+> **Audience.** Anyone who runs `fak manage` or `fak serve` and has (or can create) a
 > Slack workspace bot — by the end you'll be able to watch every guarded session as a
 > run-card in a channel and chat with a kernel-hosted model from Slack.
 
 Two things fak can do with a Slack channel today, both public and both invokable with
 your own workspace bot:
 
-1. **Watch your guarded sessions.** Every `fak guard` run posts a durable run-card to a
+1. **Watch your guarded sessions.** Every `fak manage` run posts a durable run-card to a
    Slack channel — who started, which agent and provider, the pid, and where the audit
    journal lives — so a long session is visible from your phone, not just the terminal it
    started in.
@@ -48,7 +48,7 @@ from a channel's *View channel details*, not the `#name`.
 
 ## Watch every guard session from Slack
 
-Nothing to turn on: when a `FAK_GUARD_SESSIONS_TOKEN` is resolvable, `fak guard` enqueues
+Nothing to turn on: when a `FAK_GUARD_SESSIONS_TOKEN` is resolvable, `fak manage` enqueues
 a session run-card at startup and drains it to Slack in the background.
 
 ```bash
@@ -58,7 +58,7 @@ fak manage claude
 The startup report tells you whether the card was queued:
 
 ```
-fak guard: slack thread — queued root in C0XXXXSESSIONS (nonce=…)
+fak manage: slack thread — queued root in C0XXXXSESSIONS (nonce=…)
 ```
 
 The card carries the `session_thread_id`, `trace_id`, the agent name, the provider, the

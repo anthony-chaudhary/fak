@@ -88,7 +88,7 @@ caught rather than clobbered.
 
 Be precise about *which* in-flight work the control surface actually stops today:
 
-- **The proxied serve/guard path — enforced.** On `fak serve` / `fak guard`, each
+- **The proxied serve/guard path — enforced.** On `fak serve` / `fak manage`, each
   `/v1/{chat/completions,messages,generateContent}` request checks the session's DRIVE
   state before forwarding upstream. If an operator has set the session to
   `paused`/`draining`/`stopped`, the gateway refuses that session's **next** request

@@ -76,7 +76,7 @@ it actionable instead of noise.
    `fak blockers feed`. Severity is **surfacing, not volume**: `status` is a quiet
    background record, `operator` pulls attention, `clear` is the all-clear heartbeat.
 
-2. **Capability-floor / kernel-decision appeal** — the agent judges a `fak guard`
+2. **Capability-floor / kernel-decision appeal** — the agent judges a `fak manage`
    refusal wrong (a false positive, an over-broad gate, a confusing reason). This is
    the **subjective** channel: a false-positive `DENY` is byte-identical to a correct
    one in the decision journal, so the objective guard RSI loop cannot surface it —

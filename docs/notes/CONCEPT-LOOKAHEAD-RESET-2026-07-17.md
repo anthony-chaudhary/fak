@@ -202,9 +202,9 @@ progress curve (the ban on length-monotone metrics applies to the fork's account
 
 | Step | Reusable today | Missing glue |
 |---|---|---|
-| Fork (context) | `internal/sessionimage` `ForkDir` = `SnapshotDir` (#2760) + `BranchDir` (CoW, lineage); `fak session fork`; ACRFence keep-bit (`witness.json`) | captures fak's *logical* session, **not** the Claude Code harness transcript — the flagship `fak guard -- claude` prefix lives in the transcript JSONL; fork transport (`--fork-session` or JSONL-copy-under-new-uuid) is **unverified glue** |
+| Fork (context) | `internal/sessionimage` `ForkDir` = `SnapshotDir` (#2760) + `BranchDir` (CoW, lineage); `fak session fork`; ACRFence keep-bit (`witness.json`) | captures fak's *logical* session, **not** the Claude Code harness transcript — the flagship `fak manage -- claude` prefix lives in the transcript JSONL; fork transport (`--fork-session` or JSONL-copy-under-new-uuid) is **unverified glue** |
 | Fork (workspace) | `internal/workerworktree` `Prepare/Reap` (detached worktree pinned to trunk SHA; isolated Land CAS #3619 / readback #3547 for the eventual winner); `internal/shadowgit` step→write attribution | replicate the live session's *uncommitted* diff into the fork (`git diff` → `git apply`); put the shadow dir **outside** the worktree so evidence survives Reap |
-| Rollout | headless resume spawn `rwResumeArgv`/`rwSpawnResume` + launch broker; `internal/loopmgr` `AdmitSpeculation` (EV = P(correct)×saved > cost, closed reasons) as the pay-for-rollout gate | turn cap (`--max-turns`, verify CLI); cwd pinned to fork; a **rollout policy floor** under `fak guard` (deny push/gh/steer). NB `cmd/fak/headless.go` is headless-*lint*, not a run path; `sessionreplay` is single-decision replay, not a rollout engine |
+| Rollout | headless resume spawn `rwResumeArgv`/`rwSpawnResume` + launch broker; `internal/loopmgr` `AdmitSpeculation` (EV = P(correct)×saved > cost, closed reasons) as the pay-for-rollout gate | turn cap (`--max-turns`, verify CLI); cwd pinned to fork; a **rollout policy floor** under `fak manage` (deny push/gh/steer). NB `cmd/fak/headless.go` is headless-*lint*, not a run path; `sessionreplay` is single-decision replay, not a rollout engine |
 | Witness | `internal/trajctl` rungs W0–W3 + curve/Signal; `internal/trajctlhook` `CheapScorers` (CommitProgress W3 + ActivityDivergence W2) + `GitEvidenceResolver` | point `GitEvidenceResolver` at the fork worktree; **persist evidence pre-Reap** (exit codes, diffstat, shadowgit SHAs) or W3 lessons decay to dangling refs |
 | Distill | `internal/sessionreset/model_distill.go` (opt-in `SummarizeFunc`, cost gate, graceful decline, pinned instruction) is the template | the witness gate (below) + the `Lesson` leaf |
 | Reset + render | `internal/sessionctl/next.go` Move×Render; `trajctl.GatewaySteer` POST `/v1/fak/session/{id}/steer` (#760, one-nudge-per-episode); doomloop outbox + `drain --deliver`; SessionStart `source=compact` additionalContext (`guard_sessionstart.go`); full reset via `internal/sessionreset` seed | `SteerDecision{Lesson, Rung}` extension; a `KindLookahead` ledger row |
@@ -331,7 +331,7 @@ the 4-arm A/B need seam 1.
 ## Fences (verify before building)
 
 - sessionimage forks fak's *logical* session, **not** the Claude Code transcript — the transcript
-  is the real copyable prefix for flagship `fak guard -- claude` sessions, and its fork transport
+  is the real copyable prefix for flagship `fak manage -- claude` sessions, and its fork transport
   (`--fork-session` / JSONL-copy) is **unverified**; grep found no repo reference to `--fork-session`.
 - `--max-turns` CLI support for the turn cap is unverified.
 - Fork-worktree SHAs dangle after Reap — durable witness must be recorded pre-Reap.

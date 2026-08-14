@@ -40,7 +40,7 @@ schedulers exist to push tokens/sec up and cost/token down under real concurrent
 is hard, valuable engineering, and it is the whole job of that layer.
 
 fak does not out-serve them, and this page makes no claim that it does. fak ships an
-in-kernel model path (`fak guard --gguf ...`), but the repo is explicit that it is a
+in-kernel model path (`fak manage --gguf ...`), but the repo is explicit that it is a
 **bit-exact correctness reference, not a tuned server**: no continuous batching, no paged
 attention, no multi-tenant scheduler. For real serving you run a real serving engine. If
 you need raw tokens/sec, vLLM or SGLang is the answer, full stop.

@@ -87,7 +87,7 @@ A user follow-up identified a separate product requirement: some operators want 
 Current trunk already ships the safe base mechanism:
 
 - `internal/syspromptmmu/style.go:10-145` defines `default|concise|terse`, keeps `default` as a no-op, gives explicit user formatting precedence, and preserves code, commands, diagnostics, identifiers, quotations, uncertainty, safety language, and next actions.
-- `cmd/fak/guard_output_style.go:13-63` wires the style through `fak guard --output-style` and rejects unknown values before harness launch.
+- `cmd/fak/guard_output_style.go:13-63` wires the style through `fak manage --output-style` and rejects unknown values before harness launch.
 
 That makes Caveman response shape **PARTIAL-on-axis**, not absent. The missing piece is a named, intensity-bearing profile with reproducible metadata and a benchmarked quality/cost envelope.
 

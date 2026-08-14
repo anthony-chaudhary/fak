@@ -16,7 +16,7 @@ This note is the missing complement to three existing docs:
 The remaining problem is operational: an unattended loop is not just an agent prompt. It is
 a scheduled, resumable, observable, remotely steerable process that can run while nobody is
 watching. Today fak has many good pieces, but the shape is scattered across Windows
-Scheduled Tasks, launchd templates, watchdog scripts, Slack lab helpers, `fak guard`,
+Scheduled Tasks, launchd templates, watchdog scripts, Slack lab helpers, `fak manage`,
 `fak serve`, `taskmgr`, session images, and DOS witness gates.
 
 The product line should be:
@@ -62,7 +62,7 @@ fak already has most primitives, but not one named loop-control surface.
 
 | Need | Existing substrate | Honest gap |
 |---|---|---|
-| Foreground guarded session | `fak guard -- <agent>` launches a loopback gateway and child-only base URL | Tied to one local child process; lifecycle ends with the child |
+| Foreground guarded session | `fak manage -- <agent>` launches a loopback gateway and child-only base URL | Tied to one local child process; lifecycle ends with the child |
 | Always-on gateway | `fak serve`, deployment docs, auth, metrics, `/debug/vars`, audit journal | Gateway is a front door, not yet a loop scheduler |
 | Host schedulers | Windows Scheduled Tasks installers, launchd plists, Mac keep-awake script, GCP dogfood plan | Each is bespoke; no common loop record or run ledger |
 | Fleet admission | DOS lane leases, `dos_arbitrate`, issue-dispatch preflight and cooldowns | Strong in the dispatch path, not exposed as a general loop admission API |
@@ -115,7 +115,7 @@ The OS analogy helps if it stays precise.
 
 | Agent loop concept | OS analogy | fak meaning |
 |---|---|---|
-| Foreground session | foreground process | A user-attached `fak guard -- claude` or CLI run. Terminal owns attention; exit ends the loop. |
+| Foreground session | foreground process | A user-attached `fak manage -- claude` or CLI run. Terminal owns attention; exit ends the loop. |
 | Background loop | daemon/service | A durable loop record with an owner, schedule, policy, budget, run ledger, and notification sinks. It can survive logout, host sleep, and a fresh process. |
 | Loop tick | timer interrupt | A scheduler event from cron/launchd/Task Scheduler/K8s/GitHub/HTTP. It requests a run; fak still decides admission. |
 | Agent green thread | cooperative user-space thread | A logical loop fiber multiplexed over scarce workers. It is cheap to keep as state, only binds an OS process/VM while executing a tick, and yields at turn/session boundaries. |

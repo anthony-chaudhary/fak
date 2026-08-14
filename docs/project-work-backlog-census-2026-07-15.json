@@ -1171,7 +1171,7 @@
     },
     {
       "issue": 1193,
-      "title": "epic(guard-lifecycle): first-class durable, fleet-wide, self-healing, cache-safe session lifecycle (stop · pause · start · branch · resume) through fak guard",
+      "title": "epic(guard-lifecycle): first-class durable, fleet-wide, self-healing, cache-safe session lifecycle (stop · pause · start · branch · resume) through fak manage",
       "class": "epic",
       "milestone": "Durable sessions survive 429s, overload & process death",
       "status": "undeclared",
@@ -1190,7 +1190,7 @@
     },
     {
       "issue": 1206,
-      "title": "feat(cmd): fak guard --resume <id> — guard as the cache-safe resume harness",
+      "title": "feat(cmd): fak manage --resume <id> — guard as the cache-safe resume harness",
       "class": "enhancement",
       "milestone": "The KV cache value is owned, observed & 2x",
       "status": "undeclared",
@@ -1912,7 +1912,7 @@
     },
     {
       "issue": 1506,
-      "title": "Slim the front-door flag burden on `fak guard`",
+      "title": "Slim the front-door flag burden on `fak manage`",
       "class": "enhancement",
       "milestone": "",
       "status": "undeclared",
@@ -2140,7 +2140,7 @@
     },
     {
       "issue": 1543,
-      "title": "cache-default[25]: api/provider: Add a cache-budget dry run to `fak guard` startup",
+      "title": "cache-default[25]: api/provider: Add a cache-budget dry run to `fak manage` startup",
       "class": "enhancement",
       "milestone": "",
       "status": "undeclared",
@@ -3812,7 +3812,7 @@
     },
     {
       "issue": 2044,
-      "title": "Epic: first-class hardware/resource tracking for the fak guard harness (CPU/mem/net/disk/GPU)",
+      "title": "Epic: first-class hardware/resource tracking for the fak manage harness (CPU/mem/net/disk/GPU)",
       "class": "epic",
       "milestone": "",
       "status": "undeclared",
@@ -4496,7 +4496,7 @@
     },
     {
       "issue": 2193,
-      "title": "research(guard): does provider cache reduce subscription rate-limit burn? - revisit managed-cache AUTO passivity on OAuth (fak guard)",
+      "title": "research(guard): does provider cache reduce subscription rate-limit burn? - revisit managed-cache AUTO passivity on OAuth (fak manage)",
       "class": "other",
       "milestone": "",
       "status": "undeclared",
@@ -6529,7 +6529,7 @@
     },
     {
       "issue": 2447,
-      "title": "epic(logvault): central chain-aware backup of all fak guard/harness/related logs",
+      "title": "epic(logvault): central chain-aware backup of all fak manage/harness/related logs",
       "class": "epic",
       "milestone": "",
       "status": "undeclared",
@@ -9873,7 +9873,7 @@
     },
     {
       "issue": 2865,
-      "title": "feat(security): fail-closed audit — enumerate every fak guard/hook and prove it fails closed (contrast Hermes' fail-open guards)",
+      "title": "feat(security): fail-closed audit — enumerate every fak manage/hook and prove it fails closed (contrast Hermes' fail-open guards)",
       "class": "other",
       "milestone": "",
       "status": "undeclared",
@@ -10101,7 +10101,7 @@
     },
     {
       "issue": 2883,
-      "title": "feat(ux): multi-surface delivery seam for `fak guard` — land agent output to Telegram/Slack/Discord/CLI as a thin ADJUDICATED relay",
+      "title": "feat(ux): multi-surface delivery seam for `fak manage` — land agent output to Telegram/Slack/Discord/CLI as a thin ADJUDICATED relay",
       "class": "enhancement",
       "milestone": "",
       "status": "undeclared",

@@ -186,10 +186,10 @@ opposed to `decode`, which emits one token at a time. It lives only in `internal
   context (allow / quarantine / transform). These are the project's "two gates": the
   capability floor (pre-call) and the result quarantine (post-result).
 
-## The vCache streaming economy: what `fak guard` prints per turn
+## The vCache streaming economy: what `fak manage` prints per turn
 
-When you run `fak guard -- claude --debug-stats`, the gateway streams **one line per
-turn** to stderr that prices cache-like savings by owner, and the `fak guard` exit
+When you run `fak manage -- claude --debug-stats`, the gateway streams **one line per
+turn** to stderr that prices cache-like savings by owner, and the `fak manage` exit
 summary plus `fak vcache observe`, `fak cachevalue report`, and `/metrics` carry the
 same owner vocabulary. The vocabulary on those surfaces is fak's own (the vCache work,
 [#218](https://github.com/anthony-chaudhary/fak/issues/218) /
@@ -209,10 +209,10 @@ non-zero), never from fak *believing* a prefix was warm. Belief predicts; only t
 rebates.
 
 The second law is the owner split: **provider prompt-cache savings are not fak-authored
-savings**. A default `fak guard` exit summary therefore prints one attribution line:
+savings**. A default `fak manage` exit summary therefore prints one attribution line:
 
 ```
-fak guard: avoided-spend attribution — provider ~P (p%) + fak ~F (f%) = ~T token-equiv [...]
+fak manage: avoided-spend attribution — provider ~P (p%) + fak ~F (f%) = ~T token-equiv [...]
 ```
 
 `provider` is OBSERVED/provider-relayed prompt-cache economics. `fak` is WITNESSED

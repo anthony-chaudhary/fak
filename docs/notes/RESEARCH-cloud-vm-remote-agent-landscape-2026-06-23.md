@@ -98,7 +98,7 @@ or persistent VMs like Fly Sprites), **sub-200 ms cold-start** (warm pools + laz
 
 ### Where fak sits today
 
-fak's productized front door (`fak guard -- claude`) assumes a **local, ephemeral,
+fak's productized front door (`fak manage -- claude`) assumes a **local, ephemeral,
 single-session, loopback** agent: the gateway binds `127.0.0.1:0` (`cmd/fak/guard.go:163`),
 injects *only* `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` into the child (`guard.go:223-227`),
 proxies the real provider in passthrough, and is **torn down when the child exits**
@@ -191,7 +191,7 @@ fak-shaped (uses the boundary) rather than commodity.*
    `403` + `x-deny-reason: host_not_allowed` — corroborating the egress rung in #1.)
 
 4. **Execution-target abstraction so the boundary travels** — `local | worktree | container
-   | microVM | remote-SSH` (the four targets Cursor 3.0's Agents Window unifies). `fak guard`
+   | microVM | remote-SSH` (the four targets Cursor 3.0's Agents Window unifies). `fak manage`
    keeps the gateway wherever it runs; the agent inside any VM just points its base-URL env
    at it. Depends on (3)'s auth work.
    *Seam:* `cmd/fak/guard.go` + `internal/gateway/gateway.go`.

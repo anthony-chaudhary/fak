@@ -15,7 +15,7 @@ cmd)`). It records the trap, the shipped fix, and the one residual the fix does
 ## The trap (#2972)
 
 A dispatch claude worker is launched as `claude -p /dos-dispatch-loop --lane <lane>`
-fronted by `fak guard` (`cmd/dispatchworker/guard.go`). Guard is handed
+fronted by `fak manage` (`cmd/dispatchworker/guard.go`). Guard is handed
 `--context-budget-tokens N`, which seeds the per-session `ContextTokensLeft`.
 
 The load-bearing semantics (`internal/session/usage.go` `DebitUsage`): **every turn

@@ -42,7 +42,7 @@ The checkpoint is a **mediation boundary, not an operating-system sandbox**. It 
 | Builder job | Interface | fak owns | Start here |
 |---|---|---|---|
 | Prove the full managed loop deterministically | `fak agent --offline` | Planner fixture, proposal handling, policy verdicts, result admission, and continuation | [Reproduction packet](repro-packet.md) |
-| Manage one local agent process | `fak guard` | Process lifecycle plus the configured hook and policy boundary | [One-agent guide](../README.md#manage-one-local-agent-fak-guard) |
+| Manage one local agent process | `fak manage` | Process lifecycle plus the configured hook and policy boundary | [One-agent guide](../README.md#manage-one-local-agent-fak-guard) |
 | Point compatible clients at a shared endpoint | `fak serve` | HTTP gateway, routing, policy checkpoint, engines, and service evidence | [Server quickstart](fak/server-quickstart.md) |
 | Embed or extend the managed runtime | Go ABI, MCP, or an adapter | Only the seams selected by the embedding application | [Runtime ownership and flow](explainers/agent-runtime.md) |
 

@@ -28,7 +28,7 @@ why late-positioned symbols appear after the "Read next" section.
 
 Product terms live one page over. The public vocabulary — session, agent,
 context, model, memory, tool vs skill, steering, the preflight/inflight/prefill
-split, and the cache-economics words a `fak guard` run prints — is defined in
+split, and the cache-economics words a `fak manage` run prints — is defined in
 plain language in the [fak glossary](../glossary.md), and it resolves there
 without internal shorthand.
 
@@ -111,7 +111,7 @@ Four planes, each a different question:
 ### cache anchor vs compaction budget - the knobs that confuse everyone
 
 These two are the pair the goal behind this page keeps re-confusing. They shape the
-SAME outbound `/v1/messages` body that `fak guard -- claude` forwards, but they answer
+SAME outbound `/v1/messages` body that `fak manage -- claude` forwards, but they answer
 two orthogonal questions - and the anchor GATES the budget, so setting one without the
 other in mind produces the "I lowered the budget and nothing changed" surprise.
 
@@ -167,7 +167,7 @@ layers, two collide in spelling, and one is a different sense entirely:
   `--managed-cache` posture below resolves passive. Audit:
   `docs/notes/MANAGED-CACHE-FAMILY-OWN-SESSIONS-AUDIT-2026-07-18.md`.
 
-- **managed cache** (the POSTURE: `fak guard --managed-cache auto|on|off`, epic
+- **managed cache** (the POSTURE: `fak manage --managed-cache auto|on|off`, epic
   #1844 C6) - should THIS guard session author the 1h-TTL upgrade on the outbound
   Anthropic wire? It governs ONLY the 1h-TTL member, not the whole family. AUTO
   activates only when the session provably bills an operator API key (`--api-key-env`
@@ -252,7 +252,7 @@ genuine cache concept a reader could not pin, not an inflection.
 ## The guard / gate family
 
 - **guard** - the kernel itself: the in-process adjudication system that runs the
-  decision chain and admits results (`fak guard`). A guard is a SYSTEM.
+  decision chain and admits results (`fak manage`). A guard is a SYSTEM.
 
 - **gate** - one decision point INSIDE a guard. A gate is a POINT, not the system.
   The gates split by WHEN they fire:
@@ -1909,7 +1909,7 @@ The operator-facing environment variable bounding corrupt-registry quarantine ev
 
 The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set.
 
-**Distinct from:** FAK_SESSION_ID is a DIFFERENT identity, not a fallback spelling of this one: under fak guard a child sees it set to the VOLATILE trace id, which changes every run, so preferring it would publish a populated-looking field that joins to nothing. That is why it is read LAST here. resolveGuardSessionID resolves the guard's own session identity for gating; this resolves the transcript UUID for JOINING checkpoints to descriptors, and the two coincide only by accident.
+**Distinct from:** FAK_SESSION_ID is a DIFFERENT identity, not a fallback spelling of this one: under fak manage a child sees it set to the VOLATILE trace id, which changes every run, so preferring it would publish a populated-looking field that joins to nothing. That is why it is read LAST here. resolveGuardSessionID resolves the guard's own session identity for gating; this resolves the transcript UUID for JOINING checkpoints to descriptors, and the two coincide only by accident.
 
 
 ### MechanismStaleContext
@@ -2110,7 +2110,7 @@ renderGitSpawnDelta writes the movement between TWO gitspawn reports to a writer
 
 ### guardCompactionWitness (durable per-session compaction-health row)
 
-cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it.
+cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak manage` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it.
 
 **Distinct from:** The post-hoc WITNESS OF RECORD: keyed by session id and readable with no live gateway anywhere. NOT the LIVE in-session verdict (#3099 / observeCompaction, the in-process metrics recorder that dies with the process) and NOT the honest shed ACCOUNTING (#3095 / warmWitness, which prices shed tokens against observed cache_read). Also not CompactSessionReport, which reconstructs compaction health by parsing a rollout transcript file -- this row is folded from the gateway's own counters at exit and changes nothing about how they are measured.
 

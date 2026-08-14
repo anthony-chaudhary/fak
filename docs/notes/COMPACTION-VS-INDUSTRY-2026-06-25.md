@@ -141,7 +141,7 @@ the same request, compaction off vs on. **The instrument already exists** —
   `cache_read`, *"attribute nothing to fak from it alone."*
 
 So this is **not blocked on code**; it is one credentialed Anthropic session away
-from a number. Run a long real session through `fak guard -- claude` with
+from a number. Run a long real session through `fak manage -- claude` with
 compaction on, scrape those two series, and a high `cache_read` next to a high
 `shed` *is* the cascade landing; a cratered `cache_read` next to a high `shed` is
 the cascade failing (the dropped middle re-billed). That this is a scrape-and-read

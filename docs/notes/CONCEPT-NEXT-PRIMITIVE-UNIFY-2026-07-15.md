@@ -522,7 +522,7 @@ skew is **not** folded in).
 A structural test over the parsed call graph (not a claim) enumerates every
 producer and asserts the single `enqueue`/single-drain shape; a fail-open test
 injects a malformed stophook decision and asserts **exit 0 + `NextRecord(applied
-=false)`**; `dos_commit_audit` diff-witnessed under `(fak guard)`;
+=false)`**; `dos_commit_audit` diff-witnessed under `(fak manage)`;
 `dos_verify(NEXT, next/lower-stophook)` SHIPPED.
 
 #### Acceptance gate

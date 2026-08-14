@@ -88,7 +88,7 @@ fak cachevalue census          # render the census: ACTIVE share, and upgrade-fi
 fak cachevalue census --json   # the same fold as JSON, for a periodic poster or dashboard
 ```
 
-It reads the guard-session index every `fak guard` launch appends to, keeps the LIVE rows,
+It reads the guard-session index every `fak manage` launch appends to, keeps the LIVE rows,
 GETs each worker's `/debug/vars` with that session's read-scoped bearer, and folds the
 `managed_cache` posture block (`guardvars.ManagedCacheVars`) into
 `fak-managed-cache-adoption-census/1` — `cachevaluereport.FoldCensus`, pure and
@@ -250,7 +250,7 @@ A cache-value card should be read top-down:
   .MechanismSavings()` decomposes every served-turn saving into five owned
   slices — provider-read, provider-write-premium, compaction-shed, kv-reuse,
   vdso-avoid — and folds to one headline, `provider P% + fak F%`
-  (`fak guard`'s exit-summary "avoided-spend attribution" line, and
+  (`fak manage`'s exit-summary "avoided-spend attribution" line, and
   `TwoTrackReport.OwnerAttribution` in the weekly fold). This is the fix for
   the historical failure mode where the headline read as ~100% "the
   provider's prompt cache" even when fak's own mechanisms (compaction-shed,

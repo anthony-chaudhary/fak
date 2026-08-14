@@ -94,7 +94,7 @@ then refuses unless the session is genuinely budget-drained, and finally reuses 
 new model window. MCP still cannot observe provider token usage by itself; the client or
 wrapper must report it.
 
-**6. The child-process supervisor — `fak guard --restart-on-budget`.**
+**6. The child-process supervisor — `fak manage --restart-on-budget`.**
 For wrapped CLIs that need a real OS-process boundary, guard wires a separate
 `gateway.Config.OnBudgetExhausted` callback. The callback fires after a served turn's
 provider usage drains the context budget, while the transcript is still available. Guard
@@ -114,7 +114,7 @@ wrapper a fresh process and a seed file to inject into the new model window.
   a model-call middle-summary is a tracked follow-on.
 - **Default behavior is unchanged.** With `--reset-on-budget` off (the default), the 409 +
   `SessionResetDirective` path is byte-identical to before.
-- **A hard restart is a handoff, not magic rehydration.** `fak guard --restart-on-budget`
+- **A hard restart is a handoff, not magic rehydration.** `fak manage --restart-on-budget`
   relaunches the child and exposes the carryover seed through `FAK_RESET_SEED_FILE`; a
   generic child that ignores that file starts fresh under the continuation trace but does
   not automatically ingest the seed.
@@ -124,7 +124,7 @@ wrapper a fresh process and a seed file to inject into the new model window.
 The epic is **#739**. The vertical slice described above — the `Recontinue` re-arm verb,
 the `internal/sessionreset` contributor registry, the `gateway.Config.ResetOnBudget`
 boundary, the `fak serve --reset-on-budget` flag, the MCP `fak_session_reset` tool, and the
-`fak guard --restart-on-budget` supervisor — is **shipped on `main`** (swept into the shared
+`fak manage --restart-on-budget` supervisor — is **shipped on `main`** (swept into the shared
 trunk on 2026-06-25; ships dark/default-off). The named follow-on rungs are filed as child
 issues:
 

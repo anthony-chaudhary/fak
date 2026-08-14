@@ -521,7 +521,7 @@ Response (`SessionListResponse`): `{ "sessions": [SessionState, …], "count": N
 | `400` | Missing `trace_id`, unknown verb, or a malformed body. |
 | `409` | The session is terminal (stopped), or an `if_rev` CAS guard lost the race. |
 
-**Proxy-path enforcement.** On `fak serve` / `fak guard`, a `paused` / `draining` /
+**Proxy-path enforcement.** On `fak serve` / `fak manage`, a `paused` / `draining` /
 `stopped` session's **next** `/v1/{chat/completions,messages,generateContent}` request is
 refused with `409 session_<state>` (keyed on the request `X-Trace-Id`) instead of being
 forwarded upstream — "cancel a request in flight."

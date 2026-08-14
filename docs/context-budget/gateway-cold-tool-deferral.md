@@ -53,7 +53,7 @@ operator faces (#3531):
 - the `/metrics` scrape — `fak_gateway_tool_defer_cold_total` and
   `fak_gateway_tool_defer_turns_total`, the OUTBOUND twin of the inbound
   `fak_gateway_inbound_tools_pruned_total` family;
-- the `fak guard` exit summary — a **cold-tool deferral** section printed only
+- the `fak manage` exit summary — a **cold-tool deferral** section printed only
   when the lever fired (a default-off or all-hot session stays quiet), naming the
   cold-def count × turns and flagging that the token drop is **OBSERVED** on
   `/metrics` (provider-side), never a request-byte shrink like the prune lever.

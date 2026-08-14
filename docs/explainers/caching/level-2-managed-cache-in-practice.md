@@ -4,7 +4,7 @@ description: "The operator's view of fak's managed cache: what --managed-cache o
 slug: level-2-managed-cache-in-practice
 keywords:
   - fak managed cache
-  - fak guard managed-cache
+  - fak manage managed-cache
   - FAK_MANAGED_CACHE default
   - managed cache on off auto
   - fak_gateway_cache_ttl_upgrade_total
@@ -20,7 +20,7 @@ date: 2026-07-10
 
 > **Audience.** Operators who run fak seats and want the cache working for them.
 > Prerequisites: [Level 1](level-1-what-is-caching.md) (what a prompt cache is) and a
-> working `fak guard` launch — no billing, provider-API, or kernel knowledge assumed. By
+> working `fak manage` launch — no billing, provider-API, or kernel knowledge assumed. By
 > the end you'll be able to choose the right `--managed-cache` value for your credential
 > class, predict which default your launch path actually gives you, and prove from your
 > own run whether the 1-hour TTL upgrade activated or silently stayed passive.
@@ -40,7 +40,7 @@ date: 2026-07-10
 
 ## The one flag: `--managed-cache on|off|auto`
 
-`fak guard` takes a single flag, `--managed-cache`, with exactly three values:
+`fak manage` takes a single flag, `--managed-cache`, with exactly three values:
 
 | Value | What it does |
 |---|---|
@@ -69,9 +69,9 @@ The value you get if you set *nothing* depends on **how you launched**:
   subscription-OAuth seat the guard downgrades `on` to passive (see the table above), and
   the caching work there is done by the rest of the family — the provider 5m cache on the
   client's own breakpoints, star-anchor placement, compaction, and tool-prune.
-- **A bare `fak guard`** reads only the `--managed-cache` flag, whose own default is
+- **A bare `fak manage`** reads only the `--managed-cache` flag, whose own default is
   **`auto`** — active on an API-key Anthropic session, passive on a Pro/Max
-  subscription. Exporting `FAK_MANAGED_CACHE` does nothing for a bare `fak guard`; it's
+  subscription. Exporting `FAK_MANAGED_CACHE` does nothing for a bare `fak manage`; it's
   a fleet-launcher knob.
 
 So the same unset config resolves to `on` under a launcher and `auto` under a bare
@@ -114,7 +114,7 @@ API-key billing (`--api-key-env`).
 
 From quickest to most detailed:
 
-1. **The startup banner.** `fak guard` prints one posture line at launch. Active seats
+1. **The startup banner.** `fak manage` prints one posture line at launch. Active seats
    read `managed cache — ACTIVE (...): stable-prefix cache_control upgraded to the 1h TTL
    tier ...`; a passive seat reads `managed cache — passive (...)` with the reason and
    the override. That single line is the truth of your session's posture.

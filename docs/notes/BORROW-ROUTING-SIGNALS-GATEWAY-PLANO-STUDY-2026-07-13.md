@@ -150,7 +150,7 @@ far more forgiving than Anthropic's strict contract.
   Claude-Code bug this buffer fixes. Recorded as a reference for the completions.go OpenAI-compat
   path only (where the envelope is looser and the risk is low).
 
-### Axis 4 — Guard / refusal (`fak guard`, closed refusal vocabulary)
+### Axis 4 — Guard / refusal (`fak manage`, closed refusal vocabulary)
 
 **plano mechanism.** `PromptGuards` / `GuardType::Jailbreak` / `on_exception` /
 `forward_to_error_target` are **defined and parsed** in `common/configuration.rs` with DTOs in
@@ -159,7 +159,7 @@ filters; jailbreak/toxicity/hallucination are **delegated to the external model 
 `ArchFC` callout. Guardrails are also modeled as a **composable, config-ordered filter chain**
 (`AgentFilterChain`/`ResolvedFilterChain`, MCP + raw-HTTP transports).
 
-**fak witness.** `fak guard` is a **closed 12-reason refusal vocabulary**, deny-as-value
+**fak witness.** `fak manage` is a **closed 12-reason refusal vocabulary**, deny-as-value
 (RETRYABLE/WAIT/ESCALATE/TERMINAL disposition), default-deny, no-flag-bypass, structural
 provenance-based — **inline, synchronous, no judge model**.
 

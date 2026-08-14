@@ -1,11 +1,11 @@
 ---
 title: "Host termination provenance"
-description: "How fak guard and the host-crash sensor share one evidence ledger, recording Windows console close, logoff, and shutdown without duplicating a single event."
+description: "How fak manage and the host-crash sensor share one evidence ledger, recording Windows console close, logoff, and shutdown without duplicating a single event."
 ---
 
 # Host termination provenance
 
-`fak guard` and the always-on `fak host-crash` sensor share one host evidence
+`fak manage` and the always-on `fak host-crash` sensor share one host evidence
 ledger: `%FAK_STALL_DIR%/host-crashes.jsonl` when configured, otherwise the
 platform user-config `fak/host/host-crashes.jsonl`.
 

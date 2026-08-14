@@ -65,7 +65,7 @@ demo** that executes a per-aspect decision.
 
 The coding **floors are solid and coherent**; the coding **demos are mostly
 generic-capability proofs**. What is missing is a re-runnable example that wraps a
-*coding agent behind `fak guard`* and shows a dangerous call denied in a live
+*coding agent behind `fak manage`* and shows a dangerous call denied in a live
 session — today that behavior is proven by unit tests + a recorded live pilot
 (under #747), not by an example a skeptic can run. That gap is exactly the open
 examples cluster: **#318** (dogfood-claude adoption wrapper), **#344** (dev-agent
@@ -81,7 +81,7 @@ not how good the underlying mechanism is in the abstract.
 
 | Dimension | Grade | One-line |
 |---|---|---|
-| **Adopt** — harness integration in one repoint | **A−** | `fak guard -- claude` (one command) or a base-URL repoint fronts 38/44 surveyed harnesses; agent/model/prompts unchanged. Gaps: OpenAI/Codex wire lacks a recorded live-transit proof; no prebuilt binary (needs Go 1.26+ or curl script). |
+| **Adopt** — harness integration in one repoint | **A−** | `fak manage -- claude` (one command) or a base-URL repoint fronts 38/44 surveyed harnesses; agent/model/prompts unchanged. Gaps: OpenAI/Codex wire lacks a recorded live-transit proof; no prebuilt binary (needs Go 1.26+ or curl script). |
 | **Floor** — security for code-writing agents | **B+** | Deny-by-structure before the model sees the call: gitgate (push/commit/add/tag/rebase variants), self-modify globs on the kernel spine, destructive shell (`rm -rf`/`sudo`/`dd`/`curl\|sh`/fork-bomb), inline-eval routing, synth-tool ledger (#543), secret redaction. Proven in `adjudicator_test.go` / `devagent_test.go`. Gaps: no **re-runnable** coding-agent-blocked demo; arg predicates are regex-only (relative escapes caught, absolute paths need the DOS `repo_guard.py` backstop). |
 | **Cost** — lever for long coding sessions | **C+** | Cache-preserving compaction sheds 92–95% of old turns while keeping the cache prefix **sha256-identical** (memcpy splice, fail-safe identity). Dogfooded end-to-end at 142k/236k inbound. **But:** the dogfood is a **mock upstream** — the cascade hypothesis (that Anthropic's cache actually reuses the byte-stable prefix after a middle drop) is unverified on real traffic (**#745**), and the lever is Anthropic-wire only. The realized cost win for one real coding session is **not yet measured**. |
 | **Witness** — a measured coding-agent result | **D+** | **Zero** raw-vs-fak coding-agent solve number exists. SWE-bench Verified shows fak-native work-elimination (16–23× A/C) but `pass_rate_pct = 0` (resolve-rate is GPU-gated; ≈0 with the local 135M model). Terminal-Bench 2.1 is all contract-phase (**#897**); every artifact carries `result_claim_allowed=false`. The older #868–875 agentic-benchmark family is **closed/superseded**. |
@@ -112,7 +112,7 @@ to "proven." Each rung names the live epic that owns it and the grade it lifts.
    intact audit chain + body shed in a single artifact. *Lifts Cost C+ → B.*
 
 3. **Make the floor visible — the examples cluster (`#318`, `#344`, `#321`, `#632`).**
-   Turn the test-proven floor into a re-runnable coding-agent demo: a `fak guard --`
+   Turn the test-proven floor into a re-runnable coding-agent demo: a `fak manage --`
    wrapper that denies a dangerous call live (#318), the ship-gate demo (#344), a
    point-at-your-own-model A/B (#321), and an ollama-free `adjudication-demo` (#632).
    Cheapest credibility-per-token. *Lifts Floor B+ → A−.*

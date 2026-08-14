@@ -77,7 +77,7 @@ already `get_`/`read_`/`search_` shaped.
 - **Assumption (most likely to flip the result):** the tool-NAMING regime. On real Claude Code
   traffic the read tool is `Read` (not `read_*`), so `served_inline` is 0 regardless of
   redundancy until the name gate is widened.
-- **Promotion:** feed the SAME harness a captured real `/v1/messages` session (`fak guard --
+- **Promotion:** feed the SAME harness a captured real `/v1/messages` session (`fak manage --
   claude`, or a tau2/SWE run) as the trace. If the real read pattern is redundant AND uses
   eligible tool names, the WITNESSED rate promotes the lever toward default-on.
 - **Demotion / retirement:** if a captured real session shows near-zero cross-turn re-read, or

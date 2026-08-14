@@ -1,4 +1,4 @@
-# `fak guard` on a random VM — the network-egress floor
+# `fak manage` on a random VM — the network-egress floor
 
 Move your coding agent onto an ephemeral cloud VM and the human steps away. Nobody is
 left to click "approve" on a tool call. The attack that turns that convenience into a
@@ -6,7 +6,7 @@ breach is an SSRF to the **cloud-instance metadata endpoint** — `169.254.169.2
 its peers. One GET there returns the VM's IAM role credentials, and a prompt-injected
 agent walks off the box with them.
 
-`fak guard` carries a structural **egress rung** into the VM. A tool call that reaches
+`fak manage` carries a structural **egress rung** into the VM. A tool call that reaches
 the metadata / link-local family is refused *by shape* — `EGRESS_BLOCK`, with no model
 and no human in the loop. This is why running the guard on a throwaway VM is useful the
 moment it boots: the capability floor travels with the agent, and the one destination
@@ -25,7 +25,7 @@ Expected runtime: the witness run completes in seconds after the build, and the 
 are deterministic for the same destinations.
 
 The demo uses `fak egress check`, which runs the **same kernel floor** a guarded
-session enforces, so what it shows is what `fak guard -- claude` would do to the same
+session enforces, so what it shows is what `fak manage -- claude` would do to the same
 tool call.
 
 ## What it proves
@@ -58,7 +58,7 @@ its class, never the policy.
 
 ```text
 +------------------+     +------------------------+     +---------------------------+
-| agent tool call  | --> | fak guard egress rung  | --> | metadata / link-local     |
+| agent tool call  | --> | fak manage egress rung  | --> | metadata / link-local     |
 | (on the VM)      |     | (internal/egressfloor) |     | class: EGRESS_BLOCK       |
 +------------------+     +------------------------+     +---------------------------+
                                     |
@@ -102,6 +102,6 @@ see. The strategy this is the first increment of is in
 ## Where this fits
 
 - The flag witness, standalone: `fak egress check --url <URL> | --command <CMD> | --host <HOST>`
-- The wrapping form: [`../../cmd/fak/guard.go`](../../cmd/fak/guard.go) (`fak guard -- <agent>`)
+- The wrapping form: [`../../cmd/fak/guard.go`](../../cmd/fak/guard.go) (`fak manage -- <agent>`)
 - The auth half of running off-loopback: [`../auth-hardening/`](../auth-hardening/)
 - The classifier + the rung: [`../../internal/egressfloor/`](../../internal/egressfloor/) · [`../../internal/adjudicator/decide.go`](../../internal/adjudicator/decide.go)

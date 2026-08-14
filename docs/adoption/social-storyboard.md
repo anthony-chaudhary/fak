@@ -102,7 +102,7 @@ adoption, and simulated work is labeled simulated.
 - **Hook:** "Repoint one base URL. The laptop binary is the fleet binary — you add
   flags, not components."
 - **Body:** Gateway, capability gate, result quarantine, and audit surface in a
-  single static Go binary — two `golang.org/x` modules, no Python. `fak guard -- claude`
+  single static Go binary — two `golang.org/x` modules, no Python. `fak manage -- claude`
   wraps the agent you already run; 41 of 47 surveyed harnesses repoint with one base
   URL.
 - **Diagram:** the where-the-binary-sits figure — [adoption visuals](../adoption-visuals.md).
@@ -113,7 +113,7 @@ adoption, and simulated work is labeled simulated.
 - **Hook:** "See a real verdict in 60 seconds — no key, no model, no GPU."
 - **Body:** `fak preflight --tool refund_payment --args "{}"` prints a fail-closed
   `DENY (DEFAULT_DENY)` from the bare binary. Then wrap your own agent with
-  `fak guard -- claude`.
+  `fak manage -- claude`.
 - **Diagram:** none — this is the terminal card; link out.
 - **Link:** [Getting started](../../GETTING-STARTED.md)
 

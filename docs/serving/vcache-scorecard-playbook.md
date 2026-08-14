@@ -99,7 +99,7 @@ after.
    with `--index-out anchors.json`. That provider-neutral artifact is what the agent
    loads to warm the top anchors the scorecard selected.
 
-3. **Collect provider telemetry.** Run the workload behind `fak guard` / `fak serve`
+3. **Collect provider telemetry.** Run the workload behind `fak manage` / `fak serve`
    and capture the provider usage JSONL (Claude Code probe output, OpenAI
    Responses/Chat usage objects, Codex CLI `token_count` rows). Prove realized
    savings standalone with `fak vcache prove-telemetry --file usage.jsonl`.

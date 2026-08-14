@@ -75,7 +75,7 @@ call is refused by structure.
 | MCP | project `.mcp.json` or `claude mcp add fak -- fak serve --stdio --policy policy.json` | Managed allow-list of MCP servers plus a standard `fak` server entry. |
 | Hooks | Optional local hook for audit export or policy checks | Managed hook that ships audit rows to SIEM and blocks unapproved policy drift. |
 | Logs | `--log gw.log` and `FAK_AUDIT_JOURNAL=fak-audit.jsonl` | Central log sink plus hash-chain verifier. |
-| Rollback | Remove the MCP entry or stop using `fak guard` | Disable managed server/plugin and restore direct Claude Code execution. |
+| Rollback | Remove the MCP entry or stop using `fak manage` | Disable managed server/plugin and restore direct Claude Code execution. |
 
 ## Residual risks to name up front
 

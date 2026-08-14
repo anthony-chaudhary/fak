@@ -26,7 +26,7 @@ these are new for this doc — they are the same properties described in the
 
 1. **Self-host-first.** `fak` is one static Go binary whose whole external dependency set
    is two `golang.org/x` extended-standard-library modules. Put
-   it in front of a **local** model (`fak guard --gguf …`, or `fak serve` fronting Ollama /
+   it in front of a **local** model (`fak manage --gguf …`, or `fak serve` fronting Ollama /
    vLLM / SGLang / llama.cpp on your own hardware) or a **domestic provider**, and the
    inference path never leaves infrastructure you control. Same artifact on a laptop and in
    a fleet — you add flags, not components or third-party services.
@@ -80,7 +80,7 @@ systems, a mandatory tamper-evident logging obligation (Article 12, enforceable
 August 2, 2026). fak's role:
 
 - **Locality and transfers:** run the model and tool execution on your own EU-region
-  infrastructure — or fully local with `fak guard --gguf` — and the inference path simply
+  infrastructure — or fully local with `fak manage --gguf` — and the inference path simply
   has no third-country transfer on it. The Chapter V question dissolves for that path
   instead of needing a transfer mechanism; fak is the in-process gate, not another
   processor in the chain.

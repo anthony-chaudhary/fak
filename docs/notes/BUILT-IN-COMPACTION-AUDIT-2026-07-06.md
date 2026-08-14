@@ -312,7 +312,7 @@ what was actually retained.
 
 ## See also
 
-For how fak guard *aligns with* Codex's built-in compaction at runtime — the
+For how fak manage *aligns with* Codex's built-in compaction at runtime — the
 two-wire model (fak's lossless cache-preserving cut on the Anthropic wire vs
 delegating to Codex's native `model_auto_compact_token_limit=96000` on the
 Responses wire), why guarded sessions "compact when the window looks light,"

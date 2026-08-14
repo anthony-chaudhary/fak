@@ -17,5 +17,5 @@ The law: keep the OPERATOR surface flat as the repo grows. heaviness_pressure su
 | appeal_channel_wired | 1.000 | 100 | the in-product appeal channel (`fak complain`) is wired into the dispatch table |
 | cli_verb_count | 0.782 | 78 | 114 top-level subcommands (soft 90, hard ceiling 200) |
 | meta_verb_share | 1.000 | 100 | 1/114 top-level verbs are meta-scorecards/RSI (1%, soft 8%) |
-| front_door_flag_burden | 0.150 | 15 | 71 flags on the front-door verb `fak guard` (soft 20, hard ceiling 80) |
+| front_door_flag_burden | 0.150 | 15 | 71 flags on the front-door verb `fak manage` (soft 20, hard ceiling 80) |
 | refusal_vocab_size | 0.000 | 0 | 48 structured refusal reasons in the vocabulary (soft 12) |

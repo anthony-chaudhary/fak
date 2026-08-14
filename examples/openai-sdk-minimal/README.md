@@ -72,7 +72,7 @@ your app is un-governed again — the boundary is exactly this one setting.
 
 **What this does not claim.** The adjudication is a *pre-execution verdict only* — this
 demo does not prove the model is actually prevented from running a denied tool (that
-enforcement lives in `fak guard` and the managed runtime, not in this SDK-side call), it
+enforcement lives in `fak manage` and the managed runtime, not in this SDK-side call), it
 does not exercise a real upstream model by default, and it does not demonstrate the
 authenticated path. It shows exactly one thing: the default-deny boundary decides on a
 proposed call before that call runs.

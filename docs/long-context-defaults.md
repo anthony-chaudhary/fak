@@ -64,7 +64,7 @@ should move only with a stronger witness or a clearly labeled re-budgeting decis
 
 Two things about that 48K a reader will otherwise get wrong (#5430):
 
-- **48K is the flag's default, not what a `fak guard` launch runs at.** Every `fak guard`
+- **48K is the flag's default, not what a `fak manage` launch runs at.** Every `fak manage`
   launch that does not pass `--compact-history-budget` explicitly is resolved to **96K**
   (`gateway.HeadlessCompactHistoryBudget`, via `resolveGuardCompactBudget`), because every
   guard launch fronts Claude Code and therefore carries its large fixed system+tools floor —

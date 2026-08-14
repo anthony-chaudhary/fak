@@ -105,7 +105,7 @@ $ FAK_BIN=$HOME/vm-fs-guard/fak FAK_REQUIRE_T0=1 ./run.sh
 [vm-fs-guard]   sandbox's own disk stayed readable/writable/searchable.
 [vm-fs-guard] 2 rungs above are marked (over-refusal): the measured price of the arg_rules spelling,
 [vm-fs-guard]   not a capability. They flip to ALLOW when #5310 wires the mount_view vocabulary.
-[vm-fs-guard] wrap a live agent the same way: fak guard -- claude   (the FS floor rides into the VM).
+[vm-fs-guard] wrap a live agent the same way: fak manage -- claude   (the FS floor rides into the VM).
 EXIT=0
 ```
 

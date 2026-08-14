@@ -1,18 +1,18 @@
 ---
 title: "A Local Model on the Wire Between Claude Code and the Anthropic API"
-description: "Design note on where a small local model fits the fak guard gateway, when an on-the-wire transform pays off, and why poison screening is the first use case."
+description: "Design note on where a small local model fits the fak manage gateway, when an on-the-wire transform pays off, and why poison screening is the first use case."
 ---
 
 # A local model on the wire, between Claude Code and the Anthropic API
 
 Status: design note, 2026-06-23. Explores where a small local model belongs in the
-`fak guard -- claude` path, names the first use case worth building, and gives the
+`fak manage -- claude` path, names the first use case worth building, and gives the
 decision framework for when a local-model transform on the wire pays off and when it
 does not.
 
 ## The thesis
 
-The `fak guard -- claude` gateway already sits on the wire as a disinterested referee,
+The `fak manage -- claude` gateway already sits on the wire as a disinterested referee,
 and it already does heuristic context transforms there: ctxmmu's regex screens decide
 what to quarantine, ctxwin's token-budget windowing decides what to demote, and ctxplan's
 lexical forecast decides which past turns look relevant. Each of those is a cheap, dumb
@@ -120,7 +120,7 @@ model-arm quarantine emits a held id that `PageIn` refuses pre-`Clear`.
 
 The economics, and an honest correction. This closes the gap the literal-marker list
 leaves open, and that gap matters on the passthrough wire in a specific way. On
-`fak guard -- claude` the model ingests `req.Raw` verbatim (`messages.go:218-219` forwards
+`fak manage -- claude` the model ingests `req.Raw` verbatim (`messages.go:218-219` forwards
 the original request bytes with `WithRawRequestBody(req.Raw)` to keep the `cache_control`
 prefix), so the quarantine byte-rewrite (which targets `req.Messages`, paged out in
 `admitInboundResults` at `messages.go:191`) does NOT change the bytes the frontier model

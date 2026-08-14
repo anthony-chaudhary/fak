@@ -42,7 +42,7 @@ build.
   else — no key, no model, no GPU, no network after the install.
 - **Which runtime is this?** The gateway runtime and the agent application runtime, offline.
   If those words are new, read [Two runtimes, one binary](../explainers/runtime-vs-client.md)
-  first — it names what `fak serve`, `fak serve --native`, and `fak guard` each are.
+  first — it names what `fak serve`, `fak serve --native`, and `fak manage` each are.
 
 ---
 
@@ -220,6 +220,6 @@ Stop the server (Ctrl-C in the first terminal) when you are done.
   client](../explainers/runtime-vs-client.md).
 - **Front your own model / production serving:** [server quickstart](server-quickstart.md) ·
   [server config](server-config.md).
-- **Wrap an existing harness (Claude Code, Codex) as a governed client:** [`fak guard`](../../README.md#manage-one-local-agent-fak-guard).
+- **Wrap an existing harness (Claude Code, Codex) as a governed client:** [`fak manage`](../../README.md#manage-one-local-agent-fak-guard).
 - **The guided first session (traces, policies, a real model):** [tutorial](tutorial.md).
 - **The policy schema and refusal vocabulary:** [`POLICY.md`](../../POLICY.md).

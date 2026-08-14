@@ -62,7 +62,7 @@ parse-skips hiding call sites). So all 12 are genuinely unreferenced.
   auth twin at those two sites.
 
 - **`newGuardFleetProviderMaybeSpine`** (`cmd/fak/guard_spine.go:33`). Doc: "the fleet
-  provider `fak guard` installs." No caller. So `fak guard` installs the plain
+  provider `fak manage` installs." No caller. So `fak manage` installs the plain
   disk-only provider and the live multicast self-discovery **spine wrapper is
   unreachable** from the entrypoint. Caveat: `guard_spine.go` is part of an active
   in-flight `gateway.SessionFleet` sibling refactor (with `guard_fleet.go` /

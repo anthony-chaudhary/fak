@@ -89,7 +89,7 @@ mode is the no-network, no-key dogfood path.
 ## Quick Start: one command
 
 The fastest way to put the kernel in front of the Hermes Agent you already run is the
-`fak guard` verb. It starts the gateway in-process on a private loopback port, injects the
+`fak manage` verb. It starts the gateway in-process on a private loopback port, injects the
 base URL **into the child process only**, and proxies to your real upstream:
 
 ```bash
@@ -97,10 +97,10 @@ export OPENAI_API_KEY=sk-...                  # or point --base-url at a local m
 fak manage --provider openai --api-key-env OPENAI_API_KEY -- hermes
 ```
 
-`fak guard`:
+`fak manage`:
 
 1. Starts the gateway in-process on `127.0.0.1:<random-port>`.
-2. Loads a secure default capability floor (print it with `fak guard --dump-policy`,
+2. Loads a secure default capability floor (print it with `fak manage --dump-policy`,
    override with `--policy FILE`).
 3. Injects `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1` (and `OPENAI_API_BASE`, the same
    value) into the `hermes` child only — your shell and `~/.hermes/config.yaml` are
@@ -108,9 +108,9 @@ fak manage --provider openai --api-key-env OPENAI_API_KEY -- hermes
 4. Proxies every chat turn to your upstream, adjudicating each proposed tool call first.
 5. Tears the gateway down when Hermes exits and prints what the kernel decided.
 
-> **The provider is autodetected.** `fak guard` recognizes `hermes` as an OpenAI-wire agent
+> **The provider is autodetected.** `fak manage` recognizes `hermes` as an OpenAI-wire agent
 > (the same table that maps `codex`/`opencode`/`aider`), so a bare
-> `fak guard -- hermes` already picks `--provider openai` and injects `OPENAI_BASE_URL` on
+> `fak manage -- hermes` already picks `--provider openai` and injects `OPENAI_BASE_URL` on
 > its own. Name `--provider openai` explicitly if you prefer to be unambiguous, or to wrap a
 > launcher whose basename is not `hermes`.
 
@@ -138,7 +138,7 @@ box after the initial pull. See [`fak ls`](https://github.com/anthony-chaudhary/
 
 ---
 
-## Manual wiring (without `fak guard`)
+## Manual wiring (without `fak manage`)
 
 If you run Hermes Agent and `fak serve` as separate long-running processes:
 
@@ -275,7 +275,7 @@ pages it out before it re-enters the agent's context — so the model never read
 
 This is **automatic, not a flag you flip.** Quarantine is part of the result-admit stack the
 gateway runs on every served turn (the context-MMU secret/poison check plus the IFC taint
-stamp). It is in effect whenever `fak serve` / `fak guard` fronts the agent — there is no
+stamp). It is in effect whenever `fak serve` / `fak manage` fronts the agent — there is no
 `--quarantine` switch to set or forget. What you *do* control is **what counts as poisoned**:
 the secret-shaped detector and the `SECRET_EXFIL` arg rules in your capability floor (above)
 decide which results get quarantined. To watch it fire, see
@@ -291,7 +291,7 @@ exit summary.
 
 ### Proxy seat vs. local `--gguf`
 
-On the **proxy** seat — `fak serve` / `fak guard` in front of an upstream model, this guide's
+On the **proxy** seat — `fak serve` / `fak manage` in front of an upstream model, this guide's
 documented default — the quarantined result is paged out of the agent's context before the
 model reads it, so the poison never enters the turn. The in-kernel **KV poison-evictor**
 (dropping the local KV prefix the result would have populated) is the **`--gguf` local-model
@@ -317,10 +317,10 @@ Key metrics:
 
 ### What the guard session reports
 
-On exit, `fak guard` prints the kernel's decisions for the session:
+On exit, `fak manage` prints the kernel's decisions for the session:
 
 ```
-fak guard: 31 kernel decision(s) — 27 allowed, 2 denied, 1 repaired, 1 quarantined, 0 deferred
+fak manage: 31 kernel decision(s) — 27 allowed, 2 denied, 1 repaired, 1 quarantined, 0 deferred
   blocked: POLICY_BLOCK     x2
 ```
 

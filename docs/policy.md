@@ -24,12 +24,12 @@ posture; it is an optional trial modifier used only with `fail_closed`.
 
 The following exception route is outside the manifest workflow and outside the posture table:
 
-- **Host-local interactive exception only:** use the `fak guard` operator allow overlay instead
+- **Host-local interactive exception only:** use the `fak manage` operator allow overlay instead
   of this manifest workflow.
-  The shipped coding-tool floor remains in force; `fak guard allow TOOL` adds a host-local
+  The shipped coding-tool floor remains in force; `fak manage allow TOOL` adds a host-local
   exception for a `DEFAULT_DENY`. Explicit danger denials and argument rules are unchanged.
   This route is available only to the operator of that guarded host session. Run
-  `fak guard allow TOOL`, verify it with `fak guard allow --list`, and stop; the manifest
+  `fak manage allow TOOL`, verify it with `fak manage allow --list`, and stop; the manifest
   workflow and its next check do not apply.
 
 If that exception-only case does not apply, continue with the manifest workflow. The manifest

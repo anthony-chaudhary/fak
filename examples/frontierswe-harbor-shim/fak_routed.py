@@ -16,7 +16,7 @@ gemini-cli, qwen-code, …) pointed at an OpenAI-compatible model endpoint throu
 ``base_url``. For fak's value stack to bite on a 20-hour trial — KV persistence +
 RadixAttention prefix reuse so turn *k* doesn't re-prefill turns ``1..k-1``, in-kernel
 adjudication instead of a per-tool-call hook spawn, vDSO call-elimination — that
-``base_url`` must point at a ``fak serve`` / ``fak guard --serve`` gateway rather than the
+``base_url`` must point at a ``fak serve`` / ``fak manage --serve`` gateway rather than the
 model vendor. This shim is the seam that makes that happen.
 
 `FakRoutedAgent` does **exactly one thing**: it constructs the real agent unchanged and

@@ -170,7 +170,7 @@ the source files named):
   The most complete watch.
 - **W3** — the guard capability floor, gitgate, quarantine/ctxmmu, the
   hash-chained decision journal, repair. Shipped and default-on under
-  `fak guard`.
+  `fak manage`.
 - **W4** — lanes/leases/`dos arbitrate`, the lease-disjointness steward
   (collisions=0 witnessed), `fak sweep`, the dispatch capacity equation.
   Shipped locally; the shared task record and A2A channel are in-process only

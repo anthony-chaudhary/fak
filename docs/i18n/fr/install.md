@@ -25,7 +25,7 @@ se limite à la carte des tiers et aux commandes.
 (pas de Python, pas de toolchain CUDA). Ce binaire se place entre votre agent IA et ses
 tool calls : il vérifie chaque appel *avant* son exécution et réutilise le travail partagé
 des sessions longues. Vous ne réécrivez pas votre agent — vous pointez une base URL vers
-`fak serve`, ou vous enveloppez un agent existant en une commande : `fak guard -- claude`.
+`fak serve`, ou vous enveloppez un agent existant en une commande : `fak manage -- claude`.
 
 ## Prérequis
 
@@ -44,7 +44,7 @@ nouveau ne s'installe entre elles** :
 |---|---|---|
 | **0 — Essayer le kernel** | Exécuter/mesurer la frontière d'adjudication hors ligne | `go build` (aucun téléchargement) |
 | **1 — Placer un vrai modèle derrière** | Mettre le kernel devant un modèle servi ailleurs (Ollama / vLLM / llama.cpp / un provider cloud) | + un serveur compatible OpenAI |
-| **1b — Modèle local en une commande** | Un modèle GGUF local, in-kernel, avec votre agent existant — sans clé, sans réseau | `fak guard --gguf qwen2.5:7b -- claude` (~5 Go GGUF, mis en cache) |
+| **1b — Modèle local en une commande** | Un modèle GGUF local, in-kernel, avec votre agent existant — sans clé, sans réseau | `fak manage --gguf qwen2.5:7b -- claude` (~5 Go GGUF, mis en cache) |
 | **2 — Le modèle fusionné in-kernel** | La passe forward SmolLM2 pure-Go que le kernel possède | + export Python (poids réels) |
 
 Pour simplement **servir un modèle utile avec fak devant**, visez le **Tier 1**. Le modèle

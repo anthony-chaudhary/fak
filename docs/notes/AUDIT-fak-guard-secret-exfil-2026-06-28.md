@@ -1,13 +1,13 @@
 ---
-title: "Audit: fak guard 'stale binary?' and the SECRETEXFIL quarantine banner"
-description: "Audits two fak guard symptoms: the SECRET_EXFIL banner reflects current HEAD, not a stale binary, and the over-firing banner was rewritten to be clearer."
+title: "Audit: fak manage 'stale binary?' and the SECRETEXFIL quarantine banner"
+description: "Audits two fak manage symptoms: the SECRET_EXFIL banner reflects current HEAD, not a stale binary, and the over-firing banner was rewritten to be clearer."
 ---
 
-# Audit: `fak guard` "stale binary?" and the SECRET_EXFIL quarantine banner
+# Audit: `fak manage` "stale binary?" and the SECRET_EXFIL quarantine banner
 
-Date: 2026-06-28. Scope: two reported symptoms of `fak guard -- claude`:
+Date: 2026-06-28. Scope: two reported symptoms of `fak manage -- claude`:
 
-1. "It still seems like old versions of `fak guard` are running."
+1. "It still seems like old versions of `fak manage` are running."
 2. The repeated banner
    `[fak] quarantined 1 inbound tool result(s) before the model read them: tool_result (SECRET_EXFIL). The content was paged out ...`
    should be "more permissive, useful, or clear by default."
@@ -49,7 +49,7 @@ go: go1.26.3  windows/amd64
 The stamp travels with the binary, so it is a reliable "is the `fak`/guard I'm running
 current?" check that a stale binary cannot fake. Line 1 is still `appversion.Current()`
 verbatim, so anything parsing line 1 is unaffected. (There is no version-staleness check
-inside `fak guard` itself; it always compiles the floor in and uses
+inside `fak manage` itself; it always compiles the floor in and uses
 `appversion.Current()` for the gateway `Version`.)
 
 ## Finding 2 — the detector over-fires on benign content (witnessed)

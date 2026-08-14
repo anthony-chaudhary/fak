@@ -10,7 +10,7 @@ description: "One-command runbook to serve Qwen3.6-27B through fak's OWN in-kern
 When your subscription account is unavailable, this stands up **Qwen3.6-27B on a single
 GCP A100** through fak's **own** in-kernel CUDA forward (the pure fak kernel — not vLLM,
 SGLang, or llama.cpp) and points **Claude Code on this machine** at it. Every turn decodes
-on fak's forward on the datacenter GPU, and `fak guard` adjudicates every tool call on the way.
+on fak's forward on the datacenter GPU, and `fak manage` adjudicates every tool call on the way.
 
 ```text
 ┌──────────────┐ /v1/messages ┌───────────────────────────┐ in-kernel ┌──────────────────┐

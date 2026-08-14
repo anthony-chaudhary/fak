@@ -88,7 +88,7 @@ recognize bad text; fak makes the dangerous action structurally impossible.
 
 ### 8. "Do I have to rewrite my agent to adopt it?"
 
-No. You repoint **one base URL** at `fak serve` (or run `fak guard -- claude`).
+No. You repoint **one base URL** at `fak serve` (or run `fak manage -- claude`).
 Your model, IDE, and keys stay as they are; 41 of 47 surveyed harnesses drop in
 with one base-URL change.
 → [One binary is the whole surface](../explainers/one-binary-one-surface.md)

@@ -73,7 +73,7 @@ the tool name, a why, and the blocked call's context. This file is:
   grants nothing).
 
 ### Ratification (out-of-band only)
-`fak guard allow --from-proposals` (sibling to the existing `--from-journal`):
+`fak manage allow --from-proposals` (sibling to the existing `--from-journal`):
 an out-of-band operator reviews the queued proposals and either ratifies (moves a
 proposal into the real `allow.json` overlay) or rejects (drops it). Until an
 operator ratifies, the proposed tool stays `DEFAULT_DENY`. There is **no
@@ -83,7 +83,7 @@ through a channel the agent cannot reach.
 ### Why this is safe
 The proposal file is inert. It is a mailbox, not a floor. The only thing that
 turns a proposal into a capability is an operator running `--from-proposals`,
-which is the same trust boundary as `fak guard allow` today. The agent gains a
+which is the same trust boundary as `fak manage allow` today. The agent gains a
 *voice* (structured, ratifiable) without gaining *authority*.
 
 ## Invariants (must hold for both #5181 and #5182)

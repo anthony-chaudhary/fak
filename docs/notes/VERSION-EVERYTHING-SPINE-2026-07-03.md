@@ -83,7 +83,7 @@ maps is deliberately follow-on work, not spine.
 
 ## How it plugs into the rest of the system
 
-- **fak guard / dos**: a guard decision can cite the module rev it judged
+- **fak manage / dos**: a guard decision can cite the module rev it judged
   (staleness tells beyond the binary build stamp); `dos verify` can bind a
   claim to "module X at rev N" instead of a bare SHA. A future
   `MODULE_REV_STALE` refusal token can catch a loop acting on recall from an

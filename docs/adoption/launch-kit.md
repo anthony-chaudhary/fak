@@ -139,7 +139,7 @@ Use this when the venue rewards an idea-first essay rather than a link post.
 > just call a hosted API, you get the safety floor and none of the savings — and I'd rather say
 > that up front than have you find out.
 >
-> It ships as one ~13 MB static Go binary. `fak guard -- claude` wraps the agent you already
+> It ships as one ~13 MB static Go binary. `fak manage -- claude` wraps the agent you already
 > run; your model, keys, and IDE stay exactly as they are. The prior-art audit scored 0/29
 > novel — every primitive is established engineering. The contribution is putting them in one
 > in-process gate where the tool call is the checkpoint. Don't trust that framing; run the

@@ -1,21 +1,21 @@
 ---
-title: "fak guard ↔ Codex integrated compaction: runtime alignment"
-description: "How fak guard aligns with Codex's built-in auto-compaction in practice — two wires, one budget — plus the 2026-07-15 fleet turn/compaction audit and the monitoring + best-practice defaults it motivates."
+title: "fak manage ↔ Codex integrated compaction: runtime alignment"
+description: "How fak manage aligns with Codex's built-in auto-compaction in practice — two wires, one budget — plus the 2026-07-15 fleet turn/compaction audit and the monitoring + best-practice defaults it motivates."
 date: 2026-07-15
 status: research-note
 ---
 
-# fak guard ↔ Codex integrated compaction: runtime alignment
+# fak manage ↔ Codex integrated compaction: runtime alignment
 
 Operational companion to [BUILT-IN-COMPACTION-AUDIT-2026-07-06](./BUILT-IN-COMPACTION-AUDIT-2026-07-06.md)
 (which covers *why* built-in compaction is conceptually weak). This note covers
-*how fak guard actually aligns with Codex's integrated compaction at runtime*,
+*how fak manage actually aligns with Codex's integrated compaction at runtime*,
 backed by a fleet audit of the local Codex rollout store, and the monitoring +
 best-practice defaults that follow.
 
 ## Bottom line
 
-fak guard enforces **one resident-token budget (~96K)** for a guarded session,
+fak manage enforces **one resident-token budget (~96K)** for a guarded session,
 but it has to implement that budget **two different ways** because the model is
 reached over two different wires:
 

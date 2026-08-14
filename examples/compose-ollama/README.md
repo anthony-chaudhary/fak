@@ -98,11 +98,11 @@ docker compose up -d --force-recreate fak
   **model** is not: `qwen2.5:1.5b` samples, so its text varies run to run.
 - **What this does not claim.** It does not demonstrate that a denied tool call is
   prevented from *executing* inside your agent — fak returns the verdict; the runtime
-  that honours it is `fak guard` / the managed runtime. It does not prove the model is
+  that honours it is `fak manage` / the managed runtime. It does not prove the model is
   safe, it does not benchmark answer quality, and because the images are pinned at
   `:latest` it is not a reproducible-by-digest deployment.
 
 See [`docs/fak/deployment-guide.md`](../../docs/fak/deployment-guide.md) for the
 production compose/Kubernetes patterns this recipe is distilled from, and
 [`docs/integrations/claude.md`](../../docs/integrations/claude.md) for the one-command
-`fak guard -- claude` front door.
+`fak manage -- claude` front door.

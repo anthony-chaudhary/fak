@@ -79,7 +79,7 @@ fak hooklat [STREAM...] [--budget-p99-ms 250] [--since 2h] [--json]
 With no path it discovers the workspace's own stream plus every
 `.dispatch-runs/*/.dos/metrics/observations.jsonl`, splits the rollup by
 `pretool`/`posttool` verb, and prints a per-verb + total percentile table. The
-`fak guard` exit summary carries the same fold as a one-line `hook-latency` row,
+`fak manage` exit summary carries the same fold as a one-line `hook-latency` row,
 so the tax is visible at the surface every guarded session already prints — not
 only to operators who know to look.
 

@@ -1,6 +1,6 @@
 # Token-saving observability
 
-`fak serve` and `fak guard` expose a bounded `token_savings` receipt on the existing
+`fak serve` and `fak manage` expose a bounded `token_savings` receipt on the existing
 read-scoped `GET /debug/vars` endpoint. Loopback callers need no bearer; remote callers
 need the read bearer. The receipt contains aggregate counts and bounded reason enums only:
 no prompt text, tool arguments, paths, traces, or tool results.

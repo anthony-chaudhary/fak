@@ -1,6 +1,6 @@
 ---
 title: "Universal harness profiles — declarative config + auto-rotation for"
-description: "Proposes a declarative HarnessProfile descriptor that lifts each harness's identity into config so fak guard can repoint and rotate accounts for any harness."
+description: "Proposes a declarative HarnessProfile descriptor that lifts each harness's identity into config so fak manage can repoint and rotate accounts for any harness."
 ---
 
 # Universal harness profiles — declarative config + auto-rotation for any sub-harness
@@ -10,7 +10,7 @@ against the files/lines cited (read 2026-07-01)._
 
 ## The two planes
 
-`fak guard -- <agent>` wraps any coding harness and routes every proposed tool call
+`fak manage -- <agent>` wraps any coding harness and routes every proposed tool call
 through the kernel gateway. Two different things get decided when it does:
 
 1. **The wire plane — already abstracted.** Which upstream protocol the traffic is
@@ -96,7 +96,7 @@ the repo convention **flags > env > file > defaults**: built-ins are the default
 entry with the same detect-name overrides/extends. Load validates against the closed
 vocabularies (`Wire.Valid`, `RepointMechanism.Valid`) with `DisallowUnknownFields`
 discipline (mirrors `internal/policy/policy.go:220`), failing loud on an unknown wire or
-mechanism. `fak guard --dump-harness-profiles` prints the merged, resolved set.
+mechanism. `fak manage --dump-harness-profiles` prints the merged, resolved set.
 
 ## Honest fences (what this is NOT)
 
@@ -108,7 +108,7 @@ mechanism. `fak guard --dump-harness-profiles` prints the merged, resolved set.
   real account models (claude, codex) first; opencode/aider/hermes are
   declared-but-thin (`IdentityEnvKey` / `IdentityNone`) until each has a credential/
   identity reader.
-- **Behavior-preserving spine.** C2/C3 leave existing `fak guard` behavior byte-identical
+- **Behavior-preserving spine.** C2/C3 leave existing `fak manage` behavior byte-identical
   (existing guard tests green); the descriptor only *drives* what the switches did.
 
 ## Increment map
@@ -121,7 +121,7 @@ mechanism. `fak guard --dump-harness-profiles` prints the merged, resolved set.
   `if guardIsCodex` / `case "claude"`.
 - **C4 (#1955)** — `internal/accounts` keys on a profile so `~/.codex*` homes enter the
   same rotation pool; Claude byte-identical.
-- **C5 (#1956)** — `fak guard` consults the wrapped harness's rotation pool and rotates
+- **C5 (#1956)** — `fak manage` consults the wrapped harness's rotation pool and rotates
   off a walled / `STALE_CRED` bucket (the headline behavior).
 - **C6 (#1957)** — user `HarnessProfile` overrides in config, no Go.
 

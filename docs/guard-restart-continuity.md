@@ -1,6 +1,6 @@
 ---
 title: "Guard restart continuity: the contract, the modes, and the seed-handback orphan trap"
-description: "What happens to your conversation when fak guard --restart-on-budget relaunches its child: the restart chain, the closed continuity modes, and how to diagnose 'conversation was compacted' right after a guarded budget restart."
+description: "What happens to your conversation when fak manage --restart-on-budget relaunches its child: the restart chain, the closed continuity modes, and how to diagnose 'conversation was compacted' right after a guarded budget restart."
 ---
 
 # Guard restart continuity — the contract, the modes, and the seed-handback orphan trap
@@ -11,7 +11,7 @@ description: "What happens to your conversation when fak guard --restart-on-budg
 [#3056](https://github.com/anthony-chaudhary/fak/issues/3056) (seed-prompt handback, reserved),
 [#3057](https://github.com/anthony-chaudhary/fak/issues/3057) (restart-chain observability, shipped).*
 
-A `fak guard --restart-on-budget` session can hide any number of child relaunches, and each
+A `fak manage --restart-on-budget` session can hide any number of child relaunches, and each
 one is a continuity cliff: the wrapped agent either resumes the conversation it was working
 in, or it boots cold and silently loses the task. This page is the operator contract for
 that cliff — what the restart chain does, the closed vocabulary for how continuity was (or
@@ -19,7 +19,7 @@ was not) handed back, and how to diagnose the one symptom operators actually see
 
 **The symptom to remember: if you see "conversation was compacted" (or a cold "I don't have
 the task" reply) right after a guarded budget restart, it is the seed-handback path — check
-`fak guard restart-audit`.**
+`fak manage restart-audit`.**
 
 ## The restart chain
 
@@ -66,8 +66,8 @@ compacted, or answer as if it never had the task. Do not debug the agent's compa
 settings first — this is the seed-handback path. Ask the chain:
 
 ```
-fak guard restart-audit            # every hop, journals joined against seed files on disk
-fak guard restart-audit --json     # the fak.guard.restart_audit.v1 report
+fak manage restart-audit            # every hop, journals joined against seed files on disk
+fak manage restart-audit --json     # the fak.guard.restart_audit.v1 report
 fak session status <id>            # per-session restart chain appended to the status verb
 ```
 
@@ -96,7 +96,7 @@ is a reported fact, not a process failure; gate on the report, not the exit code
 - **Seed files** — `reset-*.json` under private `fak-guard-reset-*` directories in the OS
   temp dir (or your `--restart-seed-dir`); scan extras with `--seed-dir`.
 - **Live stderr** — one correlated line per restart:
-  `fak guard: restart #N from=… to=… seed=…tok handback=… child=… status=…`.
+  `fak manage: restart #N from=… to=… seed=…tok handback=… child=… status=…`.
 
 Related pages: [managed-context continuous usage semantics](managed-context-continuous-usage.md)
 (the product contract a reset must uphold), [managed-context glossary](managed-context-glossary.md),

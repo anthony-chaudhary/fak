@@ -12,7 +12,7 @@ activation runbooks. You will be able to run the guard-hop RSI planner, keep it
 in plan mode until real measurements exist, and verify that it cannot fabricate
 a keep-bit.
 
-The dogfood default fronts every worker with `fak guard`, so each tool call crosses the
+The dogfood default fronts every worker with `fak manage`, so each tool call crosses the
 kernel. Issue [#734](https://github.com/anthony-chaudhary/fak/issues/734) *measures* that
 hop's overhead; this loop *minimises* it — a recursive-self-improvement (RSI) loop fed by
 live dogfood-fleet telemetry that keeps an optimisation only when a re-measured number and

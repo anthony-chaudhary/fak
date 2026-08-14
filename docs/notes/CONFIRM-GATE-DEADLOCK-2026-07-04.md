@@ -85,7 +85,7 @@ function of the command text today.
 
 ## Repro
 
-1. In an agent session with the fak guard's outward-facing preview-confirm gate
+1. In an agent session with the fak manage's outward-facing preview-confirm gate
    active, propose `gh issue create --repo <r> --title <t> --body-file <f>`.
 2. Observe the `REQUIRE_WITNESS/ESCALATE` refusal + a `_fak_confirm` token.
 3. Re-propose byte-identical with `"_fak_confirm":"<that token>"` added.

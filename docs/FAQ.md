@@ -32,7 +32,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "Do I have to configure anything to save tokens?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No. fak guard -- claude turns on six safe token-saving methods by default, with no flags and no config. Three are lossless and cannot change a single output token: provider prompt-cache passthrough (it forwards the cache breakpoints byte-for-byte so the provider's discount holds), tool-floor pruning (it drops tool definitions the policy would deny anyway), and vDSO dedup (it answers an identical repeated call from the previous result). Three are bounded — they keep the model's working set intact and each carries an honest note on what it sheds: history compaction, oversized-result elision, and a planned context view. You never pick, tune, or re-check them; the defaults are re-derived from the binary's own entry points and pinned by a test, so a new release cannot silently drop one. See them live with fak token-defaults-scorecard (grade A, six of six on), or read the token-saving-defaults scorecard."
+        "text": "No. fak manage -- claude turns on six safe token-saving methods by default, with no flags and no config. Three are lossless and cannot change a single output token: provider prompt-cache passthrough (it forwards the cache breakpoints byte-for-byte so the provider's discount holds), tool-floor pruning (it drops tool definitions the policy would deny anyway), and vDSO dedup (it answers an identical repeated call from the previous result). Three are bounded — they keep the model's working set intact and each carries an honest note on what it sheds: history compaction, oversized-result elision, and a planned context view. You never pick, tune, or re-check them; the defaults are re-derived from the binary's own entry points and pinned by a test, so a new release cannot silently drop one. See them live with fak token-defaults-scorecard (grade A, six of six on), or read the token-saving-defaults scorecard."
       }
     },
     {
@@ -1775,7 +1775,7 @@ wrong — at one boundary, the tool call:
 
 ## Do I have to configure anything to save tokens?
 
-No. `fak guard -- claude` turns on six safe token-saving methods by default, with no
+No. `fak manage -- claude` turns on six safe token-saving methods by default, with no
 flags and no config. Three are **lossless** and cannot change a single output token:
 provider prompt-cache passthrough (it forwards the cache breakpoints byte-for-byte so the
 provider's discount holds), tool-floor pruning (it drops tool definitions the policy would

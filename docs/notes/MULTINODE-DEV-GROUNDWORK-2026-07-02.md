@@ -26,7 +26,7 @@ TRAVEL between machines**, with what latency, and what happens when a link is do
 | `internal/laneadmit` / `regionadmit` | in-binary arbitrate twin: lanes + tree geometry + live leases → COLLISION_RISK | one process, local ref store |
 | `internal/safecommit` | commit-time flock + stale-base guard | single host |
 | hardware catalog | machine table (`experiments/benchmark/catalog.json`) | static, bench-oriented |
-| gateway (`fak guard`) | the fleet's HTTP front door, in-process loopback | no lease surface |
+| gateway (`fak manage`) | the fleet's HTTP front door, in-process loopback | no lease surface |
 
 The one structural hole at plane 0 was **transport**: every consumer doc said "run
 `git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'` before deciding, push after" —

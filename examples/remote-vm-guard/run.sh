@@ -7,7 +7,7 @@
 # METADATA endpoint (169.254.169.254 & peers): a single GET there returns the VM's IAM
 # role credentials, and a prompt-injected agent walks out of the box with them.
 #
-# THE FLOOR. `fak guard` carries a structural egress rung INTO the VM: a tool call that
+# THE FLOOR. `fak manage` carries a structural egress rung INTO the VM: a tool call that
 # reaches the metadata / link-local family is refused BY SHAPE — EGRESS_BLOCK, no model
 # and no human in the loop. This demo proves it the deterministic way, with `fak egress
 # check`, which runs the SAME kernel floor a guarded session enforces.
@@ -79,4 +79,4 @@ if [ "$FAILS" -ne 0 ]; then
 fi
 log "all witnesses passed — the metadata/link-local SSRF class is refused by structure,"
 log "every reachable IMDS address AND its DNS name, while real provider/git traffic flows."
-log "wrap a live agent the same way: fak guard -- claude   (the floor rides into the VM)."
+log "wrap a live agent the same way: fak manage -- claude   (the floor rides into the VM)."

@@ -149,7 +149,7 @@ export FAK_TOKEN="$(openssl rand -hex 32)"
 
 Point your agent's base URL at `http://127.0.0.1:8080`. The agent sees no difference — tool calls are silently adjudicated, allowed calls proxy upstream, dangerous calls are refused.
 
-#### Option B — Use `fak guard` with Claude Code (local dev)
+#### Option B — Use `fak manage` with Claude Code (local dev)
 
 ```bash
 ./fak manage --policy my-support-policy.json -- claude

@@ -266,7 +266,7 @@ fak manage claude            # compaction is on by default at a 48K budget
 fak cachevalue report        # the owner-attribution + per-fire compaction health
 ```
 
-Tune or disable the trim with `fak guard --compact-history-budget <tokens>` (`0`
+Tune or disable the trim with `fak manage --compact-history-budget <tokens>` (`0`
 turns it off). Every `fak info` line shows the live `provider X% + fak Y%` split,
 so you can watch the two savings — the provider's cache discount and fak's own
 trim — side by side, honestly, without either one claiming the other's number.

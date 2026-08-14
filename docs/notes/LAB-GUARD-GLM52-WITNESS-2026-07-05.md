@@ -33,7 +33,7 @@ filesystem paths are recorded here.
   "evidence": "scrubbed-fleet-report",
   "next_action": "use-guard-remote-serve-alias",
   "remote_serve_arg": "@lab/glm-5.2",
-  "guard_command": "fak guard --remote-serve @lab/glm-5.2 --probe -- codex"
+  "guard_command": "fak manage --remote-serve @lab/glm-5.2 --probe -- codex"
 }
 ```
 
@@ -58,10 +58,10 @@ The response body contained `GLM52_OK`.
 Command shape:
 
 ```bash
-fak guard --remote-serve @lab/glm-5.2 --api-key-env <dummy-local-key> --provider openai --probe -- python <smoke-client>
+fak manage --remote-serve @lab/glm-5.2 --api-key-env <dummy-local-key> --provider openai --probe -- python <smoke-client>
 ```
 
-The child client used `OPENAI_BASE_URL` injected by `fak guard` and did both in the
+The child client used `OPENAI_BASE_URL` injected by `fak manage` and did both in the
 same guarded session:
 
 1. posted one OpenAI-compatible chat request to `glm-5.2`;
@@ -116,7 +116,7 @@ deterministic guard decision row in the same live session that reached lab GLM-5
 
 ## Not yet
 
-- The exact unshaped `fak guard --remote-serve @lab/glm-5.2 --probe -- codex` path
+- The exact unshaped `fak manage --remote-serve @lab/glm-5.2 --probe -- codex` path
   timed out earlier. A shaped Codex smoke subsequently completed under 10 minutes and
   is tracked in #2974.
 - The public commits carrying the alias/private-roster support are local only until the

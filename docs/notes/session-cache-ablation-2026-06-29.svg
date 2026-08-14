@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700" viewBox="0 0 1000 700" font-family="Segoe UI,Helvetica,Arial,sans-serif">
 <rect x="0.0" y="0.0" width="1000.0" height="700.0" rx="0" fill="#ffffff" />
 <text x="40.0" y="46.0" font-size="26" fill="#0b1f3a" text-anchor="start" font-weight="700">How cache savings worked this session</text>
-<text x="40.0" y="72.0" font-size="13.5" fill="#5b6b82" text-anchor="start" font-weight="normal">fak guard • 122 cached turns • resumed c6723f7c — the 25.5M is Anthropic’s prompt cache, which fak PRICES (does not author)</text>
+<text x="40.0" y="72.0" font-size="13.5" fill="#5b6b82" text-anchor="start" font-weight="normal">fak manage • 122 cached turns • resumed c6723f7c — the 25.5M is Anthropic’s prompt cache, which fak PRICES (does not author)</text>
 <rect x="40.0" y="100.0" width="560.0" height="510.0" rx="10" fill="#f7f9fc" stroke="#d8dee8"/>
 <text x="60.0" y="132.0" font-size="17" fill="#14233b" text-anchor="start" font-weight="700">Prompt-cache token axis</text>
 <text x="60.0" y="152.0" font-size="12.5" fill="#5b6b82" text-anchor="start" font-weight="normal">cumulative input-token-equivalents, NET of the write premium</text>
@@ -20,7 +20,7 @@
 <text x="308.0" y="569.0" font-size="11.5" fill="#5b6b82" text-anchor="middle" font-weight="normal" font-style="italic">plain claude</text>
 <rect x="420.0" y="482.4" width="96.0" height="47.6" rx="3" fill="#1f9d74" />
 <text x="468.0" y="473.4" font-size="16" fill="#14233b" text-anchor="middle" font-weight="700">4.2M</text>
-<text x="468.0" y="552.0" font-size="13.5" fill="#14233b" text-anchor="middle" font-weight="700">fak guard</text>
+<text x="468.0" y="552.0" font-size="13.5" fill="#14233b" text-anchor="middle" font-weight="700">fak manage</text>
 <text x="468.0" y="569.0" font-size="11.5" fill="#5b6b82" text-anchor="middle" font-weight="normal" font-style="italic">cache + floor</text>
 <line x1="60" y1="530" x2="580" y2="530" stroke="#5b6b82" stroke-width="1"/>
 <path d="M 308.0 586 L 308.0 595 L 468.0 595 L 468.0 586" fill="none" stroke="#1f9d74" stroke-width="1.5"/>

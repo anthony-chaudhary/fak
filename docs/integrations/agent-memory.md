@@ -1,6 +1,6 @@
 ---
 title: "Put fak in front of an agent-memory system (mem0 / OpenMemory / MCP)"
-description: "fak is the reference monitor beneath an agent-memory store, not a competitor to it. Wire mem0's OpenMemory MCP server behind fak guard and every add/search/delete crosses a default-deny capability floor: oversized writes refused, secret-shaped writes refused, a prompt-injected delete_all refused, and every recalled memory trust-gated before it re-enters context. Zero mem0 code."
+description: "fak is the reference monitor beneath an agent-memory store, not a competitor to it. Wire mem0's OpenMemory MCP server behind fak manage and every add/search/delete crosses a default-deny capability floor: oversized writes refused, secret-shaped writes refused, a prompt-injected delete_all refused, and every recalled memory trust-gated before it re-enters context. Zero mem0 code."
 ---
 
 # Run your memory store through fak
@@ -16,7 +16,7 @@ hook.
 `fak` is the layer beneath: a **reference monitor at the agent's syscall boundary**. It
 keeps the store's retrieval engine intact and adds a default-deny floor in front of every
 memory operation. This guide wires mem0's local **OpenMemory MCP server** behind
-`fak guard` so the gate is invisible to your agent and you change no mem0 code.
+`fak manage` so the gate is invisible to your agent and you change no mem0 code.
 
 > **fak does not replace your memory store.** It has no embedder, no vector search, no
 > fact-extraction pass. The play is composition: mem0 keeps recall; fak adds the gate, the
@@ -41,7 +41,7 @@ Three things mem0 has no mechanism for, with the policy in
    wiping the store still can't — the refusal is on the tool **name**, independent of what
    the model was convinced to do.
 3. **Trust-gated read-back.** This one is automatic and needs no policy. Under
-   `fak guard`, a `search_memory` **result** is a tool result, so it routes through the
+   `fak manage`, a `search_memory` **result** is a tool result, so it routes through the
    kernel's result-side floor (`/v1/fak/admit`) and is quarantined if it carries an
    injection or a secret — *before* the recalled bytes reach the model. mem0 returns stored
    text with no screen; this closes indirect prompt-injection through the memory store
@@ -60,7 +60,7 @@ promotes memory.
 
 1. **Inventory every memory surface.** Name the exact tool or API operation for writes,
    recalls, lists, deletes/resets, and background consolidation. If the agent can still
-   call the store through an SDK path that bypasses `fak guard`, that path is not gated.
+   call the store through an SDK path that bypasses `fak manage`, that path is not gated.
 2. **Put the effectful surface on the proxied stream.** Prefer an MCP tool surface or an
    equivalent wrapper where the model proposes `add`, `search`, `delete`, and `promote`
    as visible tool calls. fak cannot gate a direct library call it never sees.
@@ -142,7 +142,7 @@ is a property you can diff and test, not a prompt you hope holds.
 
 ---
 
-## Wire it live, under `fak guard`
+## Wire it live, under `fak manage`
 
 1. Run mem0's OpenMemory MCP server locally (FastAPI on `:8765`; Docker compose, local
    Qdrant — see [mem0's OpenMemory docs](https://docs.mem0.ai/openmemory/overview)). It
@@ -160,10 +160,10 @@ is a property you can diff and test, not a prompt you hope holds.
 
 Now every memory tool call the model proposes surfaces on the proxied stream, crosses
 `k.Decide`, and is dropped / repaired / allowed before your agent dispatches it to
-OpenMemory. On exit, `fak guard` prints the tally:
+OpenMemory. On exit, `fak manage` prints the tally:
 
 ```
-fak guard: 47 kernel decision(s) — 44 allowed, 3 denied, 0 repaired, 1 quarantined
+fak manage: 47 kernel decision(s) — 44 allowed, 3 denied, 0 repaired, 1 quarantined
   blocked: POLICY_BLOCK   x2     # a delete_all the model proposed
   blocked: SECRET_EXFIL   x1     # a token it tried to memorize
 ```
@@ -181,11 +181,11 @@ FAK_AUDIT_JOURNAL=~/mem-audit.jsonl fak manage --policy examples/mem0-openmemory
 - **The store must be the agent's own MCP tool on the proxied stream.** fak gates the call
   because it appears as a model-proposed `tool_use` that the proxy sees. If your agent
   calls mem0 **out-of-band** (the Python/TS SDK directly, not as a model tool call), that
-  write never crosses `fak guard` — it is invisible to the gate. fak is not an outbound MCP
+  write never crosses `fak manage` — it is invisible to the gate. fak is not an outbound MCP
   client today; a transparent outbound-MCP proxy would be net-new.
 - **Match the tool names your harness reports.** This policy uses the bare OpenMemory tool
   names. Some harnesses namespace MCP tools (Claude Code surfaces them as
-  `mcp__<server>__<tool>`). Run once with `fak guard --log -` and read the `tool=` field in
+  `mcp__<server>__<tool>`). Run once with `fak manage --log -` and read the `tool=` field in
   the `gateway_operation` lines, then set `allow` / `deny` to those exact strings (verify
   any name with `fak preflight`). The floor matches names exactly; a name it doesn't know
   falls to `DEFAULT_DENY`, which is the safe direction.
@@ -239,6 +239,6 @@ apply capability. The planning spine is
 
 - [`examples/mem0-openmemory-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mem0-openmemory-policy.json) — the floor this page deploys.
 - [`CONTEXT-IS-NOT-MEMORY.md`](../CONTEXT-IS-NOT-MEMORY.md) — why context ≠ memory, and the expire-by-default durability gate.
-- [`claude.md`](claude.md) — the `fak guard` integration this builds on.
+- [`claude.md`](claude.md) — the `fak manage` integration this builds on.
 - [`debugging.md`](debugging.md) — why was a memory call denied/transformed? Reproduce it offline with `fak preflight --explain`.
 - [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the manifest schema (allow / deny / arg_rules / self_modify_globs).

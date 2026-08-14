@@ -23,7 +23,7 @@ binding witness; no new scoring code was required.
 ## Promotion evidence (what makes measured the default)
 
 `cmd/fak/vcache.go` reads the persisted per-turn provider-cache window (the
-snapshot a finished `fak guard`/`fak serve` session leaves at the well-known
+snapshot a finished `fak manage`/`fak serve` session leaves at the well-known
 path) when no `--telemetry`/`--anchors-file` is given. When that snapshot has
 turns it ranks the workload from the observed rows and sets
 `in.AnchorSource = vcachescore.AnchorSourceMeasured`
@@ -76,4 +76,4 @@ provider window (turns with `cache_read_input_tokens`), not a synthetic fixture
 staged at the well-known path. If a synthetic window were persisted there,
 `anchor source: measured` would report a fabricated family distribution as
 observed — the cold-path guarantee is only as honest as the snapshot writer
-(`fak guard`/`fak serve`), which is the surface item 6 hardens.
+(`fak manage`/`fak serve`), which is the surface item 6 hardens.

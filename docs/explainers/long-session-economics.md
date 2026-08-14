@@ -78,7 +78,7 @@ There is a deliberately conservative case: if the span it would drop is itself m
 `cache_control` (already provider-warm), `fak` refuses to drop it, because a smaller
 prompt is not automatically cheaper than one already served from cache.
 
-The practical side of this — the one `fak guard` flag, when it fires, what it does and
+The practical side of this — the one `fak manage` flag, when it fires, what it does and
 does not promise — is in the sibling explainer
 [Long sessions: shed history, keep the cache hit](long-sessions-keep-the-cache-hit.md).
 
@@ -93,7 +93,7 @@ the provider's decision, made on the provider's side.
 So `fak` does not claim the saving. It **relays the provider's own number**: `/metrics`
 exposes `fak_gateway_compaction_*`, putting the tokens `fak` shed (what it sent) next to
 the provider's reported `cache_read` (what actually came back discounted), and the
-`fak guard` exit line summarizes both. If `cache_read` is low while the prefix was
+`fak manage` exit line summarizes both. If `cache_read` is low while the prefix was
 byte-identical, the miss is provider-side and you see it either way, rather than
 overpaying silently. The guarantee is `fak`'s; the reuse number is the provider's, and
 the two are reported separately.
@@ -179,7 +179,7 @@ rather than claiming a saving it cannot force.
 ## See also
 
 - [Addressable KV cache](addressable-kv-cache.md) — what "prefix-addressed" means, and the one thing `fak` does that shipped engines don't.
-- [Long sessions: shed history, keep the cache hit](long-sessions-keep-the-cache-hit.md) — the practical `fak guard` flag and its break-even rule.
+- [Long sessions: shed history, keep the cache hit](long-sessions-keep-the-cache-hit.md) — the practical `fak manage` flag and its break-even rule.
 - [The frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md) — why a long trajectory's cache-hit rate rises by construction, and why that is not the same as getting cheaper.
 - [O(1) context-window economics](o1-context-window-economics.md) — the accounting model underneath the per-turn cost.
 

@@ -52,7 +52,7 @@ and, uniquely, make every read *evidence-qualified* and *taint-safe* by construc
 
 - **A trace-addressed session.** Everything is keyed by the gateway-minted `X-Trace-Id`
   (`internal/gateway/gateway.go`, `traceSeq`); the "default trace" resolves to the wrapped
-  `fak guard` session, so a co-located tool needs no identity to read its own session.
+  `fak manage` session, so a co-located tool needs no identity to read its own session.
 - **A taint-stamped context store.** The inbound steer bus already screens every append
   through `ctxmmu.ScreenBytes`, stamps `abi.TaintTainted`/`TaintQuarantined`, and writes a
   hash-chained quarantine journal that stores *only reason/stub/length, never the raw
@@ -105,7 +105,7 @@ and, uniquely, make every read *evidence-qualified* and *taint-safe* by construc
 
 Auth baseline (the load-bearing caveat): every gateway read is wrapped in
 `withAuth`, but auth only engages when `RequireKey` is configured
-(`internal/gateway/http.go:316`). The common local `fak guard` deployment sets no key, so
+(`internal/gateway/http.go:316`). The common local `fak manage` deployment sets no key, so
 **every read seam above is reachable unauthenticated by any loopback process**, and none
 of the context tools carry a per-principal ACL. That is fine for a single-tenant laptop
 and a latent hazard the moment a session's transcript is worth reading from another

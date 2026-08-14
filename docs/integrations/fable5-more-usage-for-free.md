@@ -1,10 +1,10 @@
 ---
-title: "More Fable 5 (and every model) out of your Claude seat — with fak guard"
-description: "How one command — fak guard -- claude — stretches your existing Claude seat: the pure-fak, native-cache-excluded slice (context shedding + KV-prefix reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable fallover). Every number is recent — the latest fleet week, plus this repo's own last-3-day Claude Code dev sessions priced end to end — labeled by provenance, with the double-count fence carried in full and the few deliberately-cited all-time baselines flagged as such."
+title: "More Fable 5 (and every model) out of your Claude seat — with fak manage"
+description: "How one command — fak manage -- claude — stretches your existing Claude seat: the pure-fak, native-cache-excluded slice (context shedding + KV-prefix reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable fallover). Every number is recent — the latest fleet week, plus this repo's own last-3-day Claude Code dev sessions priced end to end — labeled by provenance, with the double-count fence carried in full and the few deliberately-cited all-time baselines flagged as such."
 date: 2026-07-09
 ---
 
-# More Fable 5 (and every model) out of your Claude seat — with `fak guard`
+# More Fable 5 (and every model) out of your Claude seat — with `fak manage`
 
 *This page reports **only fak's own authored slice** of the savings, on purpose:
 Anthropic's native prompt-cache discount — the larger number `fak` preserves
@@ -17,7 +17,7 @@ mechanism deep-dive and its honesty fences are
 
 ## The claim, stated honestly
 
-`fak guard -- claude` is the **easiest way to get more work out of the Claude
+`fak manage -- claude` is the **easiest way to get more work out of the Claude
 seat you already pay for** — one command, on by default, nothing to configure,
 nothing to clean up. It does that two ways, and it's worth being precise about
 which is which:
@@ -76,7 +76,7 @@ but the growing *middle* keeps missing cache and re-billing at full price. The
 industry fix — summarize-and-recompact — rewrites the prompt body near the
 context wall, which busts the cached prefix and forces a large cold re-prefill.
 
-`fak guard`'s lever is different: past the budget it **drops whole stale middle
+`fak manage`'s lever is different: past the budget it **drops whole stale middle
 turns and splices the original bytes back together**, proves the protected
 `cache_control` prefix is byte-for-byte identical, and forwards the body
 unchanged on any doubt (`internal/gateway/messages.go:697` onward). The cached
@@ -136,7 +136,7 @@ Read these the honest way:
 
 ### Dogfood witness: this very session
 
-This page is being updated **inside a `fak guard -- claude` session** (gateway
+This page is being updated **inside a `fak manage -- claude` session** (gateway
 trace `guard`). As these edits were made, `fak_context_value` reported the session
 had stayed alive across **36 context events over 39 turns** — thirty-six
 mid-session sheds — against a raw transcript weight of **3,948,011
@@ -189,8 +189,8 @@ fak manage --session-pressure-gate high --model claude-fable-5 -- claude
 ```
 
 **Honest scope of this lever:** (i) the automatic fallover lives in the
-**launcher** (`fak accounts launch` / dispatch worker), adjacent to `fak guard`,
-not inside plain `fak guard -- claude`; (ii) it fires only on a **fast startup
+**launcher** (`fak accounts launch` / dispatch worker), adjacent to `fak manage`,
+not inside plain `fak manage -- claude`; (ii) it fires only on a **fast startup
 refusal**, not mid-session; (iii) it engages only when Opus is walled and
 `--model` is left implicit. It genuinely gets you onto Fable 5 when Opus is
 capped — it does not continuously "top up" Fable usage.

@@ -56,7 +56,7 @@ So the supported model list at this layer is "whatever your upstream serves":
 The mechanism is one fact: the gateway speaks the wires your agent already speaks
 (`/v1/chat/completions`, `/v1/messages`, Gemini/xAI providers, and MCP), so the same
 gate sits in front of whichever model serves your tokens. This is the [SHIPPED]
-`fak serve` gateway and the `fak guard` front door for it.
+`fak serve` gateway and the `fak manage` front door for it.
 
 Status: [SHIPPED]. Sourced in
 [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) (the

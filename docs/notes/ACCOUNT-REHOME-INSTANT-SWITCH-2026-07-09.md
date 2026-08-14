@@ -7,7 +7,7 @@ version: 1
 # Account rehome — the manual "go" instant seat switch (2026-07-09)
 
 This is the **versioned baseline** for the seat-switch behavior an operator already
-has on a live `fak guard` session, written down before we improve it. It documents
+has on a live `fak manage` session, written down before we improve it. It documents
 what exists today and the one behavior that reads as magic — prompting **"go"** and
 watching the session hop to a fresh account instantly. The follow-up (make the
 background tick do this push automatically) is tracked separately; this doc is the
@@ -76,7 +76,7 @@ fak accounts rehome [--addr <gateway-url>] [--key <token>] [--reason <text>] [--
 
 - `--addr` — the gateway URL from the guard banner (or `FAK_ADDR`).
 - Exit `0` on an applied swap; exit `1` on transport error or gateway refusal
-  (`404` no roster in force — is `fak guard` running?; `409` no available sibling).
+  (`404` no roster in force — is `fak manage` running?; `409` no available sibling).
 - Human output names `from -> to (reason ...)` and reminds that the swap applies on
   the session's next upstream request and the left seat is excluded from
   auto-reselection for the rest of the session.

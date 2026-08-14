@@ -5,7 +5,7 @@ description: "Home for fak's serving side: run a model behind the fak serve gate
 
 # The serving side of fak
 
-The [front page](../../README.md) leads with **`fak guard`** — wrapping the agent you
+The [front page](../../README.md) leads with **`fak manage`** — wrapping the agent you
 already run. This page is the other pillar: **`fak serve`**, the side of `fak` that puts a
 model *behind* the kernel. Same substrate, different entry point — the gateway that
 adjudicates every tool call is also the seam where reused KV cache lives, is shared, and is

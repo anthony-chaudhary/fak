@@ -28,8 +28,8 @@ name — this page is the naming.
 
 - **[Gateway (inference) runtime](runtime-vs-client.md)** — `fak serve`: a long-lived server that governs *model traffic* (routing, cost caps, the capability floor, quarantine, audit); your harness still owns the loop and calls it.
 - **[Agent application runtime](runtime-vs-client.md)** — `fak serve --native`: the same binary hosting and running *the agent loop itself* (sessions, tools, subagents, streaming, resume), every step kernel-adjudicated — not proxying someone else's turn but running the turn.
-- **[Client](runtime-vs-client.md)** — the harness or app that *calls* a runtime (Claude Code, Codex, your SDK backend); `fak guard` turns a harness you already run into a governed one.
-- **[Embed](one-binary-one-surface.md)** — running the kernel *in-process* rather than as a separate service: `fak guard` starts the gateway runtime inside the child's launch, and the one static binary is the whole surface, so there is no sidecar to deploy.
+- **[Client](runtime-vs-client.md)** — the harness or app that *calls* a runtime (Claude Code, Codex, your SDK backend); `fak manage` turns a harness you already run into a governed one.
+- **[Embed](one-binary-one-surface.md)** — running the kernel *in-process* rather than as a separate service: `fak manage` starts the gateway runtime inside the child's launch, and the one static binary is the whole surface, so there is no sidecar to deploy.
 
 ## The cache
 

@@ -71,7 +71,7 @@ regardless of how cleverly the inducing prompt was assembled.
 | ShareLock's frame | fak's position |
 |---|---|
 | Poison is **dispersed across many tool descriptions** to evade per-tool description detection | fak's floor reads the **call**, not the description. There is no per-description scanner on the load-bearing path to disperse around — the dispersal move is **neutralized by construction**. (`CLAIMS.md` capability-floor units 15, 29.) |
-| The reconstructed payload is a **hidden instruction** that induces malicious behavior | An instruction can only act by becoming a **tool call**, and the call is **default-deny** gated against the policy manifest: an unlisted/dangerous call is `Deny(DEFAULT_DENY)`. The poison may *speak*; the action is gated. `fak guard -- claude` arms exactly this floor around a real session (`CLAIMS.md` guard front-door unit). |
+| The reconstructed payload is a **hidden instruction** that induces malicious behavior | An instruction can only act by becoming a **tool call**, and the call is **default-deny** gated against the policy manifest: an unlisted/dangerous call is `Deny(DEFAULT_DENY)`. The poison may *speak*; the action is gated. `fak manage -- claude` arms exactly this floor around a real session (`CLAIMS.md` guard front-door unit). |
 | Stealth is **information-theoretic** — provably no signal below threshold | fak does not *contest* the stealth claim — it concedes detectors are ~100% evadable and routes around them. Detection (`ctxmmu`/`normgate`/`wirescreen`) is an **additive, never load-bearing** rung; ShareLock is precisely why it is kept off the floor. |
 | Injected instructions that arrive **as data the model reads** | When such content arrives as a tool **result**, the **result-admit gate** quarantines prompt-injection/poison-shaped payloads out of context, raising the session taint high-water mark so a later egress is gated (`CLAIMS.md` result-admit unit 48; durable-moat re-screen unit 67). |
 | Trigger fires **on a server update** (the tool surface *changes*) | A changed tool surface is a **provenance event** — exactly the world-state shift fak's witness / change-feed machinery exists to make legible (`fak_refute_witness`, `fak_changes`). fak does not *yet* re-adjudicate on a description change (descriptions are not on the call path), so this is named as the follow-on below, not a shipped defense. |
@@ -82,7 +82,7 @@ The capability floor contains the **consequence** of a reconstructed instruction
 **not** intercept the **injection** itself, and it must not be claimed to. The fences worth
 not regressing on:
 
-1. **fak does not screen inbound third-party tool descriptions.** In `fak guard -- claude`
+1. **fak does not screen inbound third-party tool descriptions.** In `fak manage -- claude`
    passthrough, a downstream MCP server's advertised descriptions reach the model verbatim;
    fak adjudicates the *calls* the model then makes, not the advertised description text.
    The gateway's own `tools/list` advertises fak's adjudication primitives

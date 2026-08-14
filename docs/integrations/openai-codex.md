@@ -24,7 +24,7 @@ There are two useful fak entry points:
 | If you run... | Use this fak path | Why |
 |---|---|---|
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
-| Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak guard`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
+| Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak manage`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
 | OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. Endpoint-by-endpoint compatibility and current limits: [openai.md](openai.md). |
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
@@ -128,7 +128,7 @@ mediate Codex's model wire directly, use the launcher:
 The dry-run should print a command shaped like:
 
 ```text
-fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
+fak manage --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
 ### Live continuation-hook contract witness
@@ -145,7 +145,7 @@ normalized event evidence are committed at
 The reviewed Codex `UserPromptSubmit` continuation hook runs `fak sessions
 codex-loop-hook` before a continued turn. If the session is using a direct model
 provider, the hook blocks the turn because fak cannot enforce the guard on that model
-call; relaunch with `fak codex` (preferred) or `fak guard -- codex`.
+call; relaunch with `fak codex` (preferred) or `fak manage -- codex`.
 
 For a deliberately direct-provider continuation, pass `--allow-direct` when invoking
 the hook, or set `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1` in the hook environment. In
@@ -162,7 +162,7 @@ counters plus a `fak.vcache.score.v1` score under the user config dir
 `--vcache-snapshot=false` to skip the default snapshot update, or
 `--vcache-artifacts=false` to disable the post-run extraction.
 
-At runtime `fak guard` rewrites the Codex child argv to include:
+At runtime `fak manage` rewrites the Codex child argv to include:
 
 ```text
 -c model_provider=fak
@@ -249,7 +249,7 @@ envelope plus:
 - `reset.required_actions`: dump the session image, start a fresh process, rehydrate the
   planned view, and reuse provider cache only where legal.
 
-For `fak guard`, use the restart supervisor when the wrapped client benefits from a real
+For `fak manage`, use the restart supervisor when the wrapped client benefits from a real
 child-process boundary:
 
 ```bash

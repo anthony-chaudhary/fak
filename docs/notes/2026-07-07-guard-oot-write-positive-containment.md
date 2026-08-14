@@ -58,7 +58,7 @@ This family is **simultaneously over- and under-broad**:
 
 - **Over-broad (the bug that surfaced this):** the harness scratchpad lives *outside* the repo tree
   (`%LOCALAPPDATA%/Temp/claude/<proj>/<uuid>/scratchpad`), so a *sanctioned* `go build -o ../…/scratchpad/fak.exe`
-  is refused `POLICY_BLOCK`. Under `fak guard -- claude` a false `POLICY_BLOCK` reads as an agent-chosen
+  is refused `POLICY_BLOCK`. Under `fak manage -- claude` a false `POLICY_BLOCK` reads as an agent-chosen
   `end_turn` — it **silently kills the turn**. (The same failure mode `decide.go` already documents for the
   `rm_rf` / `rce_pipe` rules.)
 - **Under-broad:** because every rule *requires* a `..`, it misses every **absolute** escape —

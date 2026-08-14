@@ -54,7 +54,7 @@ These are on the trunk today. Each traces to a witness in
 [`CLAIMS.md`](../../CLAIMS.md) / [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)
 or a linked explainer — not to a self-report.
 
-- **The default-deny tool-call gate.** `fak guard -- <agent>` and `fak preflight`
+- **The default-deny tool-call gate.** `fak manage -- <agent>` and `fak preflight`
   put a capability floor in front of any agent: a dangerous tool call is refused
   by default (`verdict=DENY reason=DEFAULT_DENY`), at roughly `362 ns` per
   decision. This is the [tool-call-as-a-syscall](../explainers/tool-call-is-a-syscall.md)
@@ -87,9 +87,9 @@ they are done. The live status of each is tracked as GitHub issues.
   established proxy harnesses. Milestone **M#1 Durable sessions**; task handoff
   at session completion is [#1434](https://github.com/anthony-chaudhary/fak/issues/1434),
   WAL-class turn persistence is [#1363](https://github.com/anthony-chaudhary/fak/issues/1363).
-  Demonstrated in the `fak guard -- claude` front door; **not yet** milestone-landed.
+  Demonstrated in the `fak manage -- claude` front door; **not yet** milestone-landed.
 - **Cache default-on (planned).** Make the addressable KV cache the default
-  across the productized `fak guard` / `fak serve` path, not an opt-in. Milestone
+  across the productized `fak manage` / `fak serve` path, not an opt-in. Milestone
   **M#2 KV cache value**; the bit-exact mechanism above already ships — this is
   about turning it on by default with a witnessed value run.
 - **Native harness host seams (planned).** With the loop kernel already owned

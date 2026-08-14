@@ -8,7 +8,7 @@ description: "A read-only tool that validates, rung-folds, and ratchets fak's re
 **The goal this serves:** every managed-cache lever (epic #1844's family) must be
 provable on REAL traffic — not on the frozen `tau2-smoke` replay — before it can
 claim a saving or flip default-on. fak's durable ledgers already record that real
-traffic: every `fak guard -- claude` exit appends to
+traffic: every `fak manage -- claude` exit appends to
 `docs/nightrun/cache-savings.jsonl`, every MCP serve exit to
 `docs/nightrun/gateway-usage.jsonl`, every `fak run` kernel session with KV reuse
 to `docs/nightrun/cache-value.jsonl`. This note records the durable spine that
@@ -182,7 +182,7 @@ The guard teardown append + its context label (`claude` etc. — mirror the savi
 New counter fields (sibling issue A); periodic in-flight snapshots for guard; backfilling historical sessions; the savings ledger.
 
 #### Done condition
-A real `fak guard -- claude` session exit appends a gateway-usage row with `session_type="guard"` and live counters; `tools/managed_cache_proving_ground.py --json` shows `guard_usage_plane` at EVIDENCED with no tool change.
+A real `fak manage -- claude` session exit appends a gateway-usage row with `session_type="guard"` and live counters; `tools/managed_cache_proving_ground.py --json` shows `guard_usage_plane` at EVIDENCED with no tool change.
 
 #### Witness
 `go test ./cmd/fak` green on the new seam test; a live guard session's exit row visible in `docs/nightrun/gateway-usage.jsonl`; the rung climb in the proving-ground report and the re-pinned baseline.

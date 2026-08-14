@@ -88,7 +88,7 @@ claims.
 
 | Team / buyer | Score | Why it should care | Why `fak` fits | Main gap |
 |---|---:|---|---|---|
-| Claude Code product / SDK | **8.6** | Claude Code exposes tools, MCP, hooks, subagents, skills, permissions, and managed settings. Tool execution is a core product surface. | `fak serve --stdio`, the Claude guide, dogfood policy, and `fak guard -- claude` already match the product boundary. | The adoption path is not packaged as a managed Claude Code plugin/policy pack with a one-command enterprise rollout story. |
+| Claude Code product / SDK | **8.6** | Claude Code exposes tools, MCP, hooks, subagents, skills, permissions, and managed settings. Tool execution is a core product surface. | `fak serve --stdio`, the Claude guide, dogfood policy, and `fak manage -- claude` already match the product boundary. | The adoption path is not packaged as a managed Claude Code plugin/policy pack with a one-command enterprise rollout story. |
 | Claude API / Messages / tools | **7.7** | Tool use and the MCP connector create a server-side tool boundary that benefits from structured policy and result quarantine. | `fak` already fronts Anthropic Messages and can also be asked through MCP-style verdict tools. | The docs need a "Messages API MCP connector plus fak" reference architecture with exact request/response placement. |
 | MCP ecosystem / standards | **8.2** | Anthropic has strong incentives for MCP to remain secure, governable, and enterprise-adoptable. | `fak` contributes a concrete governance profile: default deny, structured refusal reasons, result quarantine, revocation, audit. | The profile is implicit; it needs a neutral spec that does not read like "install this repo." |
 | Enterprise security / compliance | **8.5** | Enterprise buyers need policy distribution, audit, data containment, and predictable denials. | `fak` is strongest where the model cannot talk past a policy floor, and the repo has product/security scorecards plus runnable offline proof. | Needs an executive proof packet: threat model, first 3 denied calls, log schema, SIEM path, and residual risk table. |
@@ -142,7 +142,7 @@ the [Claude Code managed rollout guide](vendor/claude-code-managed-rollout.md), 
 the [Agent Tool Governance Gateway profile](standards/agent-tool-governance-gateway.md)
 with [conformance fixtures](standards/fixtures/). That moves the artifact-backed
 pilot count from **7 to 15** (2.14x). The repo also records the live P1 proof:
-[Claude Code through `fak guard`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json)
+[Claude Code through `fak manage`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json)
 and
 [Codex through the `fak` MCP server](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json)
 both show a denied dangerous call followed by useful allowed work. With those captures,

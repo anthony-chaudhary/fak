@@ -487,7 +487,7 @@ when the client's `FAK_GATEWAY_KEY` is empty. Nothing in the repo creates
 [One-time shell setup](#one-time-shell-setup) resolve. Both that file and the plist under
 `~/Library/LaunchAgents` now hold the bearer, so treat both as secrets. Never leave a
 non-loopback `--addr` without `--require-key-env`: that is an unauthenticated kernel
-reachable off-host, and both `fak guard` and `fak serve` warn about it.
+reachable off-host, and both `fak manage` and `fak serve` warn about it.
 
 ### 4. Load, then verify
 

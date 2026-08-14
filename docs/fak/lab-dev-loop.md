@@ -23,7 +23,7 @@ JSON — not a code import. See [the GPU-server private boundary](../gpu-server-
         │  post a task line
         ▼
   private bridge ──▶ lab box you chose
-        ▲               │  runs:  fak guard --remote-serve <box>:8080 -- <agent> <task>
+        ▲               │  runs:  fak manage --remote-serve <box>:8080 -- <agent> <task>
         │               │           ├─ kernel adjudicates every tool call (local, on the box)
         │  postback      │           └─ INFERENCE runs on the lab GPU (the remote fak serve)
         └───────────────┘  + writes one fak.fleet.report/v1 line
@@ -32,9 +32,9 @@ JSON — not a code import. See [the GPU-server private boundary](../gpu-server-
                             fleetctl status  (public fold + readiness score)
 ```
 
-## The one new public piece: `fak guard --remote-serve`
+## The one new public piece: `fak manage --remote-serve`
 
-`fak guard` runs its own kernel gateway on a local loopback port and execs the agent;
+`fak manage` runs its own kernel gateway on a local loopback port and execs the agent;
 `--remote-serve HOST[:PORT]` points that agent's **inference** at a `fak serve` running on
 a lab box you chose. The kernel still adjudicates every tool call locally on the box, but
 the model forward runs on the lab GPU. Port defaults to `8080` (the documented `fak serve`
@@ -87,7 +87,7 @@ The resolver applies a scrubbed **latency budget** (default 30s) to the fresh re
 `LATENCY_DEGRADED` with next action
 `route-latency-exceeds-dev-budget-refresh-report-or-use-fallback`, `fak lab readiness`
 holds lab-backed dispatch closed instead of advertising `READY_FOR_DEV_WORK`, and
-`fak guard --remote-serve @lab/glm-5.2` refuses the alias with `LAB_TARGET_NOT_READY`
+`fak manage --remote-serve @lab/glm-5.2` refuses the alias with `LAB_TARGET_NOT_READY`
 rather than binding a route a coding worker cannot use. The producer records the scrubbed
 sample when self-reporting the box:
 
@@ -129,7 +129,7 @@ glance that the turn's compute is where you put it, not on a public API.
 ## The Codex prompt-size latency envelope
 
 Small OpenAI-compatible clients already complete through the lab route: a minimal
-`fak guard --remote-serve @lab/glm-5.2 --provider openai --probe -- python <smoke>` returns
+`fak manage --remote-serve @lab/glm-5.2 --provider openai --probe -- python <smoke>` returns
 model text well inside the probe window. The **Codex** shape is different, and it is worth
 naming why so the next operator does not re-diagnose it:
 
@@ -168,7 +168,7 @@ Pick by what the lab box can give you; each is honest about any request shaping:
 The explicit smoke route is now witnessed from this machine: the private loopback proxy
 collapsed the no-repo/no-tools Codex request to the final user prompt, capped output at 16
 tokens, stripped tool schemas, and recorded that shaping as a **smoke-only** route. With
-that shaping, the command above returned `GLM52_OK` through `fak guard
+that shaping, the command above returned `GLM52_OK` through `fak manage
 --remote-serve @lab/glm-5.2` in 282.8s. This proves the end-to-end wiring and lab inference
 for a Codex-shaped client.
 
@@ -187,7 +187,7 @@ in `fak-private`. The shape of the loop, with no lab identifiers, is:
 
 1. Post a task line in the control channel.
 2. The bridge runs, on a persistent session on the box you chose:
-   `cd <repo> && fak guard --remote-serve localhost:8080 -- <agent> '<task>'`.
+   `cd <repo> && fak manage --remote-serve localhost:8080 -- <agent> '<task>'`.
 3. The box posts the guard exit summary back to the channel and writes one
    `fak.fleet.report/v1` line into the reports directory (via `fak lab report`, or the
    bridge's own writer) so `fak lab status` folds it into the public fleet view.

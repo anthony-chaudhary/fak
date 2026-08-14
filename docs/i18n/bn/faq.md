@@ -26,7 +26,7 @@ auditable verdict লিখে রাখে।
 ## Q2. আমাকে কি model বদলাতে বা এজেন্ট নতুন করে লিখতে হবে?
 
 না। fak আপনার ইতিমধ্যে ব্যবহৃত model-কেই govern ও cache করে। এক কমান্ডে wrap করুন —
-`fak guard -- claude` — অথবা একটি base URL `fak serve`-এর দিকে ঘুরিয়ে দিন।
+`fak manage -- claude` — অথবা একটি base URL `fak serve`-এর দিকে ঘুরিয়ে দিন।
 
 ## Q3. আমার ডেটা কোথায় যায় — এটি কি অনুবর্তী (compliant)?
 

@@ -92,7 +92,7 @@ generation-budget dimensions at B6 (`docs/generation-super-loop-budgets.md`). Th
 *shape* is uniform; the cascade is not yet plumbed (gap G4).
 
 One more property is worth naming because it is easy to get wrong: **one binary, many
-processes**. The same executable runs as the in-process gate inside `fak guard`, the
+processes**. The same executable runs as the in-process gate inside `fak manage`, the
 gateway, the dispatch tick, and the watchdog — but cross-band state moves only through
 witnessable substrates (git refs for leases, durable ledgers, the run registry), never
 through shared memory between processes. That is why any single process at any band can

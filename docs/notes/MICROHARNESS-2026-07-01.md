@@ -16,7 +16,7 @@ all — fak spawns **one detached OS process per agent**
 (`spawnDispatchIssueWorker`, `cmd/fak/dispatch_tick_worker.go:246`), and that process is
 a full external coding CLI (`claude -p ...` / `opencode run`, spawned by
 `tools/dispatch_worker.py`; Go twin `cmd/dispatchworker/worker.go`) wrapped by a
-**second** `fak guard` process acting as the policy reverse-proxy (`cmd/fak/guard.go`).
+**second** `fak manage` process acting as the policy reverse-proxy (`cmd/fak/guard.go`).
 Steady state is therefore **~2 heavyweight processes per agent**, plus a per-process
 `internal/registrations` init tax and a per-process hash-chained audit JSONL.
 

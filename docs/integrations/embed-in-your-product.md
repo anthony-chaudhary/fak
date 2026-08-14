@@ -23,8 +23,8 @@ integration: `fak serve` is the long-lived gateway runtime — it speaks the Ope
 Completions and Anthropic Messages wires your SDK already speaks, adjudicates any tool
 call the model proposes, and proxies to the upstream that actually serves your tokens.
 
-The category error to head off: **`fak guard` is not an alternative to your API call.**
-`fak guard -- <agent>` is a **child-process launcher** — it starts the gateway
+The category error to head off: **`fak manage` is not an alternative to your API call.**
+`fak manage -- <agent>` is a **child-process launcher** — it starts the gateway
 in-process, injects the base URL into the *child process only*, and tears the gateway
 down when that child exits. A server-side product has no child agent to launch, so there
 is nothing for `guard` to wrap. The other verb you will see, `fak serve --native` (the
@@ -33,7 +33,7 @@ loop and your code drives it. You want neither — you keep your loop.
 
 | Verb | What it is | Fits a server-side product feature? |
 |---|---|---|
-| `fak guard -- <agent>` | child-process launcher: in-process gateway + base-URL injection into one child, torn down on exit | No — there is no child to launch |
+| `fak manage -- <agent>` | child-process launcher: in-process gateway + base-URL injection into one child, torn down on exit | No — there is no child to launch |
 | `fak serve` | long-lived gateway runtime: your client repoints one base URL | **Yes — this guide** |
 | `fak serve --native` | agent application runtime: fak owns the loop | No — you keep your own loop |
 
@@ -157,7 +157,7 @@ ships are not written for your product's tools:
 - `fak serve` with **no `--policy`** loads the built-in demo floor (the tau2
   airline-demo tools plus read-only `read_`/`get_`/`search_`/`list_`/`lookup_`/`find_`
   prefixes — see `fak policy --dump`).
-- `fak guard`'s embedded floor (`cmd/fak/guard-default-policy.json`) allow-lists a
+- `fak manage`'s embedded floor (`cmd/fak/guard-default-policy.json`) allow-lists a
   *coding harness's* tools — `Bash`, `Read`, `Edit`, `Write`, `Grep`, … — plus the same
   read-only prefix families.
 

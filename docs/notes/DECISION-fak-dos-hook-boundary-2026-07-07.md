@@ -38,7 +38,7 @@ sibling implements what is decided here.
 | codex seat (`fak dispatch`, Go) | **deletes** `CLAUDE_CONFIG_DIR`; sets `CODEX_HOME` | not Claude Code — Claude plugins can never apply; dos is wired via codex's own cached hook manifests (`tools/codex_dos_hook_doctor.py`, audited by `tools/codex_dos_recent_audit.py`) |
 | opencode seat (`fak dispatch`, Go) | **deletes** `CLAUDE_CONFIG_DIR`; sets `XDG_CONFIG_HOME` | not Claude Code — runs `opencode run --agent dos-dispatch` |
 
-Additionally, the guarded launch path (`fak guard`, default-on for dispatch workers)
+Additionally, the guarded launch path (`fak manage`, default-on for dispatch workers)
 injects its **own** `--settings` temp file — observed live in
 `.dispatch-runs/dispatch-claude-20260707-102108.log`:
 

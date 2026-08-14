@@ -50,7 +50,7 @@ rather than the proof's assumptions.
 
 ### P0 — PreCompact async mini-lookahead ([#5207](https://github.com/anthony-chaudhary/fak/issues/5207))
 
-Run: a normal long `fak guard -- claude` working session; no operator action at the
+Run: a normal long `fak manage -- claude` working session; no operator action at the
 boundary. On a PreCompact *allow* decision the hook (once #5207 lands) gates via
 `AdmitSpeculation`, spawns the detached rollout (transcript fork + worktree prepare +
 diff patch + `--max-turns 3` resume under a deny-push floor), and exits 0 immediately.

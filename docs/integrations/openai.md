@@ -59,7 +59,7 @@ the same gateway but are other routes: [claude.md](claude.md) and
 
 Two ways to put the gateway in front of an OpenAI client:
 
-- **Wrap an agent process:** `fak guard --provider openai --api-key-env OPENAI_API_KEY -- <your agent>`
+- **Wrap an agent process:** `fak manage --provider openai --api-key-env OPENAI_API_KEY -- <your agent>`
   starts the gateway in-process and injects `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1`
   into the child only (the `/v1` matters — OpenAI clients append `/chat/completions`).
 - **Run a long-lived gateway:** `fak serve --addr 127.0.0.1:8080 --provider openai --base-url <upstream>/v1 --model <id>`
@@ -74,8 +74,8 @@ Upstream choices behind either entry point:
 - **No upstream at all** — omit `--base-url` for the deterministic offline mock planner
   (what the proof above uses).
 
-The floor is on by default: `fak guard` loads an embedded secure default policy
-(`fak guard --dump-policy` prints it), and `fak serve` without `--policy` uses the
+The floor is on by default: `fak manage` loads an embedded secure default policy
+(`fak manage --dump-policy` prints it), and `fak serve` without `--policy` uses the
 fail-closed default. Author your own with
 [POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 

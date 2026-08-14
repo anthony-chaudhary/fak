@@ -52,10 +52,10 @@ The largest avoidable cost is often not one token string but an entire extra mod
 | **One observable boundary** | Journals model traffic, reuse, compaction, policy, and recovery together. |
 | **Backend choice** | Preserves cloud providers, fronts OpenAI-compatible servers, or loads GGUF weights while exposing OpenAI, Anthropic, and MCP interfaces. |
 
-These are measured features. On the current 50-turn × 5-agent Qwen2.5-1.5B Q8 workload, fak did about **4.1× less compute work** than a tuned baseline that already kept each agent's KV cache warm (about 19 versus 78 minutes on an Apple M3 Pro). Real `fak guard -- claude` sessions compacted up to about 107K aged tokens per fire while holding resident context to 48K. Local policy verdicts measured 362 ns without argument predicates and 560–605 ns with them. Scope, hardware, units, and tuned baselines are in [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) and the tagged [claims ledger](CLAIMS.md).
+These are measured features. On the current 50-turn × 5-agent Qwen2.5-1.5B Q8 workload, fak did about **4.1× less compute work** than a tuned baseline that already kept each agent's KV cache warm (about 19 versus 78 minutes on an Apple M3 Pro). Real `fak manage -- claude` sessions compacted up to about 107K aged tokens per fire while holding resident context to 48K. Local policy verdicts measured 362 ns without argument predicates and 560–605 ns with them. Scope, hardware, units, and tuned baselines are in [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) and the tagged [claims ledger](CLAIMS.md).
 
 <p align="center">
-  <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token economics for fak guard sessions versus a tuned warm-cache baseline" width="900">
+  <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token economics for fak manage sessions versus a tuned warm-cache baseline" width="900">
 </p>
 
 ## Pick an operating shape

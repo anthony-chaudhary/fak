@@ -61,7 +61,7 @@ and nothing happens until that kernel rules on it.
 
 ## The path of one call: proposed → verdict → (maybe) executed
 
-`fak` is one Go binary that sits between the agent and the world (`fak guard --
+`fak` is one Go binary that sits between the agent and the world (`fak manage --
 claude` puts it there in one command). Every tool call walks this path:
 
 1. **The model proposes.** It emits a tool call — a request, not an action.
@@ -80,7 +80,7 @@ claude` puts it there in one command). Every tool call walks this path:
    so poisoned output never becomes the model's next instructions.
 
 At exit you get the ledger, one line:
-`fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
+`fak manage: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
 ![Left-to-right flow: the agent emits a tool call; the fak kernel adjudicates it against a default-deny capability floor; four verdicts branch out — ALLOW (the call runs), DENY (it never reaches the tool), TRANSFORM (rewritten to a safe form, then runs), REQUIRE_WITNESS (held) — and any result that runs is checked again before re-entering context](../adoption/diagrams/syscall-flow.svg)
 

@@ -123,7 +123,7 @@ nobody learns the classifier over-fired. A durable surface fixes that:
 - **A logged false-positive report (proposed).** When an escalation is
   confirmed-innocent (by the operator, or by an authorized agent), record it —
   command, classifier, reason — to a ledger that (a) feeds the corpus in layer 2 and
-  (b) surfaces the false-positive *rate* over time. A `fak guard false-positive`
+  (b) surfaces the false-positive *rate* over time. A `fak manage false-positive`
   verb, or an entry the existing guard-audit journal already has a slot for. The
   rule mirrors "no silent caps": if you route around a guard decision, the routing
   must leave evidence, or the guard never improves.
@@ -178,7 +178,7 @@ worst-first. Wiring `guard-accuracy` in as a scorecard member closes the gap bet
   whether the escalate/don't boundary is CORRECT). Every wild misfire is *added* as a
   new labeled row — a fix is a ratchet, not a local patch.
 - Still proposed (not shipped by this note): the logged false-positive escape hatch
-  (a `fak guard false-positive` verb / guard-audit journal slot) that auto-feeds the
+  (a `fak manage false-positive` verb / guard-audit journal slot) that auto-feeds the
   corpus, so a routed-around escalation always leaves a trace. Until it lands, corpus
   rows are added by hand from witnessed misfires.
 - The two live self-collisions are first-person session evidence, not a captured

@@ -14,7 +14,7 @@ Putting `fak` in front of an agent has **two** compatibility surfaces, not one:
    when a tool is denied. This is the half that a working wire silently hides.
 
 A harness can connect its wire perfectly and still fail at the tool boundary. The
-`fak guard` capability floor is **fail-closed**: a host-tool name it does not
+`fak manage` capability floor is **fail-closed**: a host-tool name it does not
 affirmatively admit resolves to `DEFAULT_DENY`. If the harness treats that denial as a
 retryable planning failure while its objective is still active, the session spins —
 denied, re-proposed, denied — making no progress.
@@ -126,9 +126,9 @@ The advertised launchers and whether the gate/fixture covers their dialect. "Pro
 
 | Harness / launcher | Wire | Dialect shape | Dialect fixture |
 |---|---|---|---|
-| Claude Code (`fak guard -- claude`) | Anthropic Messages | PascalCase (`Bash`, `Read`, `TodoWrite`, `Task`) | Profile row + replay (anthropic wire) |
+| Claude Code (`fak manage -- claude`) | Anthropic Messages | PascalCase (`Bash`, `Read`, `TodoWrite`, `Task`) | Profile row + replay (anthropic wire) |
 | OpenAI Codex / `fakc` (`fak codex`) | Responses | snake_case (`update_plan`, `shell_command`, `functions.*`) | Profile row + replay (openai wire) |
-| OpenCode (`fak guard --provider openai -- opencode`) | Chat Completions | lowercase (`bash`, `read`, `write`, `edit`) | Profile row |
+| OpenCode (`fak manage --provider openai -- opencode`) | Chat Completions | lowercase (`bash`, `read`, `write`, `edit`) | Profile row |
 | MCP client (`fak serve --stdio`) | MCP | `mcp__server__tool`, resource APIs | Profile row |
 
 Live gateway-transited end-to-end proof is recorded per launcher in its own guide (the

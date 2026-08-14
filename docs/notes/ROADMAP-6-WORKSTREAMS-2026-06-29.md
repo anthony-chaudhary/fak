@@ -77,7 +77,7 @@ correctness oracle runnable on the Mac node (the metal cell in `internal/covmatr
 serving (pure-fak) · M#11 Substrate/interop (half-fak) · dogfood scorecard (#1422).
 
 **Status — `not yet`, by track:**
-- **(a) api-only** — *closest.* `fak guard -- claude` is the productized front door (in-process
+- **(a) api-only** — *closest.* `fak manage -- claude` is the productized front door (in-process
   loopback, passthrough); the real witnessed value is **eating 429s + safety**, and the
   cache-value P&L roll-up (#1301, **closed**) gives kernel-WITNESSED + API-OBSERVED $. But
   milestone **M#1 has 0 of 23 issues closed** — the durable-session value is demonstrated, not

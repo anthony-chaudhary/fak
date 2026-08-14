@@ -25,7 +25,7 @@ templated, indirect, or undocumented — the [caveats](#caveats-worth-knowing) b
 exactly how.
 
 *Custom base URL* is a **wire fact**, not a support status. Support status has one canonical
-vocabulary — **`fak guard` + guide**, **guide**, **universal recipe** — defined once in the
+vocabulary — **`fak manage` + guide**, **guide**, **universal recipe** — defined once in the
 [integration index](README.md#support-status-the-canonical-vocabulary), which is
 authoritative. A tool listed here with no dedicated guide is **universal recipe** support:
 it repoints by the key in its row and is graded, sourced, in this table.

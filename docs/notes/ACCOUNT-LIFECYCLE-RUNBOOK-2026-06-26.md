@@ -178,7 +178,7 @@ and the multi-step retire — both now closed.
   the dos/job roster rows, so `claude-as`, `u`, and other switcher consumers can read the same
   readiness surface without reimplementing the registry's login rules.
 - **Switcher and guard login posture** — `fak fleet-accounts roster/resolve`, `fak dispatch
-  tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak guard` now carry or print the
+  tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak manage` now carry or print the
   same `login_status`/`can_serve` posture instead of inferring readiness from config dir names or
   raw credential booleans.
 - **`fak accounts remove --archive`** — the one-command retire (tombstone + dir-rename + registry

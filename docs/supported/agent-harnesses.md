@@ -22,7 +22,7 @@ For the copy-paste recipe and the 60-second offline proof, start at the
 
 **Support status uses one canonical vocabulary, and it is not defined here.** The
 [integration index](../integrations/README.md#support-status-the-canonical-vocabulary) is
-authoritative for the three values — **`fak guard` + guide**, **guide**, and **universal
+authoritative for the three values — **`fak manage` + guide**, **guide**, and **universal
 recipe**. This page carries those labels rather than coining its own. The *custom base URL*
 column in the tables below is a **wire fact** (can the tool repoint its wire), not a support
 label.
@@ -33,18 +33,18 @@ label.
 
 These five have a dedicated walkthrough. Each guide names the wire, the repoint key, and a
 worked end-to-end setup. The *support* column is the index's vocabulary: four of the five
-also ship a one-command `fak guard` launcher; Cursor is wired by MCP entry or base URL, so
+also ship a one-command `fak manage` launcher; Cursor is wired by MCP entry or base URL, so
 it carries the **guide** label.
 
 | Harness | Wire | Support | Repoint key | Guide |
 |---|---|---|---|---|
-| Claude Code | Anthropic Messages | `fak guard` + guide | `ANTHROPIC_BASE_URL` (or `fak guard -- claude`) | [claude.md](../integrations/claude.md) |
+| Claude Code | Anthropic Messages | `fak manage` + guide | `ANTHROPIC_BASE_URL` (or `fak manage -- claude`) | [claude.md](../integrations/claude.md) |
 | Cursor | MCP, or OpenAI Chat Completions proxy | guide | MCP server entry, or a custom OpenAI-compatible endpoint | [cursor.md](../integrations/cursor.md) |
-| OpenAI Codex | OpenAI Chat Completions | `fak guard` + guide | `OPENAI_BASE_URL` | [openai-codex.md](../integrations/openai-codex.md) |
-| OpenCode | OpenAI Chat Completions | `fak guard` + guide | `OPENAI_BASE_URL` (or `fak guard --provider openai -- opencode`) | [claude.md#opencode](../integrations/claude.md#opencode) |
-| Hermes Agent (NousResearch) | OpenAI Chat Completions | `fak guard` + guide | `OPENAI_BASE_URL` / `~/.hermes/config.yaml` `model.base_url` (or `fak guard -- hermes`) | [hermes.md](../integrations/hermes.md) |
+| OpenAI Codex | OpenAI Chat Completions | `fak manage` + guide | `OPENAI_BASE_URL` | [openai-codex.md](../integrations/openai-codex.md) |
+| OpenCode | OpenAI Chat Completions | `fak manage` + guide | `OPENAI_BASE_URL` (or `fak manage --provider openai -- opencode`) | [claude.md#opencode](../integrations/claude.md#opencode) |
+| Hermes Agent (NousResearch) | OpenAI Chat Completions | `fak manage` + guide | `OPENAI_BASE_URL` / `~/.hermes/config.yaml` `model.base_url` (or `fak manage -- hermes`) | [hermes.md](../integrations/hermes.md) |
 
-The one-command front door for Claude Code is `fak guard -- claude`: it starts the gateway
+The one-command front door for Claude Code is `fak manage -- claude`: it starts the gateway
 in-process, injects the base URL into the child only, and proxies the real Anthropic API in
 passthrough. OpenCode fronts the same way over `--provider openai`. Both are covered in the
 [Claude Code guide](../integrations/claude.md).

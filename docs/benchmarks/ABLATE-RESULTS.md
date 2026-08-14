@@ -145,7 +145,7 @@ host run the suite under WSL (`./test.ps1`); `go build` / `go vet` are native.
 > ([#623](https://github.com/anthony-chaudhary/fak/issues/623)): the *agent* ablation.
 > It asks "what does the kernel cost/save in front of a real agent?" by running the
 > SAME task through `claude_code` (bare `claude -p`) vs `claude_code+fak`
-> (`fak guard -- claude -p`). The external model emits different tool calls each run,
+> (`fak manage -- claude -p`). The external model emits different tool calls each run,
 > so the `WorkloadHash` equality guard does NOT apply — validity here is
 > **distributional**, not exact-workload. The controller (`tools/cross_agent_ablate.py`)
 > enforces a four-part contract: a **success-gate** (no "saved" number unless both arms

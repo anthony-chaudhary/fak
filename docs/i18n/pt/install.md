@@ -18,7 +18,7 @@ Esta é a porta de entrada de **instalar e executar**; o pitch denso está no
 estática, sem dependências externas: a mesma binária é o gateway, o motor de KV-cache e roteamento, e —
 no mesmo caminho de chamada — o portão de política, a quarentena de resultados e o log de auditoria.
 Você não reescreve seu agente: aponta uma base URL para `fak serve`, ou envolve um agente existente com
-um único comando, `fak guard -- claude`.
+um único comando, `fak manage -- claude`.
 
 ## Por que importa no Brasil e em Portugal
 
@@ -50,7 +50,7 @@ entre elas**:
 |---|---|---|
 | **0 — Experimentar o kernel** | Rodar/medir o limite de adjudicação, offline | `go build` |
 | **1 — Colocar fak à frente de um modelo real** | O kernel à frente de um modelo que você serve em outro lugar (Ollama / vLLM / llama.cpp / cloud) | + um servidor compatível com OpenAI |
-| **1b — Modelo local em um comando** | Um modelo GGUF local, in-kernel, com seu agente atual — sem key, sem rede, sem segundo terminal | `fak guard --gguf qwen2.5:7b -- claude` |
+| **1b — Modelo local em um comando** | Um modelo GGUF local, in-kernel, com seu agente atual — sem key, sem rede, sem segundo terminal | `fak manage --gguf qwen2.5:7b -- claude` |
 | **2 — O modelo fundido no kernel** | O forward pass em Go puro que o próprio kernel executa | + export das weights reais |
 
 Se você só quer **servir um modelo útil com fak à frente**, o alvo é o **Tier 1**. O modelo in-kernel do

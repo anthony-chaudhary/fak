@@ -34,7 +34,7 @@ fak loop-map --json               # the machine-readable map (for tooling)
 |---|---|---|---|
 | **orient** | about to trust a recalled memory | `fak recall` | re-verify recalled memory against the tree at read time before you trust it; the kernel-side equivalent is the `dos_recall` MCP tool. |
 | **plan** | about to fan out N agents / parallel work | `dos arbitrate` | prove the lanes are disjoint **before** launching, so workers do not collide or needlessly serialize — honor a REFUSE. |
-| **act** | about to run a tool call | `fak guard` | the kernel adjudicates each call, repairs a malformed one in place, and serves an identical repeat locally instead of spending a turn. |
+| **act** | about to run a tool call | `fak manage` | the kernel adjudicates each call, repairs a malformed one in place, and serves an identical repeat locally instead of spending a turn. |
 | **verify** | about to claim the work is done | `dos verify` | confirm the claim landed from git evidence, not a self-report; pair with `fak commit --preview` to pre-check lane + ship-stamp. |
 | **ship** | the tree is green, about to commit | `fak commit` | commit-by-path under the green gate (refuses OFF_TRUNK / PATHSPEC_RACE); then `dos commit-audit <sha>` grades it diff-witnessed. |
 | **learn** | the session is over | `fak sessions` | ingest + score this host's transcripts so the session -> outcome loop learns from the run instead of forgetting it. |

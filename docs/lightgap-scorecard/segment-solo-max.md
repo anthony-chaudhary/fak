@@ -58,7 +58,7 @@ One person running `claude` all day against a subscription. They are not paying 
 - **β** `-0.359` → `w` `-0.376`  ·  mode `pure_tax`
 - **adoption** 0.5 h fak vs 0 h alternative, of 2 h → load `+0.25` → `τ` `+0.255`
 - **w_net** `-0.631`
-- **cost basis** README.md 1,746 w + GETTING-STARTED.md 3,124 w + INSTALL.md 1,647 w -- the minimum read to a first working `fak guard -- claude`; the alternative is already installed and its cost is already sunk, so alt_hours = 0
+- **cost basis** README.md 1,746 w + GETTING-STARTED.md 3,124 w + INSTALL.md 1,647 w -- the minimum read to a first working `fak manage -- claude`; the alternative is already installed and its cost is already sunk, so alt_hours = 0
 - **Read** pure_tax because the bare agent is the reference point, not a rung below the ceiling: the absolute elimination fraction cancels in the ratio, so only the 1.56x matters. On the ONE committed head-to-head against what this buyer actually uses, fak costs MORE tokens, not fewer. The compaction row cannot rescue this cell: BENCHMARK-AUTHORITY.md:66 fences shed tokens to a proportional blend and forbids ratioing them against cache_read, so no like-for-like elimination fraction is derivable from it.
 - **Fence** K=5 per arm on ONE tiny tool-light task. The guard's fixed preamble dominates a short session and would amortize over a long one -- which is precisely the long-session comparison this segment's session-longevity cell records as never run. Read this as 'unamortized overhead is real and measured', not as 'fak costs 1.56x forever'.
 
@@ -80,7 +80,7 @@ One person running `claude` all day against a subscription. They are not paying 
 
 the deciding comparison for this buyer -- fak's compaction versus Claude Code's own native auto-compaction, over a session long enough for both to fire repeatedly -- has never been run. The repo has fak's per-fire shed (~107K tokens against a 48K budget) but no measurement of the alternative on the same session, and `docs/benchmarks/AUTHORITY-GENERATED-SAMPLE.md:465` states plainly that sessionbench has no checkpoint/resume. A number for one arm is not a comparison.
 
-**Next:** run one long real task twice (bare `claude` vs `fak guard -- claude`), same prompt and same tools, and report turns-to-context-exhaustion and re-explanation events for both arms
+**Next:** run one long real task twice (bare `claude` vs `fak manage -- claude`), same prompt and same tools, and report turns-to-context-exhaustion and re-explanation events for both arms
 
 ## Injection control — never measured (weight 0.05)
 

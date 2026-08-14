@@ -46,7 +46,7 @@ follows it).
 steer surfaces:
 
 1. the guard's session-start runtime prose (the injected block every session reads —
-   `fak guard` / sessionstart), and
+   `fak manage` / sessionstart), and
 2. an in-flight steer: `fak signal <id> steer --text "..."` (POSTs to
    `/v1/fak/session/{id}/steer`, delivered at the next turn boundary; machine
    re-anchor nudges ride the same path via the `doomloop-guard` principal, #3529).

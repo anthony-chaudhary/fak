@@ -55,7 +55,7 @@ These are the canonical search + reference terms, drawn from
 | `fused agent kernel` | the expanded product name when `fak` alone is too ambiguous |
 | `treat the tool call like a syscall` | the one-line mental model / slogan |
 | `fak serve` | the gateway verb (the runnable surface) |
-| `fak guard` | the one-command wrapper for an agent you already run |
+| `fak manage` | the one-command wrapper for an agent you already run |
 | `long-session prompt cache` | the cost/reuse framing |
 | `model routing for agents` | the per-call routing framing |
 | `MCP tool-call boundary` | the MCP/adjudication framing |

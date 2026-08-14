@@ -17,7 +17,7 @@ and [observability.md](observability.md).
 ## 1. Thesis: dogfood the kernel on the REAL dev loop
 
 "Dogfooding" only counts when our own daily dev work crosses the kernel boundary —
-not when a demo does. fak's whole claim is that the kernel (`fak serve` / `fak guard`)
+not when a demo does. fak's whole claim is that the kernel (`fak serve` / `fak manage`)
 belongs in front of *every* tool call an agent proposes: deny the dangerous ones by
 structure, repair malformed args, quarantine poisoned results, and write every verdict
 to a durable, tamper-evident record. The honest test of that claim is to put it in
@@ -30,7 +30,7 @@ talked **straight to the provider API** — the kernel adjudicated **none** of i
 is the inverse of dogfooding.
 
 A just-shipped change closes that gap. `tools/dispatch_worker.py` now fronts every
-worker with `fak guard` **by default** (`guarded_launch_command`, gated by
+worker with `fak manage` **by default** (`guarded_launch_command`, gated by
 `FLEET_DOGFOOD_GUARD`), and `tools/issue_dispatch.py` routes its detached spawn through
 the same path. So:
 
@@ -45,7 +45,7 @@ shared `fak serve` gateway in front of hand-driven Claude Code sessions too, so 
 interactive coding is kernel-adjudicated). This doc is how you get all three.
 
 The interactive front door is the one-command, productized form of the same boundary
-(`cmd/fak/guard.go`): `fak guard -- claude` starts the same gateway `fak serve` runs,
+(`cmd/fak/guard.go`): `fak manage -- claude` starts the same gateway `fak serve` runs,
 points the child agent's base URL at it through a **child-only** env var (never your
 shell, never `settings.json`), defaults the upstream to the real Anthropic API in
 passthrough mode, uses your Claude Pro/Max **subscription** OAuth token by default when
@@ -54,7 +54,7 @@ by default** that you can replay with `fak audit verify`.
 
 ```
  ┌─────────────┐  POST /v1/messages  ┌────────────────────────┐  /v1/messages  ┌──────────────────┐
- │ claude (-p) │ ─────────────────▶  │  fak guard / fak serve  │ ─────────────▶ │ api.anthropic.com │
+ │ claude (-p) │ ─────────────────▶  │  fak manage / fak serve  │ ─────────────▶ │ api.anthropic.com │
  │  the worker │ ◀──── SSE stream ─  │  adjudicates every tool │ ◀──────────── │   (real Claude)   │
  └─────────────┘                      └────────────────────────┘                └──────────────────┘
    ANTHROPIC_BASE_URL set on the CHILD only      every tool call crosses the floor; every verdict journaled
@@ -76,7 +76,7 @@ Tier 2 just keep the same guarded loop running longer and reach more sessions.
 | **Reachable by other machines** | no | yes, over Tailscale | yes, over Tailscale / private IP |
 | **Role** | the status quo | the recommended dev server | overflow + GPU bursts |
 
-The kernel boundary is **identical** on every tier — it is the same `fak guard` /
+The kernel boundary is **identical** on every tier — it is the same `fak manage` /
 `fak serve` gateway. The tiers differ only in *how long it stays up* and *who can reach
 it*.
 
@@ -126,7 +126,7 @@ ANTHROPIC_API_KEY="sk-ant-..." ./tools/install-mac-node.sh --bind-all
 ./tools/install-mac-node.sh --uninstall
 ```
 
-To also put `fak` on PATH system-wide (so `fak guard -- claude` resolves anywhere),
+To also put `fak` on PATH system-wide (so `fak manage -- claude` resolves anywhere),
 run `scripts/dogfood-claude.sh --install` once after the node installer.
 Full runbook: [`docs/fak/node-macos-a-activation.md`](node-macos-a-activation.md).
 
@@ -145,7 +145,7 @@ running its own gateway.
 ```bash
 # On the Mac: a shared, authenticated gateway in front of the real Anthropic API.
 # Bind beyond loopback ONLY with a required key — an unauthenticated off-host kernel
-# gateway is an open door (fak guard and fak serve both warn about this).
+# gateway is an open door (fak manage and fak serve both warn about this).
 export FAK_GATEWAY_KEY="$(openssl rand -hex 32)"
 export ANTHROPIC_API_KEY="sk-ant-..."        # or use the subscription-OAuth default
 fak serve --addr 0.0.0.0:8080 \
@@ -164,7 +164,7 @@ claude                                          # your normal Claude Code, now k
 ```
 
 For a *single* laptop session you do not need the shared gateway at all —
-`fak guard -- claude` runs its own in-process gateway on a private loopback port and
+`fak manage -- claude` runs its own in-process gateway on a private loopback port and
 needs no key. The shared gateway is the lever for covering *many* machines / sessions
 from one always-on host.
 
@@ -221,13 +221,13 @@ python tools/dogfood_coverage.py --check     # exit 1 if any HARD KPI is unmet
 The HARD KPIs are the ones that must hold for the fleet to be kernel-adjudicated at
 all:
 
-- `fleet_leaf_guarded` — the leaf launcher really fronts a claude worker with `fak guard`
+- `fleet_leaf_guarded` — the leaf launcher really fronts a claude worker with `fak manage`
   on this host (a behavior check, not a grep).
 - `bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
   dropping coverage to 0%.
 - `guard_default_on` — `FLEET_DOGFOOD_GUARD` is not disabled in the live environment.
 - `issue_dispatch_wired` — the scheduled-task lane routes its spawn through the guard path.
-- `guard_verb_present` — `fak guard` exists as the one-command front door.
+- `guard_verb_present` — `fak manage` exists as the one-command front door.
 
 **The journals are the witness.** Every guarded worker writes its verdicts to a durable,
 hash-chained JSONL journal. The fleet uses a **per-session** journal under the gitignored
@@ -235,8 +235,8 @@ hash-chained JSONL journal. The fleet uses a **per-session** journal under the g
 lane and backend (for separability and globbing) **plus a per-process token**. That
 per-session key is deliberate: the hash-chained journal has no inter-process lock, so two
 concurrent same-lane workers sharing one file would braid two independent chains into a
-forked, unverifiable journal. A per-session file lets each `fak guard` own its own valid
-chain; the interactive `fak guard` default writes one under your user config dir.
+forked, unverifiable journal. A per-session file lets each `fak manage` own its own valid
+chain; the interactive `fak manage` default writes one under your user config dir.
 `dogfood_coverage.py` counts the decision rows across those journals (`audit_rows` in the
 payload) — that is the proof the wire was *exercised*, not merely wired. Verify any one
 chain is intact (glob the lane prefix to find them):
@@ -270,7 +270,7 @@ A host that has never built `fak` still dispatches — it just dogfoods 0% until
 the binary (which is exactly what `dogfood_coverage.py`'s `bin_resolvable` KPI flags).
 The fleet must keep moving; coverage is a goal, never a gate on getting work done.
 
-**Timeout floors so the gateway never truncates a long turn.** `fak guard` fronts the
+**Timeout floors so the gateway never truncates a long turn.** `fak manage` fronts the
 real provider in passthrough, and a frontier Claude Code turn with extended thinking can
 run well past `fak serve`'s default 60 s planner / 90 s write timeouts — which would cut
 the turn off at the gateway. So a guarded worker raises both floors to a generous
@@ -280,7 +280,7 @@ bounded (default 1800 s, opt out with `--timeout-s 0`) so a wedged session canno
 tokens forever.
 
 One more safety note for the shared-gateway tiers: a gateway bound beyond loopback with
-no required key is an unauthenticated kernel reachable off-host. Both `fak guard` and
+no required key is an unauthenticated kernel reachable off-host. Both `fak manage` and
 `fak serve` warn loudly about this. On Tier 1 / Tier 2 always pair a non-loopback
 `--addr` with `--require-key-env`, and keep the gateway on a private network (Tailscale
 or the VPC), never the public internet.
@@ -291,6 +291,6 @@ or the VPC), never the public internet.
 
 - [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) — the one-command dogfood launcher and the `/v1/messages` adjudication proxy
 - [`docs/fak/server-quickstart.md`](server-quickstart.md) — every way to start a `fak serve` gateway (auth, policy, in-kernel, cloud)
-- `cmd/fak/guard.go` — the `fak guard` front door (child-only base URL, subscription default, default-on hash-chained journal)
+- `cmd/fak/guard.go` — the `fak manage` front door (child-only base URL, subscription default, default-on hash-chained journal)
 - `tools/dogfood_coverage.py` — the coverage scorecard (run it to measure the 3x)
 - `tools/gcp_accel.py` — the GCP accelerator ladder for the GPU-burst in-kernel path

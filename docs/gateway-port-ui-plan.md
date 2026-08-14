@@ -8,7 +8,7 @@
 
 ## The claim in one line
 
-Every `fak guard` session already binds its own private loopback port, already publishes
+Every `fak manage` session already binds its own private loopback port, already publishes
 that port to a durable index, and already serves an HTML page and a ~25-block live read
 model on it. **The per-agent visual surface is not a new frontend — it is an origin that
 exists and renders four facts where it could render the whole session.** The work is to
@@ -232,7 +232,7 @@ re-render the per-agent read model — it points at it.
 
 ### Hermes (NousResearch)
 
-Already a first-class integration here (`docs/integrations/hermes.md`; `fak guard -- hermes`
+Already a first-class integration here (`docs/integrations/hermes.md`; `fak manage -- hermes`
 over its OpenAI Chat Completions wire), and already a borrowed source: rung 3 of the Hermes
 **"Footprint Ladder"** is re-derived in `internal/policy/serviceadmit.go` as a kernel rule
 over the emitted catalog rather than a per-tool `check_fn` convention.

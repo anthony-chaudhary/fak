@@ -86,7 +86,7 @@ Related repo-local roots: `.goal-runs/*.pid` (detached goal-loop workers,
 
 ## 2. Guard / session / hooks
 
-The `fak guard` wrapper and the Claude Code lifecycle hooks it installs.
+The `fak manage` wrapper and the Claude Code lifecycle hooks it installs.
 
 ### 2.1 Guard decision journal — the primary durable witness
 
@@ -97,7 +97,7 @@ CAP_VERSION_BIND`), flushed per write, each row carrying the prior row's chained
 `:161`/`:192`).
 
 - **Off by default.** Enabled via `FAK_AUDIT_JOURNAL=<path>` (boot) or `journal.Enable(path)`.
-  `fak guard` defaults it **on** (`guardEnableAudit`, `cmd/fak/guard_support.go:530`; wired at
+  `fak manage` defaults it **on** (`guardEnableAudit`, `cmd/fak/guard_support.go:530`; wired at
   `guard.go:477`), writing to `.dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl`
   where `<hash>` = first 12 hex of sha256(abs repo root) (`guardDefaultAuditPath`,
   `guard_support.go:461`). `--audit PATH` overrides; `--audit off` disables.
@@ -119,7 +119,7 @@ CAP_VERSION_BIND`), flushed per write, each row carrying the prior row's chained
 | Trajectory-control ledger | `docs/nightrun/trajctl.jsonl` | JSONL append | `internal/trajctl/trajctl.go:139` | per-turn scores + compaction boundaries + detours (Stop/PreCompact hooks) |
 | Session crash-journal | `session-journal.jsonl` (see roots table) | JSONL append | `internal/sessionjournal/sessionjournal.go:92` | open/beat/close vs. boot epoch → LIVE/CRASHED/STALE/CLOSED |
 | Durable session registry | `UserConfigDir/fak/session-registry.json` (or `.fak/session-registry.json`) | single-JSON overwrite | `cmd/fak/session_durable.go:104` | mirror of serve/guard session table |
-| Guard session index | `<regDir>/guard_sessions.jsonl` | JSONL append | `internal/guardsessions/guardsessions.go:90` | **⚠ writer present but the live-launch trigger is not wired** — `recordGuardSessionIndex` (`guard_sessions.go:35`) is referenced only from `guard_sessions_test.go`. `fak guard sessions` reads it; a live `fak guard` may not populate it in this tree. |
+| Guard session index | `<regDir>/guard_sessions.jsonl` | JSONL append | `internal/guardsessions/guardsessions.go:90` | **⚠ writer present but the live-launch trigger is not wired** — `recordGuardSessionIndex` (`guard_sessions.go:35`) is referenced only from `guard_sessions_test.go`. `fak manage sessions` reads it; a live `fak manage` may not populate it in this tree. |
 | Harness-resources ledger | `.fak/nightrun/harness-resources.jsonl` | JSONL append | `cmd/fak/harness_resources.go:18` | per-session CPU/RSS/disk-IO on guard/serve exit (`--resource-stats`, on by default) |
 
 **Excluded (per-launch temp only):** the hook *installers* write Claude Code `--settings`
@@ -239,7 +239,7 @@ appends one row recording that it ran. It is worth stating plainly what that cos
   per-sample benchmark loop, and logging it would distort the latency it exists to measure
   (`usageLogExcluded`, `cmd/fak/usagelog_record.go:39`). Rows are otherwise appended from
   `main()`'s return paths (`main.go:60`/`:628`/`:631`), the dispatch preamble and its panic
-  boundary (`main_preamble.go:28`/`:47`/`:53`), the `fak guard` wrapper's exit
+  boundary (`main_preamble.go:28`/`:47`/`:53`), the `fak manage` wrapper's exit
   (`recordGuardUsage`, `usagelog_record.go:61`), and the commit/sweep/sync front doors
   (`runObservedGitOperation`, `gitop_usage.go:11`). A verb handler that calls `os.Exit` deep
   in its own error path terminates without running deferred functions and is therefore not
@@ -270,15 +270,15 @@ first-generation `claude -p …` worker, which carries no session id on its argv
 wrote one, the row stays `MIDTOOL_UNKNOWN` and defers — the fail-safe working, not a bug to
 wait out.
 
-**A session that is not running under `fak guard` will never gain one.** fak installs its
-hooks only into the `--settings` file `fak guard` appends to the wrapped agent's argv at
-launch; it reads `~/.claude/settings.json` (`fak guard allow --from-claude-settings`) but
+**A session that is not running under `fak manage` will never gain one.** fak installs its
+hooks only into the `--settings` file `fak manage` appends to the wrapped agent's argv at
+launch; it reads `~/.claude/settings.json` (`fak manage allow --from-claude-settings`) but
 never writes hooks there. So a session started by hand has no SessionStart hook, no Stop
 hook, and no other in-process moment where fak could witness the driver. **There is no
-backfill: restart the session under `fak guard` if you want it reclaimable.** Waiting will
+backfill: restart the session under `fak manage` if you want it reclaimable.** Waiting will
 not produce a recorded pid.
 
-A session that *is* under `fak guard` but predates the pid witness needs no new mechanism —
+A session that *is* under `fak manage` but predates the pid witness needs no new mechanism —
 the SessionStart matcher is deliberately empty (`guard_sessionstart.go:469`), so the hook
 re-fires on `clear` / `compact` / `resume` in the same driver process and appends a fresh pid
 row then; the fold takes the last row per transcript. Until that next SessionStart source

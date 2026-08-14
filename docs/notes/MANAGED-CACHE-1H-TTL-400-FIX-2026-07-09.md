@@ -6,13 +6,13 @@ description: "Forced managed-cache 1h-TTL crashed workers with a 400 because the
 # Managed-cache 1h-TTL 400 — the forced `--managed-cache on` instant crash
 
 **Date:** 2026-07-09
-**Area:** `internal/gateway` (fak guard subscription-OAuth passthrough)
+**Area:** `internal/gateway` (fak manage subscription-OAuth passthrough)
 **Fix commit area:** `internal/gateway/messages_transform.go`, `messages_tooldefer.go`, `messages_compact_test.go`
 
 ## Symptom
 
 Every worker launched with **forced** managed-cache — `FAK_MANAGED_CACHE=on` (equivalently
-`fak guard --managed-cache on`), logged as `managed cache — ACTIVE (forced by --managed-cache on)`
+`fak manage --managed-cache on`), logged as `managed cache — ACTIVE (forced by --managed-cache on)`
 — instant-crashed **at launch** with an upstream **HTTP 400 "malformed request"**. The worker never
 completed a turn.
 

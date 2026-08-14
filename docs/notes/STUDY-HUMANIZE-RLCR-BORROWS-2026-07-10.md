@@ -160,7 +160,7 @@ chains A→B→C (`test-path-validation-robustness.sh:199-332,367-377`); atomic-
 gives 20/20 consistent reads under a concurrent writer + zombie-loop protection (newest-dir-only)
 (`test-concurrent-state-robustness.sh:279-322,186-201`); nproc-throttled parallel harness with
 mock-codex injection (`run-all-tests.sh:133-141,202-218`). (b) An adversarial test corpus for
-fak's guard/path/arbitration surface. (c) Best guess: fak guard tests skew happy-path.
+fak's guard/path/arbitration surface. (c) Best guess: fak manage tests skew happy-path.
 
 **#13 — Parent-only canonicalization as the path-authorization primitive.** PARTIAL · MED.
 (a) `canonicalize_path_prefix` resolves ONLY the parent and reattaches the basename verbatim

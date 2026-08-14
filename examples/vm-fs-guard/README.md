@@ -1,4 +1,4 @@
-# `fak guard` on a random VM — the filesystem boundary (VM-vs-boundary witness)
+# `fak manage` on a random VM — the filesystem boundary (VM-vs-boundary witness)
 
 Move your coding agent onto an ephemeral cloud VM (E2B, Fly, Cloudflare, Anthropic's
 sandbox) and the human steps away. The **disk is the sandbox's** — fak did not
@@ -107,7 +107,7 @@ widens:
 
 ```text
 +---------------------+     +--------------------------+     +----------------------------+
-| agent FS tool call  | --> | fak guard  (T1 path floor|     | .git / .ssh / .env / kernel|
+| agent FS tool call  | --> | fak manage  (T1 path floor|     | .git / .ssh / .env / kernel|
 | (on the sandbox VM) |     |  + T2 read-trust floor)  | --> | -> DENY SELF_MODIFY        |
 +---------------------+     +--------------------------+     | poisoned read -> QUARANTINE|
         the disk is the sandbox's            |               | in-scope read/write -> ALLOW|
@@ -235,7 +235,7 @@ works, not as a template for a production view.
 
 - The FS-floor witness, standalone: `fak preflight --policy vm-fs-floor.json --tool Write --args '{"file_path":".git/config", …}'`
 - The result-quarantine fold: `fak demo --json` (the `QUARANTINE` line)
-- The wrapping form: [`../../cmd/fak/guard.go`](../../cmd/fak/guard.go) (`fak guard -- <agent>`)
+- The wrapping form: [`../../cmd/fak/guard.go`](../../cmd/fak/guard.go) (`fak manage -- <agent>`)
 - The network twin: [`../remote-vm-guard/`](../remote-vm-guard/) (`fak egress check`)
 - The call-side self-modify witness it builds on: [`../self-modify-floor/`](../self-modify-floor/)
 - The spine: [`../../docs/explainers/agent-virtual-filesystem.md`](../../docs/explainers/agent-virtual-filesystem.md) — the T0-vs-T1 tier table this is the proof of

@@ -31,12 +31,12 @@ head is upgraded), but whether the provider honors 1h on a subscription seat sta
 One guarded `claude` turn, managed cache forced ACTIVE, on the live subscription wire:
 
 ```
-fak guard --managed-cache on -- claude --dangerously-skip-permissions -p "ok"
+fak manage --managed-cache on -- claude --dangerously-skip-permissions -p "ok"
 ```
 
 Guard startup banner confirmed the lever armed:
 
-> `fak guard: managed cache — ACTIVE (forced by --managed-cache on): stable-prefix
+> `fak manage: managed cache — ACTIVE (forced by --managed-cache on): stable-prefix
 > cache_control upgraded to the 1h TTL tier on the outbound wire …`
 
 Outbound result, repeated across the turn's requests:

@@ -1,14 +1,14 @@
 ---
-title: "Wiring fak guard -- codex to the Codex ChatGPT-subscription OAuth"
-description: "Increment plan to wire fak guard -- codex to hold a Codex ChatGPT-subscription OAuth token upstream, like the Claude path instead of requiring OPENAI_API_KEY."
+title: "Wiring fak manage -- codex to the Codex ChatGPT-subscription OAuth"
+description: "Increment plan to wire fak manage -- codex to hold a Codex ChatGPT-subscription OAuth token upstream, like the Claude path instead of requiring OPENAI_API_KEY."
 ---
 
-# Wiring `fak guard -- codex` to the Codex ChatGPT-subscription OAuth token
+# Wiring `fak manage -- codex` to the Codex ChatGPT-subscription OAuth token
 
 **Date:** 2026-06-30
 **Status:** increment 1 (resolver) code-complete; increments 2–6 are the plan below.
-**Goal:** let `fak guard -- codex` hold a **Codex ChatGPT-subscription** credential
-upstream (the `codex login` OAuth token), the way `fak guard -- claude` already holds a
+**Goal:** let `fak manage -- codex` hold a **Codex ChatGPT-subscription** credential
+upstream (the `codex login` OAuth token), the way `fak manage -- claude` already holds a
 Claude Pro/Max subscription OAuth token — instead of requiring `OPENAI_API_KEY` (API
 billing), which is the only Codex auth guard wires today.
 
@@ -108,7 +108,7 @@ pair** and must come from the same file — a mismatched account id is a documen
   `anthropicUpstreamCredential`). The Codex `-c model_providers.fak.*` override already
   points Codex at the gateway; `env_key` stays `OPENAI_API_KEY` and the placeholder
   satisfies it. **Witness:** the 4-check end-to-end proof from `docs/integrations/CLAUDE.md`
-  re-run against `fak guard -- codex` (a `/v1/responses` 200 that is only possible because
+  re-run against `fak manage -- codex` (a `/v1/responses` 200 that is only possible because
   the gateway swapped in the held OAuth token).
 
 - **[6] Banner + honest fences.** Update `printGuardCodexNote` to say "Codex ChatGPT

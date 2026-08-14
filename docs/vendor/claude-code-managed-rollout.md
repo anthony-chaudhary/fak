@@ -65,7 +65,7 @@ Validate the same server outside Claude Code first:
 python examples/mcp/verify.py
 ```
 
-Then run a live `fak guard` turn when a Claude Code seat is available:
+Then run a live `fak manage` turn when a Claude Code seat is available:
 
 ```bash
 FAK_AUDIT_JOURNAL="$PWD/fak-audit.jsonl" \
@@ -130,7 +130,7 @@ that data flow. The digest is the default evidence.
 
 1. Disable or remove the managed `fak` MCP server entry.
 2. Stop setting `FAK_AUDIT_JOURNAL` and gateway log export variables.
-3. Remove `fak guard` from any launcher wrappers.
+3. Remove `fak manage` from any launcher wrappers.
 4. Keep Claude Code's native managed settings, permission rules, and MCP allowlist in
    place.
 
@@ -139,7 +139,7 @@ point of placing `fak` at the tool-governance boundary.
 
 ## Residual risks
 
-- A proxy/subscription `fak guard -- claude` run governs tool calls and result admission
+- A proxy/subscription `fak manage -- claude` run governs tool calls and result admission
   but does not own Anthropic's upstream KV cache.
 - Audit rows are durable only when `FAK_AUDIT_JOURNAL` or an equivalent sink is required.
 - A managed MCP entry gives Claude access to governance tools; it does not automatically

@@ -1,18 +1,18 @@
 ---
 title: "fak: guard the opencode/GLM dispatch lane"
-description: "How to front the opencode/GLM dispatch worker with fak guard by setting the GLM base URL; live-node activation is deferred."
+description: "How to front the opencode/GLM dispatch worker with fak manage by setting the GLM base URL; live-node activation is deferred."
 ---
 
 # Guarding the opencode/GLM dispatch lane (issue #730)
 
 Use this when you run the two-lane dispatch fleet and want the **opencode/GLM**
-worker to pass through the same `fak guard` decision journal as the Claude worker.
+worker to pass through the same `fak manage` decision journal as the Claude worker.
 Start with the always-on fleet shape in
 [`always-on-dogfood-server.md`](always-on-dogfood-server.md), then use this page
 to set the GLM base URL and verify the guarded opencode command.
 
 The fleet-through-kernel change fronts every **claude** dispatch worker with
-`fak guard` by default, so the kernel adjudicates every tool call the worker proposes
+`fak manage` by default, so the kernel adjudicates every tool call the worker proposes
 and records each verdict in a durable decision journal. The **opencode/GLM** lane was
 left out on purpose — and this is the doc that closes it.
 
@@ -22,9 +22,9 @@ left out on purpose — and this is the doc that closes it.
 told the worker's upstream:
 
 - The **claude** backend proxies the public Anthropic API (passthrough/subscription)
-  with no base-URL override, so `fak guard --provider anthropic -- claude …` is safe by
+  with no base-URL override, so `fak manage --provider anthropic -- claude …` is safe by
   default.
-- The **opencode** backend fronts a *local* GLM server. `fak guard --provider openai`
+- The **opencode** backend fronts a *local* GLM server. `fak manage --provider openai`
   with no base URL would route it to `api.openai.com` — a **misroute**. So `guard_wrap`
   returns the worker command **unchanged** (`guarded=False`) unless
   `FLEET_DOGFOOD_GUARD_BASEURL` names the GLM `/v1` endpoint.

@@ -6,7 +6,7 @@ description: "Integration index for fak — the agent kernel. Any agent or frame
 # Run your agent through fak
 
 **Reader:** a builder choosing an integration by client, wire, and support status.
-**Lifecycle:** current · **Generation:** wire compatibility is release-independent; the `fak guard` subscription default and live token streaming on the OpenAI wire track the current build.
+**Lifecycle:** current · **Generation:** wire compatibility is release-independent; the `fak manage` subscription default and live token streaming on the OpenAI wire track the current build.
 **Authority:** [what fak supports](../supported/README.md) · [compatibility matrix](compatibility-matrix.md). **Proof:** `python3 examples/wire-proof/verify.py` (60s; no key, model, or GPU).
 
 You don't rewrite your agent to adopt `fak`. You point it at `fak serve` — one kernel in
@@ -82,7 +82,7 @@ names the trust boundary and failure semantics for each integration.
 ## Which agent do you run?
 
 Pick by **client**, the **wire** it speaks, and its **support** status. **Default:** if a
-row offers `fak guard`, that is the shortest path.
+row offers `fak manage`, that is the shortest path.
 
 ### Support status: the canonical vocabulary
 
@@ -92,9 +92,9 @@ row offers `fak guard`, that is the shortest path.
 [compatibility matrix](compatibility-matrix.md) — reference these labels rather than
 defining their own. Support has exactly three values:
 
-- **`fak guard`** — a one-command launcher: `fak guard -- <agent>` starts the gateway
-  in-process and injects the base URL into the child only. Every `fak guard` tool also
-  has a guide, so the tables write it **`fak guard` + guide**.
+- **`fak manage`** — a one-command launcher: `fak manage -- <agent>` starts the gateway
+  in-process and injects the base URL into the child only. Every `fak manage` tool also
+  has a guide, so the tables write it **`fak manage` + guide**.
 - **guide** — a dedicated walkthrough you wire by base URL or MCP. (The
   [agent-harnesses page](../supported/agent-harnesses.md) groups these under "harnesses
   with a dedicated guide" and carries the labels below in a *support* column — a heading,
@@ -112,11 +112,11 @@ connection is made, and those pages link back here instead of coining new status
 
 | You run… | Wire | Support | Guide |
 |---|---|---|---|
-| **Claude Code** / the Anthropic API or SDK | Anthropic Messages | `fak guard` + guide | [`claude.md`](claude.md) |
-| **OpenAI Codex** (CLI / IDE extension) | OpenAI Chat Completions | `fak guard` + guide | [`openai-codex.md`](openai-codex.md) |
+| **Claude Code** / the Anthropic API or SDK | Anthropic Messages | `fak manage` + guide | [`claude.md`](claude.md) |
+| **OpenAI Codex** (CLI / IDE extension) | OpenAI Chat Completions | `fak manage` + guide | [`openai-codex.md`](openai-codex.md) |
 | **Any OpenAI SDK or Chat Completions client** (OpenAI / Agents SDK, LangChain, LlamaIndex, …) | OpenAI Chat Completions | guide | [`openai.md`](openai.md) |
-| **OpenCode** (terminal agent) | OpenAI Chat Completions | `fak guard` + guide | [`claude.md#opencode`](claude.md#opencode) |
-| **Hermes Agent** (NousResearch self-hosted agent) | OpenAI Chat Completions | `fak guard` + guide | [`hermes.md`](hermes.md) |
+| **OpenCode** (terminal agent) | OpenAI Chat Completions | `fak manage` + guide | [`claude.md#opencode`](claude.md#opencode) |
+| **Hermes Agent** (NousResearch self-hosted agent) | OpenAI Chat Completions | `fak manage` + guide | [`hermes.md`](hermes.md) |
 | **Cursor** (IDE) | MCP *or* OpenAI proxy | guide | [`cursor.md`](cursor.md) |
 | **VS Code + GitHub Copilot** (IDE) | OpenAI/Anthropic proxy | guide | [`vscode.md`](vscode.md) |
 | **Zed** (AI-native editor) | OpenAI/Anthropic/MCP | guide | [`zed.md`](zed.md) |
@@ -130,7 +130,7 @@ connection is made, and those pages link back here instead of coining new status
 | **No agent at all — a product feature that calls a model directly** (screener, classifier, drafter; your own loop, your own tools) | OpenAI or Anthropic SDK, direct API call | guide | [`embed-in-your-product.md`](embed-in-your-product.md) |
 
 **On a Claude Pro/Max subscription?** [`fable5-more-usage-for-free.md`](fable5-more-usage-for-free.md)
-is the honest, dogfood-witnessed case for how `fak guard -- claude` stretches the seat you
+is the honest, dogfood-witnessed case for how `fak manage -- claude` stretches the seat you
 already pay for — the pure-fak, native-cache-excluded slice (context shedding + KV-prefix
 reuse), plus the one genuinely Fable-5-specific lever (the capped-Opus → Fable 5 fallover),
 with every number labeled by provenance and the shed-per-fire double-count fence carried in full.
@@ -138,7 +138,7 @@ with every number labeled by provenance and the shed-per-fire double-count fence
 **Not running an agent — you have a product feature that calls a model?** A SaaS/API
 backend that calls `messages.create(...)` / `chat.completions.create(...)` itself (a
 job-application screener, a support-reply drafter, a field extractor) keeps its own loop
-and fronts *that call* with `fak serve` — `fak guard` is a child-process launcher and does
+and fronts *that call* with `fak serve` — `fak manage` is a child-process launcher and does
 not fit a server-side product. The persona guide, including why the default floor denies
 your app's own tools and how to author one that doesn't:
 [`embed-in-your-product.md`](embed-in-your-product.md).
@@ -327,8 +327,8 @@ governance surface, not tokens per second. Full scope, claim by claim:
 ## Cross-references
 
 - [What fak supports](../supported/README.md) — the dedicated capability pages: [models](../supported/models.md), [clouds & hosted providers](../supported/clouds.md), [APIs, wires & MCP](../supported/apis-and-protocols.md), [agent harnesses & frameworks](../supported/agent-harnesses.md), and [serving engines](../supported/engines.md).
-- [Two runtimes, one binary: gateway vs agent runtime vs client](../explainers/runtime-vs-client.md) — the first-decision naming behind "put fak in front of your agent": `fak serve` (the gateway runtime that governs model traffic) vs `fak serve --native` (the agent application runtime that owns the loop) vs a harness wrapped by `fak guard` (a governed client). `serve` and `guard` are a runtime and a client, not two versions of one thing.
-- [More Fable 5 (and every model) out of your Claude seat](fable5-more-usage-for-free.md) — the reader-facing "more usage for free" case for `fak guard -- claude`, reporting only fak's own authored slice (native prompt cache excluded on purpose): 69.7% WITNESSED KV-prefix reuse, ~37k tokens shed per compaction fire, the capped-Opus → Fable 5 fallover, and the honest fences on what "for free" and "Fable-specific" actually mean.
+- [Two runtimes, one binary: gateway vs agent runtime vs client](../explainers/runtime-vs-client.md) — the first-decision naming behind "put fak in front of your agent": `fak serve` (the gateway runtime that governs model traffic) vs `fak serve --native` (the agent application runtime that owns the loop) vs a harness wrapped by `fak manage` (a governed client). `serve` and `guard` are a runtime and a client, not two versions of one thing.
+- [More Fable 5 (and every model) out of your Claude seat](fable5-more-usage-for-free.md) — the reader-facing "more usage for free" case for `fak manage -- claude`, reporting only fak's own authored slice (native prompt cache excluded on purpose): 69.7% WITNESSED KV-prefix reuse, ~37k tokens shed per compaction fire, the capped-Opus → Fable 5 fallover, and the honest fences on what "for free" and "Fable-specific" actually mean.
 - [Embed fak in your product](embed-in-your-product.md) — the front door for the *non*-agent adopter: a product feature that makes a direct API call keeps its own loop, repoints one base URL at `fak serve`, and authors a capability floor for its own tools (the default floors allow-list a coding harness's tools, not yours).
 - [Harness integration acceptance checklist](harness-acceptance-checklist.md) — the model-wire, host-tool dialect, argument-field, deny-behavior, and replay fixture contract for first-class launchers.
 - [Reusable harness-loop playbook](harness-loop-playbook.md) — apply the selector/executor/witness/stop pattern to customer workflows such as support queues, data QA, and eval runs.

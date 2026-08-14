@@ -45,7 +45,7 @@ traffic — that is exactly what happened to M1–M5. So default-on is **earned*
    by owner (OBSERVED vs WITNESSED), and the verdict is deterministic and witnessed
    by a hash-chained journal row, not a self-report.
 2. **Dogfood** proves the gate *actually fires on our own usage* — it ran on a real
-   `fak guard`/`fak serve` session, wrote a ledger/journal row, and moved fak's
+   `fak manage`/`fak serve` session, wrote a ledger/journal row, and moved fak's
    authored slice `F` above zero on a multi-turn session.
 
 Only then does the default-on lever (`--vcache-governor`, `--vcache-anchor`, …)

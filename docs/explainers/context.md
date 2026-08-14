@@ -32,7 +32,7 @@ routes below only when the readout raises a specific question.
 
 ## Current default
 
-On the `fak guard` and `fak serve` path, context placement is automatic:
+On the `fak manage` and `fak serve` path, context placement is automatic:
 
 1. Fak upgrades the cache horizon and plans a resident view under a token budget.
 2. It carries the objective as a verbatim pin and preserves a stable warm prefix.
@@ -60,7 +60,7 @@ current implementation boundary.
 |---|---|---|
 | Ordinary agent run | Keep the automatic default. | Fak plans, pins, sheds, and restores without a context flag. |
 | A measured task needs a different resident envelope | Set `--ctx-view-budget <tokens>`; change `--compact-history-budget <tokens>` only with a task-local witness. | The explicit budgets replace the conservative defaults for that run. |
-| An operator needs a hard session envelope or reset policy | Use the `fak guard -h -all` budget and reset controls, then inspect the session readout. | Session governance is explicit; it is separate from per-turn placement. |
+| An operator needs a hard session envelope or reset policy | Use the `fak manage -h -all` budget and reset controls, then inspect the session readout. | Session governance is explicit; it is separate from per-turn placement. |
 | Flat-context handoff with no transcript compaction | Follow the relay contract as design guidance only. | Relay mode is planned, not a shipped enforcement mode. Do not describe it as active. |
 
 A larger number is not automatically better. Select the smallest resident envelope that
@@ -83,7 +83,7 @@ The mechanics of pins, tombstones, restore handles, and value measurement are in
 ## Generation and support boundary
 
 This page is the **current (`gen/now`) builder route**. It describes behavior wired into
-current `fak guard`/`serve` execution plus CLI controls that are available now. Runtime
+current `fak manage`/`serve` execution plus CLI controls that are available now. Runtime
 authority lives in the [`ctxplan`](../../internal/ctxplan/) placement code,
 [`ctxmmu`](../../internal/ctxmmu/) admission code, and gateway message pipeline; the
 focused proof ledger is [D3 · ctxmmu](../proofs/ctxmmu.md).

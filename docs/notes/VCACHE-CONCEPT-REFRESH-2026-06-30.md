@@ -58,7 +58,7 @@ vCache (epic #715–#720) is the active control loop that would make mechanism #
 | **M4 chains & recall** | prefix DAG, topological replay, cost-gated rebuild | `internal/vcachechain/` | **UP but gated OFF** — `ProveRecall` runs only from the `fak vcache` CLI; `Replay` is never called live |
 | **M5 governor** | pin / lazy / evict, warm budget, affinity routing, secret gate | `internal/vcachegov/`, `internal/gateway/vcache_governor_journal.go` | **decision witness live; actions gated OFF** — the gateway folds live provider-cache families into governor verdicts on `/metrics` and a hash-chained `/debug/vars` journal, but it still does not warm, pin, evict, or route on those verdicts |
 
-So on a normal `fak guard -- claude` run: mechanisms #1–#5 are *observed* and
+So on a normal `fak manage -- claude` run: mechanisms #1–#5 are *observed* and
 owner-attributed, M1 warmth-prediction error is *emitted* on `/metrics` with
 false-warm demotions recorded to `/debug/vars`, the narrow M2 Anthropic
 system-anchor preflight can *rewrite* volatile-before-stable system heads, M5's
@@ -94,13 +94,13 @@ recorded session; they do not warm, pin, or recall anything live.
 
 ## The activation gap, in live code
 
-The old default `fak guard` exit printed the provider line and the fak lines
+The old default `fak manage` exit printed the provider line and the fak lines
 separately, and the per-turn `fak-turn` line's `saved=` was the provider net only.
 That conflation is now closed in the live surfaces:
 
 ```go
 // cmd/fak/guard.go — one default owner/mechanism headline
-"fak guard: avoided-spend attribution — provider ~P (...) + fak ~F (...) = ~T token-equiv [...]"
+"fak manage: avoided-spend attribution — provider ~P (...) + fak ~F (...) = ~T token-equiv [...]"
 ```
 
 ```go

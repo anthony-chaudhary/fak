@@ -52,7 +52,7 @@ Concede these first, because they are real:
   2 repaired / 0 quarantined / 3 deferred`.
 - **An appliance you put in front.** You do not rewrite an application to sit it behind a
   firewall; you route through it. fak is the same drop-in shape: repoint one base URL, or
-  run `fak guard -- claude`. You keep your model, IDE, and keys.
+  run `fak manage -- claude`. You keep your model, IDE, and keys.
 
 If someone calls that posture "a firewall for agents," they are not wrong about the
 instinct. The disagreement is about the layer and the unit of control.

@@ -1,23 +1,23 @@
 ---
-title: "fak guard's share of cache value on real sessions — proven"
-description: "On real fak guard sessions, 100% of reported cache value is the provider's prompt cache; fak's own authored share measures essentially 0%."
+title: "fak manage's share of cache value on real sessions — proven"
+description: "On real fak manage sessions, 100% of reported cache value is the provider's prompt cache; fak's own authored share measures essentially 0%."
 ---
 
-# fak guard's share of cache value on real sessions — proven (2026-07-01)
+# fak manage's share of cache value on real sessions — proven (2026-07-01)
 
 **Question.** Of the cache value fak reports on real sessions, what percent is
 fak-authored (fak's own mechanisms) versus the provider's prompt cache? The
-headline `fak guard` prints ("saved N tokens") had never been split into a
+headline `fak manage` prints ("saved N tokens") had never been split into a
 proven percentage on real traffic — epic #1844's core complaint.
 
 **Answer (measured, from the durable ledgers as of 2026-07-02T02:00Z):**
 
 | scope | provider token-equiv | fak token-equiv | fak share |
 |---|---:|---:|---:|
-| real `fak guard -- claude` sessions (11 sessions, 2026-07-01..02 UTC) | 153,100,871 | 0 | **0.0000%** |
+| real `fak manage -- claude` sessions (11 sessions, 2026-07-01..02 UTC) | 153,100,871 | 0 | **0.0000%** |
 | all real sessions in the ledgers (guard + `fak run` kernel sessions) | 153,100,871 | 3,441 | **0.0022%** |
 
-On the flagship `fak guard -- claude` path, **100% of the reported cache value
+On the flagship `fak manage -- claude` path, **100% of the reported cache value
 is the provider's prompt cache** — the same cache the client would get with no
 fak in the path. fak's own witnessed slice on real traffic is 3,441 tokens of
 KV-prefix reuse, all from `fak run` smollm2 kernel sessions (Track 1), none

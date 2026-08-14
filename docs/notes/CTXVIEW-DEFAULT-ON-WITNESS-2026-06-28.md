@@ -46,7 +46,7 @@ regression floor to the **measured 75.1% realized reuse** from a real run. So th
 - **Fail-open by construction.** `maybePlanMessages` returns the full history on any planner
   error, empty render, or untraced one-shot — it "only ever shortens, and on doubt shortens
   nothing."
-- **The flagship wire stays cache-safe.** Under budget>0 the `fak guard -- claude` passthrough
+- **The flagship wire stays cache-safe.** Under budget>0 the `fak manage -- claude` passthrough
   applies the in-place same-role stub transform (`agent.CompactAnthropicHistoryToView`),
   proven prefix-byte-identical by `TestCtxViewHTTPAnthropicPassthroughPlansView` and bailing
   to identity on any ambiguity. The flip changes the flagship wire (it is no longer pure

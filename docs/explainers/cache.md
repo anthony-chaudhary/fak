@@ -26,7 +26,7 @@ reuse.
 
 | Workload | Current mode and default | What fak reuses | Next proof |
 |---|---|---|---|
-| Agent calls Anthropic through `fak guard` | Provider prompt cache. Fleet launchers select managed-cache `on`; a bare guard defaults to `auto`. | The byte-identical stable prompt prefix. On the Anthropic wire, active managed cache can request the longer cache tier so an idle return can read rather than rebuild that prefix. | Read [Managed cache in practice](caching/level-2-managed-cache-in-practice.md), run a guarded session, then run `fak cachevalue report`. |
+| Agent calls Anthropic through `fak manage` | Provider prompt cache. Fleet launchers select managed-cache `on`; a bare guard defaults to `auto`. | The byte-identical stable prompt prefix. On the Anthropic wire, active managed cache can request the longer cache tier so an idle return can read rather than rebuild that prefix. | Read [Managed cache in practice](caching/level-2-managed-cache-in-practice.md), run a guarded session, then run `fak cachevalue report`. |
 | Agent calls OpenAI, Gemini, or another provider through an API wire | Provider-native cache behavior where that wire exposes it; fak remains passive when it cannot apply the Anthropic cache-control mechanism. | A stable prefix can remain eligible for provider reuse, but the provider decides whether it hits. | Use the [provider matrix and wire economics](caching/level-3-cache-economics-and-the-wire.md) and inspect that provider's reported cache fields. Do not infer a hit from prefix stability alone. |
 | `fak serve --engine inkernel` or another local in-kernel model path | Kernel-owned KV cache. | Addressable token/KV spans and prefix state owned by fak's serving path, not a provider billing rebate. | Follow [The kernel-owned KV cache](caching/level-4-kernel-kv-cache.md) to its deterministic reuse and accounting witnesses. |
 
@@ -50,7 +50,7 @@ surface; that is a different claim from observed provider savings.
 
 ## API-backed managed-cache choices
 
-`fak guard --managed-cache` accepts three values on the Anthropic wire:
+`fak manage --managed-cache` accepts three values on the Anthropic wire:
 
 | Choice | Behavior | Select it when |
 |---|---|---|
@@ -58,7 +58,7 @@ surface; that is a different claim from observed provider savings.
 | `auto` | Activates only when fak can identify API-key billing; otherwise it stays passive. | The bare-guard default, or when active steering should depend on observable billing. |
 | `off` | Leaves provider cache markers unsteered. | A bounded comparison or a provider path where the operator deliberately wants passive behavior. |
 
-Fleet launchers and bare `fak guard` have different defaults, so name the launch surface when
+Fleet launchers and bare `fak manage` have different defaults, so name the launch surface when
 reporting a result. OpenAI-wire and other non-Anthropic sessions do not acquire Anthropic's
 `cache_control` behavior merely because a launcher selected `on`.
 

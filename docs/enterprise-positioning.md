@@ -77,7 +77,7 @@ status. The `Fence #` column points to the note below that cites the in-repo wit
 
 | # | Named market gap | Named by | fak surface | Status | Fence |
 |---|---|---|---|---|---|
-| 1 | Runtime **enforcement**, not written policy | Gartner AI TRiSM / Guardian Agents | `fak guard` + default-deny capability floor (`fak preflight --policy`, closed 12-reason refusal vocabulary) | `[SHIPPED]` | [1] |
+| 1 | Runtime **enforcement**, not written policy | Gartner AI TRiSM / Guardian Agents | `fak manage` + default-deny capability floor (`fak preflight --policy`, closed 12-reason refusal vocabulary) | `[SHIPPED]` | [1] |
 | 2 | "Prove it," not "trust me" (Know Your Agent) | a16z Big Ideas 2026 | Commit-level verify — a claimed "done" refused from git evidence (`dos_verify` / `dos commit-audit`) | `[SHIPPED]` | [2] |
 | 3 | Budget enforcement must live **outside** the agent (hard kill/pause) | TechCrunch, Jun 5 2026 | `serve` cost lever + pre-exhaustion budget webhook/reset; hard per-scope kill/pause | **Partial** — lever `[SHIPPED]`, hard kill/pause `[TICKETED #3273]` | [3] |
 | 4 | Agents as first-class **non-human identities** + kill-switch | Industry NHI framing | First-class agent identity record + fleet kill-switch | `[TICKETED #3274]` | [4] |
@@ -168,7 +168,7 @@ attribution collected in the epic research brief.
    regex + Luhn) and replaces each with `[REDACTED:<kind>]` before bytes leave the box,
    pinning the original in the shared CAS so an authorized restore returns it byte-exact.
    Honest fences: it is **default-inert** (`FAK_WIRE_REDACT`), it is a **compliance floor, not
-   a token saver**, and on the flagship `fak guard -- claude` Anthropic passthrough the
+   a token saver**, and on the flagship `fak manage -- claude` Anthropic passthrough the
    redaction cannot reach the wire until the cache-prefix-preserving `req.Raw` transform
    ([#555](https://github.com/anthony-chaudhary/fak/issues/555)) lands — it *does* reach the
    wire on the non-passthrough proxy/serve routes today. Witness: [`CLAIMS.md`](../CLAIMS.md)

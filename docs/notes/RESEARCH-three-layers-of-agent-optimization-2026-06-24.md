@@ -282,7 +282,7 @@ The strongest case against is that skill-agnosticism forecloses the *tightest* c
 is bought at the cost of the deepest cross-layer optimization the thesis describes.
 
 The most important open question is not conceptual but a wiring fact. On the flagship route
-(`fak guard -- claude`, the Anthropic passthrough), the model reads the original request
+(`fak manage -- claude`, the Anthropic passthrough), the model reads the original request
 bytes verbatim (`req.Raw`, `internal/gateway/messages.go`), while every byte-level layer-2
 rewrite targets `req.Messages`, which is never re-serialized on that route. So the
 write-time admitters `ctxmmu` and `normgate`, and the `ctxplan` view planning behind them,

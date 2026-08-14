@@ -50,7 +50,7 @@ missing is loop *ownership*, not the pieces.
 | Stateless + persistent context planner | `gateway.go:1078 maybePlanMessages`, default-on at `--ctx-view-budget=8000` |
 | KV planned-elision residency bridge | `agent.KVSpanElider.ElideKVSpans` behind `FAK_INKERNEL_KVMMU` (bit-exact, max\|delta\|=0) |
 | Inbound result quarantine + tool-def pruning | `messages.go:600 admitInboundResults`, `messages.go:515 maybeCompactInboundTools` |
-| `fak guard` proxy gate | wraps any harness on a private loopback, adjudicates every call (`guard.go:505`). The gate we keep; the native loop complements it |
+| `fak manage` proxy gate | wraps any harness on a private loopback, adjudicates every call (`guard.go:505`). The gate we keep; the native loop complements it |
 | In-kernel syscall boundary + A/B comparator | `kernel.Syscall` (`kernel.go:579`), `execViaKernel` (`loop.go:141`); `agent_test.go:12 TestOfflineABTurnDelta` |
 
 ## Partial (engine exists, harness doesn't own it yet)

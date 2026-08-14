@@ -18,7 +18,7 @@ description: "A lightweight, durable, machine-global sidecar that records sessio
 
 On 2026-07-09 an in-place `WinAppRuntime.Main.1.8` update crashed WindowsTerminal
 (`0xc0000005` in `Microsoft.Terminal.Control.dll`, ~1s after the update), taking every
-terminal — and every `fak guard` / `fak c` session running inside them — down at one
+terminal — and every `fak manage` / `fak c` session running inside them — down at one
 instant. This is the *machine-wide* failure class: not one session hitting a rate limit,
 but the whole fleet dying together. A Windows-update reboot is the same shape.
 
@@ -35,7 +35,7 @@ is **best-effort reconstruction**, not a durable ledger read:
 | `resume_sweep` / `internal/resume/sweep` | discovers sessions by scanning `~/.claude*/projects/*/<sid>.jsonl` transcripts | reboot-surviving, but cwd is recovered from the **irreversible** project slug (`re.sub([^A-Za-z0-9],"-")`) — a repo outside the `<workspace-root>\*`/`<windows-users-root>\*` globs lands the resume in the wrong tree |
 | live-vs-crashed test | scan the live process table (`Win32_Process`) for the sid | **erased by a reboot** — after a machine-wide crash you cannot tell which sessions *were* alive |
 | `guard_sessions.jsonl` (`internal/guardsessions`, #3461) | append-only index: `{handle, trace_id, agent, pid, cwd, started_utc, nonce}` | **register-only, latest-per-handle snapshot** — no lifecycle, no clean-close, no liveness fold; a session that crashed and one that ran for hours look identical |
-| `session-registry.json` (`internal/session`, #1197) | durable descriptor registry with `PID/host/cwd/StartSHA` | **opt-in** (a plain `fak guard -- claude` writes no row; gated on `guardDurabilityWanted`), **per-user-config**, and its only staleness signal is `LastSeen` vs a TTL — never reconciled against a reboot |
+| `session-registry.json` (`internal/session`, #1197) | durable descriptor registry with `PID/host/cwd/StartSHA` | **opt-in** (a plain `fak manage -- claude` writes no row; gated on `guardDurabilityWanted`), **per-user-config**, and its only staleness signal is `LastSeen` vs a TTL — never reconciled against a reboot |
 | `internal/resume/scan.go` `CrashInterrupted` | per-transcript "killed mid-turn" verdict | the exact fingerprint a reboot stamps on every live transcript at once — but per-session, with **no boot correlation** and no "the whole fleet died together" fan-out |
 
 The common gap has one name: **there is no machine boot epoch anywhere in fak.** A grep for
@@ -114,10 +114,10 @@ durable liveness fold that survives a machine-wide reboot and emits the resume s
   write boot-stamped events; a heartbeat cadence bounds crash-loss to one interval; graceful
   exit writes `close`; the fold distinguishes clean CLOSED from crashed. Grade the append cost
   (must be O(1) per event).
-- **C3 — unconditional register-on-start via the SessionStart hook.** DoD: every `fak guard` /
+- **C3 — unconditional register-on-start via the SessionStart hook.** DoD: every `fak manage` /
   `fak c` start appends a boot-stamped `open` — *not* opt-in like `session-registry.json`; the
   currently-inert `guard-sessionstart` hook (persists nothing today) writes the row so a plain
-  interactive `fak guard -- claude` is finally recorded. Flag-gated first.
+  interactive `fak manage -- claude` is finally recorded. Flag-gated first.
 - **C4 — recovery-on-restart feeds the resume pipeline.** DoD: on SessionStart after a detected
   reboot, `report` hands the CRASHED set to `resume_sweep` / `fleet_resume_watchdog` as a
   durable input; witnessed that a resume launches from the journal's recorded cwd, not the

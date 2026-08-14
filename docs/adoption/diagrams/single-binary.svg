@@ -67,5 +67,5 @@
 <text x="460" y="272" text-anchor="middle" font-size="12" font-weight="700" fill="#0969da">&#8594; one</text>
 
 <text x="460" y="516" text-anchor="middle" font-size="11" fill="#57606a">Same four responsibilities on both sides. Left = four cooperating services; right = one process. The collapse is the only difference.</text>
-<text x="460" y="534" text-anchor="middle" font-size="10.5" fill="#57606a">You add flags, not components: fak guard -- claude &#183; fak serve &#183; fak preflight. One binary drops in front of the agent you already run.</text>
+<text x="460" y="534" text-anchor="middle" font-size="10.5" fill="#57606a">You add flags, not components: fak manage -- claude &#183; fak serve &#183; fak preflight. One binary drops in front of the agent you already run.</text>
 </svg>

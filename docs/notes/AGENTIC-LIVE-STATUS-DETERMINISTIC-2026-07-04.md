@@ -1,11 +1,11 @@
 ---
-title: "Agentic detail in fak guard live status: the deterministic-first"
-description: "Audits which fak guard live-status agent signals are already witnessed, which need aggregation, and which aren't yet deterministically attributable."
+title: "Agentic detail in fak manage live status: the deterministic-first"
+description: "Audits which fak manage live-status agent signals are already witnessed, which need aggregation, and which aren't yet deterministically attributable."
 ---
 
-# Agentic detail in `fak guard` live status: the deterministic-first ladder (2026-07-04)
+# Agentic detail in `fak manage` live status: the deterministic-first ladder (2026-07-04)
 
-**Operator goal (2026-07-04):** make `fak guard` live status — the `fak info`
+**Operator goal (2026-07-04):** make `fak manage` live status — the `fak info`
 agents pane the 20% `--split` strip runs — show *more agentic detail*: what each
 agent is doing, how many are active, and how many tokens each sub-agent is
 using. "Think about deterministic items first."
@@ -65,7 +65,7 @@ Ordered most-deterministic (data already computed, pure projection) → least.
 | 1 | per-session **spawn count** (subagents spawned) | detection yes, counter no | spawn shape recognized at `adjudicateProposed` (`ToolAdjudication.Tool`, wire.go:576) via `subagentSpawnShapes` (subagent_witness.go:40) | `AdjudicationSummary` (metrics.go:912) buckets by verdict/reason only — no `byTool`/spawn counter |
 | 1 | per-session **last tool** + **in-flight/idle age** ("what doing") | tool name yes (payload-free), inflight yes (aggregate) | tool name per call at `adjudicateProposed`; aggregate inflight at `/debug/vars` `inflight_max_age_seconds` | no *per-trace* last-tool/inflight attribution kept |
 | 1 | subagent **lifecycle** (spawned Task, runtime, LIVE/STALLED) | **yes** | toolproc journal `.fak/toolproc/journal.jsonl` — `spawn`/`exit`/`session_end` rows with `Tool`, owner session, runtime, liveness (`fak toolproc ps`) | a separate surface; not joined into the guard pane; no tokens/PID in the schema |
-| 3 | true per-**sub-agent** *token* attribution | **NO — not wired** | — | gateway `trace_id` and toolproc harness `session_id` are separate namespaces with **no parent↔child link on the request path**; `State.ParentTrace` is budget-reset lineage only (session.go:250). A subagent gets a distinct trace row only if its requests carry a distinct `X-Trace-Id`; `fak guard` sets one `DefaultTraceID` for the wrapped CLI. See #2397 (agentgraph subagent registry). |
+| 3 | true per-**sub-agent** *token* attribution | **NO — not wired** | — | gateway `trace_id` and toolproc harness `session_id` are separate namespaces with **no parent↔child link on the request path**; `State.ParentTrace` is budget-reset lineage only (session.go:250). A subagent gets a distinct trace row only if its requests carry a distinct `X-Trace-Id`; `fak manage` sets one `DefaultTraceID` for the wrapped CLI. See #2397 (agentgraph subagent registry). |
 
 **The honest fence (rung 3).** The operator's phrase "how many tokens each
 **sub-agent** is using" is only literally answerable once a subagent's requests
@@ -161,7 +161,7 @@ The per-trace activity record + its bounded lifecycle (cap traces, drop on sessi
 Per-sub-agent TOKEN attribution (#2250 owns tokens; the parent↔child trace link is #2397). Joining the toolproc lifecycle journal (`.fak/toolproc/journal.jsonl`) into the pane (a separate follow-on). Any prompt/argument/result text — the pane stays payload-free; only the tool NAME crosses. `/metrics` labels (per-trace cardinality stays off Prometheus by design — snapshot only).
 
 #### Done condition
-A live `fak guard --split -- claude` session shows, per agent row, its last adjudicated tool, its spawn count when > 0, and an in-flight or idle age; a session with no activity yet renders exactly as today (fields omitted); the `/debug/vars` wire shape for a pre-activity session is byte-identical.
+A live `fak manage --split -- claude` session shows, per agent row, its last adjudicated tool, its spawn count when > 0, and an in-flight or idle age; a session with no activity yet renders exactly as today (fields omitted); the `/debug/vars` wire shape for a pre-activity session is byte-identical.
 
 #### Witness
 `go test ./internal/gateway ./cmd/fak` green; a gateway unit test asserts last-tool/spawn-count/inflight/idle from a synthesized adjudication sequence; a pane fixture (`info_panels_test.go`/`info_visual_test.go`) pins the new row clause at full and mini levels; a golden `/debug/vars` test proves the zero-activity wire shape is unchanged.
@@ -191,7 +191,7 @@ One worker owns the per-trace record + the four wire fields + the pane render + 
 - Lands independently of #2250 but shares the `debugSessionVars`/`guardInfoSession` row — land whichever first, rebase the other's field additions.
 
 #### Trigger
-Manual decomposition of the 2026-07-04 operator goal ("fak guard live status shows more agentic detail"). Not a scheduled producer.
+Manual decomposition of the 2026-07-04 operator goal ("fak manage live status shows more agentic detail"). Not a scheduled producer.
 
 #### Batch policy
 One issue; dedupes on the `fak-agentic-live-status-key` marker above (a rerun updates rather than re-files). Deduped against #2250 (tokens, not activity), #2537 (trajctl behavioral scorer, not a pane cell), and #2050 (hardware resource row, not agentic) — this is the activity-cell slice only.

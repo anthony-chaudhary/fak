@@ -14,7 +14,7 @@ prompt-MMU [#751](https://github.com/anthony-chaudhary/fak/issues/751), owned-KV
 
 ## TL;DR
 
-When you run `fak guard -- claude`, **two context/cache managers are stacked on the same
+When you run `fak manage -- claude`, **two context/cache managers are stacked on the same
 wire, blind to each other**:
 
 - **fak** (the kernel manager) is **cache-PRESERVING**: it sheds old turns by byte-splicing
@@ -111,7 +111,7 @@ the installed version):** auto-compaction **cannot be reliably disabled via conf
   to block the pending compaction at the event level.
 
 So the answer is not a flag flip; it is a **conditional coherence protocol**, and
-`fak guard` is uniquely positioned to run it because it already controls the child Claude
+`fak manage` is uniquely positioned to run it because it already controls the child Claude
 process's environment and config:
 
 > **Block** the harness's auto-compaction (PreCompact exit 2) **while fak's cache-preserving
@@ -150,7 +150,7 @@ compactor, fold in the wall-clock TTL, and decide the suppress/yield posture.**
   `cache_creation` burst.
 
 What it does NOT do (the epic's actuator rungs): install/drive the `PreCompact` hook from
-`fak guard`; compute the inbound-prefix digest on the gateway passthrough and feed
+`fak manage`; compute the inbound-prefix digest on the gateway passthrough and feed
 observations in; route `recommend_reset` into `ResetOnBudget`; surface a
 `harness_rewrite` / `quarantine_at_risk` line in the guard banner + `/metrics`.
 
@@ -158,7 +158,7 @@ observations in; route `recommend_reset` into `ResetOnBudget`; surface a
 
 The epic's Definition of Done and child tickets are filed under #1131. Sequenced by
 leverage: (A) the spine [shipped], (B) gateway wiring to capture the inbound-prefix digest +
-feed `compactcohere` and emit metrics, (C) the `fak guard` PreCompact-hook actuator driven by
+feed `compactcohere` and emit metrics, (C) the `fak manage` PreCompact-hook actuator driven by
 the standing posture, (D) the quarantine-survives-summary witness (prove §2.4 and that the
 warning fires), (E) the operator observability line.
 

@@ -1,6 +1,6 @@
 # Audit: fakguard crashes & bad preventions at trajectory final steps (2026-07-11)
 
-**Scope.** The guard surface that acts at the *end* of an autonomous `fak guard -- claude`
+**Scope.** The guard surface that acts at the *end* of an autonomous `fak manage -- claude`
 trajectory: the Stop-hook completion guard, the result-side livelock/doom-loop detector, the
 gateway/policy tool-call refusal path, and the git commit/push gates. "Final step" = git commit,
 git push, CI invocation, and the agent's own attempt to *stop*. We looked for two failure classes:

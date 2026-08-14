@@ -1,6 +1,6 @@
 ---
 title: "fak proof: the fail-closed guard audit"
-description: "The enumerated ledger of every fak guard, adjudication rung, and hook, with its asserted failure mode, its witness test, and an honest finding for each path that fails open."
+description: "The enumerated ledger of every fak manage, adjudication rung, and hook, with its asserted failure mode, its witness test, and an honest finding for each path that fails open."
 ---
 
 # D1 · fail-closed audit

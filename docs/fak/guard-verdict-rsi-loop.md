@@ -1,18 +1,18 @@
 ---
-title: "fak guard verdict-pattern RSI loop"
-description: "The RSI loop for fak guard that closes on our OWN usage — the real decision
+title: "fak manage verdict-pattern RSI loop"
+description: "The RSI loop for fak manage that closes on our OWN usage — the real decision
 journal — with no hardware gate. The hardware-free sibling of the latency loop (#733/#734)."
 ---
 
-# fak guard verdict-pattern RSI loop
+# fak manage verdict-pattern RSI loop
 
-> **Audience.** Anyone wiring or auditing the `fak guard` self-improvement loop — by the end you'll know which of the two guard RSI loops closes on a normal box and how its keep-bit stays non-forgeable.
+> **Audience.** Anyone wiring or auditing the `fak manage` self-improvement loop — by the end you'll know which of the two guard RSI loops closes on a normal box and how its keep-bit stays non-forgeable.
 
-`fak guard -- <agent>` fronts a coding agent with the kernel adjudicating every tool call,
+`fak manage -- <agent>` fronts a coding agent with the kernel adjudicating every tool call,
 and writes a **default-on, hash-chained decision journal** (`guard-audit.jsonl`) of every
 verdict it reaches. That journal is the self-improvement signal our own workflow produces.
 
-There are two RSI loops for `fak guard`. They optimise different signals, and only one of
+There are two RSI loops for `fak manage`. They optimise different signals, and only one of
 them can close on a normal machine:
 
 | loop | tool | signal | closes on a normal box? |
@@ -69,7 +69,7 @@ files / files but all blank) so the operator gets the unblock action, not an und
 
 ## Producing real rows
 
-Any `fak guard -- <agent>` session appends rows. To seed without a live agent, drive real
+Any `fak manage -- <agent>` session appends rows. To seed without a live agent, drive real
 tool-call proposals through a journal-enabled gateway — the kernel decides and journals each:
 
 ```bash

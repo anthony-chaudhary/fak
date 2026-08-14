@@ -15,7 +15,7 @@
 # internals, an `.ssh` private key, a `.env`, fak's own kernel source — and (2) reading
 # a poisoned document straight back into its context as if it were fact.
 #
-# THE FLOOR. `fak guard` carries two structural filesystem rungs into the VM:
+# THE FLOOR. `fak manage` carries two structural filesystem rungs into the VM:
 #   T1 — a write into a guarded region is refused BY SHAPE (SELF_MODIFY / ESCALATE),
 #        naming ONLY the one offending glob, no model and no human in the loop;
 #   T2 — a poisoned tool RESULT (a remote/local read) is QUARANTINE'd (TRUST_VIOLATION),
@@ -303,4 +303,4 @@ else
 fi
 log "2 rungs above are marked (over-refusal): the measured price of the arg_rules spelling,"
 log "  not a capability. They flip to ALLOW when #5310 wires the mount_view vocabulary."
-log "wrap a live agent the same way: fak guard -- claude   (the FS floor rides into the VM)."
+log "wrap a live agent the same way: fak manage -- claude   (the FS floor rides into the VM)."
