@@ -1,0 +1,1252 @@
+{
+  "evalId": "eval-vMN-2026-08-14T11:09:54",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-08-14T11:09:54.122Z",
+    "prompts": [
+      {
+        "raw": "({ vars }) => [{ role: 'user', content: vars.task }]",
+        "label": "baseline (no skill)",
+        "config": {},
+        "id": "3b50aa1d921fbfdb192777804a3610684af77ae8384eab96b773519927cd9225",
+        "provider": "openai:gpt-4.1-mini",
+        "metrics": {
+          "score": 0,
+          "testPassCount": 0,
+          "testFailCount": 0,
+          "testErrorCount": 5,
+          "assertPassCount": 0,
+          "assertFailCount": 0,
+          "totalLatencyMs": 1177,
+          "tokenUsage": {
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "total": 0,
+            "numRequests": 5,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "namedScoreWeights": {},
+          "cost": 0
+        }
+      },
+      {
+        "raw": "({ vars }) => [\n  { role: 'system', content: system },\n  { role: 'user', content: vars.task },\n]",
+        "label": "ponytail",
+        "config": {},
+        "id": "99e1ea0dc21155f199005f8c0bebdfaab72da093e94882e313aa2e92048cb36e",
+        "provider": "openai:gpt-4.1-mini",
+        "metrics": {
+          "score": 0,
+          "testPassCount": 0,
+          "testFailCount": 0,
+          "testErrorCount": 5,
+          "assertPassCount": 0,
+          "assertFailCount": 0,
+          "totalLatencyMs": 1500,
+          "tokenUsage": {
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "total": 0,
+            "numRequests": 5,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "namedScores": {},
+          "namedScoresCount": {},
+          "namedScoreWeights": {},
+          "cost": 0
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "53a23f3b-fc57-4a1b-b25c-8a9574956088",
+        "latencyMs": 213,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"user\",\"content\":\"Write me a Python function that validates email addresses.\"}]",
+          "label": "baseline (no skill)",
+          "config": {}
+        },
+        "promptId": "3b50aa1d921fbfdb192777804a3610684af77ae8384eab96b773519927cd9225",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:54 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Write me a Python function that validates email addresses."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Write me a Python function that validates email addresses."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:54 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "1b28c961-8e12-49c5-b030-60e36ad12cc8",
+        "latencyMs": 205,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"system\",\"content\":\"---\\nname: ponytail\\ndescription: >\\n  Forces the laziest solution that actually works, simplest, shortest, most\\n  minimal. Channels a senior dev who has seen everything: question whether the\\n  task needs to exist at all (YAGNI), reach for the standard library before\\n  custom code, native platform features before dependencies, one line before\\n  fifty. Supports intensity levels: lite, full (default), ultra. Use on ANY\\n  coding task: writing, adding, refactoring, fixing, reviewing, or designing\\n  code, and choosing libraries or dependencies. Also use whenever the user\\n  says \\\"ponytail\\\", \\\"be lazy\\\", \\\"lazy mode\\\", \\\"simplest solution\\\", \\\"minimal\\n  solution\\\", \\\"yagni\\\", \\\"do less\\\", or \\\"shortest path\\\", or complains about\\n  over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT\\n  use for non-coding requests (general knowledge, prose, translation,\\n  summaries, recipes).\\nargument-hint: \\\"[lite|full|ultra]\\\"\\nlicense: MIT\\n---\\n\\n# Ponytail\\n\\nYou are a lazy senior developer. Lazy means efficient, not careless. You have\\nseen every over-engineered codebase and been paged at 3am for one. The best\\ncode is the code never written.\\n\\n## Persistence\\n\\nACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\\nunsure. Off only: \\\"stop ponytail\\\" / \\\"normal mode\\\". Default: **full**.\\nSwitch: `/ponytail lite|full|ultra`.\\n\\n## The ladder\\n\\nStop at the first rung that holds:\\n\\n1. **Does this need to exist at all?** Speculative need = skip it, say so in one line. (YAGNI)\\n2. **Already in this codebase?** A helper, util, type, or pattern that already lives here → reuse it. Look before you write; re-implementing what's a few files over is the most common slop.\\n3. **Stdlib does it?** Use it.\\n4. **Native platform feature covers it?** `<input type=\\\"date\\\">` over a picker lib, CSS over JS, DB constraint over app code.\\n5. **Already-installed dependency solves it?** Use it. Never add a new one for what a few lines can do.\\n6. **Can it be one line?** One line.\\n7. **Only then:** the minimum code that works.\\n\\nThe ladder is a reflex, not a research project — but it runs *after* you\\nunderstand the problem, not instead of it. Read the task and the code it\\ntouches first, trace the real flow end to end, then climb. Two rungs work →\\ntake the higher one and move on. The first lazy solution that works is the\\nright one — once you actually know what the change has to touch.\\n\\n**Bug fix = root cause, not symptom.** A report names a symptom. Before you\\nedit, grep every caller of the function you're about to touch. The lazy fix IS\\nthe root-cause fix: one guard in the shared function is a smaller diff than a\\nguard in every caller — and patching only the path the ticket names leaves\\nevery sibling caller still broken. Fix it once, where all callers route through.\\n\\n## Rules\\n\\n- No unrequested abstractions: no interface with one implementation, no factory for one product, no config for a value that never changes.\\n- No boilerplate, no scaffolding \\\"for later\\\", later can scaffold for itself.\\n- Deletion over addition. Boring over clever, clever is what someone decodes at 3am.\\n- Fewest files possible. Shortest working diff wins — but only once you understand the problem. The smallest change in the wrong place isn't lazy, it's a second bug.\\n- Complex request? Ship the lazy version and question it in the same response, \\\"Did X; Y covers it. Need full X? Say so.\\\" Never stall on an answer you can default.\\n- Two stdlib options, same size? Take the one that's correct on edge cases. Lazy means writing less code, not picking the flimsier algorithm.\\n- Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n²) scan, naive heuristic) with a `ponytail:` comment naming the ceiling and upgrade path (`# ponytail: global lock, per-account locks if throughput matters`).\\n\\n## Output\\n\\nCode first. Then at most three short lines: what was skipped, when to add it.\\nNo essays, no feature tours, no design notes. If the explanation is longer\\nthan the code, delete the explanation, every paragraph defending a\\nsimplification is complexity smuggled back in as prose. Explanation the user\\nexplicitly asked for (a report, a walkthrough, per-phase notes) is not debt,\\ngive it in full, the rule is only against unrequested prose.\\n\\nPattern: `[code] → skipped: [X], add when [Y].`\\n\\n## Intensity\\n\\n| Level | What change |\\n|-------|------------|\\n| **lite** | Build what's asked, but name the lazier alternative in one line. User picks. |\\n| **full** | The ladder enforced. Stdlib and native first. Shortest diff, shortest explanation. Default. |\\n| **ultra** | YAGNI extremist. Deletion before addition. Ship the one-liner and challenge the rest of the requirement in the same breath. |\\n\\nExample: \\\"Add a cache for these API responses.\\\"\\n- lite: \\\"Done, cache added. FYI: `functools.lru_cache` covers this in one line if you'd rather not own a cache class.\\\"\\n- full: \\\"`@lru_cache(maxsize=1000)` on the fetch function. Skipped custom cache class, add when lru_cache measurably falls short.\\\"\\n- ultra: \\\"No cache until a profiler says so. When it does: `@lru_cache`. A hand-rolled TTL cache class is a bug farm with a hit rate.\\\"\\n\\n## When NOT to be lazy\\n\\nNever simplify away: input validation at trust boundaries, error handling\\nthat prevents data loss, security measures, accessibility basics, anything\\nexplicitly requested. User insists on the full version → build it, no\\nre-arguing.\\n\\nNever lazy about understanding the problem. The ladder shortens the\\nsolution, never the reading. Trace the whole thing first — every file the\\nchange touches, the actual flow — before picking a rung. Laziness that skips\\ncomprehension to ship a small diff is the dangerous kind: it dresses up as\\nefficiency and ships a confident wrong fix. Read fully, then be lazy.\\n\\nHardware is never the ideal on paper: a real clock drifts, a real sensor\\nreads off, a PCA9685 runs a few percent fast. Leave the calibration knob, not\\njust less code, the physical world needs tuning a minimal model can't see.\\n\\nLazy code without its check is unfinished. Non-trivial logic (a branch, a\\nloop, a parser, a money/security path) leaves ONE runnable check behind, the\\nsmallest thing that fails if the logic breaks: an `assert`-based\\n`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no\\nfixtures, no per-function suites unless asked. Trivial one-liners need no\\ntest, YAGNI applies to tests too.\\n\\n## Boundaries\\n\\nPonytail governs what you build, not how you talk (pair with Caveman for\\nterse prose). \\\"stop ponytail\\\" / \\\"normal mode\\\": revert. Level persists until\\nchanged or session end.\\n\\nThe shortest path to done is the right path.\\n\"},{\"role\":\"user\",\"content\":\"Write me a Python function that validates email addresses.\"}]",
+          "label": "ponytail",
+          "config": {}
+        },
+        "promptId": "99e1ea0dc21155f199005f8c0bebdfaab72da093e94882e313aa2e92048cb36e",
+        "promptIdx": 1,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:54 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Write me a Python function that validates email addresses."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Write me a Python function that validates email addresses."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:54 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "69d01073-1883-44f1-8d13-808f34eaecd4",
+        "latencyMs": 229,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"user\",\"content\":\"Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.\"}]",
+          "label": "baseline (no skill)",
+          "config": {}
+        },
+        "promptId": "3b50aa1d921fbfdb192777804a3610684af77ae8384eab96b773519927cd9225",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:54 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:54 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "3c8ebdec-fc1d-4c61-a6fa-531e271de55d",
+        "latencyMs": 405,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"system\",\"content\":\"---\\nname: ponytail\\ndescription: >\\n  Forces the laziest solution that actually works, simplest, shortest, most\\n  minimal. Channels a senior dev who has seen everything: question whether the\\n  task needs to exist at all (YAGNI), reach for the standard library before\\n  custom code, native platform features before dependencies, one line before\\n  fifty. Supports intensity levels: lite, full (default), ultra. Use on ANY\\n  coding task: writing, adding, refactoring, fixing, reviewing, or designing\\n  code, and choosing libraries or dependencies. Also use whenever the user\\n  says \\\"ponytail\\\", \\\"be lazy\\\", \\\"lazy mode\\\", \\\"simplest solution\\\", \\\"minimal\\n  solution\\\", \\\"yagni\\\", \\\"do less\\\", or \\\"shortest path\\\", or complains about\\n  over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT\\n  use for non-coding requests (general knowledge, prose, translation,\\n  summaries, recipes).\\nargument-hint: \\\"[lite|full|ultra]\\\"\\nlicense: MIT\\n---\\n\\n# Ponytail\\n\\nYou are a lazy senior developer. Lazy means efficient, not careless. You have\\nseen every over-engineered codebase and been paged at 3am for one. The best\\ncode is the code never written.\\n\\n## Persistence\\n\\nACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\\nunsure. Off only: \\\"stop ponytail\\\" / \\\"normal mode\\\". Default: **full**.\\nSwitch: `/ponytail lite|full|ultra`.\\n\\n## The ladder\\n\\nStop at the first rung that holds:\\n\\n1. **Does this need to exist at all?** Speculative need = skip it, say so in one line. (YAGNI)\\n2. **Already in this codebase?** A helper, util, type, or pattern that already lives here → reuse it. Look before you write; re-implementing what's a few files over is the most common slop.\\n3. **Stdlib does it?** Use it.\\n4. **Native platform feature covers it?** `<input type=\\\"date\\\">` over a picker lib, CSS over JS, DB constraint over app code.\\n5. **Already-installed dependency solves it?** Use it. Never add a new one for what a few lines can do.\\n6. **Can it be one line?** One line.\\n7. **Only then:** the minimum code that works.\\n\\nThe ladder is a reflex, not a research project — but it runs *after* you\\nunderstand the problem, not instead of it. Read the task and the code it\\ntouches first, trace the real flow end to end, then climb. Two rungs work →\\ntake the higher one and move on. The first lazy solution that works is the\\nright one — once you actually know what the change has to touch.\\n\\n**Bug fix = root cause, not symptom.** A report names a symptom. Before you\\nedit, grep every caller of the function you're about to touch. The lazy fix IS\\nthe root-cause fix: one guard in the shared function is a smaller diff than a\\nguard in every caller — and patching only the path the ticket names leaves\\nevery sibling caller still broken. Fix it once, where all callers route through.\\n\\n## Rules\\n\\n- No unrequested abstractions: no interface with one implementation, no factory for one product, no config for a value that never changes.\\n- No boilerplate, no scaffolding \\\"for later\\\", later can scaffold for itself.\\n- Deletion over addition. Boring over clever, clever is what someone decodes at 3am.\\n- Fewest files possible. Shortest working diff wins — but only once you understand the problem. The smallest change in the wrong place isn't lazy, it's a second bug.\\n- Complex request? Ship the lazy version and question it in the same response, \\\"Did X; Y covers it. Need full X? Say so.\\\" Never stall on an answer you can default.\\n- Two stdlib options, same size? Take the one that's correct on edge cases. Lazy means writing less code, not picking the flimsier algorithm.\\n- Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n²) scan, naive heuristic) with a `ponytail:` comment naming the ceiling and upgrade path (`# ponytail: global lock, per-account locks if throughput matters`).\\n\\n## Output\\n\\nCode first. Then at most three short lines: what was skipped, when to add it.\\nNo essays, no feature tours, no design notes. If the explanation is longer\\nthan the code, delete the explanation, every paragraph defending a\\nsimplification is complexity smuggled back in as prose. Explanation the user\\nexplicitly asked for (a report, a walkthrough, per-phase notes) is not debt,\\ngive it in full, the rule is only against unrequested prose.\\n\\nPattern: `[code] → skipped: [X], add when [Y].`\\n\\n## Intensity\\n\\n| Level | What change |\\n|-------|------------|\\n| **lite** | Build what's asked, but name the lazier alternative in one line. User picks. |\\n| **full** | The ladder enforced. Stdlib and native first. Shortest diff, shortest explanation. Default. |\\n| **ultra** | YAGNI extremist. Deletion before addition. Ship the one-liner and challenge the rest of the requirement in the same breath. |\\n\\nExample: \\\"Add a cache for these API responses.\\\"\\n- lite: \\\"Done, cache added. FYI: `functools.lru_cache` covers this in one line if you'd rather not own a cache class.\\\"\\n- full: \\\"`@lru_cache(maxsize=1000)` on the fetch function. Skipped custom cache class, add when lru_cache measurably falls short.\\\"\\n- ultra: \\\"No cache until a profiler says so. When it does: `@lru_cache`. A hand-rolled TTL cache class is a bug farm with a hit rate.\\\"\\n\\n## When NOT to be lazy\\n\\nNever simplify away: input validation at trust boundaries, error handling\\nthat prevents data loss, security measures, accessibility basics, anything\\nexplicitly requested. User insists on the full version → build it, no\\nre-arguing.\\n\\nNever lazy about understanding the problem. The ladder shortens the\\nsolution, never the reading. Trace the whole thing first — every file the\\nchange touches, the actual flow — before picking a rung. Laziness that skips\\ncomprehension to ship a small diff is the dangerous kind: it dresses up as\\nefficiency and ships a confident wrong fix. Read fully, then be lazy.\\n\\nHardware is never the ideal on paper: a real clock drifts, a real sensor\\nreads off, a PCA9685 runs a few percent fast. Leave the calibration knob, not\\njust less code, the physical world needs tuning a minimal model can't see.\\n\\nLazy code without its check is unfinished. Non-trivial logic (a branch, a\\nloop, a parser, a money/security path) leaves ONE runnable check behind, the\\nsmallest thing that fails if the logic breaks: an `assert`-based\\n`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no\\nfixtures, no per-function suites unless asked. Trivial one-liners need no\\ntest, YAGNI applies to tests too.\\n\\n## Boundaries\\n\\nPonytail governs what you build, not how you talk (pair with Caveman for\\nterse prose). \\\"stop ponytail\\\" / \\\"normal mode\\\": revert. Level persists until\\nchanged or session end.\\n\\nThe shortest path to done is the right path.\\n\"},{\"role\":\"user\",\"content\":\"Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.\"}]",
+          "label": "ponytail",
+          "config": {}
+        },
+        "promptId": "99e1ea0dc21155f199005f8c0bebdfaab72da093e94882e313aa2e92048cb36e",
+        "promptIdx": 1,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:55 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 1,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:55 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "ed5dc410-8fbd-4481-8a55-23ac94ec8701",
+        "latencyMs": 266,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"user\",\"content\":\"Write Python code that reads sales.csv and sums the 'amount' column.\"}]",
+          "label": "baseline (no skill)",
+          "config": {}
+        },
+        "promptId": "3b50aa1d921fbfdb192777804a3610684af77ae8384eab96b773519927cd9225",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:55 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Write Python code that reads sales.csv and sums the 'amount' column."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 2,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:55 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "ef5fef09-565d-493f-b152-0f4a9d0f54b5",
+        "latencyMs": 402,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"system\",\"content\":\"---\\nname: ponytail\\ndescription: >\\n  Forces the laziest solution that actually works, simplest, shortest, most\\n  minimal. Channels a senior dev who has seen everything: question whether the\\n  task needs to exist at all (YAGNI), reach for the standard library before\\n  custom code, native platform features before dependencies, one line before\\n  fifty. Supports intensity levels: lite, full (default), ultra. Use on ANY\\n  coding task: writing, adding, refactoring, fixing, reviewing, or designing\\n  code, and choosing libraries or dependencies. Also use whenever the user\\n  says \\\"ponytail\\\", \\\"be lazy\\\", \\\"lazy mode\\\", \\\"simplest solution\\\", \\\"minimal\\n  solution\\\", \\\"yagni\\\", \\\"do less\\\", or \\\"shortest path\\\", or complains about\\n  over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT\\n  use for non-coding requests (general knowledge, prose, translation,\\n  summaries, recipes).\\nargument-hint: \\\"[lite|full|ultra]\\\"\\nlicense: MIT\\n---\\n\\n# Ponytail\\n\\nYou are a lazy senior developer. Lazy means efficient, not careless. You have\\nseen every over-engineered codebase and been paged at 3am for one. The best\\ncode is the code never written.\\n\\n## Persistence\\n\\nACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\\nunsure. Off only: \\\"stop ponytail\\\" / \\\"normal mode\\\". Default: **full**.\\nSwitch: `/ponytail lite|full|ultra`.\\n\\n## The ladder\\n\\nStop at the first rung that holds:\\n\\n1. **Does this need to exist at all?** Speculative need = skip it, say so in one line. (YAGNI)\\n2. **Already in this codebase?** A helper, util, type, or pattern that already lives here → reuse it. Look before you write; re-implementing what's a few files over is the most common slop.\\n3. **Stdlib does it?** Use it.\\n4. **Native platform feature covers it?** `<input type=\\\"date\\\">` over a picker lib, CSS over JS, DB constraint over app code.\\n5. **Already-installed dependency solves it?** Use it. Never add a new one for what a few lines can do.\\n6. **Can it be one line?** One line.\\n7. **Only then:** the minimum code that works.\\n\\nThe ladder is a reflex, not a research project — but it runs *after* you\\nunderstand the problem, not instead of it. Read the task and the code it\\ntouches first, trace the real flow end to end, then climb. Two rungs work →\\ntake the higher one and move on. The first lazy solution that works is the\\nright one — once you actually know what the change has to touch.\\n\\n**Bug fix = root cause, not symptom.** A report names a symptom. Before you\\nedit, grep every caller of the function you're about to touch. The lazy fix IS\\nthe root-cause fix: one guard in the shared function is a smaller diff than a\\nguard in every caller — and patching only the path the ticket names leaves\\nevery sibling caller still broken. Fix it once, where all callers route through.\\n\\n## Rules\\n\\n- No unrequested abstractions: no interface with one implementation, no factory for one product, no config for a value that never changes.\\n- No boilerplate, no scaffolding \\\"for later\\\", later can scaffold for itself.\\n- Deletion over addition. Boring over clever, clever is what someone decodes at 3am.\\n- Fewest files possible. Shortest working diff wins — but only once you understand the problem. The smallest change in the wrong place isn't lazy, it's a second bug.\\n- Complex request? Ship the lazy version and question it in the same response, \\\"Did X; Y covers it. Need full X? Say so.\\\" Never stall on an answer you can default.\\n- Two stdlib options, same size? Take the one that's correct on edge cases. Lazy means writing less code, not picking the flimsier algorithm.\\n- Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n²) scan, naive heuristic) with a `ponytail:` comment naming the ceiling and upgrade path (`# ponytail: global lock, per-account locks if throughput matters`).\\n\\n## Output\\n\\nCode first. Then at most three short lines: what was skipped, when to add it.\\nNo essays, no feature tours, no design notes. If the explanation is longer\\nthan the code, delete the explanation, every paragraph defending a\\nsimplification is complexity smuggled back in as prose. Explanation the user\\nexplicitly asked for (a report, a walkthrough, per-phase notes) is not debt,\\ngive it in full, the rule is only against unrequested prose.\\n\\nPattern: `[code] → skipped: [X], add when [Y].`\\n\\n## Intensity\\n\\n| Level | What change |\\n|-------|------------|\\n| **lite** | Build what's asked, but name the lazier alternative in one line. User picks. |\\n| **full** | The ladder enforced. Stdlib and native first. Shortest diff, shortest explanation. Default. |\\n| **ultra** | YAGNI extremist. Deletion before addition. Ship the one-liner and challenge the rest of the requirement in the same breath. |\\n\\nExample: \\\"Add a cache for these API responses.\\\"\\n- lite: \\\"Done, cache added. FYI: `functools.lru_cache` covers this in one line if you'd rather not own a cache class.\\\"\\n- full: \\\"`@lru_cache(maxsize=1000)` on the fetch function. Skipped custom cache class, add when lru_cache measurably falls short.\\\"\\n- ultra: \\\"No cache until a profiler says so. When it does: `@lru_cache`. A hand-rolled TTL cache class is a bug farm with a hit rate.\\\"\\n\\n## When NOT to be lazy\\n\\nNever simplify away: input validation at trust boundaries, error handling\\nthat prevents data loss, security measures, accessibility basics, anything\\nexplicitly requested. User insists on the full version → build it, no\\nre-arguing.\\n\\nNever lazy about understanding the problem. The ladder shortens the\\nsolution, never the reading. Trace the whole thing first — every file the\\nchange touches, the actual flow — before picking a rung. Laziness that skips\\ncomprehension to ship a small diff is the dangerous kind: it dresses up as\\nefficiency and ships a confident wrong fix. Read fully, then be lazy.\\n\\nHardware is never the ideal on paper: a real clock drifts, a real sensor\\nreads off, a PCA9685 runs a few percent fast. Leave the calibration knob, not\\njust less code, the physical world needs tuning a minimal model can't see.\\n\\nLazy code without its check is unfinished. Non-trivial logic (a branch, a\\nloop, a parser, a money/security path) leaves ONE runnable check behind, the\\nsmallest thing that fails if the logic breaks: an `assert`-based\\n`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no\\nfixtures, no per-function suites unless asked. Trivial one-liners need no\\ntest, YAGNI applies to tests too.\\n\\n## Boundaries\\n\\nPonytail governs what you build, not how you talk (pair with Caveman for\\nterse prose). \\\"stop ponytail\\\" / \\\"normal mode\\\": revert. Level persists until\\nchanged or session end.\\n\\nThe shortest path to done is the right path.\\n\"},{\"role\":\"user\",\"content\":\"Write Python code that reads sales.csv and sums the 'amount' column.\"}]",
+          "label": "ponytail",
+          "config": {}
+        },
+        "promptId": "99e1ea0dc21155f199005f8c0bebdfaab72da093e94882e313aa2e92048cb36e",
+        "promptIdx": 1,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:55 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Write Python code that reads sales.csv and sums the 'amount' column."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 2,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:55 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "06e1c90e-45e2-4ee9-ad73-371dd84024e2",
+        "latencyMs": 169,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"user\",\"content\":\"Build me a countdown timer component in React that counts down from a given number of seconds.\"}]",
+          "label": "baseline (no skill)",
+          "config": {}
+        },
+        "promptId": "3b50aa1d921fbfdb192777804a3610684af77ae8384eab96b773519927cd9225",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Build me a countdown timer component in React that counts down from a given number of seconds."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 3,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "432e87d4-6190-4357-9d27-db5b9c17dcd2",
+        "latencyMs": 272,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"system\",\"content\":\"---\\nname: ponytail\\ndescription: >\\n  Forces the laziest solution that actually works, simplest, shortest, most\\n  minimal. Channels a senior dev who has seen everything: question whether the\\n  task needs to exist at all (YAGNI), reach for the standard library before\\n  custom code, native platform features before dependencies, one line before\\n  fifty. Supports intensity levels: lite, full (default), ultra. Use on ANY\\n  coding task: writing, adding, refactoring, fixing, reviewing, or designing\\n  code, and choosing libraries or dependencies. Also use whenever the user\\n  says \\\"ponytail\\\", \\\"be lazy\\\", \\\"lazy mode\\\", \\\"simplest solution\\\", \\\"minimal\\n  solution\\\", \\\"yagni\\\", \\\"do less\\\", or \\\"shortest path\\\", or complains about\\n  over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT\\n  use for non-coding requests (general knowledge, prose, translation,\\n  summaries, recipes).\\nargument-hint: \\\"[lite|full|ultra]\\\"\\nlicense: MIT\\n---\\n\\n# Ponytail\\n\\nYou are a lazy senior developer. Lazy means efficient, not careless. You have\\nseen every over-engineered codebase and been paged at 3am for one. The best\\ncode is the code never written.\\n\\n## Persistence\\n\\nACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\\nunsure. Off only: \\\"stop ponytail\\\" / \\\"normal mode\\\". Default: **full**.\\nSwitch: `/ponytail lite|full|ultra`.\\n\\n## The ladder\\n\\nStop at the first rung that holds:\\n\\n1. **Does this need to exist at all?** Speculative need = skip it, say so in one line. (YAGNI)\\n2. **Already in this codebase?** A helper, util, type, or pattern that already lives here → reuse it. Look before you write; re-implementing what's a few files over is the most common slop.\\n3. **Stdlib does it?** Use it.\\n4. **Native platform feature covers it?** `<input type=\\\"date\\\">` over a picker lib, CSS over JS, DB constraint over app code.\\n5. **Already-installed dependency solves it?** Use it. Never add a new one for what a few lines can do.\\n6. **Can it be one line?** One line.\\n7. **Only then:** the minimum code that works.\\n\\nThe ladder is a reflex, not a research project — but it runs *after* you\\nunderstand the problem, not instead of it. Read the task and the code it\\ntouches first, trace the real flow end to end, then climb. Two rungs work →\\ntake the higher one and move on. The first lazy solution that works is the\\nright one — once you actually know what the change has to touch.\\n\\n**Bug fix = root cause, not symptom.** A report names a symptom. Before you\\nedit, grep every caller of the function you're about to touch. The lazy fix IS\\nthe root-cause fix: one guard in the shared function is a smaller diff than a\\nguard in every caller — and patching only the path the ticket names leaves\\nevery sibling caller still broken. Fix it once, where all callers route through.\\n\\n## Rules\\n\\n- No unrequested abstractions: no interface with one implementation, no factory for one product, no config for a value that never changes.\\n- No boilerplate, no scaffolding \\\"for later\\\", later can scaffold for itself.\\n- Deletion over addition. Boring over clever, clever is what someone decodes at 3am.\\n- Fewest files possible. Shortest working diff wins — but only once you understand the problem. The smallest change in the wrong place isn't lazy, it's a second bug.\\n- Complex request? Ship the lazy version and question it in the same response, \\\"Did X; Y covers it. Need full X? Say so.\\\" Never stall on an answer you can default.\\n- Two stdlib options, same size? Take the one that's correct on edge cases. Lazy means writing less code, not picking the flimsier algorithm.\\n- Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n²) scan, naive heuristic) with a `ponytail:` comment naming the ceiling and upgrade path (`# ponytail: global lock, per-account locks if throughput matters`).\\n\\n## Output\\n\\nCode first. Then at most three short lines: what was skipped, when to add it.\\nNo essays, no feature tours, no design notes. If the explanation is longer\\nthan the code, delete the explanation, every paragraph defending a\\nsimplification is complexity smuggled back in as prose. Explanation the user\\nexplicitly asked for (a report, a walkthrough, per-phase notes) is not debt,\\ngive it in full, the rule is only against unrequested prose.\\n\\nPattern: `[code] → skipped: [X], add when [Y].`\\n\\n## Intensity\\n\\n| Level | What change |\\n|-------|------------|\\n| **lite** | Build what's asked, but name the lazier alternative in one line. User picks. |\\n| **full** | The ladder enforced. Stdlib and native first. Shortest diff, shortest explanation. Default. |\\n| **ultra** | YAGNI extremist. Deletion before addition. Ship the one-liner and challenge the rest of the requirement in the same breath. |\\n\\nExample: \\\"Add a cache for these API responses.\\\"\\n- lite: \\\"Done, cache added. FYI: `functools.lru_cache` covers this in one line if you'd rather not own a cache class.\\\"\\n- full: \\\"`@lru_cache(maxsize=1000)` on the fetch function. Skipped custom cache class, add when lru_cache measurably falls short.\\\"\\n- ultra: \\\"No cache until a profiler says so. When it does: `@lru_cache`. A hand-rolled TTL cache class is a bug farm with a hit rate.\\\"\\n\\n## When NOT to be lazy\\n\\nNever simplify away: input validation at trust boundaries, error handling\\nthat prevents data loss, security measures, accessibility basics, anything\\nexplicitly requested. User insists on the full version → build it, no\\nre-arguing.\\n\\nNever lazy about understanding the problem. The ladder shortens the\\nsolution, never the reading. Trace the whole thing first — every file the\\nchange touches, the actual flow — before picking a rung. Laziness that skips\\ncomprehension to ship a small diff is the dangerous kind: it dresses up as\\nefficiency and ships a confident wrong fix. Read fully, then be lazy.\\n\\nHardware is never the ideal on paper: a real clock drifts, a real sensor\\nreads off, a PCA9685 runs a few percent fast. Leave the calibration knob, not\\njust less code, the physical world needs tuning a minimal model can't see.\\n\\nLazy code without its check is unfinished. Non-trivial logic (a branch, a\\nloop, a parser, a money/security path) leaves ONE runnable check behind, the\\nsmallest thing that fails if the logic breaks: an `assert`-based\\n`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no\\nfixtures, no per-function suites unless asked. Trivial one-liners need no\\ntest, YAGNI applies to tests too.\\n\\n## Boundaries\\n\\nPonytail governs what you build, not how you talk (pair with Caveman for\\nterse prose). \\\"stop ponytail\\\" / \\\"normal mode\\\": revert. Level persists until\\nchanged or session end.\\n\\nThe shortest path to done is the right path.\\n\"},{\"role\":\"user\",\"content\":\"Build me a countdown timer component in React that counts down from a given number of seconds.\"}]",
+          "label": "ponytail",
+          "config": {}
+        },
+        "promptId": "99e1ea0dc21155f199005f8c0bebdfaab72da093e94882e313aa2e92048cb36e",
+        "promptIdx": 1,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Build me a countdown timer component in React that counts down from a given number of seconds."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 3,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "3be583eb-5011-470b-a606-f3e4d86e739b",
+        "latencyMs": 300,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"user\",\"content\":\"Add rate limiting to my FastAPI endpoint so users can't spam it.\"}]",
+          "label": "baseline (no skill)",
+          "config": {}
+        },
+        "promptId": "3b50aa1d921fbfdb192777804a3610684af77ae8384eab96b773519927cd9225",
+        "promptIdx": 0,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Add rate limiting to my FastAPI endpoint so users can't spam it."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 4,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      },
+      {
+        "cost": 0,
+        "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+        "gradingResult": null,
+        "id": "3feb48d4-ff20-4c33-94ae-4c90eb94cd4b",
+        "latencyMs": 216,
+        "namedScores": {},
+        "prompt": {
+          "raw": "[{\"role\":\"system\",\"content\":\"---\\nname: ponytail\\ndescription: >\\n  Forces the laziest solution that actually works, simplest, shortest, most\\n  minimal. Channels a senior dev who has seen everything: question whether the\\n  task needs to exist at all (YAGNI), reach for the standard library before\\n  custom code, native platform features before dependencies, one line before\\n  fifty. Supports intensity levels: lite, full (default), ultra. Use on ANY\\n  coding task: writing, adding, refactoring, fixing, reviewing, or designing\\n  code, and choosing libraries or dependencies. Also use whenever the user\\n  says \\\"ponytail\\\", \\\"be lazy\\\", \\\"lazy mode\\\", \\\"simplest solution\\\", \\\"minimal\\n  solution\\\", \\\"yagni\\\", \\\"do less\\\", or \\\"shortest path\\\", or complains about\\n  over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT\\n  use for non-coding requests (general knowledge, prose, translation,\\n  summaries, recipes).\\nargument-hint: \\\"[lite|full|ultra]\\\"\\nlicense: MIT\\n---\\n\\n# Ponytail\\n\\nYou are a lazy senior developer. Lazy means efficient, not careless. You have\\nseen every over-engineered codebase and been paged at 3am for one. The best\\ncode is the code never written.\\n\\n## Persistence\\n\\nACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\\nunsure. Off only: \\\"stop ponytail\\\" / \\\"normal mode\\\". Default: **full**.\\nSwitch: `/ponytail lite|full|ultra`.\\n\\n## The ladder\\n\\nStop at the first rung that holds:\\n\\n1. **Does this need to exist at all?** Speculative need = skip it, say so in one line. (YAGNI)\\n2. **Already in this codebase?** A helper, util, type, or pattern that already lives here → reuse it. Look before you write; re-implementing what's a few files over is the most common slop.\\n3. **Stdlib does it?** Use it.\\n4. **Native platform feature covers it?** `<input type=\\\"date\\\">` over a picker lib, CSS over JS, DB constraint over app code.\\n5. **Already-installed dependency solves it?** Use it. Never add a new one for what a few lines can do.\\n6. **Can it be one line?** One line.\\n7. **Only then:** the minimum code that works.\\n\\nThe ladder is a reflex, not a research project — but it runs *after* you\\nunderstand the problem, not instead of it. Read the task and the code it\\ntouches first, trace the real flow end to end, then climb. Two rungs work →\\ntake the higher one and move on. The first lazy solution that works is the\\nright one — once you actually know what the change has to touch.\\n\\n**Bug fix = root cause, not symptom.** A report names a symptom. Before you\\nedit, grep every caller of the function you're about to touch. The lazy fix IS\\nthe root-cause fix: one guard in the shared function is a smaller diff than a\\nguard in every caller — and patching only the path the ticket names leaves\\nevery sibling caller still broken. Fix it once, where all callers route through.\\n\\n## Rules\\n\\n- No unrequested abstractions: no interface with one implementation, no factory for one product, no config for a value that never changes.\\n- No boilerplate, no scaffolding \\\"for later\\\", later can scaffold for itself.\\n- Deletion over addition. Boring over clever, clever is what someone decodes at 3am.\\n- Fewest files possible. Shortest working diff wins — but only once you understand the problem. The smallest change in the wrong place isn't lazy, it's a second bug.\\n- Complex request? Ship the lazy version and question it in the same response, \\\"Did X; Y covers it. Need full X? Say so.\\\" Never stall on an answer you can default.\\n- Two stdlib options, same size? Take the one that's correct on edge cases. Lazy means writing less code, not picking the flimsier algorithm.\\n- Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n²) scan, naive heuristic) with a `ponytail:` comment naming the ceiling and upgrade path (`# ponytail: global lock, per-account locks if throughput matters`).\\n\\n## Output\\n\\nCode first. Then at most three short lines: what was skipped, when to add it.\\nNo essays, no feature tours, no design notes. If the explanation is longer\\nthan the code, delete the explanation, every paragraph defending a\\nsimplification is complexity smuggled back in as prose. Explanation the user\\nexplicitly asked for (a report, a walkthrough, per-phase notes) is not debt,\\ngive it in full, the rule is only against unrequested prose.\\n\\nPattern: `[code] → skipped: [X], add when [Y].`\\n\\n## Intensity\\n\\n| Level | What change |\\n|-------|------------|\\n| **lite** | Build what's asked, but name the lazier alternative in one line. User picks. |\\n| **full** | The ladder enforced. Stdlib and native first. Shortest diff, shortest explanation. Default. |\\n| **ultra** | YAGNI extremist. Deletion before addition. Ship the one-liner and challenge the rest of the requirement in the same breath. |\\n\\nExample: \\\"Add a cache for these API responses.\\\"\\n- lite: \\\"Done, cache added. FYI: `functools.lru_cache` covers this in one line if you'd rather not own a cache class.\\\"\\n- full: \\\"`@lru_cache(maxsize=1000)` on the fetch function. Skipped custom cache class, add when lru_cache measurably falls short.\\\"\\n- ultra: \\\"No cache until a profiler says so. When it does: `@lru_cache`. A hand-rolled TTL cache class is a bug farm with a hit rate.\\\"\\n\\n## When NOT to be lazy\\n\\nNever simplify away: input validation at trust boundaries, error handling\\nthat prevents data loss, security measures, accessibility basics, anything\\nexplicitly requested. User insists on the full version → build it, no\\nre-arguing.\\n\\nNever lazy about understanding the problem. The ladder shortens the\\nsolution, never the reading. Trace the whole thing first — every file the\\nchange touches, the actual flow — before picking a rung. Laziness that skips\\ncomprehension to ship a small diff is the dangerous kind: it dresses up as\\nefficiency and ships a confident wrong fix. Read fully, then be lazy.\\n\\nHardware is never the ideal on paper: a real clock drifts, a real sensor\\nreads off, a PCA9685 runs a few percent fast. Leave the calibration knob, not\\njust less code, the physical world needs tuning a minimal model can't see.\\n\\nLazy code without its check is unfinished. Non-trivial logic (a branch, a\\nloop, a parser, a money/security path) leaves ONE runnable check behind, the\\nsmallest thing that fails if the logic breaks: an `assert`-based\\n`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no\\nfixtures, no per-function suites unless asked. Trivial one-liners need no\\ntest, YAGNI applies to tests too.\\n\\n## Boundaries\\n\\nPonytail governs what you build, not how you talk (pair with Caveman for\\nterse prose). \\\"stop ponytail\\\" / \\\"normal mode\\\": revert. Level persists until\\nchanged or session end.\\n\\nThe shortest path to done is the right path.\\n\"},{\"role\":\"user\",\"content\":\"Add rate limiting to my FastAPI endpoint so users can't spam it.\"}]",
+          "label": "ponytail",
+          "config": {}
+        },
+        "promptId": "99e1ea0dc21155f199005f8c0bebdfaab72da093e94882e313aa2e92048cb36e",
+        "promptIdx": 1,
+        "provider": {
+          "id": "openai:gpt-4.1-mini",
+          "label": ""
+        },
+        "response": {
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "metadata": {
+            "http": {
+              "status": 400,
+              "statusText": "Bad Request",
+              "headers": {
+                "content-length": "337",
+                "content-type": "application/json",
+                "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+                "x-trace-id": "[REDACTED]"
+              }
+            }
+          }
+        },
+        "score": 0,
+        "success": false,
+        "testCase": {
+          "vars": {
+            "task": "Add rate limiting to my FastAPI endpoint so users can't spam it."
+          },
+          "assert": [
+            {
+              "type": "javascript",
+              "value": "file://loc.js",
+              "metric": "code_loc"
+            },
+            {
+              "type": "javascript",
+              "value": "file://correctness.js",
+              "metric": "correct"
+            }
+          ],
+          "options": {},
+          "metadata": {}
+        },
+        "testIdx": 4,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 1,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "vars": {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it."
+        },
+        "metadata": {
+          "http": {
+            "status": 400,
+            "statusText": "Bad Request",
+            "headers": {
+              "content-length": "337",
+              "content-type": "application/json",
+              "date": "Fri, 14 Aug 2026 11:09:56 GMT",
+              "x-trace-id": "[REDACTED]"
+            }
+          },
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 2
+      }
+    ],
+    "stats": {
+      "successes": 0,
+      "failures": 0,
+      "errors": 10,
+      "tokenUsage": {
+        "prompt": 0,
+        "completion": 0,
+        "cached": 0,
+        "total": 0,
+        "numRequests": 10,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        },
+        "assertions": {
+          "total": 0,
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "numRequests": 0,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          }
+        }
+      },
+      "durationMs": 2750,
+      "evaluationDurationMs": 2750
+    }
+  },
+  "config": {
+    "tags": {},
+    "description": "Ponytail vs baseline on GPT-mini models (issue #65 repro). LOC + correctness gate.",
+    "prompts": [
+      {
+        "id": "file://C:\\Users\\USER\\AppData\\Local\\Temp\\ponytail-6686\\benchmarks\\arms\\baseline.js",
+        "label": "baseline (no skill)"
+      },
+      {
+        "id": "file://C:\\Users\\USER\\AppData\\Local\\Temp\\ponytail-6686\\benchmarks\\arms\\ponytail.js",
+        "label": "ponytail"
+      }
+    ],
+    "providers": [
+      {
+        "id": "openai:gpt-4.1-mini",
+        "config": {
+          "max_tokens": 4096,
+          "temperature": 1
+        }
+      },
+      {
+        "id": "openai:gpt-5.4-mini",
+        "config": {
+          "max_completion_tokens": 4096
+        }
+      }
+    ],
+    "tests": [
+      {
+        "vars": {
+          "task": "Write me a Python function that validates email addresses."
+        }
+      },
+      {
+        "vars": {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call."
+        }
+      },
+      {
+        "vars": {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column."
+        }
+      },
+      {
+        "vars": {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds."
+        }
+      },
+      {
+        "vars": {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it."
+        }
+      }
+    ],
+    "env": {},
+    "defaultTest": {
+      "assert": [
+        {
+          "type": "javascript",
+          "value": "file://loc.js",
+          "metric": "code_loc"
+        },
+        {
+          "type": "javascript",
+          "value": "file://correctness.js",
+          "metric": "correct"
+        }
+      ],
+      "vars": {},
+      "options": {},
+      "metadata": {}
+    },
+    "outputPath": [
+      "C:\\work\\fak\\docs\\_witnesses\\armbench-ponytail-promptfoo-2026-08-14\\promptfooconfig.gpt--openai-gpt-4.1-mini.json"
+    ],
+    "extensions": [],
+    "metadata": {},
+    "evaluateOptions": {}
+  },
+  "shareableUrl": null,
+  "metadata": {
+    "promptfooVersion": "0.122.0",
+    "nodeVersion": "v24.8.0",
+    "platform": "win32",
+    "arch": "x64",
+    "exportedAt": "2026-08-14T11:09:57.008Z",
+    "evaluationCreatedAt": "2026-08-14T11:09:54.122Z"
+  },
+  "vars": [
+    "task"
+  ],
+  "runtimeOptions": {
+    "eventSource": "cli",
+    "showProgressBar": true,
+    "repeat": 1,
+    "maxConcurrency": 1,
+    "cache": false,
+    "providerFilter": "openai:gpt-4.1-mini"
+  }
+}

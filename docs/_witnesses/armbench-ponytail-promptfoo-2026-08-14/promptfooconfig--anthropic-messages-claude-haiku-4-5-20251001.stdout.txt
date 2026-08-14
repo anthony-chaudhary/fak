@@ -1,0 +1,10 @@
+Cache is disabled.
+  ✗ Missing ANTHROPIC_API_KEY (anthropic:messages:claude-haiku-4-5-20251001)
+
+To fix, set the environment variable or use --env-file:
+    export ANTHROPIC_API_KEY=your-api-key-here
+
+
+There were some errors during the operation. See logs for more details.
+Error log: C:\Users\USER\.promptfoo\logs\promptfoo-error-2026-08-14_11-09-45-412Z.log
+Debug log: C:\Users\USER\.promptfoo\logs\promptfoo-debug-2026-08-14_11-09-45-412Z.log

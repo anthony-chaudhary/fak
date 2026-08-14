@@ -1,0 +1,62 @@
+Cache is disabled.
+Starting evaluation eval-vMN-2026-08-14T11:09:54
+Running 10 test cases (up to 1 at a time)...
+
+[90m┌────────────────────────────────────────[39m[90m┬────────────────────────────────────────[39m[90m┬────────────────────────────────────────┐[39m
+[90m│[39m[1m[34m task                                   [39m[22m[90m│[39m[1m[34m [openai:gpt-4.1-mini] baseline (no     [39m[22m[90m│[39m[1m[34m [openai:gpt-4.1-mini] ponytail         [39m[22m[90m│[39m
+[90m│[39m[1m[34m                                        [39m[22m[90m│[39m[1m[34m skill)                                 [39m[22m[90m│[39m[1m[34m                                        [39m[22m[90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Write me a Python function that        [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m
+[90m│[39m validates email addresses.             [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m
+[90m│[39m                                        [90m│[39m rejected the request as malformed      [90m│[39m rejected the request as malformed      [90m│[39m
+[90m│[39m                                        [90m│[39m (HTTP 400) — check the model name,     [90m│[39m (HTTP 400) — check the model name,     [90m│[39m
+[90m│[39m                                        [90m│[39m message roles, and parameter ranges —  [90m│[39m message roles, and parameter ranges —  [90m│[39m
+[90m│[39m                                        [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m
+[90m│[39m                                        [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Write a reusable debounce function in  [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m
+[90m│[39m vanilla JavaScript: debounce(fn,       [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m
+[90m│[39m delay) returns a debounced version of  [90m│[39m rejected the request as malformed      [90m│[39m rejected the request as malformed      [90m│[39m
+[90m│[39m fn that delays calling it until delay  [90m│[39m (HTTP 400) — check the model name,     [90m│[39m (HTTP 400) — check the model name,     [90m│[39m
+[90m│[39m ms after the last call.                [90m│[39m message roles, and parameter ranges —  [90m│[39m message roles, and parameter ranges —  [90m│[39m
+[90m│[39m                                        [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m
+[90m│[39m                                        [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Write Python code that reads sales.csv [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m
+[90m│[39m and sums the 'amount' column.          [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m
+[90m│[39m                                        [90m│[39m rejected the request as malformed      [90m│[39m rejected the request as malformed      [90m│[39m
+[90m│[39m                                        [90m│[39m (HTTP 400) — check the model name,     [90m│[39m (HTTP 400) — check the model name,     [90m│[39m
+[90m│[39m                                        [90m│[39m message roles, and parameter ranges —  [90m│[39m message roles, and parameter ranges —  [90m│[39m
+[90m│[39m                                        [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m
+[90m│[39m                                        [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Build me a countdown timer component   [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m
+[90m│[39m in React that counts down from a given [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m
+[90m│[39m number of seconds.                     [90m│[39m rejected the request as malformed      [90m│[39m rejected the request as malformed      [90m│[39m
+[90m│[39m                                        [90m│[39m (HTTP 400) — check the model name,     [90m│[39m (HTTP 400) — check the model name,     [90m│[39m
+[90m│[39m                                        [90m│[39m message roles, and parameter ranges —  [90m│[39m message roles, and parameter ranges —  [90m│[39m
+[90m│[39m                                        [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m
+[90m│[39m                                        [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Add rate limiting to my FastAPI        [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m [ERROR] API error: 400 Bad Request     [90m│[39m
+[90m│[39m endpoint so users can't spam it.       [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m {"error":{"code":"upstream_invalid_re… [90m│[39m
+[90m│[39m                                        [90m│[39m rejected the request as malformed      [90m│[39m rejected the request as malformed      [90m│[39m
+[90m│[39m                                        [90m│[39m (HTTP 400) — check the model name,     [90m│[39m (HTTP 400) — check the model name,     [90m│[39m
+[90m│[39m                                        [90m│[39m message roles, and parameter ranges —  [90m│[39m message roles, and parameter ranges —  [90m│[39m
+[90m│[39m                                        [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m upstream said: {\"detail\":\"The       [90m│[39m
+[90m│[39m                                        [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m 'gpt-4.1-mini' m...                    [90m│[39m
+[90m└────────────────────────────────────────[39m[90m┴────────────────────────────────────────[39m[90m┴────────────────────────────────────────┘[39m
+✓ Eval complete (ID: eval-vMN-2026-08-14T11:09:54)
+
+» View results: promptfoo view
+» Share with your team: https://promptfoo.app
+» Feedback: https://promptfoo.dev/feedback
+
+
+Results:
+  0 passed (0%)
+  0 failed (0%)
+  ✗ 10 errors (100%)
+Duration: 3s (concurrency: 1)
+
+Writing output to C:\work\fak\docs\_witnesses\armbench-ponytail-promptfoo-2026-08-14\promptfooconfig.gpt--openai-gpt-4.1-mini.json

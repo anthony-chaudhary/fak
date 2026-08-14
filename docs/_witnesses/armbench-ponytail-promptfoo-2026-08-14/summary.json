@@ -1,0 +1,375 @@
+{
+  "schema": "fak.armbench.ponytail-promptfoo.v1",
+  "upstream": "DietrichGebert/ponytail",
+  "revision": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "promptfoo_version": "0.122.0",
+  "captured_at": "2026-08-14T11:09:43Z",
+  "inputs": [
+    {
+      "path": "benchmarks/arms/baseline.js",
+      "kind": "arm",
+      "sha256": "ef0f81f670425705ab3195609947aa64890890cb078d7669780afe2228da8740",
+      "bytes": 113
+    },
+    {
+      "path": "benchmarks/arms/caveman-SKILL.md",
+      "kind": "skill",
+      "sha256": "09ebdef35a85d058f8eba04c6a3d91079ac8dabc3d45d265694f128c808f7648",
+      "bytes": 3654
+    },
+    {
+      "path": "benchmarks/arms/caveman.js",
+      "kind": "arm",
+      "sha256": "b3793a7549c9217e9e9b89b2ed5e94813a9c71297386c77a177d4e2ef3e13d1a",
+      "bytes": 315
+    },
+    {
+      "path": "benchmarks/arms/ponytail.js",
+      "kind": "arm",
+      "sha256": "9091a2e794ad1c5c7c4c9b68a3bb4aa995fcce6d0f09aad37a2febdd95640b82",
+      "bytes": 373
+    },
+    {
+      "path": "benchmarks/correctness.js",
+      "kind": "assertion",
+      "sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "bytes": 10228
+    },
+    {
+      "path": "benchmarks/loc.js",
+      "kind": "assertion",
+      "sha256": "c3c346f836eec0ba759a100a5c1166be2362fcf37017470f3c9f9b872ab44234",
+      "bytes": 935
+    },
+    {
+      "path": "benchmarks/promptfooconfig.gemini.yaml",
+      "kind": "config",
+      "sha256": "2c1578b259fc3efb755d1c1534f2a01ebe75ea05e6fc2cd6701ea68e99affce6",
+      "bytes": 1400
+    },
+    {
+      "path": "benchmarks/promptfooconfig.gpt-newest.yaml",
+      "kind": "config",
+      "sha256": "e3bcfbf34eb148d81bfd3c985d88ea7e7f71c9989b74b9588c8136488ed18f72",
+      "bytes": 1399
+    },
+    {
+      "path": "benchmarks/promptfooconfig.gpt.yaml",
+      "kind": "config",
+      "sha256": "1e196e71efc3c77c54efb10d58634a9e1d1fe58c7e8755ee712825e1c6b940fb",
+      "bytes": 1390
+    },
+    {
+      "path": "benchmarks/promptfooconfig.yaml",
+      "kind": "config",
+      "sha256": "fc292f68c5727f306f5ba1ce74b161631e416ce71b66a67d9241a59556c3e00d",
+      "bytes": 1815
+    },
+    {
+      "path": "benchmarks/prompts.json",
+      "kind": "prompt",
+      "sha256": "6137aae013b057d38c90b38af17e6b22d57011b85d0be5d549045df196fa37ac",
+      "bytes": 1029
+    },
+    {
+      "path": "skills/ponytail/SKILL.md",
+      "kind": "skill",
+      "sha256": "1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2",
+      "bytes": 6637
+    }
+  ],
+  "cells": [
+    {
+      "config": "promptfooconfig.yaml",
+      "provider": "anthropic:messages:claude-haiku-4-5-20251001",
+      "arms": [
+        "baseline",
+        "caveman",
+        "ponytail"
+      ],
+      "status": "unavailable",
+      "exit_code": 1,
+      "result_path": "promptfooconfig--anthropic-messages-claude-haiku-4-5-20251001.json",
+      "stdout_path": "promptfooconfig--anthropic-messages-claude-haiku-4-5-20251001.stdout.txt",
+      "stderr_path": "promptfooconfig--anthropic-messages-claude-haiku-4-5-20251001.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 1",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.yaml",
+        "--filter-providers",
+        "anthropic:messages:claude-haiku-4-5-20251001",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig--anthropic-messages-claude-haiku-4-5-20251001.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.yaml",
+      "provider": "anthropic:messages:claude-sonnet-4-6",
+      "arms": [
+        "baseline",
+        "caveman",
+        "ponytail"
+      ],
+      "status": "unavailable",
+      "exit_code": 1,
+      "result_path": "promptfooconfig--anthropic-messages-claude-sonnet-4-6.json",
+      "stdout_path": "promptfooconfig--anthropic-messages-claude-sonnet-4-6.stdout.txt",
+      "stderr_path": "promptfooconfig--anthropic-messages-claude-sonnet-4-6.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 1",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.yaml",
+        "--filter-providers",
+        "anthropic:messages:claude-sonnet-4-6",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig--anthropic-messages-claude-sonnet-4-6.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.yaml",
+      "provider": "anthropic:messages:claude-opus-4-8",
+      "arms": [
+        "baseline",
+        "caveman",
+        "ponytail"
+      ],
+      "status": "unavailable",
+      "exit_code": 1,
+      "result_path": "promptfooconfig--anthropic-messages-claude-opus-4-8.json",
+      "stdout_path": "promptfooconfig--anthropic-messages-claude-opus-4-8.stdout.txt",
+      "stderr_path": "promptfooconfig--anthropic-messages-claude-opus-4-8.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 1",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.yaml",
+        "--filter-providers",
+        "anthropic:messages:claude-opus-4-8",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig--anthropic-messages-claude-opus-4-8.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gpt.yaml",
+      "provider": "openai:gpt-4.1-mini",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "failed",
+      "exit_code": 100,
+      "result_path": "promptfooconfig.gpt--openai-gpt-4.1-mini.json",
+      "stdout_path": "promptfooconfig.gpt--openai-gpt-4.1-mini.stdout.txt",
+      "stderr_path": "promptfooconfig.gpt--openai-gpt-4.1-mini.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 100",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gpt.yaml",
+        "--filter-providers",
+        "openai:gpt-4.1-mini",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gpt--openai-gpt-4.1-mini.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gpt.yaml",
+      "provider": "openai:gpt-5.4-mini",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "completed",
+      "exit_code": 0,
+      "result_path": "promptfooconfig.gpt--openai-gpt-5.4-mini.json",
+      "stdout_path": "promptfooconfig.gpt--openai-gpt-5.4-mini.stdout.txt",
+      "stderr_path": "promptfooconfig.gpt--openai-gpt-5.4-mini.stderr.txt",
+      "attempts": 1,
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gpt.yaml",
+        "--filter-providers",
+        "openai:gpt-5.4-mini",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gpt--openai-gpt-5.4-mini.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gpt-newest.yaml",
+      "provider": "openai:gpt-5.5",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "completed",
+      "exit_code": 0,
+      "result_path": "promptfooconfig.gpt-newest--openai-gpt-5.5.json",
+      "stdout_path": "promptfooconfig.gpt-newest--openai-gpt-5.5.stdout.txt",
+      "stderr_path": "promptfooconfig.gpt-newest--openai-gpt-5.5.stderr.txt",
+      "attempts": 1,
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gpt-newest.yaml",
+        "--filter-providers",
+        "openai:gpt-5.5",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gpt-newest--openai-gpt-5.5.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gpt-newest.yaml",
+      "provider": "openai:gpt-4.1-mini",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "failed",
+      "exit_code": 100,
+      "result_path": "promptfooconfig.gpt-newest--openai-gpt-4.1-mini.json",
+      "stdout_path": "promptfooconfig.gpt-newest--openai-gpt-4.1-mini.stdout.txt",
+      "stderr_path": "promptfooconfig.gpt-newest--openai-gpt-4.1-mini.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 100",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gpt-newest.yaml",
+        "--filter-providers",
+        "openai:gpt-4.1-mini",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gpt-newest--openai-gpt-4.1-mini.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gpt-newest.yaml",
+      "provider": "openai:gpt-5.4-mini",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "completed",
+      "exit_code": 0,
+      "result_path": "promptfooconfig.gpt-newest--openai-gpt-5.4-mini.json",
+      "stdout_path": "promptfooconfig.gpt-newest--openai-gpt-5.4-mini.stdout.txt",
+      "stderr_path": "promptfooconfig.gpt-newest--openai-gpt-5.4-mini.stderr.txt",
+      "attempts": 1,
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gpt-newest.yaml",
+        "--filter-providers",
+        "openai:gpt-5.4-mini",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gpt-newest--openai-gpt-5.4-mini.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gemini.yaml",
+      "provider": "google:gemini-3.5-flash",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "unavailable",
+      "exit_code": 1,
+      "result_path": "promptfooconfig.gemini--google-gemini-3.5-flash.json",
+      "stdout_path": "promptfooconfig.gemini--google-gemini-3.5-flash.stdout.txt",
+      "stderr_path": "promptfooconfig.gemini--google-gemini-3.5-flash.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 1",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gemini.yaml",
+        "--filter-providers",
+        "google:gemini-3.5-flash",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gemini--google-gemini-3.5-flash.json"
+      ]
+    },
+    {
+      "config": "promptfooconfig.gemini.yaml",
+      "provider": "google:gemini-3.1-pro-preview",
+      "arms": [
+        "baseline",
+        "ponytail"
+      ],
+      "status": "unavailable",
+      "exit_code": 1,
+      "result_path": "promptfooconfig.gemini--google-gemini-3.1-pro-preview.json",
+      "stdout_path": "promptfooconfig.gemini--google-gemini-3.1-pro-preview.stdout.txt",
+      "stderr_path": "promptfooconfig.gemini--google-gemini-3.1-pro-preview.stderr.txt",
+      "attempts": 1,
+      "detail": "exit status 1",
+      "command": [
+        "npx",
+        "promptfoo@0.122.0",
+        "eval",
+        "-c",
+        "benchmarks/promptfooconfig.gemini.yaml",
+        "--filter-providers",
+        "google:gemini-3.1-pro-preview",
+        "--no-cache",
+        "--max-concurrency",
+        "1",
+        "--output",
+        "docs/_witnesses/armbench-ponytail-promptfoo-2026-08-14/promptfooconfig.gemini--google-gemini-3.1-pro-preview.json"
+      ]
+    }
+  ],
+  "fak_value_claim": "none",
+  "all_declared_cells_attempted": true
+}

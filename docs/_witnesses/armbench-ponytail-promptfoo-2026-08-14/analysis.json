@@ -1,0 +1,842 @@
+{
+  "schema": "fak.armbench.ponytail-promptfoo.analysis.v1",
+  "meaning": "truthful comparator reproduction only; no fak value claim",
+  "upstream_delta_basis": "Upstream published 2026-06-12 aggregate covers Claude 4.0-era Sonnet/Opus/Haiku and lacks per-task raw data; pinned configs now declare different model IDs, so no like-for-like numeric delta is asserted. Current cells are reported independently.",
+  "completed_results": [
+    {
+      "result_file": "promptfooconfig.gpt--openai-gpt-4.1-mini.json",
+      "provider": "openai:gpt-4.1-mini",
+      "stats": {
+        "successes": 0,
+        "failures": 0,
+        "errors": 10,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 10,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "durationMs": 2750,
+        "evaluationDurationMs": 2750
+      },
+      "per_arm": {
+        "baseline (no skill)": {
+          "tasks": 5,
+          "correct": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "errors": 5
+        },
+        "ponytail": {
+          "tasks": 5,
+          "correct": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "errors": 5
+        }
+      },
+      "per_task": [
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        }
+      ]
+    },
+    {
+      "result_file": "promptfooconfig.gpt--openai-gpt-5.4-mini.json",
+      "provider": "openai:gpt-5.4-mini",
+      "stats": {
+        "successes": 10,
+        "failures": 0,
+        "errors": 0,
+        "tokenUsage": {
+          "prompt": 8312,
+          "completion": 2157,
+          "cached": 0,
+          "total": 10469,
+          "numRequests": 10,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 1280,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "durationMs": 45138,
+        "evaluationDurationMs": 45138
+      },
+      "per_arm": {
+        "baseline (no skill)": {
+          "tasks": 5,
+          "correct": 5,
+          "output_tokens": 1446,
+          "total_tokens": 1567,
+          "errors": 0
+        },
+        "ponytail": {
+          "tasks": 5,
+          "correct": 5,
+          "output_tokens": 711,
+          "total_tokens": 8902,
+          "errors": 0
+        }
+      },
+      "per_task": [
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 226,
+          "total_tokens": 242,
+          "success": true,
+          "error": null,
+          "raw_output": "Sure — here’s a simple Python function that validates an email address using a regular expression:\n\n```python\nimport re\n\ndef is_valid_email(email: str) -> bool:\n    pattern = r\"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$\"\n    return re.match(pattern, email) is not None\n```\n\n### Example usage:\n```python\nprint(is_valid_email(\"test@example.com\"))      # True\nprint(is_valid_email(\"bad-email@\"))            # False\nprint(is_valid_email(\"john.doe@mail.co.uk\"))   # True\n```\n\n### Notes:\n- This checks for a basic valid email format.\n- It does **not** fully implement all RFC email rules, which are much more complex.\n- For most common use cases, this is enough.\n\nIf you want, I can also give you:\n1. a **stricter** validator,\n2. a **more RFC-compliant** one, or\n3. a version using the `email` standard library."
+        },
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 8,
+          "output_tokens": 166,
+          "total_tokens": 1796,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport re\n\n_EMAIL_RE = re.compile(\n    r\"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@\"\n    r\"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\"\n    r\"(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$\"\n)\n\ndef is_valid_email(email: str) -> bool:\n    return bool(_EMAIL_RE.fullmatch(email))\n```\n\nskipped: full RFC 5322 edge cases and internationalized addresses.\nadd when: you need standards-grade parsing or non-ASCII email support."
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 14,
+          "output_tokens": 144,
+          "total_tokens": 184,
+          "success": true,
+          "error": null,
+          "raw_output": "```js\nfunction debounce(fn, delay) {\n  let timerId;\n\n  return function (...args) {\n    const context = this;\n\n    clearTimeout(timerId);\n    timerId = setTimeout(() => {\n      fn.apply(context, args);\n    }, delay);\n  };\n}\n```\n\n### Example\n```js\nconst logResize = debounce(() => {\n  console.log(\"Window resized\");\n}, 300);\n\nwindow.addEventListener(\"resize\", logResize);\n```\n\n### How it works\n- Each call resets the timer.\n- `fn` runs only after no new calls happen for `delay` milliseconds.\n- `apply(context, args)` preserves `this` and forwards arguments."
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 69,
+          "total_tokens": 1723,
+          "success": true,
+          "error": null,
+          "raw_output": "```js\nfunction debounce(fn, delay) {\n  let timer;\n  return function (...args) {\n    clearTimeout(timer);\n    timer = setTimeout(() => fn.apply(this, args), delay);\n  };\n}\n```\n\n→ skipped: extra options like leading/trailing/maxWait. add when you need those behaviors.\n"
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 73,
+          "total_tokens": 94,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport csv\n\ntotal = 0.0\n\nwith open(\"sales.csv\", newline=\"\", encoding=\"utf-8\") as file:\n    reader = csv.DictReader(file)\n    for row in reader:\n        total += float(row[\"amount\"])\n\nprint(total)\n```\n\nIf you want, I can also show a pandas version."
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 4,
+          "output_tokens": 73,
+          "total_tokens": 1708,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport csv\n\nwith open(\"sales.csv\", newline=\"\") as f:\n    total = sum(float(row[\"amount\"]) for row in csv.DictReader(f))\n\nprint(total)\n```\n\n- skipped: custom parser, extra error handling.\n- add when: the file is messy, huge, or you need validation/formatting."
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 57,
+          "output_tokens": 576,
+          "total_tokens": 600,
+          "success": true,
+          "error": null,
+          "raw_output": "Here’s a simple reusable React countdown timer component that counts down from a given number of seconds.\n\n### CountdownTimer.jsx\n```jsx\nimport React, { useEffect, useState } from \"react\";\n\nfunction CountdownTimer({ initialSeconds = 60, onComplete }) {\n  const [secondsLeft, setSecondsLeft] = useState(initialSeconds);\n  const [isRunning, setIsRunning] = useState(true);\n\n  useEffect(() => {\n    if (!isRunning || secondsLeft <= 0) return;\n\n    const intervalId = setInterval(() => {\n      setSecondsLeft((prev) => {\n        if (prev <= 1) {\n          clearInterval(intervalId);\n          setIsRunning(false);\n          if (onComplete) onComplete();\n          return 0;\n        }\n        return prev - 1;\n      });\n    }, 1000);\n\n    return () => clearInterval(intervalId);\n  }, [isRunning, secondsLeft, onComplete]);\n\n  const formatTime = (totalSeconds) => {\n    const minutes = Math.floor(totalSeconds / 60);\n    const seconds = totalSeconds % 60;\n    return `${String(minutes).padStart(2, \"0\")}:${String(seconds).padStart(2, \"0\")}`;\n  };\n\n  const handleReset = () => {\n    setSecondsLeft(initialSeconds);\n    setIsRunning(true);\n  };\n\n  return (\n    <div style={{ fontFamily: \"sans-serif\", textAlign: \"center\" }}>\n      <h2>Countdown Timer</h2>\n      <div style={{ fontSize: \"2rem\", margin: \"1rem 0\" }}>\n        {formatTime(secondsLeft)}\n      </div>\n      <button onClick={() => setIsRunning((prev) => !prev)}>\n        {isRunning ? \"Pause\" : \"Resume\"}\n      </button>\n      <button onClick={handleReset} style={{ marginLeft: \"0.5rem\" }}>\n        Reset\n      </button>\n    </div>\n  );\n}\n\nexport default CountdownTimer;\n```\n\n### Usage\n```jsx\nimport React from \"react\";\nimport CountdownTimer from \"./CountdownTimer\";\n\nfunction App() {\n  return (\n    <div>\n      <CountdownTimer\n        initialSeconds={90}\n        onComplete={() => alert(\"Time's up!\")}\n      />\n    </div>\n  );\n}\n\nexport default App;\n```\n\n### Notes\n- `initialSeconds` sets the starting countdown value.\n- `onComplete` runs when the timer hits zero.\n- Includes **Pause**, **Resume**, and **Reset** controls.\n\nIf you want, I can also provide:\n- a version using **TypeScript**\n- a version with **custom styling**\n- a version that uses a **single hook** like `useCountdown`"
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 19,
+          "output_tokens": 170,
+          "total_tokens": 1808,
+          "success": true,
+          "error": null,
+          "raw_output": "```jsx\nimport { useEffect, useState } from \"react\";\n\nexport default function CountdownTimer({ seconds }) {\n  const [remaining, setRemaining] = useState(seconds);\n\n  useEffect(() => {\n    setRemaining(seconds);\n\n    if (seconds <= 0) return;\n\n    const id = setInterval(() => {\n      setRemaining((s) => {\n        if (s <= 1) {\n          clearInterval(id);\n          return 0;\n        }\n        return s - 1;\n      });\n    }, 1000);\n\n    return () => clearInterval(id);\n  }, [seconds]);\n\n  return <span>{remaining}</span>;\n}\n```\n\nskipped: styling, pause/reset controls, prop validation.  \nadd when: you need formatted time, user controls, or stricter input handling."
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 22,
+          "output_tokens": 427,
+          "total_tokens": 447,
+          "success": true,
+          "error": null,
+          "raw_output": "Here’s a simple way to add rate limiting to a FastAPI endpoint using `slowapi`.\n\n## 1) Install the dependency\n\n```bash\npip install slowapi\n```\n\n## 2) Set up the limiter\n\n```python\nfrom fastapi import FastAPI, Request\nfrom slowapi import Limiter, _rate_limit_exceeded_handler\nfrom slowapi.errors import RateLimitExceeded\nfrom slowapi.util import get_remote_address\nfrom slowapi.middleware import SlowAPIMiddleware\n\napp = FastAPI()\n\nlimiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\napp.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)\napp.add_middleware(SlowAPIMiddleware)\n```\n\n## 3) Protect your endpoint\n\n```python\nfrom slowapi import Limiter\nfrom fastapi import Request\n\n@app.get(\"/my-endpoint\")\n@limiter.limit(\"5/minute\")\nasync def my_endpoint(request: Request):\n    return {\"message\": \"success\"}\n```\n\nThat limits each client IP to **5 requests per minute**.\n\n---\n\n## Common options\n\n- `10/minute`\n- `100/hour`\n- `1000/day`\n\nExample:\n\n```python\n@limiter.limit(\"10/minute\")\n```\n\n---\n\n## If you want per-user limits instead of per-IP\n\nIf users are authenticated, you can rate limit by user ID or API key rather than IP:\n\n```python\nfrom slowapi.util import get_remote_address\n\ndef get_user_key(request: Request):\n    return request.headers.get(\"X-User-ID\", get_remote_address(request))\n\nlimiter = Limiter(key_func=get_user_key)\n```\n\n---\n\n## Notes\n\n- `slowapi` works well for simple setups.\n- If you run multiple workers or multiple servers, use Redis for shared rate-limit storage; otherwise each worker will track limits separately.\n\nIf you want, I can also show you:\n1. **rate limiting with Redis**,  \n2. **per-authenticated-user limits**, or  \n3. **a dependency-based FastAPI example**."
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 17,
+          "output_tokens": 233,
+          "total_tokens": 1867,
+          "success": true,
+          "error": null,
+          "raw_output": "from fastapi import FastAPI, HTTPException, Request\nfrom time import monotonic\n\napp = FastAPI()\n\n# ponytail: in-memory per-IP limit; swap to Redis if you run multiple workers/instances.\n_BUCKETS: dict[str, tuple[float, int]] = {}\nWINDOW = 60\nMAX_REQS = 10\n\n@app.middleware(\"http\")\nasync def rate_limit(request: Request, call_next):\n    ip = request.client.host if request.client else \"unknown\"\n    now = monotonic()\n    start, count = _BUCKETS.get(ip, (now, 0))\n\n    if now - start >= WINDOW:\n        start, count = now, 0\n\n    if count >= MAX_REQS:\n        raise HTTPException(status_code=429, detail=\"Too many requests\")\n\n    _BUCKETS[ip] = (start, count + 1)\n    return await call_next(request)\n\n# skipped: Redis/shared-store limiter, auth-based quotas, cleanup/expiry job.\n# add when: you have multiple processes, want per-user limits, or memory growth matters."
+        }
+      ]
+    },
+    {
+      "result_file": "promptfooconfig.gpt-newest--openai-gpt-4.1-mini.json",
+      "provider": "openai:gpt-4.1-mini",
+      "stats": {
+        "successes": 0,
+        "failures": 0,
+        "errors": 10,
+        "tokenUsage": {
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "total": 0,
+          "numRequests": 10,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "durationMs": 2275,
+        "evaluationDurationMs": 2275
+      },
+      "per_arm": {
+        "baseline (no skill)": {
+          "tasks": 5,
+          "correct": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "errors": 5
+        },
+        "ponytail": {
+          "tasks": 5,
+          "correct": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "errors": 5
+        }
+      },
+      "per_task": [
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "baseline (no skill)",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "ponytail",
+          "correct": null,
+          "code_loc": null,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "success": false,
+          "error": "API error: 400 Bad Request\n{\"error\":{\"code\":\"upstream_invalid_request\",\"message\":\"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\\\"detail\\\":\\\"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.\\\"}\",\"param\":null,\"type\":\"invalid_request_error\"}}",
+          "raw_output": null
+        }
+      ]
+    },
+    {
+      "result_file": "promptfooconfig.gpt-newest--openai-gpt-5.4-mini.json",
+      "provider": "openai:gpt-5.4-mini",
+      "stats": {
+        "successes": 10,
+        "failures": 0,
+        "errors": 0,
+        "tokenUsage": {
+          "prompt": 8312,
+          "completion": 1914,
+          "cached": 0,
+          "total": 10226,
+          "numRequests": 10,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 2560,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "durationMs": 41327,
+        "evaluationDurationMs": 41327
+      },
+      "per_arm": {
+        "baseline (no skill)": {
+          "tasks": 5,
+          "correct": 5,
+          "output_tokens": 1450,
+          "total_tokens": 1571,
+          "errors": 0
+        },
+        "ponytail": {
+          "tasks": 5,
+          "correct": 5,
+          "output_tokens": 464,
+          "total_tokens": 8655,
+          "errors": 0
+        }
+      },
+      "per_task": [
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 193,
+          "total_tokens": 209,
+          "success": true,
+          "error": null,
+          "raw_output": "Sure — here’s a practical Python function for validating email addresses using a regular expression:\n\n```python\nimport re\n\ndef is_valid_email(email: str) -> bool:\n    pattern = r\"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$\"\n    return re.match(pattern, email) is not None\n```\n\n### Example usage:\n```python\nprint(is_valid_email(\"test@example.com\"))   # True\nprint(is_valid_email(\"bad-email\"))          # False\nprint(is_valid_email(\"user@domain\"))        # False\n```\n\n### Notes:\n- This is a **basic validation** function.\n- It catches most common valid/invalid formats, but it does **not** fully implement the complete RFC email specification.\n- If you need stricter validation or want to check if the domain exists, I can help with that too."
+        },
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 4,
+          "output_tokens": 84,
+          "total_tokens": 1714,
+          "success": true,
+          "error": null,
+          "raw_output": "import re\n\n_EMAIL_RE = re.compile(r\"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$\")\n\ndef is_valid_email(email: str) -> bool:\n    return bool(_EMAIL_RE.match(email))\n\n# skipped: full RFC email validation, add when you need to accept edge-case addresses.\n# add when: you need strict standards compliance or internationalized email support."
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 14,
+          "output_tokens": 141,
+          "total_tokens": 181,
+          "success": true,
+          "error": null,
+          "raw_output": "```js\nfunction debounce(fn, delay) {\n  let timerId;\n\n  return function (...args) {\n    const context = this;\n\n    clearTimeout(timerId);\n\n    timerId = setTimeout(() => {\n      fn.apply(context, args);\n    }, delay);\n  };\n}\n```\n\n### Example\n```js\nconst onResize = debounce(() => {\n  console.log(\"Resized!\");\n}, 300);\n\nwindow.addEventListener(\"resize\", onResize);\n```\n\n### How it works\n- Each call resets the timer.\n- `fn` is only executed after `delay` ms pass without another call.\n- `apply` preserves `this` and forwards arguments."
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 81,
+          "total_tokens": 1735,
+          "success": true,
+          "error": null,
+          "raw_output": "```js\nfunction debounce(fn, delay) {\n  let timer;\n  return function (...args) {\n    clearTimeout(timer);\n    timer = setTimeout(() => fn.apply(this, args), delay);\n  };\n}\n```\n\nskipped: custom wrapper class, options, leading/trailing modes.  \nadd when: you need cancellation, immediate execution, or max-wait behavior."
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 77,
+          "total_tokens": 98,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport csv\n\ntotal = 0.0\n\nwith open('sales.csv', newline='', encoding='utf-8') as f:\n    reader = csv.DictReader(f)\n    for row in reader:\n        total += float(row['amount'])\n\nprint(total)\n```\n\nIf you'd like, I can also give you a `pandas` version."
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 4,
+          "output_tokens": 82,
+          "total_tokens": 1717,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport csv\n\nwith open(\"sales.csv\", newline=\"\", encoding=\"utf-8\") as f:\n    total = sum(float(row[\"amount\"]) for row in csv.DictReader(f))\n\nprint(total)\n```\n\n- skipped: custom parser, error handling, CLI wrapper.\n- add when: you need to handle bad/missing data or reuse this in more than one place."
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 54,
+          "output_tokens": 541,
+          "total_tokens": 565,
+          "success": true,
+          "error": null,
+          "raw_output": "Here’s a simple React countdown timer component that counts down from a given number of seconds.\n\n### `CountdownTimer.jsx`\n```jsx\nimport React, { useEffect, useState } from \"react\";\n\nfunction CountdownTimer({ initialSeconds = 60 }) {\n  const [secondsLeft, setSecondsLeft] = useState(initialSeconds);\n  const [isRunning, setIsRunning] = useState(true);\n\n  useEffect(() => {\n    if (!isRunning || secondsLeft <= 0) return;\n\n    const timerId = setInterval(() => {\n      setSecondsLeft((prev) => {\n        if (prev <= 1) {\n          clearInterval(timerId);\n          setIsRunning(false);\n          return 0;\n        }\n        return prev - 1;\n      });\n    }, 1000);\n\n    return () => clearInterval(timerId);\n  }, [isRunning, secondsLeft]);\n\n  const formatTime = (totalSeconds) => {\n    const minutes = Math.floor(totalSeconds / 60);\n    const seconds = totalSeconds % 60;\n    return `${String(minutes).padStart(2, \"0\")}:${String(seconds).padStart(2, \"0\")}`;\n  };\n\n  return (\n    <div style={{ fontFamily: \"sans-serif\", textAlign: \"center\" }}>\n      <h2>Countdown Timer</h2>\n      <div style={{ fontSize: \"2rem\", marginBottom: \"1rem\" }}>\n        {formatTime(secondsLeft)}\n      </div>\n      <button onClick={() => setIsRunning((r) => !r)} style={{ marginRight: \"0.5rem\" }}>\n        {isRunning ? \"Pause\" : \"Resume\"}\n      </button>\n      <button\n        onClick={() => {\n          setSecondsLeft(initialSeconds);\n          setIsRunning(true);\n        }}\n      >\n        Reset\n      </button>\n    </div>\n  );\n}\n\nexport default CountdownTimer;\n```\n\n### Usage\n```jsx\nimport React from \"react\";\nimport CountdownTimer from \"./CountdownTimer\";\n\nfunction App() {\n  return (\n    <div>\n      <CountdownTimer initialSeconds={90} />\n    </div>\n  );\n}\n\nexport default App;\n```\n\n### Notes\n- `initialSeconds` controls the starting value.\n- It includes **pause/resume** and **reset**.\n- Time is displayed as `MM:SS`.\n\nIf you want, I can also make:\n- a version with **no pause/reset**\n- a **TypeScript** version\n- a **progress bar** version\n- a version that triggers a callback when it reaches zero"
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 12,
+          "output_tokens": 133,
+          "total_tokens": 1771,
+          "success": true,
+          "error": null,
+          "raw_output": "```jsx\nimport { useEffect, useState } from \"react\";\n\nexport default function CountdownTimer({ seconds }) {\n  const [remaining, setRemaining] = useState(seconds);\n\n  useEffect(() => {\n    setRemaining(seconds);\n    const id = setInterval(() => {\n      setRemaining((s) => Math.max(0, s - 1));\n    }, 1000);\n\n    return () => clearInterval(id);\n  }, [seconds]);\n\n  return <div>{remaining}s</div>;\n}\n```\n\nskipped: pause/reset controls, formatting, prop validation.\nadd when you need those behaviors or want richer display."
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 27,
+          "output_tokens": 498,
+          "total_tokens": 518,
+          "success": true,
+          "error": null,
+          "raw_output": "Yes — the easiest way is to add a rate-limiting middleware/decorator to your FastAPI app.\n\n## Option 1: Use `slowapi` (simple and common)\n\n### Install\n```bash\npip install slowapi\n```\n\n### Example\n```python\nfrom fastapi import FastAPI, Request\nfrom slowapi import Limiter\nfrom slowapi.util import get_remote_address\nfrom slowapi.errors import RateLimitExceeded\nfrom slowapi.middleware import SlowAPIMiddleware\nfrom slowapi.extension import _rate_limit_exceeded_handler\n\napp = FastAPI()\n\nlimiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\napp.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)\napp.add_middleware(SlowAPIMiddleware)\n\n@app.get(\"/my-endpoint\")\n@limiter.limit(\"5/minute\")\nasync def my_endpoint(request: Request):\n    return {\"message\": \"Success\"}\n```\n\n### What this does\n- Limits each client IP to **5 requests per minute** on `/my-endpoint`\n- Returns **HTTP 429 Too Many Requests** when they exceed the limit\n\n---\n\n## Option 2: Rate limit by user instead of IP\nIf your users authenticate, you may want to limit by user ID or API key instead of IP.\n\n```python\nfrom fastapi import FastAPI, Request\nfrom slowapi import Limiter\n\napp = FastAPI()\n\ndef get_user_key(request: Request):\n    return request.headers.get(\"X-User-ID\", request.client.host)\n\nlimiter = Limiter(key_func=get_user_key)\napp.state.limiter = limiter\n```\n\nThen apply the same `@limiter.limit(...)` decorator.\n\n---\n\n## Option 3: Use Redis for shared limits across multiple workers/servers\nIf you run multiple app instances, in-memory limiting won’t be enough. Use Redis-backed rate limiting.\n\n```python\nlimiter = Limiter(\n    key_func=get_remote_address,\n    storage_uri=\"redis://localhost:6379\"\n)\n```\n\n---\n\n## Best practice\nFor spam prevention, consider combining:\n- **Rate limiting**\n- **Authentication**\n- **CAPTCHA** for anonymous endpoints\n- **Input validation**\n- **Logging / abuse detection**\n\nIf you want, I can also show:\n1. **per-user rate limiting using JWT**\n2. **a custom FastAPI middleware**\n3. **Redis-backed production setup**"
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 6,
+          "output_tokens": 84,
+          "total_tokens": 1718,
+          "success": true,
+          "error": null,
+          "raw_output": "Use the existing request state if you already have auth/user IDs; otherwise the simplest working option is a middleware/dependency with an in-memory token bucket.  \n\nIf you want, I can add the minimal FastAPI code for:\n- per-IP limiting\n- per-user limiting\n- both\n\nSkipped: custom rate-limit service / Redis. Add when you need limits to survive restarts or multiple workers."
+        }
+      ]
+    },
+    {
+      "result_file": "promptfooconfig.gpt-newest--openai-gpt-5.5.json",
+      "provider": "openai:gpt-5.5",
+      "stats": {
+        "successes": 10,
+        "failures": 0,
+        "errors": 0,
+        "tokenUsage": {
+          "prompt": 8312,
+          "completion": 2538,
+          "cached": 0,
+          "total": 10850,
+          "numRequests": 10,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          },
+          "assertions": {
+            "total": 0,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "numRequests": 0,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            }
+          }
+        },
+        "durationMs": 64570,
+        "evaluationDurationMs": 64570
+      },
+      "per_arm": {
+        "baseline (no skill)": {
+          "tasks": 5,
+          "correct": 5,
+          "output_tokens": 1769,
+          "total_tokens": 1890,
+          "errors": 0
+        },
+        "ponytail": {
+          "tasks": 5,
+          "correct": 5,
+          "output_tokens": 769,
+          "total_tokens": 8960,
+          "errors": 0
+        }
+      },
+      "per_task": [
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 20,
+          "output_tokens": 265,
+          "total_tokens": 281,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport re\n\ndef is_valid_email(email: str) -> bool:\n    \"\"\"\n    Validate an email address using a practical regex.\n\n    Returns True if the email looks valid, otherwise False.\n    \"\"\"\n    if not isinstance(email, str):\n        return False\n\n    pattern = r\"\"\"\n        ^[A-Za-z0-9._%+-]+      # local part\n        @\n        [A-Za-z0-9.-]+          # domain name\n        \\.\n        [A-Za-z]{2,}$           # top-level domain\n    \"\"\"\n\n    return re.match(pattern, email, re.VERBOSE) is not None\n```\n\nExample usage:\n\n```python\nprint(is_valid_email(\"user@example.com\"))      # True\nprint(is_valid_email(\"john.doe+test@mail.io\")) # True\nprint(is_valid_email(\"invalid-email\"))         # False\nprint(is_valid_email(\"user@com\"))              # False\n```\n\nThis is a practical validator for common email formats. Full RFC-compliant email validation is much more complex, so for production systems you may also want to verify the domain or send a confirmation email."
+        },
+        {
+          "task": "Write me a Python function that validates email addresses.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 8,
+          "output_tokens": 188,
+          "total_tokens": 1818,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport re\n\n_EMAIL_RE = re.compile(r\"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$\")\n\ndef is_valid_email(email: str) -> bool:\n    return bool(_EMAIL_RE.fullmatch(email))\n\n\nif __name__ == \"__main__\":\n    assert is_valid_email(\"me@example.com\")\n    assert not is_valid_email(\"me@\")\n    assert not is_valid_email(\"me example.com\")\n```\n\nSkipped: full RFC email validation. Add it only if you truly need to accept exotic valid emails like quoted local parts."
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 15,
+          "output_tokens": 153,
+          "total_tokens": 193,
+          "success": true,
+          "error": null,
+          "raw_output": "```js\nfunction debounce(fn, delay) {\n  let timerId;\n\n  return function debounced(...args) {\n    const context = this;\n\n    clearTimeout(timerId);\n\n    timerId = setTimeout(() => {\n      fn.apply(context, args);\n    }, delay);\n  };\n}\n```\n\nExample usage:\n\n```js\nfunction handleResize() {\n  console.log(\"Resized!\");\n}\n\nconst debouncedResize = debounce(handleResize, 300);\n\nwindow.addEventListener(\"resize\", debouncedResize);\n```\n\nThis waits until `300ms` after the last call before running `fn`."
+        },
+        {
+          "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 7,
+          "output_tokens": 68,
+          "total_tokens": 1722,
+          "success": true,
+          "error": null,
+          "raw_output": "```js\nfunction debounce(fn, delay) {\n  let timer;\n\n  return function (...args) {\n    clearTimeout(timer);\n    timer = setTimeout(() => fn.apply(this, args), delay);\n  };\n}\n```\n\nSkipped: leading-edge calls, cancel/flush methods. Add when you actually need them."
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 4,
+          "output_tokens": 67,
+          "total_tokens": 88,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport pandas as pd\n\ndf = pd.read_csv(\"sales.csv\")\ntotal_amount = df[\"amount\"].sum()\n\nprint(total_amount)\n```"
+        },
+        {
+          "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 6,
+          "output_tokens": 75,
+          "total_tokens": 1710,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nimport csv\n\ntotal = 0.0\n\nwith open(\"sales.csv\", newline=\"\") as f:\n    for row in csv.DictReader(f):\n        total += float(row[\"amount\"])\n\nprint(total)\n```"
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 62,
+          "output_tokens": 523,
+          "total_tokens": 547,
+          "success": true,
+          "error": null,
+          "raw_output": "Here’s a simple React countdown timer component that counts down from a given number of seconds.\n\n```jsx\nimport { useEffect, useState } from \"react\";\n\nfunction CountdownTimer({ seconds }) {\n  const [timeLeft, setTimeLeft] = useState(seconds);\n\n  useEffect(() => {\n    setTimeLeft(seconds);\n  }, [seconds]);\n\n  useEffect(() => {\n    if (timeLeft <= 0) return;\n\n    const timerId = setInterval(() => {\n      setTimeLeft((prevTime) => prevTime - 1);\n    }, 1000);\n\n    return () => clearInterval(timerId);\n  }, [timeLeft]);\n\n  return (\n    <div>\n      <h2>Countdown</h2>\n      <p>{timeLeft} seconds remaining</p>\n    </div>\n  );\n}\n\nexport default CountdownTimer;\n```\n\nUsage:\n\n```jsx\nimport CountdownTimer from \"./CountdownTimer\";\n\nfunction App() {\n  return (\n    <div>\n      <CountdownTimer seconds={60} />\n    </div>\n  );\n}\n\nexport default App;\n```\n\nA slightly nicer version with `MM:SS` formatting:\n\n```jsx\nimport { useEffect, useState } from \"react\";\n\nfunction CountdownTimer({ seconds }) {\n  const [timeLeft, setTimeLeft] = useState(seconds);\n\n  useEffect(() => {\n    setTimeLeft(seconds);\n  }, [seconds]);\n\n  useEffect(() => {\n    if (timeLeft <= 0) return;\n\n    const timerId = setInterval(() => {\n      setTimeLeft((prevTime) => Math.max(prevTime - 1, 0));\n    }, 1000);\n\n    return () => clearInterval(timerId);\n  }, [timeLeft]);\n\n  const minutes = Math.floor(timeLeft / 60);\n  const remainingSeconds = timeLeft % 60;\n\n  const formattedTime = `${minutes}:${remainingSeconds\n    .toString()\n    .padStart(2, \"0\")}`;\n\n  return (\n    <div>\n      <h2>Countdown Timer</h2>\n      <p>{formattedTime}</p>\n    </div>\n  );\n}\n\nexport default CountdownTimer;\n```\n\nUsage:\n\n```jsx\n<CountdownTimer seconds={90} />\n```\n\nThis will display:\n\n```text\n1:30\n1:29\n1:28\n...\n0:00\n```"
+        },
+        {
+          "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 13,
+          "output_tokens": 182,
+          "total_tokens": 1820,
+          "success": true,
+          "error": null,
+          "raw_output": "```jsx\nimport { useEffect, useState } from \"react\";\n\nexport default function CountdownTimer({ seconds }) {\n  const [left, setLeft] = useState(seconds);\n\n  useEffect(() => {\n    setLeft(seconds);\n  }, [seconds]);\n\n  useEffect(() => {\n    if (left <= 0) return;\n\n    const id = setTimeout(() => setLeft(left - 1), 1000);\n    return () => clearTimeout(id);\n  }, [left]);\n\n  return <span>{left}</span>;\n}\n```\n\nSkipped: formatting, pause/resume, callbacks. Add when the UI actually needs them."
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "baseline (no skill)",
+          "correct": 1,
+          "code_loc": 57,
+          "output_tokens": 761,
+          "total_tokens": 781,
+          "success": true,
+          "error": null,
+          "raw_output": "You can add rate limiting to a FastAPI endpoint using `slowapi`, which integrates nicely with Starlette/FastAPI.\n\n## 1. Install dependencies\n\n```bash\npip install slowapi\n```\n\n## 2. Add rate limiting to your FastAPI app\n\n```python\nfrom fastapi import FastAPI, Request\nfrom slowapi import Limiter\nfrom slowapi.util import get_remote_address\nfrom slowapi.errors import RateLimitExceeded\nfrom slowapi.middleware import SlowAPIMiddleware\nfrom fastapi.responses import JSONResponse\n\napp = FastAPI()\n\nlimiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\n\napp.add_middleware(SlowAPIMiddleware)\n\n\n@app.exception_handler(RateLimitExceeded)\nasync def rate_limit_handler(request: Request, exc: RateLimitExceeded):\n    return JSONResponse(\n        status_code=429,\n        content={\"detail\": \"Rate limit exceeded. Please try again later.\"},\n    )\n\n\n@app.get(\"/my-endpoint\")\n@limiter.limit(\"5/minute\")\nasync def my_endpoint(request: Request):\n    return {\"message\": \"Success\"}\n```\n\nThis limits `/my-endpoint` to **5 requests per minute per IP address**.\n\n## Important note\n\nYour route must include `request: Request` for `slowapi` to work:\n\n```python\nasync def my_endpoint(request: Request):\n```\n\n## Example with POST endpoint\n\n```python\nfrom fastapi import FastAPI, Request\nfrom pydantic import BaseModel\nfrom slowapi import Limiter\nfrom slowapi.util import get_remote_address\nfrom slowapi.errors import RateLimitExceeded\nfrom slowapi.middleware import SlowAPIMiddleware\nfrom fastapi.responses import JSONResponse\n\napp = FastAPI()\n\nlimiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\napp.add_middleware(SlowAPIMiddleware)\n\n\n@app.exception_handler(RateLimitExceeded)\nasync def rate_limit_handler(request: Request, exc: RateLimitExceeded):\n    return JSONResponse(\n        status_code=429,\n        content={\"detail\": \"Too many requests. Please slow down.\"},\n    )\n\n\nclass MessageRequest(BaseModel):\n    message: str\n\n\n@app.post(\"/send-message\")\n@limiter.limit(\"10/minute\")\nasync def send_message(payload: MessageRequest, request: Request):\n    return {\"received\": payload.message}\n```\n\n## Common rate limit formats\n\n```python\n@limiter.limit(\"5/second\")\n@limiter.limit(\"100/minute\")\n@limiter.limit(\"1000/hour\")\n@limiter.limit(\"5000/day\")\n```\n\n## If you are behind a proxy or load balancer\n\n`get_remote_address` may only see the proxy IP. In production, you may want to rate limit based on a user ID, API key, or a trusted forwarded IP.\n\nExample using an API key header:\n\n```python\ndef get_api_key_or_ip(request: Request):\n    return request.headers.get(\"X-API-Key\") or get_remote_address(request)\n\n\nlimiter = Limiter(key_func=get_api_key_or_ip)\n```\n\n## Recommended production setup\n\nFor a single server, the default in-memory limiter is okay.\n\nFor multiple workers or multiple servers, use Redis:\n\n```bash\npip install slowapi redis\n```\n\n```python\nlimiter = Limiter(\n    key_func=get_remote_address,\n    storage_uri=\"redis://localhost:6379\",\n)\n```\n\nThis prevents each worker from having its own separate rate limit counter."
+        },
+        {
+          "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+          "arm": "ponytail",
+          "correct": 1,
+          "code_loc": 18,
+          "output_tokens": 256,
+          "total_tokens": 1890,
+          "success": true,
+          "error": null,
+          "raw_output": "```python\nfrom time import monotonic\nfrom fastapi import FastAPI, HTTPException, Request\n\napp = FastAPI()\n\nWINDOW = 60\nLIMIT = 10\nhits: dict[str, list[float]] = {}\n\n\ndef rate_limit(key: str) -> None:\n    now = monotonic()\n    recent = [t for t in hits.get(key, []) if now - t < WINDOW]\n\n    if len(recent) >= LIMIT:\n        raise HTTPException(status_code=429, detail=\"Too many requests\")\n\n    recent.append(now)\n    hits[key] = recent\n\n\n@app.post(\"/your-endpoint\")\nasync def your_endpoint(request: Request):\n    user_key = request.client.host  # swap for user.id if authenticated\n    rate_limit(user_key)\n\n    return {\"ok\": True}\n```\n\nSkipped: Redis/distributed limiter/dependency.  \nAdd when you run multiple workers/servers or need shared limits across instances."
+        }
+      ]
+    }
+  ]
+}

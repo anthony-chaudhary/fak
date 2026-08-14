@@ -1,0 +1,88 @@
+Cache is disabled.
+Starting evaluation eval-Oge-2026-08-14T11:09:59
+Running 10 test cases (up to 1 at a time)...
+
+[90m┌────────────────────────────────────────[39m[90m┬────────────────────────────────────────[39m[90m┬────────────────────────────────────────┐[39m
+[90m│[39m[1m[34m task                                   [39m[22m[90m│[39m[1m[34m [openai:gpt-5.4-mini] baseline (no     [39m[22m[90m│[39m[1m[34m [openai:gpt-5.4-mini] ponytail         [39m[22m[90m│[39m
+[90m│[39m[1m[34m                                        [39m[22m[90m│[39m[1m[34m skill)                                 [39m[22m[90m│[39m[1m[34m                                        [39m[22m[90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Write me a Python function that        [90m│[39m [PASS] Sure — here’s a simple Python   [90m│[39m [PASS] ```python                       [90m│[39m
+[90m│[39m validates email addresses.             [90m│[39m function that validates an email       [90m│[39m import re                              [90m│[39m
+[90m│[39m                                        [90m│[39m address using a regular expression:    [90m│[39m _EMAIL_RE = re.compile(                [90m│[39m
+[90m│[39m                                        [90m│[39m ```python                              [90m│[39m     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-… [90m│[39m
+[90m│[39m                                        [90m│[39m import re                              [90m│[39m r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-… [90m│[39m
+[90m│[39m                                        [90m│[39m def is_valid_email(email: str) ->      [90m│[39m r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,6… [90m│[39m
+[90m│[39m                                        [90m│[39m bool:                                  [90m│[39m )                                      [90m│[39m
+[90m│[39m                                        [90m│[39m     pattern =                          [90m│[39m def is_valid_email(email: str) ->      [90m│[39m
+[90m│[39m                                        [90m│[39m r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.… [90m│[39m bool:                                  [90m│[39m
+[90m│[39m                                        [90m│[39m     return re.match(...                [90m│[39m    ...                                 [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Write a reusable debounce function in  [90m│[39m [PASS] ```js                           [90m│[39m [PASS] ```js                           [90m│[39m
+[90m│[39m vanilla JavaScript: debounce(fn,       [90m│[39m function debounce(fn, delay) {         [90m│[39m function debounce(fn, delay) {         [90m│[39m
+[90m│[39m delay) returns a debounced version of  [90m│[39m   let timerId;                         [90m│[39m   let timer;                           [90m│[39m
+[90m│[39m fn that delays calling it until delay  [90m│[39m   return function (...args) {          [90m│[39m   return function (...args) {          [90m│[39m
+[90m│[39m ms after the last call.                [90m│[39m     const context = this;              [90m│[39m     clearTimeout(timer);               [90m│[39m
+[90m│[39m                                        [90m│[39m     clearTimeout(timerId);             [90m│[39m     timer = setTimeout(() =>           [90m│[39m
+[90m│[39m                                        [90m│[39m     timerId = setTimeout(() => {       [90m│[39m fn.apply(this, args), delay);          [90m│[39m
+[90m│[39m                                        [90m│[39m       fn.apply(context, args);         [90m│[39m   };                                   [90m│[39m
+[90m│[39m                                        [90m│[39m     }, delay);                         [90m│[39m }                                      [90m│[39m
+[90m│[39m                                        [90m│[39m   };                                   [90m│[39m ```                                    [90m│[39m
+[90m│[39m                                        [90m│[39m }                                      [90m│[39m → skipped: extra options like          [90m│[39m
+[90m│[39m                                        [90m│[39m ```                                    [90m│[39m leading/trailing/maxWait. add when you [90m│[39m
+[90m│[39m                                        [90m│[39m ### Example                            [90m│[39m ne...                                  [90m│[39m
+[90m│[39m                                        [90m│[39m ```js                                  [90m│[39m                                        [90m│[39m
+[90m│[39m                                        [90m│[39m c...                                   [90m│[39m                                        [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Write Python code that reads sales.csv [90m│[39m [PASS] ```python                       [90m│[39m [PASS] ```python                       [90m│[39m
+[90m│[39m and sums the 'amount' column.          [90m│[39m import csv                             [90m│[39m import csv                             [90m│[39m
+[90m│[39m                                        [90m│[39m total = 0.0                            [90m│[39m with open("sales.csv", newline="") as  [90m│[39m
+[90m│[39m                                        [90m│[39m with open("sales.csv", newline="",     [90m│[39m f:                                     [90m│[39m
+[90m│[39m                                        [90m│[39m encoding="utf-8") as file:             [90m│[39m     total = sum(float(row["amount"]) … [90m│[39m
+[90m│[39m                                        [90m│[39m     reader = csv.DictReader(file)      [90m│[39m row in csv.DictReader(f))              [90m│[39m
+[90m│[39m                                        [90m│[39m     for row in reader:                 [90m│[39m print(total)                           [90m│[39m
+[90m│[39m                                        [90m│[39m         total += float(row["amount"])  [90m│[39m ```                                    [90m│[39m
+[90m│[39m                                        [90m│[39m print(total)                           [90m│[39m - skipped: custom parser, extra error  [90m│[39m
+[90m│[39m                                        [90m│[39m ```                                    [90m│[39m handling.                              [90m│[39m
+[90m│[39m                                        [90m│[39m If you want, I can also show a         [90m│[39m - add when: the file is messy, huge,   [90m│[39m
+[90m│[39m                                        [90m│[39m panda...                               [90m│[39m or you need v...                       [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Build me a countdown timer component   [90m│[39m [PASS] Here’s a simple reusable React  [90m│[39m [PASS] ```jsx                          [90m│[39m
+[90m│[39m in React that counts down from a given [90m│[39m countdown timer component that counts  [90m│[39m import { useEffect, useState } from    [90m│[39m
+[90m│[39m number of seconds.                     [90m│[39m down from a given number of seconds.   [90m│[39m "react";                               [90m│[39m
+[90m│[39m                                        [90m│[39m ### CountdownTimer.jsx                 [90m│[39m export default function                [90m│[39m
+[90m│[39m                                        [90m│[39m ```jsx                                 [90m│[39m CountdownTimer({ seconds }) {          [90m│[39m
+[90m│[39m                                        [90m│[39m import React, { useEffect, useState }  [90m│[39m   const [remaining, setRemaining] =    [90m│[39m
+[90m│[39m                                        [90m│[39m from "react";                          [90m│[39m useState(seconds);                     [90m│[39m
+[90m│[39m                                        [90m│[39m function CountdownTimer({              [90m│[39m   useEffect(() => {                    [90m│[39m
+[90m│[39m                                        [90m│[39m initialSeconds = 60, onComplete...     [90m│[39m     setRemaining(seconds);             [90m│[39m
+[90m│[39m                                        [90m│[39m                                        [90m│[39m     if (seconds <= 0) return;          [90m│[39m
+[90m│[39m                                        [90m│[39m                                        [90m│[39m     c...                               [90m│[39m
+[90m├────────────────────────────────────────[39m[90m┼────────────────────────────────────────[39m[90m┼────────────────────────────────────────┤[39m
+[90m│[39m Add rate limiting to my FastAPI        [90m│[39m [PASS] Here’s a simple way to add rate [90m│[39m [PASS] from fastapi import FastAPI,    [90m│[39m
+[90m│[39m endpoint so users can't spam it.       [90m│[39m limiting to a FastAPI endpoint using   [90m│[39m HTTPException, Request                 [90m│[39m
+[90m│[39m                                        [90m│[39m `slowapi`.                             [90m│[39m from time import monotonic             [90m│[39m
+[90m│[39m                                        [90m│[39m ## 1) Install the dependency           [90m│[39m app = FastAPI()                        [90m│[39m
+[90m│[39m                                        [90m│[39m ```bash                                [90m│[39m # ponytail: in-memory per-IP limit;    [90m│[39m
+[90m│[39m                                        [90m│[39m pip install slowapi                    [90m│[39m swap to Redis if you run multiple      [90m│[39m
+[90m│[39m                                        [90m│[39m ```                                    [90m│[39m workers/instances.                     [90m│[39m
+[90m│[39m                                        [90m│[39m ## 2) Set up the limiter               [90m│[39m _BUCKETS: dict[str, tuple[float, int]] [90m│[39m
+[90m│[39m                                        [90m│[39m ```python                              [90m│[39m = {}                                   [90m│[39m
+[90m│[39m                                        [90m│[39m from fastapi import FastAPI, Request   [90m│[39m WINDOW = 60                            [90m│[39m
+[90m│[39m                                        [90m│[39m from slowapi import Limiter, _...      [90m│[39m MAX_R...                               [90m│[39m
+[90m└────────────────────────────────────────[39m[90m┴────────────────────────────────────────[39m[90m┴────────────────────────────────────────┘[39m
+✓ Eval complete (ID: eval-Oge-2026-08-14T11:09:59)
+
+» View results: promptfoo view
+» Share with your team: https://promptfoo.app
+» Feedback: https://promptfoo.dev/feedback
+
+Total Tokens: 10,469
+  Eval: 10,469 (8,312 prompt, 2,157 completion)
+
+Results:
+  ✓ 10 passed (100%)
+  0 failed (0%)
+  0 errors (0%)
+Duration: 45s (concurrency: 1)
+
+Writing output to C:\work\fak\docs\_witnesses\armbench-ponytail-promptfoo-2026-08-14\promptfooconfig.gpt--openai-gpt-5.4-mini.json

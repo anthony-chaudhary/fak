@@ -1,0 +1,10 @@
+Cache is disabled.
+  ✗ Missing GOOGLE_API_KEY (google:gemini-3.1-pro-preview)
+
+To fix, set the environment variable or use --env-file:
+    export GOOGLE_API_KEY=your-api-key-here
+
+
+There were some errors during the operation. See logs for more details.
+Error log: C:\Users\USER\.promptfoo\logs\promptfoo-error-2026-08-14_11-12-43-877Z.log
+Debug log: C:\Users\USER\.promptfoo\logs\promptfoo-debug-2026-08-14_11-12-43-877Z.log

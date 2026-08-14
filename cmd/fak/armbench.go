@@ -42,7 +42,7 @@ import (
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-gates|ponytail-managed|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-promptfoo|ponytail-gates|ponytail-managed|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
@@ -71,6 +71,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchImportFixtures(stdout, stderr, argv[1:])
 	case "ponytail":
 		return armbenchPonytail(stdout, stderr, argv[1:])
+	case "ponytail-promptfoo":
+		return armbenchPromptfoo(stdout, stderr, argv[1:])
 	case "ponytail-gates":
 		return armbenchPonytailGates(stdout, stderr, argv[1:])
 	case "ponytail-managed":
