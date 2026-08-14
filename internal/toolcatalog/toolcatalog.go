@@ -24,8 +24,31 @@ var (
 
 // Executor is host-only registration data. It is deliberately absent from ModelTool.
 type Executor struct {
-	Argv []string `json:"argv"`
-	Dir  string   `json:"dir,omitempty"`
+	Argv    []string          `json:"argv"`
+	Dir     string            `json:"dir,omitempty"`
+	Adapter *CommandAdapterV1 `json:"adapter,omitempty"`
+}
+
+// CommandAdapterV1 is an explicit JSON-object to process contract. Every
+// argument, stdin byte, and environment value is declared; nothing is inferred
+// from prose, schema order, or a shell command string.
+type CommandAdapterV1 struct {
+	Version string            `json:"version"`
+	Argv    []ArgvBinding     `json:"argv,omitempty"`
+	Stdin   *ValueBinding     `json:"stdin,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Result  string            `json:"result"`
+}
+
+type ArgvBinding struct {
+	Literal   string `json:"literal,omitempty"`
+	Field     string `json:"field,omitempty"`
+	Flag      string `json:"flag,omitempty"`
+	OmitEmpty bool   `json:"omit_empty,omitempty"`
+}
+
+type ValueBinding struct {
+	Field string `json:"field"`
 }
 
 // SkillProgram is the machine-authored portion of a skill. Prose is never inferred
@@ -280,6 +303,49 @@ func validateProgram(p SkillProgram) error {
 	}
 	if schema["type"] != "object" {
 		return fmt.Errorf("SKILL_PROGRAM_SCHEMA: root type must be object")
+	}
+	if adapter := p.Executor.Adapter; adapter != nil {
+		if adapter.Version != "fak.command-adapter/v1" {
+			return fmt.Errorf("SKILL_PROGRAM_ADAPTER_VERSION: want fak.command-adapter/v1")
+		}
+		if adapter.Result != "json" {
+			return fmt.Errorf("SKILL_PROGRAM_ADAPTER_RESULT: want json")
+		}
+		declared := map[string]bool{}
+		if properties, ok := schema["properties"].(map[string]any); ok {
+			for name := range properties {
+				declared[name] = true
+			}
+		}
+		checkField := func(field string) error {
+			if field == "" || !declared[field] {
+				return fmt.Errorf("SKILL_PROGRAM_ADAPTER_FIELD: %q is not declared in input_schema.properties", field)
+			}
+			return nil
+		}
+		for i, binding := range adapter.Argv {
+			if (binding.Literal == "") == (binding.Field == "") {
+				return fmt.Errorf("SKILL_PROGRAM_ADAPTER_ARGV: binding %d requires exactly one of literal or field", i)
+			}
+			if binding.Field != "" {
+				if err := checkField(binding.Field); err != nil {
+					return err
+				}
+			}
+		}
+		if adapter.Stdin != nil {
+			if err := checkField(adapter.Stdin.Field); err != nil {
+				return err
+			}
+		}
+		for env, field := range adapter.Env {
+			if strings.TrimSpace(env) == "" || strings.Contains(env, "=") || strings.IndexByte(env, 0) >= 0 {
+				return fmt.Errorf("SKILL_PROGRAM_ADAPTER_ENV: invalid name %q", env)
+			}
+			if err := checkField(field); err != nil {
+				return err
+			}
+		}
 	}
 	for dialect, alias := range p.Aliases {
 		if strings.TrimSpace(dialect) == "" || !aliasNameRE.MatchString(alias) {
