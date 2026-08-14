@@ -5447,19 +5447,23 @@ def append_fleet_trend_row(root: Path, payload: dict[str, Any], *,
                            now: str | None = None) -> dict[str, Any]:
     """#4594: feed the fleet-status trend ledger one partial row per live tick.
 
-    A single tick natively knows only its preflight live-worker count; the
-    tolerant fleet_trend reader accepts a partial ``{ts, live}`` row, which is
-    exactly the gauge the net-worker-decline alarm (#4591) consumes. The
-    ``usable``/``sessions``/``escalate`` aggregates come from a `fleet_top`
-    snapshot, not a tick, so they stay honestly absent rather than a fabricated
-    zero. Best-effort: a trend append must never fail the tick."""
+    A single tick natively knows only its backend-local preflight worker count.
+    Publishing that value as aggregate ``live`` made alternating Claude/Codex ticks
+    fabricate fleet collapses (for example 20 -> 0). Preserve it as an explicitly
+    scoped diagnostic instead; only an all-backend census may feed the aggregate
+    ``live`` trend and its net-worker-decline alarm. Best-effort: a trend append
+    must never fail the tick."""
     do_append = append or fleet_trend.append
     pre = payload.get("preflight") or {}
     ledger = str(root / fleet_trend.DEFAULT_LEDGER)
     ts = now or dt.datetime.now(dt.timezone.utc).isoformat(
         timespec="seconds").replace("+00:00", "Z")
     try:
-        row = do_append(ledger, {"live": float(pre.get("live") or 0)}, ts)
+        row = do_append(ledger, {
+            "scope": "backend",
+            "backend": str(payload.get("backend") or "unknown"),
+            "backend_live": float(pre.get("live") or 0),
+        }, ts)
         return {"ok": True, "ledger": ledger, "row": row}
     except Exception as exc:
         return {"ok": False, "ledger": ledger, "error": str(exc)}

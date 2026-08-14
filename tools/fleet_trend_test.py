@@ -145,6 +145,21 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(rows[-1]["escalate"], 1)
         self.assertEqual(rows[-1]["ts"], "2026-07-01T01:00:00Z")
 
+    def test_backend_scoped_rows_do_not_fabricate_aggregate_decline(self):
+        fleet_trend.append(self.path, {"live": 20}, "2026-08-14T13:38:00Z")
+        row = fleet_trend.append(
+            self.path,
+            {"scope": "backend", "backend": "codex", "backend_live": 0},
+            "2026-08-14T13:47:19Z",
+        )
+        self.assertEqual(row["scope"], "backend")
+        self.assertEqual(row["backend"], "codex")
+        self.assertEqual(row["backend_live"], 0.0)
+        self.assertNotIn("live", row)
+        alarm = fleet_trend.net_decline_alarm(fleet_trend.tail(self.path, 10))
+        self.assertFalse(alarm["red"])
+        self.assertEqual(alarm["n"], 1)
+
     def test_append_persists_throughput_counters(self):
         # Counters present in metrics land in the row (so the Go goodput/HEAD-stall
         # reader picks them straight off the ledger); counters absent stay absent.

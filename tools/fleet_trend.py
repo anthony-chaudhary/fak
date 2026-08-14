@@ -105,7 +105,7 @@ def metrics_of(snap: dict[str, Any]) -> dict[str, float]:
     return m
 
 
-def append(path: str, metrics: dict[str, float], now: str, *, cap: int = DEFAULT_CAP) -> dict[str, Any]:
+def append(path: str, metrics: dict[str, Any], now: str, *, cap: int = DEFAULT_CAP) -> dict[str, Any]:
     """Append one ``{ts, **metrics}`` row to the JSONL ledger and return it.
 
     Bounded: after appending, the file is trimmed to its last ``cap`` rows so the ledger
@@ -113,6 +113,13 @@ def append(path: str, metrics: dict[str, float], now: str, *, cap: int = DEFAULT
     prior line is dropped, not fatal) — a status tick must never crash on its own
     history. The directory is created if absent."""
     row = {"ts": now}
+    # Backend-local dispatcher probes are not an aggregate fleet census. Preserve their
+    # explicit scope for diagnostics without feeding backend_live into the aggregate
+    # ``live`` trend or its net-decline alarm.
+    if metrics.get("scope") == "backend":
+        row["scope"] = "backend"
+        row["backend"] = str(metrics.get("backend") or "unknown")
+        row["backend_live"] = _num(metrics.get("backend_live"))
     for k, _ in METRICS:
         if k in metrics:
             row[k] = _num(metrics[k])

@@ -1201,7 +1201,7 @@ class FleetTrendTickTest(unittest.TestCase):
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            payload = {"preflight": {"verdict": "SPAWN_OK", "cap": 4, "live": 3}}
+            payload = {"backend": "codex", "preflight": {"verdict": "SPAWN_OK", "cap": 4, "live": 3}}
             out = mod.append_fleet_trend_row(root, payload, now="2026-07-14T12:00:00Z")
             self.assertTrue(out["ok"])
             ledger = root / ".fak" / "nightrun" / "fleet-status-history.jsonl"
@@ -1209,15 +1209,17 @@ class FleetTrendTickTest(unittest.TestCase):
             rows = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["ts"], "2026-07-14T12:00:00Z")
-            self.assertEqual(rows[0]["live"], 3.0)
-            # the fleet_top-only aggregates stay honestly absent, never a zero
-            for absent in ("usable", "sessions", "escalate"):
+            self.assertEqual(rows[0]["scope"], "backend")
+            self.assertEqual(rows[0]["backend"], "codex")
+            self.assertEqual(rows[0]["backend_live"], 3.0)
+            # Backend-local probes never masquerade as an aggregate fleet census.
+            for absent in ("live", "usable", "sessions", "escalate"):
                 self.assertNotIn(absent, rows[0])
             mod.append_fleet_trend_row(root, payload, now="2026-07-14T12:05:00Z")
             rows = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(rows), 2)
 
-    def test_missing_preflight_records_zero_live(self) -> None:
+    def test_missing_preflight_records_scoped_zero(self) -> None:
         import json
         mod = load()
         with tempfile.TemporaryDirectory() as d:
@@ -1225,7 +1227,10 @@ class FleetTrendTickTest(unittest.TestCase):
             out = mod.append_fleet_trend_row(root, {}, now="2026-07-14T12:00:00Z")
             self.assertTrue(out["ok"])
             row = json.loads(Path(out["ledger"]).read_text(encoding="utf-8").strip())
-            self.assertEqual(row["live"], 0.0)
+            self.assertEqual(row["scope"], "backend")
+            self.assertEqual(row["backend"], "unknown")
+            self.assertEqual(row["backend_live"], 0.0)
+            self.assertNotIn("live", row)
 
     def test_append_failure_never_raises(self) -> None:
         mod = load()
@@ -6030,35 +6035,35 @@ class EvaluateSeatCoolGateTest(unittest.TestCase):
 
 
 class AppendFleetTrendRowTest(unittest.TestCase):
-    """#4594: every LIVE dispatcher tick feeds one partial ``{ts, live}`` row to the
-    fleet-status trend ledger so climbing-vs-draining renders unattended instead of
-    "(no history yet)". The producer is best-effort — an append error records the
-    failure but never crashes the tick — and the ledger stays bounded because it
-    delegates to ``fleet_trend.append`` (whose cap the reader honors)."""
+    """Backend dispatcher ticks preserve scoped diagnostics without claiming an
+    authoritative all-backend fleet census. The producer remains best-effort and bounded."""
 
-    def test_live_tick_appends_partial_row_from_preflight_live(self) -> None:
+    def test_live_tick_appends_backend_scoped_row(self) -> None:
         mod = load()
         import fleet_trend
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             ledger = str(root / fleet_trend.DEFAULT_LEDGER)
             res = mod.append_fleet_trend_row(
-                root, {"preflight": {"live": 3}}, now="2026-07-14T17:00:00Z")
+                root, {"backend": "codex", "preflight": {"live": 3}}, now="2026-07-14T17:00:00Z")
             self.assertTrue(res["ok"])
             self.assertEqual(res["ledger"], ledger)
             rows = fleet_trend.tail(ledger, 24)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["ts"], "2026-07-14T17:00:00Z")
-            self.assertEqual(rows[0]["live"], 3.0)
+            self.assertEqual(rows[0]["backend_live"], 3.0)
+            self.assertEqual(rows[0]["scope"], "backend")
+            self.assertEqual(rows[0]["backend"], "codex")
+            self.assertNotIn("live", rows[0])
             # a second live tick APPENDS (a trend needs history), never overwrites.
             mod.append_fleet_trend_row(
-                root, {"preflight": {"live": 1}}, now="2026-07-14T17:05:00Z")
-            self.assertEqual([r["live"] for r in fleet_trend.tail(ledger, 24)],
+                root, {"backend": "codex", "preflight": {"live": 1}}, now="2026-07-14T17:05:00Z")
+            self.assertEqual([r["backend_live"] for r in fleet_trend.tail(ledger, 24)],
                              [3.0, 1.0])  # both ticks recorded, oldest→newest
 
-    def test_missing_preflight_live_records_honest_zero(self) -> None:
-        # A tick whose preflight carries no live count records a real 0 gauge point
-        # rather than crashing the producer — the row is still a valid trend sample.
+    def test_missing_preflight_live_records_scoped_zero(self) -> None:
+        # Missing backend-local evidence remains an explicitly scoped zero; it never
+        # fabricates an aggregate fleet-wide zero.
         mod = load()
         import fleet_trend
         with tempfile.TemporaryDirectory() as d:
@@ -6066,7 +6071,9 @@ class AppendFleetTrendRowTest(unittest.TestCase):
             ledger = str(root / fleet_trend.DEFAULT_LEDGER)
             res = mod.append_fleet_trend_row(root, {}, now="2026-07-14T17:00:00Z")
             self.assertTrue(res["ok"])
-            self.assertEqual(fleet_trend.tail(ledger, 24)[0]["live"], 0.0)
+            row = fleet_trend.tail(ledger, 24)[0]
+            self.assertEqual(row["backend_live"], 0.0)
+            self.assertNotIn("live", row)
 
     def test_append_error_is_swallowed_never_fails_the_tick(self) -> None:
         # Best-effort: an append that raises must be reported, not propagated — a
