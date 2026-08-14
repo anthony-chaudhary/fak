@@ -91,9 +91,15 @@ The three anti-regrowth rules this pass enforces:
 From the repo root:
 
 ```bash
-python tools/readme_freshness_audit.py            # human-readable
-python tools/readme_freshness_audit.py --json     # machine-readable (the loop uses this)
+python tools/readme_freshness_audit.py --json > readme-before.json
+python tools/readme_freshness_audit.py            # human rendering of the same evidence
 ```
+
+`readme-before.json` is the mandatory first artifact. Quote every binding `FAIL` check name and
+its evidence before editing. Retire all binding FAIL rows before advisory prose polish; an
+advisory unglossed term such as `KV cache` must not displace a red `guard_prominence` check. The
+current README product defect belongs in its dedicated README issue, not in this skill-only
+adjudication.
 
 It checks, and exits non-zero on any **FAIL**:
 
@@ -113,6 +119,9 @@ mechanical rule.
 
 ## Step 2 — Fix every FAIL
 
+Work in the exact binding order quoted from `readme-before.json`; do not start WARN/ADVISORY
+polish or the separately issue-tracked README product fix while any FAIL remains.
+
 - **dead link** — the target moved or was deleted. Repoint it to the current
   path, or drop the link if the doc is gone. (Don't invent a path; verify it
   exists.)
@@ -123,6 +132,8 @@ mechanical rule.
   not-the-headline, or cut it.
 
 ## Step 3 — Weigh every WARN, apply laws 2 & 3
+
+Enter this step only after all binding FAIL rows are green.
 
 - **headline_authority WARN** — a front-page number isn't traceable to
   `BENCHMARK-AUTHORITY`. Either it's stale (fix it to the authority figure) or
