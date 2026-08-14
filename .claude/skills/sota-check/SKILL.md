@@ -26,15 +26,22 @@ as `internal/benchcatalog`). The human front door is
 
 ## The pass
 
-1. **Look up the reference - BEFORE writing code.** Run `fak sota <slug>` (e.g.
-   `fak sota awq-int4-gemm`) or `fak sota <the-file-you-are-about-to-edit>` (e.g.
-   `fak sota internal/model/awq_cuda.go`). It prints the SOTA stack, the `PrimaryLink` to
-   read, the chosen route, the oracle, and any named papers. `fak sota list` enumerates every
-   operation. If the operation is NOT in the matrix, that is itself the finding - go to step 5.
-2. **Read the primary reference.** Open the `PrimaryLink`. The point is not to copy bytes (the
-   licenses and the language differ) - it is to learn the technique (the fused dequant tile,
-   the online-softmax recurrence, the radix-tree reuse) so the fak version is an informed
-   implementation, not a naive one. A web search for the named paper is fair game here.
+1. **Look up and capture the reference - BEFORE writing code.** Run the installed
+   first-class binary and save its read-only machine payload:
+   ```bash
+   fak sota <slug> --json > sota-<slug>.json
+   fak sota <the-file-you-are-about-to-edit> --json > sota-path.json
+   ```
+   It reports the SOTA stack, `PrimaryLink`, chosen route, oracle, and named papers. `fak sota
+   list` enumerates every operation. If the operation is NOT in the matrix, that is itself the
+   finding - go to step 5. Persist a generated study note only through the separate explicit
+   `fak sota <slug> --write` gate; JSON capture alone must not mutate the repository.
+2. **Read the primary reference.** Open the `PrimaryLink`. Record the research date,
+   canonical URL, pinned revision/version, and license beside the captured JSON. The point is not
+   to copy bytes (the licenses and the language differ) - it is to learn the technique (the
+   fused dequant tile, the online-softmax recurrence, the radix-tree reuse) so the fak version is an informed
+   implementation, not a naive one. A web search for the named paper is fair game here, but it
+   supplements the captured local catalog result rather than replacing it.
 3. **Route honestly.** Pick `stay-minimal` (the bit-exact contract is fak's value, not raw
    throughput - most rows), `bind` (use the production library/format directly: cuBLAS fp16,
    the GGUF format), or `borrow` (adapt the reference technique). The hard rule: **borrow a
