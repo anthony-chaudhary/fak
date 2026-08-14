@@ -1,6 +1,6 @@
 ---
 name: super-loop
-description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per bounded account session slot, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `fak dispatch wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account capacity before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Regime-aware, not a fixed script: it reads the host first and adapts. Its FIRST move is a one-read gate that short-circuits when a standing dispatcher (`FleetIssueDispatch`) is already gardening — so it never marches the whole launch procedure only to discover the loop was already running. Otherwise it adapts — RECLAIM stale workers/residue before growing, RAMP a cold host canary-first (promote on witnessed commits), and run 12h+ MARATHONS as a cadence of waves with budget and stop signals. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", "start the overnight fleet", "clean up the old workers first", "ramp up slowly", or "keep it running for 12 hours".
+description: 'Plan, price, launch, monitor, and reconcile bulk headless issue-resolution work safely. Use when an operator asks for a super loop, worker wave, detached issue workers, backlog draining, capacity/status, stale-worker cleanup, ramp-up, or an overnight fleet. Dispatches end-to-end issue owners, requires explicit launch intent, prices account and tree capacity, verifies effects from git or DOS witnesses, and closes every child, lease, and intent cleanly.'
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path, honesty-boundary, and collision discipline are load-bearing and not portable per-skill
@@ -56,6 +56,23 @@ failure — two runs, ~52 turns, 0 commits).
   bleed onto the parent's loopback gateway/seat (the whole-wave same-instant crash;
   child-stderr tell: "claude.ai connectors are disabled because ANTHROPIC_API_KEY …
   is set").
+
+## Issue ownership is end to end
+
+A dispatched worker owns root implementation, not merely reconciliation of work assumed complete.
+It inspects whether the issue is unstarted, partial, unwitnessed, or shipped, then performs what is
+still owed through witness and clean closeout.
+
+Classify before dispatch: `BOUNDED` goes to one direct owner; `BROAD` goes to a parent ISSUE_OWNER
+with reserved capacity for independently executable, tree-disjoint packets; `LEAF_CHILD` is one
+bounded packet and cannot orchestrate or close the parent. For BROAD work, the parent MUST use the
+managed guarded launcher when delegation is needed and capacity exists. Fan-out is one level deep.
+
+The parent retains the issue claim and closure authority, begins the smallest root spine itself,
+records an inspectable execution map, prices child collisions, independently witnesses child
+effects, and integrates one coherent result. A refused child lowers concurrency, not ownership.
+The parent keeps doing agent-accessible root work and exits only after every child is verified,
+parked, or stopped and every owned lease/intent is released.
 
 ## Step 0 — Is the loop already running? (decide BEFORE you orient)
 

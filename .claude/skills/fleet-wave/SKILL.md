@@ -116,6 +116,32 @@ consumer, so they block exactly one thing — `lane_lease.acquire()` on that spe
 holder, so a blind sweep evicts live work (#5859). Watch for a repeated acquire REFUSE on
 one lane and escalate *that* lane; do not sweep.
 
+## End-to-end ownership default
+
+A wave dispatches **issue owners**, not finishers waiting for already-complete work. Every selected
+issue starts in an unknown state: unstarted, partial, implemented-but-unwitnessed, or shipped. The
+owner inspects and moves the actual state to a witnessed ship or a durable, clean handoff.
+
+Price work shape as well as worker count:
+
+- `BOUNDED`: one worker can perform root implementation and witness the issue within its context and
+  deadline. It works directly and does not orchestrate.
+- `BROAD`: at least two independently executable, tree-disjoint packets are required, or the whole
+  issue cannot credibly fit one worker's remaining context/deadline. Dispatch a parent ISSUE_OWNER
+  and reserve child capacity. Guarded delegation is mandatory when it is needed and available.
+- `LEAF_CHILD`: one bounded child packet. It never orchestrates and never closes the parent.
+
+The parent keeps the ticket claim and closure authority, starts the smallest executable root spine,
+prices child tree collisions, and records an ignored execution map under the wave run directory:
+acceptance item, evidence, implementation step, exact trees, witness, owner, child identity, lease,
+status, and artifact. One-level fan-out is the safety boundary: enough decomposition for broad work
+without fork bombs or unowned descendants.
+
+A child-launch or lease refusal lowers concurrency only; it does not erase agent-accessible root
+work. The owner continues safe root steps itself. Clean exit requires independent read-back of every
+child effect, every child verified/parked/stopped, all owned intents/leases released, and either a
+coherent ship or a durable park naming implemented state, missing witness, and exact next command.
+
 ## Phase 1 — Price the wave, and state the shortfall out loud
 
 ⭐ **The Phase 3 dry-run IS the pricing instrument — do not price by hand.** It folds the

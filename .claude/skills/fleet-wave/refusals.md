@@ -53,6 +53,19 @@ takes `--path` and `-m`.
 - **`fak commit` asserts the path SET, not the CONTENT.** A peer's edit to a file you
   named rides in silently. `git diff HEAD -- <paths>` before you retry a failed commit.
 
+## 2.5 A child refusal is not a parent stop
+
+For a BROAD issue, failure to admit or start one LEAF_CHILD changes the execution plan; it does not prove
+the issue is blocked. The ISSUE_OWNER must record the typed refusal, reduce concurrency, and continue root implementation plus
+all safe root-spine or undisputed packet work it can execute itself. `BLOCKED` is valid only when no
+agent-accessible acceptance step remains.
+
+Before any parent exits, its execution map must account for every spawned child as `VERIFIED`,
+`PARKED`, or `STOPPED`, with process/session identity and artifact. A quiet, failed, or rate-limited
+child is not reconciled merely because its process disappeared. Release every child lease and parent
+ticket intent. If an effect exists but cannot land, park the effect and its witness gap; if no effect
+exists, say `nothing` rather than manufacturing a WIP commit.
+
 ## 3. Park — the durable channel when you cannot land
 
 You will sometimes hold findings you cannot commit: the lane is held, the path is
