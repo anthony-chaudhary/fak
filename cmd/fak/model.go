@@ -18,7 +18,7 @@ const modelUsage = "usage: fak model <load|pull|ls|canary-gate|acceptance-gate|a
 	"  fak model ls           list known model aliases and which are cached locally\n" +
 	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
-	"  fak model acceptance-run execute a predeclared exact-model campaign\n" +
+	"  fak model acceptance-run execute a latest-generation exact-model campaign (older generations require a named exception)\n" +
 	"  fak model acceptance-refold replay immutable raw streams with the current parser\n" +
 	"  fak model readiness-inventory join exact-ID acceptance provenance into readiness rows\n"
 

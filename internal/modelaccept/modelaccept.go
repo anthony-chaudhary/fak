@@ -8,13 +8,19 @@ import (
 	"time"
 )
 
-const Schema = "fak.modelaccept.report/1"
+const Schema = "fak.modelaccept.report/2"
 
 type Verdict string
 
 const (
 	Pass Verdict = "PASS"
 	Hold Verdict = "HOLD"
+	Skip Verdict = "SKIP"
+)
+
+const (
+	LifecycleLatest     = "latest"
+	LifecycleTombstoned = "tombstoned"
 )
 
 type Task struct {
@@ -85,9 +91,18 @@ type Run struct {
 	FailureDetail string  `json:"failure_detail,omitempty"`
 }
 
+type EvalException struct {
+	Reason string `json:"reason"`
+	Ticket string `json:"ticket,omitempty"`
+}
+
 type ModelRequest struct {
-	Model         string `json:"model"`
-	RequestedTier int    `json:"requested_tier"`
+	Model         string         `json:"model"`
+	Family        string         `json:"family"`
+	Generation    string         `json:"generation"`
+	Lifecycle     string         `json:"lifecycle"`
+	RequestedTier int            `json:"requested_tier"`
+	EvalException *EvalException `json:"eval_exception,omitempty"`
 }
 
 type Input struct {
@@ -99,6 +114,10 @@ type Input struct {
 
 type ModelDecision struct {
 	Model             string  `json:"model"`
+	Family            string  `json:"family"`
+	Generation        string  `json:"generation"`
+	Lifecycle         string  `json:"lifecycle"`
+	EvalReason        string  `json:"eval_reason,omitempty"`
 	RequestedTier     int     `json:"requested_tier"`
 	Verdict           Verdict `json:"verdict"`
 	Samples           int     `json:"samples"`
@@ -132,6 +151,17 @@ type Decision struct {
 	Reasons  []string        `json:"reasons,omitempty"`
 }
 
+// ShouldEvaluate implements the campaign selection policy: current models run,
+// tombstoned generations do not consume eval capacity unless a named exception exists.
+func ShouldEvaluate(req ModelRequest) bool {
+	return req.Lifecycle == LifecycleLatest || (req.Lifecycle == LifecycleTombstoned && req.EvalException != nil)
+}
+
+// Validate checks a campaign declaration and any attached run records.
+func Validate(in Input) []string {
+	return validate(in)
+}
+
 func Evaluate(in Input) Decision {
 	out := Decision{Schema: Schema, Verdict: Pass, CorpusID: in.Corpus.ID}
 	if reasons := validate(in); len(reasons) != 0 {
@@ -143,7 +173,16 @@ func Evaluate(in Input) Decision {
 		tasks[t.ID] = t
 	}
 	for _, req := range in.Models {
-		d := ModelDecision{Model: req.Model, RequestedTier: req.RequestedTier, Verdict: Pass}
+		d := ModelDecision{Model: req.Model, Family: req.Family, Generation: req.Generation, Lifecycle: req.Lifecycle, RequestedTier: req.RequestedTier, Verdict: Pass}
+		if !ShouldEvaluate(req) {
+			d.Verdict = Skip
+			d.Reasons = []string{"tombstoned older generation; evaluation skipped by default"}
+			out.Models = append(out.Models, d)
+			continue
+		}
+		if req.EvalException != nil {
+			d.EvalReason = req.EvalException.Reason
+		}
 		var rr []Run
 		for _, r := range in.Runs {
 			task, known := tasks[r.Task]
@@ -311,9 +350,33 @@ func validate(in Input) []string {
 		r = append(r, "corpus declared_at must be RFC3339")
 	}
 	declaredModels := map[string]bool{}
+	familyLatest := map[string]int{}
 	for _, model := range in.Models {
 		if strings.TrimSpace(model.Model) == "" {
 			r = append(r, "every model needs an exact non-empty id")
+		}
+		if strings.TrimSpace(model.Family) == "" {
+			r = append(r, "model family is required: "+model.Model)
+		}
+		if strings.TrimSpace(model.Generation) == "" {
+			r = append(r, "model generation is required: "+model.Model)
+		}
+		if model.Lifecycle != LifecycleLatest && model.Lifecycle != LifecycleTombstoned {
+			r = append(r, "model lifecycle must be latest or tombstoned: "+model.Model)
+		}
+		if model.Lifecycle == LifecycleLatest {
+			familyLatest[model.Family]++
+			if model.EvalException != nil {
+				r = append(r, "latest model cannot declare eval_exception: "+model.Model)
+			}
+		}
+		if model.EvalException != nil {
+			if model.Lifecycle != LifecycleTombstoned {
+				r = append(r, "eval_exception is only valid for a tombstoned model: "+model.Model)
+			}
+			if strings.TrimSpace(model.EvalException.Reason) == "" {
+				r = append(r, "older-generation eval exception requires a named reason: "+model.Model)
+			}
 		}
 		if model.RequestedTier < 0 {
 			r = append(r, "every model needs a non-negative requested tier")
@@ -322,6 +385,18 @@ func validate(in Input) []string {
 			r = append(r, "duplicate model: "+model.Model)
 		}
 		declaredModels[model.Model] = true
+	}
+	for family, count := range familyLatest {
+		if strings.TrimSpace(family) != "" && count != 1 {
+			r = append(r, fmt.Sprintf("model family %s must declare exactly one latest generation", family))
+		}
+	}
+	missingLatest := map[string]bool{}
+	for _, model := range in.Models {
+		if family := strings.TrimSpace(model.Family); family != "" && familyLatest[family] == 0 && !missingLatest[family] {
+			r = append(r, "model family has no latest generation: "+family)
+			missingLatest[family] = true
+		}
 	}
 	seen := map[string]bool{}
 	structured := false

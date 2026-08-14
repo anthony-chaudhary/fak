@@ -6,7 +6,7 @@ import (
 )
 
 func inventoryFixture() Input {
-	return Input{Schema: Schema, Corpus: Corpus{ID: "c1", DeclaredAt: "2026-07-14T20:00:00Z", Tasks: []Task{{ID: "exact", Tier: 2, Repetitions: 1, Expected: "OK"}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", RequestedTier: 2}}, Runs: []Run{{Model: "exact-a", ActualModel: "exact-a", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T21:00:00Z"}}}
+	return Input{Schema: Schema, Corpus: Corpus{ID: "c1", DeclaredAt: "2026-07-14T20:00:00Z", Tasks: []Task{{ID: "exact", Tier: 2, Repetitions: 1, Expected: "OK"}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 2}}, Runs: []Run{{Model: "exact-a", ActualModel: "exact-a", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T21:00:00Z"}}}
 }
 
 func TestBuildInventoryPassCarriesExactProvenance(t *testing.T) {
@@ -22,7 +22,7 @@ func TestBuildInventoryPassCarriesExactProvenance(t *testing.T) {
 
 func TestBuildInventoryNeverBorrowsAcrossExactIDs(t *testing.T) {
 	in := inventoryFixture()
-	in.Models = append(in.Models, ModelRequest{Model: "exact-b", RequestedTier: 2})
+	in.Models = append(in.Models, ModelRequest{Model: "exact-b", Family: "exact-b", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 2})
 	got := BuildInventory(in, InventoryOptions{Artifact: "a", ArtifactRevision: "rev", ExpectedCorpusID: "c1", AsOf: time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)})
 	if got.Verdict != Hold || len(got.Rows) != 2 {
 		t.Fatalf("inventory=%+v", got)
@@ -54,7 +54,7 @@ func TestBuildInventoryMismatchStaleAndMissingProvenanceHold(t *testing.T) {
 
 func TestBuildInventoryIsolatesPerModelFailure(t *testing.T) {
 	in := inventoryFixture()
-	in.Models = append(in.Models, ModelRequest{Model: "exact-b", RequestedTier: 2})
+	in.Models = append(in.Models, ModelRequest{Model: "exact-b", Family: "exact-b", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 2})
 	in.Runs = append(in.Runs, Run{Model: "exact-b", ActualModel: "wrong-b", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T21:00:00Z"})
 	got := BuildInventory(in, InventoryOptions{Artifact: "a", ArtifactRevision: "rev", ExpectedCorpusID: "c1", AsOf: time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)})
 	if got.Verdict != Hold || len(got.Rows) != 2 {
@@ -76,7 +76,7 @@ func TestBuildInventoryIsolatesPerModelFailure(t *testing.T) {
 
 func TestBuildInventoryGlobalMalformedInputHoldsEveryRow(t *testing.T) {
 	in := inventoryFixture()
-	in.Models = append(in.Models, ModelRequest{Model: "exact-a", RequestedTier: 2})
+	in.Models = append(in.Models, ModelRequest{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 2})
 	got := BuildInventory(in, InventoryOptions{Artifact: "a", ArtifactRevision: "rev", AsOf: time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)})
 	if got.Verdict != Hold || len(got.Rows) != 2 {
 		t.Fatalf("inventory=%+v", got)

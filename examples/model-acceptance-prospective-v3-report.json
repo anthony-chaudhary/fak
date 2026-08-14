@@ -1,5 +1,5 @@
 {
-  "schema": "fak.modelaccept.report/1",
+  "schema": "fak.modelaccept.report/2",
   "corpus": {
     "id": "top3-prospective-sentinel-v3",
     "declared_at": "2026-07-16T10:30:00-07:00",
@@ -43,15 +43,24 @@
   "models": [
     {
       "model": "claude-opus-4-8",
-      "requested_tier": 0
+      "requested_tier": 0,
+      "family": "anthropic/opus",
+      "generation": "claude-opus-4-8",
+      "lifecycle": "latest"
     },
     {
       "model": "claude-sonnet-4-6",
-      "requested_tier": 1
+      "requested_tier": 1,
+      "family": "anthropic/sonnet",
+      "generation": "claude-sonnet-4-6",
+      "lifecycle": "latest"
     },
     {
       "model": "claude-haiku-4-5-20251001",
-      "requested_tier": 2
+      "requested_tier": 2,
+      "family": "anthropic/haiku",
+      "generation": "claude-haiku-4-5-20251001",
+      "lifecycle": "latest"
     }
   ],
   "runs": [
@@ -102,7 +111,7 @@
       "actual_model": "claude-opus-4-8",
       "task": "production-retry-recovery",
       "repetition": 1,
-      "result": "The retry succeeded and I verified the output: `RECOVERY_VALUE=42` matches the expected recovery value. The first call failed with a typed transient error (`TRANSIENT_RETRYABLE`), I retried exactly once, and the second call recovered — the retry was triggered by the typed transient error, not by output-quality judgment.\n\nFAK_ACCEPTANCE_RESULT=RECOVERED_42",
+      "result": "The retry succeeded and I verified the output: `RECOVERY_VALUE=42` matches the expected recovery value. The first call failed with a typed transient error (`TRANSIENT_RETRYABLE`), I retried exactly once, and the second call recovered \u00e2\u20ac\u201d the retry was triggered by the typed transient error, not by output-quality judgment.\n\nFAK_ACCEPTANCE_RESULT=RECOVERED_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -134,7 +143,7 @@
       "actual_model": "claude-opus-4-8",
       "task": "production-retry-recovery",
       "repetition": 3,
-      "result": "The retry succeeded. I verified `RECOVERY_VALUE=42` in the second call's output, exactly as expected — the first call returned the typed `TRANSIENT_RETRYABLE` error, and the single retry recovered with the correct value.\n\nFAK_ACCEPTANCE_RESULT=RECOVERED_42",
+      "result": "The retry succeeded. I verified `RECOVERY_VALUE=42` in the second call's output, exactly as expected \u00e2\u20ac\u201d the first call returned the typed `TRANSIENT_RETRYABLE` error, and the single retry recovered with the correct value.\n\nFAK_ACCEPTANCE_RESULT=RECOVERED_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -150,7 +159,7 @@
       "actual_model": "claude-sonnet-4-6",
       "task": "production-multi-record",
       "repetition": 1,
-      "result": "**Results:**\n- `alpha` = 17\n- `beta` = 25\n- **Sum** = 17 + 25 = **42** ✓\n\nThe integer sum of the two records is exactly 42, as required.\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+      "result": "**Results:**\n- `alpha` = 17\n- `beta` = 25\n- **Sum** = 17 + 25 = **42** \u00e2\u0153\u201c\n\nThe integer sum of the two records is exactly 42, as required.\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -164,7 +173,7 @@
       "actual_model": "claude-sonnet-4-6",
       "task": "production-multi-record",
       "repetition": 2,
-      "result": "Both records retrieved:\n\n- `alpha` = 17\n- `beta` = 25\n- Sum = 17 + 25 = **42** ✓\n\nThe integer sum of the two immutable records equals 42, as required.\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+      "result": "Both records retrieved:\n\n- `alpha` = 17\n- `beta` = 25\n- Sum = 17 + 25 = **42** \u00e2\u0153\u201c\n\nThe integer sum of the two immutable records equals 42, as required.\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -178,7 +187,7 @@
       "actual_model": "claude-sonnet-4-6",
       "task": "production-multi-record",
       "repetition": 3,
-      "result": "Both records retrieved:\n\n- `alpha` = 17\n- `beta` = 25\n- Sum: 17 + 25 = **42** ✓\n\nThe integer sum of the two records equals 42, confirming the verification passes.\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+      "result": "Both records retrieved:\n\n- `alpha` = 17\n- `beta` = 25\n- Sum: 17 + 25 = **42** \u00e2\u0153\u201c\n\nThe integer sum of the two records equals 42, confirming the verification passes.\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -208,7 +217,7 @@
       "actual_model": "claude-sonnet-4-6",
       "task": "production-retry-recovery",
       "repetition": 2,
-      "result": "The retry succeeded. The returned value is `RECOVERY_VALUE=42`, which matches the expected value — verification passes.\n\nFAK_ACCEPTANCE_RESULT=RECOVERED_42",
+      "result": "The retry succeeded. The returned value is `RECOVERY_VALUE=42`, which matches the expected value \u00e2\u20ac\u201d verification passes.\n\nFAK_ACCEPTANCE_RESULT=RECOVERED_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -240,7 +249,7 @@
       "actual_model": "claude-haiku-4-5-20251001",
       "task": "production-multi-record",
       "repetition": 1,
-      "result": "Both records retrieved successfully:\n- alpha = 17\n- beta = 25\n\nSum verification: 17 + 25 = 42 ✓\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+      "result": "Both records retrieved successfully:\n- alpha = 17\n- beta = 25\n\nSum verification: 17 + 25 = 42 \u00e2\u0153\u201c\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -254,7 +263,7 @@
       "actual_model": "claude-haiku-4-5-20251001",
       "task": "production-multi-record",
       "repetition": 2,
-      "result": "I've retrieved both immutable records:\n- **alpha**: 17\n- **beta**: 25\n\nTheir sum: 17 + 25 = 42 ✓\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+      "result": "I've retrieved both immutable records:\n- **alpha**: 17\n- **beta**: 25\n\nTheir sum: 17 + 25 = 42 \u00e2\u0153\u201c\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,
@@ -268,7 +277,7 @@
       "actual_model": "claude-haiku-4-5-20251001",
       "task": "production-multi-record",
       "repetition": 3,
-      "result": "Both records retrieved successfully:\n- alpha = 17\n- beta = 25\n- Sum: 17 + 25 = 42 ✓\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
+      "result": "Both records retrieved successfully:\n- alpha = 17\n- beta = 25\n- Sum: 17 + 25 = 42 \u00e2\u0153\u201c\n\nFAK_ACCEPTANCE_RESULT=MULTI_RECORD_42",
       "provider_error": false,
       "tool_valid": true,
       "tool_calls": 2,

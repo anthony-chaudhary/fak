@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,51 @@ func TestRunModelAcceptanceFixture(t *testing.T) {
 	}
 }
 
+func TestRunModelAcceptanceRunSkipsTombstonedGeneration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	creds := filepath.Join(dir, "config")
+	if err := os.MkdirAll(creds, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(creds, ".credentials.json"), []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(dir, "fixture")
+	if err := os.WriteFile(fixture, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	claude := filepath.Join(dir, "claude")
+	if err := os.WriteFile(claude, []byte("#!/bin/sh\necho invoked >> \"$CALL_LOG\"\ncat <<'EOF'\n{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"OK\",\"modelUsage\":{\"vendor-pro-6\":{\"inputTokens\":1,\"outputTokens\":1}}}\nEOF\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	decl := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "latest-only", DeclaredAt: time.Now().Add(-time.Hour).Format(time.RFC3339), Tasks: []modelaccept.Task{{ID: "one", Repetitions: 1, Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "vendor-pro-6", Family: "vendor/pro", Generation: "6", Lifecycle: modelaccept.LifecycleLatest}, {Model: "vendor-pro-5", Family: "vendor/pro", Generation: "5", Lifecycle: modelaccept.LifecycleTombstoned}}}
+	input, output, rawDir := filepath.Join(dir, "in.json"), filepath.Join(dir, "out.json"), filepath.Join(dir, "raw")
+	b, _ := json.Marshal(decl)
+	if err := os.WriteFile(input, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "calls")
+	t.Setenv("CALL_LOG", log)
+	var stdout, stderr bytes.Buffer
+	code := runModelAcceptanceRun(&stdout, &stderr, []string{"--input", input, "--output", output, "--raw-dir", rawDir, "--fixture-command", fixture, "--claude", claude, "--claude-config-dir", creds})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(calls), "invoked"); got != 1 {
+		t.Fatalf("provider invocations=%d, want 1", got)
+	}
+	if !strings.Contains(stdout.String(), "SKIP vendor-pro-5") {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
 func TestRunModelAcceptanceRunWritesRetainedReport(t *testing.T) {
 	old := acceptanceClaudeCommand
 	defer func() { acceptanceClaudeCommand = old }()
@@ -158,7 +204,7 @@ func TestRunModelAcceptanceRunWritesRetainedReport(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	decl := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "run-v1", DeclaredAt: time.Now().Add(-time.Hour).Format(time.RFC3339), Tasks: []modelaccept.Task{{ID: "one", Tier: 2, Repetitions: 1, Prompt: "return OK", Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 100, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "exact-a", RequestedTier: 2}}}
+	decl := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "run-v1", DeclaredAt: time.Now().Add(-time.Hour).Format(time.RFC3339), Tasks: []modelaccept.Task{{ID: "one", Tier: 2, Repetitions: 1, Prompt: "return OK", Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 100, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: modelaccept.LifecycleLatest, RequestedTier: 2}}}
 	b, _ := json.Marshal(decl)
 	input := filepath.Join(dir, "in.json")
 	os.WriteFile(input, b, 0600)

@@ -68,7 +68,7 @@ func TestRefoldAcceptanceReportFailsClosed(t *testing.T) {
 
 func topThreeInputForRefold() modelaccept.Input {
 	task := modelaccept.Task{ID: "retry", Tier: 2, Repetitions: 1, Expected: "RECOVERED", ToolRequired: true, MinToolCalls: 2, RetryRequired: true, RecoveryRequired: true}
-	models := []modelaccept.ModelRequest{{Model: "exact-a", RequestedTier: 0}, {Model: "exact-b", RequestedTier: 1}}
+	models := []modelaccept.ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: modelaccept.LifecycleLatest, RequestedTier: 0}, {Model: "exact-b", Family: "exact-b", Generation: "current", Lifecycle: modelaccept.LifecycleLatest, RequestedTier: 1}}
 	runs := []modelaccept.Run{}
 	for _, m := range models {
 		runs = append(runs, modelaccept.Run{Model: m.Model, ActualModel: m.Model, Task: task.ID, Repetition: 1, ObservedAt: "2026-07-15T01:00:00-07:00"})

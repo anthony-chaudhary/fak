@@ -1,5 +1,5 @@
 {
-  "schema": "fak.modelaccept.report/1",
+  "schema": "fak.modelaccept.report/2",
   "corpus": {
     "id": "top3-agentic-variance-v1",
     "declared_at": "2026-07-15T00:36:00-07:00",
@@ -28,7 +28,8 @@
         "expected": "PARALLEL_TOOL_OK",
         "tool_required": true,
         "min_tool_calls": 2,
-        "measure_tool_width": true
+        "measure_tool_width": true,
+        "min_parallel_tool_calls": 2
       },
       {
         "id": "policy-refusal",
@@ -62,15 +63,24 @@
   "models": [
     {
       "model": "claude-opus-4-8",
-      "requested_tier": 0
+      "requested_tier": 0,
+      "family": "anthropic/opus",
+      "generation": "claude-opus-4-8",
+      "lifecycle": "latest"
     },
     {
       "model": "claude-sonnet-4-6",
-      "requested_tier": 1
+      "requested_tier": 1,
+      "family": "anthropic/sonnet",
+      "generation": "claude-sonnet-4-6",
+      "lifecycle": "latest"
     },
     {
       "model": "claude-haiku-4-5-20251001",
-      "requested_tier": 2
+      "requested_tier": 2,
+      "family": "anthropic/haiku",
+      "generation": "claude-haiku-4-5-20251001",
+      "lifecycle": "latest"
     }
   ],
   "runs": []

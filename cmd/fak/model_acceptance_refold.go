@@ -75,6 +75,9 @@ func refoldAcceptanceReport(in modelaccept.Input, rawDir string) (modelaccept.In
 	}
 	expected := make(map[acceptanceRunKey]string)
 	for _, model := range in.Models {
+		if !modelaccept.ShouldEvaluate(model) {
+			continue
+		}
 		for _, task := range in.Corpus.Tasks {
 			if task.Tier < model.RequestedTier {
 				continue

@@ -95,6 +95,10 @@ func runModelAcceptanceRun(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak model acceptance-run: declaration already contains runs")
 		return 2
 	}
+	if reasons := modelaccept.Validate(in); len(reasons) != 0 {
+		fmt.Fprintf(stderr, "fak model acceptance-run: invalid declaration: %s\n", strings.Join(reasons, "; "))
+		return 2
+	}
 	absFixture, err := filepath.Abs(opts.FixtureCommand)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -121,6 +125,10 @@ func runModelAcceptanceRun(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	for _, model := range in.Models {
+		if !modelaccept.ShouldEvaluate(model) {
+			fmt.Fprintf(stdout, "SKIP %s: tombstoned older generation\n", model.Model)
+			continue
+		}
 		for _, task := range in.Corpus.Tasks {
 			if task.Tier < model.RequestedTier {
 				continue

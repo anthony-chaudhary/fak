@@ -18,6 +18,10 @@ type InventoryOptions struct {
 
 type InventoryRow struct {
 	Model            string   `json:"model"`
+	Family           string   `json:"family"`
+	Generation       string   `json:"generation"`
+	Lifecycle        string   `json:"lifecycle"`
+	EvalReason       string   `json:"eval_reason,omitempty"`
 	CapabilityGate   Verdict  `json:"capability_gate"`
 	RequestedTier    int      `json:"requested_tier"`
 	WitnessedTier    *int     `json:"witnessed_tier,omitempty"`
@@ -71,14 +75,17 @@ func BuildInventory(in Input, opts InventoryOptions) Inventory {
 	models := append([]ModelRequest(nil), in.Models...)
 	sort.Slice(models, func(i, j int) bool { return models[i].Model < models[j].Model })
 	for _, req := range models {
-		row := InventoryRow{Model: req.Model, CapabilityGate: Hold, RequestedTier: req.RequestedTier, CorpusID: in.Corpus.ID, DeclaredAt: in.Corpus.DeclaredAt, Artifact: opts.Artifact, ArtifactRevision: opts.ArtifactRevision}
+		row := InventoryRow{Model: req.Model, Family: req.Family, Generation: req.Generation, Lifecycle: req.Lifecycle, CapabilityGate: Hold, RequestedTier: req.RequestedTier, CorpusID: in.Corpus.ID, DeclaredAt: in.Corpus.DeclaredAt, Artifact: opts.Artifact, ArtifactRevision: opts.ArtifactRevision}
 		row.Reasons = append(row.Reasons, global...)
 		md, found := byDecision[req.Model]
 		if !found {
 			row.Reasons = append(row.Reasons, "exact model has no acceptance decision")
 		} else {
 			row.Samples = md.Samples
-			if md.Verdict != Pass {
+			row.EvalReason = md.EvalReason
+			if md.Verdict == Skip {
+				row.CapabilityGate = Skip
+			} else if md.Verdict != Pass {
 				row.Reasons = append(row.Reasons, md.Reasons...)
 			} else {
 				tier := md.RequestedTier
@@ -107,14 +114,16 @@ func BuildInventory(in Input, opts InventoryOptions) Inventory {
 		if !last.IsZero() {
 			row.ObservedLast = last.Format(time.RFC3339)
 		}
-		if last.IsZero() {
+		if last.IsZero() && row.CapabilityGate != Skip {
 			row.Reasons = append(row.Reasons, "exact model has no dated observations")
 		} else if last.After(asOf) {
 			row.Reasons = append(row.Reasons, "exact model acceptance evidence postdates inventory as-of")
 		} else if asOf.Sub(last) > maxAge {
 			row.Reasons = append(row.Reasons, "exact model acceptance evidence is stale")
 		}
-		if md.Verdict == Pass && len(row.Reasons) == 0 {
+		if md.Verdict == Skip {
+			row.CapabilityGate = Skip
+		} else if md.Verdict == Pass && len(row.Reasons) == 0 {
 			row.CapabilityGate = Pass
 		} else {
 			out.Verdict = Hold

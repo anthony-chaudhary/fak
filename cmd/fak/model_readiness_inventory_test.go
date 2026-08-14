@@ -12,7 +12,7 @@ import (
 
 func writeReadinessFixture(t *testing.T) string {
 	t.Helper()
-	in := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "fixture", DeclaredAt: "2026-07-14T20:00:00Z", Tasks: []modelaccept.Task{{ID: "exact", Tier: 2, Repetitions: 1, Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "exact-a", RequestedTier: 2}}, Runs: []modelaccept.Run{{Model: "exact-a", ActualModel: "exact-a", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T21:00:00Z"}}}
+	in := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "fixture", DeclaredAt: "2026-07-14T20:00:00Z", Tasks: []modelaccept.Task{{ID: "exact", Tier: 2, Repetitions: 1, Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: modelaccept.LifecycleLatest, RequestedTier: 2}}, Runs: []modelaccept.Run{{Model: "exact-a", ActualModel: "exact-a", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T21:00:00Z"}}}
 	path := filepath.Join(t.TempDir(), "acceptance.json")
 	b, err := json.Marshal(in)
 	if err != nil {

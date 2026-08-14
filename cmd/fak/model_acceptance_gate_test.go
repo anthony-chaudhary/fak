@@ -11,7 +11,7 @@ import (
 )
 
 func TestRunModelAcceptanceGatePassAndHold(t *testing.T) {
-	in := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "fixture", DeclaredAt: "2026-07-14T23:00:00-07:00", Tasks: []modelaccept.Task{{ID: "exact", Tier: 2, Repetitions: 1, Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "claude-haiku-4-5-20251001", RequestedTier: 2}}, Runs: []modelaccept.Run{{Model: "claude-haiku-4-5-20251001", ActualModel: "claude-haiku-4-5-20251001", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 100, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T23:01:00-07:00"}}}
+	in := modelaccept.Input{Schema: modelaccept.Schema, Corpus: modelaccept.Corpus{ID: "fixture", DeclaredAt: "2026-07-14T23:00:00-07:00", Tasks: []modelaccept.Task{{ID: "exact", Tier: 2, Repetitions: 1, Expected: "OK"}}, Thresholds: modelaccept.Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []modelaccept.ModelRequest{{Model: "claude-haiku-4-5-20251001", Family: "claude-haiku-4-5-20251001", Generation: "current", Lifecycle: modelaccept.LifecycleLatest, RequestedTier: 2}}, Runs: []modelaccept.Run{{Model: "claude-haiku-4-5-20251001", ActualModel: "claude-haiku-4-5-20251001", Task: "exact", Repetition: 1, Result: "OK", ToolValid: true, LatencyMS: 100, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-14T23:01:00-07:00"}}}
 	path := filepath.Join(t.TempDir(), "in.json")
 	b, _ := json.Marshal(in)
 	if err := os.WriteFile(path, b, 0600); err != nil {

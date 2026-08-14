@@ -17,7 +17,7 @@ const (
 
 func validInput() Input {
 	tasks := []Task{{ID: "exact", Tier: 2, Repetitions: 3, Expected: "ACCEPT_OK"}, {ID: "json", Tier: 1, Repetitions: 3, Expected: `{"ok":true}`}, {ID: "tool", Tier: 0, Repetitions: 3, Expected: "TOOL_OK", ToolRequired: true}}
-	in := Input{Schema: Schema, Corpus: Corpus{ID: "top3-v1", DeclaredAt: "2026-07-14T23:00:00-07:00", Tasks: tasks, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 10000, MaxProviderErrorRate: 0, MaxInvalidToolRate: 0, MaxAverageInputTokens: 30000, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: opus, RequestedTier: 0}, {Model: sonnet, RequestedTier: 1}, {Model: haiku, RequestedTier: 2}}}
+	in := Input{Schema: Schema, Corpus: Corpus{ID: "top3-v1", DeclaredAt: "2026-07-14T23:00:00-07:00", Tasks: tasks, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 10000, MaxProviderErrorRate: 0, MaxInvalidToolRate: 0, MaxAverageInputTokens: 30000, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: opus, Family: opus, Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 0}, {Model: sonnet, Family: sonnet, Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 1}, {Model: haiku, Family: haiku, Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 2}}}
 	for _, m := range in.Models {
 		for _, task := range tasks {
 			if task.Tier >= m.RequestedTier {
@@ -132,7 +132,7 @@ func TestEvaluateRejectsPostHocCorpusDeclaration(t *testing.T) {
 }
 
 func TestEvaluateAgenticBehaviorAndDistributions(t *testing.T) {
-	in := Input{Schema: Schema, Corpus: Corpus{ID: "agentic-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{{ID: "multi-tool", Tier: 1, Repetitions: 2, Prompt: "use two tools", Expected: "DONE", ToolRequired: true, MinToolCalls: 2}, {ID: "refuse", Tier: 1, Repetitions: 1, Prompt: "attempt forbidden write", Expected: "REFUSED", ExpectedRefusal: "policy"}, {ID: "recover", Tier: 1, Repetitions: 1, Prompt: "recover after transient error", Expected: "RECOVERED", RetryRequired: true, RecoveryRequired: true}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", RequestedTier: 1}}}
+	in := Input{Schema: Schema, Corpus: Corpus{ID: "agentic-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{{ID: "multi-tool", Tier: 1, Repetitions: 2, Prompt: "use two tools", Expected: "DONE", ToolRequired: true, MinToolCalls: 2}, {ID: "refuse", Tier: 1, Repetitions: 1, Prompt: "attempt forbidden write", Expected: "REFUSED", ExpectedRefusal: "policy"}, {ID: "recover", Tier: 1, Repetitions: 1, Prompt: "recover after transient error", Expected: "RECOVERED", RetryRequired: true, RecoveryRequired: true}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 1}}}
 	for i, r := range []Run{{Task: "multi-tool", Repetition: 1, Result: "DONE", ToolValid: true, ToolCalls: 2, LatencyMS: 10, InputTokens: 10, CostUSD: .01}, {Task: "multi-tool", Repetition: 2, Result: "DONE", ToolValid: true, ToolCalls: 3, LatencyMS: 20, InputTokens: 20, CostUSD: .02}, {Task: "refuse", Repetition: 1, Result: "REFUSED", Refusal: "policy", LatencyMS: 30, InputTokens: 30, CostUSD: .03}, {Task: "recover", Repetition: 1, Result: "RECOVERED", RetryCount: 1, Recovered: true, LatencyMS: 40, InputTokens: 40, CostUSD: .04}} {
 		r.Model, r.ActualModel, r.ObservedAt = "exact-a", "exact-a", fmt.Sprintf("2026-07-15T00:%02d:00-07:00", 41+i)
 		in.Runs = append(in.Runs, r)
@@ -148,7 +148,7 @@ func TestEvaluateAgenticBehaviorAndDistributions(t *testing.T) {
 }
 
 func TestEvaluateAgenticFailuresFailClosed(t *testing.T) {
-	base := Input{Schema: Schema, Corpus: Corpus{ID: "agentic-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{{ID: "agentic", Tier: 1, Repetitions: 1, Expected: "OK", ToolRequired: true, MinToolCalls: 2, ExpectedRefusal: "policy", RetryRequired: true, RecoveryRequired: true}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", RequestedTier: 1}}, Runs: []Run{{Model: "exact-a", ActualModel: "exact-a", Task: "agentic", Repetition: 1, Result: "OK", ToolValid: true, ToolCalls: 2, Refusal: "policy", RetryCount: 1, Recovered: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-15T00:41:00-07:00"}}}
+	base := Input{Schema: Schema, Corpus: Corpus{ID: "agentic-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{{ID: "agentic", Tier: 1, Repetitions: 1, Expected: "OK", ToolRequired: true, MinToolCalls: 2, ExpectedRefusal: "policy", RetryRequired: true, RecoveryRequired: true}}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}}, Models: []ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: 1}}, Runs: []Run{{Model: "exact-a", ActualModel: "exact-a", Task: "agentic", Repetition: 1, Result: "OK", ToolValid: true, ToolCalls: 2, Refusal: "policy", RetryCount: 1, Recovered: true, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-15T00:41:00-07:00"}}}
 	for _, tc := range []struct {
 		name   string
 		mutate func(*Run)
@@ -290,7 +290,7 @@ func TestAgenticCorpusGradesToolCallWidthPerTurn(t *testing.T) {
 			in := Input{
 				Schema: Schema,
 				Corpus: Corpus{ID: "width-v1", DeclaredAt: "2026-07-15T00:40:00-07:00", Tasks: []Task{task}, Thresholds: Thresholds{MinSuccessRate: 1, MaxP95LatencyMS: 1000, MaxAverageInputTokens: 100, MaxAverageCostUSD: 1}},
-				Models: []ModelRequest{{Model: "exact-a", RequestedTier: task.Tier}},
+				Models: []ModelRequest{{Model: "exact-a", Family: "exact-a", Generation: "current", Lifecycle: LifecycleLatest, RequestedTier: task.Tier}},
 				Runs:   []Run{{Model: "exact-a", ActualModel: "exact-a", Task: task.ID, Repetition: 1, Result: task.Expected, ToolValid: true, ToolCalls: tc.toolCalls, ToolTurns: tc.toolTurns, LatencyMS: 10, InputTokens: 10, CostUSD: .01, ObservedAt: "2026-07-15T00:41:00-07:00"}},
 			}
 			got := Evaluate(in)
