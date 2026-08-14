@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -63,6 +64,29 @@ type endpointModels struct {
 	} `json:"data"`
 }
 
+type endpointMCPResponse struct {
+	Result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	} `json:"result"`
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type endpointAdjudication struct {
+	Verdict struct {
+		Kind        string `json:"kind"`
+		Reason      string `json:"reason,omitempty"`
+		By          string `json:"by,omitempty"`
+		Disposition string `json:"disposition,omitempty"`
+	} `json:"verdict"`
+	TraceID string `json:"trace_id"`
+}
+
 type endpointCompletion struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -112,6 +136,23 @@ func probeEndpoint(ctx context.Context, client *http.Client, role, rawURL, task 
 	}
 	obs.Identity = EndpointField{Status: "PASS", Observed: map[string]any{"engine": health.Engine, "model": health.Model}}
 
+	allow, err := endpointAdjudicate(ctx, client, base, "search_kb", "endpoint-conformance-allow")
+	if err != nil {
+		obs.Admission = notYet("portable fak_adjudicate endpoint unavailable: " + err.Error())
+	} else {
+		deny, denyErr := endpointAdjudicate(ctx, client, base, "refund_payment", "endpoint-conformance-deny")
+		if denyErr != nil {
+			return obs, fmt.Errorf("admission deny: %w", denyErr)
+		}
+		if allow.Verdict.Kind != "ALLOW" || deny.Verdict.Kind != "DENY" {
+			return obs, fmt.Errorf("admission matrix = %s/%s, want ALLOW/DENY", allow.Verdict.Kind, deny.Verdict.Kind)
+		}
+		obs.Admission = EndpointField{Status: "PASS", Observed: map[string]any{
+			"allow": map[string]any{"tool": "search_kb", "verdict": allow.Verdict.Kind, "by": allow.Verdict.By},
+			"deny":  map[string]any{"tool": "refund_payment", "verdict": deny.Verdict.Kind, "reason": deny.Verdict.Reason, "disposition": deny.Verdict.Disposition, "by": deny.Verdict.By},
+		}}
+	}
+
 	var models endpointModels
 	if err := endpointJSON(ctx, client, http.MethodGet, base+"/v1/models", nil, &models, nil); err != nil {
 		return obs, fmt.Errorf("models: %w", err)
@@ -154,6 +195,30 @@ func probeEndpoint(ctx context.Context, client *http.Client, role, rawURL, task 
 	return obs, nil
 }
 
+func endpointAdjudicate(ctx context.Context, client *http.Client, base, tool, traceID string) (endpointAdjudication, error) {
+	body := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
+		"name": "fak_adjudicate", "arguments": map[string]any{"tool": tool, "arguments": map[string]any{}, "trace_id": traceID},
+	}}
+	var wire endpointMCPResponse
+	if err := endpointJSON(ctx, client, http.MethodPost, base+"/mcp", body, &wire, nil); err != nil {
+		return endpointAdjudication{}, err
+	}
+	if wire.Error != nil {
+		return endpointAdjudication{}, fmt.Errorf("MCP %d: %s", wire.Error.Code, wire.Error.Message)
+	}
+	if wire.Result.IsError || len(wire.Result.Content) == 0 {
+		return endpointAdjudication{}, fmt.Errorf("MCP tool returned no successful content")
+	}
+	var out endpointAdjudication
+	if err := json.Unmarshal([]byte(wire.Result.Content[0].Text), &out); err != nil {
+		return out, fmt.Errorf("decode adjudication: %w", err)
+	}
+	if out.Verdict.Kind == "" || out.TraceID != traceID {
+		return out, fmt.Errorf("adjudication lacks verdict or trace identity")
+	}
+	return out, nil
+}
+
 func endpointJSON(ctx context.Context, client *http.Client, method, url string, body any, out any, status *int) error {
 	var r io.Reader
 	if body != nil {
@@ -189,13 +254,23 @@ func compareEndpointSemantics(a, b EndpointObservation) error {
 	if a.Task.HTTPStatus != b.Task.HTTPStatus || a.Task.Object != b.Task.Object || a.Task.FinishReason != b.Task.FinishReason || a.Task.Content != b.Task.Content {
 		return fmt.Errorf("semantic task drift after deployment-field normalization")
 	}
-	for name, pair := range map[string][2]string{
-		"identity": {a.Identity.Status, b.Identity.Status}, "provenance": {a.Provenance.Status, b.Provenance.Status},
-		"usage": {a.Usage.Status, b.Usage.Status}, "receipt": {a.Receipt.Status, b.Receipt.Status}, "reconnect": {a.Reconnect.Status, b.Reconnect.Status},
-	} {
-		if pair[0] != pair[1] {
-			return fmt.Errorf("semantic %s status drift: %s != %s", name, pair[0], pair[1])
+	fields := map[string][2]EndpointField{
+		"identity": {a.Identity, b.Identity}, "admission": {a.Admission, b.Admission}, "lifecycle": {a.Lifecycle, b.Lifecycle},
+		"provenance": {a.Provenance, b.Provenance}, "usage": {a.Usage, b.Usage}, "reconnect": {a.Reconnect, b.Reconnect},
+		"quota": {a.Quota, b.Quota}, "upgrade": {a.Upgrade, b.Upgrade},
+	}
+	for name, pair := range fields {
+		if pair[0].Status != pair[1].Status {
+			return fmt.Errorf("semantic %s status drift: %s != %s", name, pair[0].Status, pair[1].Status)
 		}
+		if pair[0].Status == "PASS" && !reflect.DeepEqual(pair[0].Observed, pair[1].Observed) {
+			return fmt.Errorf("semantic %s value drift", name)
+		}
+	}
+	// Completion IDs are deployment-local receipt identities. Their presence is semantic;
+	// their values are deliberately normalized and therefore not compared.
+	if a.Receipt.Status != b.Receipt.Status {
+		return fmt.Errorf("semantic receipt status drift: %s != %s", a.Receipt.Status, b.Receipt.Status)
 	}
 	return nil
 }

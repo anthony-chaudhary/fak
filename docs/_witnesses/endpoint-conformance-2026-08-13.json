@@ -14,8 +14,21 @@
         }
       },
       "policy_admission": {
-        "status": "NOT_YET",
-        "reason": "endpoint exposes no deterministic admission probe"
+        "status": "PASS",
+        "observed": {
+          "allow": {
+            "by": "monitor",
+            "tool": "search_kb",
+            "verdict": "ALLOW"
+          },
+          "deny": {
+            "by": "monitor",
+            "disposition": "TERMINAL",
+            "reason": "DEFAULT_DENY",
+            "tool": "refund_payment",
+            "verdict": "DENY"
+          }
+        }
       },
       "session_lifecycle": {
         "status": "NOT_YET",
@@ -38,7 +51,7 @@
       },
       "receipt": {
         "status": "PASS",
-        "observed": "chatcmpl-fak-1786667478336348231"
+        "observed": "chatcmpl-fak-1786670269657447485"
       },
       "reconnect": {
         "status": "PASS",
@@ -57,7 +70,7 @@
         "object": "chat.completion",
         "finish_reason": "stop",
         "content": "FAK_ENDPOINT_CONFORMANCE_PASS",
-        "completion_id": "chatcmpl-fak-1786667478336348231"
+        "completion_id": "chatcmpl-fak-1786670269657447485"
       }
     },
     {
@@ -71,8 +84,21 @@
         }
       },
       "policy_admission": {
-        "status": "NOT_YET",
-        "reason": "endpoint exposes no deterministic admission probe"
+        "status": "PASS",
+        "observed": {
+          "allow": {
+            "by": "monitor",
+            "tool": "search_kb",
+            "verdict": "ALLOW"
+          },
+          "deny": {
+            "by": "monitor",
+            "disposition": "TERMINAL",
+            "reason": "DEFAULT_DENY",
+            "tool": "refund_payment",
+            "verdict": "DENY"
+          }
+        }
       },
       "session_lifecycle": {
         "status": "NOT_YET",
@@ -95,7 +121,7 @@
       },
       "receipt": {
         "status": "PASS",
-        "observed": "chatcmpl-fak-1786667481161427433"
+        "observed": "chatcmpl-fak-1786670272481394341"
       },
       "reconnect": {
         "status": "PASS",
@@ -114,7 +140,7 @@
         "object": "chat.completion",
         "finish_reason": "stop",
         "content": "FAK_ENDPOINT_CONFORMANCE_PASS",
-        "completion_id": "chatcmpl-fak-1786667481161427433"
+        "completion_id": "chatcmpl-fak-1786670272481394341"
       }
     }
   ]

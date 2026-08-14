@@ -4795,6 +4795,16 @@
           "category": "incidental",
           "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
           "token": "CAPABILITY_NOT_ADVERTISED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private wire decoder for the existing fak_adjudicate endpoint; it introduces no new policy capability.",
+          "token": "endpointAdjudication"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private conformance probe helper for the existing fak_adjudicate endpoint; it introduces no new policy capability.",
+          "token": "endpointAdjudicate"
         }
       ],
       "exclude": [
@@ -4862,6 +4872,8 @@
         "contractLeafByCapability",
         "counterfactualAdjudicator",
         "dispatchPreflightChurnState",
+        "endpointAdjudicate",
+        "endpointAdjudication",
         "executeLivePipeline",
         "executeTailPolicy",
         "fak_capability",
