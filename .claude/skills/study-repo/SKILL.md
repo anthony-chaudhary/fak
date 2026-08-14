@@ -85,7 +85,7 @@ witness discipline rather than re-implementing it.
 
 | Skill / tool | Starts from | Mechanism | License-aware? | Files issues? |
 |---|---|---|---|---|
-| `idea-scout` (`tools/idea_scout.py`) | an outward **feed** | automated arXiv/GitHub scan, dedup vs existing issues | no | yes (triage queue) |
+| `fak idea-scout` | an outward **feed** | dry-run arXiv/GitHub/HN/Reddit scan + filed-stamp dedup; `--live` files | no | yes (triage queue) |
 | `field-borrow` | a **named capability** | dogfood `fak_feature_query`/`fak index` → witness the gap, file epic-anchored | no | yes (grounded) |
 | `sota-check` | a **kernel op** you're about to write | `fak sota` prior-art matrix, route borrow/bind/stay-minimal | per-row route | no |
 | `industry-score` | the **field taxonomy** | coverage + parity-debt scorecard | no | no |
@@ -313,11 +313,20 @@ classify at that grain:
 
 **Filing is the default, not an optional epilogue.** A run that surfaced PARTIAL/ABSENT
 borrows and filed *nothing* is an incomplete pass — the research died in the transcript.
-File deduped (`gh issue list --search`), under the right epic, milestone + labels set at
-creation; on this host run `gh` via PowerShell or Bash with `--body-file` (never an inline
-heredoc). Backfill the derived work-class label with
-`python tools/issue_lane_router.py --apply-labels`. **Leak-check every body**: no absolute
-path, host, secret, or PII from the foreign clone leaks into a fak ticket.
+File only after first-class dedupe and contract checks:
+
+```bash
+fak-dev issue dedup --repo owner/name
+fak-dev issue contract --repo owner/name --issue <N>
+fak dispatch issues --issues issue.json --json
+```
+
+Issue creation and detached worker launch are independent explicit gates; this skill matching is
+not launch permission. Put each issue under the right epic with milestone + labels set at creation,
+and use a body file rather than an inline heredoc. Use `tools/issue_lane_router.py --apply-labels`
+only as a legacy/debug fallback when the first-class issue/dispatch surfaces expose a discrepancy.
+**Leak-check every body**: no absolute path, host, secret, or PII from the foreign clone leaks into
+a fak ticket.
 
 Report each filed issue number back. The only sanctioned no-file outcomes: every candidate
 resolved to **PRESENT-on-axis** or a **DIVERGENT with its tradeoff + worldview stated** (an
@@ -350,6 +359,9 @@ the research durable.**
   **inspire/integrate + license verdict**, and a **first checkable step** — unless every
   candidate resolved to PRESENT-on-axis or a stated DIVERGENT, or `--draft` was set (stated
   explicitly).
+- Filed effects are confirmed by independent `gh issue view` read-back. Any shipped effect also
+  has scoped origin ancestry, a green focused test/read-back, and `dos commit-audit` = `OK` /
+  `diff-witnessed`; worker narration is never proof.
 - **No monolith was filed** — the work is decomposed into small independently-shippable
   leaves (an epic + children if it is a real track).
 - **Every dismissal was earned by ablation, not ego** — each dropped candidate resolved to
