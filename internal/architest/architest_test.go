@@ -437,6 +437,7 @@ var tier = map[string]int{
 	"godfileceiling":        2,
 	"microscaleeval":        1,
 	"microagent":            5,
+	"sessionmine":           1, // stdlib-only offline normalization and ranking of local session telemetry; no runtime kernel.
 	"sessionsearch":         3, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
 	"taskgraph":             3, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
 	"toolshape":             4, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.

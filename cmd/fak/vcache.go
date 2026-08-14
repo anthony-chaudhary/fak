@@ -49,6 +49,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheApplyActions(stdout, stderr, argv[1:])
 	case "codex-session-extract":
 		return runVCacheCodexSessionExtract(stdout, stderr, argv[1:])
+	case "session-mine":
+		return runSessionMine(stdout, stderr, argv[1:])
 	case "context-witness":
 		return runVCacheContextWitness(stdout, stderr, argv[1:])
 	case "score", "bench":
@@ -101,6 +103,8 @@ func vcacheUsage(w io.Writer) {
                    [--prefix-witness] [--deletion-capable] [--transport-source S]
   fak vcache codex-session-extract [--session FILE | --thread-id ID] --out FILE
                    [--snapshot-out FILE|default] [--score-out FILE] [--family NAME]
+  fak vcache session-mine [--codex-root DIR] [--claude-root DIR] [--days N]
+                   [--min-support N] [--limit N]
   fak vcache context-witness [--json] [--snapshot FILE] [--fixture FILE]
                    [--wire openai|anthropic]
   fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]
