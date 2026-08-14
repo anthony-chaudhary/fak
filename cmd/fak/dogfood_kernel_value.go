@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -132,6 +133,45 @@ const dogfoodCacheWitnessMaxAge = 24 * time.Hour
 
 var dogfoodNow = time.Now
 
+type dogfoodCacheLedgerRow struct {
+	Schema          string    `json:"schema"`
+	Mechanism       string    `json:"mechanism"`
+	GeneratedAt     time.Time `json:"generated_at"`
+	CacheReadTokens int       `json:"cache_read_tokens"`
+	Fidelity        string    `json:"fidelity"`
+}
+
+func collectObservedCacheLedger(path string, now time.Time) (dogfoodValueAxis, int, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return dogfoodValueAxis{}, 0, false
+	}
+	defer f.Close()
+	var latest dogfoodCacheLedgerRow
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var row dogfoodCacheLedgerRow
+		if json.Unmarshal(sc.Bytes(), &row) != nil || row.Schema != "fak-cache-savings-ledger/1" || row.Mechanism != "provider_prompt_cache" || row.CacheReadTokens <= 0 || row.Fidelity != "lossless" || row.GeneratedAt.IsZero() {
+			continue
+		}
+		age := now.UTC().Sub(row.GeneratedAt.UTC())
+		if age < 0 || age > dogfoodCacheWitnessMaxAge {
+			continue
+		}
+		if latest.GeneratedAt.IsZero() || row.GeneratedAt.After(latest.GeneratedAt) {
+			latest = row
+		}
+	}
+	if latest.GeneratedAt.IsZero() {
+		return dogfoodValueAxis{}, 0, false
+	}
+	return dogfoodValueAxis{Status: "observed", Reason: "fresh provider cache-read tokens observed in typed lossless cache ledger; affinity causality not claimed"}, latest.CacheReadTokens, true
+}
+
+func canonicalDogfoodCacheLedgerPath(runsDir string) string {
+	return filepath.Join(filepath.Dir(filepath.Clean(runsDir)), ".fak", "nightrun", "cache-savings.jsonl")
+}
+
 func collectDogfoodKernelValue(runsDir, cacheReceipt string, minimum int) dogfoodKernelValue {
 	t := foldDispatchRepoPulseReceipts(runsDir)
 	readiness := assessRepoPulseCohort(runsDir, minimum)
@@ -141,6 +181,9 @@ func collectDogfoodKernelValue(runsDir, cacheReceipt string, minimum int) dogfoo
 	}
 	raw, err := os.ReadFile(cacheReceipt)
 	if os.IsNotExist(err) {
+		if axis, tokens, ok := collectObservedCacheLedger(canonicalDogfoodCacheLedgerPath(runsDir), dogfoodNow()); ok {
+			out.Cache, out.CacheCachedPromptTokens = axis, tokens
+		}
 		return out
 	}
 	if err != nil {

@@ -143,3 +143,48 @@ func TestCollectDogfoodVelocityRefusesThinMatchedEvidence(t *testing.T) {
 		t.Fatalf("got=%+v", got)
 	}
 }
+
+func TestDogfoodKernelValueFoldsFreshObservedCacheLedger(t *testing.T) {
+	root := t.TempDir()
+	runs := filepath.Join(root, ".dispatch-runs")
+	ledger := filepath.Join(root, ".fak", "nightrun", "cache-savings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 14, 17, 0, 0, 0, time.UTC)
+	oldNow := dogfoodNow
+	dogfoodNow = func() time.Time { return now }
+	t.Cleanup(func() { dogfoodNow = oldNow })
+	body := `{"schema":"fak-cache-savings-ledger/1","mechanism":"compaction_shed","generated_at":"2026-08-14T16:00:00Z","cache_read_tokens":999,"fidelity":"lossless"}
+` + `{"schema":"fak-cache-savings-ledger/1","mechanism":"provider_prompt_cache","generated_at":"2026-08-14T16:30:00Z","cache_read_tokens":5252608,"fidelity":"lossless"}
+`
+	if err := os.WriteFile(ledger, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := collectDogfoodKernelValue(runs, filepath.Join(root, "missing-affinity.json"), 5)
+	if got.Cache.Status != "observed" || got.CacheCachedPromptTokens != 5252608 || !strings.Contains(got.Cache.Reason, "causality not claimed") {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestDogfoodKernelValueRejectsStaleOrModeledCacheLedger(t *testing.T) {
+	root := t.TempDir()
+	runs := filepath.Join(root, ".dispatch-runs")
+	ledger := filepath.Join(root, ".fak", "nightrun", "cache-savings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldNow := dogfoodNow
+	dogfoodNow = func() time.Time { return time.Date(2026, 8, 14, 17, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { dogfoodNow = oldNow })
+	body := `{"schema":"fak-cache-savings-ledger/1","mechanism":"provider_prompt_cache","generated_at":"2026-08-12T16:00:00Z","cache_read_tokens":10,"fidelity":"lossless"}
+` + `{"schema":"fak-cache-savings-ledger/1","mechanism":"provider_prompt_cache","generated_at":"2026-08-14T16:00:00Z","cache_read_tokens":20,"fidelity":"modeled"}
+`
+	if err := os.WriteFile(ledger, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := collectDogfoodKernelValue(runs, filepath.Join(root, "missing-affinity.json"), 5)
+	if got.Cache.Status != "not-yet" || got.CacheCachedPromptTokens != 0 {
+		t.Fatalf("got=%+v", got)
+	}
+}
