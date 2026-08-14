@@ -8,76 +8,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
-// Post is one #grafana-channel message, decoupled from which fold produced it. The
-// three folds (SnapshotPost, DashboardPost, LinksRollup) each build one, so the
-// renderer (Text/Blocks) has a single input shape — the same pattern as
-// benchpost.Post and scoreboard.Update.
-type Post struct {
-	Emoji  string   // leading status glyph
-	Title  string   // headline
-	Lead   string   // one-line summary / context under the title
-	Lines  []string // the body: one line per link / annotation
-	Source string   // who posted: "ci" | "agent" | hostname (optional)
-}
+// Post is a render-ready Slack post.
+type Post slackmeta.Post
 
-// defaultEmoji is the surface glyph used when a fold leaves Emoji unset.
+func (p Post) Text() string  { return slackmeta.Post(p).Text(p.signalNoise()) }
+func (p Post) Blocks() []any { return slackmeta.Post(p).Blocks(p.signalNoise()) }
+
 const defaultEmoji = ":chart_with_upwards_trend:"
-
-// Text renders the plain-text fallback — the line Slack shows in notifications and any
-// client without Block Kit, and what tests and --dry-run assert on.
-func (p Post) Text() string {
-	var b strings.Builder
-	emoji := p.Emoji
-	if emoji == "" {
-		emoji = defaultEmoji
-	}
-	fmt.Fprintf(&b, "%s *%s*", emoji, p.Title)
-	if p.Lead != "" {
-		fmt.Fprintf(&b, "\n%s", p.Lead)
-	}
-	for _, ln := range p.Lines {
-		fmt.Fprintf(&b, "\n• %s", ln)
-	}
-	if p.Source != "" {
-		fmt.Fprintf(&b, "\n_posted by %s_", p.Source)
-	}
-	return slackmeta.AppendText(b.String(), p.signalNoise())
-}
-
-// Blocks renders the Block Kit payload. It carries the same facts as Text so a
-// non-Block client loses nothing.
-func (p Post) Blocks() []any {
-	emoji := p.Emoji
-	if emoji == "" {
-		emoji = defaultEmoji
-	}
-	blocks := []any{
-		map[string]any{
-			"type": "section",
-			"text": map[string]any{"type": "mrkdwn", "text": fmt.Sprintf("*%s %s*", emoji, p.Title)},
-		},
-	}
-	if p.Lead != "" {
-		blocks = append(blocks, map[string]any{
-			"type": "section",
-			"text": map[string]any{"type": "mrkdwn", "text": p.Lead},
-		})
-	}
-	if len(p.Lines) > 0 {
-		body := "• " + strings.Join(p.Lines, "\n• ")
-		blocks = append(blocks, map[string]any{
-			"type": "section",
-			"text": map[string]any{"type": "mrkdwn", "text": body},
-		})
-	}
-	if p.Source != "" {
-		blocks = append(blocks, map[string]any{
-			"type":     "context",
-			"elements": []any{map[string]any{"type": "mrkdwn", "text": "posted by " + p.Source}},
-		})
-	}
-	return slackmeta.AppendContext(blocks, p.signalNoise())
-}
 
 func (p Post) signalNoise() slackmeta.Score {
 	signal := 1 + slackmeta.NonEmpty(p.Lead) + len(p.Lines)

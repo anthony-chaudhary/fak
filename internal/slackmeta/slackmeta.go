@@ -19,6 +19,71 @@ type Score struct {
 	Basis  string  `json:"basis,omitempty"`
 }
 
+// Post carries the common structure and rendering behavior shared by fak Slack
+// report cards. Leaves embed it and keep only their domain-specific constructors.
+type Post struct {
+	Emoji  string   // leading status glyph
+	Title  string   // bold headline
+	Lead   string   // one-line summary
+	Lines  []string // detail rows
+	Source string   // provenance label, e.g. "ci", "local"
+}
+
+// Text returns the Slack mrkdwn fallback.
+func (p Post) Text(score Score) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s *%s*\n", p.Emoji, p.Title)
+	if p.Lead != "" {
+		b.WriteString(p.Lead)
+		b.WriteByte('\n')
+	}
+	for _, line := range p.Lines {
+		fmt.Fprintf(&b, "\u2022 %s\n", line)
+	}
+	if p.Source != "" {
+		fmt.Fprintf(&b, "_source: %s_", p.Source)
+	}
+	return AppendText(b.String(), score)
+}
+
+// Blocks returns Slack Block Kit blocks with the self-score context appended.
+func (p Post) Blocks(score Score) []any {
+	blocks := []any{
+		map[string]any{
+			"type": "header",
+			"text": map[string]any{"type": "plain_text", "text": p.Emoji + " " + p.Title},
+		},
+	}
+	if p.Lead != "" {
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{"type": "mrkdwn", "text": p.Lead},
+		})
+	}
+	if len(p.Lines) > 0 {
+		var b strings.Builder
+		for i, line := range p.Lines {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString("• " + line)
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{"type": "mrkdwn", "text": b.String()},
+		})
+	}
+	if p.Source != "" {
+		blocks = append(blocks, map[string]any{
+			"type": "context",
+			"elements": []any{
+				map[string]any{"type": "mrkdwn", "text": "source: " + p.Source},
+			},
+		})
+	}
+	return AppendContext(blocks, score)
+}
+
 // New builds a Score, clamping negative counts and applying a one-unit noise floor so
 // the ratio is always finite and comparable across reports.
 func New(signal, noise int, basis string) Score {
