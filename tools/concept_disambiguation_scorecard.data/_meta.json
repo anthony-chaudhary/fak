@@ -622,6 +622,51 @@
           "category": "incidental",
           "reason": "Issue #6689 armbench-specific helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
           "token": "applyCacheControl"
+        },
+        {
+          "category": "incidental",
+          "reason": "local expiry constant for the existing typed dogfood cache witness; not a new operator concept",
+          "token": "dogfoodCacheWitnessMaxAge"
+        },
+        {
+          "category": "incidental",
+          "reason": "private atomic file writer for the existing typed cache witness; not a new operator concept",
+          "token": "persistMicroCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant or path helper for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant or path helper for the existing typed cache witness; not a new operator concept",
+          "token": "canonicalDogfoodCacheWitnessPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "private cross-platform atomic replacement helper for the existing typed cache witness; not a new operator concept",
+          "token": "replaceMicroCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheKernel32"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheMoveFileExW"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheMovefileReplaceExisting"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheMovefileWriteThrough"
         }
       ],
       "id": "cache",
@@ -732,6 +777,7 @@
         "cachevalue_test",
         "cachewritemult",
         "caching",
+        "canonicalDogfoodCacheWitnessPath",
         "claudeKeychainCache",
         "claudeKeychainCacheEntry",
         "claudeKeychainCacheMu",
@@ -745,6 +791,7 @@
         "defaultcacheandresidency",
         "defaultcachesize",
         "detectCacheWarmReplay",
+        "dogfoodCacheWitnessMaxAge",
         "droppedcachedtokens",
         "fak_fleet_goal_cache_read_tokens_total",
         "fak_fleet_goal_cache_write_tokens_total",
@@ -766,7 +813,12 @@
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
         "microCacheArm",
+        "microCacheKernel32",
+        "microCacheMoveFileExW",
+        "microCacheMovefileReplaceExisting",
+        "microCacheMovefileWriteThrough",
         "microCacheWitness",
+        "microCacheWitnessSchema",
         "minCacheRun",
         "newCache",
         "no_cache_state_delta",
@@ -777,12 +829,14 @@
         "observeTurnCache",
         "observecachettlupgrade",
         "parseCacheSeats",
+        "persistMicroCacheWitness",
         "prefixcachehits",
         "prefixcachequeries",
         "promptcachehittokens",
         "promptcachemisstokens",
         "pycache",
         "registerCacheLevers",
+        "replaceMicroCacheWitness",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
         "runMicroCacheArm",
@@ -3964,6 +4018,31 @@
           "category": "incidental",
           "reason": "Private deduplication helper for existing dispatch witnesses; not a new witness concept.",
           "token": "mergeDispatchWitnessRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "local expiry constant for the existing typed dogfood cache witness; not a new operator concept",
+          "token": "dogfoodCacheWitnessMaxAge"
+        },
+        {
+          "category": "incidental",
+          "reason": "private atomic file writer for the existing typed cache witness; not a new operator concept",
+          "token": "persistMicroCacheWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant or path helper for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheWitnessSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant or path helper for the existing typed cache witness; not a new operator concept",
+          "token": "canonicalDogfoodCacheWitnessPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "private cross-platform atomic replacement helper for the existing typed cache witness; not a new operator concept",
+          "token": "replaceMicroCacheWitness"
         }
       ],
       "id": "witness-proof",
@@ -4010,6 +4089,7 @@
         "appendGuardCompactionWitnessTo",
         "benchFleetWitnessSeconds",
         "cacheWitnessReadback",
+        "canonicalDogfoodCacheWitnessPath",
         "checkWitness",
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
@@ -4033,6 +4113,7 @@
         "dispatchWitnessStashPathsGit",
         "dispatchWitnessStrandedBuildFails",
         "dispatchWitnessStrandedBuildFailsGo",
+        "dogfoodCacheWitnessMaxAge",
         "dogfoodDispatchWitnessName",
         "dogfoodWitnessOutcome",
         "done_not_witnessed",
@@ -4050,11 +4131,13 @@
         "maxWitnessFileBytes",
         "mergeDispatchWitnessRecords",
         "microCacheWitness",
+        "microCacheWitnessSchema",
         "motifDetectReproduceFixWitness",
         "named_witness",
         "newGuardCompactionWitness",
         "nwitness",
         "observeProxyFillWitness",
+        "persistMicroCacheWitness",
         "proxyFillDeclaredWitness",
         "proxyFillWitnessFor",
         "proxyFillWitnessPrefix",
@@ -4068,6 +4151,7 @@
         "refutes",
         "refutil",
         "renderCheckpointWitness",
+        "replaceMicroCacheWitness",
         "revocation_reason",
         "revocations",
         "revokeProxyFillWitness",
@@ -4338,6 +4422,26 @@
           "category": "incidental",
           "reason": "Per-tool ABI registry identifier for the established Bash operation",
           "token": "EngineBash"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheKernel32"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheMoveFileExW"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheMovefileReplaceExisting"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
+          "token": "microCacheMovefileWriteThrough"
         }
       ],
       "id": "gateway-engine",
@@ -4388,6 +4492,10 @@
         "kernelValue",
         "kernels",
         "kernelwiki",
+        "microCacheKernel32",
+        "microCacheMoveFileExW",
+        "microCacheMovefileReplaceExisting",
+        "microCacheMovefileWriteThrough",
         "microcache",
         "microcachedemo",
         "query_public_policy",

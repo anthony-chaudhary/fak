@@ -25,7 +25,7 @@ func runDogfoodScore(stdout, stderr io.Writer, argv []string) int {
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
 	kernelValue := fs.Bool("kernel-value", true, "fold durable token/turn/cache dogfood evidence into JSON")
 	runsDir := fs.String("runs-dir", filepath.Join(repoRoot(), ".dispatch-runs"), "dispatch receipt archive for --kernel-value")
-	cacheReceipt := fs.String("cache-witness", "", "typed fak-micro-cache-affinity-witness/1 JSON receipt")
+	cacheReceipt := fs.String("cache-witness", canonicalDogfoodCacheWitnessPath(), "typed cache receipt (default: canonical dogfood evidence; explicit path overrides it; empty disables readback)")
 	cohortMinimum := fs.Int("cohort-minimum", 5, "minimum durable post-default launches for outcome comparison")
 	if !parseFlags(fs, argv) {
 		return 2

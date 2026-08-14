@@ -7,12 +7,21 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
+
+const microCacheWitnessSchema = "fak-micro-cache-affinity-witness/1"
+
+func canonicalDogfoodCacheWitnessPath() string {
+	return filepath.Join(repoRoot(), ".fak", "dogfood", "cache-affinity-witness.json")
+}
 
 type cacheSeatFlags []string
 
@@ -29,6 +38,7 @@ type microCacheArm struct {
 }
 type microCacheWitness struct {
 	Schema                string        `json:"schema"`
+	CapturedAt            time.Time     `json:"captured_at"`
 	Verdict               string        `json:"verdict"`
 	Reason                string        `json:"reason"`
 	DistinctSeatEndpoints int           `json:"distinct_seat_endpoints"`
@@ -44,6 +54,7 @@ func runMicroCacheWitness(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", "", "model id")
 	calls := fs.Int("calls", 3, "repeated-prefix calls per arm")
 	prompt := fs.String("prompt", strings.Repeat("stable cache witness context ", 600)+"\nReturn exactly CACHE-WITNESS.", "identical repeated prompt")
+	receiptPath := fs.String("receipt", canonicalDogfoodCacheWitnessPath(), "typed receipt path (default: canonical dogfood evidence; empty disables persistence)")
 	if !parseFlags(fs, argv) || *model == "" || *calls < 2 || len(seats) == 0 {
 		fmt.Fprintln(stderr, "fak micro collapse cache-witness: require --model, --calls >=2, and --gateway-seat")
 		return 2
@@ -53,7 +64,7 @@ func runMicroCacheWitness(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak micro collapse cache-witness:", err)
 		return 2
 	}
-	r := microCacheWitness{Schema: "fak-micro-cache-affinity-witness/1", Verdict: "not-yet", DistinctSeatEndpoints: distinct}
+	r := microCacheWitness{Schema: microCacheWitnessSchema, CapturedAt: time.Now().UTC(), Verdict: "not-yet", DistinctSeatEndpoints: distinct}
 	r.On, err = runMicroCacheArm(parsed, false, *calls, *prompt)
 	if err == nil {
 		r.Off, err = runMicroCacheArm(parsed, true, *calls, *prompt)
@@ -68,11 +79,50 @@ func runMicroCacheWitness(stdout, stderr io.Writer, argv []string) int {
 		r.Verdict = "ready"
 		r.Reason = "provider cache counters captured for affinity-on and affinity-off arms"
 	}
-	_ = json.NewEncoder(stdout).Encode(r)
+	raw, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		fmt.Fprintln(stderr, "fak micro collapse cache-witness: encode receipt:", err)
+		return 1
+	}
+	if *receiptPath != "" {
+		if err := persistMicroCacheWitness(*receiptPath, raw); err != nil {
+			fmt.Fprintln(stderr, "fak micro collapse cache-witness: persist receipt:", err)
+			return 1
+		}
+	}
+	if _, err := fmt.Fprintln(stdout, string(raw)); err != nil {
+		fmt.Fprintln(stderr, "fak micro collapse cache-witness: write stdout:", err)
+		return 1
+	}
 	if r.Verdict != "ready" {
 		return 3
 	}
 	return 0
+}
+
+func persistMicroCacheWitness(path string, raw []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".cache-affinity-witness-*.json")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err = tmp.Write(append(raw, '\n')); err == nil {
+		err = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	if err != nil {
+		return err
+	}
+	// Publish with a same-directory atomic replacement. On Windows this uses
+	// MoveFileEx(REPLACE_EXISTING|WRITE_THROUGH), so repeated captures never
+	// expose a remove-then-rename gap to dogfood-score readers.
+	return replaceMicroCacheWitness(tmpPath, path)
 }
 
 func parseCacheSeats(values []string, model string) ([]microagent.GatewaySeat, int, error) {

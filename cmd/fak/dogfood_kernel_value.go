@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type dogfoodValueAxis struct {
@@ -119,11 +120,17 @@ func collectDogfoodVelocity(runsDir string, minimum int) dogfoodVelocityReadback
 }
 
 type cacheWitnessReadback struct {
-	Verdict string        `json:"verdict"`
-	Reason  string        `json:"reason"`
-	On      microCacheArm `json:"affinity_on"`
-	Off     microCacheArm `json:"affinity_off"`
+	Schema     string        `json:"schema"`
+	CapturedAt time.Time     `json:"captured_at"`
+	Verdict    string        `json:"verdict"`
+	Reason     string        `json:"reason"`
+	On         microCacheArm `json:"affinity_on"`
+	Off        microCacheArm `json:"affinity_off"`
 }
+
+const dogfoodCacheWitnessMaxAge = 24 * time.Hour
+
+var dogfoodNow = time.Now
 
 func collectDogfoodKernelValue(runsDir, cacheReceipt string, minimum int) dogfoodKernelValue {
 	t := foldDispatchRepoPulseReceipts(runsDir)
@@ -133,13 +140,38 @@ func collectDogfoodKernelValue(runsDir, cacheReceipt string, minimum int) dogfoo
 		return out
 	}
 	raw, err := os.ReadFile(cacheReceipt)
+	if os.IsNotExist(err) {
+		return out
+	}
 	if err != nil {
 		out.Cache.Reason = "cache witness unreadable: " + err.Error()
 		return out
 	}
 	var receipt cacheWitnessReadback
-	if json.Unmarshal(raw, &receipt) != nil || receipt.Verdict == "" {
-		out.Cache.Reason = "cache witness is not fak-micro-cache-affinity-witness/1 evidence"
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		out.Cache.Reason = "cache witness is invalid JSON: " + err.Error()
+		return out
+	}
+	if receipt.Schema != microCacheWitnessSchema {
+		out.Cache.Reason = fmt.Sprintf("cache witness schema %q is unsupported; want %q", receipt.Schema, microCacheWitnessSchema)
+		return out
+	}
+	if receipt.CapturedAt.IsZero() {
+		out.Cache.Reason = "cache witness capture time is missing"
+		return out
+	}
+	if receipt.Verdict != "ready" && receipt.Verdict != "not-yet" {
+		out.Cache.Reason = fmt.Sprintf("cache witness verdict %q is unsupported", receipt.Verdict)
+		return out
+	}
+	now := dogfoodNow().UTC()
+	age := now.Sub(receipt.CapturedAt)
+	if age < 0 {
+		out.Cache.Reason = fmt.Sprintf("cache witness capture time %s is in the future", receipt.CapturedAt.UTC().Format(time.RFC3339))
+		return out
+	}
+	if age > dogfoodCacheWitnessMaxAge {
+		out.Cache.Reason = fmt.Sprintf("cache witness is stale (%s old; maximum %s); capture a fresh live affinity-on/off receipt", age.Round(time.Second), dogfoodCacheWitnessMaxAge)
 		return out
 	}
 	out.Cache = dogfoodValueAxis{Status: receipt.Verdict, Reason: receipt.Reason}
