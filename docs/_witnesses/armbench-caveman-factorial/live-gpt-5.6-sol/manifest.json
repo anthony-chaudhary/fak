@@ -1,0 +1,3076 @@
+{
+  "schema": "fak-armbench-caveman-factorial/1",
+  "comparator": "JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+  "evidence_class": "live-provider-and-deterministic-transform-receipt",
+  "token_method": "UTF-8 bytes/4 ceiling; provider token fields intentionally null without provider receipts",
+  "disabled_features": [
+    "routing",
+    "policy",
+    "semantic-response-reuse"
+  ],
+  "provider_endpoint": "http://127.0.0.1:64355/v1",
+  "provider_model": "gpt-5.6-sol",
+  "pressures": [
+    1,
+    4,
+    12
+  ],
+  "cells": [
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 164,
+      "provider_output": "1. **FACT-000**\n\nQuantum entanglement occurs when two particles share one combined quantum state. Measuring one particle reveals a correlated result for the other, even when they are far apart. This does not enable faster-than-light messaging, because each individual measurement remains random; the correlation becomes apparent only when the results are later compared.\n\n**Action:** Picture entangled particles as two distant coins whose outcomes are individually random but reliably correlated when compared.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 187,
+      "provider_output": "1. **FACT-000**\n\nDistributed consensus is how multiple computers agree on one shared state even when messages are delayed or some computers fail. Each computer proposes or receives updates, and a consensus protocol ensures that only an update accepted under agreed rules becomes authoritative. This prevents different parts of the system from permanently recording conflicting results.\n\n**Action:** Review how the Raft consensus algorithm elects a leader.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 227,
+      "provider_output": "1. **FACT-000**\n\nA **zero-knowledge proof** lets someone prove that they know a secret without revealing the secret itself. Imagine proving you know the password to a locked room by entering it through a hidden door and returning through whichever exit an observer randomly requests. Repeating this test many times makes it extremely unlikely that you are merely guessing, yet the password remains undisclosed. Cryptographic systems use the same principle mathematically to verify identities, transactions, or computations while preserving privacy.\n\n**Action:** Identify one verification process that could benefit from revealing less private information.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 251,
+      "provider_output": "1. **FACT-000**\n\n**Technical idea — public-key cryptography:** Each user has two mathematically linked keys. A public key can be shared and used to encrypt data, while the private key remains secret and decrypts it. The keys are related, but deriving the private key from the public key is computationally impractical. This enables secure communication without first exchanging a shared secret.\n\n**Action:** Store private keys in a secure key-management system.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 159,
+      "provider_output": "1. **FACT-000**\n\nA neural network learns by adjusting internal numerical parameters called *weights*. During training, it makes a prediction, measures how far that prediction is from the correct answer, and uses **backpropagation** to determine how much each weight contributed to the error. An optimization algorithm then slightly updates the weights to reduce similar errors. Repeating this process across many examples gradually improves the network’s predictions.\n\n**Action:** Sketch this cycle: prediction → error measurement → backpropagation → weight update.",
+      "provider_input_tokens": 102,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 286,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 72
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 140,
+      "provider_output": "1. FACT-000\n\nAction: Explain one difficult technical idea clearly to audience.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 126,
+      "provider_output": "FACT markers:\n1. FACT-000\n\nAction: Specify difficult technical idea.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 171,
+      "provider_output": "1. FACT-000\n\nPublic-key cryptography: two keys. Public key locks message. Private key unlocks. Public key safe to share; private key stays secret. Math makes reversing lock impractical.\n\nAction: Protect private key.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 177,
+      "provider_output": "1. FACT-000\n\nQuantum entanglement: two particles share one joint state. Measure one; results correlate with the other, even far apart. No faster-than-light message sent.\n\nAction: Picture one shared system, not two separate objects.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 97,
+      "provider_output": "1. FACT-000\n\nAction: Explain difficult technical idea clearly to audience.",
+      "provider_input_tokens": 121,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 315,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 79
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 270,
+      "provider_output": "### Preserved FACT markers\n1. **FACT-000**\n\n### Technical idea: Public-key cryptography\nPublic-key cryptography uses two mathematically linked keys:\n\n- A **public key**, which anyone may use to encrypt a message.\n- A **private key**, which only the recipient uses to decrypt it.\n\nA useful analogy is an open padlock: you can give copies of the open lock to everyone, allowing anyone to secure a box for you. Once locked, however, only your private key can open it. The underlying mathematics makes deriving the private key from the public key computationally impractical.\n\n**Action:** Identify one system you use that relies on public-key cryptography.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 165,
+      "provider_output": "1. FACT-000\n\nA neural network learns by adjusting internal numerical weights. During training, it makes a prediction, measures the error, and uses backpropagation to determine how much each weight contributed to that error. An optimization algorithm then updates the weights to reduce future errors. Repeating this process across many examples allows the network to learn patterns without being explicitly programmed with every rule.\n\nAction: Sketch the prediction-error-update cycle once to reinforce the concept.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 395,
+      "provider_output": "1. **FACT-000**\n\n**Technical idea — public-key cryptography:** A user creates two mathematically linked keys. The public key can be shared so others can encrypt messages, while only the private key can decrypt them. The relationship allows encryption without exposing the secret key.\n\n**Action:** Illustrate the process with a sender, a public key, and a private-key holder.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 203,
+      "provider_output": "Quantum entanglement occurs when two particles share one combined quantum state. Measuring one particle determines the correlated measurement outcome of the other, even when they are far apart. This does not allow faster-than-light communication, because each individual result remains random; the correlation becomes apparent only when the results are later compared.\n\n**Facts**\n1. FACT-000\n\n**Action:** Use the shared-coin analogy to explain entanglement to the audience.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 155,
+      "provider_output": "1. **FACT-000**\n\nA difficult technical idea: **public-key encryption** uses two mathematically linked keys. A public key can be shared so anyone can encrypt a message, while the private key remains secret and is required to decrypt it. This enables secure communication without first exchanging a shared secret.\n\n**Action:** Create and securely store a public/private key pair.",
+      "provider_input_tokens": 102,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 286,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 72
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 182,
+      "provider_output": "1. FACT-000\n\nPublic-key cryptography: public key locks message. Only matching private key unlocks. Safe sharing; secret key stays hidden.\n\nAction: Verify public key before use.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 156,
+      "provider_output": "Technical idea—recursion: function solves big problem by calling itself on smaller problem. Base case stops calls. Results return upward.\n\nFacts:\n1. FACT-000\n\nAction: Draw one recursion tree.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 109,
+      "provider_output": "1. FACT-000 — Neural network learns by adjusting connection weights to reduce prediction error.\n\nAction: Test network on unseen data.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 100,
+      "provider_output": "Facts:\n1. FACT-000\n\nAction: Explain difficult technical idea clearly to audience.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 535700,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 116,
+      "provider_output": "1. FACT-000 — preserved.\n\nTechnical idea: encryption. Plain data + key → scrambled data. Correct key restores data. No key, data stays unreadable.\n\nAction: Protect keys.",
+      "provider_input_tokens": 121,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 315,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 79
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 182,
+      "provider_output": "1. FACT-000\n\nA neural network learns by adjusting numerical parameters called weights. During training, it makes a prediction, measures how wrong that prediction is with a loss function, and uses backpropagation to calculate how each weight contributed to the error. An optimizer then changes the weights slightly to reduce future errors. Repeating this process across many examples allows the network to recognize useful patterns.\n\nAction: Sketch this loop—predict, measure error, backpropagate, update weights.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 263,
+      "provider_output": "### Public-key cryptography, simply explained\n\nPublic-key cryptography uses two mathematically linked keys:\n\n1. **Public key:** Anyone may use it to encrypt a message for you.\n2. **Private key:** Only you possess it, so only you can decrypt that message.\n\nThink of the public key as an open padlock you distribute widely. Anyone can lock a box with it, but your private key is the only key that can reopen the box. This enables secure communication without first exchanging a shared secret.\n\n### Preserved FACT markers\n\n1. **FACT-000**\n\n**Action:** Sketch the padlock-and-key analogy for your audience.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 183,
+      "provider_output": "A zero-knowledge proof lets someone prove a statement is true without revealing the secret information behind it. For example, you can prove you know a password without transmitting the password itself. The verifier checks mathematical evidence that would be extremely difficult to produce without the secret, while learning nothing useful about the secret.\n\n**FACT markers**\n1. FACT-000\n\n**Action:** Sketch a simple challenge-response diagram to illustrate the proof process.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 198,
+      "provider_output": "1. **FACT-000**\n\n**Technical idea — public-key cryptography:**  \nPublic-key cryptography uses a matched pair of keys. A public key can be shared openly and used to encrypt a message, while the corresponding private key is kept secret and used to decrypt it. This allows secure communication without first exchanging a shared secret. The security comes from mathematical problems that are easy to perform in one direction but extremely difficult to reverse without the private key.\n\n**Action:** Share your public key while keeping your private key secret.",
+      "provider_input_tokens": 93,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 179,
+      "provider_output": "1. **FACT-000**\n\n**Technical idea — public-key encryption:**  \nPublic-key encryption uses two mathematically linked keys. A **public key** can be shared with anyone and used to encrypt a message, while a **private key** is kept secret and used to decrypt it. Think of the public key as an open padlock anyone can snap shut around a box; only the private key can reopen it. This allows secure communication without first exchanging a shared secret.\n\n**Action:** Create and securely store a public–private key pair.",
+      "provider_input_tokens": 102,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 286,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 72
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 96,
+      "provider_output": "1. FACT-000\n\nAction: Explain difficult technical idea clearly to audience.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 198,
+      "provider_output": "1. FACT-000 — preserved.\n\nPublic-key cryptography: one key locks; another unlocks. Public key shared. Private key secret. Math makes reverse path impractical.\n\nAction: Protect private key.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 144,
+      "provider_output": "1. FACT-000 — preserved.\n\nPublic-key cryptography: two keys. Public key locks data. Private key unlocks data. Sharing public key safe. Private key stays secret. Math makes reverse path impractical.\n\nAction: Protect private key.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 179,
+      "provider_output": "1. **FACT-000**\n\n**Public-key cryptography:** Two keys. Public key locks or verifies. Private key unlocks or signs. Math links keys; practical computation cannot derive private key from public key.\n\n**Action:** Verify one digital signature.",
+      "provider_input_tokens": 112,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 80,
+      "provider_output": "1. FACT-000\n\nAction: Explain difficult technical idea clearly to audience.",
+      "provider_input_tokens": 121,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 315,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 79
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 85,
+      "provider_output": "1. **FACT-000:** “tool observation 000” is repeated 256 times.\n\n**Action:** Record FACT-000 as the stable tool observation.",
+      "provider_input_tokens": 1351,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 136,
+      "provider_output": "1. **FACT-000:** Tool observation 000, repeated throughout the receipt; the supplied text contains a literal compression notice indicating that 1,194 middle bytes were omitted.\n\n**Action:** Record FACT-000 as the single synthesized tool observation.",
+      "provider_input_tokens": 1096,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 135,
+      "provider_output": "1. **FACT-000:** The inspection returned “tool observation 000” repeatedly throughout the observation.\n\n**Action:** Record FACT-000 as the inspection result.",
+      "provider_input_tokens": 1351,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 151,
+      "provider_output": "1. **FACT-000:** Tool observation 000 is repeated throughout the result; 1,194 middle bytes are marked as omitted by compression.\n\n**Action:** Verify the uncompressed tool result if the omitted content is needed.",
+      "provider_input_tokens": 1096,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 164,
+      "provider_output": "1. **FACT-000:** “tool observation 000” is repeated throughout the tool result; the receipt notes that 1,194 middle bytes were omitted.\n\n**Action:** Record FACT-000 as the single synthesized fact.",
+      "provider_input_tokens": 1105,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 530900,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4643,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1161
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 216,
+      "provider_output": "1. FACT-000: tool observation 000; repeated 256 times.\n\nAction: Record FACT-000.",
+      "provider_input_tokens": 1370,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 134,
+      "provider_output": "1. FACT-000: tool observation 000, repeated; supplied receipt compresses 1,194 middle bytes.\n\nAction: Verify full uncompressed FACT-000 tool result.",
+      "provider_input_tokens": 1115,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 510500,
+          "bytes_before": 5769,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 171,
+      "provider_output": "1. FACT-000: tool observation 000 ×256.\n\nAction: Preserve FACT-000.",
+      "provider_input_tokens": 1370,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 104,
+      "provider_output": "1. FACT-000: “tool observation 000” repeated throughout; middle 1,194 bytes marked compressed/omitted.\n\nAction: Retrieve omitted bytes before full synthesis.",
+      "provider_input_tokens": 1115,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 89,
+      "provider_output": "1. FACT-000: Tool observation 000, repeated throughout; 1,194 middle bytes omitted in supplied receipt.\n\nAction: Retrieve uncompressed FACT-000 before relying on full details.",
+      "provider_input_tokens": 1124,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4672,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1168
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 178,
+      "provider_output": "1. **FACT-000:** Tool observation 000, repeated throughout the result.\n2. **FACT-001:** Tool observation 001, repeated throughout the result.\n3. **FACT-002:** Tool observation 002, repeated throughout the result.\n4. **FACT-003:** Tool observation 003, repeated throughout the result.\n\n**Action:** Consolidate FACT-000 through FACT-003 into the stable setup record.",
+      "provider_input_tokens": 5104,
+      "provider_cache_read_tokens": 4864,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 229,
+      "provider_output": "1. **FACT-000:** “tool observation 000” is repeated throughout the tool result; the receipt indicates that 1,194 middle bytes were omitted.\n2. **FACT-001:** “tool observation 001” is repeated throughout the tool result; the receipt indicates that 1,194 middle bytes were omitted.\n3. **FACT-002:** “tool observation 002” is repeated throughout the tool result; the receipt indicates that 1,194 middle bytes were omitted.\n4. **FACT-003:** “tool observation 003” is repeated throughout the tool result; the receipt indicates that 1,194 middle bytes were omitted.\n\n**Action:** Record FACT-000 through FACT-003 as the four inspected tool observations.",
+      "provider_input_tokens": 4084,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 193,
+      "provider_output": "1. **FACT-000:** Tool observation 000, repeated throughout the result.\n2. **FACT-001:** Tool observation 001, repeated throughout the result.\n3. **FACT-002:** Tool observation 002, repeated throughout the result.\n4. **FACT-003:** Tool observation 003, repeated throughout the result.\n\n**Action:** Consolidate FACT-000 through FACT-003 into a single inspection record.",
+      "provider_input_tokens": 5104,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 203,
+      "provider_output": "1. **FACT-000:** Tool observation 000 was repeatedly reported; the supplied receipt contains a marked compression of 1,194 middle bytes.\n2. **FACT-001:** Tool observation 001 was repeatedly reported; the supplied receipt contains a marked compression of 1,194 middle bytes.\n3. **FACT-002:** Tool observation 002 was repeatedly reported; the supplied receipt contains a marked compression of 1,194 middle bytes.\n4. **FACT-003:** Tool observation 003 was repeatedly reported; the supplied receipt contains a marked compression of 1,194 middle bytes.\n\n**Action:** Record all four tool observations in the consolidated workload log.",
+      "provider_input_tokens": 4084,
+      "provider_cache_read_tokens": 3840,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 190,
+      "provider_output": "1. **FACT-000:** Tool observation 000 is repeated throughout the result; 1,194 middle bytes are marked as omitted.\n2. **FACT-001:** Tool observation 001 is repeated throughout the result; 1,194 middle bytes are marked as omitted.\n3. **FACT-002:** Tool observation 002 is repeated throughout the result; 1,194 middle bytes are marked as omitted.\n4. **FACT-003:** Tool observation 003 is repeated throughout the result; 1,194 middle bytes are marked as omitted.\n\n**Action:** Retain all four FACT markers as the synthesized inspection record.",
+      "provider_input_tokens": 4093,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 525700,
+          "bytes_before": 22135,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17636,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4409
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 342,
+      "provider_output": "1. FACT-000: tool observation 000; repeated 250×.\n2. FACT-001: tool observation 001; repeated 250×.\n3. FACT-002: tool observation 002; repeated 250×.\n4. FACT-003: tool observation 003; repeated 250×.\n\nAction: Preserve all four FACT records.",
+      "provider_input_tokens": 5123,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 159,
+      "provider_output": "1. FACT-000: tool observation 000, repeated; middle 1,194 bytes omitted in receipt.\n2. FACT-001: tool observation 001, repeated; middle 1,194 bytes omitted in receipt.\n3. FACT-002: tool observation 002, repeated; middle 1,194 bytes omitted in receipt.\n4. FACT-003: tool observation 003, repeated; middle 1,194 bytes omitted in receipt.\n\nAction: Retrieve omitted bytes; verify full facts.",
+      "provider_input_tokens": 4103,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 181,
+      "provider_output": "1. FACT-000: “tool observation 000” repeated 250 times.\n2. FACT-001: “tool observation 001” repeated 250 times.\n3. FACT-002: “tool observation 002” repeated 250 times.\n4. FACT-003: “tool observation 003” repeated 250 times.\n\nAction: Record all four FACT markers.",
+      "provider_input_tokens": 5123,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 523100,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 140,
+      "provider_output": "1. FACT-000: tool observation 000; repeated; middle 1,194 bytes compressed.\n2. FACT-001: tool observation 001; repeated; middle 1,194 bytes compressed.\n3. FACT-002: tool observation 002; repeated; middle 1,194 bytes compressed.\n4. FACT-003: tool observation 003; repeated; middle 1,194 bytes compressed.\n\nAction: Retrieve compressed bytes; verify full observations.",
+      "provider_input_tokens": 4103,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 533700,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 173,
+      "provider_output": "1. FACT-000: tool observation 000, repeated; middle 1,194 bytes omitted in receipt.\n2. FACT-001: tool observation 001, repeated; middle 1,194 bytes omitted in receipt.\n3. FACT-002: tool observation 002, repeated; middle 1,194 bytes omitted in receipt.\n4. FACT-003: tool observation 003, repeated; middle 1,194 bytes omitted in receipt.\n\nAction: Verify omitted bytes before relying on full observations.",
+      "provider_input_tokens": 4112,
+      "provider_cache_read_tokens": 3840,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17665,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4417
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 336,
+      "provider_output": "1. **FACT-000:** Tool observation 000, repeated throughout the result.\n2. **FACT-001:** Tool observation 001, repeated throughout the result.\n3. **FACT-002:** Tool observation 002, repeated throughout the result.\n4. **FACT-003:** Tool observation 003, repeated throughout the result.\n5. **FACT-004:** Tool observation 004, repeated throughout the result.\n6. **FACT-005:** Tool observation 005, repeated throughout the result.\n7. **FACT-006:** Tool observation 006, repeated throughout the result.\n8. **FACT-007:** Tool observation 007, repeated throughout the result.\n9. **FACT-008:** Tool observation 008, repeated throughout the result.\n10. **FACT-009:** Tool observation 009, repeated throughout the result.\n11. **FACT-010:** Tool observation 010, repeated throughout the result.\n12. **FACT-011:** Tool observation 011, repeated throughout the result.\n\n**Action:** Consolidate FACT-000 through FACT-011 into the stable setup record.",
+      "provider_input_tokens": 15112,
+      "provider_cache_read_tokens": 4864,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 432,
+      "provider_output": "1. **FACT-000:** Tool observation 000, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n2. **FACT-001:** Tool observation 001, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n3. **FACT-002:** Tool observation 002, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n4. **FACT-003:** Tool observation 003, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n5. **FACT-004:** Tool observation 004, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n6. **FACT-005:** Tool observation 005, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n7. **FACT-006:** Tool observation 006, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n8. **FACT-007:** Tool observation 007, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n9. **FACT-008:** Tool observation 008, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n10. **FACT-009:** Tool observation 009, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n11. **FACT-010:** Tool observation 010, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n12. **FACT-011:** Tool observation 011, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n\n**Action:** Consolidate these 12 observations into one verified inspection record.",
+      "provider_input_tokens": 12052,
+      "provider_cache_read_tokens": 3840,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 13062
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 303,
+      "provider_output": "1. **FACT-004:** tool observation 004 (repeated throughout the marker).\n2. **FACT-005:** tool observation 005 (repeated throughout the marker).\n3. **FACT-006:** tool observation 006 (repeated throughout the marker).\n4. **FACT-007:** tool observation 007 (repeated throughout the marker).\n5. **FACT-008:** tool observation 008 (repeated throughout the marker).\n6. **FACT-009:** tool observation 009 (repeated throughout the marker).\n7. **FACT-010:** tool observation 010 (repeated throughout the marker).\n8. **FACT-011:** tool observation 011 (repeated throughout the marker).\n\nOnly eight FACT markers are present in the supplied receipt; **FACT-001, FACT-002, FACT-003, and FACT-012 are not included**. The “[fak: older context shed…]” text is not a FACT marker.\n\n**Action:** Retrieve the four missing FACT markers before completing a 12-marker synthesis.",
+      "provider_input_tokens": 10110,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 976600,
+          "bytes_before": 65856,
+          "bytes_after": 43986,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 10997
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 43986,
+          "bytes_after": 43986,
+          "tokens_before_estimated": 10997,
+          "tokens_after_estimated": 10997
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 420,
+      "provider_output": "1. **FACT-001:** Tool observation 001, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n2. **FACT-002:** Tool observation 002, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n3. **FACT-003:** Tool observation 003, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n4. **FACT-004:** Tool observation 004, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n5. **FACT-005:** Tool observation 005, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n6. **FACT-006:** Tool observation 006, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n7. **FACT-007:** Tool observation 007, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n8. **FACT-008:** Tool observation 008, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n9. **FACT-009:** Tool observation 009, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n10. **FACT-010:** Tool observation 010, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n11. **FACT-011:** Tool observation 011, repeated throughout the result; 1,194 middle bytes were omitted by compression.\n12. **FACT-012:** Not present in the supplied workload receipt.\n\n**Action:** Retrieve the missing FACT-012 before treating the synthesis as complete.",
+      "provider_input_tokens": 11058,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 518600,
+          "bytes_before": 65856,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 47907,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 11977
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47907,
+          "bytes_after": 47907,
+          "tokens_before_estimated": 11977,
+          "tokens_after_estimated": 11977
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": 452,
+      "provider_output": "1. **FACT-001:** tool observation 001, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n2. **FACT-002:** tool observation 002, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n3. **FACT-003:** tool observation 003, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n4. **FACT-004:** tool observation 004, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n5. **FACT-005:** tool observation 005, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n6. **FACT-006:** tool observation 006, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n7. **FACT-007:** tool observation 007, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n8. **FACT-008:** tool observation 008, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n9. **FACT-009:** tool observation 009, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n10. **FACT-010:** tool observation 010, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n11. **FACT-011:** tool observation 011, repeated throughout the available result; 1,194 middle bytes were omitted by compression.\n12. **FACT-012:** No FACT-012 marker or associated observation appears in the supplied workload.\n\n**Action:** Retrieve and provide the missing FACT-012 result.",
+      "provider_input_tokens": 11067,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 515600,
+          "bytes_before": 65856,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 47907,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 11977
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 525500,
+          "bytes_before": 47907,
+          "bytes_after": 47944,
+          "tokens_before_estimated": 11977,
+          "tokens_after_estimated": 11986
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 336,
+      "provider_output": "1. FACT-000: tool observation 000; repeated.\n2. FACT-001: tool observation 001; repeated.\n3. FACT-002: tool observation 002; repeated.\n4. FACT-003: tool observation 003; repeated.\n5. FACT-004: tool observation 004; repeated.\n6. FACT-005: tool observation 005; repeated.\n7. FACT-006: tool observation 006; repeated.\n8. FACT-007: tool observation 007; repeated.\n9. FACT-008: tool observation 008; repeated.\n10. FACT-009: tool observation 009; repeated.\n11. FACT-010: tool observation 010; repeated.\n12. FACT-011: tool observation 011; repeated.\n\nAction: Archive all 12 observations.",
+      "provider_input_tokens": 15131,
+      "provider_cache_read_tokens": 4864,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 276,
+      "provider_output": "1. FACT-000: tool observation 000; repeated; middle compressed.\n2. FACT-001: tool observation 001; repeated; middle compressed.\n3. FACT-002: tool observation 002; repeated; middle compressed.\n4. FACT-003: tool observation 003; repeated; middle compressed.\n5. FACT-004: tool observation 004; repeated; middle compressed.\n6. FACT-005: tool observation 005; repeated; middle compressed.\n7. FACT-006: tool observation 006; repeated; middle compressed.\n8. FACT-007: tool observation 007; repeated; middle compressed.\n9. FACT-008: tool observation 008; repeated; middle compressed.\n10. FACT-009: tool observation 009; repeated; middle compressed.\n11. FACT-010: tool observation 010; repeated; middle compressed.\n12. FACT-011: tool observation 011; repeated; middle compressed.\n\nAction: Retain all 12 FACT markers.",
+      "provider_input_tokens": 12071,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52277,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 52277,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 13070
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 371,
+      "provider_output": "1. FACT-000: absent; older context shed.\n2. FACT-001: absent; older context shed.\n3. FACT-002: absent; older context shed.\n4. FACT-003: absent; older context shed.\n5. FACT-004: tool observation 004; repeated throughout payload.\n6. FACT-005: tool observation 005; repeated throughout payload.\n7. FACT-006: tool observation 006; repeated throughout payload.\n8. FACT-007: tool observation 007; repeated throughout payload.\n9. FACT-008: tool observation 008; repeated throughout payload.\n10. FACT-009: tool observation 009; repeated throughout payload.\n11. FACT-010: tool observation 010; repeated throughout payload.\n12. FACT-011: tool observation 011; repeated throughout payload.\n\nAction: recover FACT-000–003 from shed context.",
+      "provider_input_tokens": 10129,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 512100,
+          "bytes_before": 65885,
+          "bytes_after": 44015,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 11004
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 44015,
+          "bytes_after": 44015,
+          "tokens_before_estimated": 11004,
+          "tokens_after_estimated": 11004
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 351,
+      "provider_output": "1. FACT-001: tool observation 001; repeated; middle 1,194 bytes compressed.\n2. FACT-002: tool observation 002; repeated; middle 1,194 bytes compressed.\n3. FACT-003: tool observation 003; repeated; middle 1,194 bytes compressed.\n4. FACT-004: tool observation 004; repeated; middle 1,194 bytes compressed.\n5. FACT-005: tool observation 005; repeated; middle 1,194 bytes compressed.\n6. FACT-006: tool observation 006; repeated; middle 1,194 bytes compressed.\n7. FACT-007: tool observation 007; repeated; middle 1,194 bytes compressed.\n8. FACT-008: tool observation 008; repeated; middle 1,194 bytes compressed.\n9. FACT-009: tool observation 009; repeated; middle 1,194 bytes compressed.\n10. FACT-010: tool observation 010; repeated; middle 1,194 bytes compressed.\n11. FACT-011: tool observation 011; repeated; middle 1,194 bytes compressed.\n12. FACT-012: absent from receipt.\n\nAction: retrieve FACT-012.",
+      "provider_input_tokens": 11077,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 522100,
+          "bytes_before": 65885,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52277,
+          "bytes_after": 47936,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 11984
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47936,
+          "bytes_after": 47936,
+          "tokens_before_estimated": 11984,
+          "tokens_after_estimated": 11984
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": 302,
+      "provider_output": "1. FACT-001: tool observation 001; repeated; middle 1,194 bytes omitted.\n2. FACT-002: tool observation 002; repeated; middle 1,194 bytes omitted.\n3. FACT-003: tool observation 003; repeated; middle 1,194 bytes omitted.\n4. FACT-004: tool observation 004; repeated; middle 1,194 bytes omitted.\n5. FACT-005: tool observation 005; repeated; middle 1,194 bytes omitted.\n6. FACT-006: tool observation 006; repeated; middle 1,194 bytes omitted.\n7. FACT-007: tool observation 007; repeated; middle 1,194 bytes omitted.\n8. FACT-008: tool observation 008; repeated; middle 1,194 bytes omitted.\n9. FACT-009: tool observation 009; repeated; middle 1,194 bytes omitted.\n10. FACT-010: tool observation 010; repeated; middle 1,194 bytes omitted.\n11. FACT-011: tool observation 011; repeated; middle 1,194 bytes omitted.\n12. FACT-012: absent from receipt.\n\nAction: retrieve FACT-012.",
+      "provider_input_tokens": 11086,
+      "provider_cache_read_tokens": 9984,
+      "provider_cache_write_tokens": 0,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 534600,
+          "bytes_before": 65885,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 537000,
+          "bytes_before": 52277,
+          "bytes_after": 47936,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 11984
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47936,
+          "bytes_after": 47973,
+          "tokens_before_estimated": 11984,
+          "tokens_after_estimated": 11994
+        }
+      ]
+    }
+  ],
+  "quality_frontier": [
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4606,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4606,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4635,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4635,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17599,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17599,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17628,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17628,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 52248,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 43986,
+      "output_tokens_estimated": 18,
+      "quality": 0.9166666666666666
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 44015,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    }
+  ],
+  "interaction_effects": [
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0.08333333333333337,
+      "classification": "complementary"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    }
+  ],
+  "conclusion": "Live provider usage and outputs are captured per cell; transformation CPU/bytes are local receipts. Cache conclusions require non-zero provider cache fields."
+}

@@ -1,0 +1,3041 @@
+{
+  "schema": "fak-armbench-caveman-factorial/1",
+  "comparator": "JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+  "evidence_class": "deterministic-transform-receipt",
+  "token_method": "UTF-8 bytes/4 ceiling; provider token fields intentionally null without provider receipts",
+  "disabled_features": [
+    "routing",
+    "policy",
+    "semantic-response-reuse"
+  ],
+  "pressures": [
+    1,
+    4,
+    12
+  ],
+  "cells": [
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 545300,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 286,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 72
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 315,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 79
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 286,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 72
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 315,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 79
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 249,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 63
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 249,
+          "bytes_after": 286,
+          "tokens_before_estimated": 63,
+          "tokens_after_estimated": 72
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "turns": 1,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 278,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 70
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 278,
+          "bytes_after": 315,
+          "tokens_before_estimated": 70,
+          "tokens_after_estimated": 79
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 5740,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1435
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5740,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1435,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4606,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1152
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4606,
+          "bytes_after": 4643,
+          "tokens_before_estimated": 1152,
+          "tokens_after_estimated": 1161
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 5769,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1443
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "turns": 3,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 1,
+      "total_facts": 1,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 5769,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1443,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4635,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1159
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 4635,
+          "bytes_after": 4672,
+          "tokens_before_estimated": 1159,
+          "tokens_after_estimated": 1168
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 22135,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 5534
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 519100,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22135,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 5534,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17599,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4400
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17599,
+          "bytes_after": 17636,
+          "tokens_before_estimated": 4400,
+          "tokens_after_estimated": 4409
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 22164,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 5541
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "turns": 6,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 4,
+      "total_facts": 4,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 22164,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 5541,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 509100,
+          "bytes_before": 17628,
+          "bytes_after": 17628,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4407
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 17628,
+          "bytes_after": 17665,
+          "tokens_before_estimated": 4407,
+          "tokens_after_estimated": 4417
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 13062
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 8,
+      "total_facts": 12,
+      "quality": 0.6666666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 65856,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 16464
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 65856,
+          "bytes_after": 43986,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 10997
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 43986,
+          "bytes_after": 43986,
+          "tokens_before_estimated": 10997,
+          "tokens_after_estimated": 10997
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 515700,
+          "bytes_before": 65856,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52248,
+          "bytes_after": 47907,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 11977
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47907,
+          "bytes_after": 47907,
+          "tokens_before_estimated": 11977,
+          "tokens_after_estimated": 11977
+        }
+      ]
+    },
+    {
+      "style": "normal",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 18,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 540100,
+          "bytes_before": 65856,
+          "bytes_after": 52248,
+          "tokens_before_estimated": 16464,
+          "tokens_after_estimated": 13062
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 518400,
+          "bytes_before": 52248,
+          "bytes_after": 47907,
+          "tokens_before_estimated": 13062,
+          "tokens_after_estimated": 11977
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47907,
+          "bytes_after": 47944,
+          "tokens_before_estimated": 11977,
+          "tokens_after_estimated": 11986
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 12,
+      "total_facts": 12,
+      "quality": 1,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 1,
+          "bytes_before": 52277,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 52277,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 13070
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 8,
+      "total_facts": 12,
+      "quality": 0.6666666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 65885,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 16472
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 516300,
+          "bytes_before": 65885,
+          "bytes_after": 44015,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 11004
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 44015,
+          "bytes_after": 44015,
+          "tokens_before_estimated": 11004,
+          "tokens_after_estimated": 11004
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 519100,
+          "bytes_before": 52277,
+          "bytes_after": 47936,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 11984
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47936,
+          "bytes_after": 47936,
+          "tokens_before_estimated": 11984,
+          "tokens_after_estimated": 11984
+        }
+      ]
+    },
+    {
+      "style": "caveman",
+      "treatment": "tuned-bundle",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "turns": 14,
+      "answer_output_tokens_estimated": 7,
+      "answer_output_tokens_provider": null,
+      "provider_input_tokens": null,
+      "provider_cache_read_tokens": null,
+      "provider_cache_write_tokens": null,
+      "retained_facts": 11,
+      "total_facts": 12,
+      "quality": 0.9166666666666666,
+      "stages": [
+        {
+          "name": "tool-result-compression",
+          "cpu_time_ns": 1,
+          "bytes_before": 65885,
+          "bytes_after": 52277,
+          "tokens_before_estimated": 16472,
+          "tokens_after_estimated": 13070
+        },
+        {
+          "name": "context-shedding",
+          "cpu_time_ns": 505500,
+          "bytes_before": 52277,
+          "bytes_after": 47936,
+          "tokens_before_estimated": 13070,
+          "tokens_after_estimated": 11984
+        },
+        {
+          "name": "tuned-cache-layout",
+          "cpu_time_ns": 1,
+          "bytes_before": 47936,
+          "bytes_after": 47973,
+          "tokens_before_estimated": 11984,
+          "tokens_after_estimated": 11994
+        }
+      ]
+    }
+  ],
+  "quality_frontier": [
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 249,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "passthrough",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "input_bytes": 278,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4606,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4606,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4635,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "input_bytes": 4635,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17599,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17599,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17628,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "input_bytes": 17628,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 52248,
+      "output_tokens_estimated": 18,
+      "quality": 1
+    },
+    {
+      "style": "normal",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 43986,
+      "output_tokens_estimated": 18,
+      "quality": 0.6666666666666666
+    },
+    {
+      "style": "normal",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 47907,
+      "output_tokens_estimated": 18,
+      "quality": 0.9166666666666666
+    },
+    {
+      "style": "caveman",
+      "treatment": "tool-result-compression",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 52277,
+      "output_tokens_estimated": 7,
+      "quality": 1
+    },
+    {
+      "style": "caveman",
+      "treatment": "context-shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 44015,
+      "output_tokens_estimated": 7,
+      "quality": 0.6666666666666666
+    },
+    {
+      "style": "caveman",
+      "treatment": "compression+shedding",
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "input_bytes": 47936,
+      "output_tokens_estimated": 7,
+      "quality": 0.9166666666666666
+    }
+  ],
+  "interaction_effects": [
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 1,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 4,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "native-one-shot",
+      "pressure": 12,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 1,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 4,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "tool-result-compression",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "context-shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "compression+shedding",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    },
+    {
+      "workload": "multi-turn-growing-tool-results",
+      "pressure": 12,
+      "treatment": "tuned-bundle",
+      "input_bytes_difference_in_differences": 0,
+      "output_tokens_difference_in_differences_estimated": 0,
+      "quality_difference_in_differences": 0,
+      "classification": "redundant"
+    }
+  ],
+  "conclusion": "Deterministic receipts establish transformation costs, retained-fact quality, and byte-level interactions only. Provider input/cache tokens and efficiency remain NOT-YET until a live manifest supplies provider usage."
+}

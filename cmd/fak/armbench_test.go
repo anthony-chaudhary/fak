@@ -99,3 +99,18 @@ func TestArmbenchCommittedWitnessMatchesSelfcheck(t *testing.T) {
 		t.Fatal("committed fake-provider witness is stale; regenerate with `fak armbench selfcheck --json`")
 	}
 }
+
+func TestArmbenchCavemanFactorialSpine(t *testing.T) {
+	out := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := runArmbench(&stdout, &stderr, []string{"caveman-factorial", "--out", out, "--input", filepath.Join("..", "..", "docs", "_witnesses", "armbench-caveman-native", "inputs"), "--pressures", "1,4,12"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	b, err := os.ReadFile(filepath.Join(out, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"schema": "fak-armbench-caveman-factorial/1"`)) {
+		t.Fatalf("wrong manifest: %s", b)
+	}
+}

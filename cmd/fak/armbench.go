@@ -35,6 +35,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
@@ -42,7 +43,7 @@ import (
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-promptfoo|ponytail-gates|ponytail-managed|caveman-native|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-promptfoo|ponytail-gates|ponytail-managed|caveman-native|caveman-passthrough|caveman-factorial|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
@@ -75,6 +76,10 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchPromptfoo(stdout, stderr, argv[1:])
 	case "caveman-native":
 		return armbenchCavemanNative(stdout, stderr, argv[1:])
+	case "caveman-passthrough":
+		return runCavemanPassthrough(argv[1:], stdout, stderr)
+	case "caveman-factorial":
+		return armbenchCavemanFactorial(stdout, stderr, argv[1:])
 	case "ponytail-gates":
 		return armbenchPonytailGates(stdout, stderr, argv[1:])
 	case "ponytail-managed":
@@ -712,5 +717,35 @@ func runCavemanPassthrough(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, string(b))
 	fmt.Fprintln(stdout, m.CacheVerdict)
 	fmt.Fprintln(stdout, m.Conclusion)
+	return 0
+}
+
+func armbenchCavemanFactorial(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak armbench caveman-factorial", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("out", "docs/_witnesses/armbench-caveman-factorial/deterministic", "receipt directory")
+	pressures := fs.String("pressures", "1,4,12", "comma-separated positive context pressure levels")
+	baseURL := fs.String("base-url", "", "optional live OpenAI-compatible endpoint")
+	apiKeyEnv := fs.String("api-key-env", "OPENAI_API_KEY", "environment variable containing live provider key")
+	model := fs.String("model", "", "live provider model (required with --base-url)")
+	input := fs.String("input", "docs/_witnesses/armbench-caveman-native/inputs", "pinned Caveman comparator inputs")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	var levels []int
+	for _, raw := range strings.Split(*pressures, ",") {
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		levels = append(levels, n)
+	}
+	m, err := armbench.RunCavemanFactorial(armbench.FactorialOptions{OutputDir: *out, Pressures: levels, BaseURL: *baseURL, APIKey: os.Getenv(*apiKeyEnv), Model: *model, InputDir: *input})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "caveman factorial: %d cells, %d frontier points, %d interactions -> %s\n", len(m.Cells), len(m.QualityFrontier), len(m.Interactions), *out)
 	return 0
 }
