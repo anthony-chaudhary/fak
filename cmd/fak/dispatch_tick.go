@@ -417,6 +417,10 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	return opts, *asJSON, 0
 }
 
+func dispatchShouldRerouteLeasedLane(opts dispatchTickOptions, pick dispatchLanePick) bool {
+	return strings.TrimSpace(opts.Lane) == "" && pick.Lane != ""
+}
+
 // dispatchTickPick bundles the resolved candidate lane and target issue for a tick
 // together with the live/cooldown/held state that fed the decision, so
 // evaluateDispatchTick can unpack them to the same local names it used before the
@@ -897,9 +901,32 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	liveScopes := pickRes.liveScopes
 	target := pickRes.target
 	hasTarget := pickRes.hasTarget
+	var leaseReroute map[string]any
+	// Automatic dry and live ticks share one launch plan. If its first choice is
+	// already leased, spend one bounded re-pick with that lane excluded instead of
+	// returning or executing a plan already known to lose. Explicit --lane remains
+	// exact; the live path still acquires and launches only the final single tree.
+	if dispatchShouldRerouteLeasedLane(opts, pick) {
+		firstLease := inspectDispatchLaneLease(root, pick.Lane, pick.Tree, opts.Goal)
+		if refused, _ := firstLease["refused"].(bool); refused {
+			rerouteOpts := opts
+			rerouteOpts.ExcludeLanes = append(append([]string(nil), opts.ExcludeLanes...), pick.Lane)
+			rerouteStart := time.Now()
+			if alternate, rerouteErr := resolveDispatchTickPick(root, stderr, rerouteOpts, runsDir, heldNoCommit, recoverableNoCommit); rerouteErr == nil && alternate.pick.Lane != "" {
+				leaseReroute = map[string]any{"from_lane": pick.Lane, "lease": firstLease, "to_lane": alternate.pick.Lane}
+				pickRes = alternate
+				pick, held, liveIssueDetails, liveScopes = alternate.pick, alternate.held, alternate.liveIssueDetails, alternate.liveScopes
+				target, hasTarget = alternate.target, alternate.hasTarget
+			}
+			dispatchStampMs(timings, "lease_reroute", rerouteStart)
+		}
+	}
 
 	tSeed := time.Now()
 	payload := seedDispatchTickPayload(root, opts, reg, pre, account, pickRes)
+	if leaseReroute != nil {
+		payload["lease_reroute"] = leaseReroute
+	}
 	if selection, ok := dispatchTickSeatSelection(root, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend), account.Tag); ok {
 		payload["seat_selection"] = selection
 	}

@@ -2848,3 +2848,18 @@ func TestRecordDispatchPayloadPersistsRepoPulsePerLaunch(t *testing.T) {
 		t.Fatalf("legacy/no-receipt sidecar err=%v", err)
 	}
 }
+
+func TestDispatchShouldRerouteLeasedLaneMatchesDryAndLive(t *testing.T) {
+	pick := dispatchLanePick{Lane: "cmd"}
+	for _, live := range []bool{false, true} {
+		if !dispatchShouldRerouteLeasedLane(dispatchTickOptions{Live: live}, pick) {
+			t.Fatalf("live=%v automatic pick did not reroute", live)
+		}
+	}
+	if dispatchShouldRerouteLeasedLane(dispatchTickOptions{Live: true, Lane: "cmd"}, pick) {
+		t.Fatal("explicit live lane rerouted")
+	}
+	if dispatchShouldRerouteLeasedLane(dispatchTickOptions{}, dispatchLanePick{}) {
+		t.Fatal("empty pick rerouted")
+	}
+}
