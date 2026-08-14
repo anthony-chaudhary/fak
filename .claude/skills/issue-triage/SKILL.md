@@ -12,13 +12,10 @@ metadata:
 
 # /issue-triage — classify, rank, and garden the open issue backlog
 
-> Wraps `tools/issue_triage.py` (pure-stdlib). The helper is **read-only** — it
-> fetches via `gh`, classifies, ranks, and proposes actions, but never edits an
-> issue. Applying the proposed labels / comments / closes is a separate,
-> operator-approved step that runs `gh issue edit|comment|close`. This mirrors
-> plan-audit's read-only discipline and the release skill's dry-run-first rule:
-> the helper decides what is *true* and what *could* be done; the operator
-> decides what *is* done.
+> Lead with current first-class `fak console issues`, `fak-dev issue`, and
+> `fak dispatch` surfaces. The Python triage helper remains a read-only legacy/debug
+> fallback for report fields not yet exposed by those commands. Mutations stay a separate,
+> operator-approved step.
 
 A backlog rots the same way an index drifts: labels go missing, priorities
 never get set, questions hang open forever, duplicates accrete. This skill is
@@ -49,6 +46,9 @@ kind, area, workflow). Override thresholds or label sets via the helper's
 ## Step 1 — Gather and rank (read-only)
 
 ```bash
+fak console issues --state open --json > issues-ranked.json
+
+# Legacy/debug comparison for extra historical report fields:
 <p> <h.issue_triage> --markdown --out <audits_dir>/issue-triage-<YYYY-MM-DD>.md
 <p> <h.issue_triage> --actions  --out <audits_dir>/issue-actions-<YYYY-MM-DD>.json
 ```
@@ -82,8 +82,19 @@ The report's counts line is the headline. Lead the operator summary with the
 3. **stale / dormant-question** — these carry **mechanical** proposed actions
    (mark stale, close). They are the gardening moves the operator can approve
    in one batch.
-4. **duplicate clusters** — run `fak issue dedup` (the body-aware census; the
+4. **duplicate clusters** — run `fak-dev issue dedup` (the body-aware census; the
    triage helper no longer detects dups). Confirm-and-close candidates.
+
+Before proposing dispatch for a selected issue, validate and price it through the
+first-class Go surfaces:
+
+```bash
+fak-dev issue contract --repo owner/name --issue N
+fak dispatch issues --issues issue.json --json
+```
+
+Use `tools/issue_contract.py` or `tools/issue_lane_router.py` only to debug a discrepancy
+with those commands; do not teach them as the default operator path.
 
 Do **not** paste the whole report into chat — link the file. Surface only the
 0–3 findings that matter and the one batch the operator can act on now.
@@ -132,9 +143,13 @@ Rules:
 ## Step 5 — Verify (witness, don't assume)
 
 ```bash
+fak console issues --state open --json > issues-ranked-after.json
 gh issue view <n> --json labels,state,comments   # spot-check 2–3 applied rows
-<p> <h.issue_triage> --actions --out <audits_dir>/issue-actions-<YYYY-MM-DD>.json
+<p> <h.issue_triage> --actions --out <audits_dir>/verify-actions.json
 ```
+
+The first-class before/after issue models are the truth source; the fallback action manifest
+is an additional mutation witness when that helper was used.
 
 The second run is the witness: the applied issues should no longer carry the
 tag the action addressed (a closed dormant-question is no longer open; a
