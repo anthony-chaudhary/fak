@@ -61,7 +61,8 @@ type runConfig struct {
 	// observer is the typed loop-progress sink (#5148, WithProgressObserver in
 	// loop_observe.go). nil => every emitProgress is a no-op and the loop is
 	// byte-for-byte the historical loop.
-	observer ProgressObserver
+	observer    ProgressObserver
+	progressSeq uint64
 	// midflight is the owned per-run mid-flight verb mailbox (#5158, WithMidflightVerbs
 	// in loop_midflight.go). The loop consumes its queued interrupt / drop-pending-call /
 	// set-budget verbs at each CLEAN turn boundary. nil => no mailbox wired and every

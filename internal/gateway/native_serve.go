@@ -27,12 +27,15 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -134,6 +137,38 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	send := anthropicSSESender(w, flusher)
+	sendProgress := func(ev agent.ProgressEvent) {
+		payload := map[string]any{"type": string(ev.Kind), "session": reqTrace, "turn": ev.Turn, "seq": ev.Seq}
+		for k, v := range map[string]string{"call_id": ev.CallID, "tool": ev.Tool, "verdict": ev.Verdict, "reason": ev.Reason, "taint": ev.Taint} {
+			if v != "" {
+				payload[k] = v
+			}
+		}
+		b, _ := json.Marshal(payload)
+		_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, b)
+		flusher.Flush()
+	}
+	cursorRaw := r.Header.Get("Last-Event-ID")
+	if cursorRaw == "" {
+		cursorRaw = r.URL.Query().Get("since")
+	}
+	resumeOnly := cursorRaw != ""
+	if resumeOnly {
+		cursor, err := nativeProgressCursor(cursorRaw)
+		if err != nil {
+			writeErrCode(w, http.StatusBadRequest, "PROGRESS_CURSOR_INVALID", "progress cursor must be an unsigned integer")
+			return
+		}
+		replay, err := s.nativeProgress.after(reqTrace, cursor)
+		if err != nil {
+			writeErrCode(w, http.StatusConflict, "PROGRESS_CURSOR_TOO_OLD", err.Error())
+			return
+		}
+		for _, ev := range replay {
+			sendProgress(ev)
+		}
+		return
+	}
 	send("message_start", map[string]any{
 		"type": "message_start",
 		"message": map[string]any{
@@ -181,22 +216,9 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	// as the text sink (the loop is synchronous within CompleteStream), so no
 	// cross-goroutine send race is introduced.
 	onProgress := func(ev agent.ProgressEvent) {
-		payload := map[string]any{
-			"type":    string(ev.Kind),
-			"session": reqTrace,
-			"turn":    ev.Turn,
-		}
-		for k, v := range map[string]string{
-			"call_id": ev.CallID, "tool": ev.Tool,
-			"verdict": ev.Verdict, "reason": ev.Reason, "taint": ev.Taint,
-		} {
-			if v != "" {
-				payload[k] = v
-			}
-		}
-		send(string(ev.Kind), payload)
+		s.nativeProgress.append(reqTrace, ev)
+		sendProgress(ev)
 	}
-
 	m, err := s.runNativeArmStreamSeed(r.Context(), seed, reqTrace, emitText, onProgress)
 	if err != nil {
 		s.logf("gateway: native stream loop error (trace %s): %v", reqTrace, err)
@@ -260,7 +282,7 @@ func (s *Server) runNativeArmSeed(ctx context.Context, seed nativeWireSeed, reqT
 	ensureGovernedRungs()
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
 	defer release()
-	opts = append(opts, seed.runOptions()...)
+	opts = append(opts, s.nativeSeedOptions(seed)...)
 	return agent.RunArm(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, nil, opts...)
 }
 
@@ -285,7 +307,7 @@ func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed
 	ensureGovernedRungs()
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
 	defer release()
-	opts = append(opts, seed.runOptions()...)
+	opts = append(opts, s.nativeSeedOptions(seed)...)
 	if onProgress != nil {
 		opts = append(opts, agent.WithProgressObserver(onProgress))
 	}
@@ -300,6 +322,39 @@ func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed
 		return m, err
 	}
 	return agent.RunArmStream(ctx, s.planner, seed.Task, true, s.nativeMaxTurns, sink, nil, opts...)
+}
+
+func (s *Server) nativeSeedOptions(seed nativeWireSeed) []agent.RunOption {
+	opts := make([]agent.RunOption, 0, 3)
+	if len(seed.Conversation) > 0 {
+		opts = append(opts, agent.WithConversation(seed.Conversation))
+	}
+	catalog := append([]agent.ToolDef(nil), seed.Tools...)
+	seen := map[string]bool{}
+	for _, d := range catalog {
+		seen[d.Function.Name] = true
+	}
+	for _, d := range s.nativeCodeCatalog {
+		if !seen[d.Function.Name] {
+			catalog = append(catalog, d)
+		}
+	}
+	if len(catalog) > 0 {
+		opts = append(opts, agent.WithToolCatalog(catalog))
+	}
+	if len(s.nativeCodeCatalog) == 0 || !s.nativeSpeculate {
+		return opts
+	}
+	spec := abi.NewSpeculator(0)
+	spec.Learn(abi.SpecPattern{
+		Signature: codetools.ToolRead, PredictTool: codetools.ToolGlob, SuccessProb: 1,
+		Meta: codetools.CallMeta(codetools.ToolGlob, ""),
+		DeriveArgs: func([]*abi.Result) (abi.Ref, bool) {
+			b := []byte(`{"pattern":"**/*.go"}`)
+			return abi.Ref{Kind: abi.RefInline, Inline: b, Len: int64(len(b))}, true
+		},
+	})
+	return append(opts, agent.WithSpeculator(spec))
 }
 
 // ensureAgentPolicyRung guarantees the agent policy adjudicator is present in the

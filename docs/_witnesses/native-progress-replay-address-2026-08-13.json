@@ -1,0 +1,33 @@
+{
+  "schema": "fak.native-progress-replay-witness.v1",
+  "captured_at": "2026-08-13T18:02:00-07:00",
+  "issue": 6486,
+  "result": "PASS",
+  "delivery": "at-least-once",
+  "dedupe_key": ["session", "seq"],
+  "source_address": {
+    "sequence": "dense monotonic uint64 assigned at emit",
+    "sse_field": "id",
+    "payload_field": "seq"
+  },
+  "resume": {
+    "inputs": ["Last-Event-ID", "since query"],
+    "exclusive": true,
+    "ordered": true,
+    "witness_cursor": 1,
+    "replayed_ids": [2, 3],
+    "missed_event_in_tail": "call_adjudicated",
+    "missed_verdict": "DENY"
+  },
+  "bounded_buffer": {
+    "limit": 256,
+    "cursor_too_old_code": "PROGRESS_CURSOR_TOO_OLD",
+    "invalid_cursor_code": "PROGRESS_CURSOR_INVALID",
+    "silent_partial_replay": false,
+    "gap_observable": true
+  },
+  "commands": [
+    "go test ./internal/gateway -run 'TestNativeProgress|TestNativeStreamStructuredEvents' -count=1",
+    "go vet ./internal/agent ./internal/gateway"
+  ]
+}

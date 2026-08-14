@@ -814,7 +814,9 @@ type Config struct {
 	Native bool
 	// NativeMaxTurns caps the owned loop's model round-trips per served request when Native
 	// is set. <= 0 falls back to DefaultNativeMaxTurns. Inert when Native is false.
-	NativeMaxTurns int
+	NativeMaxTurns      int
+	NativeCodeWorkspace string // optional root for the six kernel coding engines
+	NativeSpeculate     bool   // opt-in effect-free coding speculation on native turns
 	// VDSOProxyFill, when true, warms the vDSO tier-2 cache from ADMITTED inbound
 	// tool_result blocks on the proxy path: an ALLOWED, read-only-shaped result the
 	// client sends back fills (tool,args)->result so a LATER re-proposed identical read
@@ -1231,6 +1233,7 @@ type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []a
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
+	nativeProgress  nativeProgressReplay
 	k               *kernel.Kernel
 	toolPlugins     []toolplugin.Plugin
 	toolPreferences toolplugin.PreferenceLayers
@@ -1819,8 +1822,10 @@ type Server struct {
 	// native, when true, routes a non-streaming /v1/messages turn through fak's OWN agent
 	// loop (agent.RunArm) — the native-harness keystone (#1316). nativeMaxTurns bounds the
 	// loop's model round-trips per request. See Config.Native / native_serve.go.
-	native         bool
-	nativeMaxTurns int
+	native            bool
+	nativeMaxTurns    int
+	nativeCodeCatalog []agent.ToolDef
+	nativeSpeculate   bool
 	// midflight is the live per-trace mid-flight verb mailbox registry (#2403): the
 	// lookup POST /v1/fak/session/{trace}/{interrupt|drop-pending-call|set-budget}
 	// crosses to reach the owned run it names. See native_midflight.go.
@@ -2022,6 +2027,15 @@ func New(cfg Config) (*Server, error) {
 		admissionCtl = NewAdmissionController(DefaultAdmissionPolicy())
 	}
 
+	var nativeCodeCatalog []agent.ToolDef
+	if cfg.NativeCodeWorkspace != "" {
+		var armErr error
+		nativeCodeCatalog, armErr = agent.ArmCodeTools(cfg.NativeCodeWorkspace)
+		if armErr != nil {
+			return nil, fmt.Errorf("native code workspace: %w", armErr)
+		}
+	}
+
 	s := &Server{
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
@@ -2092,6 +2106,8 @@ func New(cfg Config) (*Server, error) {
 		roster:                       cfg.RouteAccounts,
 		native:                       cfg.Native,
 		nativeMaxTurns:               nativeMaxTurnsOr(cfg.NativeMaxTurns),
+		nativeCodeCatalog:            nativeCodeCatalog,
+		nativeSpeculate:              cfg.NativeSpeculate,
 		vdsoProxyFill:                cfg.VDSOProxyFill,
 		maxAgeByTool:                 cfg.ToolMaxAge,
 

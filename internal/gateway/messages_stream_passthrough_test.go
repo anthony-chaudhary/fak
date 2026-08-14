@@ -14,6 +14,7 @@ import (
 
 // sseFrame is one parsed event from the gateway's downstream SSE response.
 type sseFrame struct {
+	id    string
 	event string
 	data  string
 }
@@ -24,18 +25,20 @@ func readAnthropicSSE(t *testing.T, r io.Reader) []sseFrame {
 	var frames []sseFrame
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var ev, data string
+	var id, ev, data string
 	flush := func() {
 		if data != "" {
-			frames = append(frames, sseFrame{event: ev, data: data})
+			frames = append(frames, sseFrame{id: id, event: ev, data: data})
 		}
-		ev, data = "", ""
+		id, ev, data = "", "", ""
 	}
 	for sc.Scan() {
 		line := sc.Text()
 		switch {
 		case line == "":
 			flush()
+		case strings.HasPrefix(line, "id:"):
+			id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 		case strings.HasPrefix(line, "event:"):
 			ev = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):

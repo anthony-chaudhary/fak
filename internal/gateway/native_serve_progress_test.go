@@ -159,6 +159,9 @@ func TestNativeStreamStructuredEvents(t *testing.T) {
 		}
 		switch {
 		case progressKinds[f.event]:
+			if f.id == "" {
+				t.Fatalf("%s event has no SSE id", f.event)
+			}
 			// Every custom lifecycle event carries the session trace tag.
 			if obj["session"] != trace {
 				t.Fatalf("%s event missing//wrong session tag: got %v want %q", f.event, obj["session"], trace)

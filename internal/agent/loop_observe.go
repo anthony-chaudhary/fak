@@ -45,6 +45,7 @@ const (
 //   - call_adjudicated: Turn, CallID, Tool, Verdict, Reason.
 //   - result_admitted: Turn, CallID, Tool, Taint.
 type ProgressEvent struct {
+	Seq     uint64            `json:"seq"`
 	Kind    ProgressEventKind `json:"kind"`
 	Turn    int               `json:"turn"`
 	CallID  string            `json:"call_id,omitempty"`
@@ -68,10 +69,12 @@ func WithProgressObserver(obs ProgressObserver) RunOption {
 
 // emitProgress delivers one typed lifecycle event to the wired observer. Nil-safe: with no
 // observer the call is a no-op, so the historical loop pays nothing.
-func (c runConfig) emitProgress(ev ProgressEvent) {
+func (c *runConfig) emitProgress(ev ProgressEvent) {
 	if c.observer == nil {
 		return
 	}
+	c.progressSeq++
+	ev.Seq = c.progressSeq
 	c.observer(ev)
 }
 
