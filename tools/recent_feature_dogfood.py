@@ -214,8 +214,11 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
         ),
         Probe(
             key="benchmarks-run-vcache",
-            description="run the benchmark catalog's vCache scorecard entry",
-            command=fak + ["benchmarks", "run", "vcache"],
+            description="run the benchmark catalog's vCache scorecard entry on observed telemetry",
+            command=fak + [
+                "benchmarks", "run", "vcache", "--",
+                "--telemetry", "experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl",
+            ],
             json_source="stdout",
             validator="vcache_score",
         ),

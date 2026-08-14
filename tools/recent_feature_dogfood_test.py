@@ -67,6 +67,13 @@ def test_build_suite_names_recent_surfaces() -> None:
         "go-test-promptmmu",
     ):
         assert key in keys
+    with tempfile.TemporaryDirectory() as d:
+        suite = {p.key: p for p in mod.build_suite(ROOT, Path(d), include_go_tests=True)}
+    assert suite["benchmarks-run-vcache"].command[-3:] == [
+        "--",
+        "--telemetry",
+        "experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl",
+    ]
 
 
 def test_benchmarks_payload_is_valid_dogfood() -> None:
