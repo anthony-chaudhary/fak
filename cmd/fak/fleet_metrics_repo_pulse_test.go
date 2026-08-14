@@ -39,6 +39,20 @@ func TestFleetMetricsAggregatesRepoPulseReceiptsWithoutDoubleCount(t *testing.T)
 	}
 }
 
+func TestFoldDispatchRepoPulseReceiptsDedupesLegacyHostAliases(t *testing.T) {
+	dir := t.TempDir()
+	row := `{"action":"enrolled","target_issue":3805,"host_enrollment":{"agent_id":"resolve-compute-3805","issue":3805},"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":2870,"tool_turns_skipped":2,"journal_rows":3}}`
+	for _, name := range []string{"last-resolve-tick-micro.json", "last-resolve-tick.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(row), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	totals := foldDispatchRepoPulseReceipts(dir)
+	if totals.Launches != 1 || totals.SavedTokens != 2870 || totals.ToolTurnsSkipped != 2 || totals.JournalRows != 3 || totals.DuplicateRows != 1 {
+		t.Fatalf("legacy host aliases = %+v, want one launch", totals)
+	}
+}
+
 func TestRepoPulseCohortReadinessRefusesThinEvidence(t *testing.T) {
 	dir := t.TempDir()
 	if got := assessRepoPulseCohort(dir, 5); got.Verdict != "not-yet" || got.PostLaunches != 0 || !strings.Contains(got.Reason, "need 5") {

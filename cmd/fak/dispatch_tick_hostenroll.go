@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
@@ -126,12 +128,25 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 	// done) is an abnormal exit whose lane may be mid-step, and those correctly keep the
 	// lease until TTL expiry. Fail-open — the outcome is surfaced, never propagated.
 	payload["lease_release"] = releaseInProcessLaneLease(root, lease)
+	payload["launch_id"] = newHostEnrollmentLaunchID(opts.Backend, target)
 	payload["ok"] = true
 	payload["action"] = "enrolled"
 	payload["verdict"] = "ENROLLED"
 	payload["reason"] = fmt.Sprintf("enrolled issue #%d (lane %q) as microagent %q into the in-process %s host under %q (%d prototype step(s), lease tree %v); full in-process issue resolution awaits #2001 (RunArm stepping)", target, pick.Lane, plan.AgentID, opts.Backend, account.Tag, steps, plan.Tree)
 	recordDispatchPayload(runsDir, opts.Backend, payload)
 	return finish(payload)
+}
+
+// newHostEnrollmentLaunchID creates a per-enrollment identity without inventing an OS
+// process PID. It is generated once and copied into every alias and immutable receipt.
+func newHostEnrollmentLaunchID(backend string, issue int) string {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err == nil {
+		return fmt.Sprintf("%s-%d-%s", backend, issue, hex.EncodeToString(nonce[:]))
+	}
+	// crypto/rand failure must not erase the launch witness. The timestamp fallback is
+	// process-local but still distinguishes sequential prototype enrollments.
+	return fmt.Sprintf("%s-%d-%d", backend, issue, time.Now().UnixNano())
 }
 
 // dispatchHostEnrollFailed marks a live host-enroll payload as a non-benign

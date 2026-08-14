@@ -2849,6 +2849,60 @@ func TestRecordDispatchPayloadPersistsRepoPulsePerLaunch(t *testing.T) {
 	}
 }
 
+func TestRecordDispatchPayloadPersistsInProcessLaunchOnce(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".dispatch-runs")
+	commonDir := filepath.Join(root, ".git")
+	oldCommonDir := dispatchRepoPulseCommonDir
+	dispatchRepoPulseCommonDir = func(string) string { return commonDir }
+	t.Cleanup(func() { dispatchRepoPulseCommonDir = oldCommonDir })
+
+	payload := map[string]any{
+		"schema":       "fleet-issue-resolve-dispatch/1",
+		"action":       "enrolled",
+		"target_issue": 3805,
+		"launch_id":    "micro-3805-test-launch",
+		"host_enrollment": map[string]any{
+			"agent_id": "resolve-compute-3805",
+			"issue":    3805,
+		},
+		"repo_pulse_receipt": map[string]any{
+			"schema":             "fak-dispatch-repo-pulse-receipt/1",
+			"saved_tokens":       2870,
+			"tool_turns_skipped": 2,
+			"journal_rows":       3,
+		},
+	}
+	recordDispatchPayload(dir, "micro", payload)
+
+	name := dispatchRepoPulseSidecarName(payload)
+	if name == "" || strings.Contains(name, "3805-0") {
+		t.Fatalf("in-process sidecar name = %q, want opaque non-PID launch identity", name)
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "last-resolve-tick-micro.json"),
+		filepath.Join(dir, "last-resolve-tick.json"),
+		filepath.Join(dir, name),
+		filepath.Join(commonDir, "fak-repo-pulse", name),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("receipt %s: %v", path, err)
+		}
+	}
+	totals := foldDispatchRepoPulseReceipts(dir)
+	if totals.Launches != 1 || totals.SavedTokens != 2870 || totals.ToolTurnsSkipped != 2 || totals.JournalRows != 3 || totals.DuplicateRows != 3 {
+		t.Fatalf("aliases plus immutable receipts = %+v, want one launch and three duplicates", totals)
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	totals = foldDispatchRepoPulseReceipts(dir)
+	if totals.Launches != 1 || totals.SavedTokens != 2870 || totals.ToolTurnsSkipped != 2 || totals.JournalRows != 3 {
+		t.Fatalf("totals after run archive removal = %+v", totals)
+	}
+}
+
 func TestDispatchShouldRerouteLeasedLaneMatchesDryAndLive(t *testing.T) {
 	pick := dispatchLanePick{Lane: "cmd"}
 	for _, live := range []bool{false, true} {

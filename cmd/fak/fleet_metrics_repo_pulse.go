@@ -53,13 +53,17 @@ func foldDispatchRepoPulseReceipts(dir string) dispatchRepoPulseTotals {
 				continue
 			}
 			var row struct {
-				Schema  string `json:"schema"`
-				Issue   int    `json:"issue"`
-				PID     int    `json:"pid"`
-				Spawned struct {
+				Schema   string `json:"schema"`
+				LaunchID string `json:"launch_id"`
+				Issue    int    `json:"issue"`
+				PID      int    `json:"pid"`
+				Spawned  struct {
 					Issue int `json:"issue"`
 					PID   int `json:"pid"`
 				} `json:"spawned"`
+				HostEnrollment struct {
+					AgentID string `json:"agent_id"`
+				} `json:"host_enrollment"`
 				RepoPulse struct {
 					Schema           string `json:"schema"`
 					SavedTokens      int64  `json:"saved_tokens"`
@@ -75,8 +79,16 @@ func foldDispatchRepoPulseReceipts(dir string) dispatchRepoPulseTotals {
 				issue, pid = row.Spawned.Issue, row.Spawned.PID
 			}
 			key := entry.Name()
-			if pid != 0 || issue != 0 {
-				key = fmt.Sprintf("%d/%d", issue, pid)
+			switch {
+			case row.LaunchID != "":
+				key = "launch/" + row.LaunchID
+			case pid != 0 || issue != 0:
+				key = fmt.Sprintf("process/%d/%d", issue, pid)
+			case row.HostEnrollment.AgentID != "":
+				// Migration compatibility for pre-launch_id in-process receipts: mutable
+				// aliases from one enrollment share this agent id. New enrollments always
+				// carry launch_id, so later runs of the same issue remain distinct.
+				key = "legacy-host/" + row.HostEnrollment.AgentID
 			}
 			if seen[key] {
 				out.DuplicateRows++

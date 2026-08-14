@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -501,12 +503,7 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick-"+backend+".json"), blob, 0o644)
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick.json"), blob, 0o644)
 	if receipt, ok := payload["repo_pulse_receipt"].(map[string]any); ok && dispatchMapString(receipt, "schema") == "fak-dispatch-repo-pulse-receipt/1" {
-		issue, pid := dispatchMapInt(payload, "issue"), dispatchMapInt(payload, "pid")
-		if spawned := mapAt(payload, "spawned"); issue <= 0 || pid <= 0 {
-			issue, pid = dispatchMapInt(spawned, "issue"), dispatchMapInt(spawned, "pid")
-		}
-		if issue > 0 && pid > 0 {
-			name := fmt.Sprintf("repo-pulse-launch-%d-%d.json", issue, pid)
+		if name := dispatchRepoPulseSidecarName(payload); name != "" {
 			_ = os.WriteFile(filepath.Join(runsDir, name), blob, 0o644)
 			if durableDir := dispatchRepoPulseLedgerDir(runsDir); durableDir != "" {
 				if os.MkdirAll(durableDir, 0o755) == nil {
@@ -515,6 +512,26 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 			}
 		}
 	}
+}
+
+// dispatchRepoPulseSidecarName names one immutable receipt by the launch identity
+// carried in its payload. Detached workers retain their historical issue/PID name.
+// In-process hosts have no process PID, so they carry an opaque launch_id; hash it for
+// a fixed, path-safe filename rather than treating either mutable last-* alias as an
+// identity. A payload without either identity is deliberately not archived.
+func dispatchRepoPulseSidecarName(payload map[string]any) string {
+	if launchID := dispatchMapString(payload, "launch_id"); launchID != "" {
+		sum := sha256.Sum256([]byte(launchID))
+		return "repo-pulse-launch-id-" + hex.EncodeToString(sum[:16]) + ".json"
+	}
+	issue, pid := dispatchMapInt(payload, "issue"), dispatchMapInt(payload, "pid")
+	if spawned := mapAt(payload, "spawned"); issue <= 0 || pid <= 0 {
+		issue, pid = dispatchMapInt(spawned, "issue"), dispatchMapInt(spawned, "pid")
+	}
+	if issue > 0 && pid > 0 {
+		return fmt.Sprintf("repo-pulse-launch-%d-%d.json", issue, pid)
+	}
+	return ""
 }
 
 func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, leaseID string, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool, cooldownStatus []map[string]any) map[string]any {
