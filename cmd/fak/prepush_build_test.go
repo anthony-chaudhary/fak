@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -688,5 +689,81 @@ func TestClaimPrepushTipCoalescesOnIndependentSuccess(t *testing.T) {
 	coalescedRelease()
 	if coalescedOwner {
 		t.Fatal("same-tip waiter reran gate after witnessed success")
+	}
+}
+
+func TestPrepushClaimHelper(t *testing.T) {
+	mode := os.Getenv("GO_PREPUSH_CLAIM_HELPER")
+	if mode == "" {
+		return
+	}
+	root, tip := os.Getenv("GO_PREPUSH_CLAIM_ROOT"), os.Getenv("GO_PREPUSH_CLAIM_TIP")
+	owner, release := claimPrepushTip(root, tip, time.Now)
+	defer release()
+	switch mode {
+	case "owner":
+		if !owner {
+			os.Exit(3)
+		}
+		if err := os.WriteFile(os.Getenv("GO_PREPUSH_CLAIM_READY"), []byte("ready"), 0o644); err != nil {
+			os.Exit(4)
+		}
+		time.Sleep(300 * time.Millisecond)
+		recordPrepushSuccess(root, tip, time.Now())
+		_, _ = fmt.Fprintln(os.Stdout, "OWNER")
+	case "waiter":
+		if owner {
+			os.Exit(5)
+		}
+		_, _ = fmt.Fprintln(os.Stdout, "COALESCED")
+	default:
+		os.Exit(6)
+	}
+}
+
+func TestClaimPrepushTipCoalescesAcrossProcesses(t *testing.T) {
+	root := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", root)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %v: %s", err, out)
+	}
+	tip := strings.Repeat("a", 40)
+	ready := filepath.Join(root, "owner.ready")
+	helper := func(mode string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestPrepushClaimHelper$")
+		cmd.Env = append(os.Environ(),
+			"GO_PREPUSH_CLAIM_HELPER="+mode,
+			"GO_PREPUSH_CLAIM_ROOT="+root,
+			"GO_PREPUSH_CLAIM_TIP="+tip,
+			"GO_PREPUSH_CLAIM_READY="+ready,
+		)
+		return cmd
+	}
+	owner := helper("owner")
+	var ownerOut bytes.Buffer
+	owner.Stdout, owner.Stderr = &ownerOut, &ownerOut
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = owner.Process.Kill()
+			t.Fatal("owner never published claim readiness")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	waiterOut, waiterErr := helper("waiter").CombinedOutput()
+	if err := owner.Wait(); err != nil {
+		t.Fatalf("owner: %v: %s", err, ownerOut.String())
+	}
+	if waiterErr != nil {
+		t.Fatalf("waiter: %v: %s", waiterErr, waiterOut)
+	}
+	if strings.TrimSpace(ownerOut.String()) != "OWNER" || strings.TrimSpace(string(waiterOut)) != "COALESCED" {
+		t.Fatalf("owner=%q waiter=%q", ownerOut.String(), waiterOut)
 	}
 }
