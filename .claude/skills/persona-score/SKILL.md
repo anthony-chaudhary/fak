@@ -92,6 +92,18 @@ python tools/persona_readiness_scorecard.py --critical  # the worst-served perso
 python tools/persona_readiness_scorecard.py --gaps      # the coverage backlog (unpositioned personas)
 ```
 
+Capture the live blockers before summarizing any persona as served:
+
+```bash
+python tools/persona_readiness_scorecard.py --critical > /tmp/persona-critical.txt
+python tools/persona_readiness_scorecard_test.py
+```
+
+If either command is red, report that red first and do not publish a green "all personas served"
+summary, regenerate snapshots, or commit. The current decision-maker pricing/TCO affordance is a
+separately issue-tracked product gap; record it as backlog evidence rather than silently expanding
+a skill-only pass to build the product surface.
+
 It scores each persona's met/unmet HARD affordances into a readiness verdict
 (served / mostly-served / partially-served / unserved), folds them into a composite
 (0–100, A–F) and the **persona-debt** integer, and prints the work-list: every
@@ -99,8 +111,9 @@ missing affordance with the thing to add, then the SOFT signals. Read-only.
 
 ## Step 2 — Retire persona-debt worst-served-first
 
-Take the worst-served persona first (`--critical` names it). For each missing HARD
-affordance, **add the real thing** that persona reaches for (from the roster table).
+Take the worst-served persona first (`--critical` names it), but only through a dedicated issue
+for the product affordance. For each missing HARD affordance, **add the real thing** that persona
+reaches for (from the roster table); do not count a prose-only skill edit as retiring product debt.
 After a batch, **re-run** and watch the number fall. Capture a baseline to prove it:
 
 ```bash
@@ -121,8 +134,9 @@ the forward backlog. Fix the cheap, real ones; don't grind them to zero.
 
 ## Step 4 — Re-measure, confirm, regenerate the snapshot
 
-Re-run; state the before/after (e.g. "persona-debt 4 → 0, infra-engineer
-partially-served → served"). Then regenerate the committed doc folder so it matches
+Re-run `--critical` and the focused test first. Only when both are green, state the before/after
+(e.g. "persona-debt 4 → 0, infra-engineer partially-served → served"). Then regenerate the committed doc folder so it
+matches
 the tree:
 
 ```bash
