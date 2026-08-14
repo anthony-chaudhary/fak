@@ -13,10 +13,12 @@ import (
 func TestFleetMetricsAggregatesRepoPulseReceiptsWithoutDoubleCount(t *testing.T) {
 	dir := t.TempDir()
 	rows := map[string]string{
-		"a.json":       `{"schema":"fak-dispatch-worker/1","issue":10,"pid":100,"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":400,"tool_turns_skipped":2,"journal_rows":3}}`,
-		"a-retry.json": `{"schema":"fak-dispatch-worker/1","issue":10,"pid":100,"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":400,"tool_turns_skipped":2,"journal_rows":3}}`,
-		"b.json":       `{"schema":"fak-dispatch-worker/1","issue":11,"pid":101,"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":600,"tool_turns_skipped":2,"journal_rows":3}}`,
-		"old.json":     `{"schema":"fak-dispatch-worker/1","issue":9,"pid":99}`,
+		"a.json":                        `{"schema":"fak-dispatch-worker/1","issue":10,"pid":100,"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":400,"tool_turns_skipped":2,"journal_rows":3}}`,
+		"a-retry.json":                  `{"schema":"fak-dispatch-worker/1","issue":10,"pid":100,"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":400,"tool_turns_skipped":2,"journal_rows":3}}`,
+		"b.json":                        `{"schema":"fak-dispatch-worker/1","issue":11,"pid":101,"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":600,"tool_turns_skipped":2,"journal_rows":3}}`,
+		"old.json":                      `{"schema":"fak-dispatch-worker/1","issue":9,"pid":99}`,
+		"repo-pulse-launch-12-102.json": `{"schema":"fleet-issue-resolve-dispatch/1","spawned":{"issue":12,"pid":102},"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":700,"tool_turns_skipped":2,"journal_rows":3}}`,
+		"last-resolve-tick.json":        `{"schema":"fleet-issue-resolve-dispatch/1","spawned":{"issue":12,"pid":102},"repo_pulse_receipt":{"schema":"fak-dispatch-repo-pulse-receipt/1","saved_tokens":700,"tool_turns_skipped":2,"journal_rows":3}}`,
 	}
 	for name, body := range rows {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
@@ -24,13 +26,13 @@ func TestFleetMetricsAggregatesRepoPulseReceiptsWithoutDoubleCount(t *testing.T)
 		}
 	}
 	totals := foldDispatchRepoPulseReceipts(dir)
-	if totals.Launches != 2 || totals.SavedTokens != 1000 || totals.ToolTurnsSkipped != 4 || totals.JournalRows != 6 || totals.DuplicateRows != 1 {
+	if totals.Launches != 3 || totals.SavedTokens != 1700 || totals.ToolTurnsSkipped != 6 || totals.JournalRows != 9 || totals.DuplicateRows != 2 {
 		t.Fatalf("totals=%+v", totals)
 	}
 	w := newPromWriter()
 	writeRepoPulseMetrics(w, dir)
 	raw := w.String()
-	for _, want := range []string{"fak_fleet_repo_pulse_launches_total 2", "fak_fleet_repo_pulse_context_tokens_saved_total 1000", "fak_fleet_repo_pulse_tool_turns_skipped_total 4", "fak_fleet_repo_pulse_duplicate_receipts_dropped_total 1", "fak_fleet_repo_pulse_cohort_ready 0", "fak_fleet_repo_pulse_cohort_sample_deficit 3"} {
+	for _, want := range []string{"fak_fleet_repo_pulse_launches_total 3", "fak_fleet_repo_pulse_context_tokens_saved_total 1700", "fak_fleet_repo_pulse_tool_turns_skipped_total 6", "fak_fleet_repo_pulse_duplicate_receipts_dropped_total 2", "fak_fleet_repo_pulse_cohort_ready 0", "fak_fleet_repo_pulse_cohort_sample_deficit 2"} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("missing %q:\n%s", want, raw)
 		}

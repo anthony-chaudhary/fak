@@ -35,9 +35,13 @@ func foldDispatchRepoPulseReceipts(dir string) dispatchRepoPulseTotals {
 			continue
 		}
 		var row struct {
-			Schema    string `json:"schema"`
-			Issue     int    `json:"issue"`
-			PID       int    `json:"pid"`
+			Schema  string `json:"schema"`
+			Issue   int    `json:"issue"`
+			PID     int    `json:"pid"`
+			Spawned struct {
+				Issue int `json:"issue"`
+				PID   int `json:"pid"`
+			} `json:"spawned"`
 			RepoPulse struct {
 				Schema           string `json:"schema"`
 				SavedTokens      int64  `json:"saved_tokens"`
@@ -48,9 +52,13 @@ func foldDispatchRepoPulseReceipts(dir string) dispatchRepoPulseTotals {
 		if json.Unmarshal(b, &row) != nil || row.RepoPulse.Schema != "fak-dispatch-repo-pulse-receipt/1" {
 			continue
 		}
+		issue, pid := row.Issue, row.PID
+		if issue == 0 && pid == 0 {
+			issue, pid = row.Spawned.Issue, row.Spawned.PID
+		}
 		key := entry.Name()
-		if row.PID != 0 || row.Issue != 0 {
-			key = fmt.Sprintf("%d/%d", row.Issue, row.PID)
+		if pid != 0 || issue != 0 {
+			key = fmt.Sprintf("%d/%d", issue, pid)
 		}
 		if seen[key] {
 			out.DuplicateRows++
