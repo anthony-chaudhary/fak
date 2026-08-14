@@ -22,6 +22,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/trunkbuildprobe"
 )
 
 // ---- #3405 host-probe shell reuse spine ---------------------------------- //
@@ -1070,28 +1071,14 @@ func dispatchProductBackends(product string) []string {
 }
 
 var dispatchTreeBuildCommand = func(root string) (string, error) {
-	goBin, err := exec.LookPath("go")
+	builds, output, err := trunkbuildprobe.BuildCommittedTarget(root, "./cmd/fak", 90*time.Second)
 	if err != nil {
-		return "", err
+		return output, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	cmd := windowgate.CommandContext(ctx, goBin, "build", "-o", os.DevNull, "./cmd/fak")
-	cmd.Dir = root
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			// A 90s wall-clock kill is infrastructure (a loaded host, a slow disk,
-			// an OOM reap), not a compiler diagnostic. Wrap it so the probe can
-			// recognize the timeout via errors.Is and fail open, instead of
-			// misreading a killed build as a poisoned tree and freezing the fleet.
-			return string(out), fmt.Errorf(
-				"tree build probe timed out after 90s: %w", context.DeadlineExceeded)
-		}
-		return string(out), err
+	if !builds {
+		return output, errors.New("committed tree build failed")
 	}
-	return string(out), nil
+	return output, nil
 }
 
 func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {

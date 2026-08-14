@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -90,5 +93,43 @@ func TestDispatchProbeTreeBuildGitDirNoModuleFailsOpen(t *testing.T) {
 	t.Cleanup(func() { dispatchTreeBuildCommand = old })
 	if got := dispatchProbeTreeBuild(t.TempDir()); got.Poisoned {
 		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestDispatchTreeBuildIgnoresBrokenUntrackedPeerFile(t *testing.T) {
+	root := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/peerdirty\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "cmd", "fak", "main.go")
+	if err := os.WriteFile(mainPath, []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "test")
+	runGit("add", "go.mod", "cmd/fak/main.go")
+	runGit("commit", "-m", "fixture")
+	if err := os.WriteFile(filepath.Join(root, "cmd", "fak", "peer_wip.go"), []byte("package main\nvar _ = undefinedPeerSymbol\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	literal := exec.Command("go", "build", "./cmd/fak")
+	literal.Dir = root
+	if err := literal.Run(); err == nil {
+		t.Fatal("literal peer-dirty tree unexpectedly built")
+	}
+	if got := dispatchProbeTreeBuild(root); got.Poisoned || got.Error != "" {
+		t.Fatalf("committed tree probe = %+v, want green despite unrelated untracked WIP", got)
 	}
 }

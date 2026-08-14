@@ -33,6 +33,7 @@ package trunkbuildprobe
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,6 +43,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -351,6 +353,14 @@ func UncommittedFiles(root string) map[string]string {
 // `go build ./...` there — the same blind base CI checks out, not the author's
 // dirty working tree. Returns (ok, combined output).
 func BuildCommittedHead(root string) (bool, string, error) {
+	return BuildCommittedTarget(root, "./...", 0)
+}
+
+// BuildCommittedTarget compiles target from an archive of HEAD, so unrelated
+// peer-dirty worktree files cannot mask or fabricate a committed-tree result.
+// A positive timeout bounds only the compiler; archive/extraction failures stay
+// typed as probe infrastructure errors rather than build failures.
+func BuildCommittedTarget(root, target string, timeout time.Duration) (bool, string, error) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return false, "", fmt.Errorf("go toolchain not found on PATH")
@@ -374,13 +384,23 @@ func BuildCommittedHead(root string) (bool, string, error) {
 		return false, "", fmt.Errorf("extract: %v", err)
 	}
 
-	build := windowgate.Command(goBin, "build", "./...")
+	ctx := context.Background()
+	cancel := func() {}
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	build := windowgate.CommandContext(ctx, goBin, "build", target)
 	build.Dir = tmp
 	var so, se bytes.Buffer
 	build.Stdout = &so
 	build.Stderr = &se
 	runErr := build.Run()
-	return runErr == nil, se.String() + so.String(), nil
+	output := se.String() + so.String()
+	if ctx.Err() == context.DeadlineExceeded {
+		return false, output, fmt.Errorf("committed tree build timed out after %s: %w", timeout, context.DeadlineExceeded)
+	}
+	return runErr == nil, output, nil
 }
 
 // extractTar writes every regular file of a tar stream under dest.
