@@ -64,6 +64,8 @@ func main() {
 	switch os.Args[1] {
 	case "agent":
 		cmdAgent(os.Args[2:])
+	case "harness":
+		cmdHarness(os.Args[2:])
 	case "armbench":
 		cmdArmbench(os.Args[2:])
 	case "api-host":

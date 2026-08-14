@@ -1,0 +1,22 @@
+# Linux clean-room witness for fak harness init (#6788)
+# Generator source: committed trunk archive 613a82b762e2 plus only issue #6788 paths (honest pre-commit equivalent; not a released generator binary).
+# Product dependency: immutable Go proxy pin github.com/anthony-chaudhary/fak@v0.43.1-0.20260814184635-613a82b762e2.
+# Host: Linux 6.6.114.1-microsoft-standard-WSL2 x86_64 GNU/Linux
+> go build -o /tmp/fak-harness-init-6788 ./cmd/fak
+artifact_sha256=dc3ac8d1ba6c43dfec2d6c166517e9378b03fef97a9642132d11c97f9e37b038
+> fak harness init --dir /tmp/fak-harness-product-6788 --module example.test/acme-harness --json
+{"directory":"/tmp/fak-harness-product-6788","module":"example.test/acme-harness","fak_version":"v0.43.1-0.20260814184635-613a82b762e2","contract_version":"v1alpha1","created":["README.md","cmd/product/main.go","generated/runtime.go","go.mod","go.sum","harness.lock.json","product/config.go"]}
+> go build -o product-bin ./cmd/product
+build=ok
+> go run ./cmd/product --selfcheck
+{"type":"turn.started","turn":"offline-1","detail":"offline deterministic model"}
+{"type":"model.response","turn":"offline-1","detail":"offline reply: prove the external harness works"}
+{"type":"tool.requested","turn":"offline-1","detail":"record_selfcheck"}
+{"type":"tool.completed","turn":"offline-1","detail":"record_selfcheck:ok"}
+{"type":"turn.completed","turn":"offline-1","detail":"ok"}
+internal_imports=0
+> rerun init after editing product/config.go
+{"directory":"/tmp/fak-harness-product-6788","module":"example.test/acme-harness","fak_version":"v0.43.1-0.20260814184635-613a82b762e2","contract_version":"v1alpha1","created":null,"preserved":["README.md","cmd/product/main.go","generated/runtime.go","go.mod","go.sum","harness.lock.json","product/config.go"]}
+user_file_sha256_before=b7835c89491fc69b560670e285ebb0b732a149f0a79e34e652a67acd793b1c42
+user_file_sha256_after=b7835c89491fc69b560670e285ebb0b732a149f0a79e34e652a67acd793b1c42
+user_file_preserved=true

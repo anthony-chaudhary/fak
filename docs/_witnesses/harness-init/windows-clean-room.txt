@@ -1,0 +1,22 @@
+# Windows clean-room witness for fak harness init (#6788)
+# Generator source: committed trunk archive 613a82b762e2 plus only issue #6788 paths (honest pre-commit equivalent; not a released generator binary).
+# Product dependency: immutable Go proxy pin github.com/anthony-chaudhary/fak@v0.43.1-0.20260814184635-613a82b762e2.
+# Host: Microsoft Windows NT 10.0.26200.0
+> go build -o C:\Users\USER\AppData\Local\Temp\fak-harness-init-275dd2ed868c4f4bbbd52191ef6a75ea.exe ./cmd/fak
+artifact_sha256=6bede3c8576c284e44b29034380c2f58510953eaa2ac9d642d7fad435f691d58
+> fak harness init --dir C:\Users\USER\AppData\Local\Temp\fak-harness-product-275dd2ed868c4f4bbbd52191ef6a75ea --module example.test/acme-harness --json
+{"directory":"C:\\Users\\USER\\AppData\\Local\\Temp\\fak-harness-product-275dd2ed868c4f4bbbd52191ef6a75ea","module":"example.test/acme-harness","fak_version":"v0.43.1-0.20260814184635-613a82b762e2","contract_version":"v1alpha1","created":["README.md","cmd/product/main.go","generated/runtime.go","go.mod","go.sum","harness.lock.json","product/config.go"]}
+> go build -o product-bin.exe ./cmd/product
+build=ok
+> go run ./cmd/product --selfcheck
+{"type":"turn.started","turn":"offline-1","detail":"offline deterministic model"}
+{"type":"model.response","turn":"offline-1","detail":"offline reply: prove the external harness works"}
+{"type":"tool.requested","turn":"offline-1","detail":"record_selfcheck"}
+{"type":"tool.completed","turn":"offline-1","detail":"record_selfcheck:ok"}
+{"type":"turn.completed","turn":"offline-1","detail":"ok"}
+internal_imports=0
+> rerun init after editing product/config.go
+{"directory":"C:\\Users\\USER\\AppData\\Local\\Temp\\fak-harness-product-275dd2ed868c4f4bbbd52191ef6a75ea","module":"example.test/acme-harness","fak_version":"v0.43.1-0.20260814184635-613a82b762e2","contract_version":"v1alpha1","created":null,"preserved":["README.md","cmd/product/main.go","generated/runtime.go","go.mod","go.sum","harness.lock.json","product/config.go"]}
+user_file_sha256_before=d9265530dbb1e1cb06ba551eb0679b811a0bd161874c2420f3148cfea04a26fa
+user_file_sha256_after=d9265530dbb1e1cb06ba551eb0679b811a0bd161874c2420f3148cfea04a26fa
+user_file_preserved=true
