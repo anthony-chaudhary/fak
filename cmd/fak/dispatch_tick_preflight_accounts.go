@@ -12,12 +12,33 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
+
+const dispatchRosterSnapshotTTL = 5 * time.Second
+
+type dispatchRosterSnapshot struct {
+	root    string
+	at      time.Time
+	rows    []dispatchtick.AccountRow
+	pending bool
+}
+
+var dispatchRosterBuild = dispatchBuildAccountRoster
+
+var dispatchRosterSnapshots struct {
+	sync.Mutex
+	byRoot map[string]dispatchRosterSnapshot
+}
+
+func cloneDispatchAccountRows(rows []dispatchtick.AccountRow) []dispatchtick.AccountRow {
+	return append([]dispatchtick.AccountRow(nil), rows...)
+}
 
 // dispatchReadAccountRosterNative builds the dispatch account roster and then drops
 // seats with an ACTIVE account cooldown from the servable pool. Both dispatch pickers
@@ -28,14 +49,32 @@ import (
 // Registry.LoginReportAt already applies for `fak accounts` and guard rotation
 // (internal/accounts/login.go), keyed on the same uuid: bucket the guard writes.
 func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, error) {
-	rows, err := dispatchBuildAccountRoster(root)
+	now := time.Now()
+	dispatchRosterSnapshots.Lock()
+	if snap, ok := dispatchRosterSnapshots.byRoot[root]; ok && snap.pending && now.Sub(snap.at) <= dispatchRosterSnapshotTTL {
+		snap.pending = false
+		dispatchRosterSnapshots.byRoot[root] = snap
+		rows := cloneDispatchAccountRows(snap.rows)
+		dispatchRosterSnapshots.Unlock()
+		return rows, nil
+	}
+	dispatchRosterSnapshots.Unlock()
+
+	rows, err := dispatchRosterBuild(root)
 	if err != nil {
 		return nil, err
 	}
 	// This is an ADMISSION path (it drops cooled seats from the routable pool), so an
 	// unreadable store warns on os.Stderr like the resolve/launch seams do (#6027) —
 	// stdout stays clean for the preflight's JSON.
-	return dispatchApplyAccountCooldown(rows, loadCooldownStoreFailOpen("fak dispatch", os.Stderr), time.Now()), nil
+	rows = dispatchApplyAccountCooldown(rows, loadCooldownStoreFailOpen("fak dispatch", os.Stderr), now)
+	dispatchRosterSnapshots.Lock()
+	if dispatchRosterSnapshots.byRoot == nil {
+		dispatchRosterSnapshots.byRoot = map[string]dispatchRosterSnapshot{}
+	}
+	dispatchRosterSnapshots.byRoot[root] = dispatchRosterSnapshot{root: root, at: now, rows: cloneDispatchAccountRows(rows), pending: true}
+	dispatchRosterSnapshots.Unlock()
+	return cloneDispatchAccountRows(rows), nil
 }
 
 // dispatchApplyAccountCooldown marks every roster row whose upstream account holds an
@@ -111,7 +150,7 @@ func dispatchPreflightUsageCap(root, product string, seat dispatchtick.SeatCheck
 	if store == nil {
 		return dispatchtick.UsageCapAdvisory{}
 	}
-	rows, err := dispatchBuildAccountRoster(root)
+	rows, err := dispatchRosterBuild(root)
 	if err != nil {
 		return dispatchtick.UsageCapAdvisory{}
 	}

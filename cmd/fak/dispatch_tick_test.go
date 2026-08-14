@@ -139,6 +139,74 @@ func dispatchHappyHelper(t *testing.T) func(root string, args ...string) (map[st
 	}
 }
 
+func TestDispatchAccountRosterSnapshotServesOneAdjacentRead(t *testing.T) {
+	oldBuild := dispatchRosterBuild
+	dispatchRosterSnapshots.Lock()
+	dispatchRosterSnapshots.byRoot = nil
+	dispatchRosterSnapshots.Unlock()
+	builds := 0
+	dispatchRosterBuild = func(root string) ([]dispatchtick.AccountRow, error) {
+		builds++
+		return []dispatchtick.AccountRow{{Tag: "seat-a", Product: "claude"}}, nil
+	}
+	t.Cleanup(func() {
+		dispatchRosterBuild = oldBuild
+		dispatchRosterSnapshots.Lock()
+		dispatchRosterSnapshots.byRoot = nil
+		dispatchRosterSnapshots.Unlock()
+	})
+	root := t.TempDir()
+	first, err := dispatchReadAccountRosterNative(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first[0].Tag = "mutated"
+	second, err := dispatchReadAccountRosterNative(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if builds != 1 || second[0].Tag != "seat-a" {
+		t.Fatalf("builds=%d second=%+v", builds, second)
+	}
+	if _, err := dispatchReadAccountRosterNative(root); err != nil {
+		t.Fatal(err)
+	}
+	if builds != 2 {
+		t.Fatalf("snapshot served more than one adjacent read: builds=%d", builds)
+	}
+}
+
+func TestDispatchAccountRosterSnapshotDoesNotCacheErrors(t *testing.T) {
+	oldBuild := dispatchRosterBuild
+	dispatchRosterSnapshots.Lock()
+	dispatchRosterSnapshots.byRoot = nil
+	dispatchRosterSnapshots.Unlock()
+	builds := 0
+	dispatchRosterBuild = func(root string) ([]dispatchtick.AccountRow, error) {
+		builds++
+		if builds == 1 {
+			return nil, fmt.Errorf("transient")
+		}
+		return []dispatchtick.AccountRow{{Tag: "seat-a", Product: "claude"}}, nil
+	}
+	t.Cleanup(func() {
+		dispatchRosterBuild = oldBuild
+		dispatchRosterSnapshots.Lock()
+		dispatchRosterSnapshots.byRoot = nil
+		dispatchRosterSnapshots.Unlock()
+	})
+	root := t.TempDir()
+	if _, err := dispatchReadAccountRosterNative(root); err == nil {
+		t.Fatal("expected transient build error")
+	}
+	if _, err := dispatchReadAccountRosterNative(root); err != nil {
+		t.Fatalf("error was cached: %v", err)
+	}
+	if builds != 2 {
+		t.Fatalf("builds=%d, want retry after error", builds)
+	}
+}
+
 func TestDispatchTickPreflightRefusalSkipsIssueRouter(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	dispatchProbeWorkerCount = func(root, product string) int { return 1 }
