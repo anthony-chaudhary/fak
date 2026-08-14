@@ -1313,6 +1313,7 @@ func refusalRestatementStatePath(sessionID string) string {
 
 func guardStopGitHead() string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
