@@ -152,7 +152,7 @@ func foldPaired(r pairedReport) pairedReport {
 func filteredPairedEnv(env []string) []string {
 	drop := map[string]bool{
 		"FAK_REGISTRATION_ID": true, "FAK_ROOT_REGISTRATION_ID": true, "FAK_PARENT_REGISTRATION_ID": true,
-		"FAK_SPAWN_GRANT_ID": true, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT": true, "ENABLE_TOOL_SEARCH": true, "FAK_GUARD_AFFORDANCE_MODE": true,
+		"FAK_SPAWN_GRANT_ID": true, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT": true, "FAK_GUARD_CAP_PARK": true, "ENABLE_TOOL_SEARCH": true, "FAK_GUARD_AFFORDANCE_MODE": true,
 	}
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
@@ -164,7 +164,7 @@ func filteredPairedEnv(env []string) []string {
 			out = append(out, kv)
 		}
 	}
-	return append(out, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0", "FAK_GUARD_AFFORDANCE_MODE=off")
+	return append(out, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0", "FAK_GUARD_CAP_PARK=off", "FAK_GUARD_AFFORDANCE_MODE=off")
 }
 func runPairedBaseline(ctx context.Context, task, expected, model string) pairedArm {
 	arm := pairedArm{Mechanism: "fak-manage-claude", Provider: "anthropic", Model: model, CostStatus: "provider-unreported", Managed: true}
@@ -178,7 +178,7 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 		arm.Error = err.Error()
 		return arm
 	}
-	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--max-duration", pairedBaselineGuardTimeout.String(), "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
+	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--rotate", "off", "--max-duration", pairedBaselineGuardTimeout.String(), "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
 	env := filteredPairedEnv(os.Environ())
 	if !pairedEnvHas(env, "CLAUDE_CONFIG_DIR") {
 		if dir := pairedReadyClaudeConfigDir(ctx, exe); dir != "" {
@@ -191,27 +191,28 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	start := time.Now()
 	err = cmd.Run()
 	arm.WallMS = time.Since(start).Milliseconds()
-	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			arm.Error = fmt.Sprintf("managed baseline parent timed out after %s", pairedBaselineParentTimeout)
-		} else {
-			arm.Error = strings.TrimSpace(err.Error() + ": " + stdout.String() + " " + stderr.String())
-		}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		arm.Error = fmt.Sprintf("managed baseline parent timed out after %s", pairedBaselineParentTimeout)
 		return arm
 	}
 	var got claudeResult
-	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
-		arm.Error = "decode Claude JSON: " + err.Error()
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &got); decodeErr != nil {
+		if err != nil {
+			arm.Error = strings.TrimSpace(err.Error() + ": " + stdout.String() + " " + stderr.String())
+		} else {
+			arm.Error = "decode Claude JSON: " + decodeErr.Error()
+		}
 		return arm
 	}
 	arm.Completed, arm.Answer = !got.IsError, strings.TrimSpace(got.Result)
 	if got.IsError {
+		arm.Error = arm.Answer
 		reconcilePairedBaselineCooldown(cmd.Env, got, time.Now())
 	}
 	arm.Correct = arm.Completed && arm.Answer == expected
 	arm.InputTokens, arm.OutputTokens = got.Usage.InputTokens+got.Usage.CacheCreationInputTokens, got.Usage.OutputTokens
 	arm.CacheReadTokens = got.Usage.CacheReadInputTokens
-	if got.TotalCostUSD != nil {
+	if !got.IsError && got.TotalCostUSD != nil {
 		cost := *got.TotalCostUSD
 		arm.CostUSD = &cost
 		arm.CostStatus = "provider-reported"
@@ -227,7 +228,7 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 		if arm.CacheReadTokens == 0 {
 			arm.CacheReadTokens = usage.CacheReadInputTokens
 		}
-		if arm.CostUSD == nil && usage.CostUSD > 0 {
+		if !got.IsError && arm.CostUSD == nil && usage.CostUSD > 0 {
 			cost := usage.CostUSD
 			arm.CostUSD = &cost
 			arm.CostStatus = "provider-reported"

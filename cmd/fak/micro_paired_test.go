@@ -48,19 +48,40 @@ func TestClaudeResultMissingCostStaysNull(t *testing.T) {
 	}
 }
 
+func TestClaudeErrorResultDoesNotReportZeroCost(t *testing.T) {
+	var got claudeResult
+	if err := json.Unmarshal([]byte(`{"is_error":true,"api_error_status":429,"result":"usage limit; retry in 1h","total_cost_usd":0}`), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsError || got.APIErrorStatus != 429 || got.TotalCostUSD == nil {
+		t.Fatalf("decoded=%+v", got)
+	}
+	arm := pairedArm{CostStatus: "provider-unreported"}
+	if !got.IsError && got.TotalCostUSD != nil {
+		arm.CostUSD = got.TotalCostUSD
+	}
+	if arm.CostUSD != nil || arm.CostStatus != "provider-unreported" {
+		t.Fatalf("pre-inference error became a cost claim: %+v", arm)
+	}
+}
+
 func TestFilteredPairedEnvDropsOnlyStaleRegistrationContext(t *testing.T) {
 	got := filteredPairedEnv([]string{
 		"FAK_REGISTRATION_ID=stale",
 		"FAK_ROOT_REGISTRATION_ID=root",
 		"FAK_PARENT_REGISTRATION_ID=parent",
 		"FAK_SPAWN_GRANT_ID=grant",
+		"FAK_GUARD_CAP_PARK=1",
 		"ANTHROPIC_API_KEY=keep",
 	})
 	joined := strings.Join(got, "\n")
 	if strings.Contains(joined, "REGISTRATION_ID=") || strings.Contains(joined, "SPAWN_GRANT_ID=") {
 		t.Fatalf("stale registration context survived: %q", joined)
 	}
-	if !strings.Contains(joined, "ANTHROPIC_API_KEY=keep") || !strings.Contains(joined, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0") || !strings.Contains(joined, "FAK_GUARD_AFFORDANCE_MODE=off") {
+	if strings.Contains(joined, "FAK_GUARD_CAP_PARK=1") {
+		t.Fatalf("inherited cap recovery survived: %q", joined)
+	}
+	if !strings.Contains(joined, "ANTHROPIC_API_KEY=keep") || !strings.Contains(joined, "FLEET_CLAUDE_GUARD_CRASH_RESTART_LIMIT=0") || !strings.Contains(joined, "FAK_GUARD_CAP_PARK=off") || !strings.Contains(joined, "FAK_GUARD_AFFORDANCE_MODE=off") {
 		t.Fatalf("required benchmark environment missing: %q", joined)
 	}
 }
@@ -89,7 +110,7 @@ func TestRunPairedBaselineAddsBoundedGuardEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(source)
-	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineParentTimeout)", `"--max-duration", pairedBaselineGuardTimeout.String()`} {
+	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineParentTimeout)", `"--rotate", "off"`, `"--max-duration", pairedBaselineGuardTimeout.String()`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("baseline command lacks %q", want)
 		}
