@@ -37,9 +37,11 @@ import (
 // human glance while a false "live" would hide real cruft.
 const DefaultAbandonAfter = 60 * time.Minute
 
-// WIPFile classifies one untracked SOURCE file for the land-or-park inventory.
+// WIPFile classifies one untracked durable artifact for the land-or-park inventory.
 type WIPFile struct {
 	Path        string `json:"path"`                  // repo-relative, forward slashes (as git emits)
+	Kind        string `json:"kind"`                  // source | claude-control | test-fixture
+	Action      string `json:"action"`                // land-or-park | park-or-delete | land-or-delete
 	AgeSeconds  int64  `json:"age_seconds"`           // now - mtime, floored at 0
 	Live        bool   `json:"live"`                  // touched within LiveWindow — an active edit, keep
 	Owner       string `json:"owner,omitempty"`       // owning session/pid, where discoverable
@@ -100,8 +102,9 @@ func classifyWIP(f *WIPFile, abandonAfterSec int64) {
 	}
 }
 
-// diagnoseWIP inventories untracked SOURCE files under repoRoot and classifies each for the
-// land-or-park surface. Read-only: it lists (git ls-files --others --exclude-standard), stats
+// diagnoseWIP inventories untracked durable artifacts under repoRoot and classifies each for the
+// land-or-park surface. Durable artifacts include source plus control-plane files under .claude/
+// and fixtures under testdata/; these two trees otherwise evade a source-extension-only audit. Read-only: it lists (git ls-files --others --exclude-standard), stats
 // mtimes, and — only when the corresponding probe is supplied — checks package build health
 // and owner liveness. It never moves or removes a file. A missing/failed git read yields an
 // empty inventory (the fail-safe: surface nothing rather than guess).
@@ -121,7 +124,11 @@ func diagnoseWIP(ctx context.Context, run Runner, repoRoot string, window time.D
 	var files []WIPFile
 	for _, rel := range strings.Split(out, "\n") {
 		rel = strings.TrimSpace(strings.TrimRight(rel, "\r"))
-		if rel == "" || !isSourceFile(rel) {
+		if rel == "" {
+			continue
+		}
+		kind, action, durable := classifyDurableArtifact(rel)
+		if !durable {
 			continue
 		}
 		abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
@@ -129,7 +136,7 @@ func diagnoseWIP(ctx context.Context, run Runner, repoRoot string, window time.D
 		if serr != nil || info.IsDir() {
 			continue
 		}
-		f := WIPFile{Path: rel}
+		f := WIPFile{Path: rel, Kind: kind, Action: action}
 		age := now.Sub(info.ModTime())
 		if age > 0 {
 			f.AgeSeconds = int64(age / time.Second)
@@ -164,6 +171,24 @@ func diagnoseWIP(ctx context.Context, run Runner, repoRoot string, window time.D
 		return files[i].Path < files[j].Path
 	})
 	return files
+}
+
+// classifyDurableArtifact keeps operational control files and fixtures on the same aging
+// surface as source. Tracked files never reach this fold because git supplies only untracked
+// paths; a generated goal prompt should be parked or deleted, while a fixture must be either
+// landed with its test or deleted rather than lingering as invisible local state.
+func classifyDurableArtifact(rel string) (kind, action string, ok bool) {
+	norm := strings.ToLower(filepath.ToSlash(rel))
+	if strings.HasPrefix(norm, ".claude/") {
+		return "claude-control", "park-or-delete", true
+	}
+	if strings.Contains("/"+norm, "/testdata/") {
+		return "test-fixture", "land-or-delete", true
+	}
+	if isSourceFile(rel) {
+		return "source", "land-or-park", true
+	}
+	return "", "", false
 }
 
 // isSourceFile reports whether rel names a source file the inventory tracks. Kept to code

@@ -113,3 +113,17 @@ func TestCmdTreeDoctorScratchPathCreatesNamespacedParent(t *testing.T) {
 		t.Fatalf("path = %q", path)
 	}
 }
+
+func TestRenderWIPTextShowsTypedDurableActions(t *testing.T) {
+	var out bytes.Buffer
+	renderWIPText(&out, []treedoctor.WIPFile{
+		{Path: ".claude/goal-prompts/resfleet-6557.md", Kind: "claude-control", Action: "park-or-delete", Class: "abandoned", LandOrPark: true, AgeSeconds: 7200},
+		{Path: "internal/x/testdata/case.json", Kind: "test-fixture", Action: "land-or-delete", Class: "abandoned", LandOrPark: true, AgeSeconds: 7200},
+	})
+	got := out.String()
+	for _, want := range []string{"untracked durable WIP", "claude-control", "park-or-delete", "test-fixture", "land-or-delete"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q:\n%s", want, got)
+		}
+	}
+}

@@ -154,8 +154,8 @@ type Report struct {
 	// default; Sweep reaps a stale ref lock only under apply.
 	RefLocks  RefLockReport   `json:"ref_locks"`
 	Worktrees []WorktreeState `json:"worktrees"`
-	// WIP is the untracked-source inventory: crashed-worker residue and unlanded WIP,
-	// classified for land-or-park. Read-only — Sweep never touches it (a load-bearing
+	// WIP is the untracked durable-artifact inventory: source, .claude control fuel, and
+	// testdata fixtures classified with a typed cleanup action. Read-only — Sweep never touches it (a load-bearing
 	// unlanded file is byte-indistinguishable from cruft, so acting on it is a human's call).
 	WIP []WIPFile `json:"wip,omitempty"`
 }

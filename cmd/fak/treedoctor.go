@@ -256,10 +256,10 @@ func renderTreeDoctorText(w io.Writer, rep treedoctor.Report, actions []string, 
 	}
 }
 
-// renderWIPText prints the untracked-source land-or-park inventory: the crash-loop culprits
+// renderWIPText prints the untracked durable-artifact inventory: the crash-loop culprits
 // (build poison) and aged-unowned residue first, each surfaced for a human to LAND (commit)
-// or PARK (move aside) — never removed by tree-doctor itself. A short summary line accounts
-// for the live/resident files that are correctly left alone.
+// or PARK/DELETE as its typed action directs — never removed by tree-doctor itself. A short
+// summary line accounts for the live/resident files that are correctly left alone.
 func renderWIPText(w io.Writer, wip []treedoctor.WIPFile) {
 	if len(wip) == 0 {
 		return
@@ -275,7 +275,7 @@ func renderWIPText(w io.Writer, wip []treedoctor.WIPFile) {
 			resident++
 		}
 	}
-	fmt.Fprintf(w, "\nuntracked source WIP: %d file(s) — %d land-or-park, %d live, %d resident\n",
+	fmt.Fprintf(w, "\nuntracked durable WIP: %d file(s) — %d action-needed, %d live, %d resident\n",
 		len(wip), landOrPark, live, resident)
 	for _, f := range wip {
 		if !f.LandOrPark {
@@ -289,11 +289,11 @@ func renderWIPText(w io.Writer, wip []treedoctor.WIPFile) {
 		if owner == "" {
 			owner = "unknown"
 		}
-		fmt.Fprintf(w, "  %-9s %s (age %s, owner %s) — %s\n",
-			strings.ToUpper(f.Class), f.Path, compactAge(f.AgeSeconds), owner, reason)
+		fmt.Fprintf(w, "  %-9s %-14s %s (age %s, owner %s) — %s [%s]\n",
+			strings.ToUpper(f.Class), f.Kind, f.Path, compactAge(f.AgeSeconds), owner, reason, f.Action)
 	}
 	if landOrPark > 0 {
-		fmt.Fprintln(w, "  → land (commit by path) or park (move aside); tree-doctor never removes untracked source.")
+		fmt.Fprintln(w, "  → follow each typed action; tree-doctor never removes untracked durable artifacts.")
 	}
 }
 

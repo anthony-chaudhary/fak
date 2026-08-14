@@ -193,3 +193,35 @@ func TestFileAdmission_LiveTreeNoOpsArtifact(t *testing.T) {
 		}
 	}
 }
+
+func TestFileAdmissionRejectsGeneratedClaudeControlArtifacts(t *testing.T) {
+	tests := []string{
+		".claude/goal-prompts/frontdoor-6037-recovery.md",
+		".claude/goal-prompts/resfleet-6557.md",
+		".claude/goal-prompts/resolve-issue-5898-continuation.md",
+	}
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			d := &StagedDiff{Root: t.TempDir(), AddedRenamedPaths: []string{path}, fileCache: map[string]fileEntry{path: {data: []byte("worker fuel"), exists: true}}}
+			got, err := gateFileAdmission(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Gate != "FILE_ADMISSION" {
+				t.Fatalf("generated control artifact findings=%#v", got)
+			}
+		})
+	}
+}
+
+func TestFileAdmissionAllowsReusableClaudeGoalPrompt(t *testing.T) {
+	path := ".claude/goal-prompts/resolve-top-issue-witnessed.md"
+	d := &StagedDiff{Root: t.TempDir(), AddedRenamedPaths: []string{path}, fileCache: map[string]fileEntry{path: {data: []byte("reusable project prompt"), exists: true}}}
+	got, err := gateFileAdmission(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("reusable prompt must remain admissible: %#v", got)
+	}
+}

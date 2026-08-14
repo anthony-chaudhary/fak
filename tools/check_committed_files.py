@@ -82,6 +82,12 @@ KEEP_EXCEPTIONS = {
     "fak/demorace-err.log",  # cited as evidence in docs/benchmarking/FINAL-ANALYSIS.md
 }
 
+# One-run worker fuel is control-plane residue, not a reusable project prompt. Keep this
+# fallback in parity with internal/hooks/gate_fileadmission.go for fresh clones without fak.
+GENERATED_CLAUDE_PROMPT = re.compile(
+    r"(?i)(?:^|/)(?:frontdoor-\d+-recovery|resfleet-\d+|resolve-issue-\d+-continuation)\.md$"
+)
+
 # Private-only: paths that must NEVER be tracked in the PUBLIC tree. The operator's
 # lab GPU-server *connection* code — the private control bridge client and its bench
 # orchestrator — speaks a private lab protocol and lives ONLY in the private
@@ -172,6 +178,11 @@ def _tracked(root):
 
 def _classify(path, root, max_bytes):
     """Return a violation reason string, or None if the path is allowed."""
+    if path.lower().startswith(".claude/goal-prompts/") and GENERATED_CLAUDE_PROMPT.search(path):
+        return (
+            "generated one-run .claude goal prompt; park under ignored scratch/private "
+            "storage or delete after the run"
+        )
     # Secrets first: a credential / key file is refused regardless of any other rule.
     for rx, why in SECRET_FILES:
         if rx.search(path):

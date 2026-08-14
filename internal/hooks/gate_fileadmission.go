@@ -1,6 +1,9 @@
 package hooks
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // gate_fileadmission.go — the FILE_ADMISSION gate, a port of tools/check_committed_files.py.
 // It refuses files that should never be committed: credentials, private-lab subsystems, build
@@ -80,6 +83,11 @@ var softJunk = []*regexp.Regexp{
 // exemptDataDirs — SOFT_JUNK is allowed under these prefixes (L62), str.startswith semantics.
 var exemptDataDirs = []string{"experiments/", "testdata/", "internal/", "fak/experiments/", "fak/testdata/"}
 
+// generatedControlArtifactNames identifies per-run orchestration fuel. Reusable templates under
+// .claude/goal-prompts are valid project infrastructure; issue-numbered recovery/fleet prompts
+// are receipts for one worker run and belong in private/scratch storage instead of git history.
+var generatedControlArtifactNames = regexp.MustCompile(`(?i)(?:^|/)(?:frontdoor-\d+-recovery|resfleet-\d+|resolve-issue-\d+-continuation)\.md$`)
+
 // keepExceptions — exact-path allowlist; skip junk rules but still apply the size cap (L64-66).
 var keepExceptions = map[string]bool{"fak/demorace-err.log": true}
 
@@ -92,7 +100,12 @@ func gateFileAdmission(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		seen[p] = true
-		why := classifyFileWith(d, p)
+		why := ""
+		if strings.HasPrefix(strings.ToLower(p), ".claude/goal-prompts/") && generatedControlArtifactNames.MatchString(p) {
+			why = "generated one-run .claude goal prompt; park under ignored scratch/private storage or delete after the run"
+		} else {
+			why = classifyFileWith(d, p)
+		}
 		// STAGED-ONLY fallback (mirrors main()'s staged branch in check_committed_files.py):
 		// a new raw by-machine run drop the shared classifier admits (it is under the
 		// experiments/ data dir, so soft-junk rules don't apply) is still refused here. NOT in

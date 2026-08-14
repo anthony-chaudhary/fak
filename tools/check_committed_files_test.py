@@ -16,6 +16,7 @@ or `python -m pytest tools/check_committed_files_test.py -q`.
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -148,6 +149,29 @@ def test_nonpositive_max_bytes_matches_default() -> None:
 
 
 # --- BY-MACHINE private-by-default (STAGED-ONLY) ----------------------------
+
+def test_generated_claude_control_artifact_refused() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        for rel in (
+            ".claude/goal-prompts/frontdoor-6037-recovery.md",
+            ".claude/goal-prompts/resfleet-6557.md",
+            ".claude/goal-prompts/resolve-issue-5898-continuation.md",
+        ):
+            path = Path(td, rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("worker fuel", encoding="utf-8")
+            reason = cc._classify(rel, td, cc.DEFAULT_MAX_BYTES)
+            assert "generated one-run .claude goal prompt" in reason
+
+
+def test_reusable_claude_goal_prompt_allowed() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        rel = ".claude/goal-prompts/resolve-top-issue-witnessed.md"
+        path = Path(td, rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("reusable project prompt", encoding="utf-8")
+        assert cc._classify(rel, td, cc.DEFAULT_MAX_BYTES) is None
+
 
 def test_bymachine_raw_drop_refused_by_helper() -> None:
     # A raw per-machine run drop is caught by the staged-only helper (root-hoisted form).

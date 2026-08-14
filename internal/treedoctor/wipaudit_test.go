@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,5 +152,72 @@ func setMtimeWIP(t *testing.T, root, rel string, mt time.Time) {
 	abs := filepath.Join(root, filepath.FromSlash(rel))
 	if err := os.Chtimes(abs, mt, mt); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDiagnoseWIPIncludesClaudeControlAndTestdata(t *testing.T) {
+	dir := t.TempDir()
+	paths := []string{
+		".claude/goal-prompts/resfleet-6557.md",
+		"internal/widget/testdata/case.json",
+		"notes/throwaway.md",
+	}
+	for _, rel := range paths {
+		abs := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	old := now.Add(-2 * time.Hour)
+	for _, rel := range paths {
+		if err := os.Chtimes(filepath.Join(dir, filepath.FromSlash(rel)), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(_ context.Context, _ string, _ ...string) (string, int, error) {
+		return strings.Join(paths, "\n"), 0, nil
+	}
+
+	got := diagnoseWIP(context.Background(), run, dir, time.Minute, now, WIPOptions{})
+	if len(got) != 2 {
+		t.Fatalf("durable inventory len=%d, want 2: %#v", len(got), got)
+	}
+	byPath := map[string]WIPFile{}
+	for _, f := range got {
+		byPath[f.Path] = f
+	}
+	claude := byPath[paths[0]]
+	if claude.Kind != "claude-control" || claude.Action != "park-or-delete" || !claude.LandOrPark {
+		t.Fatalf("claude classification=%#v", claude)
+	}
+	fixture := byPath[paths[1]]
+	if fixture.Kind != "test-fixture" || fixture.Action != "land-or-delete" || !fixture.LandOrPark {
+		t.Fatalf("testdata classification=%#v", fixture)
+	}
+	if _, ok := byPath[paths[2]]; ok {
+		t.Fatalf("ordinary markdown must remain outside durable inventory: %#v", byPath[paths[2]])
+	}
+}
+
+func TestClassifyDurableArtifact(t *testing.T) {
+	tests := []struct {
+		path, kind, action string
+		ok                 bool
+	}{
+		{"cmd/fak/new.go", "source", "land-or-park", true},
+		{".claude/settings.local.json", "claude-control", "park-or-delete", true},
+		{"internal/x/testdata/case.bin", "test-fixture", "land-or-delete", true},
+		{"testdata/root.json", "test-fixture", "land-or-delete", true},
+		{"docs/draft.md", "", "", false},
+	}
+	for _, tt := range tests {
+		kind, action, ok := classifyDurableArtifact(tt.path)
+		if kind != tt.kind || action != tt.action || ok != tt.ok {
+			t.Errorf("classifyDurableArtifact(%q)=(%q,%q,%v), want (%q,%q,%v)", tt.path, kind, action, ok, tt.kind, tt.action, tt.ok)
+		}
 	}
 }

@@ -31,3 +31,18 @@ Use the OS temporary directory instead when an artifact has no value after the c
 Use `fak tree-doctor --sweep-scratch --dry-run` to preview ignored scratch reclamation and
 `fak tree-doctor --sweep-scratch` to reap it. The `.gitignore` rules remain a compatibility
 backstop for older commands and hand-written redirects; they are not the preferred output path.
+
+## Control prompts and test fixtures
+
+Treat `.claude/` as project infrastructure, not an automatic home for every Claude run.
+Reusable skills, hooks, and generic goal-prompt templates belong there and should be committed.
+Issue-numbered launch fuel, recovery prompts, transcripts, and per-run state do not: allocate an
+ignored `_scratch/<producer>/` path (or private storage) before launch, then delete it when the
+run closes. `fak tree-doctor` includes any untracked `.claude/` artifact in its durable-WIP
+inventory and types stale entries `park-or-delete` so a completed run cannot leave silent residue.
+
+`testdata/` is committed test input, not an output directory. A fixture belongs there only when a
+test reads it and the fixture lands in the same coherent change. Generated candidates, reports,
+and local corpora go to `_scratch/<producer>/` until deliberately promoted. `fak tree-doctor`
+types untracked files under any `testdata/` directory `land-or-delete`; this prevents local-only
+fixtures from masking a clean-clone failure while preserving active peer edits.

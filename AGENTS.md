@@ -307,6 +307,13 @@ the *committed* tip (not the peer-dirty tree) with `fak-dev ci-preflight`.
     never touch a tracked file or a real untracked WIP file); `--sweep-scratch --dry-run`
     previews (`git clean -Xdn`) before reaping (#3211). See
     [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
+  - *Control prompts and fixtures are durable WIP too:* `.claude/` admits reusable project
+    infrastructure, not per-run residue. Put issue-numbered launch/recovery fuel and transcripts
+    under an allocated `_scratch/<producer>/` or private path, then delete them when the run closes.
+    Put a file under `testdata/` only when a test consumes it and land both together; generated
+    fixture candidates and reports stay in scratch. `fak tree-doctor` inventories untracked
+    `.claude/` files as `park-or-delete` and untracked `testdata/` files as `land-or-delete`.
+    See [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md#control-prompts-and-test-fixtures).
   - *The one sanctioned worktree — detached, lands on `main`:* per-worker build
     isolation (#1334 / epic #3165) uses a **detached** worktree pinned at trunk HEAD
     whose diff lands on `main` through the serialized `land_worktree_diff` under the
