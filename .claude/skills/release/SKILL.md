@@ -73,6 +73,26 @@ A `renew` that refuses with `reason: "held by another"` means you already lost t
 
 Release a manual lock on **every** exit path including failure (`python tools/release_lock.py release`); a stranded lock self-heals at TTL but releasing promptly is courteous.
 
+## Canonical operator path
+
+Use the first-class front door before helper-level debugging:
+
+```bash
+fak release --help
+fak release status
+fak release plan
+fak release decide
+fak release cut --dry-run
+fak release cut
+fak release tag
+fak release publish
+```
+
+Preserve this order: status/readiness → plan → decide → dry-run cut → execute cut → exact-SHA tag
+→ publish. The release lock, green-ancestor gate, and stable-context checks remain binding. Direct
+`python tools/release_*.py` commands below are fallback/debug equivalents only, not the preferred
+operator interface.
+
 ## Step 1: Decide whether to release
 
 ```bash
