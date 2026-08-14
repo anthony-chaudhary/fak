@@ -154,7 +154,10 @@ class RenderPromptTest(unittest.TestCase):
     def test_has_an_honest_block_clause(self) -> None:
         mod = load()
         p = mod.render_prompt(self.ISSUE, "docs", workspace="C:/work/fak")
-        self.assertIn("final report", p)
+        self.assertIn("durable handoff", p)
+        self.assertIn("gh issue comment <N> --body", p)
+        self.assertIn("final chat report alone is not durable", p)
+        self.assertIn("ignored scratch is not a deliverable", p)
         self.assertIn("fabricate", p)       # do NOT fabricate a pass
 
     def test_truncates_an_overlong_body(self) -> None:

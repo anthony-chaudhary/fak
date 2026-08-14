@@ -108,6 +108,27 @@ func allPromptRules() []PromptRule {
 
 // Every rule is well-formed data: a stable, unique, kebab-case id, a non-empty imperative,
 // and a witness. Without this, "structured" would be a shape nothing enforces.
+
+func TestHonestBailRequiresDurableDeliverable(t *testing.T) {
+	var imperative string
+	for _, rule := range WorkRules(6574, "tools") {
+		if rule.ID == "honest-bail" {
+			imperative = rule.Imperative
+			break
+		}
+	}
+	for _, want := range []string{
+		"durable handoff",
+		"gh issue comment <N> --body",
+		"final chat report alone is not durable",
+		"ignored scratch is not a deliverable",
+	} {
+		if !strings.Contains(imperative, want) {
+			t.Fatalf("honest-bail imperative = %q, want %q", imperative, want)
+		}
+	}
+}
+
 func TestPromptRulesAreWellFormedData(t *testing.T) {
 	idRe := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	seen := map[string]bool{}

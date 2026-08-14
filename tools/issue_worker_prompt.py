@@ -322,10 +322,12 @@ def _work_rules(n: int, lane: str) -> list[tuple[str, str, str]]:
         ("honest-bail",
          "Stopping short is legitimate ONLY after you have tried the sanctioned "
          "adaptation the blocker itself named and that also failed - then end with a "
-         "final report giving the exact gate you could not reach, what you already "
-         "tried, and the smallest next checkable step. Never stop on the first "
-         "refusal, and never let an unfinished attempt become a silent exit: commit "
-         "whatever already works first",
+         "durable handoff: post a substantive `gh issue comment <N> --body ...` "
+         "that gives the exact gate you could not reach, what you already tried, "
+         "and the smallest next checkable step (a final chat report alone is not "
+         "durable). Never stop on the first refusal, and never let an unfinished "
+         "attempt become a silent exit: promote and commit whatever already works "
+         "first; ignored scratch is not a deliverable",
          "LOOP_DONE_UNWITNESSED"),
     ]
 
