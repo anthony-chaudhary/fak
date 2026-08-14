@@ -87,6 +87,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchRun(stdout, stderr, argv[1:])
 	case "report":
 		return armbenchReport(stdout, stderr, argv[1:])
+	case "paired-report":
+		return armbenchPairedReport(stdout, stderr, argv[1:])
 	case "compare":
 		return armbenchCompare(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -363,6 +365,41 @@ func armbenchRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return emitReport(stdout, stderr, run, *asJSON, fmt.Sprintf("ledger written to %s\n", *out))
+}
+
+func armbenchPairedReport(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("armbench paired-report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	receiptsPath := fs.String("receipts", "", "committed paired benchmark receipts (required)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *receiptsPath == "" {
+		fmt.Fprintln(stderr, "fak armbench paired-report: --receipts is required")
+		return 2
+	}
+	blob, err := os.ReadFile(*receiptsPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak armbench paired-report:", err)
+		return 1
+	}
+	receipts, err := armbench.UnmarshalPairedReceipts(blob)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak armbench paired-report:", err)
+		return 1
+	}
+	report, err := armbench.BuildPairedReport(receipts)
+	if err != nil {
+		fmt.Fprintln(stderr, "refused (INVALID_PAIRED_RECEIPTS):", err)
+		return 3
+	}
+	out, err := armbench.MarshalPairedReport(report)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak armbench paired-report:", err)
+		return 1
+	}
+	_, _ = stdout.Write(out)
+	return 0
 }
 
 func armbenchReport(stdout, stderr io.Writer, argv []string) int {

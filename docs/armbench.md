@@ -308,3 +308,18 @@ closed-task slice. Any broader efficiency claim remains `not yet`.
 ## Managed-context extension
 
 The pinned Ponytail passthrough and managed-context ablation is specified in [armbench-ponytail-managed.md](armbench-ponytail-managed.md). It reuses this suite's #6688 checkout and receipts; it does not refetch or silently replace upstream fixtures.
+
+## Paired net-true report
+
+`fak armbench paired-report --receipts RECEIPTS.json` consumes trial-level receipts paired by task, model, temperature, and pair ID. The committed minimal spine is [`armbench-paired-receipts-2026-08-14.json`](_witnesses/armbench-paired-receipts-2026-08-14.json) with its deterministic [`armbench-paired-report-2026-08-14.json`](_witnesses/armbench-paired-report-2026-08-14.json). It reuses the committed fake-provider benchmark witness, so it incurs no provider spend.
+
+The report is deliberately claim-conservative:
+
+- Every delta is treatment minus the named `tuned_baseline`, with deterministic paired-bootstrap confidence intervals. Results remain stratified by task/model/temperature, preventing pooled-arm Simpson reversals.
+- Correctness and safety must independently pass configured non-inferiority margins before any efficiency result is claimable. A token-saving arm that loses correctness emits `not-yet` claim-check input.
+- Input, output, and total tokens are separate labeled metrics. Wall latency, TTFT, retry rate, failure rate, and failure counts are explicit.
+- Cold and warm observations are reported separately. One-time local setup cost is not folded into steady-state provider cost; sensitivity rows expose provider prices, local-compute valuation, and break-even trials.
+- Bonferroni correction covers the task/model/arm correctness and safety gate family. The emitted confidence level records the corrected interval.
+- `claim_check_input` names the tuned comparator, exact scope, provenance, witness, and `net-true`/`not-yet` verdict for machine consumption.
+
+The committed spine is deterministic evidence of the reporting path, not a provider-performance claim. Replace its receipts with observed provider receipts before publishing provider efficiency results.

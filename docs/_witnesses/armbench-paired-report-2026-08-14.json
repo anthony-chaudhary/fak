@@ -1,0 +1,662 @@
+{
+  "schema": "fak.armbench.paired-report/1",
+  "benchmark": "armbench committed fake-provider spine",
+  "tuned_baseline": "baseline-tuned",
+  "confidence": 0.9875,
+  "familywise_alpha": 0.05,
+  "multiple_comparison_correction": "Bonferroni across task/model/arm correctness+safety gates",
+  "comparisons": [
+    {
+      "task": "long-context",
+      "model": "fake-deterministic-v1",
+      "temperature": "0",
+      "treatment": "fak-ctxmmu",
+      "pairs": 12,
+      "cold_pairs": 1,
+      "warm_pairs": 11,
+      "baseline_failures": 0,
+      "treatment_failures": 0,
+      "success_rate_paired_delta": {
+        "estimate": 0,
+        "lower": 0,
+        "upper": 0,
+        "confidence": 0.9875
+      },
+      "safety_rate_paired_delta": {
+        "estimate": 0,
+        "lower": 0,
+        "upper": 0,
+        "confidence": 0.9875
+      },
+      "correctness_gate": "pass",
+      "safety_gate": "pass",
+      "efficiency_claims_allowed": true,
+      "headline": "fak-ctxmmu vs tuned baseline baseline-tuned: total tokens delta -2450.000 (-2450.000, -2450.000), failures 0 vs 0",
+      "metrics": [
+        {
+          "metric": "input_tokens",
+          "unit": "tokens",
+          "baseline_mean": 4201,
+          "treatment_mean": 1751,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -2450,
+            "lower": -2450,
+            "upper": -2450,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "output_tokens",
+          "unit": "tokens",
+          "baseline_mean": 80.5,
+          "treatment_mean": 80.5,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "total_tokens",
+          "unit": "tokens",
+          "baseline_mean": 4281.5,
+          "treatment_mean": 1831.5,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -2450,
+            "lower": -2450,
+            "upper": -2450,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "wall_latency",
+          "unit": "ms",
+          "baseline_mean": 1328.1666666666667,
+          "treatment_mean": 903.1666666666666,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -425,
+            "lower": -425,
+            "upper": -425,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "ttft",
+          "unit": "ms",
+          "baseline_mean": 327.5,
+          "treatment_mean": 216.25,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -111.25,
+            "lower": -111.25,
+            "upper": -111.25,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "retry_rate",
+          "unit": "retries/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "failure_rate",
+          "unit": "failures/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        }
+      ],
+      "cold_metrics": [
+        {
+          "metric": "input_tokens",
+          "unit": "tokens",
+          "baseline_mean": 4200,
+          "treatment_mean": 1750,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -2450,
+            "lower": -2450,
+            "upper": -2450,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "output_tokens",
+          "unit": "tokens",
+          "baseline_mean": 80,
+          "treatment_mean": 80,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "total_tokens",
+          "unit": "tokens",
+          "baseline_mean": 4280,
+          "treatment_mean": 1830,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -2450,
+            "lower": -2450,
+            "upper": -2450,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "wall_latency",
+          "unit": "ms",
+          "baseline_mean": 1400,
+          "treatment_mean": 975,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -425,
+            "lower": -425,
+            "upper": -425,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "ttft",
+          "unit": "ms",
+          "baseline_mean": 355,
+          "treatment_mean": 243.75,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -111.25,
+            "lower": -111.25,
+            "upper": -111.25,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "retry_rate",
+          "unit": "retries/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "failure_rate",
+          "unit": "failures/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        }
+      ],
+      "warm_metrics": [
+        {
+          "metric": "input_tokens",
+          "unit": "tokens",
+          "baseline_mean": 4201.090909090909,
+          "treatment_mean": 1751.090909090909,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -2450,
+            "lower": -2450,
+            "upper": -2450,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "output_tokens",
+          "unit": "tokens",
+          "baseline_mean": 80.54545454545455,
+          "treatment_mean": 80.54545454545455,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "total_tokens",
+          "unit": "tokens",
+          "baseline_mean": 4281.636363636364,
+          "treatment_mean": 1831.6363636363637,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -2450,
+            "lower": -2450,
+            "upper": -2450,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "wall_latency",
+          "unit": "ms",
+          "baseline_mean": 1321.6363636363637,
+          "treatment_mean": 896.6363636363636,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -425,
+            "lower": -425,
+            "upper": -425,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "ttft",
+          "unit": "ms",
+          "baseline_mean": 325,
+          "treatment_mean": 213.75,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -111.25,
+            "lower": -111.25,
+            "upper": -111.25,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "retry_rate",
+          "unit": "retries/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "failure_rate",
+          "unit": "failures/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        }
+      ],
+      "cost_sensitivity": [
+        {
+          "scenario": "provider-current",
+          "provider_baseline_usd": 0.0113075,
+          "provider_treatment_usd": 0.0051825000000000005,
+          "steady_state_paired_delta_usd": {
+            "estimate": -0.006124999999999999,
+            "lower": -0.006124999999999999,
+            "upper": -0.006124999999999999,
+            "confidence": 0.9875
+          },
+          "one_time_setup_delta_usd": 0.0002,
+          "one_time_setup_delta_ms": 2500,
+          "amortized_delta_usd_at_100_trials": -0.006122999999999999,
+          "break_even_trials": 0.0326530612244898
+        },
+        {
+          "scenario": "provider-2x-local",
+          "provider_baseline_usd": 0.0113075,
+          "provider_treatment_usd": 0.0051825000000000005,
+          "steady_state_paired_delta_usd": {
+            "estimate": -0.006124999999999999,
+            "lower": -0.006124999999999999,
+            "upper": -0.006124999999999999,
+            "confidence": 0.9875
+          },
+          "one_time_setup_delta_usd": 0.0004,
+          "one_time_setup_delta_ms": 2500,
+          "amortized_delta_usd_at_100_trials": -0.006121,
+          "break_even_trials": 0.0653061224489796
+        }
+      ]
+    },
+    {
+      "task": "short-context",
+      "model": "fake-deterministic-v1",
+      "temperature": "0",
+      "treatment": "fak-ctxmmu",
+      "pairs": 12,
+      "cold_pairs": 1,
+      "warm_pairs": 11,
+      "baseline_failures": 0,
+      "treatment_failures": 0,
+      "success_rate_paired_delta": {
+        "estimate": 0,
+        "lower": 0,
+        "upper": 0,
+        "confidence": 0.9875
+      },
+      "safety_rate_paired_delta": {
+        "estimate": 0,
+        "lower": 0,
+        "upper": 0,
+        "confidence": 0.9875
+      },
+      "correctness_gate": "pass",
+      "safety_gate": "pass",
+      "efficiency_claims_allowed": true,
+      "headline": "fak-ctxmmu vs tuned baseline baseline-tuned: total tokens delta -420.000 (-420.000, -420.000), failures 0 vs 0",
+      "metrics": [
+        {
+          "metric": "input_tokens",
+          "unit": "tokens",
+          "baseline_mean": 1201,
+          "treatment_mean": 781,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -420,
+            "lower": -420,
+            "upper": -420,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "output_tokens",
+          "unit": "tokens",
+          "baseline_mean": 80.5,
+          "treatment_mean": 80.5,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "total_tokens",
+          "unit": "tokens",
+          "baseline_mean": 1281.5,
+          "treatment_mean": 861.5,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -420,
+            "lower": -420,
+            "upper": -420,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "wall_latency",
+          "unit": "ms",
+          "baseline_mean": 1028.1666666666667,
+          "treatment_mean": 806.1666666666666,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -222,
+            "lower": -222,
+            "upper": -222,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "ttft",
+          "unit": "ms",
+          "baseline_mean": 252.5,
+          "treatment_mean": 192,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -60.5,
+            "lower": -60.5,
+            "upper": -60.5,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "retry_rate",
+          "unit": "retries/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "failure_rate",
+          "unit": "failures/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        }
+      ],
+      "cold_metrics": [
+        {
+          "metric": "input_tokens",
+          "unit": "tokens",
+          "baseline_mean": 1200,
+          "treatment_mean": 780,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -420,
+            "lower": -420,
+            "upper": -420,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "output_tokens",
+          "unit": "tokens",
+          "baseline_mean": 80,
+          "treatment_mean": 80,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "total_tokens",
+          "unit": "tokens",
+          "baseline_mean": 1280,
+          "treatment_mean": 860,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -420,
+            "lower": -420,
+            "upper": -420,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "wall_latency",
+          "unit": "ms",
+          "baseline_mean": 1100,
+          "treatment_mean": 878,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -222,
+            "lower": -222,
+            "upper": -222,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "ttft",
+          "unit": "ms",
+          "baseline_mean": 280,
+          "treatment_mean": 219.5,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -60.5,
+            "lower": -60.5,
+            "upper": -60.5,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "retry_rate",
+          "unit": "retries/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "failure_rate",
+          "unit": "failures/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        }
+      ],
+      "warm_metrics": [
+        {
+          "metric": "input_tokens",
+          "unit": "tokens",
+          "baseline_mean": 1201.090909090909,
+          "treatment_mean": 781.0909090909091,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -420,
+            "lower": -420,
+            "upper": -420,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "output_tokens",
+          "unit": "tokens",
+          "baseline_mean": 80.54545454545455,
+          "treatment_mean": 80.54545454545455,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "total_tokens",
+          "unit": "tokens",
+          "baseline_mean": 1281.6363636363637,
+          "treatment_mean": 861.6363636363636,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -420,
+            "lower": -420,
+            "upper": -420,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "wall_latency",
+          "unit": "ms",
+          "baseline_mean": 1021.6363636363636,
+          "treatment_mean": 799.6363636363636,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -222,
+            "lower": -222,
+            "upper": -222,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "ttft",
+          "unit": "ms",
+          "baseline_mean": 250,
+          "treatment_mean": 189.5,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": -60.5,
+            "lower": -60.5,
+            "upper": -60.5,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "retry_rate",
+          "unit": "retries/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        },
+        {
+          "metric": "failure_rate",
+          "unit": "failures/trial",
+          "baseline_mean": 0,
+          "treatment_mean": 0,
+          "paired_delta_treatment_minus_baseline": {
+            "estimate": 0,
+            "lower": 0,
+            "upper": 0,
+            "confidence": 0.9875
+          }
+        }
+      ],
+      "cost_sensitivity": [
+        {
+          "scenario": "provider-current",
+          "provider_baseline_usd": 0.0038075,
+          "provider_treatment_usd": 0.0027575,
+          "steady_state_paired_delta_usd": {
+            "estimate": -0.0010499999999999997,
+            "lower": -0.0010500000000000004,
+            "upper": -0.0010499999999999995,
+            "confidence": 0.9875
+          },
+          "one_time_setup_delta_usd": 0.0002,
+          "one_time_setup_delta_ms": 2500,
+          "amortized_delta_usd_at_100_trials": -0.0010479999999999997,
+          "break_even_trials": 0.19047619047619055
+        },
+        {
+          "scenario": "provider-2x-local",
+          "provider_baseline_usd": 0.0038075,
+          "provider_treatment_usd": 0.0027575,
+          "steady_state_paired_delta_usd": {
+            "estimate": -0.0010499999999999997,
+            "lower": -0.0010500000000000004,
+            "upper": -0.0010499999999999995,
+            "confidence": 0.9875
+          },
+          "one_time_setup_delta_usd": 0.0004,
+          "one_time_setup_delta_ms": 2500,
+          "amortized_delta_usd_at_100_trials": -0.0010459999999999996,
+          "break_even_trials": 0.3809523809523811
+        }
+      ]
+    }
+  ],
+  "claim_check_input": [
+    {
+      "claim": "fak-ctxmmu versus tuned baseline baseline-tuned for long-context/fake-deterministic-v1/0",
+      "tuned_baseline": "baseline-tuned",
+      "scope": "task=long-context model=fake-deterministic-v1 temperature=0 paired_n=12 cold=1 warm=11",
+      "provenance": "observed deterministic FakeProvider receipts from docs/_witnesses/armbench-selfcheck-2026-08-13.json; no provider spend",
+      "witness": "docs/_witnesses/armbench-selfcheck-2026-08-13.json",
+      "verdict": "net-true"
+    },
+    {
+      "claim": "fak-ctxmmu versus tuned baseline baseline-tuned for short-context/fake-deterministic-v1/0",
+      "tuned_baseline": "baseline-tuned",
+      "scope": "task=short-context model=fake-deterministic-v1 temperature=0 paired_n=12 cold=1 warm=11",
+      "provenance": "observed deterministic FakeProvider receipts from docs/_witnesses/armbench-selfcheck-2026-08-13.json; no provider spend",
+      "witness": "docs/_witnesses/armbench-selfcheck-2026-08-13.json",
+      "verdict": "net-true"
+    }
+  ]
+}
