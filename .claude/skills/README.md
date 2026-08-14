@@ -159,6 +159,76 @@ Claude, or under an opencode agent whose `permission.edit` is `deny`.
 Claude-only frontmatter is load-bearing and not yet acknowledged;
 `--check` is the CI gate (exit 1 on an unacknowledged one).
 
+## Live inventory
+
+Every skill directory has `SKILL.md` as its entry point. A directory may also carry companion
+rationale, fuel, monitor/refusal guidance, assets, tests, or legacy helper files; those companions
+support the entry point and are not forbidden extra content.
+
+The current entry-point inventory is:
+
+- [`agent-readiness`](agent-readiness/SKILL.md)
+- [`appeal-score`](appeal-score/SKILL.md)
+- [`bottleneck-map`](bottleneck-map/SKILL.md)
+- [`claim-repro-score`](claim-repro-score/SKILL.md)
+- [`clean-skill`](clean-skill/SKILL.md)
+- [`commit-clean`](commit-clean/SKILL.md)
+- [`conflation-score`](conflation-score/SKILL.md)
+- [`curate-cluster`](curate-cluster/SKILL.md)
+- [`disambiguate-section`](disambiguate-section/SKILL.md)
+- [`disambiguation-score`](disambiguation-score/SKILL.md)
+- [`dojo-rsi-score`](dojo-rsi-score/SKILL.md)
+- [`dos-dispatch`](dos-dispatch/SKILL.md)
+- [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md)
+- [`dos-next-up`](dos-next-up/SKILL.md)
+- [`dos-plan-price`](dos-plan-price/SKILL.md)
+- [`dos-replan`](dos-replan/SKILL.md)
+- [`dos-witness-claim`](dos-witness-claim/SKILL.md)
+- [`field-borrow`](field-borrow/SKILL.md)
+- [`fleet-wave`](fleet-wave/SKILL.md)
+- [`guard-rsi-score`](guard-rsi-score/SKILL.md)
+- [`industry-score`](industry-score/SKILL.md)
+- [`issue-triage`](issue-triage/SKILL.md)
+- [`lightgap-score`](lightgap-score/SKILL.md)
+- [`memory-compact`](memory-compact/SKILL.md)
+- [`milestone-score`](milestone-score/SKILL.md)
+- [`modularize`](modularize/SKILL.md)
+- [`negframe-score`](negframe-score/SKILL.md)
+- [`operator-heaviness-score`](operator-heaviness-score/SKILL.md)
+- [`persona-score`](persona-score/SKILL.md)
+- [`phased-plan`](phased-plan/SKILL.md)
+- [`plan-audit`](plan-audit/SKILL.md)
+- [`quality-score`](quality-score/SKILL.md)
+- [`question-loop`](question-loop/SKILL.md)
+- [`refresh-cachedoc-numbers`](refresh-cachedoc-numbers/SKILL.md)
+- [`refresh-readme`](refresh-readme/SKILL.md)
+- [`release`](release/SKILL.md)
+- [`resume-watchdog-audit`](resume-watchdog-audit/SKILL.md)
+- [`run-it-all-night`](run-it-all-night/SKILL.md)
+- [`score-2x`](score-2x/SKILL.md)
+- [`scorecard`](scorecard/SKILL.md)
+- [`scout-loop`](scout-loop/SKILL.md)
+- [`skill-lifecycle`](skill-lifecycle/SKILL.md)
+- [`skill-overlap`](skill-overlap/SKILL.md)
+- [`skill-score`](skill-score/SKILL.md)
+- [`slop-score`](slop-score/SKILL.md)
+- [`sota-check`](sota-check/SKILL.md)
+- [`spine-fanout`](spine-fanout/SKILL.md)
+- [`stability-score`](stability-score/SKILL.md)
+- [`stale-work-loop`](stale-work-loop/SKILL.md)
+- [`steer-prs`](steer-prs/SKILL.md)
+- [`steerability-score`](steerability-score/SKILL.md)
+- [`study-repo`](study-repo/SKILL.md)
+- [`super-loop`](super-loop/SKILL.md)
+- [`tail-wag`](tail-wag/SKILL.md)
+- [`ticket-scope`](ticket-scope/SKILL.md)
+- [`token-defaults-score`](token-defaults-score/SKILL.md)
+- [`trajectory-audit`](trajectory-audit/SKILL.md)
+- [`trajectory-control`](trajectory-control/SKILL.md)
+- [`trajectory-garden`](trajectory-garden/SKILL.md)
+- [`verify`](verify/SKILL.md)
+- [`wave-harvest`](wave-harvest/SKILL.md)
+
 ## Conventions
 
 - **Per-project overrides.** A project can ship a wrapper `SKILL.md` at the same
