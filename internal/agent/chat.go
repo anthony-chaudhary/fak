@@ -223,8 +223,13 @@ type ToolDefFunction struct {
 
 // Usage is the token accounting a completion reports.
 type Usage struct {
-	PromptTokens             int                `json:"prompt_tokens"`
-	CompletionTokens         int                `json:"completion_tokens"`
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	// CostUSD is an upstream-reported completion cost. It stays nil when the
+	// provider omits dollars; fak never derives it from token counts here.
+	CostUSD                  *float64           `json:"cost_usd,omitempty"`
+	CostStatus               string             `json:"cost_status,omitempty"`
+	CostProvenance           string             `json:"cost_provenance,omitempty"`
 	TotalTokens              int                `json:"total_tokens"`
 	PromptTokensDetails      *UsageTokenDetails `json:"prompt_tokens_details,omitempty"`
 	InputTokensDetails       *UsageTokenDetails `json:"input_tokens_details,omitempty"`
@@ -1034,6 +1039,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), err)
 		}
 		comp = normalizeCompletionToolCalls(comp)
+		attachProviderReportedCost(comp, raw)
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined

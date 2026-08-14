@@ -94,3 +94,16 @@ func TestPinnedMicroCorpusIsSmallAndComplexityBucketed(t *testing.T) {
 		seen[task.Complexity] = true
 	}
 }
+
+func TestFoldMicroCorpusAggregatesProviderReportedCost(t *testing.T) {
+	microCost, baselineCost := 0.01, 0.03
+	r := foldMicroCorpus([]microCorpusCase{{
+		Task:             microCorpusTask{ID: "cost"},
+		Micro:            pairedArm{Correct: true, InputTokens: 7, OutputTokens: 1, CostUSD: &microCost, CostStatus: "provider-reported"},
+		Baseline:         pairedArm{Correct: true, InputTokens: 9, OutputTokens: 1, CostUSD: &baselineCost, CostStatus: "provider-reported"},
+		ExecutionVerdict: "PASS",
+	}})
+	if r.ValueVerdict != "MICRO_WINS" || r.Totals.MicroCostUSD == nil || *r.Totals.MicroCostUSD != microCost {
+		t.Fatalf("report=%+v", r)
+	}
+}

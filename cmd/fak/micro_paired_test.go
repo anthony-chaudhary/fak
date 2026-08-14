@@ -57,3 +57,15 @@ func TestFilteredPairedEnvDropsOnlyStaleRegistrationContext(t *testing.T) {
 		t.Fatalf("required benchmark environment missing: %q", joined)
 	}
 }
+
+func TestFoldPairedUsesOnlyProviderReportedCostForValueVerdict(t *testing.T) {
+	microCost, baselineCost := 0.01, 0.02
+	r := foldPaired(pairedReport{
+		Schema: "fak-micro-paired/1",
+		Micro:  pairedArm{Correct: true, InputTokens: 7, OutputTokens: 1, CostUSD: &microCost, CostStatus: "provider-reported"},
+		CLI:    pairedArm{Correct: true, InputTokens: 10, OutputTokens: 1, CostUSD: &baselineCost, CostStatus: "provider-reported"},
+	})
+	if r.ExecutionVerdict != "PASS" || r.ValueVerdict != "MICRO_WINS" {
+		t.Fatalf("receipt=%+v", r)
+	}
+}

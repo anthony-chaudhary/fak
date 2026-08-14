@@ -140,7 +140,9 @@ func foldMicroCorpus(cases []microCorpusCase) microCorpusReport {
 			{Layer: "mode", Status: "NOT_YET", Reason: "the real gateway microagent currently exposes completion mode only; #2026 owns bash/tool mode parity"},
 		},
 	}
+	microCost := 0.0
 	baselineCost := 0.0
+	microCostComplete := len(cases) > 0
 	baselineCostComplete := len(cases) > 0
 	for _, row := range cases {
 		r.Totals.Tasks++
@@ -156,6 +158,11 @@ func foldMicroCorpus(cases []microCorpusCase) microCorpusReport {
 		r.Totals.BaselineOutput += row.Baseline.OutputTokens
 		r.Totals.MicroWallMS += row.Micro.WallMS
 		r.Totals.BaselineWallMS += row.Baseline.WallMS
+		if row.Micro.CostUSD == nil {
+			microCostComplete = false
+		} else {
+			microCost += *row.Micro.CostUSD
+		}
 		if row.Baseline.CostUSD == nil {
 			baselineCostComplete = false
 		} else {
@@ -168,11 +175,28 @@ func foldMicroCorpus(cases []microCorpusCase) microCorpusReport {
 	if len(cases) == 0 {
 		r.ExecutionVerdict = "FAIL"
 	}
-	r.Totals.MicroCostStatus = "provider-unsupported"
+	r.Totals.MicroCostStatus = "provider-unreported"
 	r.Totals.BaselineCostStatus = "provider-unreported"
+	if microCostComplete {
+		r.Totals.MicroCostUSD = &microCost
+		r.Totals.MicroCostStatus = "provider-reported"
+	}
 	if baselineCostComplete {
 		r.Totals.BaselineCostUSD = &baselineCost
 		r.Totals.BaselineCostStatus = "provider-reported"
+	}
+	if r.ExecutionVerdict == "PASS" && microCostComplete && baselineCostComplete {
+		switch {
+		case microCost < baselineCost:
+			r.ValueVerdict = "MICRO_WINS"
+			r.Reason = "all paired tasks passed and aggregate provider-reported dollars favor the shared fak gateway"
+		case microCost > baselineCost:
+			r.ValueVerdict = "BASELINE_WINS"
+			r.Reason = "all paired tasks passed and aggregate provider-reported dollars favor the managed CLI baseline"
+		default:
+			r.ValueVerdict = "TIE"
+			r.Reason = "all paired tasks passed and aggregate provider-reported dollars are equal"
+		}
 	}
 	return r
 }

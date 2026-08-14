@@ -672,6 +672,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), perr)
 		}
 		comp = normalizeCompletionToolCalls(comp)
+		attachProviderReportedCost(comp, raw)
 		if sink != nil && comp.Message.Content != "" {
 			if serr := sink(comp.Message.Content); serr != nil {
 				return nil, serr
@@ -789,6 +790,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		Usage:        usage,
 		Model:        model,
 	})
+	attachProviderReportedCost(comp, rawBuf.Bytes())
 	p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 	comp.Raw = rawBuf.Bytes()
 	comp.PreSendQuarantines = call.quarantined

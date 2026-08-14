@@ -102,6 +102,11 @@ func runMicroPaired(ctx context.Context, gateway, model, task, expected, cliMode
 		r.Micro.Completed = results[0].Done && results[0].Err == nil
 		r.Micro.Answer, r.Micro.Model = strings.TrimSpace(obs.Answer), obs.Model
 		r.Micro.InputTokens, r.Micro.OutputTokens = obs.Usage.PromptTokens, obs.Usage.CompletionTokens
+		if obs.Usage.CostUSD != nil && obs.Usage.CostStatus == "provider-reported" {
+			cost := *obs.Usage.CostUSD
+			r.Micro.CostUSD = &cost
+			r.Micro.CostStatus = "provider-reported"
+		}
 		r.Micro.Correct = r.Micro.Completed && r.Micro.Answer == expected
 	}
 
@@ -115,9 +120,21 @@ func foldPaired(r pairedReport) pairedReport {
 		r.ExecutionVerdict = "PASS"
 	}
 	r.ValueVerdict = "NOT_YET"
-	r.Reason = "paired execution is measured, but the gateway provider did not report cost; no quality/$ winner is claimed"
+	r.Reason = "paired execution is measured, but one or both providers did not report cost; no quality/$ winner is claimed"
 	if r.ExecutionVerdict != "PASS" {
 		r.Reason = "one or both identical-task arms failed correctness or provider-usage evidence"
+	} else if r.Micro.CostUSD != nil && r.CLI.CostUSD != nil {
+		switch {
+		case *r.Micro.CostUSD < *r.CLI.CostUSD:
+			r.ValueVerdict = "MICRO_WINS"
+			r.Reason = "both identical-task arms were correct and provider-reported dollars favor the shared fak gateway"
+		case *r.Micro.CostUSD > *r.CLI.CostUSD:
+			r.ValueVerdict = "BASELINE_WINS"
+			r.Reason = "both identical-task arms were correct and provider-reported dollars favor the managed CLI baseline"
+		default:
+			r.ValueVerdict = "TIE"
+			r.Reason = "both identical-task arms were correct and provider-reported dollars are equal"
+		}
 	}
 	return r
 }
