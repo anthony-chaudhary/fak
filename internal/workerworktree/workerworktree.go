@@ -401,9 +401,26 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 		return res
 	}
 	if err := writeOwnerStamp(res.Path, owner); err != nil {
+		// A newly-materialized worktree without its owner stamp is invisible to the
+		// owner-dead GC. Clean it at the source instead of converting a stamp failure
+		// into a permanent leak. A reused tree may still belong to an active peer, so
+		// fail toward keeping it rather than destroying it on a metadata failure.
+		cleanupDetail := ""
+		if !res.Reused {
+			var cleanup Result
+			switch backend.(type) {
+			case gitWorktree, *gitWorktree:
+				cleanup = ForceReap(root, res.Path, git)
+			default:
+				cleanup = backend.Release(root, res.Path, git)
+			}
+			if !cleanup.Removed {
+				cleanupDetail = "; cleanup failed: " + cleanup.Reason + " " + cleanup.Detail
+			}
+		}
 		res.OK = false
 		res.Reason = "could not write owner stamp — fail open"
-		res.Detail = err.Error()
+		res.Detail = err.Error() + cleanupDetail
 	}
 	return res
 }

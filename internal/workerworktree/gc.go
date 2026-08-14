@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 // THE OWNER-STAMPED GC (#3573)
@@ -19,11 +21,12 @@ import (
 //
 //   - every successful Prepare writes a PID + lease + creation-time owner stamp;
 //   - GC is a pure dry-run plan unless Apply is explicitly true;
-//   - a worktree is collectable only when it is old, its owner PID is confirmed dead,
-//     its stamped lease is no longer live, and its working tree is clean;
+//   - a worktree is collectable only when it is under an allowlisted worker root,
+//     old, owner-dead, lease-released, command-line inactive, clean, and carries no
+//     detached commit absent from trunk;
 //   - missing/unreadable stamps or liveness probes fail toward KEEPING;
-//   - apply uses ForceReap, bypassing the warm pool because GC is collecting a leaked
-//     member, and always follows worktree remove with worktree prune.
+//   - apply revalidates every gate, removes the directory first, then prunes the git
+//     admin record only after absence is verified (#6510).
 //
 // Owner stamps live in a sidecar directory beside the managed worktrees rather than
 // inside them. An in-tree owner file would itself appear in `git status --porcelain`
@@ -52,30 +55,42 @@ type ProcessLiveFn func(pid int) bool
 // as a live lease on the same lane) is still live.
 type LeaseIDLiveFn func(leaseID string) bool
 
+// WorktreePathActiveFn reports whether any external process command line still
+// references a worktree. A census error fails toward keeping.
+type WorktreePathActiveFn func(path string) (active bool, err error)
+
 // GCWorktree is one owner-stamped GC candidate. GarbageCollect reports candidates
-// only: a live-owner, live-lease, young, dirty, or unreadable worktree is never listed.
-// The fields retain the evidence that made the candidate safe to select.
+// only: a path outside the allowlist, live-owner, live-lease, command-line-active,
+// young, dirty, unpushed, or unreadable worktree is never listed. The fields retain
+// the evidence that made the candidate safe to select.
 type GCWorktree struct {
-	Path       string     `json:"path"`
-	Owner      OwnerStamp `json:"owner"`
-	AgeSec     int64      `json:"age_sec"`
-	OwnerLive  bool       `json:"owner_live"`
-	LeaseLive  bool       `json:"lease_live"`
-	Unlanded   int        `json:"unlanded"`
-	HeldByWork bool       `json:"held_by_work,omitempty"`
-	Eligible   bool       `json:"eligible"`
-	Removed    bool       `json:"removed,omitempty"`
-	Reason     string     `json:"reason"`
+	Path          string     `json:"path"`
+	Owner         OwnerStamp `json:"owner"`
+	AgeSec        int64      `json:"age_sec"`
+	OwnerLive     bool       `json:"owner_live"`
+	LeaseLive     bool       `json:"lease_live"`
+	ProcessActive bool       `json:"process_active"`
+	Unlanded      int        `json:"unlanded"`
+	Unpushed      int        `json:"unpushed"`
+	HeldByWork    bool       `json:"held_by_work,omitempty"`
+	Eligible      bool       `json:"eligible"`
+	Removed       bool       `json:"removed,omitempty"`
+	Reason        string     `json:"reason"`
 }
 
 // GCOptions supplies the clock and the two independent liveness witnesses. Nil
-// liveness functions mean "unknown" and therefore keep every worktree.
+// PID/lease liveness functions mean "unknown" and therefore keep every worktree.
+// PathActive defaults to the procguard command-line census. AllowedRoots defaults
+// to DefaultRoot(); explicit roots are principally for a reviewed custom worker root
+// and hermetic tests.
 type GCOptions struct {
 	Now          time.Time
 	MaxAge       time.Duration
 	Apply        bool
 	ProcessAlive ProcessLiveFn
 	LeaseLive    LeaseIDLiveFn
+	PathActive   WorktreePathActiveFn
+	AllowedRoots []string
 }
 
 // GCReport is the dry-run/apply result returned by GarbageCollect.
@@ -83,8 +98,14 @@ type GCReport struct {
 	Mode      string       `json:"mode"`
 	MaxAgeSec int64        `json:"max_age_sec"`
 	Worktrees []GCWorktree `json:"worktrees"`
+	Failures  []GCFailure  `json:"failures"`
 	WouldReap int          `json:"would_reap"`
 	Reaped    int          `json:"reaped"`
+}
+
+type GCFailure struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 // OwnerStampPath returns the sidecar path bound one-to-one to wtPath.
@@ -193,77 +214,31 @@ func ownerAge(stamp OwnerStamp, now time.Time) time.Duration {
 	return age
 }
 
-// GCList enumerates worker worktrees and returns only the deletion-free
-// owner-stamped GC candidates. It requires BOTH dead-owner and released-lease
-// evidence. This conjunctive gate preserves coldreap.go's newer rule that a dead PID
-// alone is not enough: dispatcher processes can exit while their worker's lane lease
-// remains live. Kept worktrees are deliberately omitted so `gc --dry-run` is a literal
-// list of what `gc --apply` would remove, and a live-owner worktree is never listed.
-func GCList(root string, git GitRunner, now time.Time, maxAge time.Duration, processAlive ProcessLiveFn, leaseLive LeaseIDLiveFn) []GCWorktree {
-	if maxAge <= 0 {
-		maxAge = DefaultColdAgeFloor
-	}
+// GCList enumerates worker worktrees and returns only the deletion-free,
+// owner-stamped candidates satisfying every gate in GCOptions. Kept worktrees are
+// deliberately omitted so dry-run is a literal list of what apply would attempt.
+func GCList(root string, git GitRunner, opts GCOptions) []GCWorktree {
+	opts = normalizeGCOptions(opts)
 	_, paths := Count(root, git)
 	out := make([]GCWorktree, 0, len(paths))
 	for _, wtPath := range paths {
-		row := GCWorktree{Path: wtPath, OwnerLive: true, LeaseLive: true, Reason: "kept: owner liveness unknown"}
-		stamp, err := readOwnerStamp(wtPath)
-		if err != nil {
-			continue
-		}
-		row.Owner = stamp
-		age := ownerAge(stamp, now)
-		row.AgeSec = int64(age / time.Second)
-
-		if processAlive == nil {
-			continue
-		}
-		row.OwnerLive = processAlive(stamp.PID)
-		if row.OwnerLive {
-			continue
-		}
-
-		if leaseLive == nil || stamp.LeaseID == "" {
-			continue
-		}
-		row.LeaseLive = leaseLive(stamp.LeaseID)
-		if row.LeaseLive {
-			continue
-		}
-
-		if age < maxAge {
-			continue
-		}
-
-		row.Unlanded = UnlandedCount(wtPath, git)
-		switch {
-		case row.Unlanded < 0:
-			continue
-		case row.Unlanded > 0:
-			continue
-		default:
-			row.Eligible = true
-			row.Reason = fmt.Sprintf("gc: owner pid %d dead, lease %q released, age %s past max-age %s, working tree clean",
-				stamp.PID, stamp.LeaseID, age.Round(time.Second), maxAge.Round(time.Second))
+		if row, eligible, _ := gcEntry(root, wtPath, git, opts); eligible {
 			out = append(out, row)
 		}
 	}
 	return out
 }
 
-// GarbageCollect returns the dry-run plan by default. Apply removes only Eligible
-// worktrees through ForceReap; a failed removal stays visible with Removed=false.
+// GarbageCollect returns the dry-run plan by default. Apply re-runs every gate for
+// each planned row, then removes the directory before pruning the git admin record.
+// That ordering preserves #6510: a directory that cannot be removed remains registered.
 func GarbageCollect(root string, git GitRunner, opts GCOptions) GCReport {
-	if opts.Now.IsZero() {
-		opts.Now = time.Now()
-	}
-	if opts.MaxAge <= 0 {
-		opts.MaxAge = DefaultColdAgeFloor
-	}
+	opts = normalizeGCOptions(opts)
 	report := GCReport{
 		Mode:      "dry-run",
 		MaxAgeSec: int64(opts.MaxAge / time.Second),
-		Worktrees: GCList(root, git, opts.Now, opts.MaxAge, opts.ProcessAlive, opts.LeaseLive),
+		Worktrees: GCList(root, git, opts),
+		Failures:  []GCFailure{},
 	}
 	if opts.Apply {
 		report.Mode = "apply"
@@ -275,12 +250,203 @@ func GarbageCollect(root string, git GitRunner, opts GCOptions) GCReport {
 		}
 		report.WouldReap++
 		if opts.Apply {
-			res := ForceReap(root, row.Path, git)
-			row.Removed = res.Removed
-			if res.Removed {
-				report.Reaped++
+			current, eligible, reason := gcEntry(root, row.Path, git, opts)
+			if !eligible {
+				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: reason})
+				continue
 			}
+			if current.Owner.PID != row.Owner.PID ||
+				current.Owner.LeaseID != row.Owner.LeaseID ||
+				!current.Owner.CreatedAt.Equal(row.Owner.CreatedAt) {
+				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: "owner_stamp_changed"})
+				continue
+			}
+			if reason := gcRemoveDirectoryFirst(root, row.Path, git); reason != "" {
+				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: reason})
+				continue
+			}
+			row.Removed = true
+			report.Reaped++
 		}
 	}
 	return report
+}
+
+func normalizeGCOptions(opts GCOptions) GCOptions {
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	if opts.MaxAge <= 0 {
+		opts.MaxAge = DefaultColdAgeFloor
+	}
+	if opts.PathActive == nil {
+		opts.PathActive = processCommandLineReferencesWorktree
+	}
+	if len(opts.AllowedRoots) == 0 {
+		opts.AllowedRoots = []string{DefaultRoot()}
+	}
+	return opts
+}
+
+func gcEntry(root, wtPath string, git GitRunner, opts GCOptions) (GCWorktree, bool, string) {
+	clean := filepath.Clean(strings.TrimSpace(wtPath))
+	row := GCWorktree{
+		Path:      clean,
+		OwnerLive: true,
+		LeaseLive: true,
+		Unpushed:  -1,
+		Reason:    "kept",
+	}
+	if !gcPathAllowed(clean, opts.AllowedRoots) {
+		return row, false, "path_not_under_allowed_worker_root"
+	}
+	stamp, err := readOwnerStamp(clean)
+	if err != nil {
+		return row, false, "owner_stamp_unreadable"
+	}
+	row.Owner = stamp
+	age := ownerAge(stamp, opts.Now)
+	row.AgeSec = int64(age / time.Second)
+
+	if opts.ProcessAlive == nil {
+		return row, false, "owner_liveness_unknown"
+	}
+	row.OwnerLive = opts.ProcessAlive(stamp.PID)
+	if row.OwnerLive {
+		return row, false, "owner_process_live"
+	}
+
+	if opts.LeaseLive == nil || stamp.LeaseID == "" {
+		return row, false, "lease_liveness_unknown"
+	}
+	row.LeaseLive = opts.LeaseLive(stamp.LeaseID)
+	if row.LeaseLive {
+		return row, false, "owner_lease_live"
+	}
+
+	if age < opts.MaxAge {
+		return row, false, "worktree_too_young"
+	}
+
+	if opts.PathActive == nil {
+		return row, false, "process_command_line_liveness_unknown"
+	}
+	active, activeErr := opts.PathActive(clean)
+	if activeErr != nil {
+		return row, false, "process_command_line_probe_failed"
+	}
+	row.ProcessActive = active
+	if active {
+		return row, false, "process_command_line_active"
+	}
+
+	row.Unlanded = UnlandedCount(clean, git)
+	switch {
+	case row.Unlanded < 0:
+		row.HeldByWork = true
+		return row, false, "working_tree_unreadable"
+	case row.Unlanded > 0:
+		row.HeldByWork = true
+		return row, false, "working_tree_dirty"
+	}
+
+	row.Unpushed = unpushedCommitCount(root, clean, git)
+	switch {
+	case row.Unpushed < 0:
+		row.HeldByWork = true
+		return row, false, "commit_ancestry_unreadable"
+	case row.Unpushed > 0:
+		row.HeldByWork = true
+		return row, false, "unpushed_commit"
+	}
+
+	row.Eligible = true
+	row.Reason = fmt.Sprintf("gc: owner pid %d dead, lease %q released, age %s past max-age %s, no active command line, working tree clean, and HEAD contained by trunk",
+		stamp.PID, stamp.LeaseID, age.Round(time.Second), opts.MaxAge.Round(time.Second))
+	return row, true, ""
+}
+
+// unpushedCommitCount returns 0 when the worktree HEAD is already contained by the
+// root checkout's HEAD, 1 when it is not, and -1 when ancestry cannot be proved.
+// A clean detached worktree may still hold its only durable work as a local commit;
+// status alone is therefore not a deletion witness.
+func unpushedCommitCount(root, wtPath string, git GitRunner) int {
+	rc, out := run(git, wtPath, []string{"rev-parse", "HEAD"})
+	head := strings.TrimSpace(out)
+	if rc != 0 || head == "" {
+		return -1
+	}
+	rc, _ = run(git, root, []string{"merge-base", "--is-ancestor", head, "HEAD"})
+	switch rc {
+	case 0:
+		return 0
+	case 1:
+		return 1
+	default:
+		return -1
+	}
+}
+
+// gcPathAllowed binds deletion to a direct child of a reviewed worker root and
+// the worker marker. A matching basename elsewhere is never enough.
+func gcPathAllowed(path string, roots []string) bool {
+	if !IsWorkerWorktree(path) {
+		return false
+	}
+	pathAbs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	parent := filepath.Dir(pathAbs)
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		rootAbs, err := filepath.Abs(filepath.Clean(root))
+		if err == nil && strings.EqualFold(parent, rootAbs) {
+			return true
+		}
+	}
+	return false
+}
+
+func processCommandLineReferencesWorktree(path string) (bool, error) {
+	procs, collectErr := procguard.CollectRelations()
+	if collectErr != "" {
+		return true, fmt.Errorf("process census: %s", collectErr)
+	}
+	clean := strings.ToLower(filepath.Clean(path))
+	slash := strings.ReplaceAll(clean, `\`, `/`)
+	self := os.Getpid()
+	for _, proc := range procs {
+		if proc.PID == self {
+			continue
+		}
+		cmd := strings.ToLower(proc.Cmdline)
+		if strings.Contains(cmd, clean) || strings.Contains(strings.ReplaceAll(cmd, `\`, `/`), slash) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// gcRemoveDirectoryFirst performs the destructive half only after gcEntry has
+// been evaluated twice. The filesystem goes first; prune is allowed only after the
+// directory is confirmed absent, so failure cannot strand an externally active tree
+// by unregistering it underneath a live process (#6510).
+func gcRemoveDirectoryFirst(root, wtPath string, git GitRunner) string {
+	if err := os.RemoveAll(wtPath); err != nil {
+		return "directory_remove_failed: " + err.Error()
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		return "directory_remains"
+	}
+	if rc, out := run(git, root, []string{"worktree", "prune"}); rc != 0 {
+		return "prune_failed: " + strings.TrimSpace(out)
+	}
+	wtRoot := filepath.Dir(filepath.Clean(wtPath))
+	_ = os.Remove(poolMarker(wtRoot, filepath.Base(filepath.Clean(wtPath))))
+	removeOwnerStamp(wtPath)
+	return ""
 }

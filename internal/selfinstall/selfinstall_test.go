@@ -19,7 +19,17 @@ func (s *scriptRunner) run(_ context.Context, _, name string, args ...string) (s
 	joined := name + " " + strings.Join(args, " ")
 	s.ran = append(s.ran, append([]string{name}, args...))
 	if s.failOn != "" && strings.Contains(joined, s.failOn) && !(s.failOn == "version" && name == "go") {
+		if name == "git" && len(args) >= 4 && args[0] == "worktree" && args[1] == "add" {
+			// Model git leaving a partial directory before reporting add failure.
+			_ = os.MkdirAll(args[3], 0o755)
+		}
 		return "boom: " + s.failOn, false
+	}
+	if name == "git" && len(args) >= 4 && args[0] == "worktree" && args[1] == "add" {
+		_ = os.MkdirAll(args[3], 0o755)
+	}
+	if name == "git" && len(args) >= 4 && args[0] == "worktree" && args[1] == "remove" {
+		_ = os.RemoveAll(args[3])
 	}
 	if name == "git" && len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
 		return "", true
@@ -193,12 +203,14 @@ func TestInstallStillBakesCommitWhenNoVersionFile(t *testing.T) {
 
 func TestPrepareOriginAddsAndCleansWorktree(t *testing.T) {
 	r := &scriptRunner{}
-	dir, cleanup, err := PrepareOrigin(context.Background(), r.run, "/repo", "origin/main", "/repo/.wt")
+	repo := t.TempDir()
+	wt := filepath.Join(t.TempDir(), "wt")
+	dir, cleanup, err := PrepareOrigin(context.Background(), r.run, repo, "origin/main", wt)
 	if err != nil {
 		t.Fatalf("PrepareOrigin err: %v", err)
 	}
-	if dir != "/repo/.wt" {
-		t.Fatalf("dir = %q, want /repo/.wt", dir)
+	if dir != wt {
+		t.Fatalf("dir = %q, want %q", dir, wt)
 	}
 	// It should have fetched then added a detached worktree.
 	sawFetch, sawAdd := false, false
@@ -207,35 +219,72 @@ func TestPrepareOriginAddsAndCleansWorktree(t *testing.T) {
 		if strings.Contains(j, "git fetch origin") {
 			sawFetch = true
 		}
-		if strings.Contains(j, "worktree add --detach /repo/.wt origin/main") {
+		if strings.Contains(j, "worktree add --detach "+wt+" origin/main") {
 			sawAdd = true
 		}
 	}
 	if !sawFetch || !sawAdd {
 		t.Fatalf("prepare did not fetch+add detached worktree; ran %v", r.ran)
 	}
+	stamp, present, err := readBuildOwnerStamp(wt)
+	if err != nil || !present {
+		t.Fatalf("owner stamp missing/unreadable: present=%v err=%v", present, err)
+	}
+	if stamp.PID != os.Getpid() || stamp.LeaseID == "" || stamp.CreatedAt.IsZero() {
+		t.Fatalf("owner stamp = %+v, want current pid + lease + created_at", stamp)
+	}
 	// Cleanup must remove + prune the worktree.
 	cleanup()
+	cleanup() // idempotent: explicit-before-exit plus deferred cleanup is safe.
 	sawRemove, sawPrune := false, false
+	removeCount, pruneCount := 0, 0
 	for _, c := range r.ran {
 		j := strings.Join(c, " ")
-		if strings.Contains(j, "worktree remove --force /repo/.wt") {
+		if strings.Contains(j, "worktree remove --force "+wt) {
 			sawRemove = true
+			removeCount++
 		}
 		if strings.Contains(j, "worktree prune") {
 			sawPrune = true
+			pruneCount++
 		}
 	}
 	if !sawRemove || !sawPrune {
 		t.Fatalf("cleanup did not remove+prune; ran %v", r.ran)
 	}
+	if removeCount != 1 || pruneCount != 1 {
+		t.Fatalf("idempotent cleanup ran remove=%d prune=%d, want 1 each: %v", removeCount, pruneCount, r.ran)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left worktree directory: %v", err)
+	}
+	if _, err := os.Stat(BuildOwnerStampPath(wt)); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left owner stamp: %v", err)
+	}
 }
 
 func TestPrepareOriginReportsAddFailure(t *testing.T) {
 	r := &scriptRunner{failOn: "worktree add"}
-	_, _, err := PrepareOrigin(context.Background(), r.run, "/repo", "origin/main", "/repo/.wt")
+	repo := t.TempDir()
+	wt := filepath.Join(t.TempDir(), "wt")
+	_, _, err := PrepareOrigin(context.Background(), r.run, repo, "origin/main", wt)
 	if err == nil {
 		t.Fatal("PrepareOrigin should return an error when worktree add fails")
+	}
+	if _, statErr := os.Stat(wt); !os.IsNotExist(statErr) {
+		t.Fatalf("partial add failure leaked %q: %v", wt, statErr)
+	}
+	if _, statErr := os.Stat(BuildOwnerStampPath(wt)); !os.IsNotExist(statErr) {
+		t.Fatalf("partial add failure leaked owner stamp: %v", statErr)
+	}
+	sawRemove, sawPrune := false, false
+	for _, c := range r.ran {
+		j := strings.Join(c, " ")
+		sawRemove = sawRemove || strings.Contains(j, "worktree remove --force "+wt)
+		sawPrune = sawPrune || strings.Contains(j, "worktree prune")
+	}
+	if !sawRemove || !sawPrune {
+		t.Fatalf("partial add failure did not run source cleanup: %v", r.ran)
 	}
 }
 

@@ -168,14 +168,26 @@ func cmdSelfUpdate(argv []string) {
 	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
 	ctx := context.Background()
 
-	// Self-heal first: reap build worktrees leaked by PRIOR self-update ticks that were
-	// killed (saturated box / wall-clock timeout) before their deferred cleanup could run.
-	// We hold the single-flight lock, so every fak-selfupdate-build-* worktree on disk
-	// belongs to a process that is no longer building; ReapStaleBuilds removes only those
-	// whose owning PID is provably dead. Without this, killed ticks accumulate worktrees
-	// forever (one prior run leaked dozens) because nothing else ever prunes them.
-	if reaped := selfinstall.ReapStaleBuilds(ctx, selfinstall.RealRunner, repoRoot, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
-		fmt.Printf("self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", len(reaped))
+	// Self-heal first: collect build worktrees leaked by PRIOR self-update ticks that
+	// were killed before their source cleanup ran. This is an explicit apply of a
+	// dry-run-by-default GC: exact temp-root shape + old age + dead owner + no process
+	// command line + clean tree + no unpushed commit are all rechecked immediately
+	// before directory-first removal. That preserves #6510's external-process rule:
+	// an active or undeleted tree is never unregistered.
+	buildGC := selfinstall.GarbageCollectStaleBuilds(ctx, selfinstall.RealRunner, repoRoot, selfinstall.BuildGCOptions{
+		Now:          time.Now(),
+		MinAge:       selfinstall.DefaultBuildGCMinAge,
+		Apply:        true,
+		SelfPID:      os.Getpid(),
+		TempRoot:     os.TempDir(),
+		BaseRef:      "origin/main",
+		ProcessAlive: safecommit.ProcessAlive,
+	})
+	if buildGC.Reaped > 0 {
+		fmt.Printf("self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
+	}
+	if len(buildGC.Failures) > 0 {
+		fmt.Printf("self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
 	}
 
 	// Also reap the "<binary>.old.<pid>.<i>" swap-aside files OSSwap leaks on Windows when the
@@ -214,6 +226,7 @@ func cmdSelfUpdate(argv []string) {
 	fmt.Println(selfinstall.FormatResult(res))
 	if !res.Installed {
 		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, string(res.Stage)+": "+res.Detail)
+		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
 		os.Exit(1)
 	}
 
@@ -251,6 +264,7 @@ func cmdSelfUpdate(argv []string) {
 		// binary stayed behind is exactly the silent staleness above. Name it and exit non-zero
 		// rather than reporting success for a half-converged host.
 		emitSelfUpdateOutcome(outcomeSiblingStale, installTarget, "not converged: "+strings.Join(stragglers, "; "))
+		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
 		os.Exit(1)
 	}
 	// Re-census and AUDIT: every configured hot copy is either converged above or named here with

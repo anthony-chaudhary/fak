@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Runner runs a command and returns combined output + whether it succeeded. ok=false means
@@ -136,22 +137,53 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 // origin/main, never a contaminated local build.
 //
 // It is best-effort and self-cleaning: the cleanup removes the worktree (git worktree
-// remove --force) and prunes the admin entry. A failure to create returns ("", noop, err).
+// remove --force), prunes the admin entry, and removes the out-of-tree owner stamp.
+// The cleanup is idempotent so callers may invoke it explicitly before os.Exit (which
+// skips deferred functions) while still deferring it for ordinary returns. A partial
+// `worktree add` failure is cleaned immediately, but only after proving the target did
+// not exist before the add attempt.
 func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (string, func(), error) {
 	noop := func() {}
 	if strings.TrimSpace(ref) == "" {
 		ref = "origin/main"
 	}
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "." || dir == "" {
+		return "", noop, fmt.Errorf("prepare-origin: empty worktree path")
+	}
+	if _, err := os.Lstat(dir); err == nil {
+		return "", noop, fmt.Errorf("prepare-origin: refusing to reuse existing path %s", dir)
+	} else if !os.IsNotExist(err) {
+		return "", noop, fmt.Errorf("prepare-origin: cannot inspect worktree path %s: %v", dir, err)
+	}
 	// Make sure the ref is current before we detach onto it.
 	_, _ = run(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
 	if out, ok := run(ctx, repoRoot, "git", "worktree", "add", "--detach", dir, ref); !ok {
+		// Git may have materialized part of the directory/admin entry before returning
+		// failure. The path was proven absent above, so removing that partial result
+		// cannot touch a pre-existing checkout.
+		cleanupOriginWorktree(ctx, run, repoRoot, dir)
 		return "", noop, fmt.Errorf("prepare-origin: git worktree add %s @ %s failed: %s", dir, ref, trim(out))
 	}
-	cleanup := func() {
-		_, _ = run(ctx, repoRoot, "git", "worktree", "remove", "--force", dir)
-		_, _ = run(ctx, repoRoot, "git", "worktree", "prune")
+	if err := writeBuildOwnerStamp(dir, defaultBuildOwnerStamp()); err != nil {
+		cleanupOriginWorktree(ctx, run, repoRoot, dir)
+		return "", noop, fmt.Errorf("prepare-origin: owner stamp %s: %v", BuildOwnerStampPath(dir), err)
 	}
+	var once sync.Once
+	cleanup := func() { once.Do(func() { cleanupOriginWorktree(ctx, run, repoRoot, dir) }) }
 	return dir, cleanup, nil
+}
+
+// cleanupOriginWorktree is the one source-cleanup path for PrepareOrigin. Git removal
+// is preferred because it removes the administrative record and directory together.
+// If it fails, direct removal is safe here because PrepareOrigin proved the target was
+// absent before creating it; prune then clears any dangling admin entry.
+func cleanupOriginWorktree(ctx context.Context, run Runner, repoRoot, dir string) {
+	if _, ok := run(ctx, repoRoot, "git", "worktree", "remove", "--force", dir); !ok {
+		_ = os.RemoveAll(dir)
+	}
+	_, _ = run(ctx, repoRoot, "git", "worktree", "prune")
+	removeBuildOwnerStamp(dir)
 }
 
 // versionLDFlags returns the `-ldflags` value that bakes RepoRoot's VERSION marker into the
