@@ -41,7 +41,7 @@ import (
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
@@ -68,6 +68,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchEmitDemo(stdout, stderr, argv[1:])
 	case "import-fixtures":
 		return armbenchImportFixtures(stdout, stderr, argv[1:])
+	case "ponytail":
+		return armbenchPonytail(stdout, stderr, argv[1:])
 	case "validate":
 		return armbenchValidate(stdout, stderr, argv[1:])
 	case "identity":
@@ -490,4 +492,33 @@ func writeArmbenchJSON(w io.Writer, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
+}
+
+func armbenchPonytail(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("armbench ponytail", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	checkout := fs.String("checkout", "", "pinned Ponytail checkout at the required revision")
+	caveman := fs.String("caveman", "", "Caveman plugin checkout used unchanged by the upstream runner")
+	out := fs.String("out", "", "live evidence directory (required with --live)")
+	account := fs.String("account", "", "configured Claude account identity (required with --live; secrets are never accepted)")
+	python := fs.String("python", "python", "Python executable used by the unchanged upstream runner")
+	model := fs.String("model", "haiku", "upstream agent model alias")
+	trials := fs.Int("trials", 1, "trial count per task and arm")
+	live := fs.Bool("live", false, "execute real provider-backed trials; default is no-spend validation")
+	asJSON := fs.Bool("json", false, "emit strict JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	p, err := armbench.Ponytail(armbench.PonytailOptions{Checkout: *checkout, Caveman: *caveman, Out: *out, Account: *account, Python: *python, Model: *model, Trials: *trials, Live: *live})
+	if err != nil {
+		fmt.Fprintln(stderr, "fak armbench ponytail:", err)
+		return 1
+	}
+	if *asJSON {
+		b, _ := json.MarshalIndent(p, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+	} else {
+		fmt.Fprintf(stdout, "PASS: pinned Ponytail agentic %s; tasks=%d arms=%d trials=%d model=%s\n", p.Mode, len(p.Tasks), len(p.Arms), p.Trials, p.AgentModel)
+	}
+	return 0
 }

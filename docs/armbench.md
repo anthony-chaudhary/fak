@@ -210,3 +210,97 @@ refusals. Its byte-for-byte deterministic committed capture is
 
 Exit codes: `0` success, `2` usage, `3` a typed fail-closed refusal, and `1` an
 I/O or internal runtime error.
+
+
+## Pinned Ponytail agentic reproduction (#6688)
+
+`fak armbench ponytail` is the provenance lock and launch adapter for
+`DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3`. It executes the pinned
+`benchmarks/agentic/run.py` rather than translating the suite. The adapter verifies the comparator
+revision plus SHA-256 for `README.md`, `tasks.py`, `run.py`, `judge.py`, and `complete.py`, then runs
+upstream's offline instrument self-test before either producing a no-spend packet or launching.
+The complete pinned task inventory is retained (39 task IDs), as are the three model aliases,
+`CELL_TIMEOUT=300`, trial count, one isolated Claude context per cell, Claude JSON trajectories,
+workspace files, completion/safety reasons, usage, latency, permission denials, and cell errors.
+Upstream has no cell retry loop, so a receipt records `retries: 0` rather than inventing a count.
+
+### Exact commands
+
+No-provider validation (the emitted JSON contains all 39 task commands and rotates all three arm
+orders):
+
+```bash
+fak armbench ponytail \
+  --checkout <ponytail-2ed6c52c> \
+  --python python3 --model haiku --trials 1 --json
+```
+
+Live launch uses only a configured account identity. `fak` resolves that identity through
+`fak fleet-accounts resolve --product claude`; the command accepts no token or API-key flag and the
+receipt stores no credential value. Caveman is revision-checked before launch even though the
+pinned runner injects the benchmark arm text from Ponytail's own
+`benchmarks/arms/caveman-SKILL.md`; the checkout supplies the unchanged Caveman plugin hook.
+
+```bash
+fak armbench ponytail \
+  --checkout <ponytail-2ed6c52c> \
+  --caveman <caveman-c72984e4> \
+  --account <configured-account-identity> \
+  --out <evidence-directory> \
+  --python python3 --model haiku --trials 1 --live --json
+```
+
+The adapter schedules task 1 with `baseline,caveman,ponytail`, task 2 with
+`caveman,ponytail,baseline`, task 3 with `ponytail,baseline,caveman`, then repeats the Latin-square
+rotation. The captured run used the same three orders in four-task batches because the prior live
+worker preserved three completed upstream run directories. This is counterbalanced ordering, not
+parallel execution (`--workers 1`).
+
+### Live result and raw evidence (2026-08-14 UTC)
+
+The sanctioned `aug8-netra` Claude account identity produced 36 real provider-backed cells: the 12
+closed deterministic safety/reuse/trace tasks × baseline/Caveman/Ponytail × one Haiku trial. Report
+task outcome first, then resource and safety data:
+
+| blinded arm | task success | safe | tokens | cost | latency | permission denials | failures / retries |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| A (baseline) | 12/12 | 11/12 | 1,940,834 | $2.000912 | 391.982 s | 0 | 0 / 0 |
+| B (Caveman) | 12/12 | 11/12 | 2,038,785 | $2.099629 | 409.418 s | 0 | 0 / 0 |
+| C (Ponytail) | 12/12 | 12/12 | 1,981,670 | $2.043228 | 438.278 s | 0 | 0 / 0 |
+
+A/B/C are post-collection reporting aliases; the unchanged runner necessarily records true arm
+names because those names select injection. The separate mapping in the witness prevents a reader
+from mistaking display blinding for a modified execution path. Baseline and Caveman each missed the
+shared-helper safety criterion on `trace-transfer` (they guarded `transfer` but left `withdraw`
+able to overdraw); Ponytail fixed the shared `_debit` seam. All task success checks still passed.
+
+Raw evidence is committed under
+[`docs/_witnesses/armbench-ponytail-live-2026-08-14/`](_witnesses/armbench-ponytail-live-2026-08-14/):
+every upstream `results.json`/`summary.json`, all 36 workspaces, generated source, `_claude.json`
+provider receipts, and Claude stderr. The indexed receipt
+[`armbench-ponytail-live-2026-08-14.json`](_witnesses/armbench-ponytail-live-2026-08-14.json)
+contains SHA-256 and byte size for every raw file. The no-provider packet is
+[`armbench-ponytail-dryrun-2026-08-14.json`](_witnesses/armbench-ponytail-dryrun-2026-08-14.json).
+
+### Judge calibration and published-result comparison
+
+The pinned suite has two LLM judge passes for open tasks: `judge.py` scores over-engineering and
+`complete.py` scores completeness. Both publish their rubric, use `claude-sonnet-4-6` at
+temperature 0, retain per-workspace explanations, and refuse trust unless a live calibration ranks
+the deliberately good/bad references correctly. `complete.py --selftest-offline` separately checks
+the gate. This reproduction ran upstream's deterministic offline instruments before every batch;
+it did **not** call those LLM judges because the live matrix intentionally covers the 12 tasks whose
+pinned deterministic completion/safety functions provide the verdict. Consequently the witness
+honestly records judge output as `null`; it does not relabel deterministic completion output as an
+LLM judgment. To extend the evidence to the 27 open/template tasks, first run both live judge
+self-tests through an approved provider verb, then preserve `judge.json` and `completeness.json`.
+
+Do not compare the table above directly to Ponytail's headline June 2026 `-54% LOC` result. The
+published report used Claude Code 2.1.177, Haiku 4.5, four trials, four arms (including
+`yagni-oneliner`), and the 27 open/template code-production tasks; its safety table reports five
+security tasks × four trials. This reproduction used Claude Code 2.1.229, one trial, three arms,
+and the 12 deterministic closed tasks. It asks whether each arm succeeds and follows the safe
+shared seam, not whether Ponytail minimizes LOC on frontend/backend feature tickets. The only
+supported same-run conclusion is therefore: all arms were 12/12 correct, while Ponytail was 12/12
+safe versus 11/12 for both controls; its token cost and latency were not lower in this single-trial
+closed-task slice. Any broader efficiency claim remains `not yet`.

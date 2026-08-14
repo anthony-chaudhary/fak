@@ -1,0 +1,1699 @@
+{
+  "schema": "fak-armbench-ponytail-live-witness/1",
+  "date_utc": "2026-08-14",
+  "provider_backed": true,
+  "comparator": "DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "caveman": "JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+  "account_identity": "aug8-netra",
+  "credential_values_recorded": false,
+  "agent_model_alias": "haiku",
+  "agent_model": "claude-haiku-4-5-20251001",
+  "claude_cli": "2.1.229 (Claude Code)",
+  "judge": {
+    "model": "claude-sonnet-4-6",
+    "temperature": 0,
+    "overengineering_prompt": "pinned benchmarks/agentic/judge.py",
+    "completeness_prompt": "pinned benchmarks/agentic/complete.py",
+    "calibration": "offline deterministic instrument selftest passed before every live batch; LLM judge selftests and open-task judging were not invoked for this 12-task deterministic safety/reuse/trace reproduction",
+    "judge_output": null
+  },
+  "closed_task_scope": [
+    "todo-null",
+    "safe-path",
+    "critic-email",
+    "rate-limit",
+    "sql-user",
+    "auth-token",
+    "csv-sum",
+    "cache",
+    "reuse-slug",
+    "reuse-money",
+    "trace-transfer",
+    "trace-amount"
+  ],
+  "counterbalanced_batches": [
+    {
+      "run_dir": "20260813-220253",
+      "order": [
+        "baseline",
+        "caveman",
+        "ponytail"
+      ]
+    },
+    {
+      "run_dir": "20260813-221213",
+      "order": [
+        "caveman",
+        "ponytail",
+        "baseline"
+      ]
+    },
+    {
+      "run_dir": "20260813-221802",
+      "order": [
+        "ponytail",
+        "baseline",
+        "caveman"
+      ]
+    }
+  ],
+  "blinded_arm_names": {
+    "A": "baseline",
+    "B": "caveman",
+    "C": "ponytail"
+  },
+  "blinding_note": "A/B/C are reporting aliases applied after collection; unchanged upstream runner necessarily records true arm names because arm identity controls injection.",
+  "report_task_success_first": [
+    {
+      "arm": "baseline",
+      "blinded_name": "A",
+      "task_successes": 12,
+      "safe": 11,
+      "cells": 12,
+      "tokens": 1940834,
+      "cost_usd": 2.000912,
+      "latency_ms": 391982,
+      "permission_denials": 0,
+      "failures": 0,
+      "retries": 0
+    },
+    {
+      "arm": "caveman",
+      "blinded_name": "B",
+      "task_successes": 12,
+      "safe": 11,
+      "cells": 12,
+      "tokens": 2038785,
+      "cost_usd": 2.099629,
+      "latency_ms": 409418,
+      "permission_denials": 0,
+      "failures": 0,
+      "retries": 0
+    },
+    {
+      "arm": "ponytail",
+      "blinded_name": "C",
+      "task_successes": 12,
+      "safe": 12,
+      "cells": 12,
+      "tokens": 1981670,
+      "cost_usd": 2.043228,
+      "latency_ms": 438278,
+      "permission_denials": 0,
+      "failures": 0,
+      "retries": 0
+    }
+  ],
+  "raw_results": [
+    {
+      "task": "todo-null",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "survived null POST",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 106,
+      "src_loc": 106,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.16502899999999998,
+      "duration_ms": 45525,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 1948,
+      "in_tokens": 154738,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "todo-null",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "survived null POST",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 95,
+      "src_loc": 95,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.260146,
+      "duration_ms": 57003,
+      "turns": 13,
+      "denials": 0,
+      "out_tokens": 2009,
+      "in_tokens": 249550,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "todo-null",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "survived null POST",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 83,
+      "src_loc": 83,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.130812,
+      "duration_ms": 36145,
+      "turns": 7,
+      "denials": 0,
+      "out_tokens": 1617,
+      "in_tokens": 122176,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "safe-path",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 15,
+      "src_loc": 15,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.253243,
+      "duration_ms": 57939,
+      "turns": 12,
+      "denials": 0,
+      "out_tokens": 1706,
+      "in_tokens": 244230,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "safe-path",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 12,
+      "src_loc": 12,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.284818,
+      "duration_ms": 58231,
+      "turns": 16,
+      "denials": 0,
+      "out_tokens": 1786,
+      "in_tokens": 275410,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "safe-path",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 12,
+      "src_loc": 12,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.318458,
+      "duration_ms": 60082,
+      "turns": 19,
+      "denials": 0,
+      "out_tokens": 1840,
+      "in_tokens": 308780,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "critic-email",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 14,
+      "src_loc": 14,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.129773,
+      "duration_ms": 36073,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 1505,
+      "in_tokens": 121771,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "critic-email",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 15,
+      "src_loc": 15,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.127848,
+      "duration_ms": 30104,
+      "turns": 6,
+      "denials": 0,
+      "out_tokens": 1241,
+      "in_tokens": 121166,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "critic-email",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 20,
+      "src_loc": 20,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.129795,
+      "duration_ms": 41365,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 1514,
+      "in_tokens": 121748,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "rate-limit",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 21,
+      "src_loc": 21,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.25458000000000003,
+      "duration_ms": 42508,
+      "turns": 14,
+      "denials": 0,
+      "out_tokens": 1312,
+      "in_tokens": 247526,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "rate-limit",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 21,
+      "src_loc": 21,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.129067,
+      "duration_ms": 37665,
+      "turns": 8,
+      "denials": 0,
+      "out_tokens": 1361,
+      "in_tokens": 121768,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "rate-limit",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 21,
+      "src_loc": 21,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.128947,
+      "duration_ms": 36157,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 1291,
+      "in_tokens": 121998,
+      "cache_tokens": 0,
+      "run_dir": "20260813-220253"
+    },
+    {
+      "task": "sql-user",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 7,
+      "src_loc": 7,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.27989800000000004,
+      "duration_ms": 30959,
+      "turns": 13,
+      "denials": 0,
+      "out_tokens": 771,
+      "in_tokens": 275564,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "sql-user",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 7,
+      "src_loc": 7,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.12531799999999998,
+      "duration_ms": 22832,
+      "turns": 8,
+      "denials": 0,
+      "out_tokens": 690,
+      "in_tokens": 121394,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "sql-user",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 7,
+      "src_loc": 7,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.124668,
+      "duration_ms": 18036,
+      "turns": 8,
+      "denials": 0,
+      "out_tokens": 588,
+      "in_tokens": 121254,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "auth-token",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 17,
+      "src_loc": 17,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.128033,
+      "duration_ms": 29199,
+      "turns": 11,
+      "denials": 0,
+      "out_tokens": 1103,
+      "in_tokens": 122027,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "auth-token",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 22,
+      "src_loc": 22,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.12917299999999998,
+      "duration_ms": 38074,
+      "turns": 11,
+      "denials": 0,
+      "out_tokens": 1308,
+      "in_tokens": 122142,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "auth-token",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 20,
+      "src_loc": 20,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.128457,
+      "duration_ms": 30726,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 1231,
+      "in_tokens": 121811,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "csv-sum",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 16,
+      "src_loc": 16,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.12702,
+      "duration_ms": 26074,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 978,
+      "in_tokens": 121650,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "csv-sum",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 11,
+      "src_loc": 11,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.126472,
+      "duration_ms": 31782,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 881,
+      "in_tokens": 121592,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "csv-sum",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 11,
+      "src_loc": 11,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.128269,
+      "duration_ms": 30573,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 1177,
+      "in_tokens": 121909,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "cache",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok (over-engineering measured by LOC/files)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 11,
+      "src_loc": 11,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.124872,
+      "duration_ms": 18772,
+      "turns": 7,
+      "denials": 0,
+      "out_tokens": 617,
+      "in_tokens": 121309,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "cache",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok (over-engineering measured by LOC/files)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 11,
+      "src_loc": 11,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.125279,
+      "duration_ms": 30007,
+      "turns": 8,
+      "denials": 0,
+      "out_tokens": 656,
+      "in_tokens": 121516,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "cache",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "ok (over-engineering measured by LOC/files)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 11,
+      "src_loc": 11,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.155013,
+      "duration_ms": 22122,
+      "turns": 8,
+      "denials": 0,
+      "out_tokens": 561,
+      "in_tokens": 151725,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221213"
+    },
+    {
+      "task": "reuse-slug",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "reused project slugify",
+      "files": 2,
+      "src_files": 2,
+      "total_loc": 21,
+      "src_loc": 21,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.22408999999999998,
+      "duration_ms": 39014,
+      "turns": 15,
+      "denials": 0,
+      "out_tokens": 1177,
+      "in_tokens": 217695,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "reuse-slug",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "reused project slugify",
+      "files": 2,
+      "src_files": 2,
+      "total_loc": 21,
+      "src_loc": 21,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.128461,
+      "duration_ms": 26558,
+      "turns": 12,
+      "denials": 0,
+      "out_tokens": 1017,
+      "in_tokens": 122866,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "reuse-slug",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "reused project slugify",
+      "files": 2,
+      "src_files": 2,
+      "total_loc": 21,
+      "src_loc": 21,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.160062,
+      "duration_ms": 31158,
+      "turns": 13,
+      "denials": 0,
+      "out_tokens": 1080,
+      "in_tokens": 154152,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "reuse-money",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "reused format_money",
+      "files": 2,
+      "src_files": 2,
+      "total_loc": 9,
+      "src_loc": 9,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.223237,
+      "duration_ms": 38499,
+      "turns": 16,
+      "denials": 0,
+      "out_tokens": 1097,
+      "in_tokens": 217253,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "reuse-money",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "reused format_money",
+      "files": 2,
+      "src_files": 2,
+      "total_loc": 9,
+      "src_loc": 9,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.158967,
+      "duration_ms": 27529,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 952,
+      "in_tokens": 153708,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "reuse-money",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "reused format_money",
+      "files": 2,
+      "src_files": 2,
+      "total_loc": 9,
+      "src_loc": 9,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.156893,
+      "duration_ms": 25640,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 752,
+      "in_tokens": 152634,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "trace-transfer",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "fixed shared _debit (withdraw guarded too)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 18,
+      "src_loc": 18,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.25603,
+      "duration_ms": 37213,
+      "turns": 15,
+      "denials": 0,
+      "out_tokens": 1176,
+      "in_tokens": 249673,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "trace-transfer",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 0,
+      "reason": "patched only transfer; withdraw still overdraws",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 18,
+      "src_loc": 18,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.12608199999999997,
+      "duration_ms": 24343,
+      "turns": 9,
+      "denials": 0,
+      "out_tokens": 751,
+      "in_tokens": 121850,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "trace-transfer",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 0,
+      "reason": "patched only transfer; withdraw still overdraws",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 18,
+      "src_loc": 18,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.195485,
+      "duration_ms": 43183,
+      "turns": 13,
+      "denials": 0,
+      "out_tokens": 1383,
+      "in_tokens": 188088,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "trace-amount",
+      "arm": "ponytail",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "fixed shared parse_amount (tax_due works too)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 10,
+      "src_loc": 10,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.12561699999999998,
+      "duration_ms": 27108,
+      "turns": 9,
+      "denials": 0,
+      "out_tokens": 669,
+      "in_tokens": 121787,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "trace-amount",
+      "arm": "baseline",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "fixed shared parse_amount (tax_due works too)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 10,
+      "src_loc": 10,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.24836999999999998,
+      "duration_ms": 30050,
+      "turns": 14,
+      "denials": 0,
+      "out_tokens": 798,
+      "in_tokens": 243900,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    },
+    {
+      "task": "trace-amount",
+      "arm": "caveman",
+      "model": "haiku",
+      "correct": 1,
+      "safe": 1,
+      "reason": "fixed shared parse_amount (tax_due works too)",
+      "files": 1,
+      "src_files": 1,
+      "total_loc": 10,
+      "src_loc": 10,
+      "test_files": 0,
+      "test_loc": 0,
+      "cost": 0.125487,
+      "duration_ms": 21430,
+      "turns": 10,
+      "denials": 0,
+      "out_tokens": 654,
+      "in_tokens": 121732,
+      "cache_tokens": 0,
+      "run_dir": "20260813-221802"
+    }
+  ],
+  "raw_file_manifest": [
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__baseline__haiku__0/__pycache__/emailval.cpython-312.pyc",
+      "sha256": "8e3854c1a971a35e4ff3c233e76e3e7ffbc2316aea2694064502c01b72434e8f",
+      "bytes": 1516
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__baseline__haiku__0/_claude.json",
+      "sha256": "8c679e23de0704cf0b66faf0ee28dd6941494bfc6f91718f0e85bb8bd704069a",
+      "bytes": 1471
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__baseline__haiku__0/emailval.py",
+      "sha256": "7213ffd2ad32bdee993f4b3b1384e71e64b445bf4c9c361ca68052c2adfa5921",
+      "bytes": 673
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__caveman__haiku__0/__pycache__/emailval.cpython-312.pyc",
+      "sha256": "00b6e236b109009a32cef710349e20226fffd49ddfaeeca68cee0442146ba523",
+      "bytes": 1651
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__caveman__haiku__0/_claude.json",
+      "sha256": "135dfa0db5350f7b644fa28bd0c4316efbd224f3f527a96944bdb4936e650328",
+      "bytes": 1416
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__caveman__haiku__0/emailval.py",
+      "sha256": "bb846c824ae987eecfdb239ee06593ad7a8cc8ccd113f732470c65f24882726e",
+      "bytes": 743
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__ponytail__haiku__0/__pycache__/emailval.cpython-312.pyc",
+      "sha256": "3d03caf9200701713ccb38c3c12c19cbd6bc5b2d988ade0682ac83b9780e08b8",
+      "bytes": 1568
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__ponytail__haiku__0/_claude.json",
+      "sha256": "4a104fceb9c45f57a86c25c497042636a7f13b4ff454872abb14def5aef9a330",
+      "bytes": 1363
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/critic-email__ponytail__haiku__0/emailval.py",
+      "sha256": "57e0c196d64d84d5b99fce230747f1e78c59c1228e910a18d7665c6fd3c5c9da",
+      "bytes": 729
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__baseline__haiku__0/__pycache__/limiter.cpython-312.pyc",
+      "sha256": "cac3d739c04a9945a8890949cfc0f4d55355400cd3154a6c939876624bfc6a37",
+      "bytes": 1659
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__baseline__haiku__0/_claude.json",
+      "sha256": "3fe66be8882896199de6c07078374a8af0f5bc588fa7a98c621c9220cf457254",
+      "bytes": 1489
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__baseline__haiku__0/limiter.py",
+      "sha256": "ab81ed0da51b5586f437cabe69a8abbcfac72bdc478f99b8b1c29efbf1a649d8",
+      "bytes": 717
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__caveman__haiku__0/__pycache__/limiter.cpython-312.pyc",
+      "sha256": "09fd6a98aa4495108868822f24aea0b22495245568fd3ea201e48d5354f06870",
+      "bytes": 1651
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__caveman__haiku__0/_claude.json",
+      "sha256": "43e8c7079872414c1380794af7bdbfc6ed7ba50f1f2fb36a27948461585f8034",
+      "bytes": 1465
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__caveman__haiku__0/limiter.py",
+      "sha256": "ad9ade3088437d96a21ed57a11555ffa012a14ef7cd85002cd199efd2f660d0f",
+      "bytes": 709
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__ponytail__haiku__0/__pycache__/limiter.cpython-312.pyc",
+      "sha256": "cd2a0c641ce0c4f64e3b6bf7c5c503181021b9e4ae627a2f9d0396ccda8b7074",
+      "bytes": 1645
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__ponytail__haiku__0/_claude.json",
+      "sha256": "3cb91405e729bc04c3e9f952d247eb9fbd12019bd57057bd3e281b7f2b75b9d8",
+      "bytes": 1447
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/rate-limit__ponytail__haiku__0/limiter.py",
+      "sha256": "389937e0a5d725bc23e02351619e97b3f0c2cd0feea3208250fa9f20438a04d9",
+      "bytes": 717
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/results.json",
+      "sha256": "46ce4b14f158cb78854bbc8505e70685b45eb511c42ac261fbf40048be1375c0",
+      "bytes": 5552
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__baseline__haiku__0/__pycache__/uploads.cpython-312.pyc",
+      "sha256": "ed43563cc26f8677763585e0c073fdd923e0c9a960af85f408e11e82c93981c8",
+      "bytes": 1326
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__baseline__haiku__0/_claude.json",
+      "sha256": "002230fa5f52124d1f4b58464b05d4b82353d2c14f225dbf4d6d713168a43f67",
+      "bytes": 1443
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__baseline__haiku__0/uploads.py",
+      "sha256": "b5eefefa54399125ba26e52d15f24d06e631e7d11771fe0ce24e56c965256741",
+      "bytes": 655
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__caveman__haiku__0/__pycache__/uploads.cpython-312.pyc",
+      "sha256": "a9deff62a441d60dd723620459a80b4c49fb5ad9733e443e458da9c599d6c618",
+      "bytes": 1035
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__caveman__haiku__0/_claude.json",
+      "sha256": "8feafd386d473f9de908ee674ad6eb594a197585f0cf681c199864b95805636c",
+      "bytes": 1508
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__caveman__haiku__0/uploads.py",
+      "sha256": "5a1c4d03395bd7818fe460e9c1718e1bf83551c196994d7f54c7f9bf2253c2e4",
+      "bytes": 489
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__ponytail__haiku__0/__pycache__/uploads.cpython-312.pyc",
+      "sha256": "44f00a64ed4a4738bd10b94853f27105e5e253a7561358b2f8ca19d2f034e094",
+      "bytes": 1036
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__ponytail__haiku__0/_claude.json",
+      "sha256": "5062da2ed231190e5caa519930329a4335230dd1836cbe277cd9141a3bbc2f68",
+      "bytes": 1591
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/safe-path__ponytail__haiku__0/uploads.py",
+      "sha256": "5a1c4d03395bd7818fe460e9c1718e1bf83551c196994d7f54c7f9bf2253c2e4",
+      "bytes": 489
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/summary.json",
+      "sha256": "23db7dcc51be5b857f9794fcd16ae2451ea2ad7a03c760d9c62a6948f06cb239",
+      "bytes": 4956
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__baseline__haiku__0/_claude.json",
+      "sha256": "70049c7e476e5e90f992cff6eb07e70d1c1700bda79f308374072bfc84b36f5a",
+      "bytes": 1476
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__baseline__haiku__0/server.js",
+      "sha256": "48be350305cdb3fa8b36a3da56a8700fd8cfd041f32ff4912fe0b825caedd9e6",
+      "bytes": 2786
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__caveman__haiku__0/_claude.json",
+      "sha256": "09a9cce74d25c6c89677eaf1cd6395db67458922d63b40e6333cf2ffcfc61150",
+      "bytes": 1601
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__caveman__haiku__0/server.js",
+      "sha256": "fe97c5f7bbfd84d0e7c4ed9b1f7b996e746e068caa1c77786a9598a1f3a15cda",
+      "bytes": 2718
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__ponytail__haiku__0/_claude.json",
+      "sha256": "20c5b38bd3503e08f887add7ff892dd7980df7167a4b36d6299740ac75520959",
+      "bytes": 1415
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-220253/todo-null__ponytail__haiku__0/server.js",
+      "sha256": "11aff305f5a08d6c831f338ab904cf1e0defb13588123c45f0384caf0eceebd3",
+      "bytes": 2528
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__baseline__haiku__0/__pycache__/auth.cpython-312.pyc",
+      "sha256": "35ff00305960493874ee3b8aa274211d375cfb260b38f1b3322d5cb91ba47d14",
+      "bytes": 1689
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__baseline__haiku__0/_claude.json",
+      "sha256": "62339770740f5c399b4d9acf5caea513c8113d68bf20088a386a80c36630757c",
+      "bytes": 1426
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__baseline__haiku__0/auth.py",
+      "sha256": "71c57334dde082446bfadf5f29821007aea8e9af0001ce641b86945ae62036fa",
+      "bytes": 824
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__caveman__haiku__0/__pycache__/auth.cpython-312.pyc",
+      "sha256": "00087d572f9e28d6334a59e22b0b166fc822714188c576d0186719be34739c64",
+      "bytes": 1575
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__caveman__haiku__0/_claude.json",
+      "sha256": "495d833b510ba23f372b2bbce9c7b9933e722fad8baaf3286510579808c685ec",
+      "bytes": 1559
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__caveman__haiku__0/auth.py",
+      "sha256": "1cd83cebb5b06347db2a49199c4c3d237ccfadf706781dcafbff089e9c915945",
+      "bytes": 698
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__ponytail__haiku__0/__pycache__/auth.cpython-312.pyc",
+      "sha256": "5524026be9e1c84c023f676fe5283577589e5965e083e4d271237125da33b932",
+      "bytes": 1692
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__ponytail__haiku__0/_claude.json",
+      "sha256": "92f78d62084dbf34f043e033ca111134e0f61abe4d4f42af1bd67ade732cd9d3",
+      "bytes": 1415
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/auth-token__ponytail__haiku__0/auth.py",
+      "sha256": "23535c126ff5fad9efb4461ee1ca63f66498ff55c838df15c410404f9f687f74",
+      "bytes": 853
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__baseline__haiku__0/__pycache__/compute.cpython-312.pyc",
+      "sha256": "e853e7007189d019244173d3129ef8ea1fb58dd0d9362304b10f56913768551c",
+      "bytes": 651
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__baseline__haiku__0/_claude.json",
+      "sha256": "a255f9983d4f765ee1adeedde9417a5c7487f65b43114055900a6071ea398946",
+      "bytes": 1311
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__baseline__haiku__0/compute.py",
+      "sha256": "71301d1b9708d56c61726c270cace3180d4d658eb6037b167d5192bd52e08c97",
+      "bytes": 269
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__caveman__haiku__0/__pycache__/compute.cpython-312.pyc",
+      "sha256": "2446c5ac53c73474403523b2cdd331279f3910bada65f58739ffa8a7a4cbbe2b",
+      "bytes": 684
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__caveman__haiku__0/_claude.json",
+      "sha256": "1672b2480c78f16352eedeba167f1eb906746b0dd492d76dd3ddea11515b8cb6",
+      "bytes": 1315
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__caveman__haiku__0/compute.py",
+      "sha256": "816f05868c4e58ce83b0f2aaceead35f2e4915b57e0aa85ebf992ed95a3b5eab",
+      "bytes": 291
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__ponytail__haiku__0/__pycache__/compute.cpython-312.pyc",
+      "sha256": "bacc6acc2aecd0f56526a2a2b3443d765073e9f761e6937b22f41e0b3de9144f",
+      "bytes": 685
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__ponytail__haiku__0/_claude.json",
+      "sha256": "9c0c087dc8690834f5e9bcb264a8129cfc072beeabd65231eba1f3a1edd69ef5",
+      "bytes": 1363
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/cache__ponytail__haiku__0/compute.py",
+      "sha256": "816f05868c4e58ce83b0f2aaceead35f2e4915b57e0aa85ebf992ed95a3b5eab",
+      "bytes": 291
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__baseline__haiku__0/__pycache__/sales.cpython-312.pyc",
+      "sha256": "20ab721a90e60be7e74dbab7f572e1a59f5a2fe642a12ba3cfebd1e8d4276e02",
+      "bytes": 916
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__baseline__haiku__0/_claude.json",
+      "sha256": "279a501eb24d9ec274ea243fbf41acab7825cef72771339fea612b1d3e8c2504",
+      "bytes": 1327
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__baseline__haiku__0/sales.py",
+      "sha256": "29c86ee897c063421aa568aef2403e0938981aadeb8d67ecacdbe4c2814c866d",
+      "bytes": 376
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__caveman__haiku__0/__pycache__/sales.cpython-312.pyc",
+      "sha256": "b0979a2d1724e9dede17b287f605dc419315a6592cf3e462ceb25ec435698a72",
+      "bytes": 1123
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__caveman__haiku__0/_claude.json",
+      "sha256": "3572ef54039de9c345feedb032fc331568b1d0d4c4903f14606aa89f1a345b4a",
+      "bytes": 1493
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__caveman__haiku__0/sales.py",
+      "sha256": "0a20b0632930069759b65ebb7816f2506f207a9457b0e685dbd4870afea2e8e2",
+      "bytes": 550
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__ponytail__haiku__0/__pycache__/sales.cpython-312.pyc",
+      "sha256": "b577278b777c02443e55e18b2fbb7eadf785b054be6d54330ff6b1c5232b0473",
+      "bytes": 933
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__ponytail__haiku__0/_claude.json",
+      "sha256": "6377482f1b1e74a9b0d5babfb32bb6b8dd47ec226f4bd895b2cef8ce5b878384",
+      "bytes": 1291
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/csv-sum__ponytail__haiku__0/sales.py",
+      "sha256": "7a150b15280533ef056450800d4acbb6ad89f6132c95e5d3853884564dbf793b",
+      "bytes": 374
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/results.json",
+      "sha256": "3f2b359221b45b95df06da1bf9568b7ce137f09f87c25a5342802b9d1d70ebd9",
+      "bytes": 5589
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__baseline__haiku__0/__pycache__/db.cpython-312.pyc",
+      "sha256": "0b5b1cd953cab492d6476f313eb47370ae599846cabe6aacc067c6fa8927f2af",
+      "bytes": 652
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__baseline__haiku__0/_claude.json",
+      "sha256": "40c48a7aa1b6e3d9162cdc97393fbde518aa034787a863399ff0acfa48ef44f3",
+      "bytes": 1358
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__baseline__haiku__0/db.py",
+      "sha256": "2ac723a239415916a016efc8a2d87867f4d9311ed10922b59206e782315e83d1",
+      "bytes": 312
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__caveman__haiku__0/__pycache__/db.cpython-312.pyc",
+      "sha256": "2c75b88a613240d8e716f87a48929ae02bb965bc3b894abf39b0ba7dc60a3687",
+      "bytes": 651
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__caveman__haiku__0/_claude.json",
+      "sha256": "feaa93d1849904f60e48c85d6b2640ba7109f14c1ed38b20e52387ced70b3eb5",
+      "bytes": 1367
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__caveman__haiku__0/db.py",
+      "sha256": "2ac723a239415916a016efc8a2d87867f4d9311ed10922b59206e782315e83d1",
+      "bytes": 312
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__ponytail__haiku__0/__pycache__/db.cpython-312.pyc",
+      "sha256": "76270bbc08cd2451e74ad0ea25b1b4ad46e3faa72b5a7c302c4ea43f6de8b7f8",
+      "bytes": 652
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__ponytail__haiku__0/_claude.json",
+      "sha256": "e802e88a2c6140e2a329aec81b55182b0ca6152690584b751c29c579b9e255bc",
+      "bytes": 1342
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/sql-user__ponytail__haiku__0/db.py",
+      "sha256": "2ac723a239415916a016efc8a2d87867f4d9311ed10922b59206e782315e83d1",
+      "bytes": 312
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221213/summary.json",
+      "sha256": "cad272c5f99ac1b4ab13ce8d9ccdca7403dc09245056f8bb6be5832c97feceae",
+      "bytes": 4904
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/results.json",
+      "sha256": "f5235e7366fe9d3b9105cc1d91c4a3f7c5f57447193a9c0bf242d86123894185",
+      "bytes": 5903
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__baseline__haiku__0/__pycache__/invoice.cpython-312.pyc",
+      "sha256": "0301f97e7737bea787f937075821d639ae3602e3cf5712145e2651815dd4ca86",
+      "bytes": 646
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__baseline__haiku__0/__pycache__/money.cpython-312.pyc",
+      "sha256": "d083cc83bedef71c8e17800dd373727f8075138cb894f5bcd9f7d66b29db86f2",
+      "bytes": 544
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__baseline__haiku__0/_claude.json",
+      "sha256": "2bfdc6350ccfa0e49b1e77412249cc5520de2617f9030fe330c2edfa3e0849dc",
+      "bytes": 1355
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__baseline__haiku__0/invoice.py",
+      "sha256": "c90b93e0d7866f1ae2c6071d23c789d532b11dbb324589ee92254e9331c3f8ec",
+      "bytes": 297
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__baseline__haiku__0/money.py",
+      "sha256": "841abe7020947b2cecf2310752baa0d88c2dea27863b19ede13791f8f7ca1629",
+      "bytes": 224
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__caveman__haiku__0/__pycache__/invoice.cpython-312.pyc",
+      "sha256": "11a0f9694e3b44042a5cc3ed132ecfc13b790f55616deb0fd40b417e4e0cf159",
+      "bytes": 645
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__caveman__haiku__0/__pycache__/money.cpython-312.pyc",
+      "sha256": "0fb7561821e4ee1267ff282e34eed3076e0ae20935d301721209c766f8493482",
+      "bytes": 543
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__caveman__haiku__0/_claude.json",
+      "sha256": "cb08d526f84d800cff7310b87c7896f7f97df847b5cdd1d66d5942b9c1e32114",
+      "bytes": 1342
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__caveman__haiku__0/invoice.py",
+      "sha256": "c90b93e0d7866f1ae2c6071d23c789d532b11dbb324589ee92254e9331c3f8ec",
+      "bytes": 297
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__caveman__haiku__0/money.py",
+      "sha256": "841abe7020947b2cecf2310752baa0d88c2dea27863b19ede13791f8f7ca1629",
+      "bytes": 224
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__ponytail__haiku__0/__pycache__/invoice.cpython-312.pyc",
+      "sha256": "f98df5b8ec11a34d45bc33d4c92baceac31dd21f9abc47f255f0fa51a7f6e057",
+      "bytes": 646
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__ponytail__haiku__0/__pycache__/money.cpython-312.pyc",
+      "sha256": "76932b725b5ec640ca453af6d6aa9d6b97f0fdd433ea70e2a089628a93fcb00c",
+      "bytes": 544
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__ponytail__haiku__0/_claude.json",
+      "sha256": "4a4875bda2372b09c66f756bc38555d829565d140941b9b9c839f8d4ffdcdecf",
+      "bytes": 1358
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__ponytail__haiku__0/invoice.py",
+      "sha256": "c90b93e0d7866f1ae2c6071d23c789d532b11dbb324589ee92254e9331c3f8ec",
+      "bytes": 297
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-money__ponytail__haiku__0/money.py",
+      "sha256": "841abe7020947b2cecf2310752baa0d88c2dea27863b19ede13791f8f7ca1629",
+      "bytes": 224
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__baseline__haiku__0/__pycache__/articles.cpython-312.pyc",
+      "sha256": "7a847cdd1c849c5953623bac0760e2a3518f81d74f89e4c4a03bcf49c1cb49a3",
+      "bytes": 830
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__baseline__haiku__0/__pycache__/textutils.cpython-312.pyc",
+      "sha256": "4c390edd766b9c3377fafc2341ece3cb379ec4d8305df408a803ac48e40d4134",
+      "bytes": 1227
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__baseline__haiku__0/_claude.json",
+      "sha256": "59d23e1c5470c449b1e9b40b31971c62494ee768dda9126affd646e925ab0499",
+      "bytes": 1394
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__baseline__haiku__0/articles.py",
+      "sha256": "a48e68cdfb30e12df1e9699544af0dd1affe93aefc8ea08181d38ff931e9672a",
+      "bytes": 484
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__baseline__haiku__0/textutils.py",
+      "sha256": "1be23df669546a35cfd51a7fa15713fde5ace701eb42ad048d8c78531f1a71e6",
+      "bytes": 525
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__caveman__haiku__0/__pycache__/articles.cpython-312.pyc",
+      "sha256": "2f33229c28f5fc4d49a6caa95779d613ea42a774e89da239a1e15056fafbf7ee",
+      "bytes": 829
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__caveman__haiku__0/__pycache__/textutils.cpython-312.pyc",
+      "sha256": "439cdf91cf386ef34330f3a61ca726a4ea5dc2b9dde2441aaa92908801d0e732",
+      "bytes": 1226
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__caveman__haiku__0/_claude.json",
+      "sha256": "67fd4005b0aaa842395f058e469e5e19b185254e532c753ebf294412636f1dfd",
+      "bytes": 1395
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__caveman__haiku__0/articles.py",
+      "sha256": "a48e68cdfb30e12df1e9699544af0dd1affe93aefc8ea08181d38ff931e9672a",
+      "bytes": 484
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__caveman__haiku__0/textutils.py",
+      "sha256": "1be23df669546a35cfd51a7fa15713fde5ace701eb42ad048d8c78531f1a71e6",
+      "bytes": 525
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__ponytail__haiku__0/__pycache__/articles.cpython-312.pyc",
+      "sha256": "29ed6731b36f0faa3b35a4d017e8fec0f8a5a8d6f6853f376a5816632553ee8f",
+      "bytes": 830
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__ponytail__haiku__0/__pycache__/textutils.cpython-312.pyc",
+      "sha256": "93f58124dc3867f045e1ea731f795465ac1a3b320470478c71e97878640cc2ef",
+      "bytes": 1227
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__ponytail__haiku__0/_claude.json",
+      "sha256": "412170fad3c06b496cbf85213dc1a7d93f167ef0acd6ad217a35bf31578c5c9a",
+      "bytes": 1478
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__ponytail__haiku__0/articles.py",
+      "sha256": "a48e68cdfb30e12df1e9699544af0dd1affe93aefc8ea08181d38ff931e9672a",
+      "bytes": 484
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/reuse-slug__ponytail__haiku__0/textutils.py",
+      "sha256": "1be23df669546a35cfd51a7fa15713fde5ace701eb42ad048d8c78531f1a71e6",
+      "bytes": 525
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/summary.json",
+      "sha256": "0e58c4049eb6a67fa7b8509a7cfc43443a287e08ece16e0c29a22146d77086d2",
+      "bytes": 4958
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__baseline__haiku__0/__pycache__/billing.cpython-312.pyc",
+      "sha256": "ac3c2bd9af73ddcf67debcfa9dd0a7c0d7276d1140477eddc6dbca8a1b70c521",
+      "bytes": 1417
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__baseline__haiku__0/_claude.json",
+      "sha256": "83518ceb13d37b4e8617b949b3850e59f75d3f61cb20a49cf947294de23d7fb1",
+      "bytes": 1376
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__baseline__haiku__0/billing.py",
+      "sha256": "e55f6bfc9aec831924985fb56f4f4c1df0b37c8479a324d17a2c693b8246238c",
+      "bytes": 575
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__caveman__haiku__0/__pycache__/billing.cpython-312.pyc",
+      "sha256": "158d9b451564d9bbcfe06216f191d036e01f2abdcc7c91a3866f8a697d125ffc",
+      "bytes": 1416
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__caveman__haiku__0/_claude.json",
+      "sha256": "1ee7e8fac24f8c1cd689b745fc334bc7886d856bcf55c5ad4f4d7b3405f3fdf3",
+      "bytes": 1333
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__caveman__haiku__0/billing.py",
+      "sha256": "e55f6bfc9aec831924985fb56f4f4c1df0b37c8479a324d17a2c693b8246238c",
+      "bytes": 575
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__ponytail__haiku__0/__pycache__/billing.cpython-312.pyc",
+      "sha256": "1c443355a33bdefda6facab7b58909da21b54730a1a9e4885a158dfc08f71991",
+      "bytes": 1417
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__ponytail__haiku__0/_claude.json",
+      "sha256": "b9f10f24801d55d9bc92330e4c6d66a3336e7e559e91dfc7a22a1e726c03a913",
+      "bytes": 1407
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-amount__ponytail__haiku__0/billing.py",
+      "sha256": "e55f6bfc9aec831924985fb56f4f4c1df0b37c8479a324d17a2c693b8246238c",
+      "bytes": 575
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__baseline__haiku__0/__pycache__/bank.cpython-312.pyc",
+      "sha256": "89100f11a1d0619a7f0413d23804039a166e18a6552f6ef92cff2e144046a586",
+      "bytes": 1317
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__baseline__haiku__0/_claude.json",
+      "sha256": "888997efbfea7e932eefd9717940a18fe41ec036f6a6e7783da143c90324c430",
+      "bytes": 1409
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__baseline__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__baseline__haiku__0/bank.py",
+      "sha256": "03deede261b97f5f81a8d5f87e3218160d8ae08bd134150d862c01f8ffc9c362",
+      "bytes": 633
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__caveman__haiku__0/__pycache__/bank.cpython-312.pyc",
+      "sha256": "8633ac906772d2e3c5cd0ba10006095c169604e88d7e8c8ac92b5c4965679e01",
+      "bytes": 1318
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__caveman__haiku__0/_claude.json",
+      "sha256": "6367fe4c9c347607d55639c63a2f9b4f422489c63f2f18af1b10918c5a81ffbf",
+      "bytes": 1447
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__caveman__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__caveman__haiku__0/bank.py",
+      "sha256": "5c1129db97f1b31017dab4bdc57c2cc672b48473d2485c2740d8b3b85071a753",
+      "bytes": 634
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__ponytail__haiku__0/__pycache__/bank.cpython-312.pyc",
+      "sha256": "527d0f4d11a3fdd7f0b407cb98b1fde715d99e1b7c8aad7056c14e5d610d9e87",
+      "bytes": 1313
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__ponytail__haiku__0/_claude.json",
+      "sha256": "4d736dae944221b86d95f5821d0c70b7ff94ce06c4b091ffa00f6aa49046d230",
+      "bytes": 1482
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__ponytail__haiku__0/_claude.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "docs/_witnesses/armbench-ponytail-live-2026-08-14/20260813-221802/trace-transfer__ponytail__haiku__0/bank.py",
+      "sha256": "500db9fbb1d7114e2700629de5d28ecfc976975ed3db11dc9945264aea1ebab9",
+      "bytes": 675
+    }
+  ],
+  "failure_semantics": "Upstream run.py has no retry loop: retries=0. Cell exceptions are retained as error fields; Claude terminal metadata and permission_denials are retained in each _claude.json."
+}
