@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -9,6 +11,41 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
+func TestResolveClaudeSpeed(t *testing.T) {
+	tests := []struct {
+		name, backend, workKind, configured, want string
+		ultracode                                 bool
+	}{
+		{name: "interactive auto fast", backend: "claude", workKind: "interactive", configured: "auto", want: "fast"},
+		{name: "grind auto fast", backend: "claude", workKind: "gardening", configured: "auto", want: "fast"},
+		{name: "rigor auto standard", backend: "claude", workKind: "security_audit", configured: "auto", want: "standard"},
+		{name: "ultracode auto standard", backend: "claude", workKind: "engineering", configured: "auto", ultracode: true, want: "standard"},
+		{name: "explicit standard", backend: "claude", workKind: "gardening", configured: "standard", want: "standard"},
+		{name: "non claude ignored", backend: "codex", workKind: "gardening", configured: "fast", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveClaudeSpeed(tt.backend, tt.workKind, tt.configured, tt.ultracode); got != tt.want {
+				t.Fatalf("resolveClaudeSpeed() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	if _, err := normalizeClaudeSpeed("turbo"); err == nil {
+		t.Fatal("normalizeClaudeSpeed(turbo) unexpectedly succeeded")
+	}
+}
+
+func TestWriteDispatchSpeedSidecar(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "worker.log")
+	writeDispatchSpeedSidecar(logPath, "fast")
+	got, err := os.ReadFile(logPath + ".speed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "fast\n" {
+		t.Fatalf("speed sidecar = %q, want fast\\n", got)
+	}
+}
 func TestDispatchEngineForWorkClass(t *testing.T) {
 	tests := []struct {
 		name, current, workClass, explicit, want string

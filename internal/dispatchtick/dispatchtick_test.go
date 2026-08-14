@@ -2,10 +2,31 @@ package dispatchtick
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
+func TestBuildWorkerCommandClaudeFastMode(t *testing.T) {
+	got, err := BuildWorkerCommand("claude", "task", WorkerLaunch{Speed: "fast"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"claude", "-p", "--permission-mode", "bypassPermissions", "--settings", `{"fastMode":true}`, "task"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildWorkerCommandSpeedIgnoredForNonClaude(t *testing.T) {
+	got, err := BuildWorkerCommand("codex", "task", WorkerLaunch{Speed: "fast"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got, "--settings") {
+		t.Fatalf("non-Claude command leaked speed settings: %#v", got)
+	}
+}
 func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 	tests := []struct {
 		name      string

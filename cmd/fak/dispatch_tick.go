@@ -34,6 +34,7 @@ type dispatchTickOptions struct {
 	LeaseTree       []string
 	Backend         string
 	BackendExplicit bool
+	WorkerSpeed     string
 	Goal            string
 	GoalProfile     string
 	ExcludeLanes    []string
@@ -246,6 +247,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	targetIssue := fs.Int("target-issue", 0, "explicit issue number for the selected lane")
 	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
 	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
+	workerSpeed := fs.String("speed", firstString(strings.TrimSpace(os.Getenv("FAK_CLAUDE_SPEED")), "auto"), "Claude launch speed posture (auto|fast|standard); ignored by non-Claude backends")
 	backend := fs.String("backend", firstString(strings.TrimSpace(os.Getenv("FLEET_WORKER_BACKEND")), "claude"), "worker backend (claude|opencode|codex|micro); micro (#2030, opt-in) enrolls the routed lane into the in-process microagent host instead of a detached CLI — default follows $FLEET_WORKER_BACKEND, else claude")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); known goal ids also select the default --goal-profile")
 	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
@@ -307,6 +309,11 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 			explicitBackend = true
 		}
 	})
+	speed, err := normalizeClaudeSpeed(*workerSpeed)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
+		return dispatchTickOptions{}, false, 2
+	}
 	currentBackend, err := dispatchtick.NormalizeBackend(*backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
@@ -352,6 +359,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		LeaseTree:               splitCommaList(*leaseTree),
 		Backend:                 b,
 		BackendExplicit:         explicitBackend,
+		WorkerSpeed:             speed,
 		Goal:                    goalID,
 		GoalProfile:             profile,
 		ExcludeLanes:            splitCommaList(*excludeLane),
@@ -563,6 +571,7 @@ func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map
 		"engine":               opts.Backend,
 		"work_kind":            opts.WorkKind,
 		"engine_source":        map[bool]string{true: "operator_pin", false: "work_class"}[opts.BackendExplicit],
+		"speed":                resolveClaudeSpeed(opts.Backend, opts.WorkKind, opts.WorkerSpeed, false),
 		"goal":                 opts.Goal,
 		"goal_profile":         opts.GoalProfile,
 		"max_workers":          opts.MaxWorkers,
@@ -689,6 +698,7 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 		Fallback:  fallbackModel,
 		Effort:    modelPolicy.Effort,
 		Ultracode: modelPolicy.Ultracode,
+		Speed:     resolveClaudeSpeed(opts.Backend, opts.WorkKind, opts.WorkerSpeed, modelPolicy.Ultracode),
 	}
 	if opts.Backend == "opencode" {
 		launch.AccountTag = account.Tag
@@ -1269,6 +1279,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
 	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
 	writeDispatchModelSidecar(spawned.Log, launch.Model)
+	writeDispatchSpeedSidecar(spawned.Log, launch.Speed)
 	// #4324: persist the fencing token this lane lease was acquired under, so the async
 	// witness sweep — a LATER tick process that never saw the acquire — can prove the
 	// lease is still this worker's and hand the lane back the moment the worker exits

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,47 @@ func dispatchWorkerModelMap(p workerModelPolicy) map[string]any {
 // The table is intentionally small: throughput-shaped grind classes use codex;
 // correctness-shaped rigor classes use Claude. An explicit operator backend pin
 // always wins, and an unknown/untagged class preserves current byte-for-byte.
+func normalizeClaudeSpeed(raw string) (string, error) {
+	speed := strings.ToLower(strings.TrimSpace(raw))
+	if speed == "" {
+		speed = "auto"
+	}
+	switch speed {
+	case "auto", "fast", "standard":
+		return speed, nil
+	default:
+		return "", fmt.Errorf("invalid Claude speed %q (want auto, fast, or standard)", raw)
+	}
+}
+
+// resolveClaudeSpeed keeps rigor/ultracode work at the standard posture while
+// defaulting latency-sensitive and grind work to fast. Non-Claude backends ignore it.
+func resolveClaudeSpeed(backend, workKind, configured string, ultracode bool) string {
+	if strings.ToLower(strings.TrimSpace(backend)) != "claude" {
+		return ""
+	}
+	speed, err := normalizeClaudeSpeed(configured)
+	if err != nil {
+		return ""
+	}
+	if speed != "auto" {
+		return speed
+	}
+	class := strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(strings.TrimSpace(workKind)))
+	if ultracode || strings.Contains(class, "rigor") || strings.Contains(class, "audit") || strings.Contains(class, "security") || strings.Contains(class, "verify") {
+		return "standard"
+	}
+	return "fast"
+}
+
+func writeDispatchSpeedSidecar(logPath, speed string) {
+	logPath = strings.TrimSpace(logPath)
+	speed = strings.TrimSpace(speed)
+	if logPath == "" || speed == "" {
+		return
+	}
+	_ = os.WriteFile(logPath+".speed", []byte(speed+"\n"), 0o644)
+}
 func dispatchEngineForWorkClass(current, workClass, explicit string) string {
 	if pin := strings.TrimSpace(strings.ToLower(explicit)); pin != "" {
 		return pin

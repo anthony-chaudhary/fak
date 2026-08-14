@@ -226,7 +226,8 @@ type WorkerLaunch struct {
 	Model               string // primary model to pin (Claude --model / opencode|codex -m)
 	Fallback            string // Claude-only comma-separated --fallback-model chain
 	Effort              string // Claude-only reasoning effort (--effort); ignored when Ultracode
-	Ultracode           bool   // Claude-only: emit --settings ultracode (implies xhigh + workflow)
+	Ultracode           bool
+	Speed               string // Claude-only: auto|fast|standard posture; fast emits per-session fastMode settings   // Claude-only: emit --settings ultracode (implies xhigh + workflow)
 	AccountTag          string // resolved fleet account; required for OpenCode fleet launches
 	AccountDir          string // resolved product config directory; never written to the ledger as a secret
 	TaskTier            int    // requested task tier (1 hard .. 3 narrow); required for OpenCode fleet launches
@@ -264,6 +265,8 @@ func BuildWorkerCommand(backend, prompt string, launch WorkerLaunch) ([]string, 
 		switch {
 		case launch.Ultracode:
 			cmd = append(cmd, "--settings", UltracodeSettingsArg)
+		case strings.EqualFold(strings.TrimSpace(launch.Speed), "fast"):
+			cmd = append(cmd, "--settings", `{"fastMode":true}`)
 		case strings.TrimSpace(launch.Effort) != "":
 			cmd = append(cmd, "--effort", launch.Effort)
 		}
