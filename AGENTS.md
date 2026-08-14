@@ -388,6 +388,14 @@ the *committed* tip (not the peer-dirty tree) with `fak-dev ci-preflight`.
   this: it runs `go build ./cmd/fak` under default tags and fails with the exact undefined
   symbol when it is red — the durable guard for a recurring class (#3217 #3127 #2251 #1325),
   not another one-off instance patch.
+- **Keep code comments succinct and durable.** Do not narrate syntax, restate a function name,
+  or leave step-by-step "now we" commentary that the code already makes clear. Comment the
+  non-obvious **why**: invariants, safety/security boundaries, concurrency, compatibility,
+  performance tradeoffs, and surprising operational constraints. Preserve required exported-API,
+  package, directive, generated, and legal comments. Prefer clearer names or a small helper over a
+  paragraph; move durable tutorials and runbooks to docs. The changed-lines-only
+  `COMMENT_QUALITY` pre-commit gate is advisory by default (`FLEET_COMMENT_QUALITY_GUARD=block`
+  opts into enforcement) because prose quality is contextual and must not become a brittle blocker.
 - **Every claim carries a tag.** Each `- [` line in [`fak/CLAIMS.md`](CLAIMS.md) must
   carry exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]` (lint-enforced by
   `make claims-lint`). Don't overclaim; the repo keeps an honesty ledger.

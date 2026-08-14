@@ -144,6 +144,9 @@ func PreCommitGates() []Gate {
 		// to hard-enforce it, ALLOW_GIT_HYGIENE_BYPASS=1 to skip it once; a `git-hygiene:` note or
 		// code already routed through the daily tick silences it in-band.
 		{Name: "GIT_HYGIENE_BYPASS", ModeEnv: "FLEET_GIT_HYGIENE_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_GIT_HYGIENE_BYPASS", Check: gateGitHygieneBypass},
+		// COMMENT_QUALITY reviews only changed implementation comments and stays advisory because
+		// comment value depends on context; it must never turn a prose preference into a commit blockade.
+		{Name: "COMMENT_QUALITY", ModeEnv: "FLEET_COMMENT_QUALITY_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_VERBOSE_COMMENTS", Check: gateCommentQuality},
 		// GOFMT is ADVISORY (DefaultMode "warn"): the commit-boundary sibling of make ci's
 		// gofmt-check. It fires when a staged .go file is not gofmt-clean, before the drift reds
 		// every peer's `make ci` at the trunk — a recurring red the release notes keep clearing

@@ -17,5 +17,8 @@ Must-know rules (enforced below the agent layer):
   branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
 - Commit by explicit path (`git commit -- <paths>`, never `git add -A`); sign off with
   `git commit -s` (DCO).
+- Keep code comments succinct: omit comments that restate syntax or narrate each step. Preserve
+  comments that explain non-obvious rationale, invariants, safety, concurrency, compatibility, or
+  exported APIs; prefer clearer code and put durable tutorials in docs.
 - The Go module is the repository root — run `go` commands from the clone root
   (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly).

@@ -1950,6 +1950,21 @@
           "category": "incidental",
           "reason": "Benchmark-local deterministic rubric helper, not a reusable repository guard concept.",
           "token": "semanticGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant keeps one gate name consistent across implementation and tests",
+          "token": "commentQualityGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "private Go function follows the established gate<Name> implementation convention",
+          "token": "gateCommentQuality"
+        },
+        {
+          "category": "incidental",
+          "reason": "environment variable follows the existing per-gate mode override convention",
+          "token": "FLEET_COMMENT_QUALITY_GUARD"
         }
       ],
       "exclude": [
@@ -1985,6 +2000,7 @@
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
         "FAK_GUARD_REFUSAL_STATE_DIR",
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
+        "FLEET_COMMENT_QUALITY_GUARD",
         "FLEET_GIT_HYGIENE_GUARD",
         "GATED_UNWITNESSED",
         "GateAttested",
@@ -2031,6 +2047,7 @@
         "cmdGuardGoalQuestionHook",
         "codeToolGate",
         "codeToolGateOnce",
+        "commentQualityGate",
         "cooldownGateBlindWarning",
         "coreLockLandGate",
         "dispatchGateProvenance",
@@ -2046,6 +2063,7 @@
         "fleetDogfoodGuardBaseURL",
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
+        "gateCommentQuality",
         "gateGitHygieneBypass",
         "gateProse",
         "gateSkew",
