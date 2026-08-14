@@ -492,7 +492,6 @@ func diagnose(input []byte, lim answershape.Limits) doctorReport {
 		KernelWouldHold: wouldHold,
 	}
 
-	// Check 1 — answer-shape degeneration/verbosity.
 	if shape.Degenerate {
 		rep.Recommendations = append(rep.Recommendations, Recommendation{
 			Check:    "answer-shape",
@@ -510,7 +509,6 @@ func diagnose(input []byte, lim answershape.Limits) doctorReport {
 		})
 	}
 
-	// Check 2 — the kernel admit cross-check.
 	if wouldHold {
 		rep.Recommendations = append(rep.Recommendations, Recommendation{
 			Check:    "kernel-admit",

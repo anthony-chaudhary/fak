@@ -39,13 +39,11 @@ func cmdCoverageMatrix(argv []string) {
 		return
 	}
 
-	// Build the coverage matrix from the internal package
 	payload := covmatrix.Build()
 	cells := covmatrix.Grid()
 
 	var output []byte
 	if *asJSON {
-		// Emit the full control-pane payload
 		jsonPayload, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fak coverage-matrix: %v\n", err)
@@ -123,17 +121,14 @@ func renderHumanReadable(payload scorecard.Payload, cells []covmatrix.Cell) stri
 	fmt.Fprintf(&b, "Schema: %s\n", payload.Schema)
 	fmt.Fprintf(&b, "Growth debt (silently undefined cells): %d\n\n", undefined)
 
-	// Print summary
 	fmt.Fprintf(&b, "Status summary:\n")
 	fmt.Fprintf(&b, "  SUPPORTED:       %d\n", supported)
 	fmt.Fprintf(&b, "  PROOF-PATH-ONLY: %d\n", proofPathOnly)
 	fmt.Fprintf(&b, "  FENCED:          %d\n", fenced)
 	fmt.Fprintf(&b, "  UNDEFINED:       %d  <- growth_debt\n\n", undefined)
 
-	// Print matrix as a table
 	fmt.Fprintf(&b, "%-18s", "")
 
-	// Get sorted backend list
 	backendSet := make(map[string]bool)
 	for _, c := range cells {
 		backendSet[c.Backend] = true
@@ -149,7 +144,6 @@ func renderHumanReadable(payload scorecard.Payload, cells []covmatrix.Cell) stri
 	}
 	fmt.Fprintln(&b)
 
-	// Get sorted family list
 	familySet := make(map[string]bool)
 	for _, c := range cells {
 		familySet[c.Family] = true
