@@ -3,9 +3,9 @@ You are a detached, unattended headless worker. Resolve ONE specific GitHub issu
 SAME tree on ADJACENT cmd/fak files, so lane discipline is load-bearing.
 
 ## Your issue: #5025 — route engine by task-class (codex for grind, ultracode Opus for rigor)
-Read it first: `gh issue view 5025`. STAY IN SCOPE:
+Read it first: `gh issue view 5025`. As of 2026-08-14, #5025 is OPEN. Related launch work is split: #5016 and #5019 are CLOSED; #5017 and #5018 remain OPEN. Re-read the current dispatch seams before editing; recovery and worker-worktree isolation have moved since this prompt was first written. STAY IN SCOPE:
 - `cmd/fak/dispatch_model_policy.go` and the work-kind → launch seam
-  (`cmd/fak/dispatch_tick_route.go` / `dispatch_workkind_launch*.go`) + their `_test.go`.
+  (`cmd/fak/dispatch_tick_route.go` / `cmd/fak/dispatch_workkind_launch_test.go`) + `cmd/fak/dispatch_model_policy_test.go`.
 Primary deliverable (the part that Fixes #5025): add a work-class → ENGINE
 resolution (Claude vs codex) defaulted by a small documented table — grind/gardening
 classes → codex, rigor/engineering → Claude/Opus, UNKNOWN/untagged → the CURRENT
@@ -18,7 +18,7 @@ codex launcher itself.
 1. **Take a lane first.** `dos arbitrate --workspace . --lane <guess>` covering
    `cmd/fak/dispatch_*.go`. Honor a REFUSE. NEVER --force. Do NOT edit files outside
    your lane — siblings are on accounts/guard launcher files.
-2. **Reproduce first, then fix.** Add a `dispatch_model_policy_test.go` (or route
+2. **Reproduce first, then fix.** Add a route-policy test that fails before the fix in `dispatch_model_policy_test.go` (or route
    test) case: assert a gardening/grind class resolves to the codex engine, an
    engineering/rigor class resolves to Claude, an untagged class is unchanged
    (byte-identical to prior), and an explicit pin overrides the table. Failing
