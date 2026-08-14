@@ -16,7 +16,7 @@ func capRoster() []Account {
 			Kind: KindWorker, ModelTier: intp(1), Available: boolp(true),
 			RouteWeight: intp(10), LiveSessions: intp(DefaultClaudeSessionsPerAccount)},
 		{Dir: "C:/u/.claude-idle", Product: "claude", Account: ".claude-idle", Tag: "idle",
-			Kind: KindWorker, ModelTier: intp(1), Available: boolp(true), LiveSessions: intp(1)},
+			Kind: KindWorker, ModelTier: intp(1), Available: boolp(true), LiveSessions: intp(0)},
 	}
 }
 
@@ -44,21 +44,22 @@ func TestRouteAccountSessionCapRefusal(t *testing.T) {
 		t.Fatalf("blocked = %+v, want both at-cap seats listed", route.BlockedTargetAccounts)
 	}
 
-	// Raising the budget (the documented env knob) re-admits the same roster.
+	// A legacy widening override must not multiply one OAuth identity into fake
+	// independent seats. Capacity grows only through distinct account identities.
 	t.Setenv(SessionsPerAccountEnv, "9")
-	relaxed := RouteAccount(rows, "implement the feature", "engineering", false, false, "claude", DefaultPolicy())
-	if !relaxed.OK || relaxed.Account.Tag != "weighted" {
-		t.Fatalf("route with raised cap = %+v, want route-weighted seat admitted again", relaxed)
+	stillFull := RouteAccount(rows, "implement the feature", "engineering", false, false, "claude", DefaultPolicy())
+	if stillFull.OK || !strings.Contains(stillFull.Reason, "session cap") {
+		t.Fatalf("route with unsafe widening override = %+v, want hard one-identity cap", stillFull)
 	}
 }
 
-func TestAllocateWaveFloorsLoadAtRegistryLiveSessions(t *testing.T) {
+func TestAllocateWaveRefusesPoolWithLiveSession(t *testing.T) {
 	t.Setenv(SessionsPerAccountEnv, "")
-	rows := capRoster()[1:] // just the idle seat, one live session already running
-	rows[0].LiveSessions = intp(3)
+	rows := capRoster()[1:]
+	rows[0].LiveSessions = intp(1)
 	wave := AllocateWave(rows, WaveRequest{Count: 4, TaskText: "implement the feature",
 		TaskClass: "engineering", Product: "claude"}, DefaultPolicy())
-	if !wave.OK || wave.Granted != 1 || wave.Shortfall != 3 || wave.Lanes[0].SessionSlot != 4 {
-		t.Fatalf("wave = %+v, want registry-live sessions to consume 3 of 4 slots", wave)
+	if wave.OK || wave.Granted != 0 || wave.Shortfall != 4 {
+		t.Fatalf("wave = %+v, want one live session to consume the identity pool", wave)
 	}
 }

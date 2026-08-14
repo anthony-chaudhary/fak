@@ -174,7 +174,7 @@ const (
 	// DefaultClaudeSessionsPerAccount is the default concurrent session budget
 	// for one healthy Claude worker account. It models account capacity as
 	// session slots rather than a single binary seat.
-	DefaultClaudeSessionsPerAccount = 4
+	DefaultClaudeSessionsPerAccount = 1
 	DefaultAccountSessionsPerWorker = 1
 )
 
@@ -193,15 +193,14 @@ func AccountSessionCap(row Account) int {
 	}
 }
 
-// claudeSessionsPerAccount is the per-account concurrent session budget for a
-// healthy Claude worker account: DefaultClaudeSessionsPerAccount, overridable per
-// host via the FAK_SESSIONS_PER_ACCOUNT env knob. A non-positive or unparseable
-// value keeps the default.
+// claudeSessionsPerAccount returns the hard identity-pool bound. Historical
+// builds accepted FAK_SESSIONS_PER_ACCOUNT=6 and launched six concurrent workers
+// through one OAuth identity; the witnessed #6572 wave yielded 0/10 commits and
+// progressively shorter sessions. Keep parsing the compatibility knob only so a
+// future diagnostics surface can name it; never let it widen the safety bound.
 func claudeSessionsPerAccount() int {
 	if v := strings.TrimSpace(os.Getenv(SessionsPerAccountEnv)); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+		_, _ = strconv.Atoi(v)
 	}
 	return DefaultClaudeSessionsPerAccount
 }
