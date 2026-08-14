@@ -177,6 +177,14 @@ const dispatchCodexLoopGateDefaultLimit = 20
 var dispatchResolvePIDRE = regexp.MustCompile(`^(?:resolve|repair)-\d+-\d{8}-\d{6}\.pid$`)
 var dispatchGoalPIDRE = regexp.MustCompile(`^.+-\d{8}-\d{6}\.pid$`)
 
+func dispatchModelDowngradeDefault() bool {
+	raw, ok := os.LookupEnv("FLEET_DISPATCH_MODEL_DOWNGRADE")
+	if !ok || strings.TrimSpace(raw) == "" {
+		return true
+	}
+	return dispatchBoolValue(raw)
+}
+
 func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 	opts, asJSON, code := parseDispatchTickFlags(stderr, argv)
 	if code != 0 {
@@ -260,7 +268,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	pinWorkerModel := fs.Bool("pin-worker-model", false, "benchmark gate: pin the claude worker to the account/default model (model-accounting run) instead of the seat default + fallback chain")
 	acceptanceArtifact := fs.String("model-acceptance", "", "require this exact-ID model acceptance artifact before provider launch")
 	acceptanceOverride := fs.String("model-acceptance-override", "", "operator reason to override a model acceptance HOLD (audited)")
-	modelDowngrade := fs.Bool("model-downgrade", false, "Layer-2 in-tick re-dispatch: when the target's last slot exited model-switchable (usage_cap/model_unknown/rate_limit), re-dispatch it on the next downgrade-chain model")
+	modelDowngrade := fs.Bool("model-downgrade", dispatchModelDowngradeDefault(), "Layer-2 in-tick re-dispatch for model-switchable exits (default on; --model-downgrade=false or FLEET_DISPATCH_MODEL_DOWNGRADE=false disables)")
 	focusHold := fs.Bool("focus-hold", false, "focus WIP backpressure (#3223): HOLD (refuse) a spawn that OPENS a new objective while the fleet is at/over the focusscore WIP cap, instead of the default WARN (advise + still spawn); continuation of an already-open objective is never held ($FLEET_DISPATCH_FOCUS_HOLD also enables)")
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off (default: $FLEET_CODEX_LOOP_GATE or loop)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
@@ -349,7 +357,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		PinWorkerModel:          *pinWorkerModel || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_PIN_MODEL")),
 		AcceptanceArtifact:      firstString(strings.TrimSpace(*acceptanceArtifact), strings.TrimSpace(os.Getenv("FLEET_MODEL_ACCEPTANCE"))),
 		AcceptanceOverride:      strings.TrimSpace(*acceptanceOverride),
-		ModelDowngrade:          *modelDowngrade || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_MODEL_DOWNGRADE")),
+		ModelDowngrade:          *modelDowngrade,
 		FocusHold:               *focusHold || dispatchBoolValue(os.Getenv("FLEET_DISPATCH_FOCUS_HOLD")),
 		CodexLoopGate:           strings.TrimSpace(*codexLoopGate),
 		CodexLoopGateSinceHours: maxFloat64(0, *codexLoopGateSinceHours),
@@ -645,7 +653,7 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	}
 	// Layer 2: if the target's last slot walled on a model-switchable reason this tick,
 	// re-dispatch it on the next downgrade-chain model instead of the resolved one. Live +
-	// --model-downgrade only, so the default fleet is unaffected. A model wall is transient and
+	// Default-on with an explicit false ablation; the allowlist and finite chain keep it bounded. A model wall is transient and
 	// model-scoped, so the tier's effort/ultracode reasoning posture is carried across the
 	// switch rather than stripped along with the walled model.
 	if opts.Live && opts.ModelDowngrade {

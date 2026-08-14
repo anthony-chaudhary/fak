@@ -378,10 +378,16 @@ func TestWitnessDryRunNeverLands(t *testing.T) {
 func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, string) {
 	t.Helper()
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldTreeBuild := dispatchTreeBuildCommand
+	dispatchTreeBuildCommand = func(string) (string, error) { return "", nil }
+	t.Cleanup(func() { dispatchTreeBuildCommand = oldTreeBuild })
 	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-opus-4-8,claude-sonnet-5")
 	withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
 	root := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Skipf("git init failed: %v %s", err, out)
+	}
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	// #12's last slot walled on a usage cap — model-switchable, and seat-default (no .model
 	// sidecar), so the next downgrade rung is the chain head claude-opus-4-8.
@@ -404,8 +410,8 @@ func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, str
 	t.Cleanup(func() { launchSpawnBroker = oldBroker; dispatchIssueWorkerSpawner = oldSpawner })
 
 	args := []string{"tick", "--workspace", root, "--lane", "docs", "--cooldown-min", "0", "--no-refresh", "--no-loop-ledger", "--live", "--json"}
-	if modelDowngrade {
-		args = append(args, "--model-downgrade")
+	if !modelDowngrade {
+		args = append(args, "--model-downgrade=false")
 	}
 	out, errb, code := runDispatchAt(args...)
 	if code != 0 {
@@ -418,7 +424,7 @@ func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, str
 	return got, runsDir
 }
 
-// TestDispatchTickLayer2DowngradeReDispatch is the Layer-2 witness: with --model-downgrade, a
+// TestDispatchTickLayer2DowngradeReDispatch is the Layer-2 witness: by default, a
 // target whose last slot walled on a model-switchable reason is RE-DISPATCHED on the next
 // downgrade-chain model (un-blanked), surfaced in the payload and written as the new slot's
 // .model sidecar.
@@ -439,21 +445,21 @@ func TestDispatchTickLayer2DowngradeReDispatch(t *testing.T) {
 	assertFileContains(t, filepath.Join(runsDir, "resolve-12-20260704-060606"+dispatchtick.ModelSidecarSuffix), "claude-opus-4-8")
 }
 
-// TestDispatchTickLayer2DefaultOff proves the seam is inert without the flag: the identical
+// TestDispatchTickLayer2ExplicitOff proves the seam is inert with the explicit false ablation: the identical
 // switchable-wall state spawns on the seat default, with no downgrade override or .model pin.
-func TestDispatchTickLayer2DefaultOff(t *testing.T) {
+func TestDispatchTickLayer2ExplicitOff(t *testing.T) {
 	got, runsDir := layer2DowngradeTick(t, false)
 	if got["action"] != "spawned" {
 		t.Fatalf("tick = action %v, want a plain spawn", got["action"])
 	}
 	if _, ok := got["model_downgrade"]; ok {
-		t.Fatalf("default-off tick surfaced model_downgrade: %v", got["model_downgrade"])
+		t.Fatalf("explicit-off tick surfaced model_downgrade: %v", got["model_downgrade"])
 	}
 	if _, ok := got["worker_model"]; ok {
-		t.Fatalf("default-off tick pinned a worker_model: %v", got["worker_model"])
+		t.Fatalf("explicit-off tick pinned a worker_model: %v", got["worker_model"])
 	}
 	if _, err := os.Stat(filepath.Join(runsDir, "resolve-12-20260704-060606"+dispatchtick.ModelSidecarSuffix)); err == nil {
-		t.Fatalf("default-off tick wrote a .model sidecar (seat-default worker must not)")
+		t.Fatalf("explicit-off tick wrote a .model sidecar (seat-default worker must not)")
 	}
 }
 
@@ -848,5 +854,20 @@ func TestDispatchWitnessLogTailRetainsUsageCapBeforeGuardEpilogue(t *testing.T) 
 	tail, size := dispatchWitnessLogTail(path)
 	if got := dispatchtick.ClassifyNoCommitReason(tail, size); got != dispatchtick.NoCommitUsageCap {
 		t.Fatalf("classification=%q tail_bytes=%d size=%d", got, len(tail), size)
+	}
+}
+
+func TestDispatchModelDowngradeDefaultAndEnvironmentAblation(t *testing.T) {
+	t.Setenv("FLEET_DISPATCH_MODEL_DOWNGRADE", "")
+	if !dispatchModelDowngradeDefault() {
+		t.Fatal("empty environment should keep bounded model recovery default-on")
+	}
+	t.Setenv("FLEET_DISPATCH_MODEL_DOWNGRADE", "false")
+	if dispatchModelDowngradeDefault() {
+		t.Fatal("explicit false environment should disable model recovery")
+	}
+	t.Setenv("FLEET_DISPATCH_MODEL_DOWNGRADE", "true")
+	if !dispatchModelDowngradeDefault() {
+		t.Fatal("explicit true environment should enable model recovery")
 	}
 }
