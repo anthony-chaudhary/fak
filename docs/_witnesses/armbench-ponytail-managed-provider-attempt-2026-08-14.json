@@ -1,0 +1,11 @@
+{
+  "schema": "fak-armbench-ponytail-managed-provider-attempt/1",
+  "date_utc": "2026-08-14",
+  "credential_values_recorded": false,
+  "attempts": [
+    {"account_identity": "aug8-netra", "path": "trusted configured Claude seat via fak accounts", "result": "provider_http_429", "detail": "weekly limit; reset 2026-08-19 07:00 America/Los_Angeles"},
+    {"account_identity": "july20-netra", "path": "trusted configured Claude seat via CLAUDE_CONFIG_DIR", "direct_probe": "success", "passthrough_result": "provider_http_403", "detail": "organization disables Claude subscription access when ANTHROPIC_BASE_URL is used; API key required"}
+  ],
+  "acceptance_met": false,
+  "interpretation": "provider access failures are not zero-token benchmark cells and support no value claim"
+}

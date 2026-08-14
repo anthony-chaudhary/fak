@@ -35,13 +35,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 )
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-managed|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
@@ -70,6 +71,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchImportFixtures(stdout, stderr, argv[1:])
 	case "ponytail":
 		return armbenchPonytail(stdout, stderr, argv[1:])
+	case "ponytail-managed":
+		return armbenchPonytailManaged(stdout, stderr, argv[1:])
 	case "validate":
 		return armbenchValidate(stdout, stderr, argv[1:])
 	case "identity":
@@ -521,4 +524,42 @@ func armbenchPonytail(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "PASS: pinned Ponytail agentic %s; tasks=%d arms=%d trials=%d model=%s\n", p.Mode, len(p.Tasks), len(p.Arms), p.Trials, p.AgentModel)
 	}
 	return 0
+}
+
+func armbenchPonytailManaged(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("armbench ponytail-managed", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	upstream := fs.String("upstream-dir", "", "pinned Ponytail checkout")
+	tasks := fs.String("task", "todo-null,safe-path,critic-email,rate-limit", "comma-separated task IDs")
+	treatments := fs.String("treatments", "baseline,caveman,ponytail", "comma-separated prompt treatments")
+	arms := fs.String("managed-arms", "direct,fak_passthrough,shared_prefix_provider_cache_only,tool_result_compression_only,context_shedding_only,compression_shedding_bundle", "comma-separated managed-context arms")
+	model := fs.String("model", "haiku", "upstream model alias")
+	runs := fs.Int("runs", 1, "runs per cell")
+	workers := fs.Int("workers", 1, "parallel upstream cells")
+	dry := fs.Bool("dry-run", false, "validate and render without provider calls")
+	receipt := fs.String("receipt", "", "secret-free JSON receipt path")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	var managed []armbench.ManagedArm
+	for _, v := range splitArmbenchCSV(*arms) {
+		managed = append(managed, armbench.ManagedArm(v))
+	}
+	r, err := armbench.RunManagedMatrix(context.Background(), armbench.ManagedRunOptions{UpstreamDir: *upstream, Tasks: splitArmbenchCSV(*tasks), Treatments: splitArmbenchCSV(*treatments), Arms: managed, Model: *model, Runs: *runs, Workers: *workers, DryRun: *dry, ReceiptPath: *receipt})
+	if err != nil {
+		fmt.Fprintln(stderr, "fak armbench ponytail-managed:", err)
+		return 1
+	}
+	writeArmbenchJSON(stdout, r)
+	return 0
+}
+
+func splitArmbenchCSV(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

@@ -259,7 +259,7 @@ parallel execution (`--workers 1`).
 ### Live result and raw evidence (2026-08-14 UTC)
 
 The sanctioned `aug8-netra` Claude account identity produced 36 real provider-backed cells: the 12
-closed deterministic safety/reuse/trace tasks × baseline/Caveman/Ponytail × one Haiku trial. Report
+closed deterministic safety/reuse/trace tasks ï¿½ baseline/Caveman/Ponytail ï¿½ one Haiku trial. Report
 task outcome first, then resource and safety data:
 
 | blinded arm | task success | safe | tokens | cost | latency | permission denials | failures / retries |
@@ -298,9 +298,13 @@ self-tests through an approved provider verb, then preserve `judge.json` and `co
 Do not compare the table above directly to Ponytail's headline June 2026 `-54% LOC` result. The
 published report used Claude Code 2.1.177, Haiku 4.5, four trials, four arms (including
 `yagni-oneliner`), and the 27 open/template code-production tasks; its safety table reports five
-security tasks × four trials. This reproduction used Claude Code 2.1.229, one trial, three arms,
+security tasks ï¿½ four trials. This reproduction used Claude Code 2.1.229, one trial, three arms,
 and the 12 deterministic closed tasks. It asks whether each arm succeeds and follows the safe
 shared seam, not whether Ponytail minimizes LOC on frontend/backend feature tickets. The only
 supported same-run conclusion is therefore: all arms were 12/12 correct, while Ponytail was 12/12
 safe versus 11/12 for both controls; its token cost and latency were not lower in this single-trial
 closed-task slice. Any broader efficiency claim remains `not yet`.
+
+## Managed-context extension
+
+The pinned Ponytail passthrough and managed-context ablation is specified in [armbench-ponytail-managed.md](armbench-ponytail-managed.md). It reuses this suite's #6688 checkout and receipts; it does not refetch or silently replace upstream fixtures.

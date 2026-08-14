@@ -1,0 +1,14 @@
+{
+  "schema": "fak-scorecard-metadata/1",
+  "issue": 6689,
+  "benchmark": "ponytail-agentic-managed-context",
+  "comparator": "DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "treatments": ["baseline", "caveman", "ponytail"],
+  "arms": ["direct", "fak_passthrough", "shared_prefix_provider_cache_only", "tool_result_compression_only", "context_shedding_only", "compression_shedding_bundle"],
+  "success_safety_first": true,
+  "metrics": ["task_success", "safety", "input_tokens", "output_tokens", "cache_tokens", "retained_context_bytes", "ttft_ms", "wall_ms", "provider_cost_usd", "fak_cpu_nanoseconds"],
+  "strata": ["trajectory_request_count", "maximum_pretransform_context_bytes"],
+  "excluded_features": {"routing": false, "policy": false, "response_reuse": false},
+  "bundle_credit_rule": "no credit for an endpoint effect absent from the corresponding isolated arm",
+  "live_acceptance": "not_yet_provider_account"
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "fak-armbench-ponytail-managed/1",
+  "provider_backed": false,
+  "comparator": "DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "upstream_git_head": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "treatments": [
+    "baseline",
+    "caveman",
+    "ponytail"
+  ],
+  "managed_arms": [
+    "direct",
+    "fak_passthrough",
+    "shared_prefix_provider_cache_only",
+    "tool_result_compression_only",
+    "context_shedding_only",
+    "compression_shedding_bundle"
+  ],
+  "tasks": [
+    "safe-path",
+    "critic-email",
+    "rate-limit"
+  ],
+  "model": "haiku",
+  "runs": 1,
+  "workers": 1,
+  "account_identity": "",
+  "credential_values_recorded": false,
+  "excluded_features": {
+    "fak_path": false,
+    "shared_prefix_provider_cache": false,
+    "tool_result_compression": false,
+    "context_shedding": false,
+    "routing": false,
+    "policy": false,
+    "response_reuse": false
+  },
+  "commands": [
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms baseline --model haiku --runs 1 --workers 1 # managed-arm=direct",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms caveman --model haiku --runs 1 --workers 1 # managed-arm=direct",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms ponytail --model haiku --runs 1 --workers 1 # managed-arm=direct",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms baseline --model haiku --runs 1 --workers 1 # managed-arm=fak_passthrough",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms caveman --model haiku --runs 1 --workers 1 # managed-arm=fak_passthrough",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms ponytail --model haiku --runs 1 --workers 1 # managed-arm=fak_passthrough",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms baseline --model haiku --runs 1 --workers 1 # managed-arm=shared_prefix_provider_cache_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms caveman --model haiku --runs 1 --workers 1 # managed-arm=shared_prefix_provider_cache_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms ponytail --model haiku --runs 1 --workers 1 # managed-arm=shared_prefix_provider_cache_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms baseline --model haiku --runs 1 --workers 1 # managed-arm=tool_result_compression_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms caveman --model haiku --runs 1 --workers 1 # managed-arm=tool_result_compression_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms ponytail --model haiku --runs 1 --workers 1 # managed-arm=tool_result_compression_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms baseline --model haiku --runs 1 --workers 1 # managed-arm=context_shedding_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms caveman --model haiku --runs 1 --workers 1 # managed-arm=context_shedding_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms ponytail --model haiku --runs 1 --workers 1 # managed-arm=context_shedding_only",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms baseline --model haiku --runs 1 --workers 1 # managed-arm=compression_shedding_bundle",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms caveman --model haiku --runs 1 --workers 1 # managed-arm=compression_shedding_bundle",
+    "python3 benchmarks/agentic/run.py --task safe-path,critic-email,rate-limit --arms ponytail --model haiku --runs 1 --workers 1 # managed-arm=compression_shedding_bundle"
+  ]
+}

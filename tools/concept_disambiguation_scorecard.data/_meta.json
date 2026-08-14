@@ -597,12 +597,39 @@
           "category": "incidental",
           "reason": "Provider-reported cache accounting DTO in an armbench trial row; measurement fields, not a cache mechanism or cache taxonomy concept.",
           "token": "CacheCounters"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "ManagedProviderCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "shared_prefix_provider_cache_only"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "SharedPrefixProviderCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "CacheControlWrites"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "applyCacheControl"
         }
       ],
       "id": "cache",
       "ignore": [
         "CACHE_SCOPE",
         "CacheCachedPromptTokens",
+        "CacheControlWrites",
+        "CacheCounters",
         "CacheCreationTokensHeadOnly",
         "CacheCreationTokensMessagePrefix",
         "CacheLever",
@@ -625,6 +652,7 @@
         "InputUncached",
         "InputUncachedPerMillion",
         "July4CacheValueAutospawn",
+        "ManagedProviderCache",
         "NewCacheStateAllowlist",
         "NonCache",
         "NonCacheParity",
@@ -632,6 +660,7 @@
         "OrgPolicyCachePathEnv",
         "ReasonCacheState",
         "RestartCacheHits",
+        "SharedPrefixProviderCache",
         "SubCacheWarmReplay",
         "TestMicroCacheWitnessCapturesOnOffProviderCounters",
         "TestMicroCacheWitnessRefusesSingleEndpoint",
@@ -641,6 +670,7 @@
         "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes",
         "VerdictNoCacheStateDelta",
         "WindowCache",
+        "applyCacheControl",
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
         "builtinCacheLevers",
@@ -758,6 +788,7 @@
         "runMicroCacheArm",
         "runMicroCacheWitness",
         "selectorCacheKey",
+        "shared_prefix_provider_cache_only",
         "strongMatrixCache",
         "summarizeTurnCache",
         "tokencache",
@@ -767,8 +798,7 @@
         "turnCacheStatsMu",
         "turnCacheSummary",
         "uncached",
-        "usercachedir",
-        "CacheCounters"
+        "usercachedir"
       ],
       "min_files": 3,
       "name": "Cache family",
@@ -5290,6 +5320,26 @@
           "category": "incidental",
           "reason": "Implementation helper of the existing dogfood scorecard kernel-value section; not a separate context-ctx concept.",
           "token": "collectDogfoodKernelValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "context_shedding_only"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "ContextShedding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific arm, toggle, metric, or helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "RetainedContextBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6689 armbench-specific helper name; it implements the existing managed-context experiment and does not introduce a reusable canonical concept.",
+          "token": "shedOldContext"
         }
       ],
       "id": "context-ctx",
@@ -5298,11 +5348,13 @@
         "COMPACTION_THRASH",
         "CompactionContract",
         "ContextLimit",
+        "ContextShedding",
         "ContextTokensSaved",
         "FAK_COMPACTION_THRASH_STOP",
         "MechanismStaleContext",
         "MetricFactRecall",
         "RestoreCalls",
+        "RetainedContextBytes",
         "SearchRecall",
         "WithAffinity",
         "affinityContextKey",
@@ -5322,6 +5374,7 @@
         "compactions",
         "context",
         "context_cancelled",
+        "context_shedding_only",
         "contexts",
         "ctx",
         "ctxAdviceNote",
@@ -5353,6 +5406,7 @@
         "sessionClientDescriptorForContext",
         "session_compaction_thrash",
         "setGuardCompactionAnchorMode",
+        "shedOldContext",
         "takeCompactionContract",
         "wctx"
       ],
