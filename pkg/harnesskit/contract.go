@@ -16,6 +16,7 @@ type Contract struct {
 	Security      string               `json:"security_reachability"`
 	Compatibility string               `json:"compatibility"`
 	Ownership     map[string]Ownership `json:"resource_ownership"`
+	RunProtocol   ProtocolContract     `json:"run_protocol"`
 }
 
 // SupportedPlanes returns a fresh copy of all public extension planes.
@@ -38,6 +39,7 @@ func PublicContract() Contract {
 		Security:      "registration grants reachability, never authority; Services.Invoke is adjudicated per call",
 		Compatibility: "same schema_version is additive; removals or semantic changes require a new schema_version",
 		Ownership:     map[string]Ownership{"factory_runtime": OwnershipHost, "builder_inputs": OwnershipCaller, "service_inputs": OwnershipCaller},
+		RunProtocol:   PublicProtocolContract(),
 	}
 }
 

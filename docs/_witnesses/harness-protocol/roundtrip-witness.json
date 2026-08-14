@@ -1,0 +1,34 @@
+{
+  "schema": "fak.harness.protocol-witness/v1",
+  "issue": 6789,
+  "fixture": "roundtrip-events.jsonl",
+  "producer_batches": [
+    8,
+    8
+  ],
+  "disconnect_after_sequence": 8,
+  "resume_from_sequence": 8,
+  "final_sequence": 16,
+  "unknown_event_sequence": 14,
+  "consumers": {
+    "cli": {
+      "sha256": "9edeb348e094eb003ce1ebab8fe97f67fe8facc24c721ab1b612291849feec99",
+      "semantic_checks": [
+        "run canceled",
+        "message stable protocol",
+        "tool completed",
+        "usage 12/7"
+      ]
+    },
+    "tui": {
+      "sha256": "1054c96678326058d2447e6866c5b394d236e0598a39fd4facd2cf829ec92e18",
+      "semantic_checks": [
+        "run canceled",
+        "message stable protocol",
+        "tool completed",
+        "usage 12/7"
+      ]
+    }
+  },
+  "provider_wire_types_exposed": false
+}
