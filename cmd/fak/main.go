@@ -1041,6 +1041,7 @@ func cmdAgent(argv []string) {
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
 	outputStyle := fs.String("output-style", "full", "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; caveman:* is safe native shorthand (see `fak agent profiles`)")
+	workProfile := fs.String("work-profile", "standard", "implementation policy: standard|ponytail:{low|medium|high}; ponytail:* is safe native shorthand (see `fak agent profiles`)")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	model := fs.String("model", "gemini-2.5-flash", "model id")
@@ -1066,6 +1067,17 @@ func cmdAgent(argv []string) {
 		os.Exit(2)
 	}
 	defer restoreStyle()
+	work, err := resolveAgentWorkProfile(*workProfile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	restoreWork, err := applyAgentWorkProfile(work)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent: set --work-profile: %v\n", err)
+		os.Exit(2)
+	}
+	defer restoreWork()
 	applyPolicy(*policyPath)
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)
