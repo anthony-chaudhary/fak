@@ -40,10 +40,10 @@ The friendly `caveman:medium` spelling canonicalizes to `caveman:native:medium`.
 
 ## Native versus original
 
-- **Native** means fak-authored profile text, enforced through fak's cache-stable system-prompt MMU and preservation contract. It is shipped now.
-- **Original** means exact or adapted upstream-authored profile material at a pinned revision, with attribution and a content digest. `caveman:original:*` is reserved but deliberately returns an error until that adapter passes its provenance and safety gates ([#6706](https://github.com/anthony-chaudhary/fak/issues/6706)).
+- **Native** means fak-authored profile text, enforced through fak's cache-stable system-prompt MMU and preservation contract.
+- **Original** means the vendored upstream-authored material from `juliusbrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`, preserved under its MIT license. Select `caveman:original:{low|medium|high}`; the intensities map to upstream `lite|full|ultra`.
 
-fak never silently substitutes native behavior when a user asks for `original`.
+The original-profile readout records source revision and digest, activation source, and the `set FAK_STYLE=full` disable command. Unknown original intensities fail closed. System safety, explicit user formatting, and preservation rules override imported instructions. fak never silently substitutes native behavior when a user asks for `original`.
 
 ## What a response profile cannot change
 

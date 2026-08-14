@@ -47,8 +47,9 @@ const StyleEnvVar = "FAK_STYLE"
 // collapses to, so "I chose off" and "your value was refused" produce the same steering
 // outcome (no block) while staying distinguishable in the read-out via Known.
 const (
-	StyleFamilyNative  = "native"
-	StyleFamilyCaveman = "caveman"
+	StyleFamilyNative   = "native"
+	StyleFamilyCaveman  = "caveman"
+	StyleFamilyOriginal = "original"
 )
 
 const (
@@ -64,17 +65,20 @@ const (
 // meaningful order. TestStyleLevelClosedSet pins these pairings because changing one
 // silently re-steers every session that selected that name.
 var styleLevels = map[string]int{
-	StyleFull:               SteeringOff,
-	StyleConcise:            1,
-	StyleBrief:              2,
-	StyleTerse:              3,
-	StyleMinimal:            4,
-	"native:low":            1,
-	"native:medium":         2,
-	"native:high":           3,
-	"caveman:native:low":    1,
-	"caveman:native:medium": 2,
-	"caveman:native:high":   3,
+	StyleFull:                 SteeringOff,
+	StyleConcise:              1,
+	StyleBrief:                2,
+	StyleTerse:                3,
+	StyleMinimal:              4,
+	"native:low":              1,
+	"native:medium":           2,
+	"native:high":             3,
+	"caveman:native:low":      1,
+	"caveman:native:medium":   2,
+	"caveman:native:high":     3,
+	"caveman:original:low":    1,
+	"caveman:original:medium": 2,
+	"caveman:original:high":   3,
 }
 
 // StyleReadout is the read-out: everything needed to SEE and PROVE the selection seam
@@ -103,7 +107,11 @@ type StyleReadout struct {
 	Segment string
 	// Witness is the producer's content-derived witness for Segment, empty when off. It
 	// makes drift between the read-out and the producer detectable rather than cosmetic.
-	Witness string
+	Witness          string
+	SourceRevision   string
+	SourceDigest     string
+	ActivationSource string
+	DisableCommand   string
 }
 
 // StyleLevel maps a style name to its terseness level. The set is CLOSED and the refusal is
@@ -150,8 +158,8 @@ func StyleNames() []string {
 func styleIdentity(name string, level int) (family, intensity string) {
 	canonical := canonicalStyle(name)
 	parts := strings.Split(canonical, ":")
-	if len(parts) == 3 && parts[0] == StyleFamilyCaveman && parts[1] == StyleFamilyNative {
-		return StyleFamilyCaveman + ":" + StyleFamilyNative, parts[2]
+	if len(parts) == 3 && parts[0] == StyleFamilyCaveman && (parts[1] == StyleFamilyNative || parts[1] == StyleFamilyOriginal) {
+		return StyleFamilyCaveman + ":" + parts[1], parts[2]
 	}
 	if len(parts) == 2 {
 		return parts[0], parts[1]
@@ -175,8 +183,20 @@ func DescribeStyle(name string) StyleReadout {
 		return StyleReadout{Style: StyleFull, Family: StyleFamilyNative, Intensity: "off", Level: SteeringOff}
 	}
 	family, intensity := styleIdentity(name, level)
-	out := StyleReadout{Style: canonicalStyle(name), Family: family, Intensity: intensity, Level: level, Known: true}
-	if seg, ok := SteeringSegment(level); ok {
+	out := StyleReadout{Style: canonicalStyle(name), Family: family, Intensity: intensity, Level: level, Known: true, ActivationSource: StyleEnvVar, DisableCommand: "set " + StyleEnvVar + "=" + StyleFull}
+	var seg cachemeta.PromptSegment
+	var ok bool
+	if family == StyleFamilyCaveman+":"+StyleFamilyOriginal {
+		seg, ok = cavemanOriginalSegment(intensity)
+		if !ok {
+			return StyleReadout{Style: StyleFull, Family: StyleFamilyNative, Intensity: "off", Level: SteeringOff}
+		}
+		out.SourceRevision = CavemanOriginalRevision
+		out.SourceDigest = CavemanOriginalSourceDigest
+	} else {
+		seg, ok = SteeringSegment(level)
+	}
+	if ok {
 		out.Applied = true
 		out.Segment = string(seg.Content)
 		out.Witness = seg.Witness
@@ -202,9 +222,12 @@ func StyleFromEnv(getenv func(string) string) StyleReadout {
 // style and its level are indistinguishable on the wire. StyleFull and every refused name
 // return ok false and the zero segment, which must not be appended.
 func StyleSegment(name string) (cachemeta.PromptSegment, bool) {
-	level, ok := StyleLevel(name)
-	if !ok {
+	readout := DescribeStyle(name)
+	if !readout.Applied {
 		return cachemeta.PromptSegment{}, false
 	}
-	return SteeringSegment(level)
+	if readout.Family == StyleFamilyCaveman+":"+StyleFamilyOriginal {
+		return cavemanOriginalSegment(readout.Intensity)
+	}
+	return SteeringSegment(readout.Level)
 }

@@ -60,8 +60,8 @@ func TestStyleUnknownIsFailSafe(t *testing.T) {
 // by increasing terseness — the order an operator sees in a read-out or a help string.
 func TestStyleNamesAreOrderedAndComplete(t *testing.T) {
 	names := StyleNames()
-	if len(names) != 11 {
-		t.Fatalf("StyleNames() returned %d names, want 11: %v", len(names), names)
+	if len(names) != 14 {
+		t.Fatalf("StyleNames() returned %d names, want 14: %v", len(names), names)
 	}
 	lastLevel := -1
 	seen := map[string]bool{}
@@ -77,7 +77,7 @@ func TestStyleNamesAreOrderedAndComplete(t *testing.T) {
 		lastLevel = level
 		seen[name] = true
 	}
-	for _, name := range []string{StyleFull, StyleConcise, StyleBrief, StyleTerse, StyleMinimal, "native:low", "native:medium", "native:high", "caveman:native:low", "caveman:native:medium", "caveman:native:high"} {
+	for _, name := range []string{StyleFull, StyleConcise, StyleBrief, StyleTerse, StyleMinimal, "native:low", "native:medium", "native:high", "caveman:native:low", "caveman:native:medium", "caveman:native:high", "caveman:original:low", "caveman:original:medium", "caveman:original:high"} {
 		if !seen[name] {
 			t.Fatalf("StyleNames() missing %q: %v", name, names)
 		}
@@ -97,7 +97,7 @@ func TestStyleSegmentMatchesProducer(t *testing.T) {
 		if got.Style != name || got.Level != level || !got.Known {
 			t.Errorf("style %q: readout mismatch: %+v", name, got)
 		}
-		seg, ok := SteeringSegment(level)
+		seg, ok := StyleSegment(name)
 		if !ok {
 			// level 0 (full) — steering is off, so the readout must carry no block.
 			if got.Applied || got.Segment != "" || got.Witness != "" {
@@ -114,8 +114,8 @@ func TestStyleSegmentMatchesProducer(t *testing.T) {
 		if got.Witness != seg.Witness {
 			t.Errorf("style %q: witness %q, want %q", name, got.Witness, seg.Witness)
 		}
-		if !strings.HasPrefix(got.Segment, steeringSentinelOpen) {
-			t.Errorf("style %q: readout segment is not sentinel-wrapped: %q", name, got.Segment)
+		if !strings.HasPrefix(got.Segment, steeringSentinelOpen) && !strings.HasPrefix(got.Segment, "<fak:response-profile v1") {
+			t.Errorf("style %q: readout segment is not profile-wrapped: %q", name, got.Segment)
 		}
 	}
 }
