@@ -26,6 +26,7 @@ const (
 	Retry        Verb = "retry"
 	Undo         Verb = "undo"
 	Continue     Verb = "continue"
+	EndTurn      Verb = "end_turn"
 	Pause        Verb = "pause"
 	Resume       Verb = "resume"
 	Stop         Verb = "stop"
@@ -84,6 +85,7 @@ var definitions = []Definition{
 	{Retry, Recovery, []string{"retry", "try again"}, "repeat an attempt, normally with changed evidence or constraints", false, true, StrengthMedium, false, true},
 	{Undo, Recovery, []string{"undo", "backtrack", "revert"}, "return an affected state toward a prior checkpoint", false, true, StrengthHigh, false, true},
 	{Continue, Lifecycle, []string{"continue", "keep going"}, "continue execution without changing direction", false, true, StrengthMedium, false, true},
+	{EndTurn, Lifecycle, []string{"end turn"}, "end the current turn without suspending the session", false, true, StrengthHigh, false, false},
 	{Pause, Lifecycle, []string{"pause", "hold"}, "suspend execution while preserving resumability", false, true, StrengthHigh, false, false},
 	{Resume, Lifecycle, []string{"resume"}, "resume a suspended execution", false, true, StrengthHigh, false, false},
 	{Stop, Lifecycle, []string{"stop", "cancel", "abort"}, "terminate the addressed execution", false, true, StrengthAbsolute, true, false},

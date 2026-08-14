@@ -64,3 +64,28 @@ Ordered composition matters. “Avoid X, prioritize Y, then verify Z” is a sma
 ## Honest boundary and next expansion axes
 
 This is an index and algebra, not an NLP classifier. Exact aliases demonstrate the contract, but arbitrary text extraction needs confidence, ambiguity, negation, scope, and provenance. Important unimplemented axes include delivery timing, addressee/cardinality, temporal duration, reversibility, urgency, confidence, authority, condition/trigger, resource budget, and acknowledgement/effect status. Those should extend the typed instruction rather than multiplying every verb into a Cartesian-product enum.
+
+## Control envelope (issue #6782)
+
+The second layer keeps orthogonal questions orthogonal instead of creating names such as `high_priority_immediate_fleet_redirect`:
+
+```
+Envelope {
+  Instruction: semantic verb × strength × target × reason × residual text
+  Delivery:    immediate | next_safe_point | next_turn | queued | draft
+  Addressee:   (turn | session | subagent | cohort | fleet) × (one | many | all) × IDs
+  Lifetime:    once | turn | session | until_expiry(timestamp)
+  Outcome:     receipt × admission × independently witnessed effect
+}
+```
+
+The outcome ladder distinguishes four facts that UIs commonly blur:
+
+1. a control was submitted;
+2. the transport acknowledged it;
+3. the addressee admitted it;
+4. an effect was independently observed.
+
+`accepted` therefore cannot validate as `observed` without an effect witness. Drafts have neither addressees nor runtime outcomes. Selected-many controls are cohorts; a fleet/all control cannot smuggle in a partial ID list. Expiring controls validate against a caller-supplied clock for deterministic replay.
+
+`InstructionFromSessionDecision` provides an additive mapping for the existing `CONTINUE`, `END_TURN`, `PAUSE_SESSION`, and `STOP_SESSION` wire tokens. It preserves the crucial distinction between ending one turn and pausing a resumable session, and rejects refusal reasons such as `MALFORMED` rather than reinterpreting them as controls.
