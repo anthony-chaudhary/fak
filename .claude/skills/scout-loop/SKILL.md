@@ -9,8 +9,8 @@ metadata:
 # /scout-loop — crawl the field, study the best lead, file witnessed backlog
 
 > **The research→backlog super-loop.** fak already has an outward crawler
-> (`tools/idea_scout.py` files deduped `idea-scout` triage issues from arXiv +
-> GitHub) and a study pipeline (`/study-repo` reads a repo at a pinned `@sha` and
+> (`fak idea-scout` plans deduped `idea-scout` triage issues from arXiv, GitHub,
+> Hacker News, and Reddit; `--live` is the separate mutation gate) and a study pipeline (`/study-repo` reads a repo at a pinned `@sha` and
 > decomposes it; `/field-borrow` witnesses one capability against fak and files it
 > grounded). Nothing connects them: leads pile up in a triage queue and the deep
 > study→witness→file pass waits for a human to remember it. `scout-loop` is that
@@ -25,7 +25,7 @@ first, one lead per pass, no monolith, and a crawl is never a ship.**
 
 | Skill / tool | Starts from | Mechanism | Terminal action |
 |---|---|---|---|
-| `idea-scout` (`tools/idea_scout.py`) | an outward **feed** | automated arXiv/GitHub scan + 3-rung dedup | files raw `idea-scout` **triage** issues |
+| `fak idea-scout` | an outward **feed** | dry-run arXiv/GitHub/HN/Reddit scan + filed-stamp dedup | plans raw triage issues; `--live` files |
 | [`/study-repo`](../study-repo/SKILL.md) | one **repo URL** | clone → read the code → decompose | files many small witnessed leaves |
 | [`/field-borrow`](../field-borrow/SKILL.md) | one **named capability** | dogfood `fak_feature_query`/`fak index` | files one grounded issue |
 | [`/industry-score`](../industry-score/SKILL.md) | the **field taxonomy** | coverage + parity-debt scorecard | a scorecard (files nothing) |
@@ -41,32 +41,26 @@ and converting them"* — the loop, not a single pass.
 
 ## The pass — one lead, end to end
 
-### 1 — CRAWL: read the freshest outward signal (don't re-fetch what's cached)
+### 1 — CRAWL: capture the first-class scout plan
 
-The crawler already ran; read its output rather than re-scanning arXiv:
+Run the Go front door from the repo root. Dry-run is the mandatory default:
 
 ```bash
-# The idea-scout triage queue — repo/paper leads already deduped + filed:
-gh issue list --search "label:idea-scout" --state open --limit 30 --json number,title,body,url
-python tools/industry_scorecard.py --json         # competitive map: where parity-debt is highest
-python tools/industry_freshness_cadence.py --json  # what's gone stale / newly moved in the field
+fak idea-scout --json > idea-scout-plan.json
 ```
 
-`idea-scout` walks GitHub on **two lanes** (`tools/idea_scout.py`): an all-time
-**stars** lane *and* a recency-sorted **fresh** lane (`--sort updated`, a lower star
-floor) that surfaces **new / trending / recently-updated** repos the stars sort
-buries. Each filed issue's `**Why surfaced**` line carries the score reasons that
-earned it, so a fresh-lane lead is legible right in the body — grep it for
-`trending`, `very fresh`, or `actively updated` to find the repos that just moved
-relative to ours. Those are the leads this loop most exists to catch: a repo that was
-*just open-sourced or is climbing fast* is where the novelty (and the borrow) is
-freshest.
+Inspect candidates, scores, source revisions, dedupe evidence, and planned issue contracts. For a
+pinned replay or unavailable network, use `--candidates FILE`. Direct
+`python tools/idea_scout.py` use is a legacy/debug comparison only.
 
-Also skim the durable corpus for a lead someone already flagged but never studied:
-`docs/notes/RESEARCH-*` and `docs/notes/CONCEPT-*`. The crawler is the feeder
-(`docs/dispatch-loop.md` framing: the dispatch loop *resolves*, idea-scout
-*feeds*); `scout-loop` sits between them — it *consumes the feed and produces the
-studied backlog* the dispatch loop can then resolve.
+Issue creation is a separate explicit gate and requires operator mutation intent:
+
+```bash
+fak idea-scout --json --live
+```
+
+Do not infer permission to cross that gate from this skill matching. Validate selected contracts
+through `fak-dev issue contract` and price any worker launch through `fak dispatch` before execution.
 
 ### 2 — SELECT: one highest-value repo-shaped lead (never a batch)
 
