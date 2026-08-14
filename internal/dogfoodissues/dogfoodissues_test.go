@@ -80,6 +80,12 @@ func TestExtractsCodeSlopAndDogfoodCoverageItems(t *testing.T) {
 	if slop.Grade != "C" {
 		t.Errorf("slop grade = %q, want \"C\"", slop.Grade)
 	}
+	if review := ReviewActionItem(slop, BuildOptions{}); !review.OK {
+		t.Fatalf("code-slop ACTION must be dispatchable at extraction, got %+v", review)
+	}
+	if slop.ParentRef != "#6738" || slop.Lane != "tools" || len(slop.Paths) == 0 || slop.DoneCondition == "" || slop.Witness == "" {
+		t.Fatalf("code-slop scope/routing incomplete: %+v", slop)
+	}
 	if cov.DebtCount != 1 {
 		t.Errorf("coverage debt = %d, want 1", cov.DebtCount)
 	}
@@ -119,22 +125,18 @@ func TestPlanUpdatesExistingStableKeyInsteadOfDuplicate(t *testing.T) {
 	}
 }
 
-func TestReviewedPlanSkipsAggregateRowsWithoutScope(t *testing.T) {
+func TestReviewedPlanScopesCodeSlopButHoldsOtherAggregateRows(t *testing.T) {
 	items := ExtractActionItems(fixtureReport(t), "report.json")
 	plan, skipped := BuildPlanWithOptions(items, nil, BuildOptions{})
-	if len(plan) != 0 {
-		t.Fatalf("reviewed plan len = %d, want 0 dispatchable aggregate rows", len(plan))
+	if len(plan) != 1 || plan[0].Key != "recent-feature-dogfood/code-slop-scorecard/code_slop" {
+		t.Fatalf("reviewed plan = %+v, want one dispatchable code-slop row", plan)
 	}
-	if len(skipped) != 2 {
-		t.Fatalf("skipped len = %d, want 2; rows=%+v", len(skipped), skipped)
+	if len(skipped) != 1 {
+		t.Fatalf("skipped len = %d, want 1; rows=%+v", len(skipped), skipped)
 	}
-	for _, row := range skipped {
-		if row.Dispatchability != "triage_only" {
-			t.Fatalf("skipped dispatchability = %q, want triage_only", row.Dispatchability)
-		}
-		if !strings.Contains(row.Reason, "ISSUE_SCOPE_INCOMPLETE") || !strings.Contains(row.Reason, "ISSUE_UNROUTED") {
-			t.Fatalf("skip reason = %q, want scope+route reasons", row.Reason)
-		}
+	row := skipped[0]
+	if row.Dispatchability != "triage_only" || !strings.Contains(row.Reason, "ISSUE_SCOPE_INCOMPLETE") || !strings.Contains(row.Reason, "ISSUE_UNROUTED") {
+		t.Fatalf("remaining aggregate row must stay held, got %+v", row)
 	}
 }
 

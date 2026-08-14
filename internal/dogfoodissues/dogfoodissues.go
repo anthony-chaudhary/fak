@@ -119,38 +119,41 @@ type ReportFreshness struct {
 
 // ActionItem is one scorecard ACTION item extracted from a dogfood report.json.
 type ActionItem struct {
-	Key            string
-	Title          string
-	SourceProbe    string
-	ScoreName      string
-	Score          string
-	Grade          string
-	DebtName       string
-	DebtCount      int
-	EvidencePath   string
-	NextAction     string
-	Finding        string
-	ParentRef      string
-	CurrentState   string
-	WhyNow         string
-	WorkingSpine   string
-	WorkUnit       string
-	ExpectedSteps  int
-	Assumptions    []string
-	ConfusionRisks []string
-	Coordination   []string
-	Trigger        string
-	BatchPolicy    string
-	InScope        string
-	OutOfScope     string
-	DoneCondition  string
-	Witness        string
-	AcceptanceGate string
-	Lane           string
-	Paths          []string
-	Labels         []string
-	BoundaryNotes  []string
-	ClosureBinding string
+	Key                string
+	Title              string
+	SourceProbe        string
+	ScoreName          string
+	Score              string
+	Grade              string
+	DebtName           string
+	DebtCount          int
+	EvidencePath       string
+	NextAction         string
+	Finding            string
+	ParentRef          string
+	CurrentState       string
+	WhyNow             string
+	WorkingSpine       string
+	WorkUnit           string
+	ExpectedSteps      int
+	WorkEstimate       string
+	ScopeContribution  string
+	CompletionStandard string
+	Assumptions        []string
+	ConfusionRisks     []string
+	Coordination       []string
+	Trigger            string
+	BatchPolicy        string
+	InScope            string
+	OutOfScope         string
+	DoneCondition      string
+	Witness            string
+	AcceptanceGate     string
+	Lane               string
+	Paths              []string
+	Labels             []string
+	BoundaryNotes      []string
+	ClosureBinding     string
 }
 
 // PlanRow is one create/update decision for a single ActionItem.
@@ -429,7 +432,25 @@ func ExtractActionItems(report map[string]any, reportPath string) []ActionItem {
 				EvidencePath: evidence,
 				NextAction: toStr(payload["next_action"],
 					"Retire code-slop debt worst-first, then rerun the dogfood packet."),
-				Finding: finding,
+				Finding:            finding,
+				ParentRef:          "#6738",
+				CurrentState:       fmt.Sprintf("The code-slop scorecard reports %d hard defect(s); the current worst KPI is duplication.", debt),
+				WhyNow:             "The recent-feature dogfood packet is red until one bounded, witnessed slop slice is dispatched and retired.",
+				WorkingSpine:       "Select the highest-payoff extractable duplication family, remove exactly that clone family without behavior change, and rerun the scorecard.",
+				WorkUnit:           "leaf",
+				ExpectedSteps:      4,
+				WorkEstimate:       "Estimate: 4 points",
+				ScopeContribution:  "Contribution: 4/4 points",
+				CompletionStandard: "development",
+				InScope:            "One highest-payoff extractable duplication family, its behavior-preserving helper/deletion, affected package tests, and before/after scorecard JSON.",
+				OutOfScope:         "Do not redesign the scorecard, re-pin its baseline, clear the full portfolio, or sweep unrelated cleanup.",
+				DoneCondition:      "One witnessed duplication family is removed and duplication debt strictly decreases without increasing another hard KPI.",
+				Witness:            "Run affected Go package tests in a clean overlay and compare `python tools/code_slop_scorecard.py --json --no-toolchain` before/after.",
+				AcceptanceGate:     "Affected package tests pass and the after scorecard reports strictly lower duplication debt with no new hard defect.",
+				Lane:               "tools",
+				Paths:              []string{"tools/code_slop_scorecard.py", "internal/**", "cmd/**"},
+				Labels:             []string{"gen/now", "priority/P1", "class:dev"},
+				BoundaryNotes:      []string{"Choose and name one clone family before editing; do not let the generated issue become an unbounded cleanup epic."},
 			})
 			continue
 		}
@@ -561,16 +582,19 @@ func actionCandidate(item ActionItem, opt BuildOptions) issuepolicy.Candidate {
 	scoreState := fmt.Sprintf("Source probe `%s` reported finding `%s`, grade `%s`, and %s `%d`.",
 		item.SourceProbe, item.Finding, item.Grade, item.DebtName, item.DebtCount)
 	c := issuepolicy.Candidate{
-		Schema:          issuepolicy.Schema,
-		Key:             item.Key,
-		Title:           item.Title,
-		ParentRef:       strmatch.FirstTrimmed(item.ParentRef, "fak dogfood-issues"),
-		CurrentState:    strmatch.FirstTrimmed(item.CurrentState, scoreState),
-		WhyNow:          strmatch.FirstTrimmed(item.WhyNow, "The recent-feature dogfood report emitted an ACTION/debt row for this scorecard."),
-		WorkingSpine:    item.WorkingSpine,
-		PriorityContext: dogfoodPriorityContext(item),
-		WorkUnit:        strmatch.FirstTrimmed(item.WorkUnit, "leaf"),
-		ExpectedSteps:   firstPositive(item.ExpectedSteps, 4),
+		Schema:             issuepolicy.Schema,
+		Key:                item.Key,
+		Title:              item.Title,
+		ParentRef:          strmatch.FirstTrimmed(item.ParentRef, "fak dogfood-issues"),
+		CurrentState:       strmatch.FirstTrimmed(item.CurrentState, scoreState),
+		WhyNow:             strmatch.FirstTrimmed(item.WhyNow, "The recent-feature dogfood report emitted an ACTION/debt row for this scorecard."),
+		WorkingSpine:       item.WorkingSpine,
+		PriorityContext:    dogfoodPriorityContext(item),
+		WorkUnit:           strmatch.FirstTrimmed(item.WorkUnit, "leaf"),
+		ExpectedSteps:      firstPositive(item.ExpectedSteps, 4),
+		WorkEstimate:       item.WorkEstimate,
+		ScopeContribution:  item.ScopeContribution,
+		CompletionStandard: item.CompletionStandard,
 		Assumptions: appendDefault(item.Assumptions,
 			"The source scorecard row is still current when the worker starts."),
 		ConfusionRisks: appendDefault(item.ConfusionRisks,
@@ -598,6 +622,8 @@ func actionCandidate(item ActionItem, opt BuildOptions) issuepolicy.Candidate {
 		c.WorkEstimate = fmt.Sprintf("Estimate: %g points", points)
 		c.ScopeContribution = fmt.Sprintf("Contribution: %g/%g points", points, opt.ParentBaseline)
 		c.CompletionStandard = strmatch.FirstTrimmed(opt.CompletionStandard, "production")
+	}
+	if c.CompletionStandard != "" {
 		c.TargetEnvelope = opt.TargetEnvelope
 		c.WitnessedEnvelope = opt.WitnessedEnvelope
 	}
