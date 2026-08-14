@@ -5443,6 +5443,11 @@
           "category": "incidental",
           "reason": "Local command-line threshold variable, not a repository concept or operator-facing score-debt term",
           "token": "debtCeiling"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private message formatter for the existing dogfood debt score; not a new debt concept.",
+          "token": "dogfoodDebtNextAction"
         }
       ],
       "id": "score-debt",
@@ -5456,6 +5461,7 @@
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "debtCeiling",
+        "dogfoodDebtNextAction",
         "flow_debt",
         "lightgap_debt",
         "lightgap_scorecard",

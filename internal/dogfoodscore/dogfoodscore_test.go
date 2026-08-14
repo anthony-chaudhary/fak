@@ -307,6 +307,55 @@ func TestTranscriptProjectRoots_DedupesAndSortsHomes(t *testing.T) {
 	}
 }
 
+func TestDogfoodDebtNextActionAlignsStopHealthWindow(t *testing.T) {
+	lead := KPIResult{Key: "stop_hook_healthy", Detail: "one settled marker remains"}
+	got := dogfoodDebtNextAction(lead, DefaultConflationWindowHours)
+	want := "fak stopfailure reset-stale --since-hours 72 --json"
+	if !strings.Contains(got, want) || !strings.Contains(got, "repeat with `--apply`") {
+		t.Fatalf("next action %q does not prescribe the aligned, review-first reset", got)
+	}
+
+	root := t.TempDir()
+	stopDir := filepath.Join(root, ".dos", "stop-failures")
+	if err := os.MkdirAll(stopDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const session = "settled-between-default-windows"
+	marker := filepath.Join(stopDir, session+".json")
+	if err := os.WriteFile(marker, []byte(`{"total":1,"consecutive":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	markerTime := now.Add(-48 * time.Hour)
+	if err := os.Chtimes(marker, markerTime, markerTime); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(root, ".claude-fixture", "projects", stopfailure.DefaultTranscriptNamespace)
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := filepath.Join(project, session+".jsonl")
+	if err := os.WriteFile(transcript, []byte(asstLine("continued after the marker")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	progressTime := markerTime.Add(time.Hour)
+	if err := os.Chtimes(transcript, progressTime, progressTime); err != nil {
+		t.Fatal(err)
+	}
+
+	short, err := stopfailure.ResetStale(stopfailure.Options{Root: root, Now: now, ClaudeHome: root, SinceWindow: 24 * time.Hour}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aligned, err := stopfailure.ResetStale(stopfailure.Options{Root: root, Now: now, ClaudeHome: root, SinceWindow: DefaultConflationWindowHours * time.Hour}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(short.Candidates) != 0 || len(aligned.Candidates) != 1 || aligned.Candidates[0].SessionID != session || aligned.Candidates[0].SettlementAction != stopfailure.ActionProgressAfterMarker {
+		t.Fatalf("24h=%+v 72h=%+v", short.Candidates, aligned.Candidates)
+	}
+}
+
 func TestBuild_CommittedTranscriptFixturesRedAndGreen(t *testing.T) {
 	root := repoRootFromTest(t)
 	red := Build(Options{

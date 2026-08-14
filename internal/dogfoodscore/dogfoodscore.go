@@ -577,6 +577,15 @@ func conflationDetail(ev Evidence) string {
 	return strconv.Itoa(ev.ConflationTurns) + " turn(s) claimed success in the same turn the harness reported a Stop-hook error — the model narrated a WITNESSED success over an OBSERVED hook failure"
 }
 
+func dogfoodDebtNextAction(lead KPIResult, windowHours int) string {
+	if lead.Key == "stop_hook_healthy" {
+		return "retire worst-first: " + lead.Key + " -- " + lead.Detail +
+			"; run `fak stopfailure reset-stale --since-hours " + strconv.Itoa(windowHours) +
+			" --json`, review the independently settled candidates, then repeat with `--apply`"
+	}
+	return "retire worst-first: " + lead.Key + " -- " + lead.Detail
+}
+
 func stopHealthDetail(ev Evidence) string {
 	if ev.StopMarkers == 0 {
 		return "no Stop-failure breaker markers — the loop has not wedged"
@@ -699,7 +708,7 @@ func Build(opts Options) ScorecardPayload {
 	if len(hardFail) > 0 {
 		finding = "dogfood_debt"
 		lead := hardFail[0]
-		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
+		next = dogfoodDebtNextAction(lead, opts.WindowHours)
 	}
 
 	p := scorecard.Fold(Schema, kpis, "dogfood_debt", weights, scorecard.Messages{
