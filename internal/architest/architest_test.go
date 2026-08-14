@@ -563,6 +563,7 @@ var tier = map[string]int{
 	"armbench":              1, // #6676 provenance-locked multi-arm benchmark harness: strict manifest/corpus/run schemas, deterministic pairing/resume/evidence gates, fake provider, and report fold; stdlib-only, imports nothing internal, off the hot path.
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
 	"portabilitylab":        1, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
+	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

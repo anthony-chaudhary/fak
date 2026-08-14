@@ -7,6 +7,7 @@
 //	fak preflight  -  run only the pre-flight + grammar rungs over a call
 //	fak bench      -  A/B ablate the vDSO over a frozen trace, emit report.json
 //	fak policy     -  dump / validate the deployable capability-floor manifest
+//	fak scratch-janitor - scan and optionally remove stale session scratchpads
 //	fak hook       -  spawned-hook mode: decide one call from stdin (the baseline)
 //
 // The single blank import of internal/registrations is what wires every leaf
@@ -91,6 +92,8 @@ func main() {
 		cmdSession(os.Args[2:])
 	case "session-audit":
 		cmdSessionAudit(os.Args[2:])
+	case "scratch-janitor":
+		os.Exit(runScratchJanitor(os.Stdout, os.Stderr, os.Args[2:]))
 	case "codex-resume":
 		cmdCodexResume(os.Args[2:])
 	case "sessionjournal":
