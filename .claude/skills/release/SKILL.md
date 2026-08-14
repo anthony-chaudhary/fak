@@ -93,6 +93,10 @@ Preserve this order: status/readiness → plan → decide → dry-run cut → ex
 `python tools/release_*.py` commands below are fallback/debug equivalents only, not the preferred
 operator interface.
 
+Verify the canonical surface before proceeding: `fak release --help` must list `status`, `plan`,
+`decide`, `cut`, `tag`, and `publish`. If one is absent, stop rather than silently falling back;
+use a helper only to diagnose the missing first-class wiring.
+
 ## Step 1: Decide whether to release
 
 ```bash
