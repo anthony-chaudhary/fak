@@ -1920,6 +1920,26 @@
           "category": "incidental",
           "reason": "Private hook decision tuple inside the existing guard question gate",
           "token": "guardGoalQuestionDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Claude hook protocol payload type inside the existing guard question gate",
+          "token": "guardGoalQuestionHookOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private hidden-hook actuator inside the existing guard question gate",
+          "token": "runGuardGoalQuestionHook"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private hook-settings matcher inside the existing guard question gate",
+          "token": "guardGoalQuestionMatchers"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private hidden CLI actuator inside the existing guard question gate",
+          "token": "cmdGuardGoalQuestionHook"
         }
       ],
       "exclude": [
@@ -1998,6 +2018,7 @@
         "cacheValueGateFactsFromReport",
         "callGateProvider",
         "cmdCacheValueGateScore",
+        "cmdGuardGoalQuestionHook",
         "codeToolGate",
         "codeToolGateOnce",
         "cooldownGateBlindWarning",
@@ -2050,6 +2071,8 @@
         "guardEquivalentRestarts",
         "guardGoalQuestionDecision",
         "guardGoalQuestionHookInput",
+        "guardGoalQuestionHookOutput",
+        "guardGoalQuestionMatchers",
         "guardGoalQuestionNeedsHuman",
         "guardHandoffBlockCeiling",
         "guardHandoffBlockCeilingDefault",
@@ -2151,6 +2174,7 @@
         "recordGuardCompactionWitness",
         "renderguardstartupreport",
         "runCacheValueGateScore",
+        "runGuardGoalQuestionHook",
         "runGuardOperatorQuestionGate",
         "runPinnedGate",
         "runRegressionSuite",

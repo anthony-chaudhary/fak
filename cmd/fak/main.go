@@ -321,6 +321,9 @@ func main() {
 		// Hidden: Claude Code Stop hook actuator installed by `fak guard` (see
 		// cmdGuardStopHook: blocks an unchosen end_turn past a fully-refused turn).
 		cmdGuardStopHook(os.Args[2:])
+	case "guard-goal-question":
+		// Hidden: active-goal AskUserQuestion PreToolUse boundary.
+		cmdGuardGoalQuestionHook(os.Args[2:])
 	case "guard-commit-gate":
 		// Hidden: Claude Code PreToolUse boundary for git commit stamp/path binding.
 		cmdGuardCommitGate(os.Args[2:])

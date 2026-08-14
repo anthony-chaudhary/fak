@@ -1112,6 +1112,16 @@ func guardStopHookMatchers(fakBin string) []guardPreCompactClaudeMatcher {
 	}}
 }
 
+func guardGoalQuestionMatchers(fakBin string) guardPreCompactClaudeMatcher {
+	return guardPreCompactClaudeMatcher{
+		Matcher: "AskUserQuestion",
+		Hooks: []guardPreCompactClaudeCommand{{
+			Type:    "command",
+			Command: guardPreCompactHookCommand(fakBin),
+			Args:    []string{"guard-goal-question"},
+		}},
+	}
+}
 func guardCommitGateMatchers(fakBin string) []guardPreCompactClaudeMatcher {
 	return []guardPreCompactClaudeMatcher{{
 		Matcher: "Bash",
@@ -1127,7 +1137,7 @@ func writeGuardStopHookSettings(path, fakBin string) error {
 	settings := guardPreCompactClaudeSettings{
 		Hooks: map[string][]guardPreCompactClaudeMatcher{
 			"Stop":       guardStopHookMatchers(fakBin),
-			"PreToolUse": guardCommitGateMatchers(fakBin),
+			"PreToolUse": append(guardCommitGateMatchers(fakBin), guardGoalQuestionMatchers(fakBin)),
 		},
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -1153,7 +1163,7 @@ func mergeGuardStopHookIntoSettings(path, fakBin string) error {
 		settings.Hooks = map[string][]guardPreCompactClaudeMatcher{}
 	}
 	settings.Hooks["Stop"] = guardStopHookMatchers(fakBin)
-	settings.Hooks["PreToolUse"] = guardCommitGateMatchers(fakBin)
+	settings.Hooks["PreToolUse"] = append(guardCommitGateMatchers(fakBin), guardGoalQuestionMatchers(fakBin))
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
