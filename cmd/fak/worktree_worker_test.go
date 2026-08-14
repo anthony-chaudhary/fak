@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -252,6 +253,165 @@ func TestWorktreeColdReapPlanEndToEnd(t *testing.T) {
 	}
 	if _, err := os.Stat(youngWT); err != nil {
 		t.Fatalf("apply must keep the young worktree youngWT: %v", err)
+	}
+}
+
+func newColdReapProbeFixture(t *testing.T) (repo, wt string, now time.Time, floor time.Duration) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo = t.TempDir()
+	wtRoot := t.TempDir()
+	git := func(args ...string) (string, error) {
+		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		c.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	if _, err := git("init", "-q", "-b", "main"); err != nil {
+		if _, e2 := git("init", "-q"); e2 != nil {
+			t.Skipf("git init failed: %v", e2)
+		}
+		_, _ = git("symbolic-ref", "HEAD", "refs/heads/main")
+	}
+	_, _ = git("config", "user.email", "t@t")
+	_, _ = git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git("add", "seed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := git("commit", "-qm", "seed"); err != nil {
+		t.Skipf("seed commit failed: %s", out)
+	}
+	res := workerworktree.Prepare(repo, "docs", "probe", "", wtRoot, nil)
+	if !res.OK {
+		t.Fatalf("prepare probe worktree: %+v", res)
+	}
+	now = time.Now()
+	floor = 30 * time.Minute
+	back := now.Add(-2 * time.Hour)
+	if err := os.Chtimes(res.Path, back, back); err != nil {
+		t.Fatalf("age probe worktree: %v", err)
+	}
+	return repo, res.Path, now, floor
+}
+
+func TestWorktreeColdReapProcessActiveAtPlanningIsExcluded(t *testing.T) {
+	repo, wt, now, floor := newColdReapProbeFixture(t)
+	var reapCalls []string
+
+	got := worktreeColdReapReportWithProbes(
+		repo,
+		true,
+		floor,
+		now,
+		false,
+		func(string) (bool, error) { return true, nil },
+		func(_, path string) workerworktree.Result {
+			reapCalls = append(reapCalls, path)
+			return workerworktree.Result{OK: true, Path: path, Removed: true}
+		},
+	)
+
+	if got.WouldReap != 0 || got.Reaped != 0 {
+		t.Fatalf("active process must exclude worktree from the reap plan: %+v", got)
+	}
+	if len(reapCalls) != 0 {
+		t.Fatalf("active process must not reach reap/unregister, calls=%v", reapCalls)
+	}
+	if len(got.Worktrees) != 1 || got.Worktrees[0].Eligible {
+		t.Fatalf("active process worktree must be kept: %+v", got.Worktrees)
+	}
+	if !strings.Contains(got.Worktrees[0].Reason, "active process") {
+		t.Fatalf("active process keep must carry its reason, got %q for %s", got.Worktrees[0].Reason, wt)
+	}
+}
+
+func TestWorktreeColdReapProcessBecomesLiveAtApply(t *testing.T) {
+	repo, _, now, floor := newColdReapProbeFixture(t)
+	probeCalls := 0
+	var reapCalls []string
+
+	got := worktreeColdReapReportWithProbes(
+		repo,
+		true,
+		floor,
+		now,
+		false,
+		func(string) (bool, error) {
+			probeCalls++
+			return probeCalls >= 2, nil
+		},
+		func(_, path string) workerworktree.Result {
+			reapCalls = append(reapCalls, path)
+			return workerworktree.Result{OK: true, Path: path, Removed: true}
+		},
+	)
+
+	if got.WouldReap != 1 || got.Reaped != 0 {
+		t.Fatalf("apply-time liveness flip must refuse the planned reap: %+v", got)
+	}
+	if len(reapCalls) != 0 {
+		t.Fatalf("apply-time live process must not reach reap/unregister, calls=%v", reapCalls)
+	}
+	if len(got.Failures) != 1 || got.Failures[0].Reason != "process_live" {
+		t.Fatalf("want one process_live failure, got %+v", got.Failures)
+	}
+}
+
+func TestWorktreeColdReapRemovedClaimRequiresAbsentDirectory(t *testing.T) {
+	repo, wt, now, floor := newColdReapProbeFixture(t)
+	reapCalls := 0
+
+	got := worktreeColdReapReportWithProbes(
+		repo,
+		true,
+		floor,
+		now,
+		false,
+		func(string) (bool, error) { return false, nil },
+		func(_, path string) workerworktree.Result {
+			reapCalls++
+			return workerworktree.Result{OK: true, Path: path, Removed: true}
+		},
+	)
+
+	if got.Reaped != 0 || reapCalls != 1 {
+		t.Fatalf("a removed claim with a remaining directory must not count as reaped: calls=%d out=%+v", reapCalls, got)
+	}
+	if len(got.Failures) != 1 || got.Failures[0].Reason != "directory_remains" {
+		t.Fatalf("want one directory_remains failure, got %+v", got.Failures)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("fake reap must leave directory in place: %v", err)
+	}
+}
+
+func TestWorktreeColdReapCountsVerifiedRemoval(t *testing.T) {
+	repo, wt, now, floor := newColdReapProbeFixture(t)
+
+	got := worktreeColdReapReportWithProbes(
+		repo,
+		true,
+		floor,
+		now,
+		false,
+		func(string) (bool, error) { return false, nil },
+		func(root, path string) workerworktree.Result {
+			return workerworktree.ForceReap(root, path, nil)
+		},
+	)
+
+	if got.WouldReap != 1 || got.Reaped != 1 || len(got.Failures) != 0 {
+		t.Fatalf("verified removal must count exactly one reap: %+v", got)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("verified reap must remove directory, stat err=%v", err)
 	}
 }
 

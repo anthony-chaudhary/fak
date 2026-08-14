@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -313,17 +314,25 @@ type worktreeColdReapItem struct {
 	Removed bool  `json:"removed,omitempty"`
 }
 
+// worktreeColdReapFailure records a worktree that was reapable in the planning
+// snapshot but failed one of the apply-time revalidation or removal checks.
+type worktreeColdReapFailure struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 // worktreeColdReapOut is the single JSON object the bulk cold sweep prints: the mode
 // (dry-run|apply), the age floor, the per-worktree decision ledger, and the roll-up
 // counts/bytes. In dry-run Reaped is always 0 and Bytes is the reclaimable total.
 type worktreeColdReapOut struct {
-	Mode        string                 `json:"mode"`
-	AgeFloorMin int                    `json:"age_floor_min"`
-	Worktrees   []worktreeColdReapItem `json:"worktrees"`
-	WouldReap   int                    `json:"would_reap"`
-	Reaped      int                    `json:"reaped"`
-	Bytes       int64                  `json:"bytes"`
-	ReapedBytes int64                  `json:"reaped_bytes"`
+	Mode        string                    `json:"mode"`
+	AgeFloorMin int                       `json:"age_floor_min"`
+	Worktrees   []worktreeColdReapItem    `json:"worktrees"`
+	Failures    []worktreeColdReapFailure `json:"failures"`
+	WouldReap   int                       `json:"would_reap"`
+	Reaped      int                       `json:"reaped"`
+	Bytes       int64                     `json:"bytes"`
+	ReapedBytes int64                     `json:"reaped_bytes"`
 	// HeldByWork counts the worktrees that cleared the lease and age gates and were
 	// kept only because they still carry uncommitted work, with their reclaimable
 	// bytes. Reported separately from the generic keep because it is a triage queue,
@@ -371,8 +380,43 @@ func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Durati
 // lease-liveness gate, and — only when apply is true — Reaps each cold one. It NEVER
 // deletes in dry-run: Reaped/ReapedBytes stay 0 and Bytes is the reclaimable total.
 func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration, now time.Time, evenIfUnlanded bool) worktreeColdReapOut {
+	return worktreeColdReapReportWithProbes(
+		repoRoot,
+		apply,
+		ageFloor,
+		now,
+		evenIfUnlanded,
+		worktreeColdProcessLive,
+		func(root, path string) workerworktree.Result {
+			return workerworktree.Reap(root, path, nil)
+		},
+	)
+}
+
+// worktreeColdReapReportWithProbes separates the two destructive-seam probes so
+// tests can make process liveness change between planning and apply and can prove
+// that a refused reap never reaches workerworktree.Reap.
+func worktreeColdReapReportWithProbes(
+	repoRoot string,
+	apply bool,
+	ageFloor time.Duration,
+	now time.Time,
+	evenIfUnlanded bool,
+	processLive func(path string) (bool, error),
+	reap func(root, path string) workerworktree.Result,
+) worktreeColdReapOut {
 	if ageFloor <= 0 {
 		ageFloor = workerworktree.DefaultColdAgeFloor
+	}
+	if processLive == nil {
+		processLive = func(string) (bool, error) {
+			return true, fmt.Errorf("process liveness probe is unavailable")
+		}
+	}
+	if reap == nil {
+		reap = func(_, path string) workerworktree.Result {
+			return workerworktree.Result{Path: path, Reason: "reap function is unavailable"}
+		}
 	}
 	oracle := worktreeLiveLeaseOracle(repoRoot, now)
 	plan := workerworktree.ColdReapList(repoRoot, nil, now, ageFloor, oracle)
@@ -381,6 +425,7 @@ func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration,
 		Mode:        "dry-run",
 		AgeFloorMin: int(ageFloor / time.Minute),
 		Worktrees:   make([]worktreeColdReapItem, 0, len(plan)),
+		Failures:    make([]worktreeColdReapFailure, 0),
 	}
 	if apply {
 		out.Mode = "apply"
@@ -390,16 +435,72 @@ func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration,
 		// The override promotes ONLY the unlanded-work keeps. A live lease or a
 		// worktree under the age floor stays kept either way: those protect an
 		// in-flight land, which no disk-reclamation flag should be able to override.
-		reap := c.Eligible || (evenIfUnlanded && c.HeldByWork)
+		shouldReap := c.Eligible || (evenIfUnlanded && c.HeldByWork)
 		if c.HeldByWork {
 			out.HeldByWork++
 			out.HeldByWorkBytes += item.Bytes
 		}
-		if reap {
+		liveProcess, processErr := processLive(c.Path)
+		switch {
+		case processErr != nil:
+			shouldReap = false
+			item.Eligible = false
+			item.Reason = "kept: process liveness probe failed: " + processErr.Error()
+		case liveProcess:
+			shouldReap = false
+			item.Eligible = false
+			item.Reason = "kept: an active process still references this worktree"
+		}
+		var beforeModTime time.Time
+		if shouldReap {
+			fi, err := os.Stat(c.Path)
+			if err != nil {
+				shouldReap = false
+				item.Eligible = false
+				item.Reason = "kept: worktree modtime could not be read: " + err.Error()
+			} else {
+				beforeModTime = fi.ModTime()
+			}
+		}
+		if shouldReap {
 			out.WouldReap++
 			out.Bytes += item.Bytes
 			if apply {
-				if res := workerworktree.Reap(repoRoot, c.Path, nil); res.Removed {
+				applyOracle := worktreeLiveLeaseOracle(repoRoot, time.Now())
+				leaseLive := applyOracle(c.Path)
+				unlanded := workerworktree.UnlandedCount(c.Path, nil)
+				applyProcessLive, applyProcessErr := processLive(c.Path)
+				currentInfo, modErr := os.Stat(c.Path)
+
+				failureReason := ""
+				switch {
+				case leaseLive:
+					failureReason = "lease_live"
+				case unlanded != 0:
+					failureReason = "unlanded_work"
+				case applyProcessErr != nil:
+					failureReason = "process_probe_error"
+				case applyProcessLive:
+					failureReason = "process_live"
+				case modErr != nil:
+					failureReason = "modtime_unreadable"
+				case !currentInfo.ModTime().Equal(beforeModTime):
+					failureReason = "modtime_changed"
+				}
+				if failureReason != "" {
+					out.Failures = append(out.Failures, worktreeColdReapFailure{Path: c.Path, Reason: failureReason})
+					out.Worktrees = append(out.Worktrees, item)
+					continue
+				}
+
+				res := reap(repoRoot, c.Path)
+				_, statErr := os.Stat(c.Path)
+				switch {
+				case !res.Removed:
+					out.Failures = append(out.Failures, worktreeColdReapFailure{Path: c.Path, Reason: "remove_failed"})
+				case !os.IsNotExist(statErr):
+					out.Failures = append(out.Failures, worktreeColdReapFailure{Path: c.Path, Reason: "directory_remains"})
+				default:
 					item.Removed = true
 					out.Reaped++
 					out.ReapedBytes += item.Bytes
@@ -409,6 +510,28 @@ func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration,
 		out.Worktrees = append(out.Worktrees, item)
 	}
 	return out
+}
+
+// worktreeColdProcessLive is the production process-liveness gate for a worker
+// worktree. A census failure is not an empty host: it fails closed by reporting
+// the path live and returning the census error. The current process is excluded
+// because its own argv may name the target while it performs the sweep.
+func worktreeColdProcessLive(path string) (bool, error) {
+	procs, collectErr := procguard.CollectRelations()
+	if collectErr != "" {
+		return true, fmt.Errorf("process census: %s", collectErr)
+	}
+	cleanPath := filepath.Clean(path)
+	self := os.Getpid()
+	for _, proc := range procs {
+		if proc.PID == self {
+			continue
+		}
+		if strings.Contains(proc.Cmdline, cleanPath) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // worktreeLiveLeaseOracle builds the lease-liveness gate the bulk cold sweep keys on:
