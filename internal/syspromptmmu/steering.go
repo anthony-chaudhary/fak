@@ -64,17 +64,18 @@ const (
 // The leveled canonical texts, mild (1) → maximal (4) terseness. Fixed literals, never
 // templated per turn, so each level's emitted segment is byte-identical every call.
 const (
-	steeringLevel1 = "Terseness level 1 (mild): prefer concision. Trim filler and skip restating the " +
-		"question, but keep full explanations where they add substance."
-
-	steeringLevel2 = "Terseness level 2 (moderate): be brief. Skip preamble and recap, answer directly, " +
-		"and keep explanations to the ones the answer needs."
-
-	steeringLevel3 = "Terseness level 3 (strong): be terse. No preamble, no restating the question, no " +
-		"closing summary; short sentences, essential content only."
-
-	steeringLevel4 = "Terseness level 4 (maximal): minimum viable answer. Output only the requested " +
-		"result — no explanation unless explicitly asked, no framing, no commentary."
+	steeringLevel1 = "Signal-first level 1 (light): lead with the answer. Use compact sentences and retain " +
+		"full explanation where it helps the reader act. Include every safety caveat, constraint, citation, " +
+		"command, code block, and explicitly requested section."
+	steeringLevel2 = "Signal-first level 2 (focused): state the result first, then add only the context needed " +
+		"to understand or act on it. Prefer concrete verbs and compact bullets. Include every safety caveat, " +
+		"constraint, citation, command, code block, and explicitly requested section."
+	steeringLevel3 = "Signal-first level 3 (compressed): deliver the essential result in short subject-first " +
+		"lines. Use dense bullets when they improve scanning. Include every safety caveat, constraint, citation, " +
+		"command, code block, and explicitly requested section."
+	steeringLevel4 = "Signal-first level 4 (minimal): return the requested artifact or answer in its shortest " +
+		"complete form. Keep exact syntax and all correctness-critical qualifications. Include every safety " +
+		"caveat, constraint, citation, command, code block, and explicitly requested section."
 )
 
 // steeringText maps a level to its canonical text. The set is CLOSED: only 1..4 exist;

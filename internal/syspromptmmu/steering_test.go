@@ -2,6 +2,8 @@ package syspromptmmu
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,5 +126,44 @@ func TestSteeringSpliceCacheSafe(t *testing.T) {
 	}
 	if a := AuditBaseContext(res2.Body); a.Status != AuditOK || a.GotDigest != before.ExpectDigest {
 		t.Fatalf("level-change audit: status=%q digest=%q, want ok/unchanged", a.Status, a.GotDigest)
+	}
+}
+
+func TestSteeringTextUsesPositiveSignalFirstFrame(t *testing.T) {
+	positive := []string{"lead with the answer", "state the result first", "deliver the essential result", "return the requested artifact"}
+	for i, want := range positive {
+		level := i + 1
+		text, ok := steeringText(level)
+		if !ok {
+			t.Fatalf("steeringText(%d) missing", level)
+		}
+		lower := strings.ToLower(text)
+		if !strings.Contains(lower, want) {
+			t.Errorf("steeringText(%d) = %q, want positive direction %q", level, text, want)
+		}
+		for _, prohibition := range []string{"no preamble", "no recap", "do not", "avoid "} {
+			if strings.Contains(lower, prohibition) {
+				t.Errorf("steeringText(%d) uses prohibition %q: %q", level, prohibition, text)
+			}
+		}
+	}
+}
+
+func TestSignalFirstSkillMatchesNativeProfile(t *testing.T) {
+	path := filepath.Join("..", "..", ".claude", "skills", "signal-first", "SKILL.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read native skill: %v", err)
+	}
+	text := strings.ToLower(string(body))
+	for _, want := range []string{
+		"name: signal-first",
+		"caveman-style output",
+		"put the result, decision, or next action in the first line",
+		"when compression competes with correctness, keep correctness",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("native skill missing %q", want)
+		}
 	}
 }
