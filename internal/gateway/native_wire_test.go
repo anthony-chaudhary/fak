@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"regexp"
 )
 
 // nativeWireRecorder captures every (messages, tools) pair the owned loop lowers into the
@@ -346,5 +347,23 @@ func TestNativeServeStreamMalformedToolFailsClosed(t *testing.T) {
 	}
 	if n := rec.calls(); n != 0 {
 		t.Errorf("planner was called %d times on a refused declaration — the loop must never run", n)
+	}
+}
+
+func TestNativeWireReasonVocabularyHasOneShape(t *testing.T) {
+	shape := regexp.MustCompile(`^NATIVE_[A-Z_]+$`)
+	reasons := []string{
+		nativeReasonMessageRoleUnsupported,
+		nativeReasonToolNameMissing,
+		nativeReasonToolNameDuplicate,
+		nativeReasonToolSchemaInvalid,
+	}
+	if len(reasons) < 4 {
+		t.Fatalf("reason vocabulary unexpectedly shrank: %v", reasons)
+	}
+	for _, reason := range reasons {
+		if !shape.MatchString(reason) {
+			t.Fatalf("native wire reason %q does not match %s", reason, shape)
+		}
 	}
 }

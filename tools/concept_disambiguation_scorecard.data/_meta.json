@@ -1770,6 +1770,26 @@
           "category": "incidental",
           "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
           "token": "guardSourceReadRecoverySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private progress witness helper inside the existing Stop hook",
+          "token": "guardStopGitHead"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test and deployment override for private Stop-hook state storage",
+          "token": "FAK_GUARD_REFUSAL_STATE_DIR"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private text predicate inside the existing Stop hook",
+          "token": "guardLooksLikeRefusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant aligning the existing native-wire refusal vocabulary; not a new operator concept",
+          "token": "nativeReasonMessageRoleUnsupported"
         }
       ],
       "exclude": [
@@ -1803,6 +1823,7 @@
         "FAK_CHILD_ATTEMPT_ID",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
+        "FAK_GUARD_REFUSAL_STATE_DIR",
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
         "FLEET_GIT_HYGIENE_GUARD",
         "GATED_UNWITNESSED",
@@ -1894,6 +1915,7 @@
         "guardKeychainSupported",
         "guardLaunchCoreLockAll",
         "guardLaunchKind",
+        "guardLooksLikeRefusal",
         "guardOAuthKeychainSource",
         "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
@@ -1925,6 +1947,7 @@
         "guardSplitAppleCloseOnExit",
         "guardSplitAppleCloseTail",
         "guardSplitAppleTerminalCommand",
+        "guardStopGitHead",
         "guardStopHookOperatorQuestionEnvMode",
         "guardTerminalIntents",
         "guardTimeoutFloors",
@@ -1961,6 +1984,7 @@
         "loadCacheValueGateBaseline",
         "loadGuardSelfTightenOverlay",
         "markGuardChildTerminalIntent",
+        "nativeReasonMessageRoleUnsupported",
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "normalizeGuardOperatorQuestionMode",
@@ -4476,6 +4500,11 @@
           "category": "incidental",
           "reason": "JSON provenance field for dispatch telemetry, not an engine implementation",
           "token": "engine_source"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant aligning the existing native-wire refusal vocabulary; not a new operator concept",
+          "token": "nativeReasonMessageRoleUnsupported"
         }
       ],
       "id": "gateway-engine",
@@ -4534,6 +4563,7 @@
         "microCacheMovefileWriteThrough",
         "microcache",
         "microcachedemo",
+        "nativeReasonMessageRoleUnsupported",
         "query_public_policy",
         "resolveCallEngine",
         "resolveSpawnEngine",
@@ -6228,6 +6258,16 @@
           "category": "incidental",
           "reason": "Typed OCI validation error code local to the artifact profile; it is not a support-maturity state.",
           "token": "UNSUPPORTED_MEDIA_TYPE"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant aligning the existing native-wire refusal vocabulary; not a new operator concept",
+          "token": "nativeReasonMessageRoleUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constant aligning the existing native-wire refusal vocabulary; not a new operator concept",
+          "token": "NATIVE_MESSAGE_ROLE_UNSUPPORTED"
         }
       ],
       "id": "support-maturity",
@@ -6258,6 +6298,7 @@
         "KVQUANT_UNSUPPORTED_TRANSITION",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
+        "NATIVE_MESSAGE_ROLE_UNSUPPORTED",
         "NonCacheParity",
         "OutcomeSupported",
         "ParityAhead",
@@ -6343,6 +6384,7 @@
         "immaturity",
         "joinCoverageScores",
         "manageParityPosture",
+        "nativeReasonMessageRoleUnsupported",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
         "parityPanelHeader",

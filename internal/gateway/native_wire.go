@@ -45,7 +45,9 @@ const (
 	// so it is not a JSON Schema the model can be given.
 	nativeReasonToolSchemaInvalid = "NATIVE_TOOL_SCHEMA_INVALID"
 	// Unsupported message roles are rejected before the loop runs.
-	errNativeWireRole = "native_wire_role_rejected"
+	// nativeReasonMessageRoleUnsupported: a message role cannot be represented by
+	// the owned loop; the caller must use a supported native message role.
+	nativeReasonMessageRoleUnsupported = "NATIVE_MESSAGE_ROLE_UNSUPPORTED"
 )
 
 // nativeEmptyToolSchema is the schema substituted for a declaration that omits
@@ -134,7 +136,7 @@ func nativeConversation(messages []agent.Message) ([]agent.Message, *nativeWireE
 		case agent.RoleSystem, agent.RoleUser, agent.RoleAssistant, agent.RoleTool:
 		default:
 			return nil, &nativeWireError{
-				Reason: errNativeWireRole,
+				Reason: nativeReasonMessageRoleUnsupported,
 				Detail: fmt.Sprintf("messages[%d] has role %q; supported roles are system, user, assistant, tool", i, m.Role),
 			}
 		}
