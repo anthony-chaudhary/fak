@@ -711,13 +711,13 @@ To diagnose an exact command instead of Codex config, put its arguments after th
 fak doctor mcp --command C:\path\to\fak.exe serve --stdio --policy C:\path\policy.json
 ```
 
-## Diagnose abrupt Codex/fak sessions (`fak sessiondiag`)
+## Diagnose abrupt Codex/fak sessions (`fak-dev sessiondiag`)
 
 When a Codex-backed session exits, freezes, or loses tool events, run the read-only diagnostic as soon as possible:
 
 ```powershell
-fak sessiondiag --since 24h
-fak sessiondiag --since 2h --json
+fak-dev sessiondiag --since 24h
+fak-dev sessiondiag --since 2h --json
 ```
 
 The verb opens Codex's `logs_2.sqlite` in SQLite read-only/query-only mode, bounds all log queries by time, and emits counts rather than prompt or tool bodies. To keep the live diagnostic bounded, it validates that the schema is readable but reports `integrity=not_checked`; run a full integrity check only on the shutdown-time copy described below. `CORRELATED_RUNTIME_PRESSURE` means the window contains store/WAL pressure, slow structured-log writes, or in-process app-server queue loss. It deliberately reports `causality=not_established`: those signals can explain an unusable session but do not prove which process terminated. `EXPLICIT_FAILURE_EVIDENCE` is reserved for an explicit panic/fatal/fak-child-exit log record. Preserve matching Windows Application Error/WER evidence when available.

@@ -60,17 +60,17 @@ red, and a peer's uncommitted fix can mask a real one. Name the question, run th
 
 | Your question | Run |
 |---|---|
-| Is the **committed trunk** buildable + gofmt-clean? *(what CI gates — what "clean **git** build" means)* | `fak ci-preflight` |
+| Is the **committed trunk** buildable + gofmt-clean? *(what CI gates — what "clean **git** build" means)* | `fak-dev ci-preflight` |
 | Does the committed tip plus **only my explicit uncommitted paths** pass full build/vet and affected tests? | `fak validate --mine <path> [--mine <path>...]` |
-| Does **my change** compile, ignoring peers' broken untracked WIP? | `fak buildcheck [--vet]` |
-| Does the **literal working tree** compile — *my own* untracked WIP included? | `fak buildcheck --isolate=false --vet` |
+| Does **my change** compile, ignoring peers' broken untracked WIP? | `fak-dev buildcheck [--vet]` |
+| Does the **literal working tree** compile — *my own* untracked WIP included? | `fak-dev buildcheck --isolate=false --vet` |
 | Will my **push** red another worker's build graph? | `fak hooks pre-push` |
 
 `fak validate` archives the committed tip, overlays only repeatable explicit `--mine` paths, then runs
 full `go build ./...`, `go vet ./...`, and dependency-aware affected tests; it never infers ownership
 from the shared dirty tree.
-`fak ci-preflight` archives the tip to a throwaway checkout (immune to the dirty tree;
-`--skip-build` = gofmt-only fast path). `fak buildcheck` discards output to the null device
+`fak-dev ci-preflight` archives the tip to a throwaway checkout (immune to the dirty tree;
+`--skip-build` = gofmt-only fast path). `fak-dev buildcheck` discards output to the null device
 and, by default, `-overlay`s away untracked siblings so a peer's WIP can't red your compile —
 an untracked `.go` in a package *you're* already editing is auto-kept as the matched new file,
 `--mine <file>` force-keeps one wired in from elsewhere, and a red that's purely mask-induced is
@@ -106,7 +106,7 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 > (when the binary is unbuildable) is `go build -o $env:TEMP\fak-verify.exe ./cmd/fak`
 > (PowerShell) / `go build -o /tmp/fak-verify.exe ./cmd/fak` (bash), or `go vet ./cmd/fak` —
 > but note a *fixed* temp name still collides when two agents run it at once, which is exactly
-> what `fak buildcheck`'s per-process temp overlay avoids. The in-tree `go build -o fak` above
+> what `fak-dev buildcheck`'s per-process temp overlay avoids. The in-tree `go build -o fak` above
 > is for *producing* the binary you run, not for a compile check.
 
 ## The 60-second proof (no key, no model, no GPU — verified)
@@ -195,11 +195,11 @@ fan-out, or exhaustive proof.
    spine itself as the first issue** (`gen/now`, milestoned, missing witness named) — a spine
    is never silently deferred.
 2. **File the follow-on backlog at creation time (3..50+ issues)** — the moment a spine
-   ships, run `fak issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` to expand
+   ships, run `fak-dev issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` to expand
    the QA / dogfood / productization / observability / integration / docs / release taxonomy
-   into contract-ready candidates (every one dispatchable under `fak issue contract`), then
+   into contract-ready candidates (every one dispatchable under `fak-dev issue contract`), then
    file them with milestone + labels at creation, or wave-plan first via
-   `fak issue cohort --from-plan`. The verb refuses to plan without a spine witness — that
+   `fak-dev issue cohort --from-plan`. The verb refuses to plan without a spine witness — that
    refusal is default 1 talking.
 
 **End of run: file the leftovers, don't narrate them.** `never silently deferred` binds
@@ -274,7 +274,7 @@ the message editor opens and hangs headless as `INTERACTIVE_HANG`) only as a fal
 binary/tooling is unavailable, and say so in the handoff.
 
 Filing a GitHub issue from an agent session works the same way: prefer
-`fak issue create --title T (--body B | --body-file F)` over raw `gh issue create` —
+`fak-dev issue create --title T (--body B | --body-file F)` over raw `gh issue create` —
 it shells to `gh` directly from the trusted binary, the same way `fak commit`/`fak
 sweep` do for git, so it does not trip the reversibility/ESCALATE preview-confirm
 gate on every call. Use raw `gh issue create` only as a fallback when the binary is
@@ -288,7 +288,7 @@ Before you touch one: grep the whole live tree for every consumer, migrate them 
 lockstep, and put a three-line impact statement (what changed · consumers migrated ·
 impact/cutover/rollback) in the commit body. The full checklist and a worked example are
 in **[docs/ci/ci-spec-change-migration.md](docs/ci/ci-spec-change-migration.md)**. Prove
-the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
+the *committed* tip (not the peer-dirty tree) with `fak-dev ci-preflight`.
 
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
@@ -302,8 +302,8 @@ the *committed* tip (not the peer-dirty tree) with `fak ci-preflight`.
     (or a single gitignored `_scratch/`), never loose in the repo root. Do not invent a
     root-level output name and rely on `.gitignore`: allocate it first with `fak tree-doctor
     --scratch-dir <producer>` (a run directory) or `fak tree-doctor --scratch-path
-    <producer>/<file>` (one generated file), then redirect there. `fak treedoctor
-    --sweep-scratch` reaps gitignored scratch via `git clean -Xdf` (ignored-only: it can
+    <producer>/<file>` (one generated file), then redirect there. `fak tree-doctor`
+    `--sweep-scratch` reaps gitignored scratch via `git clean -Xdf` (ignored-only: it can
     never touch a tracked file or a real untracked WIP file); `--sweep-scratch --dry-run`
     previews (`git clean -Xdn`) before reaping (#3211). See
     [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
@@ -656,7 +656,7 @@ A second, orthogonal axis separates work by **class** — fleet **infra** (CI, d
 loops, observability, slack, build) vs product **dev** leaves vs the public
 **front-door / mainline** release path. It is derived from the file-tree lane an issue
 routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
-`fak index work dev-leaves` (product only, plumbing hidden), `... infra`, and
+`fak-dev index work dev-leaves` (product only, plumbing hidden), `... infra`, and
 `... front-door` (the fenced release path). Use it to dispatch one class at a time; see
 [`docs/work-class-axis.md`](docs/work-class-axis.md).
 

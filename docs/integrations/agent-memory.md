@@ -223,7 +223,7 @@ If the agent needs to discover fak's own memory surface instead of reading this 
 query the self-feature catalog:
 
 ```bash
-fak feature query memory --detail fak_memory_run --json
+fak-dev feature query memory --detail fak_memory_run --json
 ```
 
 Over MCP, call `fak_feature_query` with `{"query":"memory"}`. It returns lightweight

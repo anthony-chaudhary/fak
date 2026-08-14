@@ -38,8 +38,7 @@ loop and your code drives it. You want neither — you keep your loop.
 | `fak serve --native` | agent application runtime: fak owns the loop | No — you keep your own loop |
 
 Naming and first-decision background:
-[Two runtimes, one binary](../explainers/runtime-vs-client.md). A `fak runtimes`
-chooser verb is tracked in
+[Two runtimes, one binary](../explainers/runtime-vs-client.md). A runtime chooser verb is tracked in
 [#3257](https://github.com/anthony-chaudhary/fak/issues/3257), and a first-class
 explainer for the guard/serve *enforcement* boundary (request-arrival vs turn-end) in
 [#5162](https://github.com/anthony-chaudhary/fak/issues/5162).
