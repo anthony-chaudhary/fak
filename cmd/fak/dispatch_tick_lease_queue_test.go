@@ -247,3 +247,30 @@ func TestDispatchLaneLeaseAdmitGivesUpThePlace(t *testing.T) {
 		t.Fatalf("tickets after the admit = %d, want 0 (an admitted caller gives up its place)", len(got))
 	}
 }
+
+func TestInspectDispatchLaneLeaseMatchesHeldAdmissionWithoutMutation(t *testing.T) {
+	root := initRegionTestRepo(t)
+	acquireRegionTestLease(t, root, "peer-gateway", "peer", []string{"internal/gateway/**"})
+
+	before := dispatchQueueTickets(t, root)
+	got := inspectDispatchLaneLease(root, "gateway", []string{"internal/gateway/**"}, "")
+	after := dispatchQueueTickets(t, root)
+	if refused, _ := got["refused"].(bool); !refused {
+		t.Fatalf("inspection=%+v, want refused", got)
+	}
+	if len(before) != len(after) {
+		t.Fatalf("read-only inspection mutated queue: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestInspectDispatchLaneLeaseAdmitsFreeLaneWithoutAcquiring(t *testing.T) {
+	root := initRegionTestRepo(t)
+	got := inspectDispatchLaneLease(root, "gateway", []string{"internal/gateway/**"}, "")
+	if refused, _ := got["refused"].(bool); refused {
+		t.Fatalf("inspection=%+v, want free", got)
+	}
+	live, _, err := leaseref.NewInDir(root).Live(context.Background(), time.Now())
+	if err != nil || len(live) != 0 {
+		t.Fatalf("inspection acquired lease: live=%+v err=%v", live, err)
+	}
+}

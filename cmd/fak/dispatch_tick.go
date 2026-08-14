@@ -1090,6 +1090,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	if !opts.Live {
+		lease := inspectDispatchLaneLease(root, pick.Lane, pick.Tree, opts.Goal)
+		payload["lease"] = lease
+		if refused, _ := lease["refused"].(bool); refused {
+			payload["ok"] = false
+			payload["action"] = "lane_leased"
+			payload["verdict"] = "LANE_LEASE_HELD"
+			payload["reason"] = fmt.Sprintf("lane %q lease is held by a live peer", pick.Lane)
+			return finish(payload), nil
+		}
 		payload["ok"] = true
 		payload["action"] = "would_spawn"
 		payload["verdict"] = "WOULD_SPAWN"
@@ -1288,6 +1297,23 @@ func dispatchRunPythonJSON(root string, stderr io.Writer, timeout time.Duration,
 	return nil, fmt.Errorf("python helper %s (tried %s): %w", strings.Join(args, " "), strings.Join(interps, ", "), lastErr)
 }
 
+func inspectDispatchLaneLease(root, lane string, tree []string, goal string) map[string]any {
+	holder := dispatchLeaseHolderForGoal(goal)
+	live, _, err := leaseref.NewInDir(root).Live(context.Background(), time.Now())
+	if err != nil {
+		return map[string]any{"refused": false, "fail_open": true, "error": err.Error(), "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind}
+	}
+	tax, err := regionadmit.LoadTaxonomy(root)
+	if err != nil {
+		tax = regionadmit.Taxonomy{}
+	}
+	mode := "shared"
+	if tax.Exclusive[lane] {
+		mode = "exclusive"
+	}
+	dec := regionadmit.Decide(regionadmit.Request{Actor: holder, Lane: lane, Tree: tree}, regionLeases(live), tax)
+	return map[string]any{"refused": !dec.Admit, "holder": holder, "reason": dec.Reason, "rung": dec.Rung, "detail": dec.Detail, "tree": tree, "lane": lane, "lane_kind": leaseref.ArbiterLaneKind, "mode": mode}
+}
 func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int, goal string) map[string]any {
 	holder := dispatchLeaseHolderForGoal(goal)
 	store := leaseref.NewInDir(root)
