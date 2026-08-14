@@ -974,3 +974,44 @@ overlapping paths into waves, and refuses dispatch until an existing issue passe
 contract. `--state`/`--state-out` read and explicitly persist evidence-digest adjudications;
 `--witnesses` reconciles only independent issue/git/test evidence. GitHub creation and worker
 launch are separately armed by `--live-issues` and `--live-launch`.
+
+## `fak skill compile` — explicit skill programs
+
+```text
+fak skill compile [--json] [--dialect <name>] [--expose <canonical-name>]... <SKILL.md>
+```
+
+Compiles exactly one fenced `fak-program` JSON block from a skill file into a
+content-addressed host registration and an independently content-addressed
+model-visible snapshot. Natural-language skill prose is never inferred as
+executable control flow.
+
+Registration is hidden by default. `--expose` selects canonical names for the
+current snapshot; `--dialect` applies declared provider/harness aliases after
+selection. The model learns current availability only from the `tools` carried
+in its provider request—not from installation, a skill being present, a builtin
+name, or a model's training prior.
+
+JSON output fields are stable at version `fak.skill-compile/v1`:
+
+- `registration`: canonical program, source identity, and registration digest;
+  host-only executor argv/adapter data lives here.
+- `model_view.digest`: identity of the exact selected surface.
+- `model_view.dialect`: requested alias dialect.
+- `model_view.tools`: selected provider-visible names, descriptions, input
+  schemas, canonical names, and registration digests; executor data is absent.
+- `model_view.omitted`: installed registrations omitted from this snapshot with
+  a reason such as `NOT_SELECTED`.
+
+Exit status is `0` on success and `2` for usage, read, compile, unknown
+selection, invalid dialect alias, collision, or JSON-encoding failure. Without
+`--json`, the command prints a concise registration/exposure summary.
+
+A deterministic command adapter is optional but must be explicit:
+`fak.command-adapter/v1` declares every JSON field mapped to an argv entry,
+stdin, or environment value and declares `result: "json"`. Execution uses an
+argv vector, never shell-string interpolation, and refuses undeclared adapters,
+missing fields, nonzero exits, and non-JSON output.
+
+Runnable hidden/exposed example and self-check:
+[`examples/skill-program/`](../examples/skill-program/).

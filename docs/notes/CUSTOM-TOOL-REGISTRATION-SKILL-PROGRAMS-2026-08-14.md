@@ -64,11 +64,11 @@ Compilation:
 Example:
 
 ```text
-fak skill compile .claude/skills/repo-search/SKILL.md --json
+fak skill compile --json .claude/skills/repo-search/SKILL.md
 # registered, but model_view.tools is empty and the omission says NOT_SELECTED
 
-fak skill compile .claude/skills/repo-search/SKILL.md \
-  --expose repo_search --dialect codex --json
+fak skill compile --expose repo_search --dialect codex --json \
+  .claude/skills/repo-search/SKILL.md
 # model_view contains functions.shell_command, canonical_name repo_search, and catalog digest
 ```
 
@@ -87,3 +87,62 @@ The eventual request adapter should join the exposed snapshot into the existing 
 ## Non-goals of the spine
 
 This does not yet execute custom binaries, infer workflows from arbitrary prose, introspect arbitrary Cobra/flag commands, or mutate provider requests. Those are follow-on integrations; the shipped boundary makes their invariants testable first.
+
+## Shipped request and dispatch path
+
+The working spine now carries the boundary through the runtime:
+
+1. `toolcatalog.Expose` produces a digest-bound selected snapshot including
+   omissions; installed-but-unselected tools are absent.
+2. `ctxmmu.ToolPageTable` stores and faults the verified snapshot by page hash
+   plus snapshot digest.
+3. `agent.ToolDefsFromCatalogPage` lowers only that snapshot into the shared
+   provider-neutral `ToolDef` seam used by OpenAI and Anthropic request adapters.
+4. `toolcatalog.ResolveRegistration` reverse-maps the provider-visible alias to
+   the canonical registration and verifies the request-pinned registration
+   digest.
+5. gateway dispatch sends only that canonical identity through the existing
+   kernel policy floor and monotone `toolplugin.Host` before execution.
+6. `fak.command-adapter/v1` maps declared JSON fields to argv/stdin/environment
+   without a shell and requires a JSON result.
+
+Thus current availability has one authoritative path:
+
+```text
+installed registration
+  -> policy-allowed candidate
+  -> explicitly selected snapshot
+  -> ctxmmu-pinned provider request tools
+  -> model-selected visible name
+  -> digest-verified canonical registration
+  -> policy + toolplugin + argv executor
+```
+
+A model's memory of `shell_command`, `bash`, an OpenAI function, an MCP tool, or
+a skill name is never evidence that the tool exists in the current request.
+
+## Compatibility policy for model and harness priors
+
+Familiar names can reduce discovery cost, but familiarity is not semantic
+compatibility. Maintain aliases as an explicit dialect table keyed by harness or
+provider, while canonical names and registration digests remain stable. Admit an
+alias only if all of these match:
+
+- argument schema and required fields;
+- quoting and path semantics;
+- side-effect and policy class;
+- result/error shape;
+- streaming, timeout, and cancellation behavior;
+- lifecycle expectations such as confirmation or witness requirements.
+
+Otherwise use a private canonical name and teach it via the provider schema and
+concise description. A misleading familiar alias is worse than an unfamiliar
+accurate name because a model may confidently emit valid-looking but unsafe
+arguments.
+
+Issue #6820 owns the empirical decision. Compare canonical/private,
+provider-native, and popular aliases on the same semantics and prompts. Record
+model ID, harness/dialect, exact snapshot digest, raw calls, tuned no-alias
+baseline, selection accuracy, argument validity, correction turns, latency, and
+token cost. Keep an alias only on a net-true measured gain; until that ledger
+exists, compatibility benefit is **not yet**, not a shipped claim.
