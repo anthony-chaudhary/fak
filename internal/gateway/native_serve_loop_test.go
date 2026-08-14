@@ -21,6 +21,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -363,5 +366,49 @@ func TestNativeServeLoopStreamsRunArmDeltasAndMetrics(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&decideCount); got < 2 {
 		t.Fatalf("DecideSession fired %d times, want at least 2 owned-loop turn boundaries", got)
+	}
+}
+
+type nativeCodingPlanner struct {
+	turns    int
+	catalogs [][]agent.ToolDef
+}
+
+func (p *nativeCodingPlanner) Model() string { return "native-coding" }
+func (p *nativeCodingPlanner) Complete(_ context.Context, _ []agent.Message, tools []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.catalogs = append(p.catalogs, append([]agent.ToolDef(nil), tools...))
+	p.turns++
+	if p.turns == 1 {
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: "read", Type: "function", Function: agent.Func{Name: codetools.ToolRead, Arguments: `{"file_path":"a.go"}`}}}}, FinishReason: "tool_calls"}, nil
+	}
+	if p.turns == 2 {
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: "grep", Type: "function", Function: agent.Func{Name: codetools.ToolGrep, Arguments: `{"pattern":"package"}`}}}}, FinishReason: "tool_calls"}, nil
+	}
+	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "done"}, FinishReason: "stop"}, nil
+}
+
+func TestNativeServeArmsCodingCatalogAndSpeculator(t *testing.T) {
+	agent.Configure()
+	abi.RegisterRegionBackend(inlineBackend{})
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Config{EngineID: "localtools", Model: "test", VDSO: true, Native: true, NativeMaxTurns: 8, NativeCodeWorkspace: root, NativeSpeculate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	planner := &nativeCodingPlanner{}
+	srv.planner = planner
+	m, err := srv.runNativeArmSeed(context.Background(), nativeWireSeed{Task: "inspect"}, "trace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planner.catalogs) == 0 || len(planner.catalogs[0]) != 6 {
+		t.Fatalf("catalog=%+v", planner.catalogs)
+	}
+	if m.EngineCalls < 2 || m.SpecIssued < 1 || m.SpecSquashed < 1 || m.SpecServed < 1 {
+		t.Fatalf("native metrics=%+v", m)
 	}
 }

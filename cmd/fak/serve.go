@@ -168,6 +168,8 @@ type serveFlags struct {
 	dojoMode                     *bool
 	native                       *bool
 	nativeMaxTurns               *int
+	nativeCodeWorkspace          *string
+	nativeSpeculate              *bool
 	vdsoProxyFill                *bool
 	metricsSnapshot              *time.Duration
 	fleetBus                     *bool
@@ -243,6 +245,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	sf.native = fs.Bool("native", false, "NATIVE HARNESS (#1316/#1837): drive fak's OWN agent loop for every /v1/messages turn instead of the single-shot proxy turn. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted â a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) â the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
+	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "arm kernel Read/Write/Edit/Bash/Grep/Glob under this workspace root (requires --native)")
+	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation (requires --native-code-workspace)")
 	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, .fak/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
 	sf.fleetBus = fs.Bool("fleet-bus", false, "JOIN THE FLEET CONTROL BUS (#5600, epic #5599): announce this serve as a control-plane instance on the shared bus and drain directives from it every --fleet-bus-interval, so one `fak fleet control send` reaches every live instance at once — the cross-PROCESS fan-out the per-gateway `sessionctl` broadcast and the display-only `fleetspine` each stop short of. Each drained directive is applied through the SAME writes the single-session verbs ride (steer ⇒ the a2achan operator turn, needs --native; pause/resume/cancel/terminate/throttle ⇒ session.Table.Transition) and every one draws an ACK carrying what this process OBSERVED change — the return path that lets the control point say \"3 of 4 applied, 1 refused STEER_NO_OWNED_LOOP\" instead of \"sent\". Exactly-once under at-least-once redelivery is keyed by the instance identity: the default fixed HTTP listen address survives a restart and remains distinct from simultaneous serves on other addresses; --stdio, --addr :0, or an unusable address fall back to a process-local identity and therefore do not promise restart dedup. Off by default (arming a control plane must be stated); the bus directory is --fleet-bus-dir.")
@@ -574,9 +578,11 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		RouteAccounts: routeRoster,
 		// Native-harness keystone (#1316): drive agent.RunArm for a non-streaming
 		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
-		Native:         *sf.native,
-		NativeMaxTurns: *sf.nativeMaxTurns,
-		VDSOProxyFill:  *sf.vdsoProxyFill,
+		Native:              *sf.native,
+		NativeMaxTurns:      *sf.nativeMaxTurns,
+		NativeCodeWorkspace: *sf.nativeCodeWorkspace,
+		NativeSpeculate:     *sf.nativeSpeculate,
+		VDSOProxyFill:       *sf.vdsoProxyFill,
 		// Streaming CONTENT-progress deadline (#5486, --stream-progress-timeout): the
 		// window a warm-but-unadvancing proxied stream is given before the turn is ended.
 		// gateway.newConfiguredHTTPPlanner carries it onto every proxy planner, where
