@@ -68,10 +68,19 @@ work=ponytail:native:high
 
 The Ponytail work profile is tracked in [#6700](https://github.com/anthony-chaudhary/fak/issues/6700); general repeated-profile composition is tracked in [#6707](https://github.com/anthony-chaudhary/fak/issues/6707). Until those ship, `fak agent --output-style` affects response shape only.
 
-## Current boundary
+## External guarded harnesses
 
-The shipped flag drives `fak agent`, the owned in-process loop. External harness propagation through `fak guard` is not claimed yet. Use `fak agent profiles` as the machine-readable source of currently selectable behavior rather than inferring support from planned issue names.
+`fak guard --output-profile <selection> -- claude ...` resolves the same profile catalog
+before launch and injects its exact governed bytes through Claude's owned
+`--append-system-prompt` seam. The pre-launch capture records canonical family,
+implementation/intensity, fragment digest, harness, activation seam, source provenance when
+applicable, and the disable command. Omitting the flag (or selecting `full`) leaves child
+arguments byte-identical to the prior launch path.
 
+Claude is currently the only witnessed external harness. Codex, Cursor, and other wrapped
+commands refuse a non-full profile with `RESPONSE_PROFILE_UNSUPPORTED_HARNESS` rather than
+claim activation from environment inheritance. Unknown profiles likewise fail before child
+launch. This feature is prompt shaping; it does not reuse or overload Stop-output lint.
 
 ## Troubleshooting
 

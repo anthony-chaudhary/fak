@@ -126,6 +126,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	verbFlagUsage(fs, "guard")
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
 	provider := fs.String("provider", "", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai (default: auto-detected from the agent name — claude->anthropic, codex/opencode->openai — else anthropic)")
+	outputProfile := fs.String("output-profile", "", "response profile for a witnessed harness instruction seam (supported: claude)")
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
 	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080), or at a public-safe local alias like @lab/glm-5.2 resolved from the user's lab target config. Forces the OpenAI-compatible wire and upstream base http://HOST:PORT/v1 (the /v1 fak serve serves its chat route under), so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz AND /v1/models and fails loud if the box is not serving the /v1 surface.")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
@@ -341,6 +342,11 @@ func cmdManageCommand(commandName string, argv []string) {
 	}
 
 	command := fs.Args() // everything after the flags (and after `--`) is the wrapped agent.
+	command, responseProfileCapture, profileErr := injectGuardResponseProfile(command, *outputProfile)
+	if profileErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v\n", profileErr)
+		os.Exit(2)
+	}
 	if len(command) == 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -433,6 +439,15 @@ func cmdManageCommand(commandName string, argv []string) {
 	// 1. Install the capability floor: an explicit --policy file wins; otherwise the embedded
 	//    guard floor, unioned with the operator allow overlay. With NO floor the kernel
 	//    default-denies every tool, so guard ALWAYS loads one, fail-loud. See guard_startup.go.
+	if responseProfileCapture != nil {
+		raw, err := marshalGuardResponseProfileCapture(responseProfileCapture)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: RESPONSE_PROFILE_CAPTURE: %v\n", err)
+			os.Exit(2)
+		}
+		fmt.Fprintf(os.Stderr, "fak guard: response-profile %s\n", raw)
+	}
+
 	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath)
 	configureGuardPromotionLedger(rt.Adjudicator.Complain, *promotionThreshold)
 	var err error
