@@ -19,56 +19,75 @@ type dispatchRepoPulseTotals struct {
 // foldDispatchRepoPulseReceipts folds one durable spawn sidecar per launch. The
 // sidecar filename is the launch identity; duplicate JSON with the same pid/issue
 // key is counted once so retries cannot manufacture savings.
+var dispatchRepoPulseCommonDir = discoverGitCommonDir
+
+func dispatchRepoPulseLedgerDir(runsDir string) string {
+	if filepath.Base(filepath.Clean(runsDir)) != ".dispatch-runs" {
+		return ""
+	}
+	commonDir := dispatchRepoPulseCommonDir(filepath.Dir(filepath.Clean(runsDir)))
+	if commonDir == "" {
+		return ""
+	}
+	return filepath.Join(commonDir, "fak-repo-pulse")
+}
+
 func foldDispatchRepoPulseReceipts(dir string) dispatchRepoPulseTotals {
 	var out dispatchRepoPulseTotals
 	seen := map[string]bool{}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return out
+	dirs := []string{dir}
+	if durableDir := dispatchRepoPulseLedgerDir(dir); durableDir != "" && durableDir != dir {
+		dirs = append(dirs, durableDir)
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+	for _, receiptDir := range dirs {
+		entries, err := os.ReadDir(receiptDir)
 		if err != nil {
 			continue
 		}
-		var row struct {
-			Schema  string `json:"schema"`
-			Issue   int    `json:"issue"`
-			PID     int    `json:"pid"`
-			Spawned struct {
-				Issue int `json:"issue"`
-				PID   int `json:"pid"`
-			} `json:"spawned"`
-			RepoPulse struct {
-				Schema           string `json:"schema"`
-				SavedTokens      int64  `json:"saved_tokens"`
-				ToolTurnsSkipped int64  `json:"tool_turns_skipped"`
-				JournalRows      int64  `json:"journal_rows"`
-			} `json:"repo_pulse_receipt"`
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(receiptDir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			var row struct {
+				Schema  string `json:"schema"`
+				Issue   int    `json:"issue"`
+				PID     int    `json:"pid"`
+				Spawned struct {
+					Issue int `json:"issue"`
+					PID   int `json:"pid"`
+				} `json:"spawned"`
+				RepoPulse struct {
+					Schema           string `json:"schema"`
+					SavedTokens      int64  `json:"saved_tokens"`
+					ToolTurnsSkipped int64  `json:"tool_turns_skipped"`
+					JournalRows      int64  `json:"journal_rows"`
+				} `json:"repo_pulse_receipt"`
+			}
+			if json.Unmarshal(b, &row) != nil || row.RepoPulse.Schema != "fak-dispatch-repo-pulse-receipt/1" {
+				continue
+			}
+			issue, pid := row.Issue, row.PID
+			if issue == 0 && pid == 0 {
+				issue, pid = row.Spawned.Issue, row.Spawned.PID
+			}
+			key := entry.Name()
+			if pid != 0 || issue != 0 {
+				key = fmt.Sprintf("%d/%d", issue, pid)
+			}
+			if seen[key] {
+				out.DuplicateRows++
+				continue
+			}
+			seen[key] = true
+			out.Launches++
+			out.SavedTokens += row.RepoPulse.SavedTokens
+			out.ToolTurnsSkipped += row.RepoPulse.ToolTurnsSkipped
+			out.JournalRows += row.RepoPulse.JournalRows
 		}
-		if json.Unmarshal(b, &row) != nil || row.RepoPulse.Schema != "fak-dispatch-repo-pulse-receipt/1" {
-			continue
-		}
-		issue, pid := row.Issue, row.PID
-		if issue == 0 && pid == 0 {
-			issue, pid = row.Spawned.Issue, row.Spawned.PID
-		}
-		key := entry.Name()
-		if pid != 0 || issue != 0 {
-			key = fmt.Sprintf("%d/%d", issue, pid)
-		}
-		if seen[key] {
-			out.DuplicateRows++
-			continue
-		}
-		seen[key] = true
-		out.Launches++
-		out.SavedTokens += row.RepoPulse.SavedTokens
-		out.ToolTurnsSkipped += row.RepoPulse.ToolTurnsSkipped
-		out.JournalRows += row.RepoPulse.JournalRows
 	}
 	return out
 }

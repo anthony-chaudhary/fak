@@ -508,6 +508,11 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 		if issue > 0 && pid > 0 {
 			name := fmt.Sprintf("repo-pulse-launch-%d-%d.json", issue, pid)
 			_ = os.WriteFile(filepath.Join(runsDir, name), blob, 0o644)
+			if durableDir := dispatchRepoPulseLedgerDir(runsDir); durableDir != "" {
+				if os.MkdirAll(durableDir, 0o755) == nil {
+					_ = os.WriteFile(filepath.Join(durableDir, name), blob, 0o644)
+				}
+			}
 		}
 	}
 }

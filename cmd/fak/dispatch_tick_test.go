@@ -2816,7 +2816,12 @@ func TestDispatchStampSubBuckets(t *testing.T) {
 }
 
 func TestRecordDispatchPayloadPersistsRepoPulsePerLaunch(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, ".dispatch-runs")
+	commonDir := filepath.Join(root, ".git")
+	oldCommonDir := dispatchRepoPulseCommonDir
+	dispatchRepoPulseCommonDir = func(string) string { return commonDir }
+	t.Cleanup(func() { dispatchRepoPulseCommonDir = oldCommonDir })
 	payload := map[string]any{"schema": "fleet-issue-resolve-dispatch/1", "action": "spawned", "spawned": map[string]any{"issue": 123, "pid": 456}, "repo_pulse_receipt": map[string]any{"schema": "fak-dispatch-repo-pulse-receipt/1", "saved_tokens": 900, "tool_turns_skipped": 2, "journal_rows": 3}}
 	recordDispatchPayload(dir, "codex", payload)
 	path := filepath.Join(dir, "repo-pulse-launch-123-456.json")
@@ -2826,6 +2831,17 @@ func TestRecordDispatchPayloadPersistsRepoPulsePerLaunch(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"saved_tokens": 900`) {
 		t.Fatalf("sidecar=%s", b)
+	}
+	durablePath := filepath.Join(commonDir, "fak-repo-pulse", filepath.Base(path))
+	if _, err := os.Stat(durablePath); err != nil {
+		t.Fatalf("durable receipt: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	totals := foldDispatchRepoPulseReceipts(dir)
+	if totals.Launches != 1 || totals.SavedTokens != 900 || totals.ToolTurnsSkipped != 2 {
+		t.Fatalf("totals after run archive removal = %+v", totals)
 	}
 	recordDispatchPayload(dir, "codex", map[string]any{"issue": 124, "pid": 457})
 	if _, err := os.Stat(filepath.Join(dir, "repo-pulse-launch-124-457.json")); !os.IsNotExist(err) {
