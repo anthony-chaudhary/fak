@@ -192,6 +192,22 @@ func guardInfoVisualIdentityRow(v guardInfoVars) string {
 // guardInfoVisualTinyRow is the 1-row fallback for a pane too short for any sub-pane: the compact
 // status line, so even a sliver pane still shows the economy + safety in plain words.
 func guardInfoVisualTinyRow(v guardInfoVars) string {
+	w := guardInfoWorkDoneFromVars(v)
+	if w.Metrics.InputTokensAvoided.Available || w.Metrics.ModelCallsAvoided.Available {
+		tokens := "tok unavailable"
+		if w.Metrics.InputTokensAvoided.Available {
+			tokens = guardInfoSignedShortCount(w.Metrics.InputTokensAvoided.Value) + " input tok"
+		}
+		calls := "calls unavailable"
+		if w.Metrics.ModelCallsAvoided.Available {
+			calls = guardInfoShortCount(int(w.Metrics.ModelCallsAvoided.Value)) + " calls"
+		}
+		line := "work vs direct provider · " + tokens + " avoided · " + calls + " avoided · " + guardSafetyWord(v)
+		if len(v.Sessions) > 0 {
+			line += " · agents " + guardInfoAgentsSummary(v.Sessions)
+		}
+		return line
+	}
 	return renderGuardInfoLine(v)
 }
 

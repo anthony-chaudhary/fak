@@ -51,7 +51,8 @@ import (
 // OMITS the block until a turn carries provider cache activity (vcacheVarsFromSnapshot
 // returns nil), so "no cache yet" is distinguishable from "cache proved zero saving".
 type guardInfoVars struct {
-	Gateway struct {
+	WorkDone *guardInfoWorkDone `json:"work_done,omitempty"`
+	Gateway  struct {
 		UptimeSeconds    float64 `json:"uptime_seconds"`
 		InflightRequests int64   `json:"inflight_requests"`
 		VDSO             bool    `json:"vdso"`
@@ -232,6 +233,7 @@ func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVar
 		fmt.Fprintln(stderr, guardInfoFetchErrorLine(c.base, err))
 		return v, false
 	}
+	v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
 	return v, true
 }
 
@@ -824,6 +826,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 		sawHealthy = true
 		misses = 0
+		v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
 		if viewState.copyMode {
 			lastSample, haveSample = v, true // keep the sample fresh but stay frozen for copy/select
 		} else {

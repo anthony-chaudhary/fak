@@ -687,6 +687,11 @@
           "category": "incidental",
           "reason": "provider usage receipt field, not a cache mechanism or product concept",
           "token": "ProviderCacheWriteTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "cache_token_equiv_owner"
         }
       ],
       "id": "cache",
@@ -759,6 +764,7 @@
         "cache_read_rate_ms_per_token",
         "cache_state_changed",
         "cache_state_fingerprint",
+        "cache_token_equiv_owner",
         "cache_trace_test",
         "cache_undecodable",
         "cache_unreadable",
@@ -2004,6 +2010,66 @@
           "category": "incidental",
           "reason": "serialized receipt field, not a separate guard gate",
           "token": "GateContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info accounting DTO; projection of existing cache and latency facts, not a new guard gate.",
+          "token": "guardInfoWorkDone"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "ptrGuardInfoWorkDone"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneFromVars"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoSignedShortCount"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneBaselineID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneBaseline"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneMetrics"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneMetric"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "guardInfoWorkDoneSourceText"
         }
       ],
       "exclude": [
@@ -2150,6 +2216,17 @@
         "guardHandoffBlockCounterRel",
         "guardHeadlessChildWindowMode",
         "guardInfo",
+        "guardInfoSignedShortCount",
+        "guardInfoWorkDone",
+        "guardInfoWorkDoneBaseline",
+        "guardInfoWorkDoneBaselineID",
+        "guardInfoWorkDoneFromVars",
+        "guardInfoWorkDoneMetric",
+        "guardInfoWorkDoneMetrics",
+        "guardInfoWorkDoneRows",
+        "guardInfoWorkDoneSchema",
+        "guardInfoWorkDoneSource",
+        "guardInfoWorkDoneSourceText",
         "guardKeychainAPIKey",
         "guardKeychainAccessToken",
         "guardKeychainCred",
@@ -2239,6 +2316,7 @@
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
         "proseGate",
+        "ptrGuardInfoWorkDone",
         "readGuardCompactionWitnesses",
         "readguardstopsledger",
         "readguardstoptranscript",
@@ -3469,6 +3547,16 @@
           "category": "incidental",
           "reason": "distinct session count supporting a trajectory candidate, not a session lifecycle concept",
           "token": "SessionSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "observed_session"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "modeled_from_observed_session_mean"
         }
       ],
       "id": "session-runtime",
@@ -3613,8 +3701,10 @@
         "materializeSessionMoveCheckpoint",
         "member_sessions",
         "microagentSessionID",
+        "modeled_from_observed_session_mean",
         "observedSchedulerResult",
         "observedSessionIDs",
+        "observed_session",
         "orderRecords",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",

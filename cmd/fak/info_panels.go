@@ -63,6 +63,7 @@ type guardInfoPanel struct {
 // to shrink.
 func guardInfoPanels() []guardInfoPanel {
 	return []guardInfoPanel{
+		{name: "work-done", degrade: 0, rows: guardInfoWorkDoneRows},
 		{name: "trends", degrade: 4, rows: guardInfoTrendsPanelRows},
 		{name: "tasks", degrade: 1, rows: guardInfoTasksPanelRows},
 		{name: "endpoints", degrade: 2, rows: guardInfoEndpointsPanelRows},
