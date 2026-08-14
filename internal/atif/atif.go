@@ -113,8 +113,6 @@ func FromTurns(turns []trajectory.Turn, opts Options) Bundle {
 		byTrace[t.TraceID] = append(byTrace[t.TraceID], t)
 	}
 
-	// Build each trace's trajectory and resolve its parent (trace id + the exact
-	// parent step tool_use_id, when the label names one).
 	type built struct {
 		traj        Trajectory
 		parentTrace string

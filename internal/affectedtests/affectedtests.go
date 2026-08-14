@@ -43,7 +43,6 @@ import "sort"
 //
 // Pure and deterministic: same inputs -> identical output, always.
 func Select(edges map[string][]string, changed []string) []string {
-	// Build the REVERSE graph: importedBy[q] lists every p that directly imports q.
 	// Seeding a BFS from the changed set over this reverse graph reaches exactly the
 	// ancestors of the changed packages -- the packages whose tests could change.
 	importedBy := make(map[string][]string, len(edges))

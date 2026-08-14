@@ -69,7 +69,6 @@ func BuildComparison(in CompareInputs) *Comparison {
 		Summary:     summary,
 	}
 
-	// Build the four metric families (parallel to swebench).
 	c.Families = []MetricFamily{
 		{
 			Name:       "Prefill / KV-reuse work-elimination",
