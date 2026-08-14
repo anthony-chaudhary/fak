@@ -65,8 +65,13 @@ func Grade(m Manifest) Report {
 		return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "schema mismatch"}
 	}
 	byClass := map[string]map[string]Run{}
+	seenIDs := map[string]bool{}
 	for _, r := range m.Runs {
-		class := strings.TrimSpace(r.WorkClass)
+		if strings.TrimSpace(r.ID) == "" || seenIDs[r.ID] {
+			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "every run needs a unique id"}
+		}
+		seenIDs[r.ID] = true
+		class := strings.ToLower(strings.TrimSpace(r.WorkClass))
 		speed := strings.ToLower(strings.TrimSpace(r.Speed))
 		if class == "" || (speed != "fast" && speed != "standard") {
 			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "every run needs work_class and fast|standard speed"}
@@ -81,6 +86,14 @@ func Grade(m Manifest) Report {
 			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "duplicate arm for work class"}
 		}
 		byClass[class][speed] = r
+	}
+	for _, required := range []string{"interactive", "grind"} {
+		if byClass[required] == nil {
+			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "both interactive and grind work classes are required"}
+		}
+	}
+	if len(byClass) != 2 {
+		return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "manifest must contain exactly interactive and grind work classes"}
 	}
 	classes := make([]string, 0, len(byClass))
 	for class := range byClass {

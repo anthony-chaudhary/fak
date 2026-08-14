@@ -38,14 +38,33 @@ func TestGradeRejectsUnpinnedAndUndersampled(t *testing.T) {
 }
 
 func TestGradeRejectsQualityRegression(t *testing.T) {
-	base := Run{WorkClass: "interactive", Model: "opus", Account: "seat", Revision: "abc", DurationSeconds: 60, ToolCalls: 1, TurnaroundMS: []float64{10, 20}, Quality: "pass", Witness: "x"}
+	base := Run{Model: "opus", Account: "seat", Revision: "abc", DurationSeconds: 60, ToolCalls: 1, TurnaroundMS: []float64{10, 20}, Quality: "pass", Witness: "x"}
+	runs := []Run{}
+	for _, class := range []string{"interactive", "grind"} {
+		fast := base
+		fast.ID, fast.WorkClass, fast.Speed, fast.TurnaroundMS = class+"-fast", class, "fast", []float64{1, 2}
+		standard := base
+		standard.ID, standard.WorkClass, standard.Speed = class+"-standard", class, "standard"
+		runs = append(runs, fast, standard)
+	}
+	runs[0].Quality = "fail"
+	got := Grade(Manifest{Schema: Schema, Runs: runs})
+	if got.Verdict != "NOT_YET" || got.Comparisons[1].Reason != "quality witness failed" {
+		t.Fatalf("report=%+v", got)
+	}
+}
+func TestGradeRequiresBothClassesAndUniqueIDs(t *testing.T) {
+	base := Run{ID: "one", WorkClass: "interactive", Model: "opus", Account: "seat", Revision: "abc", DurationSeconds: 60, ToolCalls: 1, TurnaroundMS: []float64{1, 2}, Quality: "pass", Witness: "x"}
 	fast := base
 	fast.Speed = "fast"
-	fast.TurnaroundMS = []float64{1, 2}
-	fast.Quality = "fail"
 	standard := base
+	standard.ID = "two"
 	standard.Speed = "standard"
-	if got := Grade(Manifest{Schema: Schema, Runs: []Run{fast, standard}}); got.Verdict != "NOT_YET" || got.Comparisons[0].Reason != "quality witness failed" {
-		t.Fatalf("report=%+v", got)
+	if got := Grade(Manifest{Schema: Schema, Runs: []Run{fast, standard}}); got.Verdict != "NOT_YET" || got.Reason != "both interactive and grind work classes are required" {
+		t.Fatalf("missing class=%+v", got)
+	}
+	standard.ID = fast.ID
+	if got := Grade(Manifest{Schema: Schema, Runs: []Run{fast, standard}}); got.Verdict != "NOT_YET" || got.Reason != "every run needs a unique id" {
+		t.Fatalf("duplicate ids=%+v", got)
 	}
 }
