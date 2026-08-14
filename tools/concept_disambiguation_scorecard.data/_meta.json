@@ -2914,6 +2914,76 @@
           "category": "incidental",
           "reason": "pumpStdinToSession is an unexported I/O helper that forwards stdin frames into an existing MCP session; its precise name is implementation plumbing, not concept vocabulary.",
           "token": "pumpStdinToSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "runSessionDiscoveryServe"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "handleFakSessionDiscovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "SessionDiscoveryState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "authorizeSessionClientForSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "sessionDiscoverySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "SessionDiscoveryRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "SessionDiscoveryPublication"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "PublishSessionDiscovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "validSessionRelayURL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "rotateSessionDiscoveryEpoch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "RevokeSessionDiscovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "sessionBearer"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "authorizeSessionClientSilent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
+          "token": "handleSessionDiscovery"
         }
       ],
       "id": "session-runtime",
@@ -2937,6 +3007,7 @@
         "NarrowsSessions",
         "NewSessionAffinityGateway",
         "ObservedSessions",
+        "PublishSessionDiscovery",
         "ReapMalformedSessionRefs",
         "RecordSessionTerminalOutput",
         "RegisteredObserved",
@@ -2945,6 +3016,7 @@
         "RestoreSessionClientStateWithDependency",
         "RestoreSessionMoveCheckpoint",
         "RetiredSessions",
+        "RevokeSessionDiscovery",
         "RunSessionDiag",
         "SESSION_CLIENT_UNAVAILABLE",
         "SESSION_NOT_FOUND",
@@ -2962,6 +3034,9 @@
         "SessionClientDescriptor",
         "SessionClientDetachRequest",
         "SessionClientTokenHeader",
+        "SessionDiscoveryPublication",
+        "SessionDiscoveryRecord",
+        "SessionDiscoveryState",
         "SessionEffect",
         "SessionEffectConfirmed",
         "SessionEffectKnownNotRun",
@@ -2996,6 +3071,8 @@
         "ambiguous_session_root",
         "attemptHeap",
         "authorizeSessionClient",
+        "authorizeSessionClientForSession",
+        "authorizeSessionClientSilent",
         "blankSessionOpen",
         "boolInt",
         "bumpSessionHandoffBlocks",
@@ -3027,9 +3104,11 @@
         "guardSessionStartProcIsDriver",
         "guardsessiontempdir",
         "handleFakSessionClient",
+        "handleFakSessionDiscovery",
         "handleFakSessionMidflight",
         "handleSessionCheckpointVerb",
         "handleSessionClientPage",
+        "handleSessionDiscovery",
         "handleSessionMove",
         "handoff_session_give_up",
         "hashUnit",
@@ -3053,11 +3132,13 @@
         "repository-read",
         "requireminimaxsession",
         "restartfreshsession",
+        "rotateSessionDiscoveryEpoch",
         "runFilterToolScheduler",
         "runSessionAuditBatch",
         "runSessionAuditCodex",
         "runSessionCheckpointWitness",
         "runSessionConPTY",
+        "runSessionDiscoveryServe",
         "runSessionMove",
         "runSessionMoveAdmit",
         "runSessionMoveCheckpoint",
@@ -3082,6 +3163,7 @@
         "serveSessionRegistryPath",
         "serveSessionRegistryScopeLabel",
         "sessionAffinity",
+        "sessionBearer",
         "sessionChangesFor",
         "sessionClientAttachment",
         "sessionClientCapabilities",
@@ -3091,6 +3173,7 @@
         "sessionClientRuntimes",
         "sessionClientSchema",
         "sessionClientSession",
+        "sessionDiscoverySchema",
         "sessionLocked",
         "sessionMoveDestination",
         "sessionMoveDestinationFlags",
@@ -3125,6 +3208,7 @@
         "topsessions",
         "totalslots",
         "tuisessionrow",
+        "validSessionRelayURL",
         "verifyFilterToolScheduler",
         "verifyFilterToolSchedulerPath",
         "wipPeerCheckpointSessions",

@@ -105,6 +105,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// path so net/http.ServeMux matches it ahead of the /v1/fak/session/ subtree
 		// (a longer, exact pattern wins) — a session whose id is literally "changes"
 		// is not addressable, which is fine (ids are gateway-minted gw-<n>).
+		{"/v1/fak/discovery/", s.handleFakSessionDiscovery},
 		{"/v1/fak/session/changes", s.handleFakSessionChanges},
 		// /v1/fak/session/ is the DRIVE-state control surface: GET /v1/fak/session/{id}
 		// observes one session's run-state/budget/priority/pace; POST

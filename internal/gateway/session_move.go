@@ -351,6 +351,7 @@ func (s *Server) MoveSession(ctx context.Context, sessionID string, req SessionM
 		return SessionMoveResponse{}, moveError(http.StatusConflict, "STALE_EPOCH", "source epoch changed before cutover", transitions)
 	}
 	sess.executionEpoch = newEpoch
+	rotateSessionDiscoveryEpoch(sess, newEpoch)
 	sess.placement = normalizedPlacement(req.Destination)
 	sess.moving = false
 	for id, att := range rt.attachments {

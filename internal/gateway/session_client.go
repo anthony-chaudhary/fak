@@ -107,6 +107,7 @@ type sessionClientSession struct {
 	moveHooks          SessionMoveHooks
 	moving             bool
 	lastMove           []SessionMoveTransition
+	discovery          *SessionDiscoveryState
 }
 
 type sessionClientRuntime struct {
@@ -338,7 +339,7 @@ func (s *Server) handleFakSessionClient(w http.ResponseWriter, r *http.Request, 
 	if !known {
 		return false
 	}
-	if !s.authorizeSessionClient(w, r) {
+	if !s.authorizeSessionClientForSession(w, r, sessionID) {
 		return true
 	}
 	if s.sessionFeed == nil {

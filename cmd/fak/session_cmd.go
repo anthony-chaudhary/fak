@@ -87,6 +87,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "move" {
 		return runSessionMove(stdout, stderr, args)
 	}
+	if verb == "discovery-serve" {
+		return runSessionDiscoveryServe(stdout, stderr, args)
+	}
 
 	// reset-diff (#1575) is the one offline verb in this surface: a pure JSON-in,
 	// diff-out render over internal/sessionreset.DiffReset that never dials a live

@@ -1,0 +1,87 @@
+{
+  "schema": "fak.session-cross-device-witness.v1",
+  "captured_at": "2026-08-13T23:53:34Z",
+  "issue": 6549,
+  "result": "PASS",
+  "topology": {
+    "server": "sanctioned-model-node",
+    "client": "independent-sanctioned-compute-node",
+    "transport": "TLS over the private VPC address; no loopback path",
+    "same_host": false,
+    "same_process": false
+  },
+  "session": {
+    "session_id": "cross-device-20260813",
+    "source_epoch": "epoch-14073f6641e9354b",
+    "destination_epoch": "epoch-a1a459440f382f1f",
+    "discovery_generation_before": 1,
+    "discovery_generation_after": 2,
+    "capability_digest": "sha256:810269fcda80e42ff0e1139f26b83f58abeaced807abad3797994994872720ef"
+  },
+  "replay": {
+    "request": {
+      "client_kind": "second-device",
+      "since": 0
+    },
+    "transcript_uploaded_by_client": false,
+    "cursor_before": 0,
+    "transcript_before_bytes": 24,
+    "transcript_before_digest": "sha256:96d3d6404321400b1f04d95392bb4399feb53fe7466059adc1088939ef3095a2",
+    "accepted_input_digest": "sha256:ff5d4a793868ac5228c5e5cad232dbe5658a4cd8ee988fa536e0d257dd3276a0",
+    "cursor_after": 1,
+    "transcript_after_bytes": 64,
+    "transcript_after_digest": "sha256:479ecbe6116ee4f3c530235c9a66b408bc29c40ce932f2eea6024a001ddb974b",
+    "accepted_action_count": 1,
+    "matching_effect_count": 1,
+    "duplicate_effect": false
+  },
+  "cutover": {
+    "move_http_status": 200,
+    "same_logical_session_id": true,
+    "epoch_changed": true,
+    "generation_incremented": true,
+    "reattach_http_status": 200,
+    "reattach_since": 1,
+    "reattach_cursor": 1,
+    "transcript_digest_after_reattach": "sha256:479ecbe6116ee4f3c530235c9a66b408bc29c40ce932f2eea6024a001ddb974b",
+    "stale_epoch_http_status": 409,
+    "stale_epoch_code": "STALE_EPOCH"
+  },
+  "negative_checks": [
+    {
+      "case": "missing bearer",
+      "http_status": 401,
+      "code": "DISCOVERY_UNAUTHORIZED"
+    },
+    {
+      "case": "revoked bearer",
+      "http_status": 401,
+      "code": "DISCOVERY_REVOKED"
+    },
+    {
+      "case": "expired bearer",
+      "http_status": 401,
+      "code": "DISCOVERY_EXPIRED"
+    },
+    {
+      "case": "pre-cutover execution epoch",
+      "http_status": 409,
+      "code": "STALE_EPOCH"
+    }
+  ],
+  "commands": [
+    "fak session discovery-serve --listen 0.0.0.0:<port> --cert <cert> --key <key> --session-id cross-device-20260813 --relay-url https://<sanctioned-relay>:<port> --local-token <redacted> --ttl 20m",
+    "independent client: GET /v1/fak/discovery/{session_id} with bearer capability",
+    "independent client: POST /v1/fak/session/{session_id}/attach with {client_kind, since}",
+    "independent client: POST /v1/fak/session/{session_id}/input with {attachment_id, execution_epoch, text}",
+    "independent client: POST /v1/fak/session/{session_id}/move, rediscover, then reattach from prior cursor",
+    "independent client: repeat discovery without, after revocation of, and after expiry of bearer"
+  ],
+  "secret_handling": {
+    "bearer_in_artifact": false,
+    "private_hostname_in_artifact": false,
+    "project_id_in_artifact": false,
+    "physical_address_in_artifact": false
+  }
+}
+
