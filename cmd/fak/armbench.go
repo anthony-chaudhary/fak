@@ -42,7 +42,7 @@ import (
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-managed|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-gates|ponytail-managed|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
@@ -71,6 +71,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchImportFixtures(stdout, stderr, argv[1:])
 	case "ponytail":
 		return armbenchPonytail(stdout, stderr, argv[1:])
+	case "ponytail-gates":
+		return armbenchPonytailGates(stdout, stderr, argv[1:])
 	case "ponytail-managed":
 		return armbenchPonytailManaged(stdout, stderr, argv[1:])
 	case "validate":
@@ -562,4 +564,49 @@ func splitArmbenchCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func armbenchPonytailGates(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("armbench ponytail-gates", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	checkout := fs.String("checkout", "", "pinned Ponytail checkout")
+	live := fs.Bool("live", false, "execute provider-backed scenarios")
+	claude := fs.String("claude", "claude", "Claude CLI")
+	model := fs.String("model", "haiku", "provider model alias/snapshot")
+	account := fs.String("account", "", "configured Claude account identity (required with --live)")
+	trials := fs.Int("trials", 1, "provider trials per scenario and arm")
+	replay := fs.String("replay", "", "re-score provider outputs from an earlier raw witness")
+	out := fs.String("out", "", "raw JSON witness path")
+	jsonOut := fs.Bool("json", false, "emit strict JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *checkout == "" {
+		fmt.Fprintln(stderr, "armbench ponytail-gates: --checkout is required")
+		return 2
+	}
+	report, err := armbench.RunPonytailGates(context.Background(), armbench.PonytailGateOptions{Checkout: *checkout, Live: *live, Claude: *claude, Model: *model, Account: *account, Trials: *trials, Replay: *replay})
+	if err != nil {
+		fmt.Fprintf(stderr, "armbench ponytail-gates: %v\n", err)
+		return 1
+	}
+	if *out != "" {
+		if err := armbench.WritePonytailGateReport(*out, report); err != nil {
+			fmt.Fprintf(stderr, "armbench ponytail-gates: %v\n", err)
+			return 1
+		}
+	}
+	if *jsonOut {
+		b, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+	} else {
+		for _, s := range report.Summary {
+			fmt.Fprintf(stdout, "%-13s %-22s pass=%d fail=%d not-run=%d gate=%v\n", s.Arm, s.Category, s.Passed, s.Failed, s.NotRun, s.GatePass)
+		}
+		fmt.Fprintf(stdout, "overall_pass=%v\n", report.OverallPass)
+	}
+	if !report.OverallPass {
+		return 3
+	}
+	return 0
 }

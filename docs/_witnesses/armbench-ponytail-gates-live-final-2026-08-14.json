@@ -1,0 +1,1082 @@
+{
+  "schema": "fak.armbench.ponytail-gates.v1",
+  "comparator": "DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "generated_at": "2026-08-14T10:11:11Z",
+  "live": true,
+  "model": "haiku",
+  "account": "aug8-netra",
+  "trials": 1,
+  "sources": [
+    {
+      "path": "benchmarks/behavior.js",
+      "sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "bytes": 2785
+    },
+    {
+      "path": "benchmarks/behavior.yaml",
+      "sha256": "7f0edb875c56872fa14707a5e096a0f951dfc0b5f6de82fb7bfe505b9fd45c4f",
+      "bytes": 1685
+    },
+    {
+      "path": "benchmarks/correctness.js",
+      "sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "bytes": 10228
+    },
+    {
+      "path": "benchmarks/correctness.test.js",
+      "sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "bytes": 1583
+    },
+    {
+      "path": "benchmarks/robustness-audit.js",
+      "sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "bytes": 14150
+    },
+    {
+      "path": "benchmarks/promptfooconfig.yaml",
+      "sha256": "fc292f68c5727f306f5ba1ce74b161631e416ce71b66a67d9241a59556c3e00d",
+      "bytes": 1815
+    },
+    {
+      "path": "benchmarks/arms/baseline.js",
+      "sha256": "ef0f81f670425705ab3195609947aa64890890cb078d7669780afe2228da8740",
+      "bytes": 113
+    },
+    {
+      "path": "benchmarks/arms/caveman.js",
+      "sha256": "b3793a7549c9217e9e9b89b2ed5e94813a9c71297386c77a177d4e2ef3e13d1a",
+      "bytes": 315
+    },
+    {
+      "path": "benchmarks/arms/ponytail.js",
+      "sha256": "9091a2e794ad1c5c7c4c9b68a3bb4aa995fcce6d0f09aad37a2febdd95640b82",
+      "bytes": 373
+    },
+    {
+      "path": "benchmarks/arms/caveman-SKILL.md",
+      "sha256": "09ebdef35a85d058f8eba04c6a3d91079ac8dabc3d45d265694f128c808f7648",
+      "bytes": 3654
+    },
+    {
+      "path": "skills/ponytail/SKILL.md",
+      "sha256": "1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2",
+      "bytes": 6637
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "up.behavior.hardware-calibration",
+      "set": "upstream",
+      "category": "behavior",
+      "task": "Write a Python function that reads the temperature in Celsius from a thermistor wired to a Raspberry Pi ADC (MCP3008, channel 0).",
+      "source_path": "benchmarks/behavior.js",
+      "source_sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "assertion": "execute pinned behavior.js probe=hardware",
+      "requires_provider": true
+    },
+    {
+      "id": "up.behavior.requested-explanation",
+      "set": "upstream",
+      "category": "behavior",
+      "task": "Refactor this for readability and give me a detailed, step-by-step write-up of every change you made and why.\n\ndef p(d):\n    r = []\n    for x in d:\n        if x.get('a') and x['a'] > 0:\n            r.append(x['a'] * 2)\n    return r",
+      "source_path": "benchmarks/behavior.js",
+      "source_sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "assertion": "execute pinned behavior.js probe=explanation",
+      "requires_provider": true
+    },
+    {
+      "id": "up.behavior.one-runnable-check",
+      "set": "upstream",
+      "category": "behavior",
+      "task": "Write a Python function that parses a duration string like '1h30m45s' into a total number of seconds.",
+      "source_path": "benchmarks/behavior.js",
+      "source_sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "assertion": "execute pinned behavior.js probe=onecheck",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.email",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Write me a Python function that validates email addresses.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.debounce",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.csv-sum",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.react-countdown",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.fastapi-rate-limit",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.is-prime",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function is_prime(n) that returns True if n is prime, else False.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.factorial",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function factorial(n).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.fibonacci",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function fibonacci(n) that returns the nth Fibonacci number (0-indexed).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.gcd",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function gcd(a, b).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.binary-search",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function binary_search(arr, target) that returns the index or -1.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.is-leap-year",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function is_leap_year(year).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.days-in-month",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function days_in_month(year, month).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.int-to-roman",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function int_to_roman(n) for 1 <= n <= 3999.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.flatten",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function flatten(lst) that recursively flattens nested lists.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.chunk",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function chunk(lst, size) that splits a list into chunks.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.clamp",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function clamp(value, minimum, maximum).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.is-palindrome",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function is_palindrome(s) that ignores case and non-alphanumeric characters.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.email",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write me a Python function that validates email addresses.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.url",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function that validates whether a string is a valid HTTP or HTTPS URL.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.credit-card",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function that validates a credit card number.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.ipv4",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function that validates an IPv4 address.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness-regression.fenced-email-passes",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    },
+    {
+      "id": "up.correctness-regression.unfenced-email-passes",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    },
+    {
+      "id": "up.correctness-regression.broken-email-fails",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    },
+    {
+      "id": "up.correctness-regression.unfenced-arrow-debounce-passes",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    }
+  ],
+  "cells": [
+    {
+      "scenario_id": "up.correctness-regression.fenced-email-passes",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.correctness-regression.unfenced-email-passes",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.correctness-regression.broken-email-fails",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.correctness-regression.unfenced-arrow-debounce-passes",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.behavior.hardware-calibration",
+      "arm": "baseline",
+      "category": "behavior",
+      "pass": false,
+      "reason": "Treats the hardware as ideal; no calibration knob.",
+      "output": "Assuming a **10 kΩ NTC thermistor** forms a voltage divider with a **10 kΩ fixed resistor connected to 3.3 V**, with the thermistor connected to ground and the midpoint connected to MCP3008 channel 0:\n\n```python\nimport math\nimport spidev\n\n\ndef read_thermistor_celsius(\n    channel: int = 0,\n    nominal_resistance: float = 10_000.0,\n    nominal_temperature_c: float = 25.0,\n    beta: float = 3950.0,\n    series_resistance: float = 10_000.0,\n) -> float:\n    \"\"\"Read an NTC thermistor through an MCP3008 and return °C.\"\"\"\n    if not 0 <= channel <= 7:\n        raise ValueError(\"MCP3008 channel must be between 0 and 7\")\n\n    spi = spidev.SpiDev()\n    spi.open(0, 0)  # SPI bus 0, chip-select CE0\n    spi.max_speed_hz = 1_000_000\n\n    try:\n        response = spi.xfer2([1, (8 + channel) << 4, 0])\n    finally:\n        spi.close()\n\n    adc_value = ((response[1] & 0x03) << 8) | response[2]\n\n    if adc_value <= 0 or adc_value >= 1023:\n        raise RuntimeError(\n            f\"Thermistor ADC reading is out of range: {adc_value}\"\n        )\n\n    thermistor_resistance = (\n        series_resistance * adc_value / (1023.0 - adc_value)\n    )\n\n    nominal_temperature_k = nominal_temperature_c + 273.15\n    temperature_k = 1.0 / (\n        (1.0 / nominal_temperature_k)\n        + math.log(thermistor_resistance / nominal_resistance) / beta\n    )\n\n    return temperature_k - 273.15\n\n\ntemperature = read_thermistor_celsius()\nprint(f\"{temperature:.2f} °C\")\n```\n\nInstall and enable the SPI dependency:\n\n```bash\npython -m pip install spidev\n```\n\nUse the thermistor’s datasheet values for `nominal_resistance` and `beta`. If the thermistor and fixed resistor are reversed in the voltage divider, calculate resistance with:\n\n```python\nthermistor_resistance = series_resistance * (1023.0 - adc_value) / adc_value\n```\n"
+    },
+    {
+      "scenario_id": "up.behavior.hardware-calibration",
+      "arm": "caveman",
+      "category": "behavior",
+      "pass": false,
+      "reason": "Treats the hardware as ideal; no calibration knob.",
+      "output": "Example assumes:\n\n- MCP3008 channel `0`\n- 10 kΩ thermistor connected to `3.3 V`\n- 10 kΩ fixed resistor connected to ground\n- ADC input at midpoint\n- Thermistor: `10 kΩ @ 25°C`, Beta `3950`\n\n```python\nimport math\nimport spidev\n\n# MCP3008 on SPI bus 0, chip-select 0 (CE0)\nspi = spidev.SpiDev()\nspi.open(0, 0)\nspi.max_speed_hz = 1_000_000\n\n\ndef read_mcp3008(channel: int = 0) -> int:\n    \"\"\"Read one MCP3008 channel and return a 10-bit value (0-1023).\"\"\"\n    if not 0 <= channel <= 7:\n        raise ValueError(\"MCP3008 channel must be between 0 and 7\")\n\n    response = spi.xfer2([1, (8 + channel) << 4, 0])\n    return ((response[1] & 0x03) << 8) | response[2]\n\n\ndef read_temperature_celsius(\n    channel: int = 0,\n    fixed_resistance: float = 10_000.0,\n    nominal_resistance: float = 10_000.0,\n    nominal_temperature_c: float = 25.0,\n    beta: float = 3950.0,\n) -> float:\n    \"\"\"Read thermistor temperature using its Beta equation.\"\"\"\n    adc = read_mcp3008(channel)\n\n    if adc <= 0 or adc >= 1023:\n        raise RuntimeError(\n            \"Thermistor ADC reading is out of range; check wiring\"\n        )\n\n    # Wiring: 3.3V -> thermistor -> ADC input -> fixed resistor -> GND\n    thermistor_resistance = fixed_resistance * (1023.0 / adc - 1.0)\n\n    nominal_temperature_k = nominal_temperature_c + 273.15\n\n    temperature_k = 1.0 / (\n        (1.0 / nominal_temperature_k)\n        + math.log(thermistor_resistance / nominal_resistance) / beta\n    )\n\n    return temperature_k - 273.15\n\n\ntry:\n    temperature = read_temperature_celsius()\n    print(f\"{temperature:.2f} °C\")\nfinally:\n    spi.close()\n```\n\nInstall dependency and enable SPI:\n\n```bash\npython3 -m pip install spidev\nsudo raspi-config\n```\n\nIf divider reversed—fixed resistor to `3.3 V`, thermistor to ground—replace resistance formula with:\n\n```python\nthermistor_resistance = fixed_resistance * adc / (1023.0 - adc)\n```\n\nUse thermistor datasheet’s actual nominal resistance and Beta value for accuracy.\n"
+    },
+    {
+      "scenario_id": "up.behavior.hardware-calibration",
+      "arm": "ponytail",
+      "category": "behavior",
+      "pass": false,
+      "reason": "Treats the hardware as ideal; no calibration knob.",
+      "output": "```python\nfrom math import log\nfrom gpiozero import MCP3008\n\n_adc = MCP3008(channel=0)\n\ndef read_temperature_c(\n    series_resistor=10_000,\n    nominal_resistance=10_000,\n    nominal_temp_c=25.0,\n    beta=3950,\n):\n    \"\"\"Read a thermistor connected from MCP3008 CH0 to GND.\"\"\"\n    ratio = _adc.value  # ADC voltage / reference voltage\n    if not 0 < ratio < 1:\n        raise RuntimeError(\"Thermistor reading is outside the valid ADC range\")\n\n    resistance = series_resistor * ratio / (1 - ratio)\n    kelvin = 1 / (\n        1 / (nominal_temp_c + 273.15)\n        + log(resistance / nominal_resistance) / beta\n    )\n    return kelvin - 273.15\n```\n\nAssumes a 10 kΩ resistor from 3.3 V to CH0 and a 10 kΩ NTC thermistor from CH0 to GND. Adjust `beta` and resistance values to match/calibrate the physical thermistor. Requires `gpiozero` with SPI enabled.\n"
+    },
+    {
+      "scenario_id": "up.behavior.requested-explanation",
+      "arm": "baseline",
+      "category": "behavior",
+      "pass": true,
+      "reason": "Gave the requested write-up (189 words of prose).",
+      "output": "```python\ndef double_positive_a_values(items):\n    doubled_values = []\n\n    for item in items:\n        value = item.get(\"a\")\n        if value and value > 0:\n            doubled_values.append(value * 2)\n\n    return doubled_values\n```\n\n### Changes made\n\n1. **Renamed `p` to `double_positive_a_values`**\n   - Describes the function’s behavior: it extracts positive values stored under `\"a\"` and doubles them.\n   - If `\"a\"` has a domain-specific meaning, that term would make an even better function name.\n\n2. **Renamed `d` to `items`**\n   - Clarifies that the argument is an iterable of dictionary-like items.\n   - Avoids forcing readers to infer what the abbreviation means.\n\n3. **Renamed `r` to `doubled_values`**\n   - Makes the purpose of the result list immediately apparent.\n\n4. **Renamed `x` to `item`**\n   - Communicates that each loop iteration processes one input item.\n\n5. **Stored `item.get(\"a\")` in `value`**\n   - Avoids looking up the same field multiple times.\n   - Removes the mixture of `.get(\"a\")` and `[\"a\"]` access.\n   - Gives the condition and calculation a meaningful name to operate on.\n\n6. **Preserved the original filtering behavior**\n   - Missing and other falsy `\"a\"` values are ignored.\n   - Truthy values are included only when they are greater than zero.\n   - Included values are multiplied by two.\n   - The original order is preserved.\n\nI kept the explicit loop rather than replacing it with a compact list comprehension because the request prioritizes readability.\n"
+    },
+    {
+      "scenario_id": "up.behavior.requested-explanation",
+      "arm": "caveman",
+      "category": "behavior",
+      "pass": true,
+      "reason": "Gave the requested write-up (154 words of prose).",
+      "output": "```python\ndef double_positive_values(items):\n    doubled_values = []\n\n    for item in items:\n        value = item.get(\"a\")\n        if value and value > 0:\n            doubled_values.append(value * 2)\n\n    return doubled_values\n```\n\n### Changes\n\n1. **Renamed `p` to `double_positive_values`**\n   - States function behavior.\n   - Callers need not inspect implementation to understand result.\n\n2. **Renamed `d` to `items`**\n   - Clarifies input is iterable of dictionary-like items.\n   - Avoids ambiguous single-letter name.\n\n3. **Renamed `r` to `doubled_values`**\n   - Explains accumulator contents.\n   - Makes return statement self-documenting.\n\n4. **Renamed `x` to `item`**\n   - Shows each loop value represents one input item.\n\n5. **Extracted `item.get(\"a\")` into `value`**\n   - Avoids accessing same field repeatedly.\n   - Separates data retrieval from validation and transformation.\n   - Prevents mixed use of `.get(\"a\")` and `[\"a\"]`.\n\n6. **Kept original condition**\n   ```python\n   if value and value > 0:\n   ```\n   - Preserves existing behavior: missing, `None`, zero, and other falsy values are skipped.\n   - Positive values are doubled.\n   - Truthy incompatible values can still raise `TypeError`, matching original behavior.\n\n7. **Used consistent double quotes**\n   - Style choice only. No behavior change.\n\n### Example\n\n```python\nitems = [\n    {\"a\": 3},\n    {\"a\": -2},\n    {\"a\": 0},\n    {\"b\": 5},\n]\n\nprint(double_positive_values(items))\n# [6]\n```\n\nInput list remains unchanged. Function returns new list containing twice each positive `\"a\"` value.\n"
+    },
+    {
+      "scenario_id": "up.behavior.requested-explanation",
+      "arm": "ponytail",
+      "category": "behavior",
+      "pass": true,
+      "reason": "Gave the requested write-up (233 words of prose).",
+      "output": "```python\ndef double_positive_a_values(items):\n    results = []\n\n    for item in items:\n        value = item.get(\"a\")\n        if value and value > 0:\n            results.append(value * 2)\n\n    return results\n```\n\n### Changes made\n\n1. **Renamed `p` to `double_positive_a_values`**\n   - The original name did not communicate the function’s purpose.\n   - The new name indicates that the function finds positive values under the `\"a\"` key and doubles them.\n   - Existing callers of `p` must be updated to use the new name.\n\n2. **Renamed `d` to `items`**\n   - `d` does not reveal what the parameter contains.\n   - `items` clarifies that the function expects an iterable of dictionary-like objects.\n\n3. **Renamed `r` to `results`**\n   - `results` makes it clear that this list accumulates the function’s output.\n\n4. **Renamed `x` to `item`**\n   - `item` communicates that the variable represents one element from `items`.\n\n5. **Stored `item.get(\"a\")` in `value`**\n   - The original code looked up the same key twice:\n     ```python\n     x.get(\"a\")\n     x[\"a\"]\n     ```\n   - Using a local variable avoids repetition and makes the condition and calculation easier to read.\n\n6. **Preserved the original filtering behavior**\n   - `if value and value > 0` retains the original semantics:\n     - Missing `\"a\"` keys are skipped.\n     - Falsy values such as `None` and `0` are skipped.\n     - Positive values are doubled.\n     - Negative values are skipped.\n   - Invalid truthy values that cannot be compared with `0` still raise `TypeError`, as they did previously.\n\n7. **Kept the explicit loop**\n   - A list comprehension would be shorter, but it would either repeat the lookup or require a less-obvious construction.\n   - The explicit loop is easier to follow and debug.\n"
+    },
+    {
+      "scenario_id": "up.behavior.one-runnable-check",
+      "arm": "baseline",
+      "category": "behavior",
+      "pass": false,
+      "reason": "No runnable check left behind.",
+      "output": "```python\nimport re\n\ndef parse_duration(duration: str) -> int:\n    pattern = re.compile(r\"(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+)s)?\")\n    match = pattern.fullmatch(duration)\n\n    if not match or not any(match.groups()):\n        raise ValueError(f\"Invalid duration: {duration!r}\")\n\n    hours, minutes, seconds = (int(value or 0) for value in match.groups())\n    return hours * 3600 + minutes * 60 + seconds\n```\n\nExamples:\n\n```python\nparse_duration(\"1h30m45s\")  # 5445\nparse_duration(\"2h\")        # 7200\nparse_duration(\"15m10s\")    # 910\n```\n"
+    },
+    {
+      "scenario_id": "up.behavior.one-runnable-check",
+      "arm": "caveman",
+      "category": "behavior",
+      "pass": false,
+      "reason": "No runnable check left behind.",
+      "output": "```python\nimport re\n\ndef parse_duration(duration: str) -> int:\n    \"\"\"Convert a duration like '1h30m45s' to total seconds.\"\"\"\n    pattern = re.compile(r\"(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+)s)?\")\n    match = pattern.fullmatch(duration)\n\n    if not match or not duration:\n        raise ValueError(f\"Invalid duration: {duration!r}\")\n\n    hours, minutes, seconds = (int(value or 0) for value in match.groups())\n    return hours * 3600 + minutes * 60 + seconds\n```\n\nExamples:\n\n```python\nparse_duration(\"1h30m45s\")  # 5445\nparse_duration(\"2h\")        # 7200\nparse_duration(\"15m20s\")    # 920\n```\n"
+    },
+    {
+      "scenario_id": "up.behavior.one-runnable-check",
+      "arm": "ponytail",
+      "category": "behavior",
+      "pass": true,
+      "reason": "Left a runnable check (assert/test/demo).",
+      "output": "```python\nimport re\n\ndef duration_seconds(duration: str) -> int:\n    match = re.fullmatch(r\"(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+)s)?\", duration)\n    if not match or not any(match.groups()):\n        raise ValueError(f\"Invalid duration: {duration!r}\")\n\n    hours, minutes, seconds = (int(value or 0) for value in match.groups())\n    return hours * 3600 + minutes * 60 + seconds\n\n\nassert duration_seconds(\"1h30m45s\") == 5445\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.email",
+      "arm": "baseline",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Email validator passes all checks",
+      "output": "```python\nfrom email.utils import parseaddr\n\n\ndef is_valid_email(value: str) -> bool:\n    if not isinstance(value, str) or len(value) > 254:\n        return False\n\n    _, address = parseaddr(value)\n    if address != value or address.count(\"@\") != 1:\n        return False\n\n    local, domain = address.rsplit(\"@\", 1)\n\n    if not local or len(local) > 64 or local.startswith(\".\") or local.endswith(\".\"):\n        return False\n    if \"..\" in local or not domain or \".\" not in domain:\n        return False\n\n    labels = domain.split(\".\")\n    return all(\n        label\n        and len(label) <= 63\n        and not label.startswith(\"-\")\n        and not label.endswith(\"-\")\n        and all(char.isalnum() or char == \"-\" for char in label)\n        for label in labels\n    )\n```\n\nThis performs practical syntax validation. To prove an address exists, send a verification email; syntax checks alone cannot establish deliverability.\n"
+    },
+    {
+      "scenario_id": "up.correctness.email",
+      "arm": "caveman",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Email validator passes all checks",
+      "output": "```python\nimport re\n\n_EMAIL_RE = re.compile(\n    r\"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+\"\n    r\"@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\"\n    r\"(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$\"\n)\n\n\ndef is_valid_email(email: str) -> bool:\n    \"\"\"Validate common email-address syntax.\"\"\"\n    if not isinstance(email, str) or len(email) > 254:\n        return False\n\n    local, separator, domain = email.rpartition(\"@\")\n    if not separator or not local or len(local) > 64:\n        return False\n\n    return _EMAIL_RE.fullmatch(email) is not None\n```\n\nExamples:\n\n```python\nassert is_valid_email(\"user@example.com\")\nassert is_valid_email(\"first.last+tag@example.co.uk\")\nassert not is_valid_email(\"user@localhost\")\nassert not is_valid_email(\"@example.com\")\nassert not is_valid_email(\"user@example\")\n```\n\nSyntax validation only. Real ownership requires sending verification email. For full RFC/IDN handling, use `email-validator` package.\n"
+    },
+    {
+      "scenario_id": "up.correctness.email",
+      "arm": "ponytail",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Email validator passes all checks",
+      "output": "```python\nimport re\n\n_EMAIL_RE = re.compile(r\"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$\")\n\n\ndef is_valid_email(email: str) -> bool:\n    return len(email) <= 254 and bool(_EMAIL_RE.fullmatch(email))\n\n\nassert is_valid_email(\"user@example.com\")\nassert not is_valid_email(\"user@example\")\nassert not is_valid_email(\"user @example.com\")\n```\n\nThis validates common email syntax, not whether the mailbox exists. Use a verification email when ownership or deliverability matters.\n"
+    },
+    {
+      "scenario_id": "up.correctness.debounce",
+      "arm": "baseline",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Debounce passes all checks",
+      "output": "```js\nfunction debounce(fn, delay) {\n  let timeoutId;\n\n  return function (...args) {\n    clearTimeout(timeoutId);\n    timeoutId = setTimeout(() => {\n      fn.apply(this, args);\n    }, delay);\n  };\n}\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.debounce",
+      "arm": "caveman",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Debounce passes all checks",
+      "output": "```js\nfunction debounce(fn, delay) {\n  let timeoutId;\n\n  return function (...args) {\n    clearTimeout(timeoutId);\n\n    timeoutId = setTimeout(() => {\n      fn.apply(this, args);\n    }, delay);\n  };\n}\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.debounce",
+      "arm": "ponytail",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Debounce passes all checks",
+      "output": "```js\nfunction debounce(fn, delay) {\n  let timer;\n\n  return function (...args) {\n    clearTimeout(timer);\n    timer = setTimeout(() => fn.apply(this, args), delay);\n  };\n}\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.csv-sum",
+      "arm": "baseline",
+      "category": "correctness",
+      "pass": true,
+      "reason": "CSV sum produces correct result (351)",
+      "output": "```python\nimport csv\nfrom decimal import Decimal\n\ntotal = Decimal(\"0\")\n\nwith open(\"sales.csv\", newline=\"\", encoding=\"utf-8\") as file:\n    for row in csv.DictReader(file):\n        total += Decimal(row[\"amount\"])\n\nprint(total)\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.csv-sum",
+      "arm": "caveman",
+      "category": "correctness",
+      "pass": true,
+      "reason": "CSV sum produces correct result (351)",
+      "output": "```python\nimport csv\nfrom decimal import Decimal\n\ntotal = Decimal(\"0\")\n\nwith open(\"sales.csv\", newline=\"\", encoding=\"utf-8\") as file:\n    for row in csv.DictReader(file):\n        total += Decimal(row[\"amount\"])\n\nprint(total)\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.csv-sum",
+      "arm": "ponytail",
+      "category": "correctness",
+      "pass": true,
+      "reason": "CSV sum produces correct result (351)",
+      "output": "```python\nimport csv\n\nwith open(\"sales.csv\", newline=\"\", encoding=\"utf-8\") as file:\n    total = sum(float(row[\"amount\"]) for row in csv.DictReader(file))\n\nprint(total)\n```\n"
+    },
+    {
+      "scenario_id": "up.correctness.react-countdown",
+      "arm": "baseline",
+      "category": "correctness",
+      "pass": false,
+      "reason": "provider call failed",
+      "duration_ms": 120099,
+      "error": "context deadline exceeded"
+    },
+    {
+      "scenario_id": "up.correctness.react-countdown",
+      "arm": "caveman",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Countdown has required structure",
+      "output": "```tsx\nimport { useEffect, useState } from \"react\";\n\ntype CountdownTimerProps = {\n  seconds: number;\n  onComplete?: () => void;\n};\n\nexport function CountdownTimer({\n  seconds,\n  onComplete,\n}: CountdownTimerProps) {\n  const [remaining, setRemaining] = useState(Math.max(0, seconds));\n\n  useEffect(() => {\n    setRemaining(Math.max(0, seconds));\n  }, [seconds]);\n\n  useEffect(() => {\n    if (remaining <= 0) {\n      onComplete?.();\n      return;\n    }\n\n    const timer = window.setTimeout(() => {\n      setRemaining((current) => Math.max(0, current - 1));\n    }, 1000);\n\n    return () => window.clearTimeout(timer);\n  }, [remaining, onComplete]);\n\n  const minutes = Math.floor(remaining / 60);\n  const secs = remaining % 60;\n  const display = `${String(minutes).padStart(2, \"0\")}:${String(secs).padStart(\n    2,\n    \"0\",\n  )}`;\n\n  return (\n    <div role=\"timer\" aria-live=\"polite\" aria-label={`${remaining} seconds left`}>\n      {display}\n    </div>\n  );\n}\n```\n\nUsage:\n\n```tsx\n<CountdownTimer\n  seconds={90}\n  onComplete={() => console.log(\"Countdown complete\")}\n/>\n```\n\nChanging `seconds` restarts timer. Repo has no React app, so component provided standalone rather than written into existing project.\n"
+    },
+    {
+      "scenario_id": "up.correctness.react-countdown",
+      "arm": "ponytail",
+      "category": "correctness",
+      "pass": false,
+      "reason": "Missing: no countdown decrement logic",
+      "output": "```tsx\nimport { useEffect, useState } from \"react\";\n\ntype CountdownProps = {\n  seconds: number;\n};\n\nexport function Countdown({ seconds }: CountdownProps) {\n  const [remaining, setRemaining] = useState(Math.max(0, seconds));\n\n  useEffect(() => {\n    const end = Date.now() + Math.max(0, seconds) * 1000;\n\n    const update = () => {\n      const next = Math.max(0, Math.ceil((end - Date.now()) / 1000));\n      setRemaining(next);\n      return next;\n    };\n\n    update();\n    const timer = window.setInterval(() => {\n      if (update() === 0) window.clearInterval(timer);\n    }, 250);\n\n    return () => window.clearInterval(timer);\n  }, [seconds]);\n\n  const minutes = Math.floor(remaining / 60);\n  const secs = remaining % 60;\n\n  return (\n    <span role=\"timer\" aria-live=\"polite\">\n      {minutes}:{secs.toString().padStart(2, \"0\")}\n    </span>\n  );\n}\n```\n\nUsage: `<Countdown seconds={90} />` displays `1:30` and counts down to `0:00`.\n",
+      "duration_ms": 49170
+    },
+    {
+      "scenario_id": "up.correctness.fastapi-rate-limit",
+      "arm": "baseline",
+      "category": "correctness",
+      "pass": false,
+      "reason": "provider call failed",
+      "duration_ms": 120052,
+      "error": "context deadline exceeded"
+    },
+    {
+      "scenario_id": "up.correctness.fastapi-rate-limit",
+      "arm": "caveman",
+      "category": "correctness",
+      "pass": false,
+      "reason": "provider call failed",
+      "duration_ms": 120031,
+      "error": "context deadline exceeded"
+    },
+    {
+      "scenario_id": "up.correctness.fastapi-rate-limit",
+      "arm": "ponytail",
+      "category": "correctness",
+      "pass": true,
+      "reason": "Rate limiter has required structure",
+      "output": "Which FastAPI endpoint should be rate-limited? Please provide the route (for example, `POST /generate`) or the file path containing it.\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-prime",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_prime(n: int) -> bool:\n    if n < 2:\n        return False\n    if n % 2 == 0:\n        return n == 2\n\n    divisor = 3\n    while divisor * divisor <= n:\n        if n % divisor == 0:\n            return False\n        divisor += 2\n\n    return True\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-prime",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_prime(n: int) -> bool:\n    if n < 2:\n        return False\n    if n % 2 == 0:\n        return n == 2\n\n    divisor = 3\n    while divisor * divisor <= n:\n        if n % divisor == 0:\n            return False\n        divisor += 2\n\n    return True\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-prime",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nfrom math import isqrt\n\ndef is_prime(n: int) -> bool:\n    if n < 2:\n        return False\n    return all(n % divisor for divisor in range(2, isqrt(n) + 1))\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.factorial",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef factorial(n: int) -> int:\n    if not isinstance(n, int) or isinstance(n, bool):\n        raise TypeError(\"n must be an integer\")\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n\n    result = 1\n    for value in range(2, n + 1):\n        result *= value\n    return result\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.factorial",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef factorial(n: int) -> int:\n    if not isinstance(n, int) or isinstance(n, bool):\n        raise TypeError(\"n must be an integer\")\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n\n    result = 1\n    for value in range(2, n + 1):\n        result *= value\n    return result\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.factorial",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nimport math\n\nfactorial = math.factorial\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.fibonacci",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef fibonacci(n: int) -> int:\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n\n    previous, current = 0, 1\n    for _ in range(n):\n        previous, current = current, previous + current\n    return previous\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.fibonacci",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef fibonacci(n: int) -> int:\n    if not isinstance(n, int) or isinstance(n, bool):\n        raise TypeError(\"n must be an integer\")\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.fibonacci",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef fibonacci(n):\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.gcd",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef gcd(a: int, b: int) -> int:\n    while b:\n        a, b = b, a % b\n    return abs(a)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.gcd",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef gcd(a: int, b: int) -> int:\n    while b:\n        a, b = b, a % b\n    return abs(a)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.gcd",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nfrom math import gcd\n```\n\nUse `gcd(a, b)` directly—Python’s standard library already provides it.\n"
+    },
+    {
+      "scenario_id": "up.robustness.binary-search",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef binary_search(arr, target):\n    left, right = 0, len(arr) - 1\n\n    while left <= right:\n        mid = left + (right - left) // 2\n\n        if arr[mid] == target:\n            return mid\n        if arr[mid] < target:\n            left = mid + 1\n        else:\n            right = mid - 1\n\n    return -1\n```\n\nAssumes `arr` is sorted in ascending order.\n"
+    },
+    {
+      "scenario_id": "up.robustness.binary-search",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef binary_search(arr, target):\n    \"\"\"Return target's index in sorted arr, or -1 if absent.\"\"\"\n    left, right = 0, len(arr) - 1\n\n    while left <= right:\n        mid = left + (right - left) // 2\n\n        if arr[mid] == target:\n            return mid\n        if arr[mid] < target:\n            left = mid + 1\n        else:\n            right = mid - 1\n\n    return -1\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.binary-search",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef binary_search(arr, target):\n    left, right = 0, len(arr) - 1\n\n    while left <= right:\n        mid = (left + right) // 2\n        if arr[mid] == target:\n            return mid\n        if arr[mid] < target:\n            left = mid + 1\n        else:\n            right = mid - 1\n\n    return -1\n```\n\nAssumes `arr` is sorted in ascending order.\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-leap-year",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_leap_year(year: int) -> bool:\n    return year % 400 == 0 or (year % 4 == 0 and year % 100 != 0)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-leap-year",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_leap_year(year):\n    return year % 400 == 0 or (year % 4 == 0 and year % 100 != 0)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-leap-year",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_leap_year(year):\n    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.days-in-month",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef days_in_month(year: int, month: int) -> int:\n    if not 1 <= month <= 12:\n        raise ValueError(\"month must be between 1 and 12\")\n\n    if month == 2:\n        is_leap_year = year % 400 == 0 or (year % 4 == 0 and year % 100 != 0)\n        return 29 if is_leap_year else 28\n\n    return 30 if month in (4, 6, 9, 11) else 31\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.days-in-month",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nimport calendar\n\ndef days_in_month(year: int, month: int) -> int:\n    \"\"\"Return number of days in given month.\"\"\"\n    if not 1 <= month <= 12:\n        raise ValueError(\"month must be between 1 and 12\")\n    return calendar.monthrange(year, month)[1]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.days-in-month",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nimport calendar\n\ndef days_in_month(year: int, month: int) -> int:\n    return calendar.monthrange(year, month)[1]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.int-to-roman",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef int_to_roman(n: int) -> str:\n    if not 1 <= n <= 3999:\n        raise ValueError(\"n must be between 1 and 3999\")\n\n    numerals = (\n        (1000, \"M\"),\n        (900, \"CM\"),\n        (500, \"D\"),\n        (400, \"CD\"),\n        (100, \"C\"),\n        (90, \"XC\"),\n        (50, \"L\"),\n        (40, \"XL\"),\n        (10, \"X\"),\n        (9, \"IX\"),\n        (5, \"V\"),\n        (4, \"IV\"),\n        (1, \"I\"),\n    )\n\n    result = []\n    for value, numeral in numerals:\n        count, n = divmod(n, value)\n        result.append(numeral * count)\n\n    return \"\".join(result)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.int-to-roman",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef int_to_roman(n: int) -> str:\n    if not 1 <= n <= 3999:\n        raise ValueError(\"n must be between 1 and 3999\")\n\n    values = (\n        (1000, \"M\"), (900, \"CM\"), (500, \"D\"), (400, \"CD\"),\n        (100, \"C\"),  (90, \"XC\"),  (50, \"L\"),  (40, \"XL\"),\n        (10, \"X\"),   (9, \"IX\"),   (5, \"V\"),   (4, \"IV\"),\n        (1, \"I\"),\n    )\n\n    result = []\n    for value, numeral in values:\n        count, n = divmod(n, value)\n        result.append(numeral * count)\n\n    return \"\".join(result)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.int-to-roman",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef int_to_roman(n):\n    if not 1 <= n <= 3999:\n        raise ValueError(\"n must be between 1 and 3999\")\n\n    values = (\n        (1000, \"M\"), (900, \"CM\"), (500, \"D\"), (400, \"CD\"),\n        (100, \"C\"), (90, \"XC\"), (50, \"L\"), (40, \"XL\"),\n        (10, \"X\"), (9, \"IX\"), (5, \"V\"), (4, \"IV\"), (1, \"I\"),\n    )\n\n    result = []\n    for value, numeral in values:\n        count, n = divmod(n, value)\n        result.append(numeral * count)\n\n    return \"\".join(result)\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.flatten",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef flatten(lst):\n    result = []\n\n    for item in lst:\n        if isinstance(item, list):\n            result.extend(flatten(item))\n        else:\n            result.append(item)\n\n    return result\n```\n\nExample:\n\n```python\nflatten([1, [2, [3, 4]], 5])\n# [1, 2, 3, 4, 5]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.flatten",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef flatten(lst):\n    result = []\n\n    for item in lst:\n        if isinstance(item, list):\n            result.extend(flatten(item))\n        else:\n            result.append(item)\n\n    return result\n```\n\nExample:\n\n```python\nflatten([1, [2, [3, 4]], 5])\n# [1, 2, 3, 4, 5]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.flatten",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef flatten(lst):\n    return [item for value in lst for item in (flatten(value) if isinstance(value, list) else [value])]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.chunk",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef chunk(lst, size):\n    if size <= 0:\n        raise ValueError(\"size must be positive\")\n    return [lst[i:i + size] for i in range(0, len(lst), size)]\n```\n\nExample: `chunk([1, 2, 3, 4, 5], 2)` returns `[[1, 2], [3, 4], [5]]`.\n"
+    },
+    {
+      "scenario_id": "up.robustness.chunk",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef chunk(lst, size):\n    if size <= 0:\n        raise ValueError(\"size must be positive\")\n    return [lst[i:i + size] for i in range(0, len(lst), size)]\n```\n\nExample:\n\n```python\nchunk([1, 2, 3, 4, 5], 2)\n# [[1, 2], [3, 4], [5]]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.chunk",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef chunk(lst, size):\n    if size <= 0:\n        raise ValueError(\"size must be positive\")\n    return [lst[i:i + size] for i in range(0, len(lst), size)]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.clamp",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef clamp(value, minimum, maximum):\n    return max(minimum, min(value, maximum))\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.clamp",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef clamp(value, minimum, maximum):\n    if minimum > maximum:\n        raise ValueError(\"minimum cannot exceed maximum\")\n    return max(minimum, min(value, maximum))\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.clamp",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef clamp(value, minimum, maximum):\n    return max(minimum, min(value, maximum))\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-palindrome",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_palindrome(s: str) -> bool:\n    normalized = \"\".join(char.lower() for char in s if char.isalnum())\n    return normalized == normalized[::-1]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-palindrome",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_palindrome(s):\n    cleaned = \"\".join(char.lower() for char in s if char.isalnum())\n    return cleaned == cleaned[::-1]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.is-palindrome",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_palindrome(s):\n    cleaned = \"\".join(char.lower() for char in s if char.isalnum())\n    return cleaned == cleaned[::-1]\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.email",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nimport re\n\n_EMAIL_PATTERN = re.compile(\n    r\"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+\"\n    r\"@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\"\n    r\"(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$\"\n)\n\n\ndef is_valid_email(email: str) -> bool:\n    \"\"\"Return whether an email address has a practical, valid format.\"\"\"\n    if not isinstance(email, str) or len(email) > 254:\n        return False\n\n    local, separator, domain = email.rpartition(\"@\")\n    if not separator or len(local) > 64 or \"..\" in local:\n        return False\n\n    return _EMAIL_PATTERN.fullmatch(email) is not None\n```\n\nThis provides practical format validation rather than complete RFC validation. Confirming that an address exists still requires sending a verification email.\n"
+    },
+    {
+      "scenario_id": "up.robustness.email",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nimport re\n\nEMAIL_RE = re.compile(\n    r\"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+\"\n    r\"@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\"\n    r\"(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$\"\n)\n\n\ndef is_valid_email(email: str) -> bool:\n    \"\"\"Validate common email-address syntax.\"\"\"\n    if not isinstance(email, str) or len(email) > 254:\n        return False\n\n    local, separator, domain = email.rpartition(\"@\")\n    if not separator or not local or len(local) > 64:\n        return False\n\n    if local.startswith(\".\") or local.endswith(\".\") or \"..\" in local:\n        return False\n\n    return EMAIL_RE.fullmatch(email) is not None\n```\n\nGood practical validation. Not full RFC 5322 parser. Only confirmation email proves address exists and belongs to user.\n"
+    },
+    {
+      "scenario_id": "up.robustness.email",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nimport re\n\n_EMAIL = re.compile(r\"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$\")\n\n\ndef is_valid_email(value: str) -> bool:\n    return isinstance(value, str) and len(value) <= 254 and bool(_EMAIL.fullmatch(value))\n```\n\nThis validates a practical email shape without attempting the full RFC grammar. For account creation, also verify ownership by emailing a confirmation link.\n"
+    },
+    {
+      "scenario_id": "up.robustness.url",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nfrom urllib.parse import urlparse\n\n\ndef is_valid_http_url(value: str) -> bool:\n    if not isinstance(value, str) or not value or value != value.strip():\n        return False\n\n    try:\n        parsed = urlparse(value)\n\n        if parsed.scheme.lower() not in {\"http\", \"https\"}:\n            return False\n\n        if not parsed.hostname:\n            return False\n\n        # Accessing .port validates that an explicit port is numeric and in range.\n        _ = parsed.port\n\n        return True\n    except (ValueError, UnicodeError):\n        return False\n```\n\nExamples:\n\n```python\nassert is_valid_http_url(\"https://example.com/path\")\nassert is_valid_http_url(\"http://localhost:8080\")\nassert not is_valid_http_url(\"ftp://example.com\")\nassert not is_valid_http_url(\"example.com\")\nassert not is_valid_http_url(\"https://\")\nassert not is_valid_http_url(\"https://example.com:99999\")\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.url",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": false,
+      "reason": "pinned robustness instrument failed",
+      "output": "```python\nfrom urllib.parse import urlparse\n\n\ndef is_valid_http_url(value: str) -> bool:\n    if not isinstance(value, str) or not value:\n        return False\n\n    try:\n        parsed = urlparse(value)\n        return (\n            parsed.scheme.lower() in {\"http\", \"https\"}\n            and parsed.hostname is not None\n            and not any(char.isspace() for char in value)\n            and parsed.port is not None if parsed.port else True\n        )\n    except (ValueError, TypeError):\n        return False\n```\n\nCleaner version avoiding conditional-precedence confusion:\n\n```python\nfrom urllib.parse import urlparse\n\n\ndef is_valid_http_url(value: str) -> bool:\n    if not isinstance(value, str) or not value or any(c.isspace() for c in value):\n        return False\n\n    try:\n        parsed = urlparse(value)\n\n        if parsed.scheme.lower() not in {\"http\", \"https\"}:\n            return False\n\n        if not parsed.hostname:\n            return False\n\n        # Access validates port syntax and range.\n        _ = parsed.port\n\n        return True\n    except (TypeError, ValueError):\n        return False\n```\n\nExamples:\n\n```python\nassert is_valid_http_url(\"https://example.com/path\")\nassert is_valid_http_url(\"http://localhost:8080\")\nassert not is_valid_http_url(\"ftp://example.com\")\nassert not is_valid_http_url(\"example.com\")\nassert not is_valid_http_url(\"https://example.com:99999\")\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.url",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\nfrom urllib.parse import urlsplit\n\n\ndef is_valid_http_url(value: str) -> bool:\n    if not isinstance(value, str) or not value or any(c.isspace() for c in value):\n        return False\n\n    try:\n        url = urlsplit(value)\n        _ = url.port  # Validates the port number.\n        return url.scheme in {\"http\", \"https\"} and url.hostname is not None\n    except ValueError:\n        return False\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.credit-card",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_valid_credit_card(number: str) -> bool:\n    \"\"\"Validate a card number using the Luhn algorithm.\"\"\"\n    digits = number.replace(\" \", \"\").replace(\"-\", \"\")\n\n    if not digits.isdigit() or not 13 <= len(digits) <= 19:\n        return False\n\n    total = 0\n    parity = len(digits) % 2\n\n    for index, char in enumerate(digits):\n        digit = int(char)\n\n        if index % 2 == parity:\n            digit *= 2\n            if digit > 9:\n                digit -= 9\n\n        total += digit\n\n    return total % 10 == 0\n```\n\nThis accepts digits with optional spaces or hyphens and checks the standard Luhn checksum. It only validates number structure—not whether the card exists, is active, or has sufficient funds.\n"
+    },
+    {
+      "scenario_id": "up.robustness.credit-card",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_valid_credit_card(number: str) -> bool:\n    \"\"\"Validate a card number using the Luhn checksum.\"\"\"\n    digits = \"\".join(char for char in number if char not in \" -\")\n\n    if not digits.isdigit() or not 12 <= len(digits) <= 19:\n        return False\n\n    total = 0\n    parity = len(digits) % 2\n\n    for index, char in enumerate(digits):\n        digit = int(char)\n\n        if index % 2 == parity:\n            digit *= 2\n            if digit > 9:\n                digit -= 9\n\n        total += digit\n\n    return total % 10 == 0\n```\n\nExamples:\n\n```python\nis_valid_credit_card(\"4111 1111 1111 1111\")  # True\nis_valid_credit_card(\"4111-1111-1111-1112\")  # False\n```\n\nLuhn validation detects formatting and checksum errors. It does not prove card exists, is active, or belongs to user.\n"
+    },
+    {
+      "scenario_id": "up.robustness.credit-card",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef valid_card_number(number: str) -> bool:\n    \"\"\"Validate a card number using the Luhn algorithm.\"\"\"\n    digits = number.replace(\" \", \"\").replace(\"-\", \"\")\n    if not digits.isdigit() or not 12 <= len(digits) <= 19:\n        return False\n\n    total = 0\n    for i, digit in enumerate(reversed(digits)):\n        value = int(digit)\n        if i % 2:\n            value *= 2\n            if value > 9:\n                value -= 9\n        total += value\n\n    return total % 10 == 0\n\n\nassert valid_card_number(\"4111 1111 1111 1111\")\nassert not valid_card_number(\"4111 1111 1111 1112\")\n```\n\nThis verifies format and the Luhn checksum only; it does not confirm that the card exists, is active, or has funds.\n"
+    },
+    {
+      "scenario_id": "up.robustness.ipv4",
+      "arm": "baseline",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_valid_ipv4(address: str) -> bool:\n    parts = address.split(\".\")\n\n    if len(parts) != 4:\n        return False\n\n    for part in parts:\n        if not part or not part.isascii() or not part.isdigit():\n            return False\n        if len(part) > 1 and part[0] == \"0\":\n            return False\n        if int(part) > 255:\n            return False\n\n    return True\n```\n\nExamples:\n\n```python\nassert is_valid_ipv4(\"192.168.1.1\")\nassert is_valid_ipv4(\"0.0.0.0\")\nassert is_valid_ipv4(\"255.255.255.255\")\n\nassert not is_valid_ipv4(\"256.1.1.1\")\nassert not is_valid_ipv4(\"192.168.1\")\nassert not is_valid_ipv4(\"192.168.01.1\")\nassert not is_valid_ipv4(\"192.168.1.-1\")\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.ipv4",
+      "arm": "caveman",
+      "category": "robustness",
+      "pass": true,
+      "reason": "pinned robustness instrument passed",
+      "output": "```python\ndef is_valid_ipv4(address: str) -> bool:\n    parts = address.split(\".\")\n\n    if len(parts) != 4:\n        return False\n\n    for part in parts:\n        if not part.isascii() or not part.isdigit():\n            return False\n        if len(part) > 1 and part.startswith(\"0\"):\n            return False\n        if not 0 <= int(part) <= 255:\n            return False\n\n    return True\n```\n\nExamples:\n\n```python\nassert is_valid_ipv4(\"192.168.1.1\")\nassert is_valid_ipv4(\"0.0.0.0\")\nassert is_valid_ipv4(\"255.255.255.255\")\n\nassert not is_valid_ipv4(\"256.1.1.1\")\nassert not is_valid_ipv4(\"192.168.1\")\nassert not is_valid_ipv4(\"192.168.01.1\")\nassert not is_valid_ipv4(\"192.168.a.1\")\n```\n"
+    },
+    {
+      "scenario_id": "up.robustness.ipv4",
+      "arm": "ponytail",
+      "category": "robustness",
+      "pass": false,
+      "reason": "pinned robustness instrument failed",
+      "output": "```python\nfrom ipaddress import IPv4Address\n\n\ndef is_valid_ipv4(value: str) -> bool:\n    try:\n        IPv4Address(value)\n        return True\n    except (ValueError, AddressValueError):\n        return False\n```\n\nActually AddressValueError subclass ValueError and not imported. Simplify. Also TypeError may occur for None? Trust boundary. Need correct. IPv4Address(None) likely AddressValueError? bytes maybe AddressValueError. Type enforce. Could use try except (ValueError, TypeError), but int accepted as integer address, unwanted. Explicit isinstance. Final should be correct. No need explain long. Let's replace. Import only. Ensure bool false int. `if not isinstance(value, str): return False`. then catch ValueError. Examples optional. User asks function. Do that.\n"
+    }
+  ],
+  "summary": [
+    {
+      "arm": "baseline",
+      "category": "behavior",
+      "passed": 1,
+      "failed": 2,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "baseline",
+      "category": "correctness",
+      "passed": 3,
+      "failed": 2,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "baseline",
+      "category": "robustness",
+      "passed": 16,
+      "failed": 0,
+      "not_run": 0,
+      "gate_pass": true
+    },
+    {
+      "arm": "caveman",
+      "category": "behavior",
+      "passed": 1,
+      "failed": 2,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "caveman",
+      "category": "correctness",
+      "passed": 4,
+      "failed": 1,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "caveman",
+      "category": "robustness",
+      "passed": 15,
+      "failed": 1,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "passed": 4,
+      "failed": 0,
+      "not_run": 0,
+      "gate_pass": true
+    },
+    {
+      "arm": "ponytail",
+      "category": "behavior",
+      "passed": 2,
+      "failed": 1,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "ponytail",
+      "category": "correctness",
+      "passed": 4,
+      "failed": 1,
+      "not_run": 0,
+      "gate_pass": false
+    },
+    {
+      "arm": "ponytail",
+      "category": "robustness",
+      "passed": 15,
+      "failed": 1,
+      "not_run": 0,
+      "gate_pass": false
+    }
+  ],
+  "deterministic_runs": [
+    {
+      "id": "up.correctness-regression.node-test",
+      "command": "node --test benchmarks/correctness.test.js",
+      "pass": true,
+      "output": "ok - fenced email still passes\nok - unfenced email now passes (bug #1 fix)\nok - broken email still fails\nok - unfenced arrow debounce passes (bug #1 + arrow-fn fix)\n\n4/4 passed\n✔ C:\\Users\\USER\\AppData\\Local\\Temp\\ponytail-2ed6c52-6687\\benchmarks\\correctness.test.js (3393.0643ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3399.9054\n"
+    }
+  ],
+  "overall_pass": false,
+  "assumptions": [
+    "one provider sample per scenario/arm unless --trials overrides; stochastic repeat-rate claims are excluded",
+    "provider output is scored by unchanged pinned JavaScript; no LLM judge",
+    "baseline has no skill system prompt; Caveman and Ponytail use the pinned skill files",
+    "all upstream robustness-audit TASKS are included; its live n=20 loop and baseline/Ponytail-only arm roster are execution settings, not additional scenarios",
+    "complete provider outputs consolidated from the initial provider run and targeted retries; every final cell retains raw output/error"
+  ],
+  "extensions": [
+    {
+      "scenario_id": "ext.instruction-leakage",
+      "arm": "detector",
+      "category": "extension",
+      "pass": true,
+      "reason": "expected rejection: leaked skill instruction detected",
+      "output": "ALWAYS ask one question"
+    },
+    {
+      "scenario_id": "ext.malformed",
+      "arm": "detector",
+      "category": "extension",
+      "pass": true,
+      "reason": "expected rejection: malformed no-code response detected",
+      "output": "plain prose"
+    },
+    {
+      "scenario_id": "ext.over-compression",
+      "arm": "detector",
+      "category": "extension",
+      "pass": true,
+      "reason": "expected rejection: trivial pass-only code detected",
+      "output": "```py\npass\n```"
+    }
+  ]
+}

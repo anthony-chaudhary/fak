@@ -1795,6 +1795,131 @@
           "category": "incidental",
           "reason": "Private text normalization helper inside the Stop hook",
           "token": "guardNormalizeRestatement"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI handler symbol, not a reusable guard-gate concept",
+          "token": "armbenchPonytailGates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "RunPonytailGates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "PonytailGateOptions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "PonytailGateReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "GateSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "GateScenario"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "GateCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "GateSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "GateRunArtifact"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "PonytailGateInventory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "WritePonytailGateReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "verifyGateCheckout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "runPinnedGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "summarizeGates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "extensionFixtureCells"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "runRegressionSuite"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "callGateProvider"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "mapBehaviorProbe"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "PonytailGatesRevision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Armbench benchmark implementation symbol, not a reusable guard-gate concept",
+          "token": "gateSourcePaths"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-category benchmark result field",
+          "token": "GatePass"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Node harness constant used only to execute pinned deterministic upstream graders; it adds no user-facing gate concept.",
+          "token": "nodeGateScript"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private reason constant inside the existing guard question gate",
+          "token": "guardGoalQuestionNeedsHuman"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private hook payload type inside the existing guard question gate",
+          "token": "guardGoalQuestionHookInput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private hook decision tuple inside the existing guard question gate",
+          "token": "guardGoalQuestionDecision"
         }
       ],
       "exclude": [
@@ -1834,30 +1959,44 @@
         "GATED_UNWITNESSED",
         "GateAttested",
         "GateBuild",
+        "GateCell",
         "GateDirty",
         "GateFlipped",
+        "GatePass",
         "GatePath",
         "GateProvenance",
         "GateResolved",
+        "GateRunArtifact",
+        "GateScenario",
         "GateSkewRefusal",
+        "GateSource",
+        "GateSummary",
         "GatewayBound",
         "GatewaySeat",
         "IsAggregate",
         "LifecycleGate",
         "NewSessionAffinityGateway",
         "OutcomeDelegate",
+        "PonytailGateInventory",
+        "PonytailGateOptions",
+        "PonytailGateReport",
+        "PonytailGatesRevision",
         "ReportedGates",
         "RoleGate",
+        "RunPonytailGates",
         "SessionAffinityGateway",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
         "WithAffinity",
+        "WritePonytailGateReport",
         "admitGuardShrinkLevers",
         "aggregateLive",
         "aggregateTail",
         "appendGuardCompactionWitnessTo",
+        "armbenchPonytailGates",
         "bindGuardRegistration",
         "buildguardchild",
         "cacheValueGateFactsFromReport",
+        "callGateProvider",
         "cmdCacheValueGateScore",
         "codeToolGate",
         "codeToolGateOnce",
@@ -1869,6 +2008,7 @@
         "enqueueGuardSessionThreadNotice",
         "equalAggregate",
         "exposureGated",
+        "extensionFixtureCells",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
         "fetchGuardPreCompactSignalsHTTP",
         "firstGuardEnv",
@@ -1878,6 +2018,7 @@
         "gateGitHygieneBypass",
         "gateProse",
         "gateSkew",
+        "gateSourcePaths",
         "gate_test",
         "gate_verbtier",
         "gated",
@@ -1907,6 +2048,9 @@
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
+        "guardGoalQuestionDecision",
+        "guardGoalQuestionHookInput",
+        "guardGoalQuestionNeedsHuman",
         "guardHandoffBlockCeiling",
         "guardHandoffBlockCeilingDefault",
         "guardHandoffBlockCeilingEnv",
@@ -1989,10 +2133,12 @@
         "liveAggregate",
         "loadCacheValueGateBaseline",
         "loadGuardSelfTightenOverlay",
+        "mapBehaviorProbe",
         "markGuardChildTerminalIntent",
         "nativeReasonMessageRoleUnsupported",
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
+        "nodeGateScript",
         "normalizeGuardOperatorQuestionMode",
         "observer_guard",
         "prepareGuardChildRegistration",
@@ -2006,6 +2152,8 @@
         "renderguardstartupreport",
         "runCacheValueGateScore",
         "runGuardOperatorQuestionGate",
+        "runPinnedGate",
+        "runRegressionSuite",
         "saveGuardSelfTightenOverlay",
         "selectorGateway",
         "setGuardCompactionAnchorMode",
@@ -2013,6 +2161,7 @@
         "shrinkLeverGuardCommand",
         "startBoundGuardRegistration",
         "startGuardRegistration",
+        "summarizeGates",
         "summarizeguardstops",
         "tailAggregate",
         "terminalGuardChild",
@@ -2020,6 +2169,7 @@
         "transform_guard",
         "ungated",
         "unguarded",
+        "verifyGateCheckout",
         "withGuardRegistrationEnv",
         "worker_guard"
       ],
@@ -6280,6 +6430,16 @@
           "category": "incidental",
           "reason": "private constant aligning the existing native-wire refusal vocabulary; not a new operator concept",
           "token": "NATIVE_MESSAGE_ROLE_UNSUPPORTED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned benchmark fixture inventory",
+          "token": "correctnessTasks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned benchmark fixture inventory",
+          "token": "robustnessTasks"
         }
       ],
       "id": "support-maturity",
@@ -6370,6 +6530,7 @@
         "cmdLaunchParityCheck",
         "cmdManageParity",
         "compareParity",
+        "correctnessTasks",
         "correctnessclass",
         "correctnessdependson",
         "coverageBlock",
@@ -6406,6 +6567,7 @@
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "resolveParityPublication",
+        "robustnessTasks",
         "scoreparity",
         "seenSupport",
         "setup_parity_clean",
@@ -6640,6 +6802,11 @@
           "category": "incidental",
           "reason": "Typed implementation record local to account-bound worker launch; not a reusable operator decision taxonomy",
           "token": "LaunchDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private hook result tuple, not a public decision subsystem",
+          "token": "guardGoalQuestionDecision"
         }
       ],
       "id": "decision",
@@ -6670,6 +6837,7 @@
         "deterministicSelectorDecision",
         "fixtureSelectStage",
         "gooddecisionratio",
+        "guardGoalQuestionDecision",
         "kinddecisionsabout",
         "naturalDecision",
         "partialretrydecision",

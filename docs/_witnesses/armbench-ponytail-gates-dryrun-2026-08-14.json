@@ -1,0 +1,500 @@
+{
+  "schema": "fak.armbench.ponytail-gates.v1",
+  "comparator": "DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3",
+  "generated_at": "2026-08-14T10:20:16Z",
+  "live": false,
+  "model": "haiku",
+  "trials": 1,
+  "sources": [
+    {
+      "path": "benchmarks/behavior.js",
+      "sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "bytes": 2785
+    },
+    {
+      "path": "benchmarks/behavior.yaml",
+      "sha256": "7f0edb875c56872fa14707a5e096a0f951dfc0b5f6de82fb7bfe505b9fd45c4f",
+      "bytes": 1685
+    },
+    {
+      "path": "benchmarks/correctness.js",
+      "sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "bytes": 10228
+    },
+    {
+      "path": "benchmarks/correctness.test.js",
+      "sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "bytes": 1583
+    },
+    {
+      "path": "benchmarks/robustness-audit.js",
+      "sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "bytes": 14150
+    },
+    {
+      "path": "benchmarks/promptfooconfig.yaml",
+      "sha256": "fc292f68c5727f306f5ba1ce74b161631e416ce71b66a67d9241a59556c3e00d",
+      "bytes": 1815
+    },
+    {
+      "path": "benchmarks/arms/baseline.js",
+      "sha256": "ef0f81f670425705ab3195609947aa64890890cb078d7669780afe2228da8740",
+      "bytes": 113
+    },
+    {
+      "path": "benchmarks/arms/caveman.js",
+      "sha256": "b3793a7549c9217e9e9b89b2ed5e94813a9c71297386c77a177d4e2ef3e13d1a",
+      "bytes": 315
+    },
+    {
+      "path": "benchmarks/arms/ponytail.js",
+      "sha256": "9091a2e794ad1c5c7c4c9b68a3bb4aa995fcce6d0f09aad37a2febdd95640b82",
+      "bytes": 373
+    },
+    {
+      "path": "benchmarks/arms/caveman-SKILL.md",
+      "sha256": "09ebdef35a85d058f8eba04c6a3d91079ac8dabc3d45d265694f128c808f7648",
+      "bytes": 3654
+    },
+    {
+      "path": "skills/ponytail/SKILL.md",
+      "sha256": "1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2",
+      "bytes": 6637
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "up.behavior.hardware-calibration",
+      "set": "upstream",
+      "category": "behavior",
+      "task": "Write a Python function that reads the temperature in Celsius from a thermistor wired to a Raspberry Pi ADC (MCP3008, channel 0).",
+      "source_path": "benchmarks/behavior.js",
+      "source_sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "assertion": "execute pinned behavior.js probe=hardware",
+      "requires_provider": true
+    },
+    {
+      "id": "up.behavior.requested-explanation",
+      "set": "upstream",
+      "category": "behavior",
+      "task": "Refactor this for readability and give me a detailed, step-by-step write-up of every change you made and why.\n\ndef p(d):\n    r = []\n    for x in d:\n        if x.get('a') and x['a'] \u003e 0:\n            r.append(x['a'] * 2)\n    return r",
+      "source_path": "benchmarks/behavior.js",
+      "source_sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "assertion": "execute pinned behavior.js probe=explanation",
+      "requires_provider": true
+    },
+    {
+      "id": "up.behavior.one-runnable-check",
+      "set": "upstream",
+      "category": "behavior",
+      "task": "Write a Python function that parses a duration string like '1h30m45s' into a total number of seconds.",
+      "source_path": "benchmarks/behavior.js",
+      "source_sha256": "9364957a4fade600cd423098e115e2187d12ebcaefc54900f4b368819f33efd2",
+      "assertion": "execute pinned behavior.js probe=onecheck",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.email",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Write me a Python function that validates email addresses.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.debounce",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Write a reusable debounce function in vanilla JavaScript: debounce(fn, delay) returns a debounced version of fn that delays calling it until delay ms after the last call.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.csv-sum",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Write Python code that reads sales.csv and sums the 'amount' column.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.react-countdown",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Build me a countdown timer component in React that counts down from a given number of seconds.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness.fastapi-rate-limit",
+      "set": "upstream",
+      "category": "correctness",
+      "task": "Add rate limiting to my FastAPI endpoint so users can't spam it.",
+      "source_path": "benchmarks/correctness.js",
+      "source_sha256": "7a17d8c904eab1813a220279c31ef51598214735923d178bed9beb92e9cf0230",
+      "assertion": "execute pinned correctness.js",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.is-prime",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function is_prime(n) that returns True if n is prime, else False.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.factorial",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function factorial(n).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.fibonacci",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function fibonacci(n) that returns the nth Fibonacci number (0-indexed).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.gcd",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function gcd(a, b).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.binary-search",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function binary_search(arr, target) that returns the index or -1.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.is-leap-year",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function is_leap_year(year).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.days-in-month",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function days_in_month(year, month).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.int-to-roman",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function int_to_roman(n) for 1 \u003c= n \u003c= 3999.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.flatten",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function flatten(lst) that recursively flattens nested lists.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.chunk",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function chunk(lst, size) that splits a list into chunks.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.clamp",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function clamp(value, minimum, maximum).",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.is-palindrome",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function is_palindrome(s) that ignores case and non-alphanumeric characters.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.email",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write me a Python function that validates email addresses.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.url",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function that validates whether a string is a valid HTTP or HTTPS URL.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.credit-card",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function that validates a credit card number.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.robustness.ipv4",
+      "set": "upstream",
+      "category": "robustness",
+      "task": "Write a Python function that validates an IPv4 address.",
+      "source_path": "benchmarks/robustness-audit.js",
+      "source_sha256": "e9a7e9eb6b087e60e2fed07e61370fbd1bfca76b16bb95c86170cffedcebff96",
+      "assertion": "execute pinned pyBlock/checkPy instrument",
+      "requires_provider": true
+    },
+    {
+      "id": "up.correctness-regression.fenced-email-passes",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    },
+    {
+      "id": "up.correctness-regression.unfenced-email-passes",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    },
+    {
+      "id": "up.correctness-regression.broken-email-fails",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    },
+    {
+      "id": "up.correctness-regression.unfenced-arrow-debounce-passes",
+      "set": "upstream",
+      "category": "correctness-regression",
+      "task": "pinned node:test fixture",
+      "source_path": "benchmarks/correctness.test.js",
+      "source_sha256": "74a18b824fa0a0de7dc8d1ce210a9b5f4d2813ab77659c3e1ac5e28175b5c3e4",
+      "assertion": "execute pinned node:test suite",
+      "requires_provider": false
+    }
+  ],
+  "cells": [
+    {
+      "scenario_id": "up.correctness-regression.fenced-email-passes",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.correctness-regression.unfenced-email-passes",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.correctness-regression.broken-email-fails",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    },
+    {
+      "scenario_id": "up.correctness-regression.unfenced-arrow-debounce-passes",
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "pass": true,
+      "reason": "pinned node:test fixture observed passing"
+    }
+  ],
+  "summary": [
+    {
+      "arm": "baseline",
+      "category": "behavior",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 3,
+      "gate_pass": false
+    },
+    {
+      "arm": "baseline",
+      "category": "correctness",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 5,
+      "gate_pass": false
+    },
+    {
+      "arm": "baseline",
+      "category": "robustness",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 16,
+      "gate_pass": false
+    },
+    {
+      "arm": "caveman",
+      "category": "behavior",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 3,
+      "gate_pass": false
+    },
+    {
+      "arm": "caveman",
+      "category": "correctness",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 5,
+      "gate_pass": false
+    },
+    {
+      "arm": "caveman",
+      "category": "robustness",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 16,
+      "gate_pass": false
+    },
+    {
+      "arm": "deterministic",
+      "category": "correctness-regression",
+      "passed": 4,
+      "failed": 0,
+      "not_run": 0,
+      "gate_pass": true
+    },
+    {
+      "arm": "ponytail",
+      "category": "behavior",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 3,
+      "gate_pass": false
+    },
+    {
+      "arm": "ponytail",
+      "category": "correctness",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 5,
+      "gate_pass": false
+    },
+    {
+      "arm": "ponytail",
+      "category": "robustness",
+      "passed": 0,
+      "failed": 0,
+      "not_run": 16,
+      "gate_pass": false
+    }
+  ],
+  "deterministic_runs": [
+    {
+      "id": "up.correctness-regression.node-test",
+      "command": "node --test benchmarks/correctness.test.js",
+      "pass": true,
+      "output": "ok - fenced email still passes\nok - unfenced email now passes (bug #1 fix)\nok - broken email still fails\nok - unfenced arrow debounce passes (bug #1 + arrow-fn fix)\n\n4/4 passed\n✔ C:\\Users\\USER\\AppData\\Local\\Temp\\ponytail-2ed6c52-6687\\benchmarks\\correctness.test.js (5308.7416ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5313.902\n"
+    }
+  ],
+  "overall_pass": false,
+  "assumptions": [
+    "one provider sample per scenario/arm unless --trials overrides; stochastic repeat-rate claims are excluded",
+    "provider output is scored by unchanged pinned JavaScript; no LLM judge",
+    "baseline has no skill system prompt; Caveman and Ponytail use the pinned skill files",
+    "all upstream robustness-audit TASKS are included; its live n=20 loop and baseline/Ponytail-only arm roster are execution settings, not additional scenarios"
+  ],
+  "extensions": [
+    {
+      "scenario_id": "ext.instruction-leakage",
+      "arm": "detector",
+      "category": "extension",
+      "pass": true,
+      "reason": "expected rejection: leaked skill instruction detected",
+      "output": "ALWAYS ask one question"
+    },
+    {
+      "scenario_id": "ext.malformed",
+      "arm": "detector",
+      "category": "extension",
+      "pass": true,
+      "reason": "expected rejection: malformed no-code response detected",
+      "output": "plain prose"
+    },
+    {
+      "scenario_id": "ext.over-compression",
+      "arm": "detector",
+      "category": "extension",
+      "pass": true,
+      "reason": "expected rejection: trivial pass-only code detected",
+      "output": "```py\npass\n```"
+    }
+  ]
+}
