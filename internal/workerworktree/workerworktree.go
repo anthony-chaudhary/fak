@@ -144,6 +144,13 @@ type IsolationBackend interface {
 	Release(root, wtPath string, git GitRunner) Result
 }
 
+// ownedIsolationBackend lets a backend persist the exact owner as part of an
+// atomic lease reservation before it touches a pooled path. Backends that do not
+// implement it retain the original Materialize contract and are stamped afterward.
+type ownedIsolationBackend interface {
+	MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git GitRunner, owner OwnerStamp) Result
+}
+
 type gitWorktree struct{}
 
 var defaultIsolationBackend IsolationBackend = gitWorktree{}
@@ -170,6 +177,10 @@ type Result struct {
 	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
 	RecoveryRef      string                   `json:"recovery_ref,omitempty"`
 	RemoteRecovery   *RemoteReadback          `json:"remote_recovery,omitempty"`
+	// pooled is internal lifecycle evidence: unlike generic same-key reuse, this
+	// Prepare exclusively reserved an idle member and may safely destroy it if the
+	// post-materialization owner/state write fails.
+	pooled bool
 }
 
 // VerifyHook is a build/adjudication witness run IN the isolated worktree before
@@ -370,7 +381,7 @@ func TrunkHeadSHA(root string, git GitRunner) string {
 // does not refuse it and it can never trip OFF_TRUNK. Idempotent: a target path
 // already tracked as this worktree is reported Reused rather than re-added.
 //
-// With the warm pool on (PoolCapEnv, off by default) a miss on that same-key reuse
+// With the warm pool on (PoolCapEnv, a small default; 0 disables) a miss on that same-key reuse
 // falls to a POOL lease first: an idle worktree of this lane, re-pointed at base, also
 // reported Reused — so a NEW worker can inherit a materialized tree, which the same-key
 // check alone never allowed (#3572). Result.Path is authoritative; a leased member does
@@ -396,22 +407,31 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
-	res := backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
+	owner = normalizeOwnerStamp(owner)
+	var res Result
+	if owned, ok := backend.(ownedIsolationBackend); ok {
+		res = owned.MaterializeOwned(root, lane, key, baseSHA, wtRoot, git, owner)
+	} else {
+		res = backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
+	}
 	if !res.OK || res.Path == "" {
 		return res
 	}
-	if err := writeOwnerStamp(res.Path, owner); err != nil {
+	metadataErr := writeOwnerStamp(res.Path, owner)
+	if metadataErr == nil && PoolCap() > 0 && isGitWorktreeBackend(backend) {
+		metadataErr = recordPoolLease(res.Path, lane, owner)
+	}
+	if metadataErr != nil {
 		// A newly-materialized worktree without its owner stamp is invisible to the
-		// owner-dead GC. Clean it at the source instead of converting a stamp failure
-		// into a permanent leak. A reused tree may still belong to an active peer, so
-		// fail toward keeping it rather than destroying it on a metadata failure.
+		// owner-dead GC, and a pooled tree without its leased state can be handed to a
+		// second worker. Clean new or exclusively-reserved pool members at the source.
+		// A generic same-key reuse may still carry live WIP, so fail toward keeping it.
 		cleanupDetail := ""
-		if !res.Reused {
+		if !res.Reused || res.pooled {
 			var cleanup Result
-			switch backend.(type) {
-			case gitWorktree, *gitWorktree:
+			if isGitWorktreeBackend(backend) {
 				cleanup = ForceReap(root, res.Path, git)
-			default:
+			} else {
 				cleanup = backend.Release(root, res.Path, git)
 			}
 			if !cleanup.Removed {
@@ -419,13 +439,26 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 			}
 		}
 		res.OK = false
-		res.Reason = "could not write owner stamp — fail open"
-		res.Detail = err.Error() + cleanupDetail
+		res.Reason = "could not persist worktree owner/pool metadata — fail open"
+		res.Detail = metadataErr.Error() + cleanupDetail
 	}
 	return res
 }
 
+func isGitWorktreeBackend(backend IsolationBackend) bool {
+	switch backend.(type) {
+	case gitWorktree, *gitWorktree:
+		return true
+	default:
+		return false
+	}
+}
+
 func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitRunner) Result {
+	return gitWorktree{}.MaterializeOwned(root, lane, key, baseSHA, wtRoot, git, defaultOwnerStamp(lane))
+}
+
+func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git GitRunner, owner OwnerStamp) Result {
 	base := baseSHA
 	if base == "" {
 		base = TrunkHeadSHA(root, git)
@@ -441,6 +474,17 @@ func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitR
 		if rc == 0 {
 			for _, p := range parseWorktreePaths(out) {
 				if samePath(p, wt) {
+					if PoolCap() > 0 {
+						// An idle member at the same derived path is a NEW lease, not
+						// the historical retry case: reserve and sanitize it first.
+						if meta, err := readPoolMember(wt); err == nil && meta.State == poolStateIdle {
+							if res, ok := leaseSpecificPooled(root, wt, base, git, owner); ok {
+								return res
+							}
+							return Result{OK: false, Path: wt, BaseSHA: base,
+								Reason: "same-key idle pool member could not be leased — fail open"}
+						}
+					}
 					return Result{OK: true, Path: wt, BaseSHA: base, Reused: true}
 				}
 			}
@@ -449,10 +493,10 @@ func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitR
 	// #3572 warm pool: hand this worker an ALREADY-materialized idle worktree of its
 	// lane (a fast reset to the new base) instead of paying `worktree add`'s full
 	// checkout. Runs AFTER the same-lane+key reuse check above, which is the cheaper
-	// hit, and falls straight through to the create path below on any miss — so with
-	// the pool off (the default) this is one env read and nothing else changes.
+	// hit, and falls straight through to the create path below on any miss. Setting
+	// PoolCapEnv=0 preserves the old create path without pool state or reset/clean.
 	if k := PoolCap(); k > 0 {
-		if res, ok := leasePooled(root, lane, base, wtRoot, git); ok {
+		if res, ok := leasePooled(root, lane, base, wtRoot, git, owner); ok {
 			return res
 		}
 	}
@@ -474,7 +518,7 @@ func (gitWorktree) Materialize(root, lane, key, baseSHA, wtRoot string, git GitR
 // a removal failure is reported, never raised, and a trailing `worktree prune`
 // clears the admin record. Refuses any non-marker path as a guardrail.
 //
-// With the warm pool on (PoolCapEnv, off by default) the worktree is instead RETURNED
+// With the warm pool on (PoolCapEnv, small by default; 0 disables) the worktree is instead RETURNED
 // to its lane's idle set while that lane is under the cap — reset clean and marked
 // idle, so the next Prepare leases it rather than re-adding one (#3572). A return
 // reports OK with Removed=false; overflow and every failure path force-remove as above.
@@ -504,7 +548,13 @@ func (gitWorktree) Release(root, wtPath string, git GitRunner) Result {
 	// below. Removed stays false for a return — the worktree really is still there, and
 	// a caller counting reclaimed dirs must not be told otherwise.
 	if k := PoolCap(); k > 0 {
-		if res, ok := returnPooled(root, wtPath, k, git); ok {
+		if res, ok, fallback := returnPooled(root, wtPath, k, git); ok {
+			return res
+		} else if fallback != "" {
+			res := ForceReap(root, wtPath, git)
+			if res.OK {
+				res.Reason = "pool return skipped (" + fallback + "); force-removed"
+			}
 			return res
 		}
 	}
@@ -529,8 +579,7 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 		res.Detail = tail(out, 300)
 		return res
 	}
-	wtRoot := filepath.Dir(filepath.Clean(wtPath))
-	_ = os.Remove(poolMarker(wtRoot, filepath.Base(filepath.Clean(wtPath))))
+	removePoolMemberState(wtPath)
 	removeOwnerStamp(wtPath)
 	return res
 }

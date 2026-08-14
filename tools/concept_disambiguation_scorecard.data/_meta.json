@@ -6614,12 +6614,18 @@
           "category": "incidental",
           "reason": "digest field proving checkpoint readback, not a new rendering or materialization concept",
           "token": "MaterializedStateDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "MaterializeOwned"
         }
       ],
       "id": "render-materialize",
       "ignore": [
         "AllowsRender",
         "DefaultRender",
+        "MaterializeOwned",
         "MaterializedStateDigest",
         "RenderAging",
         "RenderAuditClusterReport",
@@ -7196,6 +7202,161 @@
           "category": "incidental",
           "reason": "unpoolable is an implementation adjective for a session rejected by the existing pool contract, not a meaningful API to rename or a new concept family.",
           "token": "unpoolable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "canonicalPoolLane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "leaseSpecificPooled"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_capacity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_lane_lock_failed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_metadata_unreadable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_metadata_write_failed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "pool_state_changed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolLaneLockPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolLegacyIdleExt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolLegacyMarker"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolLockFilePerm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolLockPoll"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolLockWait"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMemberExt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMemberMetadata"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMemberPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMemberRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMemberSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMembersLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolMetadataPerm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "PoolState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolStateDirPerm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolStateIdle"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "poolStateLeased"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "PoolUpdatedAt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "readPoolMember"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "recordPoolLease"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "removePoolMemberState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "validPoolState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "withPoolLaneLock"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
+          "token": "writePoolMemberLocked"
         }
       ],
       "exclude": [
@@ -7206,24 +7367,55 @@
         "ErrNotPoolable",
         "FLEET_WORKER_WORKTREE_POOL",
         "NewSeatPool",
+        "PoolState",
+        "PoolUpdatedAt",
         "Poolable",
         "Pooled",
         "PooledSpeedupPct",
+        "canonicalPoolLane",
         "defaultPoolCap",
         "kvpoolbytes",
         "leasePooled",
+        "leaseSpecificPooled",
         "poolIdleExt",
         "poolIdleMembers",
+        "poolLaneLockPath",
+        "poolLegacyIdleExt",
+        "poolLegacyMarker",
+        "poolLockFilePerm",
+        "poolLockPoll",
+        "poolLockWait",
         "poolMarker",
+        "poolMemberExt",
+        "poolMemberMetadata",
+        "poolMemberPath",
+        "poolMemberRecord",
+        "poolMemberSchema",
+        "poolMembersLocked",
+        "poolMetadataPerm",
         "poolSeats",
         "poolStateDir",
+        "poolStateDirPerm",
+        "poolStateIdle",
+        "poolStateLeased",
         "poolStatePath",
+        "pool_capacity",
+        "pool_lane_lock_failed",
+        "pool_metadata_unreadable",
+        "pool_metadata_write_failed",
+        "pool_state_changed",
         "poolability",
         "poolspanscores",
+        "readPoolMember",
+        "recordPoolLease",
+        "removePoolMemberState",
         "resetPooled",
         "returnPooled",
         "spoolsv",
-        "unpoolable"
+        "unpoolable",
+        "validPoolState",
+        "withPoolLaneLock",
+        "writePoolMemberLocked"
       ],
       "min_files": 2,
       "name": "Pool family",

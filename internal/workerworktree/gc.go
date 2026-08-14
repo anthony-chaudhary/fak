@@ -66,6 +66,8 @@ type WorktreePathActiveFn func(path string) (active bool, err error)
 type GCWorktree struct {
 	Path          string     `json:"path"`
 	Owner         OwnerStamp `json:"owner"`
+	PoolState     string     `json:"pool_state,omitempty"`
+	PoolUpdatedAt time.Time  `json:"pool_updated_at,omitempty"`
 	AgeSec        int64      `json:"age_sec"`
 	OwnerLive     bool       `json:"owner_live"`
 	LeaseLive     bool       `json:"lease_live"`
@@ -145,39 +147,7 @@ func normalizeOwnerStamp(stamp OwnerStamp) OwnerStamp {
 
 func writeOwnerStamp(wtPath string, stamp OwnerStamp) error {
 	stamp = normalizeOwnerStamp(stamp)
-	path := OwnerStampPath(wtPath)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(stamp, "", "  ")
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	// os.Rename does not replace an existing destination on Windows. Removing the
-	// previous stamp first makes same-key Prepare retries and warm-pool leases refresh
-	// correctly; a crash in this tiny gap fails GC toward keeping (missing stamp).
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicWriteJSON(OwnerStampPath(wtPath), stamp, 0o600)
 }
 
 func readOwnerStamp(wtPath string) (OwnerStamp, error) {
@@ -250,23 +220,38 @@ func GarbageCollect(root string, git GitRunner, opts GCOptions) GCReport {
 		}
 		report.WouldReap++
 		if opts.Apply {
-			current, eligible, reason := gcEntry(root, row.Path, git, opts)
-			if !eligible {
-				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: reason})
-				continue
+			failure := ""
+			lockErr := withPoolLaneLock(filepath.Dir(row.Path), LaneOf(row.Path), func() error {
+				current, eligible, reason := gcEntry(root, row.Path, git, opts)
+				if !eligible {
+					failure = reason
+					return nil
+				}
+				if current.Owner.PID != row.Owner.PID ||
+					current.Owner.LeaseID != row.Owner.LeaseID ||
+					!current.Owner.CreatedAt.Equal(row.Owner.CreatedAt) {
+					failure = "owner_stamp_changed"
+					return nil
+				}
+				if current.PoolState != row.PoolState ||
+					!current.PoolUpdatedAt.Equal(row.PoolUpdatedAt) {
+					failure = "pool_state_changed"
+					return nil
+				}
+				if reason := gcRemoveDirectoryFirst(root, row.Path, git); reason != "" {
+					failure = reason
+					return nil
+				}
+				row.Removed = true
+				report.Reaped++
+				return nil
+			})
+			if lockErr != nil {
+				failure = "pool_lane_lock_failed: " + lockErr.Error()
 			}
-			if current.Owner.PID != row.Owner.PID ||
-				current.Owner.LeaseID != row.Owner.LeaseID ||
-				!current.Owner.CreatedAt.Equal(row.Owner.CreatedAt) {
-				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: "owner_stamp_changed"})
-				continue
+			if failure != "" {
+				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: failure})
 			}
-			if reason := gcRemoveDirectoryFirst(root, row.Path, git); reason != "" {
-				report.Failures = append(report.Failures, GCFailure{Path: row.Path, Reason: reason})
-				continue
-			}
-			row.Removed = true
-			report.Reaped++
 		}
 	}
 	return report
@@ -300,12 +285,21 @@ func gcEntry(root, wtPath string, git GitRunner, opts GCOptions) (GCWorktree, bo
 	if !gcPathAllowed(clean, opts.AllowedRoots) {
 		return row, false, "path_not_under_allowed_worker_root"
 	}
-	stamp, err := readOwnerStamp(clean)
-	if err != nil {
-		return row, false, "owner_stamp_unreadable"
+	stamp, meta, ownershipReason := gcOwnerState(clean)
+	if ownershipReason != "" {
+		return row, false, ownershipReason
 	}
 	row.Owner = stamp
-	age := ownerAge(stamp, opts.Now)
+	ageBase := stamp.CreatedAt
+	if meta != nil {
+		row.PoolState = meta.State
+		row.PoolUpdatedAt = meta.UpdatedAt
+		ageBase = meta.UpdatedAt
+	}
+	age := opts.Now.Sub(ageBase)
+	if age < 0 {
+		age = 0
+	}
 	row.AgeSec = int64(age / time.Second)
 
 	if opts.ProcessAlive == nil {
@@ -364,6 +358,26 @@ func gcEntry(root, wtPath string, git GitRunner, opts GCOptions) (GCWorktree, bo
 	row.Reason = fmt.Sprintf("gc: owner pid %d dead, lease %q released, age %s past max-age %s, no active command line, working tree clean, and HEAD contained by trunk",
 		stamp.PID, stamp.LeaseID, age.Round(time.Second), opts.MaxAge.Round(time.Second))
 	return row, true, ""
+}
+
+// gcOwnerState reads the durable pool record when present. Pool metadata embeds
+// the owner that performed the idle/leased transition, so a process that crashes
+// between reserving a member and refreshing the compatibility owner-stamp file
+// still leaves a reclaimable leased owner instead of an ambiguous permanent leak.
+// Non-pool worktrees retain the standalone owner-stamp authority.
+func gcOwnerState(wtPath string) (OwnerStamp, *poolMemberMetadata, string) {
+	meta, metaErr := readPoolMember(wtPath)
+	if metaErr == nil {
+		return meta.Owner, &meta, ""
+	}
+	if _, statErr := os.Stat(poolMemberPath(wtPath)); statErr == nil {
+		return OwnerStamp{}, nil, "pool_metadata_unreadable"
+	}
+	stamp, err := readOwnerStamp(wtPath)
+	if err != nil {
+		return OwnerStamp{}, nil, "owner_stamp_unreadable"
+	}
+	return stamp, nil, ""
 }
 
 // unpushedCommitCount returns 0 when the worktree HEAD is already contained by the
@@ -445,8 +459,7 @@ func gcRemoveDirectoryFirst(root, wtPath string, git GitRunner) string {
 	if rc, out := run(git, root, []string{"worktree", "prune"}); rc != 0 {
 		return "prune_failed: " + strings.TrimSpace(out)
 	}
-	wtRoot := filepath.Dir(filepath.Clean(wtPath))
-	_ = os.Remove(poolMarker(wtRoot, filepath.Base(filepath.Clean(wtPath))))
+	removePoolMemberState(wtPath)
 	removeOwnerStamp(wtPath)
 	return ""
 }

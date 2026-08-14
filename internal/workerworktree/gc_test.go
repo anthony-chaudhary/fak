@@ -215,6 +215,79 @@ func TestGCListRequiresRootOwnerLeaseAgeProcessCleanAndNoUnpushedCommit(t *testi
 	}
 }
 
+func TestGarbageCollectReclaimsDeadIdleAndLeasedPoolOwners(t *testing.T) {
+	t.Setenv(PoolCapEnv, "2")
+	root := t.TempDir()
+	now := time.Date(2026, time.August, 14, 15, 0, 0, 0, time.UTC)
+	old := now.Add(-2 * time.Hour)
+
+	makeMember := func(key, state string, pid int) string {
+		owner := OwnerStamp{
+			PID:       pid,
+			LeaseID:   "resolve-tools-" + key,
+			CreatedAt: old,
+		}
+		wt := makeGCWorktree(t, root, "tools", key, owner)
+		if err := withPoolLaneLock(root, "tools", func() error {
+			return writePoolMemberLocked(wt, "tools", state, owner, old)
+		}); err != nil {
+			t.Fatalf("write %s pool member: %v", state, err)
+		}
+		return wt
+	}
+	idle := makeMember("idle", poolStateIdle, 1111)
+	leased := makeMember("leased", poolStateLeased, 2222)
+
+	g := &gcGit{
+		list:   gcPorcelain(idle, leased),
+		status: map[string]string{},
+		heads: map[string]string{
+			filepath.Clean(idle):   "idle-head",
+			filepath.Clean(leased): "leased-head",
+		},
+		ancestors: map[string]int{
+			"idle-head":   0,
+			"leased-head": 0,
+		},
+	}
+	opts := baseGCOptions(now, root)
+	opts.ProcessAlive = func(int) bool { return false }
+	opts.LeaseLive = func(string) bool { return false }
+	opts.Apply = true
+
+	report := GarbageCollect("/repo", g.run, opts)
+	if report.WouldReap != 2 || report.Reaped != 2 || len(report.Failures) != 0 {
+		t.Fatalf("dead idle+leased GC report=%+v", report)
+	}
+	states := map[string]bool{}
+	for _, row := range report.Worktrees {
+		states[row.PoolState] = true
+		if !row.Removed || row.OwnerLive || row.LeaseLive {
+			t.Fatalf("pool GC row=%+v", row)
+		}
+	}
+	if !states[poolStateIdle] || !states[poolStateLeased] {
+		t.Fatalf("GC did not preserve idle/leased evidence: %+v", report.Worktrees)
+	}
+	for _, wt := range []string{idle, leased} {
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Fatalf("GC did not remove %s member %s: %v", mustPoolStateName(report.Worktrees, wt), wt, err)
+		}
+		if _, err := os.Stat(poolMemberPath(wt)); !os.IsNotExist(err) {
+			t.Fatalf("GC left pool metadata for %s: %v", wt, err)
+		}
+	}
+}
+
+func mustPoolStateName(rows []GCWorktree, path string) string {
+	for _, row := range rows {
+		if samePath(row.Path, path) {
+			return row.PoolState
+		}
+	}
+	return "unknown"
+}
+
 func TestGarbageCollectDefaultsToDryRun(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, time.August, 14, 15, 0, 0, 0, time.UTC)

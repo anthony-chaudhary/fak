@@ -1,69 +1,71 @@
 package workerworktree
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 // THE PER-WORKER WORKTREE TAX (#3572, child of #3165)
-// Prepare materializes a FULL working tree per worker (`git worktree add --detach`)
-// and Reap force-removes it. At 100x that create/destroy is paid per dispatch: the
-// checkout cost N times over, plus `.git/worktrees` admin churn under contention.
-// Prepare's existing Reused bit only fires when the SAME lane+key re-prepares, so a
-// NEW worker always paid full price even with an identical worktree sitting idle.
+// Prepare materializes a full detached worktree and Reap destroys it. At fleet
+// scale, checkout and .git/worktrees administration become a per-dispatch tax.
 //
-// THE POOL. Keep at most K IDLE worktrees per lane. Prepare LEASES one — a fast
-// `reset --hard <newBase>` + `clean -fd` re-points the already-materialized tree at
-// the new base instead of checking the whole tree out again — and reports it with the
-// existing Reused bit. Reap RETURNS the worktree (reset clean, mark idle) up to the
-// cap and force-removes past it, exactly as today.
+// THE POOL. Keep a small bounded set of idle worktrees per lane. A new worker
+// leases an idle member by atomically changing its durable state to leased, then
+// running `reset --hard <base>` and `clean -fd`. Reap returns only a worktree that
+// is proven clean and whose detached HEAD is already contained by trunk; overflow
+// and unsafe returns fall back to the pre-pool forced removal.
 //
-// IDLE STATE LIVES OUTSIDE THE MEMBERS. One marker file per idle member sits in a
-// sidecar dir under the worktree ROOT, not in the worktree: leasing runs `git clean`
-// inside a member, which would delete an in-tree marker, and an in-tree marker would
-// also show up in the worker's own `git status`. Keeping it on disk (rather than in a
-// process-local map) is what lets a `fak worktree worker reap` in one process hand a
-// warm tree to a `prepare` in the next — the actual dispatch shape.
-//
-// FALLBACK IS ALWAYS THE OLD PATH. A miss (pool off, empty, all members claimed by a
-// racing peer, or a member that will not reset clean) falls straight through to
-// `worktree add` / `worktree remove --force`, so the pool can only ever remove work,
-// never add a new failure mode.
-//
-// LEAKED MEMBERS STAY RECLAIMABLE (the ordering #3572's Notes ask for). An idle member
-// is an ordinary marker-named worker worktree with a clean tree, so ColdReapList sees
-// it, and once its lane lease is dead and it is past the age floor it grades cold and
-// the cold sweep reclaims it. Returning a member resets it clean precisely so that
-// stays true — a member left dirty would grade HeldByWork and pin disk forever.
+// THE STATE. Every pool member has one JSON record under the configured worker
+// root. The record exists in BOTH idle and leased states, embeds the owner stamp
+// that owns the state transition, and is replaced atomically. A per-lane advisory
+// lock serializes capacity checks and idle->leased->idle transitions across the
+// separate prepare/reap processes used by dispatch.
 const (
-	// PoolCapEnv bounds the warm pool: the maximum number of IDLE worktrees kept per
-	// LANE. Unset, unparsable, or negative means defaultPoolCap; 0 disables the pool
-	// and reproduces the pre-#3572 create/reap byte for byte.
-	//
-	// CONFIG-SURFACE DEBT (#2863/#2862): this is behavioral configuration in the
-	// environment. It is spelled as a const identifier, which is the idiom this
-	// package's four existing knobs (WorktreeRootEnv, LandReadbackEnv, IsolatedLandEnv,
-	// IsolatedLandRetryEnv) already use and which envconfiglint's literal-only scanner
-	// cannot see — recorded here rather than left implicit. Relocates to: a `--pool`
-	// flag on `fak worktree worker prepare|reap` plus a field the dispatch spawn passes
-	// in, so the cap arrives as an argument instead of a process-env re-read.
+	// PoolCapEnv bounds the number of IDLE members kept per lane. Zero disables
+	// the pool and preserves the pre-#3572 create/reap lifecycle.
 	PoolCapEnv = "FLEET_WORKER_WORKTREE_POOL"
-	// defaultPoolCap is 0 — OFF. gen/next: the pool changes what Reap DOES (a reaped
-	// worktree stops disappearing), so it stays gated behind an explicit operator
-	// opt-in until dogfood evidence promotes it. Flipping this to a small K is the
-	// promotion step, not part of shipping the mechanism.
-	defaultPoolCap = 0
-	// poolStateDir is the sidecar dir under the worktree root holding the idle markers.
-	poolStateDir = ".fak-wt-pool"
-	// poolIdleExt suffixes an idle marker; the rest of the name is the member's dir name.
-	poolIdleExt = ".idle"
+
+	// Small by default: enough to amortize short-worker churn without retaining an
+	// unbounded checkout set. Operators can set PoolCapEnv=0 for the exact old path.
+	defaultPoolCap = 2
+
+	poolStateDir      = ".fak-wt-pool"
+	poolMemberExt     = ".json"
+	poolLegacyIdleExt = ".idle"
+	poolMemberSchema  = "fak-worker-worktree-pool/2"
+	poolStateIdle     = "idle"
+	poolStateLeased   = "leased"
+	poolLockPoll      = 10 * time.Millisecond
+	poolLockWait      = 2 * time.Second
+	poolMetadataPerm  = 0o600
+	poolStateDirPerm  = 0o700
+	poolLockFilePerm  = 0o600
 )
 
-// PoolCap reports how many idle worktrees the warm pool keeps per lane. Fail-open to
-// the default on anything unreadable: a typo'd knob must never mean "unbounded".
+type poolMemberMetadata struct {
+	Schema    string     `json:"schema"`
+	Lane      string     `json:"lane"`
+	State     string     `json:"state"`
+	Owner     OwnerStamp `json:"owner"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+type poolMemberRecord struct {
+	Path string
+	Meta poolMemberMetadata
+}
+
+// PoolCap reports the effective per-lane idle capacity. Unset, malformed, or
+// negative values fall back to the small default; only an explicit zero disables.
 func PoolCap() int {
 	v := strings.TrimSpace(os.Getenv(PoolCapEnv))
 	if v == "" {
@@ -76,62 +78,267 @@ func PoolCap() int {
 	return n
 }
 
-// resolveWorktreeRoot is Path's root resolution, reused so the pool's sidecar dir and
-// the worktrees it indexes can never disagree about where the root is.
 func resolveWorktreeRoot(wtRoot string) string {
-	if wtRoot == "" {
+	if strings.TrimSpace(wtRoot) == "" {
 		return DefaultRoot()
 	}
-	return wtRoot
+	return filepath.Clean(wtRoot)
 }
 
 func poolStatePath(wtRoot string) string {
 	return filepath.Join(resolveWorktreeRoot(wtRoot), poolStateDir)
 }
 
+// poolMarker retains the old helper name because cleanup and tests use it. It now
+// names the durable v2 member record rather than an idle-only marker.
 func poolMarker(wtRoot, dirName string) string {
-	return filepath.Join(poolStatePath(wtRoot), dirName+poolIdleExt)
+	return filepath.Join(poolStatePath(wtRoot), dirName+poolMemberExt)
 }
 
-// poolIdleMembers lists the idle members of lane under wtRoot, sorted for a
-// deterministic lease order. A marker whose worktree directory is GONE (cold-swept,
-// hand-removed) is dropped and its marker cleared: a member that no longer exists must
-// not hold a pool slot, or the cap silently starves after the first sweep. An empty
-// lane matches every member, which is what the cap accounting for a bare-marker path
-// would need; callers pass a real lane.
-func poolIdleMembers(wtRoot, lane string) []string {
-	stateDir := poolStatePath(wtRoot)
-	entries, err := os.ReadDir(stateDir)
+func poolLegacyMarker(wtRoot, dirName string) string {
+	return filepath.Join(poolStatePath(wtRoot), dirName+poolLegacyIdleExt)
+}
+
+func poolMemberPath(wtPath string) string {
+	clean := filepath.Clean(wtPath)
+	return poolMarker(filepath.Dir(clean), filepath.Base(clean))
+}
+
+func canonicalPoolLane(lane string) string {
+	return LaneOf(DirName(lane, "pool-lane"))
+}
+
+func poolLaneLockPath(wtRoot, lane string) string {
+	return filepath.Join(poolStatePath(wtRoot), "locks", safeKey(canonicalPoolLane(lane))+".lock")
+}
+
+// withPoolLaneLock serializes one lane's member selection, cap accounting, and
+// state transition across goroutines and processes. A bounded wait preserves the
+// package's fail-open posture: callers fall back to create/remove rather than wedge.
+func withPoolLaneLock(wtRoot, lane string, fn func() error) error {
+	lane = canonicalPoolLane(lane)
+	if lane == "" {
+		return fmt.Errorf("pool lane is empty")
+	}
+	lockPath := poolLaneLockPath(wtRoot, lane)
+	if err := os.MkdirAll(filepath.Dir(lockPath), poolStateDirPerm); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, poolLockFilePerm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	deadline := time.Now().Add(poolLockWait)
+	for {
+		err = flock.TryLock(f)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, flock.ErrLockBusy) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("pool lane %q stayed locked for %s", lane, poolLockWait)
+		}
+		time.Sleep(poolLockPoll)
+	}
+	defer func() { _ = flock.Unlock(f) }()
+	return fn()
+}
+
+// atomicWriteJSON writes a complete JSON record to a sibling temporary file,
+// fsyncs it, and atomically replaces the destination. Go's Windows rename path
+// uses MOVEFILE_REPLACE_EXISTING, so no remove-then-rename visibility gap is needed.
+func atomicWriteJSON(path string, value any, perm os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), poolStateDirPerm); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func validPoolState(state string) bool {
+	return state == poolStateIdle || state == poolStateLeased
+}
+
+func readPoolMember(wtPath string) (poolMemberMetadata, error) {
+	path := poolMemberPath(wtPath)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return poolMemberMetadata{}, err
+	}
+	var meta poolMemberMetadata
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return poolMemberMetadata{}, err
+	}
+	wantLane := LaneOf(wtPath)
+	if meta.Schema != poolMemberSchema ||
+		meta.Lane == "" || meta.Lane != wantLane ||
+		!validPoolState(meta.State) ||
+		meta.Owner.PID <= 0 || meta.Owner.CreatedAt.IsZero() ||
+		meta.UpdatedAt.IsZero() {
+		return poolMemberMetadata{}, fmt.Errorf("invalid pool member metadata")
+	}
+	meta.Owner.CreatedAt = meta.Owner.CreatedAt.UTC()
+	meta.UpdatedAt = meta.UpdatedAt.UTC()
+	return meta, nil
+}
+
+// writePoolMemberLocked replaces one member record. The caller must hold the
+// canonical lane lock when this is part of a lifecycle transition.
+func writePoolMemberLocked(wtPath, lane, state string, owner OwnerStamp, updatedAt time.Time) error {
+	lane = canonicalPoolLane(lane)
+	if lane == "" || lane != LaneOf(wtPath) {
+		return fmt.Errorf("pool lane %q does not match worktree %q", lane, wtPath)
+	}
+	if !validPoolState(state) {
+		return fmt.Errorf("invalid pool state %q", state)
+	}
+	owner = normalizeOwnerStamp(owner)
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
+	meta := poolMemberMetadata{
+		Schema:    poolMemberSchema,
+		Lane:      lane,
+		State:     state,
+		Owner:     owner,
+		UpdatedAt: updatedAt.UTC(),
+	}
+	return atomicWriteJSON(poolMemberPath(wtPath), meta, poolMetadataPerm)
+}
+
+func removePoolMemberState(wtPath string) {
+	clean := filepath.Clean(wtPath)
+	wtRoot := filepath.Dir(clean)
+	dirName := filepath.Base(clean)
+	_ = os.Remove(poolMarker(wtRoot, dirName))
+	_ = os.Remove(poolLegacyMarker(wtRoot, dirName))
+}
+
+// migrateLegacyIdleLocked turns the v1 idle-only marker into a v2 state record.
+// Missing owner evidence is kept as legacy state rather than guessed.
+func migrateLegacyIdleLocked(wtRoot, wtPath string) (poolMemberMetadata, error) {
+	owner, err := readOwnerStamp(wtPath)
+	if err != nil {
+		return poolMemberMetadata{}, err
+	}
+	updatedAt := owner.CreatedAt
+	if fi, statErr := os.Stat(poolLegacyMarker(wtRoot, filepath.Base(wtPath))); statErr == nil {
+		updatedAt = fi.ModTime()
+	}
+	if err := writePoolMemberLocked(wtPath, LaneOf(wtPath), poolStateIdle, owner, updatedAt); err != nil {
+		return poolMemberMetadata{}, err
+	}
+	_ = os.Remove(poolLegacyMarker(wtRoot, filepath.Base(wtPath)))
+	return readPoolMember(wtPath)
+}
+
+// poolMembersLocked enumerates valid durable member records for one lane. Vanished
+// worktrees release their slots. Legacy idle markers are upgraded in place.
+func poolMembersLocked(wtRoot, lane string) []poolMemberRecord {
+	wtRoot = resolveWorktreeRoot(wtRoot)
+	lane = canonicalPoolLane(lane)
+	entries, err := os.ReadDir(poolStatePath(wtRoot))
 	if err != nil {
 		return nil
 	}
-	root := resolveWorktreeRoot(wtRoot)
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), poolIdleExt) {
+	seen := map[string]bool{}
+	var out []poolMemberRecord
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
-		dirName := strings.TrimSuffix(e.Name(), poolIdleExt)
-		if lane != "" && LaneOf(dirName) != lane {
+		name := entry.Name()
+		var dirName string
+		switch {
+		case strings.HasSuffix(name, poolMemberExt):
+			dirName = strings.TrimSuffix(name, poolMemberExt)
+		case strings.HasSuffix(name, poolLegacyIdleExt):
+			dirName = strings.TrimSuffix(name, poolLegacyIdleExt)
+		default:
 			continue
 		}
-		wt := filepath.Join(root, dirName)
+		wt := filepath.Join(wtRoot, dirName)
+		key := strings.ToLower(filepath.Clean(wt))
+		if seen[key] {
+			continue
+		}
 		if _, err := os.Stat(wt); err != nil {
-			os.Remove(filepath.Join(stateDir, e.Name()))
+			removePoolMemberState(wt)
 			continue
 		}
-		out = append(out, wt)
+		if lane != "" && LaneOf(wt) != lane {
+			continue
+		}
+		meta, err := readPoolMember(wt)
+		if err != nil && strings.HasSuffix(name, poolLegacyIdleExt) {
+			meta, err = migrateLegacyIdleLocked(wtRoot, wt)
+		}
+		if err != nil {
+			continue
+		}
+		seen[key] = true
+		out = append(out, poolMemberRecord{Path: wt, Meta: meta})
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
 
-// resetPooled re-points an already-materialized worktree at base and drops everything
-// uncommitted, so the next lessee sees the same tree `worktree add --detach <base>`
-// would have given it. The build caches are EXCLUDED from the clean on purpose: they
-// are the whole point of pairing with #3242's warm GOCACHE — cleaning them would hand
-// back a worktree that is warm on checkout and cold on build. Returns false on any git
-// error, which the callers read as "this member is no longer trustworthy".
+func poolIdleMembers(wtRoot, lane string) []string {
+	var out []string
+	_ = withPoolLaneLock(wtRoot, lane, func() error {
+		for _, member := range poolMembersLocked(wtRoot, lane) {
+			if member.Meta.State == poolStateIdle {
+				out = append(out, member.Path)
+			}
+		}
+		return nil
+	})
+	return out
+}
+
+// recordPoolLease refreshes the durable leased owner after Prepare has secured a
+// member (or created a new one). Pool-disabled mode writes no pool state at all.
+func recordPoolLease(wtPath, lane string, owner OwnerStamp) error {
+	if PoolCap() == 0 {
+		return nil
+	}
+	wtRoot := filepath.Dir(filepath.Clean(wtPath))
+	return withPoolLaneLock(wtRoot, lane, func() error {
+		return writePoolMemberLocked(wtPath, lane, poolStateLeased, owner, time.Now())
+	})
+}
+
+// resetPooled makes a materialized checkout equivalent to a fresh detached add at
+// base while preserving the intentionally ignored per-worktree Go caches.
 func resetPooled(wt, base string, git GitRunner) bool {
 	if rc, _ := run(git, wt, []string{"reset", "--hard", base}); rc != 0 {
 		return false
@@ -140,70 +347,126 @@ func resetPooled(wt, base string, git GitRunner) bool {
 	return rc == 0
 }
 
-// leasePooled hands a NEW worker an idle member of its lane, re-pointed at base. The
-// claim is the marker REMOVAL: exactly one of N racing Prepares can remove a given
-// file, so a loser sees the error and moves to the next candidate rather than two
-// workers editing one tree. Returns handled=false when nothing could be leased — the
-// caller then creates a worktree exactly as before.
-func leasePooled(root, lane, base, wtRoot string, git GitRunner) (Result, bool) {
-	for _, wt := range poolIdleMembers(wtRoot, lane) {
-		if err := os.Remove(poolMarker(wtRoot, filepath.Base(wt))); err != nil {
-			continue // a peer leased it first
-		}
-		if resetPooled(wt, base, git) {
-			return Result{OK: true, Path: wt, BaseSHA: base, Reused: true,
-				Reason: "warm worktree pool hit (#3572)"}, true
-		}
-		// It would not come back clean (pruned admin record, broken registration, git
-		// absent). It is not editing space any more: destroy it so it can never be
-		// leased again, then try the next member.
-		run(git, root, []string{"worktree", "remove", "--force", wt})
-		run(git, root, []string{"worktree", "prune"})
+func reserveAndResetLocked(root string, member poolMemberRecord, base string, git GitRunner, owner OwnerStamp) (Result, bool) {
+	meta := member.Meta
+	meta.State = poolStateLeased
+	meta.Owner = normalizeOwnerStamp(owner)
+	meta.UpdatedAt = time.Now().UTC()
+	if err := atomicWriteJSON(poolMemberPath(member.Path), meta, poolMetadataPerm); err != nil {
+		return Result{}, false
 	}
+	if resetPooled(member.Path, base, git) {
+		return Result{
+			OK: true, Path: member.Path, BaseSHA: base, Reused: true,
+			Reason: "warm worktree pool hit (#3572)", pooled: true,
+		}, true
+	}
+	// The reservation prevents a second lease while the broken member is removed.
+	_ = ForceReap(root, member.Path, git)
 	return Result{}, false
 }
 
-// returnPooled parks a finished worker's worktree as an idle member instead of
-// destroying it, when its lane is under the cap. Returns handled=false for overflow (or
-// any hiccup), which the caller reads as "force-remove exactly as today".
-//
-// The member being returned is EXCLUDED from its own cap count, so re-reaping an
-// already-idle worktree is idempotent rather than tipping the lane over the cap and
-// destroying the very member it just parked. That matters because Reap is best-effort
-// and the dispatch witness sweep can fire twice on one worktree.
-//
-// WHAT THIS DOES NOT CHANGE: uncommitted work in the worktree is discarded here. So did
-// the force-remove it replaces — the reset is not a new way to lose a diff, and the
-// cold sweep's unlanded-work gate (coldreap.go) is still the arm that protects a worker
-// that died before landing.
-func returnPooled(root, wtPath string, capacity int, git GitRunner) (Result, bool) {
+// leasePooled leases the first deterministic idle member of lane. The lane lock
+// covers selection, state transition, and reset so return/GC cannot race the lease.
+func leasePooled(root, lane, base, wtRoot string, git GitRunner, owner OwnerStamp) (Result, bool) {
+	var result Result
+	var leased bool
+	err := withPoolLaneLock(wtRoot, lane, func() error {
+		for _, member := range poolMembersLocked(wtRoot, lane) {
+			if member.Meta.State != poolStateIdle {
+				continue
+			}
+			if res, ok := reserveAndResetLocked(root, member, base, git, owner); ok {
+				result, leased = res, true
+				return nil
+			}
+		}
+		return nil
+	})
+	return result, err == nil && leased
+}
+
+// leaseSpecificPooled handles the same-key case when that path is currently an
+// idle pool member. It must be reset like any other new lease, not returned via the
+// historical same-key retry path that intentionally preserves leased WIP.
+func leaseSpecificPooled(root, wtPath, base string, git GitRunner, owner OwnerStamp) (Result, bool) {
+	lane := LaneOf(wtPath)
+	wtRoot := filepath.Dir(filepath.Clean(wtPath))
+	var result Result
+	var leased bool
+	err := withPoolLaneLock(wtRoot, lane, func() error {
+		meta, err := readPoolMember(wtPath)
+		if err != nil || meta.State != poolStateIdle {
+			return nil
+		}
+		result, leased = reserveAndResetLocked(root, poolMemberRecord{Path: wtPath, Meta: meta}, base, git, owner)
+		return nil
+	})
+	return result, err == nil && leased
+}
+
+// returnPooled parks a proven-safe worktree as idle. It never resets a dirty,
+// unreadable, or unpushed member: those cases return handled=false and the caller
+// executes the old forced-removal path instead.
+func returnPooled(root, wtPath string, capacity int, git GitRunner) (result Result, handled bool, fallback string) {
 	lane := LaneOf(wtPath)
 	if lane == "" {
-		return Result{}, false // bare marker / unclassifiable: not a poolable member
+		return Result{}, false, "unclassifiable_lane"
 	}
 	wtRoot := filepath.Dir(filepath.Clean(wtPath))
-	idle := 0
-	for _, m := range poolIdleMembers(wtRoot, lane) {
-		if !samePath(m, wtPath) {
-			idle++
+	err := withPoolLaneLock(wtRoot, lane, func() error {
+		idle := 0
+		for _, member := range poolMembersLocked(wtRoot, lane) {
+			if member.Meta.State == poolStateIdle && !samePath(member.Path, wtPath) {
+				idle++
+			}
 		}
+		if idle >= capacity {
+			fallback = "pool_capacity"
+			return nil
+		}
+
+		switch unlanded := UnlandedCount(wtPath, git); {
+		case unlanded < 0:
+			fallback = "working_tree_unreadable"
+			return nil
+		case unlanded > 0:
+			fallback = "working_tree_dirty"
+			return nil
+		}
+		switch unpushed := unpushedCommitCount(root, wtPath, git); {
+		case unpushed < 0:
+			fallback = "commit_ancestry_unreadable"
+			return nil
+		case unpushed > 0:
+			fallback = "unpushed_commit"
+			return nil
+		}
+
+		owner, err := readOwnerStamp(wtPath)
+		if err != nil {
+			fallback = "owner_stamp_unreadable"
+			return nil
+		}
+		// The safety probes above prove this reset discards no unlanded or detached
+		// durable work. It merely normalizes the already-clean checkout before idle.
+		if !resetPooled(wtPath, "HEAD", git) {
+			fallback = "reset_failed"
+			return nil
+		}
+		if err := writePoolMemberLocked(wtPath, lane, poolStateIdle, owner, time.Now()); err != nil {
+			fallback = "pool_metadata_write_failed"
+			return nil
+		}
+		result = Result{
+			OK: true, Path: wtPath, Removed: false,
+			Reason: "returned to warm worktree pool (#3572)",
+		}
+		handled = true
+		return nil
+	})
+	if err != nil {
+		return Result{}, false, "pool_lane_lock_failed"
 	}
-	if idle >= capacity {
-		return Result{}, false // overflow: reap it for real
-	}
-	// Reset to its OWN tip: the member keeps whatever base it was pinned at, and the
-	// lease re-points it at the next worker's base anyway. All that matters here is
-	// that it is parked CLEAN.
-	if !resetPooled(wtPath, "HEAD", git) {
-		return Result{}, false
-	}
-	if err := os.MkdirAll(poolStatePath(wtRoot), 0o755); err != nil {
-		return Result{}, false
-	}
-	marker := poolMarker(wtRoot, filepath.Base(filepath.Clean(wtPath)))
-	if err := os.WriteFile(marker, []byte("fak-worker-worktree-pool/1 lane="+lane+"\n"), 0o644); err != nil {
-		return Result{}, false
-	}
-	return Result{OK: true, Path: wtPath, Removed: false,
-		Reason: "returned to warm worktree pool (#3572)"}, true
+	return result, handled, fallback
 }
