@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,6 +25,52 @@ func readGuardStopRecordsForTest(path string) ([]guardStopRecord, error) {
 	}), nil
 }
 
+func TestGuardRefusalRestatementCapStopsThirdNudge(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	statePath := filepath.Join(root, "restatement.json")
+	message := "I cannot perform the requested destructive action safely. A human must resolve this blocker."
+	write := func(msg string) {
+		t.Helper()
+		line := fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"text","text":%q}]}}`+"\n", msg)
+		if err := os.WriteFile(transcriptPath, []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(message)
+	for attempt := 1; attempt <= refusalRestatementCap+1; attempt++ {
+		decision := refusalRestatementCheck(refusalRestatementInput{
+			SessionID:      "session-5018",
+			TranscriptPath: transcriptPath,
+			StatePath:      statePath,
+			Head:           "same-commit",
+		})
+		if attempt <= refusalRestatementCap && decision.Blocked {
+			t.Fatalf("attempt %d blocked early: %+v", attempt, decision)
+		}
+		if attempt == refusalRestatementCap+1 {
+			if !decision.Blocked || decision.Reason != refusalNeedsHumanReason {
+				t.Fatalf("attempt %d = %+v, want terminal %s", attempt, decision, refusalNeedsHumanReason)
+			}
+		}
+		write("  " + message + "  ")
+	}
+}
+
+func TestGuardRefusalRestatementProgressResetsCap(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	statePath := filepath.Join(root, "restatement.json")
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"I cannot proceed safely; a human must resolve this blocker."}]}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, head := range []string{"a", "a", "b", "b"} {
+		if got := refusalRestatementCheck(refusalRestatementInput{SessionID: "s", TranscriptPath: transcriptPath, StatePath: statePath, Head: head}); got.Blocked {
+			t.Fatalf("head %q unexpectedly blocked: %+v", head, got)
+		}
+	}
+}
 func TestGuardStopHookDecision(t *testing.T) {
 	// Default ladder: warn=3, final=7, max=9.
 	const (

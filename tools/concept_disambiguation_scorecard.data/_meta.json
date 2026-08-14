@@ -1790,6 +1790,11 @@
           "category": "incidental",
           "reason": "private constant aligning the existing native-wire refusal vocabulary; not a new operator concept",
           "token": "nativeReasonMessageRoleUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private text normalization helper inside the Stop hook",
+          "token": "guardNormalizeRestatement"
         }
       ],
       "exclude": [
@@ -1916,6 +1921,7 @@
         "guardLaunchCoreLockAll",
         "guardLaunchKind",
         "guardLooksLikeRefusal",
+        "guardNormalizeRestatement",
         "guardOAuthKeychainSource",
         "guardOAuthKeychainSourceName",
         "guardOperatorQuestionEscalationSink",
@@ -3197,6 +3203,11 @@
           "category": "incidental",
           "reason": "Retained exact-line documentation ratchet fixture naming an existing guard-specific session hook; not a new operator-facing concept.",
           "token": "guardSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private filename sanitizer for Stop-hook state, not a session runtime concept",
+          "token": "refusalSafeSessionID"
         }
       ],
       "id": "session-runtime",
@@ -3345,6 +3356,7 @@
         "orderRecords",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",
+        "refusalSafeSessionID",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
         "repository-read",

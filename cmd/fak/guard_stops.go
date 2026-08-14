@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/anthony-chaudhary/fak/internal/headlesslint"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -40,6 +41,91 @@ import (
 //   3. An append-only JSONL ledger (one row per invocation) plus `fak guard-stops`,
 //      which folds the ledger into a tally an operator can read: how many sessions
 //      the guard ended, and why.
+
+const (
+	// refusalRestatementCap is the number of substantially-identical refusal
+	// turns tolerated without witnessed commit progress. The next stop terminates
+	// as NEEDS_HUMAN instead of injecting another continuation.
+	refusalRestatementCap   = 2
+	refusalNeedsHumanReason = "REFUSAL_RESTATEMENT_NEEDS_HUMAN"
+)
+
+type refusalRestatementInput struct {
+	SessionID      string
+	TranscriptPath string
+	StatePath      string
+	Head           string
+}
+
+type refusalRestatementResult struct {
+	Blocked bool
+	Reason  string
+	Count   int
+}
+
+type refusalRestatementState struct {
+	SessionID string `json:"session_id"`
+	Message   string `json:"message"`
+	Head      string `json:"head"`
+	Count     int    `json:"count"`
+}
+
+func refusalRestatementCheck(in refusalRestatementInput) refusalRestatementResult {
+	message := refusalLastAssistantText(in.TranscriptPath)
+	if !guardLooksLikeRefusal(message) || strings.TrimSpace(in.StatePath) == "" {
+		return refusalRestatementResult{}
+	}
+	normalized := guardNormalizeRestatement(message)
+	state := refusalRestatementState{}
+	if b, err := os.ReadFile(in.StatePath); err == nil {
+		_ = json.Unmarshal(b, &state)
+	}
+	count := 1
+	if state.SessionID == in.SessionID && state.Head == in.Head && state.Message == normalized {
+		count = state.Count + 1
+	}
+	next := refusalRestatementState{SessionID: in.SessionID, Message: normalized, Head: in.Head, Count: count}
+	if b, err := json.Marshal(next); err == nil {
+		_ = os.MkdirAll(filepath.Dir(in.StatePath), 0o700)
+		_ = os.WriteFile(in.StatePath, append(b, '\n'), 0o600)
+	}
+	if count > refusalRestatementCap {
+		return refusalRestatementResult{Blocked: true, Reason: refusalNeedsHumanReason, Count: count}
+	}
+	return refusalRestatementResult{Count: count}
+}
+
+func refusalLastAssistantText(path string) string {
+	recs := transcript.LoadFileTail(strings.TrimSpace(path), guardStopTranscriptTailBytes)
+	return guardLastAssistantText(recs)
+}
+func guardNormalizeRestatement(s string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			space = false
+		} else if !space && b.Len() > 0 {
+			b.WriteByte(' ')
+			space = true
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func guardLooksLikeRefusal(s string) bool {
+	n := guardNormalizeRestatement(s)
+	if n == "" {
+		return false
+	}
+	for _, marker := range []string{"cannot", "can not", "unable", "will not", "won t", "refuse", "needs human", "human must", "blocked"} {
+		if strings.Contains(n, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // ---- disposition vocabulary -------------------------------------------------
 

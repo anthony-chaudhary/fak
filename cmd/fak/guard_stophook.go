@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -420,6 +421,26 @@ func runGuardStopHook(stderr io.Writer, stdin io.Reader, argv []string) (exit in
 	rec.Session = parseHookSessionID(payload)
 	rec.StopHookActive = active
 	transcriptPath := parseHookTranscriptPath(payload)
+	if result := refusalRestatementCheck(refusalRestatementInput{
+		SessionID:      rec.Session,
+		TranscriptPath: transcriptPath,
+		StatePath:      refusalRestatementStatePath(rec.Session),
+		Head:           guardStopGitHead(),
+	}); result.Blocked {
+		fmt.Fprintf(stderr, "fak guard stop-hook: %s count=%d; allowing terminal blocked-state without another continuation\n", result.Reason, result.Count)
+		rec.Disposition = string(stopDispSameIssueGiveUp)
+		rec.Kind = string(stopKindStandDown)
+		rec.Stage = "refusal_restatement"
+		rec.Signal = "same-issue"
+		rec.Depth = result.Count
+		rec.Bound = refusalRestatementCap
+		rec.Note = result.Reason
+		rec.Exit = 0
+		rec.Blocked = false
+		rec.Transcript = readGuardStopTranscript(transcriptPath)
+		emitGuardStopRecord(stderr, rec)
+		return 0
+	}
 	rec.Transcript = readGuardStopTranscript(transcriptPath)
 	// #2539: score-at-turn-end — the curve gains a point every turn. Runs the cheap scorer
 	// set for the session's open objectives, bounded and fail-open, gated on the guard-wired
@@ -1276,4 +1297,37 @@ func parseGuardStopHookSignals(metrics string) (guardStopHookSignals, error) {
 		return guardStopHookSignals{}, fmt.Errorf("metric %s not found", guardStopHookMetricName)
 	}
 	return out, nil
+}
+
+func refusalRestatementStatePath(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	base := strings.TrimSpace(os.Getenv("FAK_GUARD_REFUSAL_STATE_DIR"))
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "fak-guard-refusal-state")
+	}
+	return filepath.Join(base, refusalSafeSessionID(sessionID)+".json")
+}
+
+func guardStopGitHead() string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+func refusalSafeSessionID(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "session"
+	}
+	return b.String()
 }
