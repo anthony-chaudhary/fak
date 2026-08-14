@@ -22,28 +22,27 @@ down by adding the real thing — never by gaming the detector.**
 
 ---
 
-## The family (each the same machine, a different surface)
+## Discover the live family; do not hard-code a roster
 
-| Scorecard | Tool | Debt key | Surface it measures |
-|---|---|---|---|
-| code-quality | `tools/code_quality_scorecard.py` | `code_debt` | the Go module (gofmt, tests, god-files) |
-| docs | `tools/docs_scorecard.py` | `doc_debt` | the doc corpus |
-| doc-appeal | `tools/doc_appeal_scorecard.py` | `appeal_debt` | a doc's prose voice (human, not LLM) |
-| seo / aeo | `fak score seo` (internal/seoaeoscore) | `seo_debt` | answer-engine / search surface |
-| demo-quality | `tools/demo_quality_scorecard.py` | `demo_debt` | the runnable demos |
-| repo-hygiene | `tools/repo_hygiene_scorecard.py` | `hygiene_debt` | the tree's shape |
-| observability | `tools/observability_scorecard.py` | — | dashboards / alerts / metrics doc |
-| industry | `tools/industry_scorecard.py` | `parity_debt` | fak vs the SOTA field (OUTWARD) |
-| agent-readiness | `fak score agent-readiness` (internal/agentreadinessscore) | `friction_debt` | can an AI agent adopt fak (one persona) |
-| product | `tools/product_scorecard.py` | `product_debt` | can a person use each concept today |
-| persona | `tools/persona_readiness_scorecard.py` | `persona_debt` | are the top-10 personas served |
-| steerability | `tools/steerability_scorecard.py` | `steerability_debt` | does steering effort stay FLAT as the repo grows (growth-invariant) |
+The registry printed by the first-class Go front door is the truth source:
 
-The ones that fold into the unified ratchet are wired in
-`tools/scorecard_control_pane.py` (`SCORECARDS`), which sums every `*-debt` into one
-portfolio number and gates regressions.
+```bash
+fak score --help
+```
 
----
+Select the scorecard named by the task from that live registry and capture its machine-readable
+result before editing:
+
+```bash
+fak score <name> --json > <name>-before.json
+```
+
+Retire binding FAIL debt before advisory polish.
+
+Do not preserve a fixed list in this skill: the registry grows. If a registered scorecard lacks
+`--json`, record that as a concrete gap rather than silently omitting it. The historical
+`python tools/scorecard_control_pane.py` path is a generation/debug fallback only; before trusting
+its generated pane, compare its discovered inputs with `fak score --help`.
 
 ## The five laws every scorecard obeys
 
