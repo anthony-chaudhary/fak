@@ -139,6 +139,35 @@ func dispatchHappyHelper(t *testing.T) func(root string, args ...string) (map[st
 	}
 }
 
+func TestDispatchTickPreflightRefusalSkipsIssueRouter(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	dispatchProbeWorkerCount = func(root, product string) int { return 1 }
+	routed := false
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		routed = true
+		return dispatchtick.RouterPayload{}, fmt.Errorf("router must not run after refusal")
+	}
+	root := t.TempDir()
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "claude", "--max-workers", "1", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s out=%s", code, errb, out)
+	}
+	if routed {
+		t.Fatal("issue router ran after preflight refused capacity")
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["verdict"] != dispatchtick.PreflightRefuseAtCap || got["action"] != "refused" {
+		t.Fatalf("payload=%v", got)
+	}
+	timings := mapAt(got, "timings_ms")
+	if _, ok := timings["lane_pick"]; ok {
+		t.Fatalf("refused tick recorded lane_pick: %v", timings)
+	}
+}
+
 func TestDispatchPromptCarriesDevelopmentBranchRole(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\nrelease_branch = \"main\"\nrelease_source = \"dev\"\npublic_front_door = \"main\"\n"), 0o644); err != nil {

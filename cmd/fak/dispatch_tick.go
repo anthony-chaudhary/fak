@@ -856,6 +856,30 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		account = *opts.Account
 	}
 
+	// A refused preflight cannot launch, so do not pay the issue router's GitHub/DOS
+	// subprocess fan-out merely to decorate a terminal capacity verdict (#6762).
+	// Keep this before resolveDispatchTickPick: lane/issue selection is actionable only
+	// after capacity admission. The empty pick intentionally omits lane-pick evidence.
+	if !preOK {
+		payload := seedDispatchTickPayload(root, opts, reg, pre, account, dispatchTickPick{})
+		payload["ok"] = false
+		payload["action"] = "refused"
+		payload["verdict"] = firstString(dispatchMapString(pre, "verdict"), "REFUSE")
+		payload["reason"] = "preflight refused: " + dispatchMapString(pre, "reason")
+		if worklist, ok := pre["janitor_worklist"].([]int); ok && len(worklist) > 0 {
+			payload["janitor_worklist"] = worklist
+			if opts.Live {
+				payload["janitor_reaped"] = dispatchReapWorklist(worklist)
+			}
+		}
+		payload["timings_ms"] = timings
+		timings["total"] = time.Since(t0).Milliseconds()
+		if opts.RecordLoop {
+			payload["loop_ledger"] = recordDispatchTickLoop(root, opts.LoopLedger, payload)
+		}
+		return payload, nil
+	}
+
 	tPick := time.Now()
 	pickRes, err := resolveDispatchTickPick(root, stderr, opts, runsDir, heldNoCommit, recoverableNoCommit)
 	if err != nil {
@@ -935,24 +959,6 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return p
 	}
 
-	if !preOK {
-		payload["ok"] = false
-		payload["action"] = "refused"
-		payload["verdict"] = firstString(dispatchMapString(pre, "verdict"), "REFUSE")
-		payload["reason"] = "preflight refused: " + dispatchMapString(pre, "reason")
-		// #3109 self-heal: if the refusal is (partly) driven by unattributed_live orphans,
-		// preflight surfaced their exact PIDs (dispatch marker + no live lease). Reap them
-		// here -- refuse THIS tick, but tree-kill the poison so the NEXT tick's count
-		// recovers instead of staying wedged until a separately-scheduled janitor runs.
-		// Live ticks only: a dry run stays observation-only (worklist surfaced, no kill).
-		if worklist, ok := pre["janitor_worklist"].([]int); ok && len(worklist) > 0 {
-			payload["janitor_worklist"] = worklist
-			if opts.Live {
-				payload["janitor_reaped"] = dispatchReapWorklist(worklist)
-			}
-		}
-		return finish(payload), nil
-	}
 	if pick.Lane == "" {
 		// All-self-source edge case (#1397): the auto-pick found candidate lanes but
 		// every one was held as the trust-critical witness machinery (the adjudicator,
