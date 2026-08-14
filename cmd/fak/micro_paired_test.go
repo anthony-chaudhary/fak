@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -67,5 +68,24 @@ func TestFoldPairedUsesOnlyProviderReportedCostForValueVerdict(t *testing.T) {
 	})
 	if r.ExecutionVerdict != "PASS" || r.ValueVerdict != "MICRO_WINS" {
 		t.Fatalf("receipt=%+v", r)
+	}
+}
+
+func TestRunPairedBaselineAddsBoundedGuardEnvelope(t *testing.T) {
+	if pairedBaselineTimeout <= 0 {
+		t.Fatalf("baseline timeout must be positive: %s", pairedBaselineTimeout)
+	}
+	// The parent CommandContext and the managed guard receive the same wall-clock
+	// envelope: the guard can emit a typed TIME_BUDGET_EXHAUSTED result, while the
+	// parent deadline remains the final process-tree backstop.
+	source, err := os.ReadFile("micro_paired.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineTimeout)", `"--max-duration", pairedBaselineTimeout.String()`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("baseline command lacks %q", want)
+		}
 	}
 }

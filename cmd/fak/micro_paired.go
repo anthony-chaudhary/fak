@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -28,6 +29,8 @@ type pairedArm struct {
 	Managed         bool     `json:"managed"`
 	Error           string   `json:"error,omitempty"`
 }
+
+const pairedBaselineTimeout = 2 * time.Minute
 
 type pairedReport struct {
 	Schema           string    `json:"schema"`
@@ -158,12 +161,17 @@ func filteredPairedEnv(env []string) []string {
 }
 func runPairedBaseline(ctx context.Context, task, expected, model string) pairedArm {
 	arm := pairedArm{Mechanism: "fak-manage-claude", Provider: "anthropic", Model: model, CostStatus: "provider-unreported", Managed: true}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, pairedBaselineTimeout)
+		defer cancel()
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		arm.Error = err.Error()
 		return arm
 	}
-	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
+	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--max-duration", pairedBaselineTimeout.String(), "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
 	cmd.Env = filteredPairedEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -171,7 +179,11 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	err = cmd.Run()
 	arm.WallMS = time.Since(start).Milliseconds()
 	if err != nil {
-		arm.Error = strings.TrimSpace(err.Error() + ": " + stdout.String() + " " + stderr.String())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			arm.Error = fmt.Sprintf("managed baseline timed out after %s", pairedBaselineTimeout)
+		} else {
+			arm.Error = strings.TrimSpace(err.Error() + ": " + stdout.String() + " " + stderr.String())
+		}
 		return arm
 	}
 	var got claudeResult
