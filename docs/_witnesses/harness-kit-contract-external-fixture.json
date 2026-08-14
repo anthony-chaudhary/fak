@@ -1,0 +1,15 @@
+{
+  "schema": "fak-harnesskit-contract-witness/1",
+  "issue": 6786,
+  "captured_at": "2026-08-14",
+  "fixture": "internal/architest/TestHarnesskitExternalImportBoundary",
+  "external_module": "example.com/clean-harness-product",
+  "public_import": "github.com/anthony-chaudhary/fak/pkg/harnesskit",
+  "public_result": "PASS: go run . compiled and executed a product built only from public contracts",
+  "negative_import": "github.com/anthony-chaudhary/fak/internal/abi",
+  "negative_result": "PASS: go build . failed with Go internal-package visibility enforcement",
+  "command": "go test ./internal/architest -run HarnesskitExternalImportBoundary -count=1 -v",
+  "observed": "PASS (15.26s)",
+  "independent_authority": "Go compiler operating on a fresh t.TempDir module with GOWORK=off"
+}
+
