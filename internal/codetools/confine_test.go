@@ -157,7 +157,7 @@ func TestZeroLimitsNormalizeToDefaults(t *testing.T) {
 // #6704/#6705 land is not merely unlisted, it is unknown — and both must refuse.
 func TestDefaultPolicyAdmitsImplementedTools(t *testing.T) {
 	p := DefaultPolicy()
-	for _, tool := range []string{ToolRead, ToolGrep, ToolGlob, ToolWrite, ToolEdit} {
+	for _, tool := range []string{ToolRead, ToolGrep, ToolGlob, ToolWrite, ToolEdit, ToolBash} {
 		if !p.Allow[tool] {
 			t.Fatalf("DefaultPolicy does not admit %q", tool)
 		}
@@ -165,7 +165,7 @@ func TestDefaultPolicyAdmitsImplementedTools(t *testing.T) {
 			t.Fatalf("engineFor(%q) reports the tool is not ours", tool)
 		}
 	}
-	for _, tool := range []string{"Bash"} {
+	for _, tool := range []string{"Unknown"} {
 		if p.Allow[tool] {
 			t.Fatalf("DefaultPolicy admits %q, which this slice does not implement", tool)
 		}

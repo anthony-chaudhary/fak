@@ -31,6 +31,7 @@ const (
 	ToolGlob  = "Glob"
 	ToolWrite = "Write"
 	ToolEdit  = "Edit"
+	ToolBash  = "Bash"
 )
 
 // ReadArgs names one file and an optional line window. Offset is 1-based (line 1 is the
@@ -90,6 +91,24 @@ func (a EditArgs) Validate() *Refusal {
 	}
 	if a.OldString == "" {
 		return refuse(CodeMalformed, "Edit: old_string must not be empty")
+	}
+	return nil
+}
+
+// BashArgs runs one command through the platform shell inside a confined workspace cwd.
+// TimeoutMS is optional but always capped by the toolset's configured maximum.
+type BashArgs struct {
+	Command   string `json:"command"`
+	Cwd       string `json:"cwd,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+}
+
+func (a BashArgs) Validate() *Refusal {
+	if strings.TrimSpace(a.Command) == "" {
+		return refuse(CodeMalformed, "Bash: missing required field: command")
+	}
+	if a.TimeoutMS < 0 {
+		return refuse(CodeMalformed, "Bash: timeout_ms must be >= 0")
 	}
 	return nil
 }
@@ -197,6 +216,12 @@ func Catalog() []ToolDef {
 			Name:        ToolEdit,
 			Description: "Atomically replace one exact string in a workspace file, or all matches when replace_all is true.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["file_path","old_string","new_string"],"additionalProperties":false}`),
+			ReadOnly:    false,
+		},
+		{
+			Name:        ToolBash,
+			Description: "Run a bounded command through the platform shell in a confined workspace directory.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"},"timeout_ms":{"type":"integer","minimum":0}},"required":["command"],"additionalProperties":false}`),
 			ReadOnly:    false,
 		},
 		{

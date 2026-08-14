@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -387,5 +388,30 @@ func TestOwnedLoopMutatesScratchRepoThroughKernelEngines(t *testing.T) {
 	}
 	if allowed < 2 {
 		t.Fatalf("codetools ALLOW rows=%d, log=%+v", allowed, log)
+	}
+}
+
+func TestOwnedLoopRunsBashThroughKernelEngine(t *testing.T) {
+	root := t.TempDir()
+	command := "printf kernel>witness.txt"
+	if runtime.GOOS == "windows" {
+		command = "echo kernel>witness.txt"
+	}
+	metrics, log := runCodeToolLoop(t, root, []codeToolScript{{tool: codetools.ToolBash, args: `{"command":` + mustJSON(t, command) + `,"cwd":"."}`}})
+	body, err := os.ReadFile(filepath.Join(root, "witness.txt"))
+	if err != nil || !strings.Contains(string(body), "kernel") {
+		t.Fatalf("process witness=%q err=%v", body, err)
+	}
+	if metrics.EngineCalls < 1 {
+		t.Fatalf("EngineCalls=%d, want >=1", metrics.EngineCalls)
+	}
+	found := false
+	for _, ev := range log {
+		if ev.Tool == codetools.ToolBash && ev.Verdict == "ALLOW" && ev.By == codetools.RungName {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no kernel-mediated Bash trace: %+v", log)
 	}
 }

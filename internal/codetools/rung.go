@@ -137,6 +137,19 @@ func (t *Toolset) targetOf(tool string, body []byte) (string, *Refusal) {
 		}
 		res, r := t.resolve(a.FilePath)
 		return res.Rel, r
+	case ToolBash:
+		var a BashArgs
+		if r := decodeArgs(body, &a); r != nil {
+			return "", r
+		}
+		if r := a.Validate(); r != nil {
+			return "", r
+		}
+		if a.Cwd == "" {
+			return "", nil
+		}
+		res, r := t.resolve(a.Cwd)
+		return res.Rel, r
 	case ToolGrep:
 		var a GrepArgs
 		if r := decodeArgs(body, &a); r != nil {

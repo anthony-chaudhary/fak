@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -28,6 +29,7 @@ const (
 	EngineGlob  = "codetools.glob"
 	EngineWrite = "codetools.write"
 	EngineEdit  = "codetools.edit"
+	EngineBash  = "codetools.bash"
 )
 
 // RungName identifies this package's adjudicator in a Verdict.By field and in the
@@ -40,11 +42,13 @@ const RungName = "codetools"
 // Read of a 2GB file or an unbounded Grep over a vendor tree both end the same way — the
 // loop stops being able to make progress.
 type Limits struct {
-	MaxReadBytes  int64 // largest file body a single Read returns
-	MaxMatches    int   // largest number of Grep match rows
-	MaxEntries    int   // largest number of Glob path rows
-	MaxWalkFiles  int   // largest number of files a single Grep/Glob walk visits
-	MaxWriteBytes int64 // largest body a single Write/Edit may materialize
+	MaxReadBytes   int64         // largest file body a single Read returns
+	MaxMatches     int           // largest number of Grep match rows
+	MaxEntries     int           // largest number of Glob path rows
+	MaxWalkFiles   int           // largest number of files a single Grep/Glob walk visits
+	MaxWriteBytes  int64         // largest body a single Write/Edit may materialize
+	MaxOutputBytes int           // largest stdout and stderr body retained per Bash call
+	MaxCommandTime time.Duration // hard ceiling for a Bash process forest
 }
 
 // DefaultLimits are sized for a coding loop rather than for a batch job: big enough that
@@ -53,11 +57,13 @@ type Limits struct {
 // its own — the point is that SOME bound is always in force.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxReadBytes:  1 << 20, // 1 MiB
-		MaxMatches:    500,
-		MaxEntries:    1000,
-		MaxWalkFiles:  20000,
-		MaxWriteBytes: 1 << 20,
+		MaxReadBytes:   1 << 20, // 1 MiB
+		MaxMatches:     500,
+		MaxEntries:     1000,
+		MaxWalkFiles:   20000,
+		MaxWriteBytes:  1 << 20,
+		MaxOutputBytes: 1 << 20,
+		MaxCommandTime: 2 * time.Minute,
 	}
 }
 
@@ -82,6 +88,12 @@ func (l Limits) normalize() Limits {
 	if l.MaxWriteBytes <= 0 {
 		l.MaxWriteBytes = d.MaxWriteBytes
 	}
+	if l.MaxOutputBytes <= 0 {
+		l.MaxOutputBytes = d.MaxOutputBytes
+	}
+	if l.MaxCommandTime <= 0 {
+		l.MaxCommandTime = d.MaxCommandTime
+	}
 	return l
 }
 
@@ -96,7 +108,7 @@ type Policy struct {
 // IMPLEMENTED here (#6704, #6705) — so the read spine cannot be mistaken for a mutation
 // surface an operator forgot to close.
 func DefaultPolicy() Policy {
-	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true, ToolWrite: true, ToolEdit: true}}
+	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true, ToolWrite: true, ToolEdit: true, ToolBash: true}}
 }
 
 // Config configures a Toolset. Root is the workspace every path is confined to; empty
@@ -165,6 +177,7 @@ func (t *Toolset) RegisterEngines() {
 	abi.RegisterEngine(EngineGlob, globEngine{t})
 	abi.RegisterEngine(EngineWrite, writeEngine{t})
 	abi.RegisterEngine(EngineEdit, editEngine{t})
+	abi.RegisterEngine(EngineBash, bashEngine{t})
 }
 
 // Register builds a Toolset, registers its engines, and places its rung in the
@@ -197,6 +210,8 @@ func engineFor(tool string) (string, bool) {
 		return EngineWrite, true
 	case ToolEdit:
 		return EngineEdit, true
+	case ToolBash:
+		return EngineBash, true
 	}
 	return "", false
 }

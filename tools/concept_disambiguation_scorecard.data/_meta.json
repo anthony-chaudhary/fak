@@ -4172,6 +4172,16 @@
           "category": "incidental",
           "reason": "Per-tool ABI registry identifier for the established Edit operation",
           "token": "EngineEdit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ABI adapter implementing the established Bash coding tool",
+          "token": "bashEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-tool ABI registry identifier for the established Bash operation",
+          "token": "EngineBash"
         }
       ],
       "id": "gateway-engine",
@@ -4181,6 +4191,7 @@
         "AffinitySelection",
         "BaselineEngineCalls",
         "DeniedEngineCalls",
+        "EngineBash",
         "EngineEdit",
         "EngineGlob",
         "EngineGrep",
@@ -4196,6 +4207,7 @@
         "RegisterEngines",
         "SessionAffinityGateway",
         "WithAffinity",
+        "bashEngine",
         "cacheEmitter",
         "collectDogfoodKernelValue",
         "convkernel",
