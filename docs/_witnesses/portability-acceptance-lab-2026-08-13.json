@@ -1,0 +1,420 @@
+{
+  "schema": "fak.portability.acceptance-lab/v1",
+  "verdict": "pass",
+  "hermetic": true,
+  "credentials_used": false,
+  "hosted_services_used": false,
+  "active_state": "none",
+  "scenarios": [
+    {
+      "id": "two-homes-two-users-scopes",
+      "status": "proven",
+      "decisions": 4,
+      "errors": 0,
+      "recovery_ms": 0,
+      "behavior_equivalent": true,
+      "leak_count": 0,
+      "expert_controls": [
+        "preview",
+        "atomic-apply",
+        "scope-selection"
+      ],
+      "detail": "two isolated homes and users applied personal/project/team/corporate objects"
+    },
+    {
+      "id": "organization-controls",
+      "status": "proven",
+      "decisions": 2,
+      "errors": 0,
+      "recovery_ms": 0,
+      "behavior_equivalent": true,
+      "leak_count": 0,
+      "expert_controls": [
+        "RBAC",
+        "signature",
+        "rollout"
+      ],
+      "detail": "owner-signed team collection enforces role and scope"
+    },
+    {
+      "id": "public-producer-consumer-revocation",
+      "status": "proven",
+      "decisions": 4,
+      "errors": 1,
+      "recovery_ms": 0,
+      "behavior_equivalent": true,
+      "leak_count": 0,
+      "expert_controls": [
+        "trust-root",
+        "inspect",
+        "revoke"
+      ],
+      "detail": "signed local registry publish/inspect and consumer revocation fail closed"
+    },
+    {
+      "id": "adapter-skew-and-unsupported",
+      "status": "proven",
+      "decisions": 3,
+      "errors": 1,
+      "recovery_ms": 0,
+      "behavior_equivalent": true,
+      "leak_count": 0,
+      "expert_controls": [
+        "capability-negotiation",
+        "conformance"
+      ],
+      "detail": "reference adapters conform; unknown adapter is typed refusal"
+    },
+    {
+      "id": "interrupt-corrupt-malicious-restart-rollback",
+      "status": "proven",
+      "decisions": 8,
+      "errors": 2,
+      "recovery_ms": 0,
+      "behavior_equivalent": true,
+      "leak_count": 0,
+      "expert_controls": [
+        "digest",
+        "egress-preview",
+        "journal",
+        "rollback",
+        "merge-plan"
+      ],
+      "detail": "failed artifacts durable, restart reloads journal, rollback closes state, offline conflict is explicit"
+    },
+    {
+      "id": "active-loop-history-checkpoint",
+      "status": "proven",
+      "decisions": 3,
+      "errors": 0,
+      "recovery_ms": 0,
+      "behavior_equivalent": true,
+      "leak_count": 0,
+      "expert_controls": [
+        "pause-before-export",
+        "digest",
+        "atomic-apply"
+      ],
+      "detail": "#6432 active loop and history checkpoint survive machine transfer without duplication"
+    }
+  ],
+  "coverage": [
+    {
+      "id": "A6606-checkpoint-6432",
+      "requirement": "active loop/history checkpoint integration with #6432",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Preview",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "A6606-corrupt-malicious",
+      "requirement": "corrupt and malicious package fail closed with durable artifact",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "ReadPackage",
+        "PreviewEgress"
+      ]
+    },
+    {
+      "id": "A6606-homes-users-scopes",
+      "requirement": "two homes/machines, two users, project/team/corporate scopes",
+      "status": "proven",
+      "scenario": "two-homes-two-users-scopes",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-apply",
+      "requirement": "interrupted apply leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-export",
+      "requirement": "interrupted export leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-publish",
+      "requirement": "interrupted publish leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-sync",
+      "requirement": "interrupted sync leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-matrix",
+      "requirement": "machine-readable proven/partial/unsupported/untested coverage and release verdict",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "acceptance Report.Coverage",
+        "acceptance Report.Verdict"
+      ]
+    },
+    {
+      "id": "A6606-restart-rollback",
+      "requirement": "controller restart and rollback",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-revocation",
+      "requirement": "revocation",
+      "status": "proven",
+      "scenario": "public-producer-consumer-revocation",
+      "authoritative_api": [
+        "RegistryManifest.Revoked",
+        "Inspect"
+      ]
+    },
+    {
+      "id": "A6606-skew-unsupported",
+      "requirement": "version skew and unsupported adapter",
+      "status": "proven",
+      "scenario": "adapter-skew-and-unsupported",
+      "authoritative_api": [
+        "RunReferenceConformance",
+        "AdapterRegistry.Get"
+      ]
+    },
+    {
+      "id": "E6589-adapters",
+      "requirement": "open adapter contract, conformance, version skew and explicit degradation",
+      "status": "proven",
+      "scenario": "adapter-skew-and-unsupported",
+      "authoritative_api": [
+        "RunReferenceConformance",
+        "AdapterRegistry.Get"
+      ]
+    },
+    {
+      "id": "E6589-continuity",
+      "requirement": "behavior and provenance continuity across homes",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "E6589-economics",
+      "requirement": "net-true time/error/bytes/storage/CPU measurements",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "acceptance Report.Metrics"
+      ]
+    },
+    {
+      "id": "E6589-objects",
+      "requirement": "portable managed objects and four scopes",
+      "status": "proven",
+      "scenario": "two-homes-two-users-scopes",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Preview",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "E6589-offline",
+      "requirement": "offline-first deterministic reconciliation",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "PreviewMerge",
+        "WriteMergePlan"
+      ]
+    },
+    {
+      "id": "E6589-org",
+      "requirement": "project/team/corporate governance",
+      "status": "proven",
+      "scenario": "organization-controls",
+      "authoritative_api": [
+        "OrgState.CreateCollection",
+        "PrepareOrganizationPackage"
+      ]
+    },
+    {
+      "id": "E6589-public",
+      "requirement": "public producer/consumer lifecycle and revocation",
+      "status": "proven",
+      "scenario": "public-producer-consumer-revocation",
+      "authoritative_api": [
+        "Publish",
+        "Inspect",
+        "RegistryManifest.Revoked"
+      ]
+    },
+    {
+      "id": "E6589-security",
+      "requirement": "sensitivity, provenance, no-secret egress and inert payload",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "PreviewEgress",
+        "ReadPackage"
+      ]
+    },
+    {
+      "id": "E6589-ux",
+      "requirement": "preview, explainable receipts, recovery and expert controls",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply"
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "name": "task_time",
+      "value": 39.798,
+      "unit": "ms",
+      "provenance": "observed",
+      "tuned_alternative": "manual tuned export/import checklist",
+      "baseline_value": 300000,
+      "net_cost": -299960.202
+    },
+    {
+      "name": "decisions",
+      "value": 24,
+      "unit": "count",
+      "provenance": "witnessed",
+      "tuned_alternative": "manual tuned checklist",
+      "baseline_value": 18,
+      "net_cost": 6
+    },
+    {
+      "name": "errors",
+      "value": 4,
+      "unit": "count",
+      "provenance": "witnessed",
+      "tuned_alternative": "manual tuned checklist",
+      "baseline_value": 3,
+      "net_cost": 1
+    },
+    {
+      "name": "bytes",
+      "value": 1364,
+      "unit": "bytes",
+      "provenance": "witnessed",
+      "tuned_alternative": "equivalent unpacked JSON transfer",
+      "baseline_value": 1568.6,
+      "net_cost": -204.6
+    },
+    {
+      "name": "storage",
+      "value": 16735,
+      "unit": "bytes",
+      "provenance": "observed",
+      "tuned_alternative": "temporary clean-room directory",
+      "baseline_value": 16735,
+      "net_cost": 0
+    },
+    {
+      "name": "cpu",
+      "value": 39.798,
+      "unit": "cpu-ms upper bound",
+      "provenance": "modeled",
+      "tuned_alternative": "one local core wall-time upper bound",
+      "baseline_value": 39.798,
+      "net_cost": 0
+    },
+    {
+      "name": "provenance_correctness",
+      "value": 1,
+      "unit": "ratio",
+      "provenance": "witnessed",
+      "tuned_alternative": "manual provenance inspection",
+      "baseline_value": 0.95,
+      "net_cost": 0.05
+    },
+    {
+      "name": "behavior_equivalence",
+      "value": 1,
+      "unit": "ratio",
+      "provenance": "witnessed",
+      "tuned_alternative": "source-home behavior",
+      "baseline_value": 1,
+      "net_cost": 0
+    },
+    {
+      "name": "leaks",
+      "value": 0,
+      "unit": "count",
+      "provenance": "witnessed",
+      "tuned_alternative": "manual archive inspection",
+      "baseline_value": 0,
+      "net_cost": 0
+    },
+    {
+      "name": "expert_controls",
+      "value": 8,
+      "unit": "count",
+      "provenance": "witnessed",
+      "tuned_alternative": "tuned CLI controls",
+      "baseline_value": 8,
+      "net_cost": 0
+    },
+    {
+      "name": "recovery",
+      "value": 0,
+      "unit": "ms",
+      "provenance": "observed",
+      "tuned_alternative": "manual restore from backup",
+      "baseline_value": 120000,
+      "net_cost": -120000
+    }
+  ],
+  "failure_artifacts": [
+    "failures/revoked-package.json",
+    "failures/unsupported-adapter.json",
+    "failures/interrupted-export.json",
+    "failures/interrupted-apply.json",
+    "failures/corrupt-package.json",
+    "failures/malicious-package.json",
+    "failures/interrupted-sync.json",
+    "failures/interrupted-publish.json"
+  ],
+  "digest": "sha256:fb5eb00a93d3ebd34f3bab6eb31df88ae8b8b76dfb8ccff54ffa47cc2b5429de"
+}

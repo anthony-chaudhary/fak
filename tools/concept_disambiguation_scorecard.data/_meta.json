@@ -5804,6 +5804,11 @@
           "category": "incidental",
           "reason": "Registry coverage-check method; its name is implementation vocabulary rather than a support-maturity concept.",
           "token": "RequireCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Machine-readable acceptance metric field, not a new support-maturity concept",
+          "token": "provenance_correctness"
         }
       ],
       "id": "support-maturity",
@@ -5924,6 +5929,7 @@
         "paritybench",
         "parityreport",
         "parseCoverageLine",
+        "provenance_correctness",
         "recurrentevictunsupportederror",
         "resolveParityPublication",
         "scoreparity",

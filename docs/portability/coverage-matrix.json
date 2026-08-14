@@ -1,0 +1,218 @@
+{
+  "schema": "fak.portability.coverage/v1",
+  "release_verdict": "pass",
+  "statuses": [
+    "proven",
+    "partial",
+    "unsupported",
+    "untested"
+  ],
+  "coverage": [
+    {
+      "id": "A6606-checkpoint-6432",
+      "requirement": "active loop/history checkpoint integration with #6432",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Preview",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "A6606-corrupt-malicious",
+      "requirement": "corrupt and malicious package fail closed with durable artifact",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "ReadPackage",
+        "PreviewEgress"
+      ]
+    },
+    {
+      "id": "A6606-homes-users-scopes",
+      "requirement": "two homes/machines, two users, project/team/corporate scopes",
+      "status": "proven",
+      "scenario": "two-homes-two-users-scopes",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-apply",
+      "requirement": "interrupted apply leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-export",
+      "requirement": "interrupted export leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-publish",
+      "requirement": "interrupted publish leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-interrupt-sync",
+      "requirement": "interrupted sync leaves no ambiguous active state",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply",
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-matrix",
+      "requirement": "machine-readable proven/partial/unsupported/untested coverage and release verdict",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "acceptance Report.Coverage",
+        "acceptance Report.Verdict"
+      ]
+    },
+    {
+      "id": "A6606-restart-rollback",
+      "requirement": "controller restart and rollback",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "Store.Rollback"
+      ]
+    },
+    {
+      "id": "A6606-revocation",
+      "requirement": "revocation",
+      "status": "proven",
+      "scenario": "public-producer-consumer-revocation",
+      "authoritative_api": [
+        "RegistryManifest.Revoked",
+        "Inspect"
+      ]
+    },
+    {
+      "id": "A6606-skew-unsupported",
+      "requirement": "version skew and unsupported adapter",
+      "status": "proven",
+      "scenario": "adapter-skew-and-unsupported",
+      "authoritative_api": [
+        "RunReferenceConformance",
+        "AdapterRegistry.Get"
+      ]
+    },
+    {
+      "id": "E6589-adapters",
+      "requirement": "open adapter contract, conformance, version skew and explicit degradation",
+      "status": "proven",
+      "scenario": "adapter-skew-and-unsupported",
+      "authoritative_api": [
+        "RunReferenceConformance",
+        "AdapterRegistry.Get"
+      ]
+    },
+    {
+      "id": "E6589-continuity",
+      "requirement": "behavior and provenance continuity across homes",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "E6589-economics",
+      "requirement": "net-true time/error/bytes/storage/CPU measurements",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "acceptance Report.Metrics"
+      ]
+    },
+    {
+      "id": "E6589-objects",
+      "requirement": "portable managed objects and four scopes",
+      "status": "proven",
+      "scenario": "two-homes-two-users-scopes",
+      "authoritative_api": [
+        "Store.Export",
+        "Store.Preview",
+        "Store.Apply"
+      ]
+    },
+    {
+      "id": "E6589-offline",
+      "requirement": "offline-first deterministic reconciliation",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "PreviewMerge",
+        "WriteMergePlan"
+      ]
+    },
+    {
+      "id": "E6589-org",
+      "requirement": "project/team/corporate governance",
+      "status": "proven",
+      "scenario": "organization-controls",
+      "authoritative_api": [
+        "OrgState.CreateCollection",
+        "PrepareOrganizationPackage"
+      ]
+    },
+    {
+      "id": "E6589-public",
+      "requirement": "public producer/consumer lifecycle and revocation",
+      "status": "proven",
+      "scenario": "public-producer-consumer-revocation",
+      "authoritative_api": [
+        "Publish",
+        "Inspect",
+        "RegistryManifest.Revoked"
+      ]
+    },
+    {
+      "id": "E6589-security",
+      "requirement": "sensitivity, provenance, no-secret egress and inert payload",
+      "status": "proven",
+      "scenario": "interrupt-corrupt-malicious-restart-rollback",
+      "authoritative_api": [
+        "PreviewEgress",
+        "ReadPackage"
+      ]
+    },
+    {
+      "id": "E6589-ux",
+      "requirement": "preview, explainable receipts, recovery and expert controls",
+      "status": "proven",
+      "scenario": "active-loop-history-checkpoint",
+      "authoritative_api": [
+        "Store.Preview",
+        "Store.Apply"
+      ]
+    }
+  ],
+  "report_digest": "sha256:fb5eb00a93d3ebd34f3bab6eb31df88ae8b8b76dfb8ccff54ffa47cc2b5429de"
+}
