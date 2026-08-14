@@ -135,3 +135,33 @@ func TestExposeRefusesMutatedRegistration(t *testing.T) {
 		t.Fatalf("mutated registration err=%v", err)
 	}
 }
+
+func TestValidateSnapshotBindsOmissionsAndSchema(t *testing.T) {
+	reg, err := CompileSkill([]byte(skillFixture), ".claude/skills/repo-search/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Expose([]Registration{reg}, nil, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	mutated := snapshot
+	mutated.Omitted = append([]Omission(nil), snapshot.Omitted...)
+	mutated.Omitted[0].Reason = "POLICY_DENIED"
+	if err := ValidateSnapshot(mutated); err == nil {
+		t.Fatal("mutated omission accepted under stale digest")
+	}
+
+	visible, err := Expose([]Registration{reg}, []string{"repo_search"}, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible.Tools = append([]ModelTool(nil), visible.Tools...)
+	visible.Tools[0].InputSchema = json.RawMessage(`{"type":"array"}`)
+	if err := ValidateSnapshot(visible); err == nil {
+		t.Fatal("mutated schema accepted under stale digest")
+	}
+}

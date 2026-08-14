@@ -159,13 +159,55 @@ func Expose(regs []Registration, selected []string, dialect string) (Snapshot, e
 	canonical, err := json.Marshal(struct {
 		Dialect string      `json:"dialect"`
 		Tools   []ModelTool `json:"tools"`
-	}{out.Dialect, out.Tools})
+		Omitted []Omission  `json:"omitted,omitempty"`
+	}{out.Dialect, out.Tools, out.Omitted})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	sum := sha256.Sum256(canonical)
 	out.Digest = "sha256:" + hex.EncodeToString(sum[:])
 	return out, nil
+}
+
+// ValidateSnapshot proves that model-facing names, schemas, canonical identities,
+// registration digests, and omissions still match the content-addressed selection.
+func ValidateSnapshot(snapshot Snapshot) error {
+	seenVisible := make(map[string]string, len(snapshot.Tools))
+	seenCanonical := make(map[string]bool, len(snapshot.Tools))
+	for _, tool := range snapshot.Tools {
+		if !aliasNameRE.MatchString(tool.Name) || !aliasNameRE.MatchString(tool.Canonical) {
+			return fmt.Errorf("TOOL_SNAPSHOT_NAME_INVALID: %q/%q", tool.Name, tool.Canonical)
+		}
+		if tool.Digest == "" {
+			return fmt.Errorf("TOOL_SNAPSHOT_REGISTRATION_DIGEST_MISSING: %s", tool.Canonical)
+		}
+		schema, err := normalizeJSON(tool.InputSchema)
+		if err != nil || !bytes.Equal(schema, tool.InputSchema) {
+			return fmt.Errorf("TOOL_SNAPSHOT_SCHEMA_INVALID: %s", tool.Canonical)
+		}
+		if prior := seenVisible[tool.Name]; prior != "" {
+			return fmt.Errorf("TOOL_DIALECT_COLLISION: %s and %s expose as %s", prior, tool.Canonical, tool.Name)
+		}
+		if seenCanonical[tool.Canonical] {
+			return fmt.Errorf("TOOL_SNAPSHOT_CANONICAL_COLLISION: %s", tool.Canonical)
+		}
+		seenVisible[tool.Name] = tool.Canonical
+		seenCanonical[tool.Canonical] = true
+	}
+	canonical, err := json.Marshal(struct {
+		Dialect string      `json:"dialect"`
+		Tools   []ModelTool `json:"tools"`
+		Omitted []Omission  `json:"omitted,omitempty"`
+	}{snapshot.Dialect, snapshot.Tools, snapshot.Omitted})
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(canonical)
+	want := "sha256:" + hex.EncodeToString(sum[:])
+	if snapshot.Digest == "" || snapshot.Digest != want {
+		return fmt.Errorf("TOOL_SNAPSHOT_DIGEST_MISMATCH: got %s want %s", snapshot.Digest, want)
+	}
+	return nil
 }
 
 // ValidateRegistration proves that host execution and model metadata still
