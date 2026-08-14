@@ -877,6 +877,11 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		if opts.RecordLoop {
 			payload["loop_ledger"] = recordDispatchTickLoop(root, opts.LoopLedger, payload)
 		}
+		// Readiness is an observation ledger, not a launch ledger. Persist dry
+		// terminal outcomes so a later readiness read does not report an erased
+		// or stale blocker; recordDispatchPayload creates a launch sidecar only
+		// when a real spawned payload carries a repo-pulse receipt.
+		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return payload, nil
 	}
 
@@ -1167,7 +1172,9 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["action"] = "would_spawn"
 		payload["verdict"] = "WOULD_SPAWN"
 		payload["reason"] = fmt.Sprintf("safe to spawn 1 %s issue-resolution worker on #%d (lane %q) under account %q", opts.Backend, target, pick.Lane, account.Tag)
-		return finish(payload), nil
+		payload = finish(payload)
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return payload, nil
 	}
 
 	spawnStart = time.Now()

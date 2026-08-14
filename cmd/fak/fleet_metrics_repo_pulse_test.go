@@ -74,6 +74,26 @@ func TestRepoPulseReadinessFoldsNewestDispatchBlocker(t *testing.T) {
 	}
 }
 
+func TestRepoPulseReadinessClearsBlockerOnNewerDrySpawnableTick(t *testing.T) {
+	dir := t.TempDir()
+	refused := filepath.Join(dir, "last-resolve-tick-opencode.json")
+	spawnable := filepath.Join(dir, "last-resolve-tick-claude.json")
+	if err := os.WriteFile(refused, []byte(`{"action":"refused","verdict":"REFUSE_NO_ACCOUNT","backend":"opencode"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(refused, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spawnable, []byte(`{"action":"would_spawn","verdict":"WOULD_SPAWN","backend":"claude","live":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := assessRepoPulseCohort(dir, 5)
+	if r.PostLaunches != 0 || r.DispatchBlocker != "" || r.NextAction != "" || r.DispatchEvidence != filepath.Base(spawnable) {
+		t.Fatalf("got=%+v", r)
+	}
+}
+
 func TestRepoPulseReadinessMakesExplicitZeroCapActionable(t *testing.T) {
 	dir := t.TempDir()
 	body := `{"action":"refused","verdict":"REFUSE_AT_CAP","reason":"live workers 0 >= cap 0 (kernel alive=1, os procs=0, dos target=0, host_cap=14, max-workers=0)","backend":"claude"}`
