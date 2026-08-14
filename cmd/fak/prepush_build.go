@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
@@ -227,6 +228,104 @@ type trunkBuildResult struct {
 	Regressions    []string `json:"regressions,omitempty"`
 }
 
+const prepushSuccessReuseTTL = 2 * time.Minute
+
+type prepushSuccessReceipt struct {
+	Schema      string    `json:"schema"`
+	Tip         string    `json:"tip"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+var (
+	prepushSuccessReceiptMu sync.Mutex
+	prepushSuccessCommonDir = discoverGitCommonDir
+	prepushSuccessSleep     = time.Sleep
+)
+
+func prepushSuccessReceiptPath(root string) string {
+	commonDir := prepushSuccessCommonDir(root)
+	if commonDir == "" {
+		return ""
+	}
+	return filepath.Join(commonDir, "fak-prepush-success.json")
+}
+
+func prepushSuccessReusable(root, tip string, now time.Time) bool {
+	path := prepushSuccessReceiptPath(root)
+	if path == "" || tip == "" {
+		return false
+	}
+	prepushSuccessReceiptMu.Lock()
+	defer prepushSuccessReceiptMu.Unlock()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var receipt prepushSuccessReceipt
+	if json.Unmarshal(b, &receipt) != nil || receipt.Schema != "fak-prepush-success/1" || receipt.Tip != tip {
+		return false
+	}
+	age := now.Sub(receipt.CompletedAt)
+	return age >= 0 && age <= prepushSuccessReuseTTL
+}
+
+func recordPrepushSuccess(root, tip string, now time.Time) {
+	path := prepushSuccessReceiptPath(root)
+	if path == "" || tip == "" {
+		return
+	}
+	prepushSuccessReceiptMu.Lock()
+	defer prepushSuccessReceiptMu.Unlock()
+	b, err := json.Marshal(prepushSuccessReceipt{Schema: "fak-prepush-success/1", Tip: tip, CompletedAt: now.UTC()})
+	if err != nil {
+		return
+	}
+	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		_ = os.Rename(tmp, path)
+	}
+	_ = os.Remove(tmp)
+}
+
+const prepushClaimStaleAfter = 15 * time.Minute
+
+func prepushClaimPath(root, tip string) string {
+	commonDir := prepushSuccessCommonDir(root)
+	if commonDir == "" || tip == "" {
+		return ""
+	}
+	return filepath.Join(commonDir, "fak-prepush-"+tip+".lock")
+}
+
+// claimPrepushTip coalesces cross-process checks for the same immutable tip. A waiter
+// returns owner=false only after independently reading the successful receipt written
+// by the owner; owner failure removes the claim and lets one waiter retry the gate.
+func claimPrepushTip(root, tip string, now func() time.Time) (owner bool, release func()) {
+	path := prepushClaimPath(root, tip)
+	if path == "" {
+		return true, func() {}
+	}
+	for {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err == nil {
+			_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
+			_ = f.Close()
+			return true, func() { _ = os.Remove(path) }
+		}
+		if !os.IsExist(err) {
+			return true, func() {}
+		}
+		if prepushSuccessReusable(root, tip, now()) {
+			return false, func() {}
+		}
+		if info, statErr := os.Stat(path); statErr == nil && now().Sub(info.ModTime()) > prepushClaimStaleAfter {
+			_ = os.Remove(path)
+			continue
+		}
+		prepushSuccessSleep(100 * time.Millisecond)
+	}
+}
+
 func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("hooks pre-push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -248,7 +347,21 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	res, code := evaluatePrePushBuildAt(r, *base, *tip, *budget, *advisory)
+	resolvedTip := strings.TrimSpace(*tip)
+	if resolvedTip == "" {
+		resolvedTip, _ = prepushGitRevParse(r, "HEAD")
+	}
+	if prepushSuccessReusable(r, resolvedTip, prepushNow()) {
+		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s age<=%s\n", resolvedTip, prepushSuccessReuseTTL)
+		return 0
+	}
+	owner, releaseClaim := claimPrepushTip(r, resolvedTip, prepushNow)
+	if !owner {
+		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s coalesced=true\n", resolvedTip)
+		return 0
+	}
+	defer releaseClaim()
+	res, code := evaluatePrePushBuildAt(r, *base, resolvedTip, *budget, *advisory)
 	// Repeat the earliest commit admission decision over immutable base..tip
 	// objects. This protects direct pushes and is the CI-consumed committed-diff seam.
 	if res.BaseSha != "" && res.Ref != "" {
@@ -290,6 +403,9 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		if err := writeIndentedJSONFile(*report, res); err != nil {
 			fmt.Fprintf(stderr, "fak hooks pre-push: write report: %v\n", err)
 		}
+	}
+	if code == 0 {
+		recordPrepushSuccess(r, resolvedTip, prepushNow())
 	}
 	return code
 }

@@ -631,3 +631,62 @@ func TestPrepushBuildAuditsExplicitTipInsteadOfHead(t *testing.T) {
 		t.Fatalf("rev-parse refs=%v, want pushed-sha first", resolved)
 	}
 }
+
+func TestPrepushSuccessReceiptReusesOnlySameFreshTip(t *testing.T) {
+	commonDir := t.TempDir()
+	oldCommonDir := prepushSuccessCommonDir
+	prepushSuccessCommonDir = func(string) string { return commonDir }
+	t.Cleanup(func() { prepushSuccessCommonDir = oldCommonDir })
+
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	if prepushSuccessReusable("repo", "tip-a", now) {
+		t.Fatal("missing receipt reused")
+	}
+	recordPrepushSuccess("repo", "tip-a", now)
+	if !prepushSuccessReusable("repo", "tip-a", now.Add(time.Second)) {
+		t.Fatal("fresh same-tip success not reused")
+	}
+	if prepushSuccessReusable("repo", "tip-b", now.Add(time.Second)) {
+		t.Fatal("changed tip reused")
+	}
+	if prepushSuccessReusable("repo", "tip-a", now.Add(prepushSuccessReuseTTL+time.Second)) {
+		t.Fatal("expired success reused")
+	}
+}
+
+func TestPrepushFailureDoesNotCreateSuccessReceipt(t *testing.T) {
+	commonDir := t.TempDir()
+	oldCommonDir := prepushSuccessCommonDir
+	prepushSuccessCommonDir = func(string) string { return commonDir }
+	t.Cleanup(func() { prepushSuccessCommonDir = oldCommonDir })
+
+	if prepushSuccessReusable("repo", "failed-tip", time.Now()) {
+		t.Fatal("failure path unexpectedly reusable")
+	}
+	if _, err := os.Stat(filepath.Join(commonDir, "fak-prepush-success.json")); !os.IsNotExist(err) {
+		t.Fatalf("failure created receipt: %v", err)
+	}
+}
+
+func TestClaimPrepushTipCoalescesOnIndependentSuccess(t *testing.T) {
+	commonDir := t.TempDir()
+	oldCommonDir, oldSleep := prepushSuccessCommonDir, prepushSuccessSleep
+	prepushSuccessCommonDir = func(string) string { return commonDir }
+	prepushSuccessSleep = func(time.Duration) {
+		recordPrepushSuccess("repo", "same-tip", time.Now())
+	}
+	t.Cleanup(func() {
+		prepushSuccessCommonDir, prepushSuccessSleep = oldCommonDir, oldSleep
+	})
+
+	owner, release := claimPrepushTip("repo", "same-tip", time.Now)
+	if !owner {
+		t.Fatal("first claimant was not owner")
+	}
+	defer release()
+	coalescedOwner, coalescedRelease := claimPrepushTip("repo", "same-tip", time.Now)
+	coalescedRelease()
+	if coalescedOwner {
+		t.Fatal("same-tip waiter reran gate after witnessed success")
+	}
+}
