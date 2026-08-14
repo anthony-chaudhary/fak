@@ -179,6 +179,7 @@ func readDurableDispatchWitnesses(runsDir string) []dispatchtick.WitnessRecord {
 			Witness string `json:"witness"`
 			Reason  string `json:"reason"`
 			Model   string `json:"model"`
+			Speed   string `json:"speed"`
 			Zone    string `json:"zone"`
 		}
 		if json.Unmarshal(raw, &row) != nil || row.Claim == "" {
@@ -201,7 +202,12 @@ func readDurableDispatchWitnesses(runsDir string) []dispatchtick.WitnessRecord {
 				row.Model = strings.TrimSpace(string(b))
 			}
 		}
-		latest[issue] = dispatchtick.WitnessRecord{Issue: issue, Log: row.Log, SHA: row.SHA, Claim: row.Claim, Verdict: row.Verdict, Witness: row.Witness, Reason: row.Reason, Model: row.Model, Zone: row.Zone}
+		if strings.TrimSpace(row.Speed) == "" {
+			if b, err := os.ReadFile(stem + dispatchtick.SpeedSidecarSuffix); err == nil {
+				row.Speed = strings.TrimSpace(string(b))
+			}
+		}
+		latest[issue] = dispatchtick.WitnessRecord{Issue: issue, Log: row.Log, SHA: row.SHA, Claim: row.Claim, Verdict: row.Verdict, Witness: row.Witness, Reason: row.Reason, Model: row.Model, Speed: row.Speed, Zone: row.Zone}
 		latestName[issue] = filepath.Base(path)
 	}
 	issues := make([]int, 0, len(latest))
@@ -355,6 +361,9 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		// re-dispatch on after a model-switchable wall).
 		if b, err := os.ReadFile(stem + dispatchtick.ModelSidecarSuffix); err == nil {
 			rec.Model = strings.TrimSpace(string(b))
+		}
+		if b, err := os.ReadFile(stem + dispatchtick.SpeedSidecarSuffix); err == nil {
+			rec.Speed = strings.TrimSpace(string(b))
 		}
 		// #5416 track E: scrape the rung that actually served the slot from its .zone
 		// sidecar, THROUGH the allowlist — a truncated or hand-edited file leaves Zone

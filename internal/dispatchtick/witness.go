@@ -119,6 +119,7 @@ type WitnessRecord struct {
 	// keys off this + Reason: a model-switchable no-commit exit whose ladder head was
 	// Model advances to the NEXT chain model instead of re-storming the same walled one.
 	Model string
+	Speed string
 	// Zone is the placement rung the slot was served from (device / fleet / vendor),
 	// scraped from the .zone sidecar. Empty when the rung is not recorded — an unpinned
 	// seat-default slot, a tick with no roster, or a model the roster does not bind — and
@@ -167,6 +168,9 @@ func (r WitnessRecord) Map() map[string]any {
 	// model-switch program) — a floor worker (model=="") writes no model key at all.
 	if r.Model != "" {
 		out["model"] = r.Model
+	}
+	if r.Speed != "" {
+		out["speed"] = r.Speed
 	}
 	// The zone key rides the same rule as the model key: emitted ONLY when the slot's rung
 	// was actually attributed, so a fleet with no roster writes a sidecar byte-identical to

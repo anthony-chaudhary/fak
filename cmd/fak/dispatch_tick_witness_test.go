@@ -205,6 +205,31 @@ func TestWitnessBindsTestRunToDoneClaim(t *testing.T) {
 // that carried a .model sidecar (a pinned, un-blanked worker) is graded with that model
 // scraped into WitnessRecord.Model and emitted in the .witness sidecar, while a
 // seat-default slot (no .model sidecar) grades with an empty Model and no model key.
+func TestWitnessExitedWorkersScrapesSpeedSidecar(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
+	stem := "resolve-3010-20260704-010101"
+	writeWitnessWorker(t, runsDir, stem, "# fak-spawn issue=3010 lane=gateway\nusage limit reached\n", deadDispatchPID)
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchtick.SpeedSidecarSuffix), []byte("fast\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, records := witnessExitedWorkers(root, runsDir, true)
+	if len(records) != 1 || records[0].Speed != "fast" {
+		t.Fatalf("records=%+v, want speed fast", records)
+	}
+	b, err := os.ReadFile(filepath.Join(runsDir, stem+dispatchtick.WitnessSidecarSuffix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["speed"] != "fast" {
+		t.Fatalf("witness speed=%v, want fast", doc["speed"])
+	}
+}
 func TestWitnessExitedWorkersScrapesModelSidecar(t *testing.T) {
 	root := t.TempDir()
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
