@@ -1,0 +1,3 @@
+ receipt  micro-selfcheck-parent · PASS · children 2
+          micro-alpha · lease lease-micro-alpha · session value-000 · stopped · effect sha256:6869e63494e0f91b4ee3404d811af45cea847f8e5483188774853338a9817641
+          micro-beta · lease lease-micro-beta · session value-001 · stopped · effect sha256:e3893b79c244c09c64f6c90f571a5cd8ab52960af4335228c4a117680185b433
