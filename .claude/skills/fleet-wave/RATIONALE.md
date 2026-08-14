@@ -138,8 +138,10 @@ path for detached workers.
 `launch_goal_detached.ps1:252-256`: `$tag = [IO.Path]::GetFileNameWithoutExtension($PointerFile)`,
 then `$LogDir/$tag-$stamp.{out.log,err.log,pid,in.txt}`. So a per-wave rendered pointer makes
 every artifact self-identifying with no extra machinery. The hazard it defends against is
-concrete: `C:\work\fleet\.goal-runs` currently holds **941** run artifacts, and ids recycle.
-A probe that finds a `.pid` or a log at a reused tag is reading a *previous* wave's evidence
+concrete: the workspace-derived `.goal-runs` archive held **941** run artifacts in the dated
+2026-08-08 measurement above, and ids recycle. Resolve that archive from the primary checkout /
+workspace telemetry rather than a host-specific absolute path. A probe that finds a `.pid` or a
+log at a reused tag is reading a *previous* wave's evidence
 — the stale predecessor vouching for the corpse. `.fak/` is gitignored (`.gitignore:576`),
 so rendering the fuel there never dirties the shared trunk.
 
@@ -151,8 +153,10 @@ naming the incumbent). It is the **complement** to the file-tree lease, in the v
 words. The reason it is mandatory *in the fuel* rather than run by the orchestrator is
 structural and is the sharpest difference from the ported skill: fak's fuel has each worker
 pick the top-ranked ready leaf routed to **its own** lane
-(`.claude/goal-prompts/resolve-top-issue-witnessed.md`, via
-`python tools/issue_lane_router.py --view p0-p1 --json`). The orchestrator does not know
+(`.claude/goal-prompts/resolve-top-issue-witnessed.md`, through the current first-class
+`fak console issues` / `fak-dev issue` / `fak dispatch issues` path). The legacy
+`tools/issue_lane_router.py` helper is for debugging a routing discrepancy, not the canonical
+operator front door. The orchestrator does not know
 which ticket any worker will take, so it **cannot** pre-claim the roster. Tensorbuild's skill
 claims at ranking time because its waves are orchestrator-assigned; porting that instruction
 verbatim would have produced a rule no fak orchestrator could execute.
