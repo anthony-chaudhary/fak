@@ -1940,6 +1940,11 @@
           "category": "incidental",
           "reason": "Private hidden CLI actuator inside the existing guard question gate",
           "token": "cmdGuardGoalQuestionHook"
+        },
+        {
+          "category": "incidental",
+          "reason": "private timeout split in the existing paired benchmark harness; not a new operator concept",
+          "token": "pairedBaselineGuardTimeout"
         }
       ],
       "exclude": [
@@ -2164,6 +2169,7 @@
         "nodeGateScript",
         "normalizeGuardOperatorQuestionMode",
         "observer_guard",
+        "pairedBaselineGuardTimeout",
         "prepareGuardChildRegistration",
         "printGuardAllowExpiries",
         "printGuardLaunchPostures",
@@ -5720,6 +5726,11 @@
           "category": "incidental",
           "reason": "private implementation of the existing managed-context guard recovery path; not a new operator concept",
           "token": "guardSourceReadRecoverySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "private bounded subprocess context for resolving the existing account seat; not a new operator concept",
+          "token": "probeCtx"
         }
       ],
       "id": "context-ctx",
@@ -5781,6 +5792,7 @@
         "noteCompactionContract",
         "noteCtxValueTTL1hScope",
         "postCtx",
+        "probeCtx",
         "readGuardCompactionWitnesses",
         "recalled",
         "recalling",

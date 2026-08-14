@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 func TestFoldPairedPassesExecutionButRefusesUnsupportedCostClaim(t *testing.T) {
@@ -72,8 +78,8 @@ func TestFoldPairedUsesOnlyProviderReportedCostForValueVerdict(t *testing.T) {
 }
 
 func TestRunPairedBaselineAddsBoundedGuardEnvelope(t *testing.T) {
-	if pairedBaselineTimeout <= 0 {
-		t.Fatalf("baseline timeout must be positive: %s", pairedBaselineTimeout)
+	if pairedBaselineGuardTimeout <= 0 || pairedBaselineParentTimeout <= pairedBaselineGuardTimeout {
+		t.Fatalf("baseline envelopes invalid: guard=%s parent=%s", pairedBaselineGuardTimeout, pairedBaselineParentTimeout)
 	}
 	// The parent CommandContext and the managed guard receive the same wall-clock
 	// envelope: the guard can emit a typed TIME_BUDGET_EXHAUSTED result, while the
@@ -83,9 +89,58 @@ func TestRunPairedBaselineAddsBoundedGuardEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(source)
-	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineTimeout)", `"--max-duration", pairedBaselineTimeout.String()`} {
+	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineParentTimeout)", `"--max-duration", pairedBaselineGuardTimeout.String()`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("baseline command lacks %q", want)
 		}
+	}
+}
+
+func TestPairedEnvLookupPreservesExplicitSeat(t *testing.T) {
+	env := []string{"Path=x", "CLAUDE_CONFIG_DIR=C:\\seat"}
+	if !pairedEnvHas(env, "claude_config_dir") || pairedEnvValue(env, "CLAUDE_CONFIG_DIR") != `C:\seat` {
+		t.Fatalf("seat lookup failed: %v", env)
+	}
+}
+
+func TestPairedReadyClaudeConfigDirUsesServableAccount(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only; Windows path is live-witnessed")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "fak")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s' '{\"dir\":\"/seat/ready\",\"can_serve\":true}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := pairedReadyClaudeConfigDir(context.Background(), exe); got != "/seat/ready" {
+		t.Fatalf("config dir=%q", got)
+	}
+}
+
+func TestReconcilePairedBaselineCooldownPersistsExactSeat(t *testing.T) {
+	t.Setenv("FLEET_STATE_DIR", t.TempDir())
+	now := time.Date(2026, 8, 14, 11, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	home := mkFailoverHome(t, root, ".claude-paired", "paired@example.test", "paired-account", "token", now.Add(time.Hour).UnixMilli())
+	got := claudeResult{IsError: true, APIErrorStatus: 429, Result: "API Error 429: usage limit reached; try again in 1h6m"}
+	if !reconcilePairedBaselineCooldown([]string{"CLAUDE_CONFIG_DIR=" + home.Dir}, got, now) {
+		t.Fatal("provider cap was not persisted")
+	}
+	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := store.CooledDown(home.Identity.AccountKey(), now.Add(time.Minute))
+	if !ok || entry.ResetAt.Before(now.Add(time.Hour)) {
+		t.Fatalf("cooldown=%+v ok=%v", entry, ok)
+	}
+}
+
+func TestReconcilePairedBaselineCooldownIgnoresSuccessfulZeroCost(t *testing.T) {
+	t.Setenv("FLEET_STATE_DIR", t.TempDir())
+	zero := 0.0
+	got := claudeResult{TotalCostUSD: &zero, Result: "READY"}
+	if reconcilePairedBaselineCooldown([]string{"CLAUDE_CONFIG_DIR=C:\\seat"}, got, time.Now()) {
+		t.Fatal("successful provider-reported zero became a cooldown")
 	}
 }

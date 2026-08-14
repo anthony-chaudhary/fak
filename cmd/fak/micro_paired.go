@@ -7,10 +7,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 type pairedArm struct {
@@ -30,7 +33,10 @@ type pairedArm struct {
 	Error           string   `json:"error,omitempty"`
 }
 
-const pairedBaselineTimeout = 2 * time.Minute
+const (
+	pairedBaselineGuardTimeout  = 2 * time.Minute
+	pairedBaselineParentTimeout = pairedBaselineGuardTimeout + 20*time.Second
+)
 
 type pairedReport struct {
 	Schema           string    `json:"schema"`
@@ -45,10 +51,11 @@ type pairedReport struct {
 }
 
 type claudeResult struct {
-	IsError      bool     `json:"is_error"`
-	Result       string   `json:"result"`
-	TotalCostUSD *float64 `json:"total_cost_usd"`
-	Usage        struct {
+	IsError        bool     `json:"is_error"`
+	APIErrorStatus int      `json:"api_error_status"`
+	Result         string   `json:"result"`
+	TotalCostUSD   *float64 `json:"total_cost_usd"`
+	Usage          struct {
 		InputTokens              int `json:"input_tokens"`
 		OutputTokens             int `json:"output_tokens"`
 		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
@@ -163,7 +170,7 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	arm := pairedArm{Mechanism: "fak-manage-claude", Provider: "anthropic", Model: model, CostStatus: "provider-unreported", Managed: true}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, pairedBaselineTimeout)
+		ctx, cancel = context.WithTimeout(ctx, pairedBaselineParentTimeout)
 		defer cancel()
 	}
 	exe, err := os.Executable()
@@ -171,8 +178,14 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 		arm.Error = err.Error()
 		return arm
 	}
-	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--max-duration", pairedBaselineTimeout.String(), "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
-	cmd.Env = filteredPairedEnv(os.Environ())
+	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--max-duration", pairedBaselineGuardTimeout.String(), "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
+	env := filteredPairedEnv(os.Environ())
+	if !pairedEnvHas(env, "CLAUDE_CONFIG_DIR") {
+		if dir := pairedReadyClaudeConfigDir(ctx, exe); dir != "" {
+			env = append(env, "CLAUDE_CONFIG_DIR="+dir)
+		}
+	}
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	start := time.Now()
@@ -180,7 +193,7 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	arm.WallMS = time.Since(start).Milliseconds()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			arm.Error = fmt.Sprintf("managed baseline timed out after %s", pairedBaselineTimeout)
+			arm.Error = fmt.Sprintf("managed baseline parent timed out after %s", pairedBaselineParentTimeout)
 		} else {
 			arm.Error = strings.TrimSpace(err.Error() + ": " + stdout.String() + " " + stderr.String())
 		}
@@ -192,6 +205,9 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 		return arm
 	}
 	arm.Completed, arm.Answer = !got.IsError, strings.TrimSpace(got.Result)
+	if got.IsError {
+		reconcilePairedBaselineCooldown(cmd.Env, got, time.Now())
+	}
 	arm.Correct = arm.Completed && arm.Answer == expected
 	arm.InputTokens, arm.OutputTokens = got.Usage.InputTokens+got.Usage.CacheCreationInputTokens, got.Usage.OutputTokens
 	arm.CacheReadTokens = got.Usage.CacheReadInputTokens
@@ -220,3 +236,46 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	}
 	return arm
 }
+
+func reconcilePairedBaselineCooldown(env []string, got claudeResult, now time.Time) bool {
+	if !got.IsError || got.APIErrorStatus != 429 {
+		return false
+	}
+	kind := classifyLaunchModelUnavailable(got.Result, "")
+	if kind != launchModelUsageLimit && kind != launchModelRateLimit {
+		return false
+	}
+	configDir := pairedEnvValue(env, "CLAUDE_CONFIG_DIR")
+	account := accountKeyForDir(configDir)
+	if account == "" {
+		return false
+	}
+	entry, ok := recordLaunchCooldown(io.Discard, account, got.Result, kind, now)
+	return ok && entry.Account == account
+}
+
+func pairedEnvValue(env []string, name string) string {
+	prefix := strings.ToUpper(strings.TrimSpace(name)) + "="
+	for _, entry := range env {
+		if strings.HasPrefix(strings.ToUpper(entry), prefix) {
+			return strings.TrimSpace(entry[len(prefix):])
+		}
+	}
+	return ""
+}
+
+func pairedReadyClaudeConfigDir(ctx context.Context, exe string) string {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(probeCtx, exe, "accounts", "next", "--json").Output()
+	if err != nil {
+		return ""
+	}
+	var seat accounts.RotationSeat
+	if json.Unmarshal(out, &seat) != nil || !seat.CanServe {
+		return ""
+	}
+	return strings.TrimSpace(seat.Dir)
+}
+
+func pairedEnvHas(env []string, name string) bool { return pairedEnvValue(env, name) != "" }
