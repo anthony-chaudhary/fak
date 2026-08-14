@@ -32,6 +32,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,10 @@ import (
 // rate-limited crashes with their managed-cache restart plan. Returns the process exit code
 // (0 ok, 1 a runtime error, 2 a usage error).
 func runResumeScan(stdout, stderr io.Writer, argv []string) int {
+	return runResumeScanWithScratchpadRoot(stdout, stderr, argv, defaultClaudeScratchpadRoot())
+}
+
+func runResumeScanWithScratchpadRoot(stdout, stderr io.Writer, argv []string, scratchpadRoot string) int {
 	fs := flag.NewFlagSet("resume scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	store := fs.String("store", "", "directory of Claude Code session transcripts (.jsonl) to scan")
@@ -98,12 +103,14 @@ func runResumeScan(stdout, stderr io.Writer, argv []string) int {
 			HorizonTurns:     *horizon,
 			ShedBudgetTokens: *shedBudget,
 		})
+		sessionID := strings.TrimSuffix(e.Name(), ".jsonl")
 		rows = append(rows, scanRow{
-			SessionID:    strings.TrimSuffix(e.Name(), ".jsonl"),
-			Model:        model,
-			IdleSeconds:  idle,
-			LimitMessage: limitMsg,
-			Diagnosis:    d,
+			SessionID:      sessionID,
+			ScratchpadPath: deriveScratchpadPath(path, sessionID, scratchpadRoot),
+			Model:          model,
+			IdleSeconds:    idle,
+			LimitMessage:   limitMsg,
+			Diagnosis:      d,
 		})
 	}
 	if len(rows) == 0 {
@@ -121,11 +128,44 @@ func runResumeScan(stdout, stderr io.Writer, argv []string) int {
 // scanRow is one diagnosed session in the store: the leaf verdict plus the shell-only context
 // (which session, what model, and the human refusal text — content the leaf never sees).
 type scanRow struct {
-	SessionID    string           `json:"session_id"`
-	Model        string           `json:"model,omitempty"`
-	IdleSeconds  int64            `json:"idle_seconds"`
-	LimitMessage string           `json:"limit_message,omitempty"`
-	Diagnosis    resume.Diagnosis `json:"diagnosis"`
+	SessionID      string           `json:"session_id"`
+	ScratchpadPath string           `json:"scratchpad_path,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	IdleSeconds    int64            `json:"idle_seconds"`
+	LimitMessage   string           `json:"limit_message,omitempty"`
+	Diagnosis      resume.Diagnosis `json:"diagnosis"`
+}
+
+func defaultClaudeScratchpadRoot() string {
+	if runtime.GOOS == "windows" {
+		localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+		if localAppData == "" {
+			return ""
+		}
+		return filepath.Join(localAppData, "Temp", "claude")
+	}
+	return filepath.Join(string(filepath.Separator), "tmp", "claude")
+}
+
+func deriveScratchpadPath(transcriptPath, sessionID, scratchpadRoot string) string {
+	if !filepath.IsAbs(scratchpadRoot) || !safeResumePathComponent(sessionID) {
+		return ""
+	}
+	transcriptPath = filepath.Clean(transcriptPath)
+	if filepath.Ext(transcriptPath) != ".jsonl" ||
+		strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl") != sessionID {
+		return ""
+	}
+	projectDir := filepath.Dir(transcriptPath)
+	projectSlug := filepath.Base(projectDir)
+	if !safeResumePathComponent(projectSlug) || filepath.Base(filepath.Dir(projectDir)) != "projects" {
+		return ""
+	}
+	return filepath.Join(scratchpadRoot, projectSlug, sessionID, "scratchpad")
+}
+
+func safeResumePathComponent(part string) bool {
+	return part != "" && part != "." && part != ".." && !filepath.IsAbs(part) && filepath.Base(part) == part
 }
 
 // scanTranscriptToEvents streams a Claude Code transcript JSONL into the closed event facts

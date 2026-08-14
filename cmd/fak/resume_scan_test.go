@@ -19,6 +19,12 @@ func runResumeScanAt(argv ...string) (string, string, int) {
 	return out.String(), errb.String(), code
 }
 
+func runResumeScanAtWithScratchpadRoot(scratchpadRoot string, argv ...string) (string, string, int) {
+	var out, errb bytes.Buffer
+	code := runResumeScanWithScratchpadRoot(&out, &errb, argv, scratchpadRoot)
+	return out.String(), errb.String(), code
+}
+
 // crashedFixture is a real-shaped Claude Code session that died on a rate limit: a genuine
 // 250k-token model turn, then the SYNTHETIC rate-limit refusal (model "<synthetic>",
 // isApiErrorMessage, all-zero usage), then bookkeeping. The resident size must come from the
@@ -43,7 +49,10 @@ const otherFixture = `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message
 // writeStore lays out a fixture store and returns its directory.
 func writeStore(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "config", "projects", "project-slug")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for name, body := range map[string]string{
 		"crashed0.jsonl": crashedFixture,
 		"cleanab1.jsonl": cleanFixture,
@@ -87,7 +96,8 @@ func TestResumeScanFlagsRateLimitCrash(t *testing.T) {
 // sized from the real turn, and carries the closed session-limit reason.
 func TestResumeScanJSON(t *testing.T) {
 	dir := writeStore(t)
-	out, errb, code := runResumeScanAt("--store", dir, "--json")
+	scratchpadRoot := filepath.Join(t.TempDir(), "claude")
+	out, errb, code := runResumeScanAtWithScratchpadRoot(scratchpadRoot, "--store", dir, "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
 	}
@@ -107,6 +117,10 @@ func TestResumeScanJSON(t *testing.T) {
 	if crashed == nil {
 		t.Fatalf("crashed session missing from scan rows:\n%s", out)
 	}
+	wantScratchpad := filepath.Join(scratchpadRoot, "project-slug", "crashed0", "scratchpad")
+	if crashed.ScratchpadPath != wantScratchpad {
+		t.Errorf("scratchpad_path = %q, want %q", crashed.ScratchpadPath, wantScratchpad)
+	}
 	d := crashed.Diagnosis
 	if !d.NeedsRestart || d.Crash != resume.CrashRateLimit || d.LimitReason != resume.LimitSession {
 		t.Errorf("crashed diagnosis = needsRestart=%v crash=%q reason=%q, want true/rate_limit/session_limit", d.NeedsRestart, d.Crash, d.LimitReason)
@@ -116,6 +130,28 @@ func TestResumeScanJSON(t *testing.T) {
 	}
 	if d.Plan.Recommended != resume.StrategyCut {
 		t.Errorf("recommended = %q, want cut", d.Plan.Recommended)
+	}
+}
+
+func TestDeriveScratchpadPathRejectsUnsafeTranscriptShapes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "claude")
+	for name, tt := range map[string]struct {
+		path      string
+		sessionID string
+	}{
+		"not under projects": {filepath.Join(t.TempDir(), "config", "sessions", "project-slug", "session.jsonl"), "session"},
+		"session mismatch":   {filepath.Join(t.TempDir(), "config", "projects", "project-slug", "other.jsonl"), "session"},
+	} {
+		if got := deriveScratchpadPath(tt.path, tt.sessionID, root); got != "" {
+			t.Errorf("%s: deriveScratchpadPath() = %q, want empty", name, got)
+		}
+	}
+	if got := deriveScratchpadPath(
+		filepath.Join(t.TempDir(), "config", "projects", "project-slug", "session.jsonl"),
+		"session",
+		"",
+	); got != "" {
+		t.Errorf("empty scratchpad root: deriveScratchpadPath() = %q, want empty", got)
 	}
 }
 
