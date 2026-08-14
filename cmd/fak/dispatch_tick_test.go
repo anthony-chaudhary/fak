@@ -2720,7 +2720,7 @@ func TestDispatchStampSubBuckets(t *testing.T) {
 
 func TestRecordDispatchPayloadPersistsRepoPulsePerLaunch(t *testing.T) {
 	dir := t.TempDir()
-	payload := map[string]any{"schema": "fleet-issue-resolve-dispatch/1", "action": "spawned", "issue": 123, "pid": 456, "repo_pulse_receipt": map[string]any{"schema": "fak-dispatch-repo-pulse-receipt/1", "saved_tokens": 900, "tool_turns_skipped": 2, "journal_rows": 3}}
+	payload := map[string]any{"schema": "fleet-issue-resolve-dispatch/1", "action": "spawned", "spawned": map[string]any{"issue": 123, "pid": 456}, "repo_pulse_receipt": map[string]any{"schema": "fak-dispatch-repo-pulse-receipt/1", "saved_tokens": 900, "tool_turns_skipped": 2, "journal_rows": 3}}
 	recordDispatchPayload(dir, "codex", payload)
 	path := filepath.Join(dir, "repo-pulse-launch-123-456.json")
 	b, err := os.ReadFile(path)
