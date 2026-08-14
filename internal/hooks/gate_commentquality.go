@@ -100,6 +100,9 @@ func documentationGroups(file *ast.File) map[*ast.CommentGroup]bool {
 func implementationComment(file *ast.File, group *ast.CommentGroup) bool {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
+		if ok && strings.HasPrefix(fn.Name.Name, "Example") {
+			continue
+		}
 		if ok && fn.Body != nil && group.Pos() >= fn.Body.Pos() && group.End() <= fn.Body.End() {
 			return true
 		}

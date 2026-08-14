@@ -91,3 +91,46 @@ func local() {
 		t.Fatalf("candidates = %d, %v", n, ok)
 	}
 }
+
+func TestCommentQualityPreservesURLAndBuildConstraints(t *testing.T) {
+	src := `//go:build linux
+
+package sample
+
+func local() {
+	// Keep the URL intact because https://example.test/protocol#fragment is the compatibility authority.
+	_ = 1
+}
+`
+	d := commentQualityDiff("sample.go", src, 1, 6)
+	findings, err := gateCommentQuality(d)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("findings = %#v, err = %v", findings, err)
+	}
+	if n, _, ok := d.Candidates(commentQualityGate); !ok || n != 1 {
+		t.Fatalf("candidates = %d, %v", n, ok)
+	}
+}
+
+func TestCommentQualityExampleFixtureAndEmptyDomain(t *testing.T) {
+	example := commentQualityDiff("example_test.go", `package sample
+
+func Example_local() {
+	// This function loops through the items.
+	for range []int{1} {}
+}
+`, 4)
+	findings, err := gateCommentQuality(example)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("example findings = %#v, err = %v", findings, err)
+	}
+
+	empty := commentQualityDiff("sample.go", "package sample\n\nfunc local() {}\n", 3)
+	findings, err = gateCommentQuality(empty)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("empty findings = %#v, err = %v", findings, err)
+	}
+	if n, _, ok := empty.Candidates(commentQualityGate); !ok || n != 0 {
+		t.Fatalf("empty candidates = %d, %v", n, ok)
+	}
+}

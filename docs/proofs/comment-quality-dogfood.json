@@ -1,0 +1,71 @@
+{
+  "schema": "fak-comment-quality-dogfood/1",
+  "issue": 6814,
+  "parent_issue": 6764,
+  "gate": {
+    "name": "COMMENT_QUALITY",
+    "scope": "added or edited Go implementation comment blocks",
+    "default_mode": "warn",
+    "whole_tree_blocking": false
+  },
+  "cohorts": [
+    {
+      "issue": 6766,
+      "commit": "f44c2f0a04e0",
+      "scope": "cmd/fak",
+      "files_reviewed": [
+        "cmd/fak/covmatrix.go",
+        "cmd/fak/doctor.go"
+      ],
+      "candidates": 8,
+      "findings": 8,
+      "removed_comment_lines": 8,
+      "retained_rationale_examples": [
+        "covmatrix JSON numeric-type rationale",
+        "doctor kernel-admit predicate rationale"
+      ],
+      "behavior_changes": 0
+    },
+    {
+      "issue": 6767,
+      "commit": "e4f935a8ecf2",
+      "scope": "internal packages",
+      "files_reviewed": [
+        "internal/affectedtests/affectedtests.go",
+        "internal/atif/atif.go",
+        "internal/webbench/report.go"
+      ],
+      "candidates": 3,
+      "findings": 3,
+      "removed_comment_lines": 4,
+      "retained_rationale_examples": [
+        "affectedtests reverse-BFS rationale",
+        "ATIF parent-step field semantics",
+        "exported API documentation"
+      ],
+      "behavior_changes": 0
+    }
+  ],
+  "totals": {
+    "files_reviewed": 5,
+    "candidate_blocks": 11,
+    "finding_blocks": 11,
+    "removed_comment_lines": 12,
+    "behavior_changes": 0
+  },
+  "fixture_controls": {
+    "positive": [
+      "syntax narration",
+      "conspicuously long implementation block"
+    ],
+    "negative": [
+      "documentation",
+      "generated file",
+      "directive and build constraint",
+      "legal header",
+      "URL-bearing compatibility rationale",
+      "meaningful concurrency rationale",
+      "empty changed-comment domain"
+    ]
+  }
+}
