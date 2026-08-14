@@ -347,3 +347,53 @@ func TestSkillSwapFromGuardRefuses(t *testing.T) {
 		t.Fatalf("guarded swap exit=%d, want 1 (refused): %s", code, errb.String())
 	}
 }
+
+func TestRunSkillCompileRequiresExplicitExposure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(path, []byte(skillCompileFixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runSkillCompile(&stdout, &stderr, []string{"--json", path}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Registration struct {
+			Program struct {
+				Name string `json:"name"`
+			} `json:"program"`
+		} `json:"registration"`
+		ModelView struct {
+			Tools   []json.RawMessage `json:"tools"`
+			Omitted []struct {
+				Reason string `json:"reason"`
+			} `json:"omitted"`
+		} `json:"model_view"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Registration.Program.Name != "repo_search" || len(got.ModelView.Tools) != 0 || len(got.ModelView.Omitted) != 1 || got.ModelView.Omitted[0].Reason != "NOT_SELECTED" {
+		t.Fatalf("registration leaked into model availability: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runSkillCompile(&stdout, &stderr, []string{"--json", "--dialect", "codex", "--expose", "repo_search", path}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"name": "functions.shell_command"`)) {
+		t.Fatalf("dialect-native tool name missing: %s", stdout.String())
+	}
+}
+
+const skillCompileFixture = `---
+name: repo_search
+description: Search repository text.
+---
+# Search
+` + "```fak-program" + `
+{"version":"fak.skill-program/v1","name":"repo_search","input_schema":{"type":"object","properties":{"query":{"type":"string"}}},"executor":{"argv":["fak","code","search","--json"]},"aliases":{"codex":"functions.shell_command"}}
+` + "```" + `
+`

@@ -32,6 +32,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/capindexgw"
 	"github.com/anthony-chaudhary/fak/internal/ctxresidency"
 	"github.com/anthony-chaudhary/fak/internal/skillenv"
+	"github.com/anthony-chaudhary/fak/internal/toolcatalog"
 )
 
 func cmdSkill(args []string) {
@@ -51,6 +52,8 @@ func cmdSkill(args []string) {
 		code = runSkillValue(os.Stdout, os.Stderr, args[1:])
 	case "swap":
 		code = runSkillSwap(os.Stdout, os.Stderr, args[1:])
+	case "compile":
+		code = runSkillCompile(os.Stdout, os.Stderr, args[1:])
 	case "-h", "--help", "help":
 		skillUsage(os.Stderr)
 		return
@@ -83,6 +86,10 @@ The queried skill loader — 0 cost for ∞ skills, paged on demand (epic #1103,
       hot-swap a skill's active version and print the pre-flip blast radius.
       --from guards the remap (refuses if the pinned version differs); the flip
       is persisted to .claude/skill-page-table.json so residency reads it back.
+
+  fak skill compile <SKILL.md> [--source NAME] [--expose NAME ...] [--dialect NAME] [--json]
+      compile only an explicit versioned fak-program block; registration and
+      model exposure are separate, and --expose selects the request-visible tool.
 
   fak skill footprint [--top N] [--mcp] [--json]
       the userland resident-floor scorecard: per-skill resident description
@@ -506,4 +513,71 @@ func sortedStringKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func runSkillCompile(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("skill compile", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var source, dialect string
+	var expose skillStringListFlag
+	var asJSON bool
+	fs.StringVar(&source, "source", "", "stable source identity (defaults to path)")
+	fs.StringVar(&dialect, "dialect", "openai", "model/harness tool-name dialect")
+	fs.Var(&expose, "expose", "canonical tool name to expose (repeatable)")
+	fs.BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "fak skill compile: pass exactly one SKILL.md path")
+		return 2
+	}
+	path := fs.Arg(0)
+	if source == "" {
+		source = filepath.ToSlash(filepath.Clean(path))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak skill compile: %v\n", err)
+		return 1
+	}
+	reg, err := toolcatalog.CompileSkill(data, source)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak skill compile: %v\n", err)
+		return 1
+	}
+	view, err := toolcatalog.Expose([]toolcatalog.Registration{reg}, expose, dialect)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak skill compile: %v\n", err)
+		return 1
+	}
+	result := struct {
+		Registration toolcatalog.Registration `json:"registration"`
+		ModelView    toolcatalog.Snapshot     `json:"model_view"`
+	}{reg, view}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(result); err != nil {
+			fmt.Fprintf(stderr, "fak skill compile: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "%s %s\n", reg.Program.Name, reg.Digest)
+	fmt.Fprintf(stdout, "registered: executable via %q\n", reg.Program.Executor.Argv)
+	if len(view.Tools) == 0 {
+		fmt.Fprintln(stdout, "model-visible: no (registration does not imply exposure)")
+	} else {
+		fmt.Fprintf(stdout, "model-visible: yes as %s (%s)\n", view.Tools[0].Name, view.Digest)
+	}
+	return 0
+}
+
+type skillStringListFlag []string
+
+func (f *skillStringListFlag) String() string { return strings.Join(*f, ",") }
+func (f *skillStringListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
 }
