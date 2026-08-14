@@ -1945,6 +1945,11 @@
           "category": "incidental",
           "reason": "private timeout split in the existing paired benchmark harness; not a new operator concept",
           "token": "pairedBaselineGuardTimeout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark-local deterministic rubric helper, not a reusable repository guard concept.",
+          "token": "semanticGate"
         }
       ],
       "exclude": [
@@ -2186,6 +2191,7 @@
         "runRegressionSuite",
         "saveGuardSelfTightenOverlay",
         "selectorGateway",
+        "semanticGate",
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
@@ -7153,6 +7159,11 @@
           "category": "incidental",
           "reason": "Implementation identifier within the worker-worktree warm-pool leaf; not a new repository-wide concept.",
           "token": "MaterializeOwned"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal upstream prompt identifier for React re-rendering, not a rendering subsystem symbol.",
+          "token": "rerender"
         }
       ],
       "id": "render-materialize",
@@ -7211,6 +7222,7 @@
         "renders",
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
+        "rerender",
         "runTUIRender",
         "runTUIRenderControl",
         "runTUIRenderSeat",

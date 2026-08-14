@@ -42,7 +42,7 @@ import (
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
 
-const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-promptfoo|ponytail-gates|ponytail-managed|validate|identity|run|report|compare> [flags]
+const armbenchUsage = `usage: fak armbench <selfcheck|emit-demo|import-fixtures|ponytail|ponytail-promptfoo|ponytail-gates|ponytail-managed|caveman-native|validate|identity|run|report|compare> [flags]
 
   selfcheck   run the deterministic fake-provider spine and every fail-closed proof
   emit-demo   write a runnable manifest + corpus pair to a directory
@@ -73,6 +73,8 @@ func runArmbench(stdout, stderr io.Writer, argv []string) int {
 		return armbenchPonytail(stdout, stderr, argv[1:])
 	case "ponytail-promptfoo":
 		return armbenchPromptfoo(stdout, stderr, argv[1:])
+	case "caveman-native":
+		return armbenchCavemanNative(stdout, stderr, argv[1:])
 	case "ponytail-gates":
 		return armbenchPonytailGates(stdout, stderr, argv[1:])
 	case "ponytail-managed":
@@ -610,5 +612,36 @@ func armbenchPonytailGates(stdout, stderr io.Writer, argv []string) int {
 	if !report.OverallPass {
 		return 3
 	}
+	return 0
+}
+
+func armbenchCavemanNative(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak armbench caveman-native", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("input", "docs/_witnesses/armbench-caveman-native/inputs", "pinned imported inputs")
+	out := fs.String("out", "docs/_witnesses/armbench-caveman-native/exact", "witness output directory")
+	base := fs.String("base-url", os.Getenv("OPENAI_BASE_URL"), "direct provider base URL")
+	keyEnv := fs.String("api-key-env", "OPENAI_API_KEY", "environment variable holding provider key")
+	model := fs.String("model", armbench.CavemanModel, "model snapshot; override only for a labeled replacement run")
+	label := fs.String("label", "exact-model", "run label")
+	trials := fs.Int("trials", 3, "trials per prompt per arm (must be 3)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *base == "" || os.Getenv(*keyEnv) == "" {
+		fmt.Fprintln(stderr, "caveman-native: provider base URL and key are required")
+		return 2
+	}
+	if *model != armbench.CavemanModel && !strings.HasPrefix(*label, "replacement-") {
+		fmt.Fprintln(stderr, "caveman-native: replacement models require --label replacement-...")
+		return 2
+	}
+	p, err := armbench.RunCaveman(context.Background(), armbench.CavemanOptions{InputDir: *input, OutDir: *out, BaseURL: *base, APIKey: os.Getenv(*keyEnv), Model: *model, Label: *label, Trials: *trials})
+	if err != nil {
+		fmt.Fprintf(stderr, "caveman-native: %v\n", err)
+		return 1
+	}
+	b, _ := json.MarshalIndent(p, "", "  ")
+	fmt.Fprintln(stdout, string(b))
 	return 0
 }

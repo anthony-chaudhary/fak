@@ -1,0 +1,1 @@
+react-rerender normal trial 1: provider status 400: {"error":{"code":"upstream_invalid_request","message":"upstream rejected the request as malformed (HTTP 400) — check the model name, message roles, and parameter ranges — upstream said: {\"detail\":\"The '[redacted]' model is not supported when using Codex with a ChatGPT account.\"}","param":null,"type":"invalid_request_error"}}
