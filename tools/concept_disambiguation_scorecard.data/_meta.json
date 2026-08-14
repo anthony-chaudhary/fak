@@ -3862,6 +3862,16 @@
           "category": "incidental",
           "reason": "field holding the provider continuation evidence inside the existing movement receipt, not a separate proof concept",
           "token": "ProviderWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "private filename parser implementation, not a public witness concept",
+          "token": "dogfoodDispatchWitnessName"
+        },
+        {
+          "category": "incidental",
+          "reason": "private fold row type, not a distinct witness-proof concept",
+          "token": "dogfoodWitnessOutcome"
         }
       ],
       "id": "witness-proof",
@@ -3931,6 +3941,8 @@
         "dispatchWitnessStashPathsGit",
         "dispatchWitnessStrandedBuildFails",
         "dispatchWitnessStrandedBuildFailsGo",
+        "dogfoodDispatchWitnessName",
+        "dogfoodWitnessOutcome",
         "done_not_witnessed",
         "fak_fleet_goal_witnessed_registrations",
         "formatGuardCompactionWitness",
