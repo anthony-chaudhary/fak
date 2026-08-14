@@ -52,9 +52,11 @@ type ChainEvidence struct {
 	ReceiptPresent  bool    `json:"receipt_present"`
 	ReceiptFresh    bool    `json:"receipt_fresh"`
 	ReceiptMode     string  `json:"receipt_mode,omitempty"`
+	Actions         int     `json:"actions"`
 	PendingCreates  int     `json:"pending_creates"`
 	SyncedOK        int     `json:"synced_ok"`
 	SyncedFailed    int     `json:"synced_failed"`
+	Skipped         int     `json:"skipped"`
 	ReceiptParseErr string  `json:"receipt_parse_err,omitempty"`
 }
 
@@ -106,9 +108,11 @@ func scanChain(root string, now time.Time) ChainEvidence {
 		return ce
 	}
 	ce.ReceiptMode = scorecard.ValueText(rec["mode"])
+	ce.Actions = anyInt(rec["actions"])
 	ce.PendingCreates = anyInt(rec["planned_creates"])
 	ce.SyncedOK = anyInt(rec["synced_ok"])
 	ce.SyncedFailed = anyInt(rec["synced_failed"])
+	ce.Skipped = anyInt(rec["skipped"])
 	return ce
 }
 
@@ -146,9 +150,11 @@ func chainResults(ce ChainEvidence, windowHours int) []KPIResult {
 		bridgeDetail = strconv.Itoa(ce.SyncedOK) + " action(s) filed/updated as deduped tracker issues (receipt mode live)"
 	case ce.ReceiptMode == "live":
 		bridgeDetail = strconv.Itoa(ce.SyncedFailed) + " gh sync failure(s) in the bridge receipt — re-run `fak dogfood-issues --live`"
+	case ce.ReceiptMode == "fetch-existing" && ce.Skipped > 0:
+		bridgeDetail = strconv.Itoa(ce.Skipped) + " of " + strconv.Itoa(ce.Actions) + " action(s) were skipped without a tracker witness -- scope the triage-only candidate, then run `fak dogfood-issues --live`"
 	case ce.ReceiptMode == "fetch-existing" && ce.PendingCreates == 0:
 		bridged = true
-		bridgeDetail = "all extracted actions are already tracked (receipt mode fetch-existing, 0 pending creates)"
+		bridgeDetail = "all extracted actions are already tracked (receipt mode fetch-existing, 0 pending creates, 0 skipped)"
 	case ce.ReceiptMode == "fetch-existing":
 		bridgeDetail = strconv.Itoa(ce.PendingCreates) + " unfiled action(s) in the bridge receipt — run `fak dogfood-issues --live`"
 	default:

@@ -143,7 +143,7 @@ func TestChain_StaleReportRedsFreshness(t *testing.T) {
 }
 
 // The receipt semantics table: live-with-failures reds, live-clean greens,
-// fetch-existing greens only at zero pending creates, an unknown mode reds, and a
+// fetch-existing greens only at zero pending creates AND zero skipped actions, an unknown mode reds, and a
 // receipt OLDER than its report reds (it witnessed a previous report).
 func TestChain_ReceiptSemantics(t *testing.T) {
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
@@ -156,8 +156,9 @@ func TestChain_ReceiptSemantics(t *testing.T) {
 	}{
 		{name: "live clean", receipt: map[string]any{"mode": "live", "synced_ok": 3, "synced_failed": 0}, want: true, detail: "3 action(s)"},
 		{name: "live failures", receipt: map[string]any{"mode": "live", "synced_ok": 1, "synced_failed": 2}, want: false, detail: "2 gh sync failure(s)"},
-		{name: "fetch clean", receipt: map[string]any{"mode": "fetch-existing", "planned_creates": 0}, want: true, detail: "already tracked"},
-		{name: "fetch pending", receipt: map[string]any{"mode": "fetch-existing", "planned_creates": 4}, want: false, detail: "4 unfiled action(s)"},
+		{name: "fetch clean", receipt: map[string]any{"mode": "fetch-existing", "actions": 2, "planned_creates": 0, "skipped": 0}, want: true, detail: "already tracked"},
+		{name: "fetch skipped", receipt: map[string]any{"mode": "fetch-existing", "actions": 1, "planned_creates": 0, "skipped": 1}, want: false, detail: "1 of 1 action(s) were skipped without a tracker witness"},
+		{name: "fetch pending", receipt: map[string]any{"mode": "fetch-existing", "actions": 4, "planned_creates": 4, "skipped": 0}, want: false, detail: "4 unfiled action(s)"},
 		{name: "unknown mode", receipt: map[string]any{"mode": "dry-run"}, want: false, detail: "unrecognized"},
 		{name: "receipt predates report", receipt: map[string]any{"mode": "live", "synced_ok": 3, "synced_failed": 0}, stale: true, want: false, detail: "predates"},
 	}
@@ -220,8 +221,8 @@ func TestChain_ReceiptContractPinned(t *testing.T) {
 		t.Fatalf("receipt name drifted: %q", chainReceiptName)
 	}
 	// Field names read by scanChain, as dogfoodissues.Receipt marshals them.
-	for _, field := range []string{"mode", "planned_creates", "synced_ok", "synced_failed"} {
-		raw := `{"mode":"live","planned_creates":1,"synced_ok":2,"synced_failed":3}`
+	for _, field := range []string{"mode", "actions", "planned_creates", "synced_ok", "synced_failed", "skipped"} {
+		raw := `{"mode":"live","actions":4,"planned_creates":1,"synced_ok":2,"synced_failed":3,"skipped":1}`
 		var rec map[string]any
 		if err := json.Unmarshal([]byte(raw), &rec); err != nil {
 			t.Fatalf("unmarshal: %v", err)
