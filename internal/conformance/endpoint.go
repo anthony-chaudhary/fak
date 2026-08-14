@@ -87,6 +87,13 @@ type endpointAdjudication struct {
 	TraceID string `json:"trace_id"`
 }
 
+type endpointSessionState struct {
+	TraceID string `json:"trace_id"`
+	Run     string `json:"run"`
+	Reason  string `json:"reason,omitempty"`
+	Rev     uint64 `json:"rev"`
+}
+
 type endpointCompletion struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -173,6 +180,13 @@ func probeEndpoint(ctx context.Context, client *http.Client, role, rawURL, task 
 	}
 	choice := completion.Choices[0]
 	obs.Task = EndpointTaskObservation{HTTPStatus: status, Object: completion.Object, FinishReason: choice.FinishReason, Content: strings.TrimSpace(choice.Message.Content), CompletionID: completion.ID}
+	lifecycle, lifecycleErr := endpointLifecycle(ctx, client, base, role)
+	if lifecycleErr != nil {
+		obs.Lifecycle = notYet("portable session lifecycle endpoint unavailable: " + lifecycleErr.Error())
+	} else {
+		obs.Lifecycle = EndpointField{Status: "PASS", Observed: lifecycle}
+	}
+
 	if len(completion.Usage) == 0 {
 		obs.Usage = notYet("provider usage absent")
 	} else {
@@ -193,6 +207,34 @@ func probeEndpoint(ctx context.Context, client *http.Client, role, rawURL, task 
 	}
 	obs.Reconnect = EndpointField{Status: "PASS", Observed: true}
 	return obs, nil
+}
+
+func endpointLifecycle(ctx context.Context, client *http.Client, base, role string) (map[string]any, error) {
+	traceID := "endpoint-conformance-lifecycle-" + role
+	path := base + "/v1/fak/session/" + traceID
+	var initial endpointSessionState
+	if err := endpointJSON(ctx, client, http.MethodGet, path, nil, &initial, nil); err != nil {
+		return nil, err
+	}
+	if initial.TraceID != traceID || initial.Run != "running" {
+		return nil, fmt.Errorf("initial state = %q/%q, want trace/running", initial.TraceID, initial.Run)
+	}
+	var stopped endpointSessionState
+	body := map[string]any{"run": "stopped", "reason": "completed", "if_rev": initial.Rev}
+	if err := endpointJSON(ctx, client, http.MethodPost, path+"/run", body, &stopped, nil); err != nil {
+		return nil, err
+	}
+	if stopped.TraceID != traceID || stopped.Run != "stopped" || stopped.Reason != "completed" || stopped.Rev <= initial.Rev {
+		return nil, fmt.Errorf("stopped state lacks trace, terminal transition, reason, or revision advance")
+	}
+	var readback endpointSessionState
+	if err := endpointJSON(ctx, client, http.MethodGet, path, nil, &readback, nil); err != nil {
+		return nil, err
+	}
+	if readback != stopped {
+		return nil, fmt.Errorf("terminal lifecycle readback drift")
+	}
+	return map[string]any{"initial": initial.Run, "terminal": stopped.Run, "reason": stopped.Reason, "revision_advanced": true, "readback": true}, nil
 }
 
 func endpointAdjudicate(ctx context.Context, client *http.Client, base, tool, traceID string) (endpointAdjudication, error) {

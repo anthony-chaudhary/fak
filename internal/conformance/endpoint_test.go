@@ -11,6 +11,7 @@ import (
 
 func endpointFixture(content string, usage bool) *httptest.Server {
 	mux := http.NewServeMux()
+	states := map[string]endpointSessionState{}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "engine": "fixture", "model": "same-model"})
 	})
@@ -37,6 +38,40 @@ func endpointFixture(content string, usage bool) *httptest.Server {
 		text, _ := json.Marshal(map[string]any{"verdict": map[string]any{"kind": kind, "reason": reason, "by": "monitor", "disposition": disposition}, "trace_id": req.Params.Arguments.TraceID})
 		json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{"content": []map[string]any{{"type": "text", "text": string(text)}}, "isError": false}})
 	})
+	mux.HandleFunc("/v1/fak/session/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v1/fak/session/"), "/")
+		id := parts[0]
+		state, ok := states[id]
+		if !ok {
+			state = endpointSessionState{TraceID: id, Run: "running"}
+		}
+		switch r.Method {
+		case http.MethodGet:
+			json.NewEncoder(w).Encode(state)
+		case http.MethodPost:
+			if len(parts) != 2 || parts[1] != "run" {
+				http.NotFound(w, r)
+				return
+			}
+			var req struct {
+				Run, Reason string
+				IfRev       uint64 `json:"if_rev"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			if req.IfRev != state.Rev {
+				http.Error(w, "revision conflict", 409)
+				return
+			}
+			state.Run, state.Reason, state.Rev = req.Run, req.Reason, state.Rev+1
+			states[id] = state
+			json.NewEncoder(w).Encode(state)
+		default:
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, _ *http.Request) {
 		v := map[string]any{"id": "deployment-specific-id", "object": "chat.completion", "choices": []map[string]any{{"finish_reason": "stop", "message": map[string]any{"content": content}}}}
 		if usage {
@@ -55,7 +90,7 @@ func TestProbeEndpointPairPassesAndKeepsUnsupportedFieldsNotYet(t *testing.T) {
 	if p.Verdict != "PASS" {
 		t.Fatalf("packet = %+v", p)
 	}
-	if p.Endpoints[0].Admission.Status != "PASS" || p.Endpoints[0].Quota.Status != "NOT_YET" {
+	if p.Endpoints[0].Admission.Status != "PASS" || p.Endpoints[0].Lifecycle.Status != "PASS" || p.Endpoints[0].Quota.Status != "NOT_YET" {
 		t.Fatalf("coverage = %+v", p.Endpoints[0])
 	}
 	if p.Endpoints[0].Usage.Status != "PASS" || p.Endpoints[0].Receipt.Status != "PASS" {
@@ -91,7 +126,7 @@ func TestProbeEndpointPairFailsAdmissionSemanticDrift(t *testing.T) {
 	missing := httptest.NewServer(mux)
 	defer missing.Close()
 	p := ProbeEndpointPair(context.Background(), a.Client(), a.URL, missing.URL)
-	if p.Verdict != "FAIL" || !strings.Contains(p.Reason, "admission status drift") {
+	if p.Verdict != "FAIL" || !(strings.Contains(p.Reason, "admission status drift") || strings.Contains(p.Reason, "lifecycle status drift")) {
 		t.Fatalf("packet = %+v", p)
 	}
 }

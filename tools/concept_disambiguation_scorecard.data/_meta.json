@@ -3019,6 +3019,11 @@
           "category": "incidental",
           "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
           "token": "sessionCorpusCapabilities"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private conformance decoder for the existing gateway SessionState wire projection; it introduces no new session runtime concept.",
+          "token": "endpointSessionState"
         }
       ],
       "id": "session-runtime",
@@ -3124,6 +3129,7 @@
         "decodeSessionClientJSON",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
+        "endpointSessionState",
         "enqueueGuardSessionThreadNotice",
         "episodes",
         "exact-filter",
