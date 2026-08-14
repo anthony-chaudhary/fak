@@ -1070,6 +1070,67 @@ func dispatchProductBackends(product string) []string {
 	}
 }
 
+const dispatchTreeBuildSuccessTTL = 2 * time.Minute
+
+type dispatchTreeBuildSuccess struct {
+	head string
+	at   time.Time
+}
+
+var dispatchTreeBuildSuccesses struct {
+	sync.Mutex
+	byRoot map[string]dispatchTreeBuildSuccess
+}
+
+var dispatchTreeBuildHead = func(root string) string {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "HEAD")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func dispatchTreeBuildKey(root string) (string, string) {
+	head := dispatchTreeBuildHead(root)
+	if head == "" {
+		return "", ""
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", ""
+	}
+	return absRoot, head
+}
+
+func dispatchTreeBuildSucceededRecently(root, head string, now time.Time) bool {
+	if root == "" || head == "" {
+		return false
+	}
+	dispatchTreeBuildSuccesses.Lock()
+	defer dispatchTreeBuildSuccesses.Unlock()
+	hit, ok := dispatchTreeBuildSuccesses.byRoot[root]
+	return ok && hit.head == head && now.Sub(hit.at) <= dispatchTreeBuildSuccessTTL
+}
+
+func dispatchRecordTreeBuildSuccess(root, head string, now time.Time) {
+	if root == "" || head == "" {
+		return
+	}
+	dispatchTreeBuildSuccesses.Lock()
+	defer dispatchTreeBuildSuccesses.Unlock()
+	if dispatchTreeBuildSuccesses.byRoot == nil {
+		dispatchTreeBuildSuccesses.byRoot = map[string]dispatchTreeBuildSuccess{}
+	}
+	for workspaceRoot, hit := range dispatchTreeBuildSuccesses.byRoot {
+		if now.Sub(hit.at) > dispatchTreeBuildSuccessTTL {
+			delete(dispatchTreeBuildSuccesses.byRoot, workspaceRoot)
+		}
+	}
+	dispatchTreeBuildSuccesses.byRoot[root] = dispatchTreeBuildSuccess{head: head, at: now}
+}
+
 var dispatchTreeBuildCommand = func(root string) (string, error) {
 	builds, output, err := trunkbuildprobe.BuildCommittedTarget(root, "./cmd/fak", 90*time.Second)
 	if err != nil {
@@ -1082,8 +1143,17 @@ var dispatchTreeBuildCommand = func(root string) (string, error) {
 }
 
 func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
+	now := time.Now()
+	cacheRoot, head := dispatchTreeBuildKey(root)
+	if dispatchTreeBuildSucceededRecently(cacheRoot, head, now) {
+		return dispatchtick.TreeCheck{}
+	}
 	out, err := dispatchTreeBuildCommand(root)
 	if err == nil {
+		// Record the HEAD observed before the build. If HEAD moved during the
+		// probe, the next lookup sees a mismatch and rebuilds rather than
+		// attributing the old build to the new commit.
+		dispatchRecordTreeBuildSuccess(cacheRoot, head, time.Now())
 		return dispatchtick.TreeCheck{}
 	}
 	// Missing toolchain/probe infrastructure fails open; a real compiler diagnostic

@@ -10,6 +10,63 @@ import (
 	"testing"
 )
 
+func TestDispatchTreeBuildCachesSuccessByHead(t *testing.T) {
+	oldBuild, oldHead := dispatchTreeBuildCommand, dispatchTreeBuildHead
+	builds := 0
+	head := "a"
+	dispatchTreeBuildCommand = func(string) (string, error) { builds++; return "", nil }
+	dispatchTreeBuildHead = func(string) string { return head }
+	dispatchTreeBuildSuccesses.Lock()
+	dispatchTreeBuildSuccesses.byRoot = nil
+	dispatchTreeBuildSuccesses.Unlock()
+	t.Cleanup(func() {
+		dispatchTreeBuildCommand, dispatchTreeBuildHead = oldBuild, oldHead
+		dispatchTreeBuildSuccesses.Lock()
+		dispatchTreeBuildSuccesses.byRoot = nil
+		dispatchTreeBuildSuccesses.Unlock()
+	})
+	root := t.TempDir()
+	dispatchProbeTreeBuild(root)
+	dispatchProbeTreeBuild(root)
+	if builds != 1 {
+		t.Fatalf("unchanged HEAD builds=%d, want one", builds)
+	}
+	head = "b"
+	dispatchProbeTreeBuild(root)
+	if builds != 2 {
+		t.Fatalf("changed HEAD builds=%d, want rebuild", builds)
+	}
+}
+
+func TestDispatchTreeBuildDoesNotCacheFailure(t *testing.T) {
+	oldBuild, oldHead := dispatchTreeBuildCommand, dispatchTreeBuildHead
+	builds := 0
+	dispatchTreeBuildCommand = func(string) (string, error) {
+		builds++
+		if builds == 1 {
+			return "pkg/broken", errors.New("exit status 1")
+		}
+		return "", nil
+	}
+	dispatchTreeBuildHead = func(string) string { return "a" }
+	dispatchTreeBuildSuccesses.Lock()
+	dispatchTreeBuildSuccesses.byRoot = nil
+	dispatchTreeBuildSuccesses.Unlock()
+	t.Cleanup(func() {
+		dispatchTreeBuildCommand, dispatchTreeBuildHead = oldBuild, oldHead
+		dispatchTreeBuildSuccesses.Lock()
+		dispatchTreeBuildSuccesses.byRoot = nil
+		dispatchTreeBuildSuccesses.Unlock()
+	})
+	root := t.TempDir()
+	if got := dispatchProbeTreeBuild(root); !got.Poisoned {
+		t.Fatalf("first probe=%+v, want poison", got)
+	}
+	if got := dispatchProbeTreeBuild(root); got.Poisoned || builds != 2 {
+		t.Fatalf("failure was cached: probe=%+v builds=%d", got, builds)
+	}
+}
+
 func TestDispatchProbeTreeBuildNamesCompilerFailure(t *testing.T) {
 	old := dispatchTreeBuildCommand
 	dispatchTreeBuildCommand = func(string) (string, error) {
