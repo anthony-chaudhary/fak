@@ -4442,6 +4442,16 @@
           "category": "incidental",
           "reason": "private Windows atomic replacement implementation for the existing typed cache witness; not a new operator concept",
           "token": "microCacheMovefileWriteThrough"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch CLI resolver, not a public gateway engine concept",
+          "token": "dispatchEngineForWorkClass"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON provenance field for dispatch telemetry, not an engine implementation",
+          "token": "engine_source"
         }
       ],
       "id": "gateway-engine",
@@ -4472,10 +4482,12 @@
         "collectDogfoodKernelValue",
         "convkernel",
         "countingEngine",
+        "dispatchEngineForWorkClass",
         "dogfoodKernelValue",
         "editEngine",
         "engineFor",
         "engineTokensPerCall",
+        "engine_source",
         "engineer",
         "engineered",
         "engineering",

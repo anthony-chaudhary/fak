@@ -25,21 +25,22 @@ import (
 )
 
 type dispatchTickOptions struct {
-	Workspace    string
-	MaxWorkers   int
-	WorkKind     string
-	Lane         string
-	TargetIssue  int
-	LeaseID      string
-	LeaseTree    []string
-	Backend      string
-	Goal         string
-	GoalProfile  string
-	ExcludeLanes []string
-	Live         bool
-	Refresh      bool
-	PreferNewest bool
-	Generation   string
+	Workspace       string
+	MaxWorkers      int
+	WorkKind        string
+	Lane            string
+	TargetIssue     int
+	LeaseID         string
+	LeaseTree       []string
+	Backend         string
+	BackendExplicit bool
+	Goal            string
+	GoalProfile     string
+	ExcludeLanes    []string
+	Live            bool
+	Refresh         bool
+	PreferNewest    bool
+	Generation      string
 	// View scopes the tick's issue routing to a named issue-view from
 	// .github/issue-views.json (#1411). Empty disables the scoping; the CLI
 	// flag defaults it to the operator-marked `current` board/milestone focus.
@@ -300,14 +301,29 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		}
 		root = wd
 	}
-	b, err := dispatchtick.NormalizeBackend(*backend)
+	explicitBackend := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "backend" {
+			explicitBackend = true
+		}
+	})
+	currentBackend, err := dispatchtick.NormalizeBackend(*backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
 		return dispatchTickOptions{}, false, 2
 	}
 	wk := strings.TrimSpace(*workKind)
 	if wk == "" {
-		wk = dispatchtick.DefaultWorkKind(b)
+		wk = dispatchtick.DefaultWorkKind(currentBackend)
+	}
+	pin := ""
+	if explicitBackend {
+		pin = currentBackend
+	}
+	b, err := dispatchtick.NormalizeBackend(dispatchEngineForWorkClass(currentBackend, wk, pin))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
+		return dispatchTickOptions{}, false, 2
 	}
 	goalID, profile, goalErr := normalizeDispatchGoal(*goal, *goalProfile)
 	if goalErr != nil {
@@ -335,6 +351,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		LeaseID:                 strings.TrimSpace(*leaseID),
 		LeaseTree:               splitCommaList(*leaseTree),
 		Backend:                 b,
+		BackendExplicit:         explicitBackend,
 		Goal:                    goalID,
 		GoalProfile:             profile,
 		ExcludeLanes:            splitCommaList(*excludeLane),
@@ -543,6 +560,9 @@ func seedDispatchTickPayload(root string, opts dispatchTickOptions, reg, pre map
 		"workspace":            root,
 		"live":                 opts.Live,
 		"backend":              opts.Backend,
+		"engine":               opts.Backend,
+		"work_kind":            opts.WorkKind,
+		"engine_source":        map[bool]string{true: "operator_pin", false: "work_class"}[opts.BackendExplicit],
 		"goal":                 opts.Goal,
 		"goal_profile":         opts.GoalProfile,
 		"max_workers":          opts.MaxWorkers,

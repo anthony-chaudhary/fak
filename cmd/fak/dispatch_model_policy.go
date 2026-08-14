@@ -126,6 +126,33 @@ func dispatchWorkerModelMap(p workerModelPolicy) map[string]any {
 
 // workerModelSource names where a resolved worker model came from — surfaced in the tick
 // payload and the .model witness so a model-accounting run can attribute each worker's spend.
+// dispatchEngineForWorkClass resolves the worker engine before account/model routing.
+// The table is intentionally small: throughput-shaped grind classes use codex;
+// correctness-shaped rigor classes use Claude. An explicit operator backend pin
+// always wins, and an unknown/untagged class preserves current byte-for-byte.
+func dispatchEngineForWorkClass(current, workClass, explicit string) string {
+	if pin := strings.TrimSpace(strings.ToLower(explicit)); pin != "" {
+		return pin
+	}
+	class := strings.NewReplacer("-", "_", " ", "_").Replace(strings.TrimSpace(strings.ToLower(workClass)))
+	grind := map[string]bool{
+		"gardening": true, "grind": true, "mechanical": true, "mechanical_grind": true,
+		"hygiene": true, "doc_sync": true, "log_sweep": true,
+	}
+	rigor := map[string]bool{
+		"engineering": true, "rigor": true, "audit": true, "verify": true,
+		"security": true, "security_audit": true, "design": true, "benchmark_claims": true,
+	}
+	switch {
+	case grind[class]:
+		return "codex"
+	case rigor[class]:
+		return "claude"
+	default:
+		return strings.TrimSpace(strings.ToLower(current))
+	}
+}
+
 const (
 	// modelSourceSeatDefault is the DEFAULT claude posture: the model is blank, so the
 	// worker starts on the seat's own saved default and degrades through --fallback-model.

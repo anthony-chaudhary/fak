@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"reflect"
 	"testing"
 
@@ -8,6 +9,52 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
+func TestDispatchEngineForWorkClass(t *testing.T) {
+	tests := []struct {
+		name, current, workClass, explicit, want string
+	}{
+		{name: "gardening defaults codex", current: "claude", workClass: "gardening", want: "codex"},
+		{name: "grind defaults codex", current: "claude", workClass: "mechanical_grind", want: "codex"},
+		{name: "engineering defaults claude", current: "codex", workClass: "engineering", want: "claude"},
+		{name: "rigor defaults claude", current: "codex", workClass: "security_audit", want: "claude"},
+		{name: "unknown preserves current", current: "opencode", workClass: "", want: "opencode"},
+		{name: "operator pin wins", current: "claude", workClass: "gardening", explicit: "opencode", want: "opencode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dispatchEngineForWorkClass(tt.current, tt.workClass, tt.explicit); got != tt.want {
+				t.Fatalf("dispatchEngineForWorkClass(%q, %q, %q) = %q, want %q", tt.current, tt.workClass, tt.explicit, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseDispatchTickFlagsRoutesEngineByWorkClass(t *testing.T) {
+	t.Run("untagged default is byte-identical", func(t *testing.T) {
+		opts, ok, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir()})
+		if ok || code != 0 || opts.Backend != "claude" {
+			t.Fatalf("ok=%v code=%d backend=%q, want false/0/claude", ok, code, opts.Backend)
+		}
+	})
+	t.Run("grind selects codex", func(t *testing.T) {
+		opts, ok, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir(), "--work-kind", "gardening"})
+		if ok || code != 0 || opts.Backend != "codex" {
+			t.Fatalf("ok=%v code=%d backend=%q, want false/0/codex", ok, code, opts.Backend)
+		}
+	})
+	t.Run("rigor selects claude", func(t *testing.T) {
+		opts, ok, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir(), "--work-kind", "security_audit"})
+		if ok || code != 0 || opts.Backend != "claude" {
+			t.Fatalf("ok=%v code=%d backend=%q, want false/0/claude", ok, code, opts.Backend)
+		}
+	})
+	t.Run("explicit backend wins", func(t *testing.T) {
+		opts, ok, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir(), "--backend", "opencode", "--work-kind", "gardening"})
+		if ok || code != 0 || opts.Backend != "opencode" || !opts.BackendExplicit {
+			t.Fatalf("ok=%v code=%d backend=%q explicit=%v, want false/0/opencode/true", ok, code, opts.Backend, opts.BackendExplicit)
+		}
+	})
+}
 func TestResolveWorkerModelPolicy_ClaudeDefaultStaysBlank(t *testing.T) {
 	t.Setenv("FLEET_WORKER_FALLBACK_MODEL", "claude-opus-4-8,claude-sonnet-5")
 	acct := dispatchtick.Account{Tag: "gem8", Model: "opus"}
