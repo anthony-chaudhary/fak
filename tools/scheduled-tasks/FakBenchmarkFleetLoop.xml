@@ -34,7 +34,7 @@
       </Repetition>
     </TimeTrigger>
   </Triggers>
-  <!-- The action runs the committed tick payload directly. conhost.exe --headless
+  <!-- The action runs the committed tick payload directly. conhost.exe in headless mode
        returned its own status and hid the dispatcher's, which is how a loop with zero
        successful witnesses reported Last Result 0 for weeks (#6503). -->
   <Actions Context="Author">
