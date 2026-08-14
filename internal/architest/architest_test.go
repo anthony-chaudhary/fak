@@ -563,9 +563,8 @@ var tier = map[string]int{
 	"lifecycleadapter":      1, // stdlib-only process-forest adapter capability negotiation and bounded invocation contract.
 	"terminalbarrier":       3, // #6436 (epic #6432): the fail-closed pause barrier terminal relief must clear before any host replacement. Composes fleetbus(2) durable lifecycle envelopes with processforest(1) identity and lifecycleadapter(1) negotiation; the destructive step is an injected Actuator, so the barrier itself can never kill anything.
 	"depthadmit":            1, // The DEPTH mirror of focusscore(1): focusscore folds how BROAD the fleet is (active objectives vs the WIP cap), this folds how FAR DOWN one line got (declared plan phases vs the ones a W3 commit-progress row witnessed), so a `met` that stopped short is refused as DEPTH_NOT_CARRIED instead of reading clean. Pure over stdlib, no ledger and no git: the impure read lives in cmd/fak/trajctl_depth.go.
-	"quantmeta":             1, // stdlib-only neutral quantization capability descriptor (#6222): typed vocabulary + pure adjudicator; abstains on unknown input, refuses only self-contradiction; no ranking, no runtime, no model kernel.
 	"gardenbudget":          1, // #6493 whole-tick budget/checkpoint primitive: stdlib-only durable cursor plus pure suffix executor/remaining-budget arithmetic; imports nothing internal and stays off the hot path.
-	"armbench":              1, // #6676 provenance-locked multi-arm benchmark harness: strict manifest/corpus/run schemas, deterministic pairing/resume/evidence gates, fake provider, and report fold; stdlib-only, imports nothing internal, off the hot path.
+	"armbench":              2, // #6676 off-path multi-arm benchmark integrator; imports the tier-2 windowgate to keep managed child processes invisible on Windows.
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
 	"portabilitylab":        1, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
@@ -1198,6 +1197,8 @@ var chatEndpointRole = map[string]string{
 	"deepseekbench":     "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
 	"glm52prefillsweep": "the off-path GLM-5.2 prefill-latency sweep client (#3085/#3086): POSTs a prefill-dominant request (large prompt, max_tokens~1) at each prompt length against a fak serve endpoint to record TTFT / prefill tok/s (not a live planner)",
 	"zaitask":           "the off-path bounded non-streaming Z.AI Coding Plan task runner (not a live kernel planner)",
+	"armbench":          "the off-path benchmark clients for fak/OpenAI-compatible generation surfaces (not a live planner)",
+	"conformance":       "the off-path provider-conformance probe client (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
