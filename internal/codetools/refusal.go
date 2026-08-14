@@ -29,6 +29,9 @@ const (
 	CodeCanceled      = "CANCELED"       // the caller's context was canceled
 	CodeCacheScope    = "CACHE_SCOPE"    // the call's cache hints contradict the tool's write shape
 	CodeIO            = "IO_ERROR"       // the filesystem refused the operation
+	CodeExists        = "ALREADY_EXISTS" // create mode addressed an existing file
+	CodeEditConflict  = "EDIT_CONFLICT"  // exact edit match count violated semantics
+	CodeTooLarge      = "TOO_LARGE"      // mutation input exceeded the configured bound
 )
 
 // Refusal is one denied or failed operation: the closed Code, the abi reason the rung

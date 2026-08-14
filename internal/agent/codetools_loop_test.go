@@ -92,8 +92,8 @@ func runCodeToolLoop(t *testing.T, root string, script []codeToolScript) (ArmMet
 		t.Fatalf("ArmCodeTools: %v", err)
 	}
 	t.Cleanup(DisarmCodeTools)
-	if len(catalog) != 3 {
-		t.Fatalf("armed catalog has %d tools, want 3 (Read/Grep/Glob)", len(catalog))
+	if len(catalog) != len(codetools.Catalog()) {
+		t.Fatalf("armed catalog has %d tools, want %d", len(catalog), len(codetools.Catalog()))
 	}
 
 	turns := make([]*Completion, 0, len(script)+1)
@@ -361,4 +361,31 @@ func mustJSON(t *testing.T, s string) string {
 		t.Fatalf("marshal %q: %v", s, err)
 	}
 	return string(b)
+}
+
+func TestOwnedLoopMutatesScratchRepoThroughKernelEngines(t *testing.T) {
+	root := t.TempDir()
+	metrics, log := runCodeToolLoop(t, root, []codeToolScript{
+		{tool: codetools.ToolWrite, args: `{"file_path":"pkg/a.go","content":"package pkg\n\nconst Value = 1\n","mode":"create"}`},
+		{tool: codetools.ToolEdit, args: `{"file_path":"pkg/a.go","old_string":"Value = 1","new_string":"Value = 2"}`},
+	})
+	body, err := os.ReadFile(filepath.Join(root, "pkg", "a.go"))
+	if err != nil {
+		t.Fatalf("read witness: %v", err)
+	}
+	if string(body) != "package pkg\n\nconst Value = 2\n" {
+		t.Fatalf("mutated file = %q", body)
+	}
+	if metrics.EngineCalls < 2 {
+		t.Fatalf("EngineCalls=%d, want >=2", metrics.EngineCalls)
+	}
+	allowed := 0
+	for _, ev := range log {
+		if ev.By == codetools.RungName && ev.Verdict == "ALLOW" {
+			allowed++
+		}
+	}
+	if allowed < 2 {
+		t.Fatalf("codetools ALLOW rows=%d, log=%+v", allowed, log)
+	}
 }

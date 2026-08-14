@@ -26,9 +26,11 @@ import (
 // the harness-conventional spellings so a model already fluent in Read/Grep/Glob needs
 // no retraining to drive the kernel-mediated versions.
 const (
-	ToolRead = "Read"
-	ToolGrep = "Grep"
-	ToolGlob = "Glob"
+	ToolRead  = "Read"
+	ToolGrep  = "Grep"
+	ToolGlob  = "Glob"
+	ToolWrite = "Write"
+	ToolEdit  = "Edit"
 )
 
 // ReadArgs names one file and an optional line window. Offset is 1-based (line 1 is the
@@ -48,6 +50,46 @@ func (a ReadArgs) Validate() *Refusal {
 	}
 	if a.Offset < 0 || a.Limit < 0 {
 		return refuse(CodeMalformed, "Read: offset and limit must be >= 0")
+	}
+	return nil
+}
+
+// WriteArgs replaces one file with Content. Mode makes creation semantics explicit:
+// "create" refuses an existing file, "overwrite" refuses a missing file, and "upsert"
+// permits either. No omitted/default mode can silently change a caller's intent.
+type WriteArgs struct {
+	FilePath string `json:"file_path"`
+	Content  string `json:"content"`
+	Mode     string `json:"mode"`
+}
+
+func (a WriteArgs) Validate() *Refusal {
+	if strings.TrimSpace(a.FilePath) == "" {
+		return refuse(CodeMalformed, "Write: missing required field: file_path")
+	}
+	switch a.Mode {
+	case "create", "overwrite", "upsert":
+		return nil
+	default:
+		return refuse(CodeMalformed, "Write: mode must be create, overwrite, or upsert")
+	}
+}
+
+// EditArgs performs an exact textual replacement. The default requires exactly one
+// match; ReplaceAll requires at least one and replaces every match.
+type EditArgs struct {
+	FilePath   string `json:"file_path"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
+}
+
+func (a EditArgs) Validate() *Refusal {
+	if strings.TrimSpace(a.FilePath) == "" {
+		return refuse(CodeMalformed, "Edit: missing required field: file_path")
+	}
+	if a.OldString == "" {
+		return refuse(CodeMalformed, "Edit: old_string must not be empty")
 	}
 	return nil
 }
@@ -118,7 +160,7 @@ type ToolDef struct {
 	ReadOnly    bool            `json:"read_only"`
 }
 
-// Catalog returns the three read-tool definitions in a stable order. It is a pure function of
+// Catalog returns the implemented coding-tool definitions in a stable order. It is a pure function of
 // the package: a caller binds it into its own planner-facing catalog shape (the owned
 // loop's ToolDef, an MCP tools/list, an Anthropic tools[]) without this leaf having to
 // know which wire it is being advertised on.
@@ -144,6 +186,18 @@ func Catalog() []ToolDef {
 				`"max_matches":{"type":"integer"}},` +
 				`"required":["pattern"],"additionalProperties":false}`),
 			ReadOnly: true,
+		},
+		{
+			Name:        ToolWrite,
+			Description: "Atomically create or replace a workspace file with explicit create/overwrite/upsert semantics.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["create","overwrite","upsert"]}},"required":["file_path","content","mode"],"additionalProperties":false}`),
+			ReadOnly:    false,
+		},
+		{
+			Name:        ToolEdit,
+			Description: "Atomically replace one exact string in a workspace file, or all matches when replace_all is true.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["file_path","old_string","new_string"],"additionalProperties":false}`),
+			ReadOnly:    false,
 		},
 		{
 			Name:        ToolGlob,

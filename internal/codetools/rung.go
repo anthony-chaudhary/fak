@@ -60,14 +60,14 @@ func (t *Toolset) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 
 // admit runs the ordered checks and returns the first refusal, or nil to allow.
 func (t *Toolset) admit(ctx context.Context, c *abi.ToolCall) *Refusal {
-	if r := t.cacheScope(c); r != nil {
-		return r
-	}
 	body := bytesOf(ctx, c.Args)
 	// Canonical path FIRST: every path-bearing tool resolves its operand to one
-	// (Abs, Rel) pair before any policy question is asked about it, so policy is asked
-	// about a real file rather than about the caller's spelling of one.
+	// (Abs, Rel) pair before cache-scope or policy matching, so both reason about a real
+	// workspace target rather than a caller-controlled spelling.
 	if _, r := t.targetOf(c.Tool, body); r != nil {
+		return r
+	}
+	if r := t.cacheScope(c); r != nil {
 		return r
 	}
 	// Policy LAST among the semantic checks, on the canonical operand. A tool the
@@ -109,6 +109,26 @@ func (t *Toolset) targetOf(tool string, body []byte) (string, *Refusal) {
 	switch tool {
 	case ToolRead:
 		var a ReadArgs
+		if r := decodeArgs(body, &a); r != nil {
+			return "", r
+		}
+		if r := a.Validate(); r != nil {
+			return "", r
+		}
+		res, r := t.resolve(a.FilePath)
+		return res.Rel, r
+	case ToolWrite:
+		var a WriteArgs
+		if r := decodeArgs(body, &a); r != nil {
+			return "", r
+		}
+		if r := a.Validate(); r != nil {
+			return "", r
+		}
+		res, r := t.resolve(a.FilePath)
+		return res.Rel, r
+	case ToolEdit:
+		var a EditArgs
 		if r := decodeArgs(body, &a); r != nil {
 			return "", r
 		}

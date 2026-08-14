@@ -23,9 +23,11 @@ import (
 // manifest, a residency PDP, or an operator reading a decision journal can see WHICH
 // coding operation a call dispatched to, not just "the coding engine".
 const (
-	EngineRead = "codetools.read"
-	EngineGrep = "codetools.grep"
-	EngineGlob = "codetools.glob"
+	EngineRead  = "codetools.read"
+	EngineGrep  = "codetools.grep"
+	EngineGlob  = "codetools.glob"
+	EngineWrite = "codetools.write"
+	EngineEdit  = "codetools.edit"
 )
 
 // RungName identifies this package's adjudicator in a Verdict.By field and in the
@@ -38,10 +40,11 @@ const RungName = "codetools"
 // Read of a 2GB file or an unbounded Grep over a vendor tree both end the same way — the
 // loop stops being able to make progress.
 type Limits struct {
-	MaxReadBytes int64 // largest file body a single Read returns
-	MaxMatches   int   // largest number of Grep match rows
-	MaxEntries   int   // largest number of Glob path rows
-	MaxWalkFiles int   // largest number of files a single Grep/Glob walk visits
+	MaxReadBytes  int64 // largest file body a single Read returns
+	MaxMatches    int   // largest number of Grep match rows
+	MaxEntries    int   // largest number of Glob path rows
+	MaxWalkFiles  int   // largest number of files a single Grep/Glob walk visits
+	MaxWriteBytes int64 // largest body a single Write/Edit may materialize
 }
 
 // DefaultLimits are sized for a coding loop rather than for a batch job: big enough that
@@ -50,10 +53,11 @@ type Limits struct {
 // its own — the point is that SOME bound is always in force.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxReadBytes: 1 << 20, // 1 MiB
-		MaxMatches:   500,
-		MaxEntries:   1000,
-		MaxWalkFiles: 20000,
+		MaxReadBytes:  1 << 20, // 1 MiB
+		MaxMatches:    500,
+		MaxEntries:    1000,
+		MaxWalkFiles:  20000,
+		MaxWriteBytes: 1 << 20,
 	}
 }
 
@@ -75,6 +79,9 @@ func (l Limits) normalize() Limits {
 	if l.MaxWalkFiles <= 0 {
 		l.MaxWalkFiles = d.MaxWalkFiles
 	}
+	if l.MaxWriteBytes <= 0 {
+		l.MaxWriteBytes = d.MaxWriteBytes
+	}
 	return l
 }
 
@@ -89,7 +96,7 @@ type Policy struct {
 // IMPLEMENTED here (#6704, #6705) — so the read spine cannot be mistaken for a mutation
 // surface an operator forgot to close.
 func DefaultPolicy() Policy {
-	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true}}
+	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true, ToolWrite: true, ToolEdit: true}}
 }
 
 // Config configures a Toolset. Root is the workspace every path is confined to; empty
@@ -100,7 +107,7 @@ type Config struct {
 	Policy Policy
 }
 
-// Toolset is a configured, confinement-bound instance of the three read engines plus the
+// Toolset is a configured, confinement-bound instance of the coding engines plus the
 // adjudicator rung that admits them. It is safe for concurrent use: every field is set
 // once at construction and read-only thereafter.
 type Toolset struct {
@@ -149,13 +156,15 @@ func (t *Toolset) Root() string { return t.root }
 // Limits reports the bounds in force.
 func (t *Toolset) Limits() Limits { return t.limits }
 
-// RegisterEngines binds the three engines into the abi registry under their own ids, so a
+// RegisterEngines binds the engines into the abi registry under their own ids, so a
 // kernel dispatching a call whose Engine names one of them reaches this toolset. Mirrors
 // RegisterReadEngine: re-registering replaces the driver, so arming twice is safe.
 func (t *Toolset) RegisterEngines() {
 	abi.RegisterEngine(EngineRead, readEngine{t})
 	abi.RegisterEngine(EngineGrep, grepEngine{t})
 	abi.RegisterEngine(EngineGlob, globEngine{t})
+	abi.RegisterEngine(EngineWrite, writeEngine{t})
+	abi.RegisterEngine(EngineEdit, editEngine{t})
 }
 
 // Register builds a Toolset, registers its engines, and places its rung in the
@@ -184,6 +193,10 @@ func engineFor(tool string) (string, bool) {
 		return EngineGrep, true
 	case ToolGlob:
 		return EngineGlob, true
+	case ToolWrite:
+		return EngineWrite, true
+	case ToolEdit:
+		return EngineEdit, true
 	}
 	return "", false
 }
@@ -213,9 +226,7 @@ func readOnlyTool(tool string) bool {
 //     from cache and never fills one. The rung REFUSES a call that contradicts this
 //     (CodeCacheScope), because a mutation mislabeled read-only would let the vDSO answer
 //     it from a cached result — the one failure mode a cache in front of a side-effecting
-//     tool must make impossible. This slice ships no mutating tool, so the branch is the
-//     floor waiting for #6704/#6705 rather than a live path; it is enforced now precisely
-//     so those land against a guard that already exists.
+//     tool must make impossible. Write/Edit exercise this branch: mutations are destructive and never replayable.
 //
 // principal is the isolation subject (tenant / user / auth principal); empty leaves the
 // key unscoped, which is byte-identical to the single-tenant behavior and is the

@@ -152,12 +152,12 @@ func TestZeroLimitsNormalizeToDefaults(t *testing.T) {
 	}
 }
 
-// TestDefaultPolicyAdmitsOnlyTheReadTools pins the admission floor this slice ships: the
+// TestDefaultPolicyAdmitsImplementedTools pins the admission floor this slice ships: the
 // three read tools and nothing else. A Write/Edit/Bash name reaching this package before
 // #6704/#6705 land is not merely unlisted, it is unknown — and both must refuse.
-func TestDefaultPolicyAdmitsOnlyTheReadTools(t *testing.T) {
+func TestDefaultPolicyAdmitsImplementedTools(t *testing.T) {
 	p := DefaultPolicy()
-	for _, tool := range []string{ToolRead, ToolGrep, ToolGlob} {
+	for _, tool := range []string{ToolRead, ToolGrep, ToolGlob, ToolWrite, ToolEdit} {
 		if !p.Allow[tool] {
 			t.Fatalf("DefaultPolicy does not admit %q", tool)
 		}
@@ -165,7 +165,7 @@ func TestDefaultPolicyAdmitsOnlyTheReadTools(t *testing.T) {
 			t.Fatalf("engineFor(%q) reports the tool is not ours", tool)
 		}
 	}
-	for _, tool := range []string{"Write", "Edit", "Bash"} {
+	for _, tool := range []string{"Bash"} {
 		if p.Allow[tool] {
 			t.Fatalf("DefaultPolicy admits %q, which this slice does not implement", tool)
 		}

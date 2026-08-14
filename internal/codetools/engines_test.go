@@ -315,15 +315,13 @@ func TestGlobIsCancellationAware(t *testing.T) {
 // cache key can never disagree about whether a tool mutates.
 func TestCatalogAndCacheScopeAgreeOnWriteShape(t *testing.T) {
 	for _, d := range Catalog() {
-		if !d.ReadOnly {
-			t.Fatalf("catalog entry %q is write-shaped; this slice ships read tools only", d.Name)
-		}
 		meta := CallMeta(d.Name, "")
-		if meta["readOnlyHint"] != "true" || meta["idempotentHint"] != "true" {
-			t.Fatalf("CallMeta(%q) = %v, want the read-only/idempotent hints", d.Name, meta)
-		}
-		if _, ok := meta["destructive"]; ok {
-			t.Fatalf("CallMeta(%q) marked a read tool destructive: %v", d.Name, meta)
+		if d.ReadOnly {
+			if meta["readOnlyHint"] != "true" || meta["idempotentHint"] != "true" || meta["destructive"] != "" {
+				t.Fatalf("CallMeta(%q) = %v, want read-only/idempotent", d.Name, meta)
+			}
+		} else if meta["readOnlyHint"] != "false" || meta["idempotentHint"] != "false" || meta["destructive"] != "true" {
+			t.Fatalf("CallMeta(%q) = %v, want non-cacheable destructive", d.Name, meta)
 		}
 	}
 	if got := CallMeta(ToolRead, "tenant-a")["principal"]; got != "tenant-a" {

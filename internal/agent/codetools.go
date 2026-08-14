@@ -9,15 +9,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 )
 
-// codetools.go — arming the kernel-mediated coding READ tools (Read/Grep/Glob) on the
+// codetools.go — arming the kernel-mediated coding filesystem tools (Read/Write/Edit/Grep/Glob) on the
 // owned loop (#6703, child of #6658).
 //
 // The loop's built-in catalog is the airline-support fixture and its only real
 // filesystem engine is readengine.go's read-only `fak_read` MCP miss path. So an operator
 // asking the native harness to perform a coding task had nothing to dispatch. This file
 // is the seam that changes: it binds internal/codetools' engines + adjudicator rung into
-// the process registries and teaches Configure()'s policy to admit exactly the three read
-// tools, so a Read/Grep/Glob proposed by the model crosses the SAME k.Syscall boundary as
+// the process registries and teaches Configure()'s policy to admit the configured coding
+// tools, so a coding tool proposed by the model crosses the SAME k.Syscall boundary as
 // every other tool call — adjudicated, counted, journaled, and dispatched to a registered
 // engine.
 //
@@ -34,7 +34,7 @@ import (
 // refuse a malformed call before a filesystem path is ever canonicalized.
 const codeToolRank = 20
 
-// codeToolGate is the single registered adjudicator link for the coding read tools. It
+// codeToolGate is the single registered adjudicator link for the coding tools. It
 // owns no policy itself: it forwards to whichever Toolset is currently armed.
 type codeToolGate struct{}
 
@@ -80,7 +80,7 @@ func ArmCodeTools(root string) ([]ToolDef, error) {
 // registered but defers, so nothing has to be unregistered from a frozen registry.
 func DisarmCodeTools() { armedCodeTools.Store(nil) }
 
-// CodeToolCatalog renders the coding read tools as loop ToolDefs. Empty when unarmed, so
+// CodeToolCatalog renders the coding tools as loop ToolDefs. Empty when unarmed, so
 // a caller can splice it into a catalog unconditionally.
 func CodeToolCatalog() []ToolDef {
 	if armedCodeTools.Load() == nil {
@@ -120,7 +120,7 @@ func codeToolAllow() []string {
 	if armedCodeTools.Load() == nil {
 		return nil
 	}
-	names := make([]string, 0, 3)
+	names := make([]string, 0, len(codetools.Catalog()))
 	for _, d := range codetools.Catalog() {
 		names = append(names, d.Name)
 	}

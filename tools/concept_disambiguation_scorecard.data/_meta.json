@@ -4068,6 +4068,26 @@
           "category": "incidental",
           "reason": "Issue #6703 private engine registration helper, not a new gateway architecture concept",
           "token": "engineFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ABI adapter implementing the established Write coding tool",
+          "token": "writeEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ABI adapter implementing the established Edit coding tool",
+          "token": "editEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-tool ABI registry identifier for the established Write operation",
+          "token": "EngineWrite"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-tool ABI registry identifier for the established Edit operation",
+          "token": "EngineEdit"
         }
       ],
       "id": "gateway-engine",
@@ -4077,10 +4097,12 @@
         "AffinitySelection",
         "BaselineEngineCalls",
         "DeniedEngineCalls",
+        "EngineEdit",
         "EngineGlob",
         "EngineGrep",
         "EngineRead",
         "EngineReductionPct",
+        "EngineWrite",
         "GatewaySeat",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelTurns",
@@ -4095,6 +4117,7 @@
         "convkernel",
         "countingEngine",
         "dogfoodKernelValue",
+        "editEngine",
         "engineFor",
         "engineTokensPerCall",
         "engineer",
@@ -4119,7 +4142,8 @@
         "resolveCallEngine",
         "resolveSpawnEngine",
         "selectorGateway",
-        "shrinkWireInKernel"
+        "shrinkWireInKernel",
+        "writeEngine"
       ],
       "min_files": 3,
       "name": "Gateway / engine family",
