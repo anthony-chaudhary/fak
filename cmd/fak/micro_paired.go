@@ -10,9 +10,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accountprobe"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
@@ -207,7 +209,7 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	arm.Completed, arm.Answer = !got.IsError, strings.TrimSpace(got.Result)
 	if got.IsError {
 		arm.Error = arm.Answer
-		reconcilePairedBaselineCooldown(cmd.Env, got, time.Now())
+		reconcilePairedBaselineReadiness(cmd.Env, got, time.Now())
 	}
 	arm.Correct = arm.Completed && arm.Answer == expected
 	arm.InputTokens, arm.OutputTokens = got.Usage.InputTokens+got.Usage.CacheCreationInputTokens, got.Usage.OutputTokens
@@ -236,6 +238,41 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 		break
 	}
 	return arm
+}
+
+func reconcilePairedBaselineReadiness(env []string, got claudeResult, now time.Time) bool {
+	if reconcilePairedBaselineCooldown(env, got, now) {
+		return true
+	}
+	if !got.IsError || got.APIErrorStatus != 403 {
+		return false
+	}
+	dir := pairedEnvValue(env, "CLAUDE_CONFIG_DIR")
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	account := filepath.Base(filepath.Clean(dir))
+	if account == "." || account == string(filepath.Separator) {
+		return false
+	}
+	reason := strings.TrimSpace(got.Result)
+	ledgerOK := accountprobe.AppendLedger("", accountprobe.LedgerEntry{
+		TS:          now.UTC().Format(time.RFC3339Nano),
+		Account:     account,
+		Tag:         strings.TrimPrefix(account, ".claude-"),
+		Status:      "ACCESS",
+		BlockReason: reason,
+		Reason:      "paired_baseline_provider_access",
+	}) == nil
+	store, err := accounts.LoadCooldownStore(defaultCooldownStorePath())
+	if err != nil {
+		return false
+	}
+	entry, changed := store.RecordOrgAuthWall(accountKeyForDir(dir), "paired_baseline_provider_access", now)
+	if !changed || entry.Kind != accounts.CooldownOrgAuthWall || store.Save() != nil {
+		return false
+	}
+	return ledgerOK
 }
 
 func reconcilePairedBaselineCooldown(env []string, got claudeResult, now time.Time) bool {

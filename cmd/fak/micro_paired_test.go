@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accountprobe"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
@@ -154,6 +155,48 @@ func TestReconcilePairedBaselineCooldownPersistsExactSeat(t *testing.T) {
 	entry, ok := store.CooledDown(home.Identity.AccountKey(), now.Add(time.Minute))
 	if !ok || entry.ResetAt.Before(now.Add(time.Hour)) {
 		t.Fatalf("cooldown=%+v ok=%v", entry, ok)
+	}
+}
+
+func TestReconcilePairedBaselineReadinessPersistsAccessWall(t *testing.T) {
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+	stateDir := t.TempDir()
+	t.Setenv("FLEET_STATE_DIR", stateDir)
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	dir := filepath.Join(t.TempDir(), ".claude-seat-a")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"11111111-1111-1111-1111-111111111111"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := claudeResult{IsError: true, APIErrorStatus: 403, Result: "organization inference disabled"}
+	if !reconcilePairedBaselineReadiness([]string{"CLAUDE_CONFIG_DIR=" + dir}, got, now) {
+		t.Fatal("access wall was not reconciled")
+	}
+	entry, ok := accountprobe.LastProbeByAccount(regDir)[".claude-seat-a"]
+	if !ok || entry.Status != "ACCESS" || entry.BlockReason != got.Result || entry.Reason != "paired_baseline_provider_access" {
+		t.Fatalf("ledger entry=%+v ok=%v", entry, ok)
+	}
+	store, err := accounts.LoadCooldownStore(filepath.Join(stateDir, "account-cooldown.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wall, ok := store.OrgAuthWall("uuid:11111111-1111-1111-1111-111111111111", now)
+	if !ok || wall.Kind != accounts.CooldownOrgAuthWall {
+		t.Fatalf("org wall=%+v ok=%v", wall, ok)
+	}
+}
+
+func TestReconcilePairedBaselineReadinessIgnoresSuccessfulResult(t *testing.T) {
+	t.Setenv("FLEET_REG_DIR", t.TempDir())
+	t.Setenv("FLEET_STATE_DIR", t.TempDir())
+	if reconcilePairedBaselineReadiness([]string{"CLAUDE_CONFIG_DIR=C:\\seat"}, claudeResult{Result: "READY"}, time.Now()) {
+		t.Fatal("successful result must not block readiness")
+	}
+	if got := accountprobe.ReadLedger(accountprobe.ProbeLedgerPath("")); len(got) != 0 {
+		t.Fatalf("successful result wrote readiness ledger: %+v", got)
 	}
 }
 

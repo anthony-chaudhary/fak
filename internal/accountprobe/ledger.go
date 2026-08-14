@@ -3,14 +3,18 @@ package accountprobe
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 // LedgerEntry is one probe_ledger.jsonl record. Only the fields the roster fold reads
 // are modeled; unknown keys are ignored on decode.
+var appendLedgerMu sync.Mutex
+
 type LedgerEntry struct {
 	TS          string `json:"ts"`
 	Account     string `json:"account"`
@@ -60,6 +64,35 @@ func ReadLedger(path string) []LedgerEntry {
 		out = append(out, e)
 	}
 	return out
+}
+
+// AppendLedger appends one witnessed provider verdict to the active probe ledger.
+// Writers are serialized in-process and each JSON object is emitted with one write so
+// concurrent probe/readiness producers cannot interleave partial lines.
+func AppendLedger(rd string, entry LedgerEntry) error {
+	if strings.TrimSpace(entry.TS) == "" {
+		entry.TS = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	body, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("encode probe ledger entry: %w", err)
+	}
+	path := ProbeLedgerPath(rd)
+	appendLedgerMu.Lock()
+	defer appendLedgerMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create probe ledger dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open probe ledger: %w", err)
+	}
+	defer f.Close()
+	body = append(body, '\n')
+	if _, err := f.Write(body); err != nil {
+		return fmt.Errorf("append probe ledger: %w", err)
+	}
+	return nil
 }
 
 // LastProbeByAccount returns the most-recent ledger entry per account (basename ->

@@ -35,6 +35,18 @@ func TestProbeLedgerPath(t *testing.T) {
 	}
 }
 
+func TestAppendLedgerCreatesRoundTrippableLine(t *testing.T) {
+	rd := t.TempDir()
+	entry := LedgerEntry{TS: "2026-08-14T12:00:00Z", Account: ".claude-seat-a", Tag: "seat-a", Status: "ACCESS", BlockReason: "organization inference disabled", Reason: "paired_baseline_provider_access"}
+	if err := AppendLedger(rd, entry); err != nil {
+		t.Fatal(err)
+	}
+	got := ReadLedger(ProbeLedgerPath(rd))
+	if len(got) != 1 || got[0] != entry {
+		t.Fatalf("ledger=%+v want=%+v", got, entry)
+	}
+}
+
 func TestReadLedgerSkipsBlankAndMalformed(t *testing.T) {
 	rd := t.TempDir()
 	writeLedger(t, rd,
