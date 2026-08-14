@@ -142,6 +142,13 @@ func renderSessionOpen(w io.Writer, result gateway.SessionClientAttachResponse) 
 	fmt.Fprintf(w, "  execution_epoch=%s event_head=%d attachment=%s input_lease=%t\n", d.ExecutionEpoch, d.EventHead, result.AttachmentID, result.InputLease)
 	fmt.Fprintf(w, "  capability_digest=%s\n", d.CapabilityDigest)
 	fmt.Fprintf(w, "  capabilities=%s\n", strings.Join(d.Capabilities, ","))
+	for _, action := range d.Actions {
+		if action.Available {
+			fmt.Fprintf(w, "  action=%s available route=%s %s\n", action.ID, action.Method, action.Route)
+		} else {
+			fmt.Fprintf(w, "  action=%s unavailable=%s reason=%s handoff=%s\n", action.ID, action.UnavailableCode, action.UnavailableReason, action.Handoff)
+		}
+	}
 	fmt.Fprintf(w, "  state=%s rev=%d pending=%s\n", d.State.Run, d.State.Rev, blankSessionOpen(d.Pending))
 	if d.RecoveryDependency != "" {
 		fmt.Fprintf(w, "  recovery_dependency=%s\n", d.RecoveryDependency)

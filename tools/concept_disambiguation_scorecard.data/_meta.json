@@ -2994,6 +2994,31 @@
           "category": "incidental",
           "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
           "token": "SessionCapabilityCorpusSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "SessionRecoveryScenarios"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "SessionClientActionSpec"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "sessionCapabilityDefinition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "sessionCapabilityCorpus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "sessionCorpusCapabilities"
         }
       ],
       "id": "session-runtime",
@@ -3039,6 +3064,7 @@
         "SessionCapabilityCorpusSchema",
         "SessionClass",
         "SessionClientActionRequest",
+        "SessionClientActionSpec",
         "SessionClientAttachRequest",
         "SessionClientAttachResponse",
         "SessionClientDecisionRequest",
@@ -3071,6 +3097,7 @@
         "SessionMoveSafePointRequested",
         "SessionMoveTransition",
         "SessionPlacement",
+        "SessionRecoveryScenarios",
         "SessionShellErrorRate",
         "SessionTerminalView",
         "SetSessionAffinity",
@@ -3175,6 +3202,8 @@
         "serveSessionRegistryScopeLabel",
         "sessionAffinity",
         "sessionBearer",
+        "sessionCapabilityCorpus",
+        "sessionCapabilityDefinition",
         "sessionChangesFor",
         "sessionClientAttachment",
         "sessionClientCapabilities",
@@ -3184,6 +3213,7 @@
         "sessionClientRuntimes",
         "sessionClientSchema",
         "sessionClientSession",
+        "sessionCorpusCapabilities",
         "sessionDiscoverySchema",
         "sessionLocked",
         "sessionMoveDestination",
@@ -4745,6 +4775,26 @@
           "category": "incidental",
           "reason": "Wire-field label in an endpoint conformance packet; it does not introduce a new policy capability.",
           "token": "policy_admission"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "SessionCapabilityCorpusSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "sessionCapabilityDefinition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "sessionCapabilityCorpus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "CAPABILITY_NOT_ADVERTISED"
         }
       ],
       "exclude": [
@@ -4757,6 +4807,7 @@
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
         "ArmFakCapability",
+        "CAPABILITY_NOT_ADVERTISED",
         "CapabilityAdded",
         "CapabilityDocument",
         "CapabilityRemoved",
@@ -4788,6 +4839,7 @@
         "RolloutPosture",
         "RunCIPreflight",
         "SIGNATURE_POLICY",
+        "SessionCapabilityCorpusSchema",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",
@@ -4852,6 +4904,8 @@
         "semanticGold",
         "semanticGrade",
         "semanticSubmission",
+        "sessionCapabilityCorpus",
+        "sessionCapabilityDefinition",
         "tailPolicyReport",
         "tailPolicyResult",
         "tailPolicySchema",

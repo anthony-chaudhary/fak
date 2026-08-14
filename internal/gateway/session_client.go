@@ -22,21 +22,22 @@ import (
 const sessionClientSchema = "fak-session-client/1"
 const SessionClientTokenHeader = "X-Fak-Session-Token"
 
-var sessionClientCapabilities = []string{"approve", "close", "deny", "detach", "effect_recovery", "observe", "replay", "terminal_transcript", "text_input"}
+var sessionClientCapabilities = []string{"approve", "checkpoint", "close", "deny", "detach", "drain", "effect_recovery", "move", "observe", "pause", "replay", "resume", "terminal_transcript", "text_input"}
 
 type SessionClientDescriptor struct {
-	Schema             string              `json:"schema"`
-	SessionID          string              `json:"session_id"`
-	ExecutionEpoch     string              `json:"execution_epoch"`
-	EventHead          uint64              `json:"event_head"`
-	Pending            string              `json:"pending_interaction,omitempty"`
-	RecoveryDependency string              `json:"recovery_dependency,omitempty"`
-	Capabilities       []string            `json:"capabilities"`
-	CapabilityDigest   string              `json:"capability_digest"`
-	Endpoint           string              `json:"endpoint"`
-	State              SessionState        `json:"state"`
-	Terminal           SessionTerminalView `json:"terminal"`
-	Effects            []SessionEffect     `json:"effects,omitempty"`
+	Schema             string                    `json:"schema"`
+	SessionID          string                    `json:"session_id"`
+	ExecutionEpoch     string                    `json:"execution_epoch"`
+	EventHead          uint64                    `json:"event_head"`
+	Pending            string                    `json:"pending_interaction,omitempty"`
+	RecoveryDependency string                    `json:"recovery_dependency,omitempty"`
+	Capabilities       []string                  `json:"capabilities"`
+	CapabilityDigest   string                    `json:"capability_digest"`
+	Endpoint           string                    `json:"endpoint"`
+	State              SessionState              `json:"state"`
+	Terminal           SessionTerminalView       `json:"terminal"`
+	Effects            []SessionEffect           `json:"effects,omitempty"`
+	Actions            []SessionClientActionSpec `json:"actions"`
 }
 
 type SessionTerminalView struct {
@@ -291,7 +292,7 @@ func (s *Server) clientDescriptor(r *http.Request, sessionID string) (SessionCli
 		Schema: sessionClientSchema, SessionID: sessionID, ExecutionEpoch: epoch,
 		EventHead: head, Capabilities: caps, CapabilityDigest: capabilityDigest(caps),
 		Endpoint: requestBaseURL(r) + "/v1/fak/session/" + sessionID, State: st,
-		Terminal: terminal, Effects: effects, RecoveryDependency: dependency,
+		Terminal: terminal, Effects: effects, RecoveryDependency: dependency, Actions: SessionCapabilityCorpus(caps),
 	}, true
 }
 
@@ -310,7 +311,7 @@ func (s *Server) sessionClientDescriptorForContext(ctx context.Context, sessionI
 	rt.mu.Lock()
 	epoch := rt.sessionLocked(sessionID).executionEpoch
 	rt.mu.Unlock()
-	return SessionClientDescriptor{Schema: sessionClientSchema, SessionID: sessionID, ExecutionEpoch: epoch, EventHead: head, Capabilities: caps, CapabilityDigest: capabilityDigest(caps), State: st, Terminal: terminal, Effects: effects, RecoveryDependency: dependency}, true
+	return SessionClientDescriptor{Schema: sessionClientSchema, SessionID: sessionID, ExecutionEpoch: epoch, EventHead: head, Capabilities: caps, CapabilityDigest: capabilityDigest(caps), State: st, Terminal: terminal, Effects: effects, RecoveryDependency: dependency, Actions: SessionCapabilityCorpus(caps)}, true
 }
 
 func requestBaseURL(r *http.Request) string {
@@ -514,12 +515,12 @@ func (s *Server) handleFakSessionClient(w http.ResponseWriter, r *http.Request, 
 
 var sessionClientPage = template.Must(template.New("session-client").Parse(`<!doctype html>
 <html><head><meta charset="utf-8"><title>fak session {{.}}</title><style>
-body{font:15px ui-monospace,monospace;background:#101418;color:#e8edf2;max-width:920px;margin:2rem auto;padding:0 1rem}button,input{font:inherit}code,pre{background:#192128;padding:.5rem;white-space:pre-wrap}.ok{color:#72e09a}.err{color:#ff8080}</style></head>
-<body><h1>fak session <code id="sid">{{.}}</code></h1><p id="identity">attaching…</p><h2>Full advertised capabilities</h2><ul id="caps"></ul><h2>Shared event tail</h2><pre id="events"></pre><form id="input"><input id="text" size="70" autocomplete="off"><button>Send through shared input lease</button></form><p id="status"></p>
+body{font:15px ui-monospace,monospace;background:#101418;color:#e8edf2;max-width:920px;margin:2rem auto;padding:0 1rem}button,input{font:inherit}@media(max-width:520px){body{margin:.5rem auto;padding:0 .5rem}button,input{box-sizing:border-box;max-width:100%}#actions{padding-left:1.2rem}}code,pre{background:#192128;padding:.5rem;white-space:pre-wrap}.ok{color:#72e09a}.err{color:#ff8080}</style></head>
+<body><h1>fak session <code id="sid">{{.}}</code></h1><p id="identity">attachingâ€¦</p><h2>Full advertised capabilities</h2><ul id="caps"></ul><h2>Action parity</h2><ul id="actions"></ul><h2>Shared event tail</h2><pre id="events"></pre><form id="input"><input id="text" size="70" autocomplete="off"><button>Send through shared input lease</button></form><p id="status"></p>
 <script>
 const sid={{printf "%q" .}}, base='/v1/fak/session/'+encodeURIComponent(sid); let attachment='', epoch='', cursor=0;
 async function call(path,body){const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.code)+': '+(j.error&&j.error.message));return j}
-function render(d){epoch=d.execution_epoch;cursor=d.event_head;identity.textContent='logical='+d.session_id+' epoch='+epoch+' head='+cursor+' capability='+d.capability_digest;caps.innerHTML=d.capabilities.map(x=>'<li>'+x+'</li>').join('')}
+function render(d){epoch=d.execution_epoch;cursor=d.event_head;identity.textContent='logical='+d.session_id+' epoch='+epoch+' head='+cursor+' capability='+d.capability_digest;caps.innerHTML=d.capabilities.map(x=>'<li>'+x+'</li>').join('');actions.innerHTML=d.actions.map(x=>'<li data-action='+x.id+'>'+x.label+': '+(x.available?control(x):x.unavailable_code+' - '+x.unavailable_reason+' Handoff: '+x.handoff)+'</li>').join('')} function control(x){if(x.kind==='text')return '<input aria-label="'+x.label+'"> <button data-route="'+x.route+'">Send</button>';if(x.kind==='form')return '<button data-route="'+x.route+'">Configure</button>';return '<button data-route="'+x.route+'">'+x.label+'</button>'}
 (async()=>{try{const d=await call('/client');render(d);const a=await call('/attach',{client_kind:'browser',since:cursor});attachment=a.attachment_id;render(a.descriptor);events.textContent=JSON.stringify(a.events,null,2);status.textContent=a.input_lease?'input lease held':'observe only: another client holds input lease';status.className='ok'}catch(e){status.textContent=e;status.className='err'}})();
 input.onsubmit=async e=>{e.preventDefault();try{const a=await call('/input',{attachment_id:attachment,execution_epoch:epoch,text:text.value,principal:'browser'});events.textContent=JSON.stringify(a.events,null,2);render(a.descriptor);text.value='';status.textContent='addressed once at '+a.cursor;status.className='ok'}catch(e){status.textContent=e;status.className='err'}};
 </script></body></html>`))

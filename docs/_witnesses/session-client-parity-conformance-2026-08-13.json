@@ -1,0 +1,29 @@
+{
+  "schema": "fak.session-client-conformance-witness.v1",
+  "captured_at": "2026-08-13T17:34:00-07:00",
+  "issue": 6550,
+  "result": "PASS",
+  "corpus_schema": "fak.session-capability-corpus.v1",
+  "reference_clients": ["terminal", "browser"],
+  "action_ids": ["observe", "terminal", "replay", "input", "approve", "deny", "steer", "pause", "resume", "drain", "terminate", "checkpoint", "move", "detach", "effect_recovery"],
+  "rule": "Each action is generated from the descriptor's capability set. Both reference clients render an available control or CAPABILITY_NOT_ADVERTISED with reason and handoff.",
+  "recovery_scenarios": ["disconnect_replay", "duplicate_delivery", "stale_epoch", "lease_transfer", "pending_approval", "source_process_loss", "interrupted_cutover"],
+  "address_assertions": {
+    "logical_session_id_preserved": true,
+    "cursor_compared": true,
+    "execution_epoch_compared": true,
+    "capability_digest_compared": true,
+    "terminal_digest_compared": true,
+    "effect_ids_and_verdicts_compared": true
+  },
+  "render_witnesses": {
+    "terminal_wide": "TestSessionReferenceRenderWitnesses captured the descriptor/action JSON",
+    "browser_wide": "TestSessionReferenceRenderWitnesses captured generated HTML",
+    "browser_constrained_mobile": "same HTML contains the max-width:520px constrained layout and generated action controls"
+  },
+  "ci_tripwire": "TestSessionCapabilityCorpusCoversAdvertisedCapabilities fails whenever an advertised capability has no generated reference-client action.",
+  "commands": [
+    "go test ./internal/gateway ./cmd/fak -run 'TestSessionCapabilityCorpus|TestSessionReferenceClients|TestSessionRecoveryScenario|TestSessionReferenceRenderWitnesses|TestRenderSessionOpenExposesActionParity|TestSessionClient' -count=1",
+    "go vet ./internal/gateway ./cmd/fak"
+  ]
+}
