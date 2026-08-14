@@ -268,6 +268,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "guard_accuracy", "debt": "guard_accuracy_debt", "script": "", "cmd": "go run ./cmd/fak score guard-accuracy --json", "label": "guard-accuracy"},
     {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak score dogfood --json", "label": "dogfood-loop"},
     {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak score concept-usage --json", "label": "concept-usage"},
+    {"key": "lightgap", "debt": "lightgap_debt", "script": "", "cmd": "go run ./cmd/fak score lightgap --json", "label": "lightgap"},
     {"key": "maturity", "debt": "maturity_debt", "script": "", "cmd": "go run ./cmd/fak maturity --json", "label": "maturity"},
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak score support-maturity --json", "label": "support-maturity"},

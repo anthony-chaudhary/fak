@@ -150,17 +150,6 @@ EXCLUDED_SCORECARDS: dict[str, str] = {
     "behavior_contract_scorecard.py": "advisory testing-quality gate (#2900): emits "
     "change_detector_debt and is fold-eligible, but registering it would require re-pinning "
     "scorecard_baseline.json — register + pin on a green tree to fold it into the ratchet",
-    "lightgap_scorecard.py": "the unbounded usability card (docs/lightgap-scorecard/): scores "
-    "fak per buyer-segment x facet against the next-best real option and the physical ceiling. "
-    "It emits corpus-compatible lightgap_debt (top level, found by find_int) and is fold-eligible, "
-    "but is held out for two reasons. (1) Its debt counts UNCOVERED cells -- comparisons nobody has "
-    "RUN -- not defects in something that exists, so it is heterogeneous even by total_debt's "
-    "already-heterogeneous standard: retiring one unit means running an experiment, not fixing a "
-    "line. (2) Registering it adds 9 to total_debt and reds the shared ratchet until "
-    "scorecard_baseline.json is re-pinned, and the pin cannot be taken honestly while the go-backed "
-    "cards are dropping out of the fold on a non-compiling working tree. Register + pin on a green "
-    "tree. It deliberately emits NO corpus grade (the card has no mean by construction -- see its "
-    "module docstring); derive_grade(debt) is the correct last-resort lens for it",
     "commit_quality_scorecard.py": "the eventual commit-scoring superset (composes "
     "subject-gradeability + stamp-bindability + on-lane into one commit_debt). Fold-eligible "
     "(emits corpus.commit_debt + grade), BUT its kpi_stamp_on_lane reads working-tree "
