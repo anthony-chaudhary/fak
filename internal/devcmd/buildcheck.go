@@ -190,7 +190,7 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	// errors reach the user -- a mask-induced false red is then suppressed entirely. In JSON
 	// mode output is always captured (stdout carries only the report); otherwise it streams.
 	overlayMasked := *isolate && len(masked) > 0
-	capture := *asJSON || overlayMasked
+	capture := *asJSON || overlayMasked || len(kept) > 0
 	runOut, runErr := stdout, stderr
 	var buf bytes.Buffer
 	if capture {
@@ -225,6 +225,9 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 			verdict, reason, code = "OK", "", 0
 			buf.Reset() // the captured masked-build errors were a false red; do not surface them
 		}
+	}
+	if code != 0 {
+		labelUntrackedBuildFailures(&buf, append(append([]string{}, masked...), kept...))
 	}
 	elapsed := buildCheckNow().Sub(start)
 
@@ -328,6 +331,17 @@ func buildCheckTail(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func labelUntrackedBuildFailures(output *bytes.Buffer, untracked []string) {
+	normalizedOutput := filepath.ToSlash(output.String())
+	for _, path := range untracked {
+		normalizedPath := filepath.ToSlash(path)
+		if !strings.Contains(normalizedOutput, normalizedPath) {
+			continue
+		}
+		fmt.Fprintf(output, "fak buildcheck: %s is UNTRACKED -- this red is not from the committed base\n", normalizedPath)
+	}
 }
 
 func joinReason(a, b string) string {

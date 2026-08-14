@@ -230,6 +230,44 @@ func TestRunBuildCheckJSONReport(t *testing.T) {
 	}
 }
 
+func TestLabelUntrackedBuildFailures(t *testing.T) {
+	var output bytes.Buffer
+	output.WriteString("internal/broken/broken.go:3:27: undefined: missing\n")
+	labelUntrackedBuildFailures(&output, []string{"internal/broken/broken.go", "internal/other/clean.go"})
+
+	got := output.String()
+	for _, want := range []string{
+		"internal/broken/broken.go:3:27: undefined: missing",
+		"internal/broken/broken.go is UNTRACKED -- this red is not from the committed base",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "internal/other/clean.go is UNTRACKED") {
+		t.Fatalf("unrelated untracked path was labelled:\n%s", got)
+	}
+}
+
+func TestRunBuildCheckLabelsKeptUntrackedFailure(t *testing.T) {
+	withBuildCheckSeams(t, []string{"cmd/fak/peer.go"}, map[string]bool{"cmd/fak": true}, func(_ string, _ []string, _, stderr io.Writer) (int, error) {
+		stderr.Write([]byte("cmd/fak/peer.go:9:2: undefined: Missing\n"))
+		return 1, nil
+	})
+	var stdout, stderr bytes.Buffer
+	if got := RunBuildCheck(&stdout, &stderr, []string{"./cmd/fak"}); got != 1 {
+		t.Fatalf("RunBuildCheck()=%d, want 1", got)
+	}
+	for _, want := range []string{
+		"cmd/fak/peer.go:9:2: undefined: Missing",
+		"cmd/fak/peer.go is UNTRACKED -- this red is not from the committed base",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
 func TestRunBuildCheckBuildFailedExit(t *testing.T) {
 	withBuildCheckSeams(t, nil, nil, func(_ string, _ []string, _, stderr io.Writer) (int, error) {
 		stderr.Write([]byte("cmd/fak/x.go:9:2: undefined: Foo\n"))
