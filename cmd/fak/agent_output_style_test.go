@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -32,5 +34,32 @@ func TestApplyAgentOutputStyleRestoresEnvironment(t *testing.T) {
 	restore()
 	if got := os.Getenv(syspromptmmu.StyleEnvVar); got != prior {
 		t.Fatalf("restored=%q", got)
+	}
+}
+
+func TestAgentOutputProfilesUserReadout(t *testing.T) {
+	var out bytes.Buffer
+	if err := printAgentOutputProfiles(&out, nil); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"caveman:medium", "caveman:original:*", "not-yet", "--output-style full", "does not change work policy"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("profiles readout missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAgentOutputProfilesJSON(t *testing.T) {
+	var out bytes.Buffer
+	if err := printAgentOutputProfiles(&out, []string{"--json"}); err != nil {
+		t.Fatal(err)
+	}
+	var got []agentOutputProfile
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 8 || got[5].Selection != "caveman:medium" || got[5].Canonical != "caveman:native:medium" || got[7].Status != "not-yet" {
+		t.Fatalf("profile JSON = %+v", got)
 	}
 }

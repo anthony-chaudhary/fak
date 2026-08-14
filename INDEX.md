@@ -30,6 +30,8 @@ This is the complete map of repository documentation. The audience table below i
 New dated notes go under [`docs/notes/`](docs/notes/) and get a line in **Notes & research**, so the audience route can stay concise while the map remains complete. Before touching this map or [`llms.txt`](llms.txt), run `python tools/check_index_sync.py --audit-tree`; the same reciprocal check runs in staged mode for front-door index and dated-note changes.
 
 ## Start here
+
+- [Response profiles: concise, Caveman-compatible, and composable](docs/response-profiles.md) -- choose low/medium/high, distinguish native from original, and understand the safety and composition boundaries.
 - **Micro-context fabric research** — one immutable agent base, bounded physical model slots, and 100 / 1,000 / 10,000 logical contexts; start with the [research contract](docs/research/micro-context-fabrics.md), run the floor with `go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64`, and follow the [research witness index](docs/research/README.md).
 
 

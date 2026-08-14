@@ -171,6 +171,18 @@ gain vs tuned warm-cache stack.) The vDSO hit-rate and token savings are reporte
 as **soft UPSIDE secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md`
 (unit 82).
 
+## `fak agent` response profiles
+
+`fak agent --output-style <selection>` opts the owned agent loop into a named response shape. The default is `full` (no shaping). Run `fak agent profiles` or `fak agent profiles --json` to list shipped, reserved, and not-yet selections. The recommended concise compatibility setting is `caveman:medium`; it canonicalizes to the fak-authored `caveman:native:medium`. See [Response profiles](response-profiles.md) for intensity guidance, native-versus-original provenance, preservation rules, and the current harness boundary.
+
+```bash
+fak agent profiles
+fak agent --output-style caveman:medium --task "Explain this failure"
+fak agent --output-style full
+```
+
+Unknown or not-yet selections fail before the run. Response profiles do not change work policy or tool authorization.
+
 ## Verbs
 
 The verb surface is **two-tier** (epic #2228). The **frontdoor** tier is the

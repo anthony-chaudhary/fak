@@ -1030,10 +1030,17 @@ func printBreakEven(w io.Writer, r *turnbench.BreakEvenReport) {
 // adjudicator denies, and MMU quarantines for each arm  -  the real turn-use-vs-now
 // measurement the static bench could not produce.
 func cmdAgent(argv []string) {
+	if len(argv) > 0 && argv[0] == "profiles" {
+		if err := printAgentOutputProfiles(os.Stdout, argv[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
-	outputStyle := fs.String("output-style", "full", "response profile: full|concise|brief|terse|minimal|native:{low|medium|high}|caveman:native:{low|medium|high}")
+	outputStyle := fs.String("output-style", "full", "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; caveman:* is safe native shorthand (see `fak agent profiles`)")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	model := fs.String("model", "gemini-2.5-flash", "model id")

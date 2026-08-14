@@ -200,9 +200,9 @@ func TestComposableStyleFamiliesAndIntensities(t *testing.T) {
 		{"native:low", 1, StyleFamilyNative, "low"},
 		{"native:medium", 2, StyleFamilyNative, "medium"},
 		{"native:high", 3, StyleFamilyNative, "high"},
-		{"caveman:native:low", 1, StyleFamilyCaveman, "low"},
-		{"caveman:native:medium", 2, StyleFamilyCaveman, "medium"},
-		{"caveman:native:high", 3, StyleFamilyCaveman, "high"},
+		{"caveman:native:low", 1, StyleFamilyCaveman + ":" + StyleFamilyNative, "low"},
+		{"caveman:native:medium", 2, StyleFamilyCaveman + ":" + StyleFamilyNative, "medium"},
+		{"caveman:native:high", 3, StyleFamilyCaveman + ":" + StyleFamilyNative, "high"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,6 +227,17 @@ func TestOriginalStyleIsNotSilentlyAliased(t *testing.T) {
 		got := DescribeStyle(name)
 		if got.Known || got.Applied || got.Level != SteeringOff {
 			t.Fatalf("DescribeStyle(%q) = %+v; foreign/or unsupported profiles must fail safe", name, got)
+		}
+	}
+}
+
+func TestCavemanShorthandCanonicalizesToNative(t *testing.T) {
+	for _, intensity := range []string{"low", "medium", "high"} {
+		raw := "caveman:" + intensity
+		got := DescribeStyle(raw)
+		want := "caveman:native:" + intensity
+		if !got.Known || got.Style != want || got.Family != "caveman:native" || got.Intensity != intensity {
+			t.Fatalf("DescribeStyle(%q) = %+v, want canonical %q", raw, got, want)
 		}
 	}
 }

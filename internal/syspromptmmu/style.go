@@ -122,7 +122,15 @@ func StyleLevel(name string) (int, bool) {
 // canonicalStyle normalizes an operator-supplied name to its comparison form. Kept separate
 // from StyleLevel so DescribeStyle can report the canonical spelling it resolved to.
 func canonicalStyle(name string) string {
-	return strings.ToLower(strings.TrimSpace(name))
+	canonical := strings.ToLower(strings.TrimSpace(name))
+	// User-facing Caveman shorthand selects fak's safe native implementation. The canonical
+	// readout always expands the implementation slot so captures never confuse it with a
+	// future provenance-checked `caveman:original:*` adapter.
+	parts := strings.Split(canonical, ":")
+	if len(parts) == 2 && parts[0] == StyleFamilyCaveman {
+		canonical = StyleFamilyCaveman + ":" + StyleFamilyNative + ":" + parts[1]
+	}
+	return canonical
 }
 
 // StyleNames lists the closed vocabulary in ascending terseness order (full first), for a
