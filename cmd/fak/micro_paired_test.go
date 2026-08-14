@@ -111,7 +111,7 @@ func TestRunPairedBaselineAddsBoundedGuardEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(source)
-	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineParentTimeout)", `"--rotate", "off"`, `"--max-duration", pairedBaselineGuardTimeout.String()`} {
+	for _, want := range []string{"context.WithTimeout(ctx, pairedBaselineParentTimeout)", `"--rotate", "off"`, `"--max-duration", pairedBaselineGuardTimeout.String()`, `arm.Error = reason`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("baseline command lacks %q", want)
 		}
@@ -134,8 +134,24 @@ func TestPairedReadyClaudeConfigDirUsesServableAccount(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s' '{\"dir\":\"/seat/ready\",\"can_serve\":true}'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := pairedReadyClaudeConfigDir(context.Background(), exe); got != "/seat/ready" {
-		t.Fatalf("config dir=%q", got)
+	got, reason := pairedReadyClaudeConfigDir(context.Background(), exe)
+	if got != "/seat/ready" || reason != "" {
+		t.Fatalf("config dir=%q reason=%q", got, reason)
+	}
+}
+
+func TestPairedReadyClaudeConfigDirPreservesNoSeatRefusal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only; Windows path is live-witnessed")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "fak")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s\n' 'no runtime-launchable account' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, reason := pairedReadyClaudeConfigDir(context.Background(), exe)
+	if got != "" || !strings.Contains(reason, "no runtime-launchable account") {
+		t.Fatalf("config dir=%q reason=%q", got, reason)
 	}
 }
 

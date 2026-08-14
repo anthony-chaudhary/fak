@@ -183,9 +183,12 @@ func runPairedBaseline(ctx context.Context, task, expected, model string) paired
 	cmd := exec.CommandContext(ctx, exe, "manage", "--quiet", "--probe", "--rotate", "off", "--max-duration", pairedBaselineGuardTimeout.String(), "--lease", "mode=off", "--", "claude", "-p", task, "--output-format", "json", "--max-turns", "1", "--tools", "", "--model", model, "--setting-sources", "")
 	env := filteredPairedEnv(os.Environ())
 	if !pairedEnvHas(env, "CLAUDE_CONFIG_DIR") {
-		if dir := pairedReadyClaudeConfigDir(ctx, exe); dir != "" {
-			env = append(env, "CLAUDE_CONFIG_DIR="+dir)
+		dir, reason := pairedReadyClaudeConfigDir(ctx, exe)
+		if dir == "" {
+			arm.Error = reason
+			return arm
 		}
+		env = append(env, "CLAUDE_CONFIG_DIR="+dir)
 	}
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
@@ -302,18 +305,29 @@ func pairedEnvValue(env []string, name string) string {
 	return ""
 }
 
-func pairedReadyClaudeConfigDir(ctx context.Context, exe string) string {
+func pairedReadyClaudeConfigDir(ctx context.Context, exe string) (string, string) {
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(probeCtx, exe, "accounts", "next", "--json").Output()
+	cmd := exec.CommandContext(probeCtx, exe, "accounts", "next", "--json")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		reason := strings.TrimSpace(stderr.String())
+		if reason == "" {
+			reason = err.Error()
+		}
+		return "", "managed baseline skipped: no runtime-launchable account: " + reason
 	}
 	var seat accounts.RotationSeat
-	if json.Unmarshal(out, &seat) != nil || !seat.CanServe {
-		return ""
+	if err := json.Unmarshal(out, &seat); err != nil {
+		return "", "managed baseline skipped: decode account readiness: " + err.Error()
 	}
-	return strings.TrimSpace(seat.Dir)
+	dir := strings.TrimSpace(seat.Dir)
+	if !seat.CanServe || dir == "" {
+		return "", "managed baseline skipped: account readiness returned no servable config dir"
+	}
+	return dir, ""
 }
 
 func pairedEnvHas(env []string, name string) bool { return pairedEnvValue(env, name) != "" }
