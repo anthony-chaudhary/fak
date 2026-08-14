@@ -135,7 +135,9 @@ type Candidate struct {
 	CreatedUnix int64 `json:"created_unix"`
 	// UpdatedUnix is when the unit was last updated (0 = unknown); the PRIMARY recency signal.
 	UpdatedUnix int64 `json:"updated_unix"`
-	// LastAttemptUnix is when a worker was last spawned for this unit (0 = never); the cooldown input.
+	// LastAttemptUnix is when a worker was last spawned for this unit (0 = never). It holds
+	// recent work for cooldown; after cooldown it marks already-started WIP, which sorts before
+	// never-attempted work within the same explicit priority tier.
 	LastAttemptUnix int64 `json:"last_attempt_unix"`
 	// BlockedBy names the ids of prerequisites this unit depends on — a dependency edge honored as
 	// a SOFT hold, never a hard ban. When a listed prerequisite is still an OPEN candidate in the
@@ -272,6 +274,10 @@ type Input struct {
 	// supersede collapse still keeps the FRESHEST duplicate (the most recent update of one
 	// target), and the live/cooldown/collision skips are unchanged.
 	PreferOldest bool `json:"prefer_oldest,omitempty"`
+	// FinishFirst orders already-attempted survivors before never-attempted survivors within
+	// the same explicit priority tier. It does not bypass cooldown, dependencies, generations,
+	// or collision pricing. False preserves the legacy recency order.
+	FinishFirst bool `json:"finish_first,omitempty"`
 	// Generation narrows the admitted horizon: "", "default", or "auto" admits gen/now and
 	// gen/next; "now", "next", "second-next", and "future" admit only that horizon; "all"
 	// admits every classified generation while still holding unclassified candidates. Legacy
@@ -426,6 +432,15 @@ func Plan(in Input) Result {
 		}
 		if ranked[i].Priority != ranked[j].Priority {
 			return ranked[i].Priority > ranked[j].Priority // declared priority leads recency; higher = do-first
+		}
+		// A prior attempt is the durable signal that this issue is already WIP. Once its
+		// cooldown clears, finish it before opening a never-attempted issue in the same
+		// priority tier. This is deliberately a sort, not a hold: collision and dependency
+		// pricing can still choose the largest safe set.
+		if in.FinishFirst {
+			if ai, aj := ranked[i].LastAttemptUnix > 0, ranked[j].LastAttemptUnix > 0; ai != aj {
+				return ai
+			}
 		}
 		if wi, wj := wedgedObjective(ranked[i].Candidate), wedgedObjective(ranked[j].Candidate); wi != wj {
 			return !wi // within a priority tier, fresh work outranks a sustained-STALL (wedged) objective

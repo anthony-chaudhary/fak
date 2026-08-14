@@ -456,14 +456,19 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 			Tree:       paths,
 			Scoped:     true,
 		}
+		lastAttempt := int64(0)
+		if attemptedAt, ok := snap.latest[route.Number]; ok {
+			lastAttempt = attemptedAt.Unix()
+		}
 		cands = append(cands, dispatchorder.Candidate{
-			ID:          id,
-			Key:         id,
-			Lane:        leaseID,
-			Tree:        paths,
-			Mode:        "exclusive",
-			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(paths)),
-			CreatedUnix: int64(route.Number),
+			ID:              id,
+			Key:             id,
+			Lane:            leaseID,
+			Tree:            paths,
+			Mode:            "exclusive",
+			UpdatedUnix:     dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(paths)),
+			CreatedUnix:     int64(route.Number),
+			LastAttemptUnix: lastAttempt,
 		})
 	}
 	for i, lane := range lanes {
@@ -505,14 +510,19 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 			StepBudget: stepBudget,
 			Tree:       append([]string(nil), grp.Tree...),
 		}
+		lastAttempt := int64(0)
+		if attemptedAt, ok := snap.latest[issue]; ok {
+			lastAttempt = attemptedAt.Unix()
+		}
 		cands = append(cands, dispatchorder.Candidate{
-			ID:          id,
-			Key:         id,
-			Lane:        leaseID,
-			Tree:        grp.Tree,
-			Mode:        "exclusive",
-			UpdatedUnix: dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(grp.Tree)),
-			CreatedUnix: int64(grp.Count*len(lanes) + (len(lanes) - i)),
+			ID:              id,
+			Key:             id,
+			Lane:            leaseID,
+			Tree:            grp.Tree,
+			Mode:            "exclusive",
+			UpdatedUnix:     dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(grp.Tree)),
+			CreatedUnix:     int64(grp.Count*len(lanes) + (len(lanes) - i)),
+			LastAttemptUnix: lastAttempt,
 		})
 	}
 
@@ -520,6 +530,7 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 		Candidates:      cands,
 		NowUnix:         time.Now().Unix(),
 		CooldownSeconds: -1,
+		FinishFirst:     true,
 	})
 	limit := minInt(requested, granted)
 	runLanes := append([]string(nil), res.Keep...)

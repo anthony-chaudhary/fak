@@ -1032,3 +1032,46 @@ func TestRangesOverlapGrammar(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanFinishesAttemptedWorkBeforeOpeningFreshWork(t *testing.T) {
+	in := Input{
+		NowUnix:         10_000,
+		CooldownSeconds: 100,
+		FinishFirst:     true,
+		Candidates: []Candidate{
+			{ID: "fresh", Key: "fresh", UpdatedUnix: 9_900, Priority: 1},
+			{ID: "wip", Key: "wip", UpdatedUnix: 1_000, LastAttemptUnix: 9_000, Priority: 1},
+		},
+	}
+
+	got := Plan(in)
+	if pick := got.Pick(); pick != "wip" {
+		t.Fatalf("pick = %q, want attempted WIP before a newer unstarted issue; order=%+v", pick, got.Order)
+	}
+	if got.KeepCount != 2 {
+		t.Fatalf("keep_count = %d, want both safe candidates retained", got.KeepCount)
+	}
+}
+
+func TestPlanFinishFirstPreservesPriorityAndCooldown(t *testing.T) {
+	in := Input{
+		NowUnix:         10_000,
+		CooldownSeconds: 100,
+		FinishFirst:     true,
+		Candidates: []Candidate{
+			{ID: "urgent-fresh", Key: "urgent-fresh", UpdatedUnix: 9_900, Priority: 2},
+			{ID: "wip", Key: "wip", UpdatedUnix: 1_000, LastAttemptUnix: 9_000, Priority: 1},
+			{ID: "cooling", Key: "cooling", UpdatedUnix: 9_950, LastAttemptUnix: 9_950, Priority: 3},
+		},
+	}
+
+	got := Plan(in)
+	if pick := got.Pick(); pick != "urgent-fresh" {
+		t.Fatalf("pick = %q, want explicit higher priority to lead finish-first; order=%+v", pick, got.Order)
+	}
+	for _, row := range got.Order {
+		if row.ID == "cooling" && row.Disposition != DispCooling {
+			t.Fatalf("cooling disposition = %q, want %q", row.Disposition, DispCooling)
+		}
+	}
+}
