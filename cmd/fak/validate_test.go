@@ -26,6 +26,47 @@ func runValidateJSON(t *testing.T, argv []string) (validateResult, int, string) 
 	return res, code, stderr.String()
 }
 
+func TestValidateTestOnlyIgnoresBrokenPeerWIPAndReportsMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	repo, git := seedGitFixtureRepo(t)
+	commitFiles(t, repo, git, "clean", map[string]string{
+		"go.mod": cleanGoMod,
+		"p/p.go": cleanGoFile,
+		"p/p_test.go": `package p
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if Add(1, 2) != 3 { t.Fatal("bad") }
+}
+`,
+		"peer/peer.go": "package peer\n\nfunc OK() {}\n",
+	})
+	if err := os.WriteFile(filepath.Join(repo, "p", "p_test.go"), []byte(`package p
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if Add(1, 2) != 3 { t.Fatal("bad") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "peer", "peer.go"), []byte("package peer\n\nfunc Broken( {\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, code, stderr := runValidateJSON(t, []string{"--root", repo, "--mine", "p/p_test.go", "--test-only", "--json"})
+	if code != 0 || !res.OK || res.Schema != "fak-validate/1" || res.Mode != "test-only" {
+		t.Fatalf("code=%d stderr=%q result=%+v", code, stderr, res)
+	}
+	if len(res.Tested) == 0 {
+		t.Fatalf("expected affected package tests: %+v", res)
+	}
+}
+
 func TestValidateRequiresExplicitMine(t *testing.T) {
 	_, code, stderr := runValidateJSON(t, []string{"--json"})
 	if code != 2 || !bytes.Contains([]byte(stderr), []byte("at least one --mine")) {

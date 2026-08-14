@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -24,6 +26,8 @@ import (
 )
 
 type validateResult struct {
+	Schema   string               `json:"schema"`
+	Mode     string               `json:"mode"`
 	Ref      string               `json:"ref"`
 	Tip      string               `json:"tip"`
 	Mine     []string             `json:"mine"`
@@ -41,6 +45,9 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	ref := fs.String("ref", "HEAD", "committed base ref or sha")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	testOnly := fs.Bool("test-only", false, "skip full build/vet and run only affected tests in the isolated checkout")
+	wslTests := fs.Bool("wsl-tests", false, "run isolated affected tests through WSL (Windows hosts only)")
+	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
 	if !parseFlags(fs, argv) {
@@ -79,21 +86,27 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	res := validateResult{Ref: *ref, Tip: tip, Mine: paths, OK: true}
-	if files, ferr := gofmtOwnedPaths(dir, paths); ferr != nil {
-		res.OK = false
-		res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Detail: ferr.Error()})
-	} else if len(files) > 0 {
-		res.OK = false
-		res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Files: files})
+	mode := "full"
+	if *testOnly {
+		mode = "test-only"
 	}
-	if detail, ok := runGoCheck(dir, "build", "./..."); !ok {
-		res.OK = false
-		res.Failures = append(res.Failures, ciPreflightFailure{Step: "build", Detail: detail})
-	}
-	if detail, ok := runGoCheck(dir, "vet", "./..."); !ok {
-		res.OK = false
-		res.Failures = append(res.Failures, ciPreflightFailure{Step: "vet", Detail: detail})
+	res := validateResult{Schema: "fak-validate/1", Mode: mode, Ref: *ref, Tip: tip, Mine: paths, OK: true}
+	if !*testOnly {
+		if files, ferr := gofmtOwnedPaths(dir, paths); ferr != nil {
+			res.OK = false
+			res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Detail: ferr.Error()})
+		} else if len(files) > 0 {
+			res.OK = false
+			res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Files: files})
+		}
+		if detail, ok := runGoCheck(dir, "build", "./..."); !ok {
+			res.OK = false
+			res.Failures = append(res.Failures, ciPreflightFailure{Step: "build", Detail: detail})
+		}
+		if detail, ok := runGoCheck(dir, "vet", "./..."); !ok {
+			res.OK = false
+			res.Failures = append(res.Failures, ciPreflightFailure{Step: "vet", Detail: detail})
+		}
 	}
 	fileToPkg, edges, _, graphErr := goListGraph(dir)
 	if graphErr != nil {
@@ -121,8 +134,12 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		}
 		if len(res.Tested) > 0 {
 			testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
-			args := append([]string{"test"}, testTargets...)
-			if detail, ok := runValidateTests(dir, args); !ok {
+			args := []string{"test"}
+			if strings.TrimSpace(*testRun) != "" {
+				args = append(args, "-run", *testRun)
+			}
+			args = append(args, testTargets...)
+			if detail, ok := runValidateTests(dir, args, *wslTests); !ok {
 				res.OK = false
 				res.Failures = append(res.Failures, ciPreflightFailure{Step: "test", Detail: detail})
 			}
@@ -329,15 +346,38 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 	return dst
 }
 
-func runValidateTests(dir string, args []string) (string, bool) {
-	// The archive checkout is isolated from peer WIP, so direct `go test` is the exact
-	// intended affected-package operation. The caller can invoke `fak validate` from WSL
-	// on hosts whose application policy blocks freshly-built native test binaries.
-	cmd := windowgate.Command("go", args...)
-	cmd.Dir = dir
+func runValidateTests(dir string, args []string, wsl bool) (string, bool) {
+	// The archive checkout is isolated from peer WIP. On Windows, --wsl-tests keeps the
+	// same archive question but executes test binaries under Linux, avoiding host
+	// application-control stalls on freshly compiled native test executables.
+	var cmd *exec.Cmd
+	if wsl && runtime.GOOS == "windows" {
+		// Stream the isolated archive into WSL-native /tmp. A tar stream is cheaper
+		// than per-file NTFS copies and lets Go compile/test from ext4.
+		wslDir := "/tmp/fak-validate-" + filepath.Base(dir)
+		cleanup := "rm -rf -- " + posixQuote(wslDir)
+		command := "set -euo pipefail; trap " + posixQuote(cleanup) + " EXIT; rm -rf " + posixQuote(wslDir) + "; mkdir -p " + posixQuote(wslDir) + "; tar -cf - . | tar -xf - -C " + posixQuote(wslDir) + "; cd " + posixQuote(wslDir) + "; go"
+		for _, arg := range args {
+			command += " " + posixQuote(arg)
+		}
+		command += " && printf '\n__FAK_VALIDATE_TEST_OK__\n'"
+		cmd = windowgate.Command("wsl.exe", "--cd", dir, "bash", "-lc", command)
+	} else {
+		cmd = windowgate.Command("go", args...)
+		cmd.Dir = dir
+	}
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err == nil
+	detail := strings.TrimSpace(string(out))
+	if wsl && strings.Contains(detail, "__FAK_VALIDATE_TEST_OK__") {
+		detail = strings.TrimSpace(strings.ReplaceAll(detail, "__FAK_VALIDATE_TEST_OK__", ""))
+		return detail, true
+	}
+	return detail, err == nil
+}
+
+func posixQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func runGoCheck(dir string, args ...string) (string, bool) {
@@ -353,7 +393,11 @@ func runGoCheck(dir string, args ...string) (string, bool) {
 
 func renderValidate(w io.Writer, res validateResult) {
 	if res.OK {
-		fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) build, vet, and affected-test clean\n", short(res.Tip), len(res.Mine))
+		if res.Mode == "test-only" {
+			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) affected-test clean (isolated test-only mode)\n", short(res.Tip), len(res.Mine))
+		} else {
+			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) build, vet, and affected-test clean\n", short(res.Tip), len(res.Mine))
+		}
 		return
 	}
 	fmt.Fprintf(w, "RED: committed tip %s + owned delta failed\n", short(res.Tip))
