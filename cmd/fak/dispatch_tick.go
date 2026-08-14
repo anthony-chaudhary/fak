@@ -897,9 +897,33 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	liveScopes := pickRes.liveScopes
 	target := pickRes.target
 	hasTarget := pickRes.hasTarget
+	var leaseReroute map[string]any
+	// A dry tick is the operator's launch plan. If its automatic first choice is
+	// already leased, spend one bounded re-pick with that lane excluded instead of
+	// returning a plan known to be unusable and requiring another parent turn.
+	// Explicit --lane remains exact, and live ticks still acquire only the one tree
+	// they planned, so this cannot turn a preview convenience into surprise fan-out.
+	if !opts.Live && strings.TrimSpace(opts.Lane) == "" && pick.Lane != "" {
+		firstLease := inspectDispatchLaneLease(root, pick.Lane, pick.Tree, opts.Goal)
+		if refused, _ := firstLease["refused"].(bool); refused {
+			rerouteOpts := opts
+			rerouteOpts.ExcludeLanes = append(append([]string(nil), opts.ExcludeLanes...), pick.Lane)
+			rerouteStart := time.Now()
+			if alternate, rerouteErr := resolveDispatchTickPick(root, stderr, rerouteOpts, runsDir, heldNoCommit, recoverableNoCommit); rerouteErr == nil && alternate.pick.Lane != "" {
+				leaseReroute = map[string]any{"from_lane": pick.Lane, "lease": firstLease, "to_lane": alternate.pick.Lane}
+				pickRes = alternate
+				pick, held, liveIssueDetails, liveScopes = alternate.pick, alternate.held, alternate.liveIssueDetails, alternate.liveScopes
+				target, hasTarget = alternate.target, alternate.hasTarget
+			}
+			dispatchStampMs(timings, "lease_reroute", rerouteStart)
+		}
+	}
 
 	tSeed := time.Now()
 	payload := seedDispatchTickPayload(root, opts, reg, pre, account, pickRes)
+	if leaseReroute != nil {
+		payload["lease_reroute"] = leaseReroute
+	}
 	if selection, ok := dispatchTickSeatSelection(root, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend), account.Tag); ok {
 		payload["seat_selection"] = selection
 	}
