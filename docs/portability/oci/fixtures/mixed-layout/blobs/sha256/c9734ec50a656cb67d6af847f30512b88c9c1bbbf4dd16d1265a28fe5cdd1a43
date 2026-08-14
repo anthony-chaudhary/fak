@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.fak.collection.config.v1+json",
+  "config": {
+    "mediaType": "application/vnd.fak.collection.config.v1+json",
+    "digest": "sha256:dc105716028a24cb0b0c0fcb6bca0985f480e403325398e0ec493cae1fecd0da",
+    "size": 692
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.fak.skill.v1+json",
+      "digest": "sha256:9c4bc41988155102f8e5d9ce380b7a80e0688dd90db9f9457392fdea1fe0055c",
+      "size": 18,
+      "annotations": {
+        "io.fak.object.kind": "skill",
+        "org.opencontainers.image.title": "skills/review.json"
+      }
+    },
+    {
+      "mediaType": "application/vnd.fak.mcp.server.v1+json",
+      "digest": "sha256:abe05d017cbc91e4e2f3634cc322e0e873619474bbaedd9ba746f7447c12aaf5",
+      "size": 246,
+      "annotations": {
+        "io.fak.object.kind": "mcp-service",
+        "org.opencontainers.image.title": "mcp/fak.server.json"
+      }
+    },
+    {
+      "mediaType": "application/vnd.example.future.v9+binary",
+      "digest": "sha256:e32f0d62288c85119349a5519afbd5617a4ca4f84ceee9ca836812e8b982d5e2",
+      "size": 5,
+      "annotations": {
+        "io.fak.object.kind": "future-object",
+        "org.opencontainers.image.title": "future/opaque.bin"
+      }
+    }
+  ],
+  "annotations": {
+    "example.unknown": "preserve-me",
+    "org.opencontainers.image.description": "hand-authored mixed collection"
+  }
+}

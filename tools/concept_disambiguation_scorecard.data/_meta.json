@@ -4865,6 +4865,11 @@
           "category": "incidental",
           "reason": "Private conformance probe helper for the existing fak_adjudicate endpoint; it introduces no new policy capability.",
           "token": "endpointAdjudicate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Media-type constant local to OCI profile serialization; it does not introduce or rename a policy capability.",
+          "token": "PolicyMediaType"
         }
       ],
       "exclude": [
@@ -4899,6 +4904,7 @@
         "OrgPolicyURLEnv",
         "POLICY_CONFLICT",
         "PolicyHash",
+        "PolicyMediaType",
         "PolicyRevision",
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
@@ -5965,6 +5971,11 @@
           "category": "incidental",
           "reason": "Machine-readable acceptance metric field, not a new support-maturity concept",
           "token": "provenance_correctness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed OCI validation error code local to the artifact profile; it is not a support-maturity state.",
+          "token": "UNSUPPORTED_MEDIA_TYPE"
         }
       ],
       "id": "support-maturity",
@@ -6045,6 +6056,7 @@
         "UNKNOWN_RUNTIME",
         "UNSUPPORTED_COMBINATION",
         "UNSUPPORTED_FORMAT",
+        "UNSUPPORTED_MEDIA_TYPE",
         "VerdictParityOK",
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",
@@ -7433,13 +7445,31 @@
           "category": "incidental",
           "reason": "gitDailyDayLayout is a file-local mirror of Go's reference-date layout 2006-01-02, duplicated as a literal because internal/gitdaily (which owns gitdaily.DayLayout) sits a layer ABOVE internal/metrics and so cannot be imported here. It introduces no layout concept of its own.",
           "token": "gitDailyDayLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "OCI image-layout serialization function local to the artifact profile; it does not define a product UI or repository layout concept.",
+          "token": "ExportLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Required OCI image-layout JSON field from the external specification; it is not a fak layout concept.",
+          "token": "imageLayoutVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "OCI image-layout deserialization function local to the artifact profile; it does not define a product UI or repository layout concept.",
+          "token": "ImportLayout"
         }
       ],
       "id": "layout",
       "ignore": [
+        "ExportLayout",
+        "ImportLayout",
         "archusesmlamoelayout",
         "defaultlayout",
         "gitDailyDayLayout",
+        "imageLayoutVersion",
         "layouts",
         "usesmlamoelayout"
       ],

@@ -73,7 +73,7 @@ pilot_development_branch = "dev"
 [lanes]
 concurrent = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
-  "cachemeta", "portabilityswitch",
+  "cachemeta", "ociartifact", "portabilityswitch",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
@@ -529,6 +529,7 @@ adjudicator = ["internal/adjudicator/**"]
 agent = ["internal/agent/**"]
 agentdojo = ["internal/agentdojo/**"]
 architest = ["internal/architest/**"]
+ociartifact = ["internal/ociartifact/**"]
 portabilityswitch = ["internal/portabilityswitch/**"]
 windowgate = ["internal/windowgate/**"]
 worktype = ["internal/worktype/**"]
