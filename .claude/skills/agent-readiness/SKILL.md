@@ -104,9 +104,13 @@ score but are **never** friction-debt; weigh them, don't grind on them.
 From the repo root:
 
 ```bash
-go run ./cmd/fak score agent-readiness            # human scorecard + friction-debt work-list
-go run ./cmd/fak score agent-readiness --json     # machine payload (the loop uses this)
+fak score agent-readiness --json > agent-readiness.json
 ```
+
+This machine-readable artifact is mandatory. Before choosing work, quote every non-zero
+`corpus.breakdown` row from it. When present, prioritize `command_verbs_resolve` and
+`refusal_recovery_mapped` before softer copy polish. Product defects exposed by those rows
+belong in dedicated issues rather than being silently fixed inside a skill-only pass.
 
 It scores the three steps (discover · adopt · build) into a composite (0–100, A–F)
 and a **friction-debt** integer, and prints the work-list: every HARD defect with
@@ -114,15 +118,17 @@ the affordance to add, then the SOFT signals. Read-only; it never edits the tree
 
 ## Step 2 — Retire friction-debt worst-step-first
 
-Take the weakest step first (the scorecard names it in `group_scores`). For each
-HARD defect, add the real affordance from the table above. After a batch, **re-run
+Take the weakest measured step first (the captured JSON names it in `group_scores` and
+`corpus.breakdown`). Quote the exact non-zero rows in the work record. For each HARD defect,
+add the real affordance from the table above, using a dedicated product issue when the fix is
+outside this skill. After a batch, **re-run
 the scorecard** and watch the number fall; that loop (add, re-measure, add again)
 is the whole method. Capture a before/after baseline so you can prove the drop:
 
 ```bash
-go run ./cmd/fak score agent-readiness --json > /tmp/before.json   # baseline before the pass
-# … add the affordances …
-go run ./cmd/fak score agent-readiness --compare /tmp/before.json  # experience-frontier delta (+35% goal) + friction-debt delta
+fak score agent-readiness --json > /tmp/before.json   # baseline before the pass
+# … add the issue-authorized affordances …
+fak score agent-readiness --compare /tmp/before.json  # experience-frontier delta (+35% goal) + friction-debt delta
 ```
 
 `--compare` leads with the **experience-frontier** delta and a percentage: the goal
@@ -137,7 +143,8 @@ token added only to move a metric is the gaming this pass refuses.
 
 ## Step 4 — Re-measure, confirm, regenerate the snapshot
 
-Re-run the scorecard; state the before/after on BOTH headlines (e.g. "friction-debt
+Re-run `fak score agent-readiness --json`; compare and quote the before/after
+`corpus.breakdown` rows, then state the before/after on BOTH headlines (e.g. "friction-debt
 6 → 0, adopt 67 → 100; experience-frontier 284 → 384, +35%"). Then regenerate the
 committed snapshot so the doc matches the tree:
 
