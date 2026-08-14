@@ -16,6 +16,11 @@ metadata:
 > **Default N = 30.** `/fleet-wave` alone means *30 issues, 30 sessions, 4 hours*.
 > `/fleet-wave 12` retargets it. `/fleet-wave 30 8h` retargets the deadline too.
 
+> **Codex is the default worker backend.** Native `fak dispatch wave --backend codex` is
+> the closest currently supported Ultracode-style shape: one guarded headless Codex process
+> per admitted live issue and switcher seat. Do not use raw `codex exec` or share one
+> interactive `CODEX_HOME` across children.
+
 **Relation to the family — this skill does not re-implement any of it.**
 
 | | |
@@ -189,49 +194,48 @@ so a per-wave pointer name makes every log, pid crumb and stdin capture self-ide
 Reuse a pointer name across waves and the previous wave's artifacts answer your probes as
 if they were this run's — a stale predecessor vouching for a corpse.
 
-## Phase 3 — Launch. PLAN by default; `-Launch` is the opt-in.
+## Phase 3 — DRY-RUN, then launch **once**
+
+Confirm the installed native contract and account offer first:
 
 ```powershell
-# The plan — spawns NOTHING. This is the witnessable artifact AND the pricing; show it first.
-.\tools\launch_wave_detached.ps1 -Count 30 -PointerFile ".fak\wave\$WAVE.md" `
-    -WorkKind engineering -Workspace "C:\work\fak"
-
-# Then, on approval, actually dispatch:
-.\tools\launch_wave_detached.ps1 -Count 30 -PointerFile ".fak\wave\$WAVE.md" `
-    -WorkKind engineering -Workspace "C:\work\fak" -Launch
+fak dispatch wave --help
+fak fleet-accounts wave --count 30 --work-kind codex --product codex --json
+fak fleet-accounts status --provider codex --json
 ```
 
-⭐ **Both arguments are still worth passing** (§ 1 and § 3), though neither is a landmine
-any more: `-PointerFile` because this skill launches a *per-wave* rendered pointer whose
-filename is the wave's attribution, and `-Workspace` because the tree your workers share
-should be a decision, not an inference. Before #5895 both defaults were wrong and both
-failures read as "the wave ran" — that is why they are named here at all.
+The `fleet-accounts wave` receipt—not account-directory count—is the seat-room authority.
+Use `granted`, `shortfall`, `distinct_pools`, and each lane's `config_dir`, `pool`, and
+`session_slot`. `status` is health context, not allocation; if it unexpectedly says zero
+while the offer grants seats, preserve the offer and surface the inconsistency.
 
-**What the launcher already solves — do not re-implement any of it.** It asks the switcher
-for N *distinct-account* session slots in one call (distinctness by Anthropic
-`accountUuid`, so two dirs on one account never both inflate the count), then dispatches
-each slot through `launch_goal_detached.ps1`, which owns the dangerous parts:
+Current `dispatch wave` is dry-run unless `--live` is present:
 
-- ✅ **Guarded by default.** Each worker runs under its **own** `fak guard` gateway
-  (`-Guarded`), which is what "fak guarded ultracode session" means here — real tool-floor
-  adjudication and a hash-chained audit per worker. Witnessed on this box: **50,055 kernel
-  decisions across 513 dispatch sessions.**
-- ✅ **Seat hygiene.** It strips `ANTHROPIC_*` and the session-identity vars *before*
-  pinning the account. ⛔ **This is why you must NOT hand-wrap workers in your own guard.**
-  A parent under `fak guard` exports a loopback `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`;
-  env precedence beats the seat's OAuth, so an inheriting child bills the parent's seat and
-  dies the instant the parent gateway exits — the whole-wave same-instant crash. The
-  child-stderr tell is `claude.ai connectors are disabled because ANTHROPIC_API_KEY … is set`.
-- ✅ **Per-spawn preflight.** The `SPAWN_OK` gate is re-checked at *every* spawn, so the
-  wave under-fills mid-flight the moment the host, seat pool, or cap refuses.
-- ✅ **stdin-fed prompt.** The condition goes in via a UTF-8 file, never `-ArgumentList` —
-  backticked commands and `--flags` would otherwise be re-split and choke claude's parser.
+```powershell
+fak dispatch wave --count 30 --backend codex --work-kind codex --max-workers 30 `
+  --goal high-priority --workspace . --json
+```
 
-⚠️ **One honest caveat, and it bounds the wave:** a just-spawned worker is stdin-fed and
-carries no scannable process marker, so the per-spawn re-check cannot see a sibling until
-it holds a lane lease. **Size the wave from the plan; do not re-run the launcher to "top
-up" while workers are still starting.** Refill belongs to `fak dispatch auto --live` on a
-cadence, which reads live population rather than racing it.
+Read the typed plan before launch. It must select real issue contracts, pairwise-safe lanes,
+distinct switcher seats, guarded worker commands, and explicit refusal/downsize reasons.
+Each dispatch tick renders bounded fuel from the live GitHub issue and requires full
+implement-test-witness-commit-push ownership. The wave fuel file is an operator receipt, not
+a child prompt argument.
+
+Do not pass stale `--deadline`, `--fuel-dir`, `--dry-run`, `--launch`, or `--accounts` flags
+unless installed help advertises them. The deadline remains the monitor/refill stop condition.
+
+Launch exactly once after explicit intent and a clean dry run:
+
+```powershell
+fak dispatch wave --count 30 --backend codex --work-kind codex --max-workers 30 `
+  --goal high-priority --workspace . --live --json
+```
+
+`--count` requests account-session slots; `--max-workers` is the hard process ceiling. The
+switcher binds each child to its assigned `CODEX_HOME`. Record wave ID, issue/lane/account,
+PID, and run/log paths from the receipt. Never globally switch the interactive account, copy
+credentials, or replace this path with raw `Start-Process` calls.
 
 ## Phase 4 — Monitor. Watchers see what workers inside the tree cannot.
 

@@ -16,6 +16,10 @@ metadata:
 > **PLAN first**, and hold the fan-out to the honesty boundary: a launch is not a
 > ship — only a witnessed commit on the trunk resolves an issue.
 
+**Codex default.** The native Codex wave is the closest supported Ultracode-like shape:
+one guarded Codex process per admitted issue and switcher seat. Never fan out raw `codex exec`
+processes or share one interactive `CODEX_HOME` across children.
+
 ## Two launch paths — pick the one that matches your risk
 
 | Path | What it gives | When |
@@ -232,10 +236,11 @@ after the last rung's workers hold leases/markers or have exited.
 
 Never launch blind. Run the launcher in its default PLAN mode and read the plan:
 
-```bash
-# Default path — native Go tree-disjoint in-repo wave (dry-run by default; admits core
-# internal/** lanes via the trust-critical hold, not just docs/tools):
-fak dispatch wave --max-workers <N> --work-kind engineering    # DRY-RUN
+```powershell
+# Ask the switcher for offered seats, then native Go DRY-RUN (no --live).
+fak fleet-accounts wave --count <N> --work-kind codex --product codex --json
+fak dispatch wave --count <N> --backend codex --work-kind codex --max-workers <N> `
+  --goal high-priority --workspace . --json
 ```
 
 ```powershell
@@ -250,11 +255,11 @@ Read the plan out loud for the operator:
   disjoint and that the plan now includes core `internal/**` lanes (gateway/engine/
   agent/…), not only docs/tools — the trust-critical hold still holds kernel/adjudicator/
   policy/etc. A colliding set is priced out (serialized into a later wave), not launched.
-- **Multi-account (`launch_wave_detached` / `fak dispatch wave`):** confirm `granted`
-  vs `requested` (honest under-fill when fewer account session slots are free) and
-  that repeated account tags stay within their `session_cap`. If the
-  workers will share a tree, confirm the fuel's lane-lease step is intact, or launch
-  fewer workers.
+- **Multi-account (`fak dispatch wave`):** use the preceding `fleet-accounts wave`
+  receipt as authority; confirm `granted`, `shortfall`, `distinct_pools`, and each lane's
+  `config_dir`, `pool`, and `session_slot`. A single pool is not a useful multi-account
+  wave unless its explicit session cap permits the offered slots. `status` is health
+  context, not allocation.
 
 If the plan shows collisions, an unavailable account, or fewer slots than needed, fix
 the partition or wait — do not `--force` / launch anyway.
@@ -263,8 +268,9 @@ the partition or wait — do not `--force` / launch anyway.
 
 Only after the plan is clean AND the operator approves the real spawn:
 
-```bash
-fak dispatch wave --max-workers <N> --work-kind engineering --live
+```powershell
+fak dispatch wave --count <N> --backend codex --work-kind codex --max-workers <N> `
+  --goal high-priority --workspace . --live --json
 ```
 ```powershell
 .\tools\launch_wave_detached.ps1 -Count <N> -WorkKind engineering -Launch -Workspace C:\work\fak `
