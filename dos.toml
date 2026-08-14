@@ -73,7 +73,7 @@ pilot_development_branch = "dev"
 [lanes]
 concurrent = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
-  "cachemeta",
+  "cachemeta", "portabilityswitch",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
@@ -313,7 +313,7 @@ concurrent = [
   "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare", "fleetfreeze", "fleetmemory",
   "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetsim", "fleetspine", "fleettrend", "fleetverify",
-  "flock", "flowcredit", "focusscore", "frontierswe", "fusedturn", "gardenbundle",
+  "flock", "flowcredit", "focusscore", "framebus", "frontierswe", "fusedturn", "gardenbundle",
   "gatewayusageledger", "ghexec", "ghspam", "glm52prefillsweep", "goalpark", "godsplitplan",
   "grafanapost", "growthgate", "guard", "guardaccuracy", "guardaudit", "guardcorpus",
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
@@ -378,7 +378,7 @@ concurrent = [
 exclusive = ["abi", "release", "dos", "global"]
 autopick = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
-  "cachemeta",
+  "cachemeta",,
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
@@ -527,6 +527,7 @@ adjudicator = ["internal/adjudicator/**"]
 agent = ["internal/agent/**"]
 agentdojo = ["internal/agentdojo/**"]
 architest = ["internal/architest/**"]
+portabilityswitch = ["internal/portabilityswitch/**"]
 windowgate = ["internal/windowgate/**"]
 worktype = ["internal/worktype/**"]
 choicetriage = ["internal/choicetriage/**"]
@@ -851,6 +852,7 @@ fleetverify = ["internal/fleetverify/**"]
 flock = ["internal/flock/**"]
 flowcredit = ["internal/flowcredit/**"]
 focusscore = ["internal/focusscore/**"]
+framebus = ["internal/framebus/**"]
 frontierswe = ["internal/frontierswe/**"]
 fusedturn = ["internal/fusedturn/**"]
 gardenbundle = ["internal/gardenbundle/**"]
