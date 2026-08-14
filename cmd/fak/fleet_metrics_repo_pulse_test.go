@@ -74,6 +74,30 @@ func TestRepoPulseReadinessFoldsNewestDispatchBlocker(t *testing.T) {
 	}
 }
 
+func TestRepoPulseReadinessMakesExplicitZeroCapActionable(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"action":"refused","verdict":"REFUSE_AT_CAP","reason":"live workers 0 >= cap 0 (kernel alive=1, os procs=0, dos target=0, host_cap=14, max-workers=0)","backend":"claude"}`
+	if err := os.WriteFile(filepath.Join(dir, "last-resolve-tick.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := assessRepoPulseCohort(dir, 5)
+	if r.DispatchBlocker != "REFUSE_AT_CAP" || r.NextAction != "preview one worker without launching: fak dispatch tick --backend claude --max-workers 1 --json" {
+		t.Fatalf("got=%+v", r)
+	}
+}
+
+func TestRepoPulseReadinessKeepsGenuineAtCapGeneric(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"action":"refused","verdict":"REFUSE_AT_CAP","reason":"live workers 4 >= cap 4 (max-workers=8)","backend":"claude"}`
+	if err := os.WriteFile(filepath.Join(dir, "last-resolve-tick.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := assessRepoPulseCohort(dir, 5)
+	if r.DispatchBlocker != "REFUSE_AT_CAP" || !strings.Contains(r.NextAction, "resolve the latest dispatch refusal") || strings.Contains(r.NextAction, "--max-workers 1") {
+		t.Fatalf("got=%+v", r)
+	}
+}
+
 func TestRepoPulseReadinessSurfacesMalformedNewestEvidence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "last-resolve-tick.json")

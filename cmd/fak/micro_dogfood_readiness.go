@@ -84,10 +84,20 @@ func foldLatestDispatchBlocker(dir string, readiness *repoPulseCohortReadiness) 
 		switch strings.ToUpper(readiness.DispatchBlocker) {
 		case "REFUSE_NO_SEAT":
 			readiness.NextAction = "wait for a leased worker to exit, then run fak dispatch tick --backend " + fallback(receipt.Backend, "codex")
+		case "REFUSE_AT_CAP":
+			if explicitZeroWorkerCap(receipt.Reason) {
+				readiness.NextAction = "preview one worker without launching: fak dispatch tick --backend " + fallback(receipt.Backend, "codex") + " --max-workers 1 --json"
+			} else {
+				readiness.NextAction = "resolve the latest dispatch refusal, then run fak dispatch tick --backend " + fallback(receipt.Backend, "codex")
+			}
 		default:
 			readiness.NextAction = "resolve the latest dispatch refusal, then run fak dispatch tick --backend " + fallback(receipt.Backend, "codex")
 		}
 	}
+}
+
+func explicitZeroWorkerCap(reason string) bool {
+	return strings.Contains(strings.ToLower(reason), "max-workers=0")
 }
 
 func fallback(value, defaultValue string) string {
