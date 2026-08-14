@@ -228,12 +228,16 @@ type trunkBuildResult struct {
 	Regressions    []string `json:"regressions,omitempty"`
 }
 
-const prepushSuccessReuseTTL = 2 * time.Minute
+const (
+	prepushSuccessReuseTTL = 24 * time.Hour
+	prepushGateContract    = "affected-importer-cone+concept-admission+test-quality/v1"
+)
 
 type prepushSuccessReceipt struct {
-	Schema      string    `json:"schema"`
-	Tip         string    `json:"tip"`
-	CompletedAt time.Time `json:"completed_at"`
+	Schema       string    `json:"schema"`
+	Tip          string    `json:"tip"`
+	GateContract string    `json:"gate_contract"`
+	CompletedAt  time.Time `json:"completed_at"`
 }
 
 var (
@@ -262,7 +266,7 @@ func prepushSuccessReusable(root, tip string, now time.Time) bool {
 		return false
 	}
 	var receipt prepushSuccessReceipt
-	if json.Unmarshal(b, &receipt) != nil || receipt.Schema != "fak-prepush-success/1" || receipt.Tip != tip {
+	if json.Unmarshal(b, &receipt) != nil || receipt.Schema != "fak-prepush-success/2" || receipt.Tip != tip || receipt.GateContract != prepushGateContract {
 		return false
 	}
 	age := now.Sub(receipt.CompletedAt)
@@ -276,7 +280,7 @@ func recordPrepushSuccess(root, tip string, now time.Time) {
 	}
 	prepushSuccessReceiptMu.Lock()
 	defer prepushSuccessReceiptMu.Unlock()
-	b, err := json.Marshal(prepushSuccessReceipt{Schema: "fak-prepush-success/1", Tip: tip, CompletedAt: now.UTC()})
+	b, err := json.Marshal(prepushSuccessReceipt{Schema: "fak-prepush-success/2", Tip: tip, GateContract: prepushGateContract, CompletedAt: now.UTC()})
 	if err != nil {
 		return
 	}

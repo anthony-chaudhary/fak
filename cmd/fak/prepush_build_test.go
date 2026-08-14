@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -644,12 +645,30 @@ func TestPrepushSuccessReceiptReusesOnlySameFreshTip(t *testing.T) {
 		t.Fatal("missing receipt reused")
 	}
 	recordPrepushSuccess("repo", "tip-a", now)
-	if !prepushSuccessReusable("repo", "tip-a", now.Add(time.Second)) {
-		t.Fatal("fresh same-tip success not reused")
+	if !prepushSuccessReusable("repo", "tip-a", now.Add(3*time.Minute)) {
+		t.Fatal("same-tip success older than the former two-minute window not reused")
 	}
 	if prepushSuccessReusable("repo", "tip-b", now.Add(time.Second)) {
 		t.Fatal("changed tip reused")
 	}
+	path := filepath.Join(commonDir, "fak-prepush-success.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt prepushSuccessReceipt
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.GateContract = "old-contract"
+	raw, _ = json.Marshal(receipt)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if prepushSuccessReusable("repo", "tip-a", now.Add(time.Second)) {
+		t.Fatal("changed gate contract reused")
+	}
+	recordPrepushSuccess("repo", "tip-a", now)
 	if prepushSuccessReusable("repo", "tip-a", now.Add(prepushSuccessReuseTTL+time.Second)) {
 		t.Fatal("expired success reused")
 	}
