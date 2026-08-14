@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -17,7 +18,27 @@ import (
 func cmdConformance(argv []string) {
 	fs := flag.NewFlagSet("conformance", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON instead of a human report")
+	localEndpoint := fs.String("local-endpoint", "", "probe a local fak endpoint against --managed-endpoint")
+	managedEndpoint := fs.String("managed-endpoint", "", "probe a managed fak endpoint against --local-endpoint")
 	_ = fs.Parse(argv)
+
+	if *localEndpoint != "" || *managedEndpoint != "" {
+		if *localEndpoint == "" || *managedEndpoint == "" {
+			fmt.Fprintln(os.Stderr, "fak conformance: --local-endpoint and --managed-endpoint are required together")
+			os.Exit(2)
+		}
+		packet := conformance.ProbeEndpointPair(context.Background(), conformance.DefaultEndpointClient(), *localEndpoint, *managedEndpoint)
+		b, err := json.MarshalIndent(packet, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak conformance: %v\n", err)
+			os.Exit(2)
+		}
+		os.Stdout.Write(append(b, '\n'))
+		if packet.Verdict != "PASS" {
+			os.Exit(1)
+		}
+		return
+	}
 
 	rep := conformance.Run()
 

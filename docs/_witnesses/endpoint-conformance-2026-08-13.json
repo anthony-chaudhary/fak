@@ -1,0 +1,121 @@
+{
+  "schema": "fak-endpoint-conformance/1",
+  "verdict": "PASS",
+  "task": "Reply with exactly FAK_ENDPOINT_CONFORMANCE_PASS and nothing else.",
+  "endpoints": [
+    {
+      "role": "local",
+      "endpoint": "local",
+      "identity": {
+        "status": "PASS",
+        "observed": {
+          "engine": "inkernel",
+          "model": "qwen2.5:14b"
+        }
+      },
+      "policy_admission": {
+        "status": "NOT_YET",
+        "reason": "endpoint exposes no deterministic admission probe"
+      },
+      "session_lifecycle": {
+        "status": "NOT_YET",
+        "reason": "endpoint exposes no portable session-lifecycle receipt"
+      },
+      "provider_model_provenance": {
+        "status": "PASS",
+        "observed": {
+          "model": "qwen2.5:14b",
+          "owner": "fak"
+        }
+      },
+      "provider_reported_usage": {
+        "status": "PASS",
+        "observed": {
+          "completion_tokens": 7,
+          "prompt_tokens": 42,
+          "total_tokens": 49
+        }
+      },
+      "receipt": {
+        "status": "PASS",
+        "observed": "chatcmpl-fak-1786667478336348231"
+      },
+      "reconnect": {
+        "status": "PASS",
+        "observed": true
+      },
+      "quota_refusal": {
+        "status": "NOT_YET",
+        "reason": "probe does not manufacture a quota failure"
+      },
+      "upgrade_compatibility": {
+        "status": "PASS",
+        "observed": "fak-endpoint-conformance/1"
+      },
+      "task": {
+        "http_status": 200,
+        "object": "chat.completion",
+        "finish_reason": "stop",
+        "content": "FAK_ENDPOINT_CONFORMANCE_PASS",
+        "completion_id": "chatcmpl-fak-1786667478336348231"
+      }
+    },
+    {
+      "role": "managed",
+      "endpoint": "managed",
+      "identity": {
+        "status": "PASS",
+        "observed": {
+          "engine": "inkernel",
+          "model": "qwen2.5:14b"
+        }
+      },
+      "policy_admission": {
+        "status": "NOT_YET",
+        "reason": "endpoint exposes no deterministic admission probe"
+      },
+      "session_lifecycle": {
+        "status": "NOT_YET",
+        "reason": "endpoint exposes no portable session-lifecycle receipt"
+      },
+      "provider_model_provenance": {
+        "status": "PASS",
+        "observed": {
+          "model": "qwen2.5:14b",
+          "owner": "fak"
+        }
+      },
+      "provider_reported_usage": {
+        "status": "PASS",
+        "observed": {
+          "completion_tokens": 7,
+          "prompt_tokens": 42,
+          "total_tokens": 49
+        }
+      },
+      "receipt": {
+        "status": "PASS",
+        "observed": "chatcmpl-fak-1786667481161427433"
+      },
+      "reconnect": {
+        "status": "PASS",
+        "observed": true
+      },
+      "quota_refusal": {
+        "status": "NOT_YET",
+        "reason": "probe does not manufacture a quota failure"
+      },
+      "upgrade_compatibility": {
+        "status": "PASS",
+        "observed": "fak-endpoint-conformance/1"
+      },
+      "task": {
+        "http_status": 200,
+        "object": "chat.completion",
+        "finish_reason": "stop",
+        "content": "FAK_ENDPOINT_CONFORMANCE_PASS",
+        "completion_id": "chatcmpl-fak-1786667481161427433"
+      }
+    }
+  ]
+}

@@ -2984,6 +2984,16 @@
           "category": "incidental",
           "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
           "token": "handleSessionDiscovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire-field label for observed endpoint coverage; it does not introduce a new session runtime primitive.",
+          "token": "session_lifecycle"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated reference-client conformance plumbing; this token implements the session capability corpus but is not a separately selectable product concept.",
+          "token": "SessionCapabilityCorpusSchema"
         }
       ],
       "id": "session-runtime",
@@ -3026,6 +3036,7 @@
         "SchedulerOverhead",
         "SessionAffinityGateway",
         "SessionAutonomous",
+        "SessionCapabilityCorpusSchema",
         "SessionClass",
         "SessionClientActionRequest",
         "SessionClientAttachRequest",
@@ -3188,6 +3199,7 @@
         "sessionRegistryRecoveryStage",
         "sessionRoots",
         "session_compaction_thrash",
+        "session_lifecycle",
         "session_registry_recovery",
         "sessionids",
         "sessionregistry",
@@ -4728,6 +4740,11 @@
           "category": "incidental",
           "reason": "Selfcheck assertion label for the unnamed-arm refusal; test evidence name, not a policy capability concept.",
           "token": "unnamed_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire-field label in an endpoint conformance packet; it does not introduce a new policy capability.",
+          "token": "policy_admission"
         }
       ],
       "exclude": [
@@ -4735,8 +4752,11 @@
       ],
       "id": "policy-capability",
       "ignore": [
+        "ARM_CAPABILITY_BUNDLED",
+        "ARM_CAPABILITY_UNNAMED",
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
+        "ArmFakCapability",
         "CapabilityAdded",
         "CapabilityDocument",
         "CapabilityRemoved",
@@ -4760,6 +4780,8 @@
         "PolicyHash",
         "PolicyRevision",
         "ProgressCallAdjudicated",
+        "ReasonArmCapabilityBundled",
+        "ReasonArmCapabilityUnnamed",
         "RetryPolicy",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
@@ -4776,6 +4798,7 @@
         "adjudication",
         "adjudicationPrompt",
         "adjudicators",
+        "bundled_capability",
         "capabilities",
         "capability_denied",
         "capability_digest",
@@ -4789,6 +4812,7 @@
         "dispatchPreflightChurnState",
         "executeLivePipeline",
         "executeTailPolicy",
+        "fak_capability",
         "fak_fleet_goal_adjudications_total",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
@@ -4808,6 +4832,7 @@
         "policyErr",
         "policyLocked",
         "policyOf",
+        "policy_admission",
         "policy_changed",
         "policyblocks",
         "policylabel",
@@ -4831,17 +4856,10 @@
         "tailPolicyResult",
         "tailPolicySchema",
         "tool_policy_grammar",
+        "unnamed_capability",
         "verifyTailPolicyMatrix",
         "windowReceipt",
-        "windowResult",
-        "fak_capability",
-        "ArmFakCapability",
-        "ReasonArmCapabilityBundled",
-        "ARM_CAPABILITY_BUNDLED",
-        "ReasonArmCapabilityUnnamed",
-        "ARM_CAPABILITY_UNNAMED",
-        "bundled_capability",
-        "unnamed_capability"
+        "windowResult"
       ],
       "min_files": 3,
       "name": "Policy / authorization family",
