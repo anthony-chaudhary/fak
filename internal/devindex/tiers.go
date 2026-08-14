@@ -67,7 +67,7 @@ var verbTiers = map[string]VerbTier{
 	"codex":        TierFrontdoor,
 	"doctor":       TierFrontdoor,
 	"egress":       TierFrontdoor,
-	"guard":        TierFrontdoor,
+	"manage":       TierFrontdoor,
 	"help":         TierFrontdoor,
 	"info":         TierFrontdoor,
 	"ls":           TierFrontdoor,

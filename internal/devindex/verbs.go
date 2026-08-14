@@ -176,7 +176,7 @@ var verbManifest = []Verb{
 	{Name: "godsplit-plan", Synopsis: "read-only boundary + hazard planner for a behavior-preserving Go god-file split (the /modularize --json plan)", Lane: "cmd"},
 	{Name: "grafana", Synopsis: "export fak fleet metrics as a Grafana dashboard/datasource", Lane: "cmd"},
 	{Name: "growthgate", Synopsis: "the unbounded-growth ratchet: census append-only ledger/log bloat vs byte budgets; --reap COLD logs", Lane: "cmd"},
-	{Name: "guard", Synopsis: "wrap an agent harness: deny/repair/quarantine proposed tool calls (the one-command front door)", Lane: "gateway"},
+	{Name: "manage", Synopsis: "wrap an agent harness: deny/repair/quarantine proposed tool calls (the primary managed-agent front door; guard is deprecated)", Aliases: []string{"m", "guard"}, Lane: "gateway", Doc: "docs/manage.md"},
 	{Name: "guard-accuracy", Synopsis: "score the guard reversibility classifier's accuracy against a labeled corpus: false-positive (benign escalated) + false-negative (dangerous let through) rates; the accuracy dual of guard-verdict-rsi, folded worst-first as a control-pane scorecard", Lane: "cmd"},
 	{Name: "guard-audit", Synopsis: "prune mirrored guard journals from the vault by age/count (dry-run unless --apply)", Lane: "cmd"},
 	{Name: "guard-commit-gate", Synopsis: "internal: Claude Code PreToolUse commit-gate actuator installed by fak guard", Lane: "cmd"},

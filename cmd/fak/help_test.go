@@ -76,8 +76,8 @@ func TestRuntimeHelpHasNoDevelopmentCatalog(t *testing.T) {
 }
 
 func TestSuggestVerbSpellingUsesRuntimeSurface(t *testing.T) {
-	if got := suggestVerbSpelling("guardd"); got != "guard" {
-		t.Errorf("suggestVerbSpelling(guardd) = %q, want guard", got)
+	if got := suggestVerbSpelling("guardd"); got != "manage" {
+		t.Errorf("suggestVerbSpelling(guardd) = %q, want canonical manage", got)
 	}
 	if got := suggestVerbSpelling("zzqx"); got != "" {
 		t.Errorf("suggestVerbSpelling(zzqx) = %q, want no suggestion", got)
@@ -164,6 +164,7 @@ func TestCommitHelpShowsDeepHelpAboveFlagDump(t *testing.T) {
 // usage, never the bare dump — the same rationale as the original "ps" exemption:
 //   - "version"/"help" have no top-level flag.FlagSet at all (custom arg parse);
 //   - "ps" sets fs.Usage to its own psUsage;
+//   - "manage" shares guard's hand-curated usage and fully compatible flag parser;
 //   - "audit"/"egress"/"model"/"signal" are subcommand dispatchers whose no-arg /
 //     --help path prints a bespoke usage (auditUsage/egressUsage/modelUsage/
 //     signalUsage), and "codex" sets its own fs.Usage — none regress to the bare
@@ -188,7 +189,7 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 	src := all.String()
 	exempt := map[string]bool{
 		"version": true, "help": true, "ps": true,
-		"audit": true, "egress": true, "model": true, "signal": true, "codex": true,
+		"audit": true, "egress": true, "model": true, "signal": true, "codex": true, "manage": true,
 	}
 	for _, g := range overviewGroups {
 		for _, e := range g.entries {
@@ -199,6 +200,67 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 			if !strings.Contains(src, want) {
 				t.Errorf("overview verb %q: no %s call found in cmd/fak — its --help would regress to the bare flag.FlagSet dump", e.name, want)
 			}
+		}
+	}
+}
+
+// TestCapturedManageHelpSurfaces is the rendered-byte witness for #6538. It
+// captures the same writers used by `fak help`, `fak help manage`, `fak help m`,
+// and `fak help guard`; assertions are deliberately on user-visible output, not
+// catalog internals.
+func TestCapturedManageHelpSurfaces(t *testing.T) {
+	var compact bytes.Buffer
+	usageCompact(&compact)
+	root := compact.String()
+	if !strings.Contains(root, "manage + serve:") ||
+		!strings.Contains(root, "  manage") ||
+		!strings.Contains(root, "'fak m'; legacy: guard") {
+		t.Fatalf("captured `fak help` does not lead with canonical manage and its migration spellings:\n%s", root)
+	}
+	if strings.Contains(root, "\n  guard        ") {
+		t.Fatalf("captured `fak help` still presents guard as canonical:\n%s", root)
+	}
+
+	for _, spelling := range []string{"manage", "m"} {
+		var out bytes.Buffer
+		if !printVerbHelp(&out, spelling) {
+			t.Fatalf("captured `fak help %s` did not resolve", spelling)
+		}
+		got := out.String()
+		if !strings.HasPrefix(got, "  fak manage    [flags]") {
+			t.Fatalf("captured `fak help %s` does not lead with canonical manage:\n%s", spelling, got)
+		}
+		if !strings.Contains(got, "aliases: m (preferred short form), guard (deprecated compatibility name)") ||
+			!strings.Contains(got, "flags: fak manage -h") {
+			t.Fatalf("captured `fak help %s` lost alias resolution or canonical flag guidance:\n%s", spelling, got)
+		}
+	}
+
+	var guard bytes.Buffer
+	if !printVerbHelp(&guard, "guard") {
+		t.Fatal("captured `fak help guard` did not resolve")
+	}
+	gotGuard := guard.String()
+	manageAt := strings.Index(gotGuard, "  fak manage    [flags]")
+	guardAt := strings.Index(gotGuard, "  fak guard     [--provider")
+	if manageAt < 0 || guardAt < 0 || manageAt > guardAt {
+		t.Fatalf("captured `fak help guard` does not lead with manage while retaining full guard help:\n%s", gotGuard)
+	}
+	for _, notice := range []string{
+		"DEPRECATED: fak guard is the legacy compatibility spelling; migrate to fak manage (or fak m).",
+		"Sunset notice: guard remains fully compatible during migration; no removal date is set.",
+		"flags: fak manage -h",
+	} {
+		if !strings.Contains(gotGuard, notice) {
+			t.Fatalf("captured `fak help guard` missing %q:\n%s", notice, gotGuard)
+		}
+	}
+}
+
+func TestManageSuggestionPrefersCanonicalSpelling(t *testing.T) {
+	for _, typo := range []string{"guardd", "manag", "mange"} {
+		if got := suggestVerbSpelling(typo); got != "manage" {
+			t.Errorf("suggestVerbSpelling(%q) = %q, want canonical manage", typo, got)
 		}
 	}
 }

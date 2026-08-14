@@ -50,9 +50,9 @@ var overviewGroups = []struct {
 		{"session", "budget turns/tokens/context; steer or stop without another prompt turn"},
 		{"info", "live reused-token, effective-cost, and total-savings overlay"},
 	}},
-	{"guard + serve", []overviewEntry{
+	{"manage + serve", []overviewEntry{
 		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
-		{"guard", "wrap an agent harness: manage every tool call in-process"},
+		{"manage", "wrap an agent harness: manage every tool call in-process ('fak m'; legacy: guard)"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
@@ -86,6 +86,8 @@ var overviewGroups = []struct {
 // gate treats a companion as covered when its primary is in the overview AND the
 // companion's spelling appears in that primary's blurb — folding never hides a verb.
 var frontdoorCompanions = map[string]string{
+	"guard":  "manage",
+	"m":      "manage",
 	"replay": "run",
 	"top":    "ps",
 	"pull":   "model",
@@ -148,7 +150,11 @@ func printVerbHelp(w io.Writer, tok string) bool {
 	if !verbDeepHelpBody(w, tok) {
 		return false
 	}
-	fmt.Fprintf(w, "\nflags: fak %s -h\n", tok)
+	flagTok := tok
+	if tok == "m" || tok == "guard" {
+		flagTok = "manage"
+	}
+	fmt.Fprintf(w, "\nflags: fak %s -h\n", flagTok)
 	return true
 }
 
@@ -163,6 +169,25 @@ func verbDeepHelpBody(w io.Writer, tok string) bool {
 	if tok == "capabilities" {
 		writeCapabilitiesUsage(w)
 		return true
+	}
+	if tok == "manage" || tok == "m" || tok == "guard" {
+		// Lead every spelling with the canonical manage block, then retain the
+		// complete historical guard wall so no invocation or flag becomes
+		// undiscoverable during the compatibility sunset.
+		manageSections := verbWallSections([]string{"manage"})
+		for _, section := range manageSections {
+			fmt.Fprint(w, section)
+		}
+		if tok == "guard" {
+			fmt.Fprintln(w, "DEPRECATED: fak guard is the legacy compatibility spelling; migrate to fak manage (or fak m).")
+			fmt.Fprintln(w, "Sunset notice: guard remains fully compatible during migration; no removal date is set.")
+			fmt.Fprintln(w)
+		}
+		legacySections := verbWallSections([]string{"guard"})
+		for _, section := range legacySections {
+			fmt.Fprint(w, section)
+		}
+		return len(manageSections)+len(legacySections) > 0
 	}
 	sections := verbWallSections([]string{tok})
 	if len(sections) == 0 {
@@ -266,8 +291,13 @@ func suggestVerb(tok string) string {
 		if name == "" {
 			return
 		}
-		if d := levenshtein(tok, strings.ToLower(name)); d < bestDist || (d == bestDist && best != "" && name < best) {
-			best, bestDist = name, d
+		matchName := strings.ToLower(name)
+		preferred := name
+		if matchName == "guard" || matchName == "m" {
+			preferred = "manage"
+		}
+		if d := levenshtein(tok, matchName); d < bestDist || (d == bestDist && best != "" && preferred < best) {
+			best, bestDist = preferred, d
 		}
 	}
 	for _, group := range overviewGroups {

@@ -451,3 +451,26 @@ func mustMkdir(t *testing.T, root string, parts ...string) {
 		t.Fatal(err)
 	}
 }
+
+func TestManageIsCanonicalWithCompatibilityAliases(t *testing.T) {
+	cat := &Catalog{Root: FindRoot(".")}
+	for _, spelling := range []string{"manage", "m", "guard"} {
+		got, ok := cat.VerbByName(spelling)
+		if !ok {
+			t.Fatalf("VerbByName(%q) did not resolve", spelling)
+		}
+		if got.Name != "manage" {
+			t.Fatalf("VerbByName(%q).Name = %q, want canonical manage", spelling, got.Name)
+		}
+	}
+	manage, ok := cat.VerbByName("manage")
+	if !ok || !reflect.DeepEqual(manage.Aliases, []string{"m", "guard"}) {
+		t.Fatalf("manage aliases = %#v, want [m guard]", manage.Aliases)
+	}
+	for _, query := range []string{"manage", "m", "guard"} {
+		hits := cat.SearchVerbs(query)
+		if len(hits) == 0 || hits[0].Name != "manage" {
+			t.Fatalf("SearchVerbs(%q) first hit = %#v, want canonical manage", query, hits)
+		}
+	}
+}
