@@ -645,3 +645,35 @@ func armbenchCavemanNative(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintln(stdout, string(b))
 	return 0
 }
+
+func runCavemanPassthrough(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("armbench caveman-passthrough", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("out", "docs/_witnesses/armbench-caveman-passthrough/live", "archive directory")
+	input := fs.String("input", "docs/_witnesses/armbench-caveman-native/inputs", "pinned #6681 corpus")
+	base := fs.String("base-url", os.Getenv("OPENAI_BASE_URL"), "real provider OpenAI-compatible base URL")
+	keyenv := fs.String("api-key-env", "OPENAI_API_KEY", "provider API key environment variable")
+	model := fs.String("model", "gpt-5.6-sol", "provider model snapshot")
+	label := fs.String("label", "live", "run label")
+	trials := fs.Int("trials", 3, "trials per prompt (first cold; remaining warm)")
+	inPrice := fs.Float64("input-per-million", 0, "provider input USD per million")
+	outPrice := fs.Float64("output-per-million", 0, "provider output USD per million")
+	cachePrice := fs.Float64("cache-read-per-million", 0, "provider cache-read USD per million")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *base == "" || os.Getenv(*keyenv) == "" {
+		fmt.Fprintln(stderr, "base URL and API key are required")
+		return 2
+	}
+	m, err := armbench.RunCavemanPassthrough(context.Background(), armbench.PassthroughOptions{InputDir: *input, OutDir: *out, BaseURL: *base, APIKey: os.Getenv(*keyenv), Model: *model, Label: *label, Trials: *trials, InputPerMillion: *inPrice, OutputPerMillion: *outPrice, CacheReadPerMillion: *cachePrice})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	b, _ := json.MarshalIndent(m.Summary, "", "  ")
+	fmt.Fprintln(stdout, string(b))
+	fmt.Fprintln(stdout, m.CacheVerdict)
+	fmt.Fprintln(stdout, m.Conclusion)
+	return 0
+}
