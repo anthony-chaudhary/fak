@@ -262,6 +262,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Worktree ledger ownership](docs/notes/WORKTREE-LEDGER-OWNERSHIP-2026-08-13.md) -- auto-indexed dated note.
 - [Caveman study: shape-specific context transforms with measured fallback](docs/notes/CONCEPT-STUDY-CAVEMAN-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6668-#6670.
 - [Ponytail study: portable behavioral instructions and their witnesses](docs/notes/CONCEPT-STUDY-PONYTAIL-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6671-#6673.
 
