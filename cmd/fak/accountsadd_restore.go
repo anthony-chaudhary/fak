@@ -80,6 +80,7 @@ func runAccountsRestore(stdout, stderr io.Writer, p restoreParams) int {
 	reg.Homes[idx].Dir = liveDir
 	reg.Homes[idx].Status = ""
 	reg.Homes[idx].RehomeTo = ""
+	reg.Homes[idx].Terminal = false
 	reg.Homes[idx].TombstonedAt = ""
 	reg.Homes[idx].TombstoneReason = ""
 	reg.Homes[idx].Enabled = nil
@@ -145,6 +146,7 @@ func restoreInPlace(stdout, stderr io.Writer, p restoreParams, reg accounts.Regi
 	oldRehome := reg.Homes[idx].RehomeTo
 	reg.Homes[idx].Status = ""
 	reg.Homes[idx].RehomeTo = ""
+	reg.Homes[idx].Terminal = false
 	reg.Homes[idx].TombstonedAt = ""
 	reg.Homes[idx].TombstoneReason = ""
 	reg.Homes[idx].Enabled = nil

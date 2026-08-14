@@ -18,7 +18,7 @@ import (
 
 // saveAccountsRegistry persists reg to path, printing the shared "fak accounts: %v"
 // error on failure. It returns false (the caller should then `return 1`) when the save
-// failed — the save-and-report step repeated by every accounts mutation verb.
+// failed - the save-and-report step repeated by every accounts mutation verb.
 func saveAccountsRegistry(stderr io.Writer, path string, reg accounts.Registry) bool {
 	if err := accounts.SaveRegistry(path, reg); err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
@@ -54,12 +54,12 @@ type addParams struct {
 	// apiKeyEnv, when non-empty, enrolls an API-KEY seat (CredKindAPIKey, #5331) instead of a
 	// subscription-OAuth seat: it is the NAME of the environment variable holding the account's
 	// Anthropic API key (e.g. "ANTHROPIC_API_KEY"). The registry stores ONLY this reference,
-	// never the secret. This path runs no setup-token and copies no credential bundle — the
-	// credential is the env var — so it is mutually exclusive with --adopt/--no-login/--token.
+	// never the secret. This path runs no setup-token and copies no credential bundle - the
+	// credential is the env var - so it is mutually exclusive with --adopt/--no-login/--token.
 	apiKeyEnv string
 
 	// probeIdentity (adopt only) reconciles the adopted seat's identity against the account its
-	// live credential ACTUALLY serves — a network probe of the OAuth profile endpoint — and
+	// live credential ACTUALLY serves - a network probe of the OAuth profile endpoint - and
 	// prefers the credential over stale on-disk .claude.json metadata, overwriting the seeded
 	// oauthAccount when they disagree. This is the fix for a seat whose .claude.json names one
 	// account while its .credentials.json (a later /login into a shared dir) serves another.
@@ -80,13 +80,13 @@ type addParams struct {
 	probeURL string
 
 	// noDivorce (adopt only) opts OUT of the default post-copy token-family divorce. An adopt
-	// COPIES the source's .credentials.json, so both dirs end up holding ONE OAuth refresh token —
+	// COPIES the source's .credentials.json, so both dirs end up holding ONE OAuth refresh token -
 	// and the first side to refresh rotates the family and silently 401s the other (witnessed
 	// 2026-08-06: an enrolled seat's refresh logged the operator's own interactive session out,
 	// its access token still hours from expiry). By default the enroll therefore refreshes the new
 	// seat immediately, so the seat provably owns its own family and the source's now-dead
 	// credential is reported at enroll time instead of detonating later. Pass this to keep the
-	// copy byte-identical and control the timing yourself — the hazard then stays armed, which is
+	// copy byte-identical and control the timing yourself - the hazard then stays armed, which is
 	// the whole reason it is opt-out rather than opt-in.
 	noDivorce bool
 
@@ -94,7 +94,7 @@ type addParams struct {
 	// `claude -p`). Test seam only, mirroring accounts.RefreshSpawn.
 	divorceSpawn accounts.RefreshSpawn
 
-	// dryRun prints the enrollment plan and returns without any mutation — no dir created, no
+	// dryRun prints the enrollment plan and returns without any mutation - no dir created, no
 	// credential copied, no OAuth probe, no registry write, no view sync (#3954). It short-circuits
 	// after the read-only refusals (bad target, existing dir, duplicate name, missing source) so a
 	// dry run still surfaces those, but performs zero writes and zero network calls.
@@ -118,11 +118,11 @@ type addParams struct {
 //     (inheriting the TTY for the browser+paste), or read --token/stdin with --no-login, then
 //     twin-check (GateTokenWrite) and write <dir>/.oauth-token. With --adopt: copy the EXISTING
 //     login bundle (.credentials.json and/or .oauth-token) from the source seat (--from, else
-//     ~/.claude) — the account you are already logged into becomes a rotation seat with no
+//     ~/.claude) - the account you are already logged into becomes a rotation seat with no
 //     setup-token. A copied .oauth-token is still twin-checked.
-//  3. record identity. Default: probe the OAuth profile endpoint for the email + account UUID —
+//  3. record identity. Default: probe the OAuth profile endpoint for the email + account UUID -
 //     ground truth that also proves the credential works. With --adopt: derive identity from
-//     the copied disk state (DeriveIdentity) — the credential is already a proven live login;
+//     the copied disk state (DeriveIdentity) - the credential is already a proven live login;
 //     fall back to a token probe only if disk identity is empty and a token was copied.
 //  4. seed the dir's markers so every consumer recognizes it: .claude.json (identity, so the
 //     roster shows WHO it is, not "-"), projects/ (the fleet discovery gate), and settings.json
@@ -163,7 +163,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// uses the same handle the rosters show.
 	rosterName := rosterAccountName(p.name, p.suffix)
 	dir := accountDir(p.homeDir, p.name, p.suffix)
-	// The TARGET must never be the live default seat — a new account gets a fresh, isolated
+	// The TARGET must never be the live default seat - a new account gets a fresh, isolated
 	// home so no login can clobber ~/.claude. This holds even under --force.
 	if filepath.Clean(dir) == filepath.Clean(filepath.Join(p.homeDir, ".claude")) {
 		fmt.Fprintln(stderr, "fak accounts: refusing to add into the default ~/.claude seat")
@@ -204,7 +204,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 
 	// Dry run (#3954): every durable mutation and network probe lives BELOW this point (MkdirAll,
 	// SnapshotBeforeOverwrite, copyLoginBundle, the OAuth identity probe, the registry write, the
-	// view sync). Short-circuit here — after the read-only refusals above have had their say — so a
+	// view sync). Short-circuit here - after the read-only refusals above have had their say - so a
 	// dry run reports exactly what WOULD happen and touches nothing. The source seat is still
 	// resolved (read-only) so an adopt from a missing source fails the same way it would for real.
 	if p.dryRun {
@@ -221,7 +221,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	var id accounts.ProbedIdentity
 
 	if apiKeyEnv != "" {
-		// API-KEY seat (#5331): there is NO credential to obtain or copy — the credential is the
+		// API-KEY seat (#5331): there is NO credential to obtain or copy - the credential is the
 		// Anthropic API key held in the $apiKeyEnv env var, and the registry keeps only the NAME.
 		// Identity is derived from the KEY's org/workspace; offline that probe cannot run, so id
 		// stays empty here (no OAuth email/uuid) and the seat's stable identity is its env-var
@@ -248,7 +248,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		// snapshot whatever is already there so the prior account is always recoverable. On a fresh
 		// add the dir is empty and this is a no-op; on a --force reconcile it captures the live
 		// credential being replaced, so even an in-place refresh can be undone with
-		// `restore-credential`. A backup miss is a non-fatal warning — it never blocks the enroll.
+		// `restore-credential`. A backup miss is a non-fatal warning - it never blocks the enroll.
 		if snaps, berr := accounts.SnapshotBeforeOverwrite(accounts.BackupRoot(p.homeDir), rosterName, dir, time.Now()); berr != nil {
 			fmt.Fprintf(stderr, "fak accounts: warning: pre-overwrite credential backup failed: %v\n", berr)
 		} else if len(snaps) > 0 {
@@ -274,14 +274,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			}
 		}
 		fmt.Fprintf(stdout, "adopted login from %s (%s)\n", src, strings.Join(copied, ", "))
-		// Record identity. The copied disk metadata (.claude.json oauthAccount) is only a CLAIM —
+		// Record identity. The copied disk metadata (.claude.json oauthAccount) is only a CLAIM -
 		// it lies exactly when the source is a shared dir a later /login rewrote .credentials.json
 		// on without touching oauthAccount. So by DEFAULT reconcile that claim against the account
 		// the copied LIVE credential actually serves (an OAuth profile probe) and let the credential
 		// win, writing a corrected .claude.json so every later disk read is right. --no-probe-identity
 		// opts back into the historical disk-only derivation for a deliberately offline enrollment.
 		// A probe that can't run (no live session credential, offline, endpoint error) degrades to
-		// the same disk+token derivation, so a plain adopt is never WORSE than before — only better
+		// the same disk+token derivation, so a plain adopt is never WORSE than before - only better
 		// when the network is there.
 		if p.noProbeIdentity {
 			id = adoptedIdentityDiskOnly(dir, p.probeURL)
@@ -296,7 +296,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		// Step 3b: DIVORCE the copied credential's OAuth token family. The copy above left this
 		// seat and `src` holding one refresh token; the first of them to refresh rotates the family
 		// and the other is instantly dead (see internal/accounts/credfamily.go for the witness).
-		// Resolving it here — while the operator is watching the enroll — is the only way the cost
+		// Resolving it here - while the operator is watching the enroll - is the only way the cost
 		// lands at a chosen moment instead of mid-task hours later. It doubles as the seat's
 		// refresh-capability proof: a seat that cannot rotate its own token is a seat that will
 		// demand a human /login, and we would rather learn that now than at dispatch.
@@ -325,7 +325,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		probed, err := accounts.ProbeToken(nil, "", token)
 		if err != nil {
 			// A probe failure is not fatal to enrollment (the dir + token are written), but it
-			// means we cannot record identity and the credential may be bad — surface it loudly.
+			// means we cannot record identity and the credential may be bad - surface it loudly.
 			fmt.Fprintf(stderr, "fak accounts: warning: identity probe failed: %v\n", err)
 			fmt.Fprintln(stderr, "  the seat is created with a token but no recorded identity; run `fak accounts discover --write` after first login")
 		} else {
@@ -335,14 +335,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	}
 
 	// Step 4b (#3954): refuse a login-identity hijack BEFORE writing the seat. GateTokenWrite above
-	// already guards the token-fingerprint smear; this guards the orthogonal axis — the account the
+	// already guards the token-fingerprint smear; this guards the orthogonal axis - the account the
 	// just-probed credential ACTUALLY serves colliding with an EXISTING seat. reg is the pre-add
 	// registry (recorded identities, deliberately un-Refreshed) so the check keys on the registry's
 	// binding, not current disk. A duplicate (a different active seat already owns this account) is
 	// refused unless --force; a rebind of this seat onto its own new account is enroll-current's job,
 	// so it is surfaced, not blocked; an unprobed identity warns rather than guesses.
 	// An api-key seat has no probed OAuth account to collide on (its identity is the key's
-	// org, which we don't probe offline), so the login-hijack check does not apply — skip it
+	// org, which we don't probe offline), so the login-hijack check does not apply - skip it
 	// rather than warn "could not verify identity collision" on every api-key enroll (#5331).
 	if apiKeyEnv == "" {
 		switch col := accounts.DetectEnrollCollision(reg, rosterName, id); col.Kind {
@@ -350,17 +350,17 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			if !p.force {
 				// The dir was created THIS run (a duplicate-refuse implies !force, and reconcile needs
 				// force, so an existing dir would have been refused earlier). Remove it so a refused
-				// hijack leaves no half-seat behind — the registry (the authority) was never touched.
+				// hijack leaves no half-seat behind - the registry (the authority) was never touched.
 				if !reconcile {
 					_ = os.RemoveAll(dir)
 				}
 				fmt.Fprintf(stderr, "fak accounts: REFUSED (identity-hijack): %s\n", col.Detail)
 				fmt.Fprintf(stderr, "  enrolling it as %q would collapse two seats onto one rate-limit bucket. Pick a remedy:\n", rosterName)
-				fmt.Fprintf(stderr, "    fresh dir     — meant to add a DIFFERENT account? log in again under a FRESH config dir\n")
+				fmt.Fprintf(stderr, "    fresh dir     - meant to add a DIFFERENT account? log in again under a FRESH config dir\n")
 				fmt.Fprintf(stderr, "                    (CLAUDE_CONFIG_DIR=<new dir> claude /login), then re-run. Never log into another seat's dir.\n")
-				fmt.Fprintf(stderr, "    canonicalize  — this login should BE seat %q? rebind that seat onto it in place:\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "    canonicalize  - this login should BE seat %q? rebind that seat onto it in place:\n", col.ConflictSeat)
 				fmt.Fprintf(stderr, "                    fak accounts enroll-current --name %s --force\n", col.ConflictSeat)
-				fmt.Fprintf(stderr, "    tombstone     — retiring seat %q instead? tombstone it with fall-forward, then re-run:\n", col.ConflictSeat)
+				fmt.Fprintf(stderr, "    tombstone     - retiring seat %q instead? tombstone it with fall-forward, then re-run:\n", col.ConflictSeat)
 				fmt.Fprintf(stderr, "                    fak accounts remove --name %s --rehome-to <seat>\n", col.ConflictSeat)
 				fmt.Fprintf(stderr, "  (--force enrolls the duplicate anyway: two seats on one bucket, one of which the rotation drops)\n")
 				return 1
@@ -387,8 +387,8 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	// Seed the seat's settings.json from the registry's per-account defaults (defaults.settings)
 	// so the new account launches WITH the bypass/permission defaults, not without them until a
 	// later `sync`. Claude reads only its own settings.json, so this is what stops the bypass
-	// default "getting lost" for a brand-new seat. Scoped to the just-added home, and — like the
-	// .claude.json/projects markers above — done regardless of --no-sync, since it is part of
+	// default "getting lost" for a brand-new seat. Scoped to the just-added home, and - like the
+	// .claude.json/projects markers above - done regardless of --no-sync, since it is part of
 	// making the seat usable, not a roster-view refresh. A registry with no defaults.settings
 	// block is a clean no-op.
 	newHome := accounts.Home{Name: rosterName, Dir: dir}
@@ -436,7 +436,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 			return serr
 		}
 		fmt.Fprintf(stdout, "synced %d roster view(s)\n", synced)
-		// Step 7b (#3954): auto-verify the seat we just enrolled is actually usable — serveable in
+		// Step 7b (#3954): auto-verify the seat we just enrolled is actually usable - serveable in
 		// the registry projection AND present in each rendered roster view. Advisory only: the dir +
 		// registry + views already landed, so a miss is a loud warning pointing at the gap, not a
 		// failure of the enroll that already committed.
@@ -447,14 +447,14 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	if reconcile {
 		action = "reconciled"
 	}
-	fmt.Fprintf(stdout, "%s account %q (dir=%s, reserved=%v) — ~/.claude untouched\n", action, rosterName, dir, p.reserved)
+	fmt.Fprintf(stdout, "%s account %q (dir=%s, reserved=%v) - ~/.claude untouched\n", action, rosterName, dir, p.reserved)
 	return 0
 }
 
 // dryRunAddPlan prints the enrollment plan for `--dry-run` and returns without mutating anything.
 // It performs only read-only work: resolving the adopt source (so a missing source still fails as it
 // would for real) and describing the mutations the real run would perform. Kept in lockstep with the
-// mutation sequence in runAccountsAdd — every "would" line names a step that lives below the dry-run
+// mutation sequence in runAccountsAdd - every "would" line names a step that lives below the dry-run
 // short-circuit there.
 func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry, rosterName, dir string, reconcile bool) int {
 	regVerb := "add"
@@ -466,7 +466,7 @@ func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry,
 	fmt.Fprintf(stdout, "  roster name:   %s (reserved=%v)\n", rosterName, p.reserved)
 	// A third-party-endpoint seat: show the endpoint and the overlay's variable NAMES, and
 	// validate the overlay HERE too, so `--dry-run` catches a credential-shaped name before the
-	// operator re-runs for real. Names only, never values — a dry-run plan is meant to be
+	// operator re-runs for real. Names only, never values - a dry-run plan is meant to be
 	// pasteable, and ANTHROPIC_CUSTOM_HEADERS carries arbitrary header text.
 	if base := strings.TrimSpace(p.baseURL); base != "" {
 		fmt.Fprintf(stdout, "  endpoint:      %s (third-party Anthropic-compatible; launch requires --guard=false)\n", base)
@@ -503,13 +503,13 @@ func dryRunAddPlan(stdout, stderr io.Writer, p addParams, reg accounts.Registry,
 	} else {
 		fmt.Fprintf(stdout, "  views:         would regenerate the dos + job roster views and re-verify the seat is servable\n")
 	}
-	fmt.Fprintf(stdout, "re-run without --dry-run to apply — ~/.claude untouched\n")
+	fmt.Fprintf(stdout, "re-run without --dry-run to apply - ~/.claude untouched\n")
 	return 0
 }
 
 // verifyServableAfterSync re-reads the registry (Refresh()ed, so LoginStatus reflects the just-copied
 // dir) and the rendered view files, then asserts the new seat is serveable and present in each
-// CONFIGURED view. It only warns — never changes the exit code — because it runs after the enroll has
+// CONFIGURED view. It only warns - never changes the exit code - because it runs after the enroll has
 // already committed; its job is to turn a silent "enrolled but nothing will call it" into a visible
 // one. A disabled view (empty path) is not counted against servability.
 func verifyServableAfterSync(stdout, stderr io.Writer, p addParams, rosterName string) {
@@ -543,7 +543,7 @@ func verifyServableAfterSync(stdout, stderr io.Writer, p addParams, rosterName s
 		}
 		return
 	}
-	fmt.Fprintf(stderr, "fak accounts: warning: seat %q enrolled but NOT yet servable — %s\n", rosterName, strings.Join(problems, "; "))
+	fmt.Fprintf(stderr, "fak accounts: warning: seat %q enrolled but NOT yet servable - %s\n", rosterName, strings.Join(problems, "; "))
 	fmt.Fprintln(stderr, "  run `fak accounts status --probe` to inspect, or `fak accounts sync` to regenerate the views")
 }
 
@@ -607,7 +607,7 @@ func resolveSourceSeat(homeDir, from string, reg accounts.Registry) (string, err
 // homeRoot is the dir under which sibling seats are discovered; when set, a source .oauth-token
 // that is a KNOWN cross-account twin (its fingerprint already belongs to a DIFFERENT account's
 // live login among the siblings) is deliberately SKIPPED as long as the source also carries a
-// live .credentials.json — that session is the real credential, and carrying the twin would only
+// live .credentials.json - that session is the real credential, and carrying the twin would only
 // trip the GateTokenWrite smear guard and burn the other account's rate-limit bucket. The
 // skipped token's short fingerprint is returned so the caller can explain the omission. Passing
 // "" for homeRoot disables the sibling lookup and copies both files (the prior behavior).
@@ -648,7 +648,7 @@ func copyLoginBundle(src, dst, homeRoot string) (copied []string, skippedTwin st
 // skip) only when ALL of these hold: the source carries a usable live .credentials.json (so the
 // seat still has a credential without the token), the source carries a .oauth-token, and that
 // token's fingerprint matches a SIBLING home under homeRoot whose live login names a DIFFERENT
-// account than the source's own login. That is exactly the GateTokenWrite refusal condition —
+// account than the source's own login. That is exactly the GateTokenWrite refusal condition -
 // caught here so the adopt copies the clean session instead of copying-then-refusing. It returns
 // "" (copy the token) whenever homeRoot is unset, the token is the only credential, or the token
 // legitimately belongs to the source's own account.
@@ -663,7 +663,7 @@ func twinTokenToSkip(src, homeRoot string) string {
 	// The token may only be dropped when a real session credential remains. hasLiveCredentials
 	// mirrors the launcher's "can this dir actually serve" check on .credentials.json alone.
 	if !hasLiveSessionCred(src) {
-		return "" // token is the only credential — keep it
+		return "" // token is the only credential - keep it
 	}
 	srcAcct := accounts.DeriveIdentity(src).AccountKey()
 	homes, derr := accounts.Discover(homeRoot)
@@ -690,7 +690,7 @@ func twinTokenToSkip(src, homeRoot string) string {
 }
 
 // hasLiveSessionCred reports whether dir carries a usable auto-refreshing session credential
-// (.credentials.json with a non-empty claudeAiOauth access/refresh token) — the credential that
+// (.credentials.json with a non-empty claudeAiOauth access/refresh token) - the credential that
 // lets a seat serve WITHOUT a .oauth-token. It is deliberately narrow: a bare .oauth-token does
 // NOT count here, since the whole point is deciding whether the token is redundant.
 func hasLiveSessionCred(dir string) bool {
@@ -777,6 +777,7 @@ type removeParams struct {
 	rehomeTo     string
 	reason       string
 	archive      bool
+	terminal     bool
 	registryPath string
 	dosView      string
 	jobView      string
@@ -784,12 +785,12 @@ type removeParams struct {
 }
 
 // sameDir reports whether two paths name the same directory, tolerant of separators and
-// (on Windows) case — used to refuse archiving the live CLAUDE_CONFIG_DIR out from under the
+// (on Windows) case - used to refuse archiving the live CLAUDE_CONFIG_DIR out from under the
 // running session.
 func sameDir(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }
 
 // loadRegistryOrErr loads the canonical accounts registry, printing the house error
-// and returning ok=false on failure — the LoadRegistry+error-print prelude the
+// and returning ok=false on failure - the LoadRegistry+error-print prelude the
 // registry-mutating subcommands repeat.
 func loadRegistryOrErr(stderr io.Writer, registryPath string) (accounts.Registry, bool) {
 	reg, err := accounts.LoadRegistry(registryPath)
@@ -802,8 +803,8 @@ func loadRegistryOrErr(stderr io.Writer, registryPath string) (accounts.Registry
 
 // resolveAdoptSource resolves the seat an `--adopt` enroll copies its login bundle FROM, and
 // refuses a missing or invalid source. The dry run and the real run have to agree about what
-// "the source" is and refuse the same source for the same reason — a --dry-run that happily
-// resolved a source the real run then rejected would print a plan nobody can execute — so both
+// "the source" is and refuse the same source for the same reason - a --dry-run that happily
+// resolved a source the real run then rejected would print a plan nobody can execute - so both
 // ask here. ok=false means the refusal has already been printed and the caller must exit 1.
 func resolveAdoptSource(stderr io.Writer, p addParams, reg accounts.Registry) (string, bool) {
 	src, err := resolveSourceSeat(p.homeDir, p.from, reg)
@@ -815,7 +816,7 @@ func resolveAdoptSource(stderr io.Writer, p addParams, reg accounts.Registry) (s
 }
 
 // resolveRehomeTarget picks the seat a removal falls FORWARD to and resolves it. Both removal
-// forms choose it the same way — the explicit --rehome-to, else the registry's anchor seat —
+// forms choose it the same way - the explicit --rehome-to, else the registry's anchor seat -
 // and refuse the same two ways: no target at all, and a target the registry cannot resolve.
 // Sharing that is what stops one form from tombstoning against a rehome the other form would
 // have rejected. self names the seat being retired when the caller has exactly one (the
@@ -860,11 +861,11 @@ func syncViewsUnlessNoSync(stdout, stderr io.Writer, registryPath, dosView, jobV
 }
 
 // runAccountsRemove tombstones an account in the canonical registry and regenerates the
-// views — the single-source inverse of add. It sets the home to status=tombstoned with a
+// views - the single-source inverse of add. It sets the home to status=tombstoned with a
 // rehome target (so anything pinned to it falls forward) and records the audit fields
 // (tombstoned_at, tombstone_reason), then re-syncs so the account drops from the dos view's
 // active rows and appears under the job view's tombstoned_accounts block. It does NOT delete
-// the config dir — that is a separate, destructive operator step.
+// the config dir - that is a separate, destructive operator step.
 func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	if p.name == "" {
 		fmt.Fprintln(stderr, "usage: fak accounts remove --name <name> [--rehome-to <seat>] [--reason <text>] [--archive]")
@@ -894,14 +895,20 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		fmt.Fprintf(stderr, "fak accounts: %q is already tombstoned\n", p.name)
 		return 1
 	}
-	// Resolve the rehome target: the flag, else the registry's default seat.
-	rehome, liveRehome, ok := resolveRehomeTarget(stderr, reg, p.rehomeTo, p.name)
-	if !ok {
-		return 1
-	}
-	if liveRehome.Name == p.name {
-		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q through %q because it resolves back to itself\n", p.name, rehome)
-		return 1
+	// Resolve the rehome target unless this is an explicit terminal tombstone. Terminal
+	// retirement is reserved for the final account in one harness; cross-provider routing
+	// (for example Claude -> Codex) belongs to fleet-accounts, not this registry.
+	rehome, liveRehome := "", accounts.Home{}
+	if !p.terminal {
+		var ok bool
+		rehome, liveRehome, ok = resolveRehomeTarget(stderr, reg, p.rehomeTo, p.name)
+		if !ok {
+			return 1
+		}
+		if liveRehome.Name == p.name {
+			fmt.Fprintf(stderr, "fak accounts: cannot rehome %q through %q because it resolves back to itself\n", p.name, rehome)
+			return 1
+		}
 	}
 	reason := p.reason
 	if reason == "" {
@@ -911,11 +918,15 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	// Refreshed COPY (so disk-derived identities drive the grouping without persisting them).
 	// After this removal these seats still resolve to the account, so a note points the operator
 	// at the account-scoped retirement instead of relying on catching the `dup ->` line by eye
-	// (#4669) — the exact july6-netra papercut the issue reports.
+	// (#4669) - the exact july6-netra papercut the issue reports.
 	peers := reconcileRefreshed(reg)[p.name].Peers
 
 	date := time.Now().UTC().Format("2006-01-02")
-	movedRoles, code := applyTombstone(stdout, stderr, &reg, idx, rehome, liveRehome.Name, reason, p.archive, date)
+	liveName := liveRehome.Name
+	if p.terminal {
+		liveName = ""
+	}
+	movedRoles, code := applyTombstone(stdout, stderr, &reg, idx, rehome, liveName, reason, p.archive, p.terminal, date)
 	if code != 0 {
 		return code
 	}
@@ -923,12 +934,16 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
 		return 1
 	}
-	fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", p.name, rehome)
+	if p.terminal {
+		fmt.Fprintf(stdout, "registry: terminal-tombstoned %s (no same-harness rehome)\n", p.name)
+	} else {
+		fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", p.name, rehome)
+	}
 	for _, role := range movedRoles {
 		fmt.Fprintf(stdout, "registry: role %s -> %s (was %s)\n", role, liveRehome.Name, p.name)
 	}
 	if len(peers) > 0 {
-		fmt.Fprintf(stdout, "note: also reachable via %s — pass --by-account to retire the whole account\n", strings.Join(peers, ", "))
+		fmt.Fprintf(stdout, "note: also reachable via %s - pass --by-account to retire the whole account\n", strings.Join(peers, ", "))
 	}
 	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
 		return code
@@ -949,7 +964,7 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 // to `C -> L` instead of letting the registry accrete `tombstoned -> … -> live` chains as
 // intermediate hops retire (#4672). With archive it instead renames the seat's config dir to
 // <dir>.DELETED-<date> and repoints the registry handle (name + dir) plus any inbound rehome edge
-// that named the old handle onto the renamed one — a repoint `restore` reverses — the manual
+// that named the old handle onto the renamed one - a repoint `restore` reverses - the manual
 // dir-rename + hand-edit-registry dance, done for you. It refuses the live CLAUDE_CONFIG_DIR, since
 // you cannot move the dir the current session runs from.
 //
@@ -958,10 +973,11 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 // refusal/failure. rehome is the handle recorded on the seat (may itself rehome forward);
 // liveRehomeName is its resolved live seat, used for the role move. date is passed in so an
 // account-scoped retirement stamps every seat with ONE archive date.
-func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, rehome, liveRehomeName, reason string, archive bool, date string) (movedRoles []string, code int) {
+func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, rehome, liveRehomeName, reason string, archive, terminal bool, date string) (movedRoles []string, code int) {
 	fromName := reg.Homes[idx].Name
 	reg.Homes[idx].Status = accounts.StatusTombstoned
 	reg.Homes[idx].RehomeTo = rehome
+	reg.Homes[idx].Terminal = terminal
 	reg.Homes[idx].TombstonedAt = time.Now().UTC().Format(time.RFC3339)
 	reg.Homes[idx].TombstoneReason = reason
 	disabled := false
@@ -972,7 +988,7 @@ func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, r
 		oldName, oldDir := reg.Homes[idx].Name, reg.Homes[idx].Dir
 		if oldDir != "" {
 			if live := os.Getenv("CLAUDE_CONFIG_DIR"); live != "" && sameDir(live, oldDir) {
-				fmt.Fprintf(stderr, "fak accounts: refusing to archive %q — it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", fromName)
+				fmt.Fprintf(stderr, "fak accounts: refusing to archive %q - it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", fromName)
 				return movedRoles, 1
 			}
 			newDir := oldDir + ".DELETED-" + date
@@ -987,7 +1003,7 @@ func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, r
 				}
 				fmt.Fprintf(stdout, "archived dir: %s -> %s\n", oldDir, newDir)
 			} else {
-				fmt.Fprintf(stdout, "archive: dir %s absent — repointing the registry only\n", oldDir)
+				fmt.Fprintf(stdout, "archive: dir %s absent - repointing the registry only\n", oldDir)
 			}
 			reg.Homes[idx].Dir = newDir
 		}
@@ -1001,13 +1017,13 @@ func applyTombstone(stdout, stderr io.Writer, reg *accounts.Registry, idx int, r
 	} else {
 		// Flatten inbound rehome edges past a seat tombstoned IN PLACE (#4672). The seat keeps its
 		// name here (no --archive rename), so every OTHER seat that rehomed to it would keep naming
-		// a now-dead seat — and as intermediate hops retire the pool accretes tombstoned->…->live
+		// a now-dead seat - and as intermediate hops retire the pool accretes tombstoned->…->live
 		// chains that `list --all` renders as rehomes pointing at dead seats. Repoint each such edge
 		// forward to the live seat this removal falls to. (The archive branch above already repoints
 		// inbound edges onto the renamed handle, which `restore` reverses; a plain tombstone has no
 		// rename and nothing to reverse, so flattening forward is the correct hygiene.) idx is
-		// skipped naturally — its own RehomeTo is the rehome handle, never fromName (a self-rehome is
-		// refused upstream) — and fromName != liveRehomeName for the same reason, so no self-loop.
+		// skipped naturally - its own RehomeTo is the rehome handle, never fromName (a self-rehome is
+		// refused upstream) - and fromName != liveRehomeName for the same reason, so no self-loop.
 		for i := range reg.Homes {
 			if i != idx && reg.Homes[i].RehomeTo == fromName {
 				reg.Homes[i].RehomeTo = liveRehomeName
@@ -1026,7 +1042,7 @@ func reconcileRefreshed(reg accounts.Registry) map[string]accounts.SeatIdentity 
 
 // resolveAccountBucket maps a --by-account selector to the account-bucket key Reconcile groups
 // on, plus the ACTIVE seats resolving to it. The selector may be an account email, an account
-// UUID, the raw bucket key (uuid:… / tok:… / apikey:…), or a seat NAME — whichever handle an
+// UUID, the raw bucket key (uuid:… / tok:… / apikey:…), or a seat NAME - whichever handle an
 // operator has to hand. reg must already be Refreshed (identities derived). It refuses
 // ambiguity: a selector that names seats on more than one distinct bucket returns ok=false with
 // the matched buckets, so the caller can list them rather than guess which account to retire.
@@ -1039,7 +1055,7 @@ func resolveAccountBucket(reg accounts.Registry, selector string) (bucket string
 		}
 		key := h.Identity.AccountKey()
 		if key == "" {
-			continue // no derivable identity — nothing to bucket on
+			continue // no derivable identity - nothing to bucket on
 		}
 		if h.Name == sel ||
 			(h.Identity.Email != "" && strings.EqualFold(h.Identity.Email, sel)) ||
@@ -1070,7 +1086,7 @@ func resolveAccountBucket(reg accounts.Registry, selector string) (bucket string
 // reason, so a duplicate seat that was identity_mismatched onto the account (the `dup ->` line
 // in `list`) cannot leave the account live after its canonical seat is removed. It prints the
 // full set of seats it will touch BEFORE acting, and refuses (structured, non-zero) when the
-// rehome target itself resolves back into the account being retired — otherwise the account
+// rehome target itself resolves back into the account being retired - otherwise the account
 // would never actually retire.
 func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 	reg, ok := loadRegistryOrErr(stderr, p.registryPath)
@@ -1086,24 +1102,25 @@ func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 		fmt.Fprintf(stderr, "fak accounts: no active seat resolves to account %q (want an email, account UUID, bucket key, or seat name)\n", p.byAccount)
 		return 1
 	case len(buckets) > 1:
-		fmt.Fprintf(stderr, "fak accounts: %q is ambiguous — it names %d accounts (%s); retire one at a time with --name, or pass a UUID/email that selects exactly one\n",
+		fmt.Fprintf(stderr, "fak accounts: %q is ambiguous - it names %d accounts (%s); retire one at a time with --name, or pass a UUID/email that selects exactly one\n",
 			p.byAccount, len(buckets), strings.Join(buckets, ", "))
 		return 1
 	}
 
-	// Resolve the rehome target: the flag, else the registry's anchor seat. No seat to exclude
-	// here — the account form retires a whole bucket, and rehoming INTO that bucket is caught
-	// by the identity check below, which a name comparison could not see anyway.
-	rehome, liveRehome, ok := resolveRehomeTarget(stderr, reg, p.rehomeTo, "")
-	if !ok {
-		return 1
-	}
-	// Refuse rehoming INTO the account being retired: the live target must not itself resolve to
-	// the bucket we are tombstoning, else the account never actually retires — the exact bug this
-	// command fixes. Key on the refreshed identity so a name-lie duplicate target is caught too.
-	if liveKey := accountKeyForName(refreshed, liveRehome.Name); liveKey == bucket {
-		fmt.Fprintf(stderr, "fak accounts: REFUSED (rehome-into-retired): rehome target %q resolves to the account being retired (%s); pick a live seat on a DIFFERENT account\n", rehome, bucket)
-		return 1
+	// Resolve the rehome target unless this is an explicit final-account retirement.
+	// Cross-provider destinations belong to fleet-accounts; a Claude tombstone must not fake
+	// a Codex home inside the Claude registry merely to satisfy a same-harness edge.
+	rehome, liveRehome := "", accounts.Home{}
+	if !p.terminal {
+		var ok bool
+		rehome, liveRehome, ok = resolveRehomeTarget(stderr, reg, p.rehomeTo, "")
+		if !ok {
+			return 1
+		}
+		if liveKey := accountKeyForName(refreshed, liveRehome.Name); liveKey == bucket {
+			fmt.Fprintf(stderr, "fak accounts: REFUSED (rehome-into-retired): rehome target %q resolves to the account being retired (%s); pick a live seat on a DIFFERENT account or pass --terminal when no same-harness account remains\n", rehome, bucket)
+			return 1
+		}
 	}
 
 	reason := p.reason
@@ -1116,8 +1133,12 @@ func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 	for i, s := range seats {
 		names[i] = s.Name
 	}
-	fmt.Fprintf(stdout, "retiring account %s — %d seat(s): %s\n", bucket, len(seats), strings.Join(names, ", "))
-	fmt.Fprintf(stdout, "  rehome -> %s; reason: %s\n", rehome, reason)
+	fmt.Fprintf(stdout, "retiring account %s - %d seat(s): %s\n", bucket, len(seats), strings.Join(names, ", "))
+	if p.terminal {
+		fmt.Fprintf(stdout, "  terminal retirement (no same-harness rehome); reason: %s\n", reason)
+	} else {
+		fmt.Fprintf(stdout, "  rehome -> %s; reason: %s\n", rehome, reason)
+	}
 
 	date := time.Now().UTC().Format("2006-01-02")
 	// Pre-flight the archive so a multi-seat retirement is all-or-nothing at the first rename:
@@ -1134,7 +1155,7 @@ func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 		if idx < 0 {
 			continue // resolved from the refreshed clone; the name is always present in reg
 		}
-		movedRoles, code := applyTombstone(stdout, stderr, &reg, idx, rehome, liveRehome.Name, reason, p.archive, date)
+		movedRoles, code := applyTombstone(stdout, stderr, &reg, idx, rehome, liveRehome.Name, reason, p.archive, p.terminal, date)
 		if code != 0 {
 			return code
 		}
@@ -1150,12 +1171,16 @@ func runAccountsRemoveByAccount(stdout, stderr io.Writer, p removeParams) int {
 	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
 		return code
 	}
-	fmt.Fprintf(stdout, "removed account %s — %d seat(s) tombstoned; rehome -> %s (config dirs left in place unless --archive)\n", bucket, len(seats), rehome)
+	if p.terminal {
+		fmt.Fprintf(stdout, "removed account %s � %d seat(s) terminal-tombstoned (config dirs left in place unless --archive)\n", bucket, len(seats))
+	} else {
+		fmt.Fprintf(stdout, "removed account %s � %d seat(s) tombstoned; rehome -> %s (config dirs left in place unless --archive)\n", bucket, len(seats), rehome)
+	}
 	return 0
 }
 
 // reconcileRefreshedRegistry returns a Refreshed CLONE of reg (identities derived from disk)
-// without mutating the caller's registry — the same slice-clone guard reconcileRefreshed uses,
+// without mutating the caller's registry - the same slice-clone guard reconcileRefreshed uses,
 // but returning the registry itself so a caller can resolve buckets over it.
 func reconcileRefreshedRegistry(reg accounts.Registry) accounts.Registry {
 	homes := make([]accounts.Home, len(reg.Homes))
@@ -1197,7 +1222,7 @@ func preflightArchive(stderr io.Writer, seats []accounts.Home, date string) int 
 			continue
 		}
 		if live != "" && sameDir(live, s.Dir) {
-			fmt.Fprintf(stderr, "fak accounts: refusing to archive %q — it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", s.Name)
+			fmt.Fprintf(stderr, "fak accounts: refusing to archive %q - it is the live CLAUDE_CONFIG_DIR; archive it from another session\n", s.Name)
 			return 1
 		}
 		if _, err := os.Stat(s.Dir + ".DELETED-" + date); err == nil {
@@ -1217,10 +1242,15 @@ func moveRolesOffHome(reg *accounts.Registry, from, to string) []string {
 	}
 	var moved []string
 	for role, name := range reg.Roles {
-		if name == from {
-			reg.Roles[role] = to
-			moved = append(moved, role)
+		if name != from {
+			continue
 		}
+		if to == "" {
+			delete(reg.Roles, role)
+		} else {
+			reg.Roles[role] = to
+		}
+		moved = append(moved, role)
 	}
 	sort.Strings(moved)
 	return moved
@@ -1238,7 +1268,7 @@ type setRoleParams struct {
 
 // runAccountsSetRole points a well-known ROLE at <name>: it sets reg.Roles[role]=name,
 // validates (the target must be an active, serveable home), and regenerates the views. This is
-// the deterministic one-command inverse of hand-editing the registry's roles — and the reason
+// the deterministic one-command inverse of hand-editing the registry's roles - and the reason
 // roles exist: the launch seat (RoleActive) and the rehome anchor (RoleAnchor) are SEPARATE,
 // so pointing one never disturbs the other. RoleActive is surfaced as active_default in the
 // dos view. Refuses a missing or tombstoned target (a tombstone can never serve, so it can

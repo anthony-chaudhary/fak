@@ -100,7 +100,7 @@ type accountsCmd struct {
 	refreshAckLogout *bool
 
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmByAccount *string
-	rmArchive                                              *bool
+	rmArchive, rmTerminal                                  *bool
 
 	roleFlag, launchCommand, launchModel, launchFallbackModel, launchManagedCache, launchUltracode, afterSeat, cooldownClear *string
 	launchGuard, launchSkipPerms, rotateFlag, noHeadroom                                                                     *bool
@@ -159,6 +159,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	refreshAckLogout := fs.Bool("yes-log-me-out", false, "(refresh) accept that rotating a seat which shares its OAuth token family with the config dir THIS session runs out of will END this session's login. Such a seat is REFUSED without this flag, because a shared family is one login and the first side to refresh silently 401s the other — the operator's own interactive session, mid-task (#5954). With the flag the rotation proceeds and the report names the invalidated dir and its exact `claude /login` recovery")
 	probeIdent := fs.Bool("probe", false, "(status) probe each seat's live credential identity and flag identity-metadata-stale when the on-disk .claude.json disagrees with the account the credential actually serves")
 	rmRehome := fs.String("rehome-to", "", "(remove) live seat to rehome the tombstoned account to (default: the registry's anchor seat)")
+	rmTerminal := fs.Bool("terminal", false, "(remove) retire without a rehome target because no same-harness account remains")
 	rmReason := fs.String("reason", "", "(remove) tombstone_reason recorded in the registry; (rehome) reason token recorded on the live seat switch")
 	rehomeAddr := fs.String("addr", defaultSessionAddr(), "(rehome) gateway base URL of the LIVE fak guard session (from the guard banner, or $FAK_ADDR)")
 	rehomeKey := fs.String("key", defaultGatewayBearerToken(), "(rehome) bearer credential (only if the gateway sets --require-key)")
@@ -247,6 +248,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 		rehomeKey:           rehomeKey,
 		rmByAccount:         rmByAccount,
 		rmArchive:           rmArchive,
+		rmTerminal:          rmTerminal,
 		roleFlag:            roleFlag,
 		launchCommand:       launchCommand,
 		launchModel:         launchModel,
@@ -292,7 +294,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
 	addNoDivorce, refreshTimeout, refreshAckLogout := c.addNoDivorce, c.refreshTimeout, c.refreshAckLogout
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
-	rmByAccount := c.rmByAccount
+	rmByAccount, rmTerminal := c.rmByAccount, c.rmTerminal
 	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
 	launchUltracode, launchModel, launchFallbackModel, launchManagedCache := c.launchUltracode, c.launchModel, c.launchFallbackModel, c.launchManagedCache
 	rotateFlag, afterSeat, noHeadroom, cooldownClear := c.rotateFlag, c.afterSeat, c.noHeadroom, c.cooldownClear
@@ -457,6 +459,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			rehomeTo:     *rmRehome,
 			reason:       *rmReason,
 			archive:      *rmArchive,
+			terminal:     *rmTerminal,
 			registryPath: *registryPath,
 			dosView:      *dosView,
 			jobView:      *jobView,

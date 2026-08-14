@@ -150,6 +150,7 @@ type Home struct {
 	// a future schema version.
 	Default  bool     `json:"default,omitempty"`
 	RehomeTo string   `json:"rehome_to,omitempty"`
+	Terminal bool     `json:"terminal,omitempty"`
 	Role     string   `json:"role,omitempty"`
 	Note     string   `json:"note,omitempty"`
 	Identity Identity `json:"identity,omitempty"`
@@ -652,7 +653,8 @@ func (r Registry) fallbackSeat(avoid string, refused map[string]bool, cd *Cooldo
 // invariants, each a fail-loud boundary:
 //   - a known major version; at least one home;
 //   - each home: a non-empty, unique name; a status in the closed set; an active home
-//     carries a dir; a tombstoned home carries a rehome_to that is not itself;
+//     carries a dir; a tombstoned home may omit rehome_to only as an explicit terminal
+//     tombstone (nothing in this harness remains to fall forward to);
 //   - every role (active, anchor, …) names a present, ACTIVE home — never a typo or a
 //     tombstone (a tombstone can't serve, so it can't fill a role);
 //   - every tombstone Resolves to a live seat (no dangling rehome, no cycle).
@@ -703,8 +705,11 @@ func (r Registry) Validate() error {
 				return fmt.Errorf("accounts: active home %q has no dir", h.Name)
 			}
 		} else {
-			if h.RehomeTo == "" {
-				return fmt.Errorf("accounts: tombstoned home %q needs a rehome_to", h.Name)
+			if h.RehomeTo == "" && !h.Terminal {
+				return fmt.Errorf("accounts: tombstoned home %q needs a rehome_to or terminal=true", h.Name)
+			}
+			if h.RehomeTo != "" && h.Terminal {
+				return fmt.Errorf("accounts: terminal tombstone %q must not carry rehome_to", h.Name)
 			}
 			if h.RehomeTo == h.Name {
 				return fmt.Errorf("accounts: home %q rehomes to itself", h.Name)
@@ -725,7 +730,7 @@ func (r Registry) Validate() error {
 	// Referential: every tombstone must reach a live seat (catches dangling rehome
 	// targets and cycles, transitively).
 	for _, h := range r.Homes {
-		if !h.Active() {
+		if !h.Active() && !h.Terminal {
 			if _, _, err := r.Resolve(h.Name); err != nil {
 				return err
 			}

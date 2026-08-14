@@ -185,3 +185,37 @@ func TestRemoveNameNotesOtherLiveSeat(t *testing.T) {
 		t.Fatalf("july6-netra should still be live after a per-seat remove (the papercut)")
 	}
 }
+
+func TestRunAccountsRemoveByAccountTerminalRetiresFinalBucket(t *testing.T) {
+	root := t.TempDir()
+	seat := mkHome(t, root, ".claude-final", "final@example.com", true)
+	regPath := filepath.Join(root, "registry.json")
+	reg := accounts.Registry{
+		Roles: map[string]string{accounts.RoleActive: "final", accounts.RoleAnchor: "final"},
+		Homes: []accounts.Home{{Name: "final", Dir: seat, Identity: accounts.DeriveIdentity(seat)}},
+	}
+	if err := accounts.SaveRegistry(regPath, reg); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runAccountsRemoveByAccount(&out, &errb, removeParams{
+		byAccount: "final", terminal: true, registryPath: regPath,
+		noSync: true, reason: "move active work to Codex",
+	})
+	if code != 0 {
+		t.Fatalf("terminal remove code=%d stderr=%s", code, errb.String())
+	}
+	got, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Roles) != 0 {
+		t.Fatalf("terminal retirement must clear same-harness roles: %+v", got.Roles)
+	}
+	if got.Homes[0].Active() || got.Homes[0].RehomeTo != "" {
+		t.Fatalf("final seat = %+v, want terminal tombstone", got.Homes[0])
+	}
+	if !strings.Contains(out.String(), "terminal-tombstoned") {
+		t.Fatalf("output should name terminal tombstone:\n%s", out.String())
+	}
+}
