@@ -125,7 +125,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: current directory)")
 	count := fs.Int("count", 2, "number of account session slots to allocate")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
-	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
+	backend := fs.String("backend", "codex", "worker backend (claude|opencode|codex); default codex")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); forwarded to each tick")
 	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")

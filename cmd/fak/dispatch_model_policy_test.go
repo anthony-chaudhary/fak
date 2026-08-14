@@ -11,6 +11,23 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
+func TestParseDispatchTickFlagsDefaultsToCodex(t *testing.T) {
+	t.Setenv("FLEET_WORKER_BACKEND", "")
+	opts, _, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir()})
+	if code != 0 {
+		t.Fatalf("parse code = %d, want 0", code)
+	}
+	if opts.Backend != "codex" {
+		t.Fatalf("backend = %q, want codex", opts.Backend)
+	}
+
+	t.Setenv("FLEET_WORKER_BACKEND", "claude")
+	opts, _, code = parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir()})
+	if code != 0 || opts.Backend != "claude" {
+		t.Fatalf("environment override: code=%d backend=%q, want 0/claude", code, opts.Backend)
+	}
+}
+
 func TestResolveClaudeSpeed(t *testing.T) {
 	tests := []struct {
 		name, backend, workKind, configured, want string
@@ -50,10 +67,10 @@ func TestDispatchEngineForWorkClass(t *testing.T) {
 	tests := []struct {
 		name, current, workClass, explicit, want string
 	}{
-		{name: "gardening defaults codex", current: "claude", workClass: "gardening", want: "codex"},
-		{name: "grind defaults codex", current: "claude", workClass: "mechanical_grind", want: "codex"},
-		{name: "engineering defaults claude", current: "codex", workClass: "engineering", want: "claude"},
-		{name: "rigor defaults claude", current: "codex", workClass: "security_audit", want: "claude"},
+		{name: "gardening preserves explicit current", current: "claude", workClass: "gardening", want: "claude"},
+		{name: "grind preserves explicit current", current: "claude", workClass: "mechanical_grind", want: "claude"},
+		{name: "engineering keeps codex default", current: "codex", workClass: "engineering", want: "codex"},
+		{name: "rigor keeps codex default", current: "codex", workClass: "security_audit", want: "codex"},
 		{name: "unknown preserves current", current: "opencode", workClass: "", want: "opencode"},
 		{name: "operator pin wins", current: "claude", workClass: "gardening", explicit: "opencode", want: "opencode"},
 	}
@@ -69,8 +86,8 @@ func TestDispatchEngineForWorkClass(t *testing.T) {
 func TestParseDispatchTickFlagsRoutesEngineByWorkClass(t *testing.T) {
 	t.Run("untagged default is byte-identical", func(t *testing.T) {
 		opts, ok, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir()})
-		if ok || code != 0 || opts.Backend != "claude" {
-			t.Fatalf("ok=%v code=%d backend=%q, want false/0/claude", ok, code, opts.Backend)
+		if ok || code != 0 || opts.Backend != "codex" {
+			t.Fatalf("ok=%v code=%d backend=%q, want false/0/codex", ok, code, opts.Backend)
 		}
 	})
 	t.Run("grind selects codex", func(t *testing.T) {
@@ -79,10 +96,10 @@ func TestParseDispatchTickFlagsRoutesEngineByWorkClass(t *testing.T) {
 			t.Fatalf("ok=%v code=%d backend=%q, want false/0/codex", ok, code, opts.Backend)
 		}
 	})
-	t.Run("rigor selects claude", func(t *testing.T) {
+	t.Run("rigor keeps codex default", func(t *testing.T) {
 		opts, ok, code := parseDispatchTickFlags(io.Discard, []string{"--workspace", t.TempDir(), "--work-kind", "security_audit"})
-		if ok || code != 0 || opts.Backend != "claude" {
-			t.Fatalf("ok=%v code=%d backend=%q, want false/0/claude", ok, code, opts.Backend)
+		if ok || code != 0 || opts.Backend != "codex" {
+			t.Fatalf("ok=%v code=%d backend=%q, want false/0/codex", ok, code, opts.Backend)
 		}
 	})
 	t.Run("explicit backend wins", func(t *testing.T) {

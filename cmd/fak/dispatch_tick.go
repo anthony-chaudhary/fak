@@ -248,7 +248,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
 	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
 	workerSpeed := fs.String("speed", firstString(strings.TrimSpace(os.Getenv("FAK_CLAUDE_SPEED")), "auto"), "Claude launch speed posture (auto|fast|standard); ignored by non-Claude backends")
-	backend := fs.String("backend", firstString(strings.TrimSpace(os.Getenv("FLEET_WORKER_BACKEND")), "claude"), "worker backend (claude|opencode|codex|micro); micro (#2030, opt-in) enrolls the routed lane into the in-process microagent host instead of a detached CLI — default follows $FLEET_WORKER_BACKEND, else claude")
+	backend := fs.String("backend", firstString(strings.TrimSpace(os.Getenv("FLEET_WORKER_BACKEND")), "codex"), "worker backend (claude|opencode|codex|micro); micro (#2030, opt-in) enrolls the routed lane into the in-process microagent host instead of a detached CLI — default follows $FLEET_WORKER_BACKEND, else codex")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); known goal ids also select the default --goal-profile")
 	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the busiest pick")

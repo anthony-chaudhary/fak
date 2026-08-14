@@ -170,7 +170,7 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 	budget := fs.Int("budget", 20, "cap the candidate set to the worst N items needing attention, same semantics as garden walk --budget")
 	skipActive := fs.Bool("skip-active", true, "skip items already in-progress, same as garden walk --skip-active")
 	skipFresh := fs.Int("skip-fresh", 0, "also skip items idle fewer than this many days, same as garden walk --skip-fresh")
-	backend := fs.String("backend", "claude", "worker backend passed to each dispatch tick (claude|opencode|codex)")
+	backend := fs.String("backend", "codex", "worker backend passed to each dispatch tick (claude|opencode|codex); default codex")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by dispatch preflight (same knob as dispatch tick)")
 	apply := fs.Bool("apply", false, "attempt to actually spawn admitted candidates (default: dry-run, spawns nothing)")
 	dryRunFlag := fs.Bool("dry-run", false, "explicit alias for the default: report the decision per candidate, spawn nothing")

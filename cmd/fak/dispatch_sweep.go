@@ -79,7 +79,7 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: current directory)")
 	maxAgents := fs.Int("max-agents", 100, "best-effort UPPER bound on workers to spawn this sweep (the preflight cap is the real limiter)")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "preflight worker cap passed to each tick (the real DoS limiter)")
-	backend := fs.String("backend", "claude", "worker backend for every tick (claude|opencode|codex)")
+	backend := fs.String("backend", "codex", "worker backend for every tick (claude|opencode|codex); default codex")
 	lane := fs.String("lane", "", "pin every tick to this lane (default: largest step-budget lane pick)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the step-budget pick")
 	settleS := fs.Float64("settle-s", 8.0, "seconds to wait after a live spawn before the next tick (lets the worker's de-dup log appear)")
