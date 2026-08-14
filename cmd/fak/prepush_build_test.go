@@ -651,7 +651,7 @@ func TestPrepushSuccessReceiptReusesOnlySameFreshTip(t *testing.T) {
 	if prepushSuccessReusable("repo", "tip-b", now.Add(time.Second)) {
 		t.Fatal("changed tip reused")
 	}
-	path := filepath.Join(commonDir, "fak-prepush-success.json")
+	path := prepushSuccessReceiptPath("repo", "tip-a")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -683,7 +683,7 @@ func TestPrepushFailureDoesNotCreateSuccessReceipt(t *testing.T) {
 	if prepushSuccessReusable("repo", "failed-tip", time.Now()) {
 		t.Fatal("failure path unexpectedly reusable")
 	}
-	if _, err := os.Stat(filepath.Join(commonDir, "fak-prepush-success.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(prepushSuccessReceiptPath("repo", "tip-a")); !os.IsNotExist(err) {
 		t.Fatalf("failure created receipt: %v", err)
 	}
 }
@@ -784,5 +784,41 @@ func TestClaimPrepushTipCoalescesAcrossProcesses(t *testing.T) {
 	}
 	if strings.TrimSpace(ownerOut.String()) != "OWNER" || strings.TrimSpace(string(waiterOut)) != "COALESCED" {
 		t.Fatalf("owner=%q waiter=%q", ownerOut.String(), waiterOut)
+	}
+}
+
+func TestPrepushSuccessReceiptsSurviveInterleavedTips(t *testing.T) {
+	commonDir := t.TempDir()
+	oldCommonDir := prepushSuccessCommonDir
+	prepushSuccessCommonDir = func(string) string { return commonDir }
+	t.Cleanup(func() { prepushSuccessCommonDir = oldCommonDir })
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	recordPrepushSuccess("repo", "tip-a", now)
+	recordPrepushSuccess("repo", "tip-b", now.Add(time.Minute))
+	if !prepushSuccessReusable("repo", "tip-a", now.Add(2*time.Minute)) || !prepushSuccessReusable("repo", "tip-b", now.Add(2*time.Minute)) {
+		t.Fatal("interleaved success evicted a still-reusable tip")
+	}
+}
+
+func TestPrunePrepushSuccessReceiptsBoundsFiles(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	for i := 0; i < prepushSuccessMaxFiles+5; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("%03d.json", i))
+		if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := now.Add(time.Duration(i) * time.Second)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prunePrepushSuccessReceipts(dir, now.Add(time.Minute))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != prepushSuccessMaxFiles {
+		t.Fatalf("receipt files=%d want=%d", len(entries), prepushSuccessMaxFiles)
 	}
 }

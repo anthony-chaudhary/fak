@@ -230,6 +230,7 @@ type trunkBuildResult struct {
 
 const (
 	prepushSuccessReuseTTL = 24 * time.Hour
+	prepushSuccessMaxFiles = 64
 	prepushGateContract    = "affected-importer-cone+concept-admission+test-quality/v1"
 )
 
@@ -246,16 +247,16 @@ var (
 	prepushSuccessSleep     = time.Sleep
 )
 
-func prepushSuccessReceiptPath(root string) string {
+func prepushSuccessReceiptPath(root, tip string) string {
 	commonDir := prepushSuccessCommonDir(root)
-	if commonDir == "" {
+	if commonDir == "" || tip == "" {
 		return ""
 	}
-	return filepath.Join(commonDir, "fak-prepush-success.json")
+	return filepath.Join(commonDir, "fak-prepush-success", tip+".json")
 }
 
 func prepushSuccessReusable(root, tip string, now time.Time) bool {
-	path := prepushSuccessReceiptPath(root)
+	path := prepushSuccessReceiptPath(root, tip)
 	if path == "" || tip == "" {
 		return false
 	}
@@ -273,13 +274,51 @@ func prepushSuccessReusable(root, tip string, now time.Time) bool {
 	return age >= 0 && age <= prepushSuccessReuseTTL
 }
 
+func prunePrepushSuccessReceipts(dir string, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type candidate struct {
+		path string
+		mod  time.Time
+	}
+	keep := make([]candidate, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > prepushSuccessReuseTTL {
+			_ = os.Remove(path)
+			continue
+		}
+		keep = append(keep, candidate{path: path, mod: info.ModTime()})
+	}
+	sort.Slice(keep, func(i, j int) bool { return keep[i].mod.After(keep[j].mod) })
+	if len(keep) <= prepushSuccessMaxFiles {
+		return
+	}
+	for _, row := range keep[prepushSuccessMaxFiles:] {
+		_ = os.Remove(row.path)
+	}
+}
+
 func recordPrepushSuccess(root, tip string, now time.Time) {
-	path := prepushSuccessReceiptPath(root)
+	path := prepushSuccessReceiptPath(root, tip)
 	if path == "" || tip == "" {
 		return
 	}
 	prepushSuccessReceiptMu.Lock()
 	defer prepushSuccessReceiptMu.Unlock()
+	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
+		return
+	}
+	prunePrepushSuccessReceipts(filepath.Dir(path), now)
 	b, err := json.Marshal(prepushSuccessReceipt{Schema: "fak-prepush-success/2", Tip: tip, GateContract: prepushGateContract, CompletedAt: now.UTC()})
 	if err != nil {
 		return
