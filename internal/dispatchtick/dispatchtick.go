@@ -133,6 +133,9 @@ func NormalizeBackend(raw string) (string, error) {
 
 // ProductForBackend is the preflight/account-switcher product name.
 func ProductForBackend(backend string) string {
+	if IsMicroBackend(backend) {
+		return MicroBackend
+	}
 	if backend == "opencode" {
 		return "opencode"
 	}

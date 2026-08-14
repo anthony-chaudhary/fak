@@ -629,6 +629,9 @@ func dispatchFallbackReadout(root string, stderr io.Writer, workKind, primaryPro
 }
 
 func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string) dispatchtick.AccountCheck {
+	if product == dispatchtick.MicroBackend {
+		return dispatchtick.AccountCheck{Available: true, Tag: "micro-local", Tier: 1, Reason: "offline in-process microagent host"}
+	}
 	if product == "codex" {
 		return dispatchCodexAmbientAccount()
 	}
@@ -694,6 +697,9 @@ func maxInt(a, b int) int {
 }
 
 func dispatchPreflightSeat(root string, _ io.Writer, product string) dispatchtick.SeatCheck {
+	if product == dispatchtick.MicroBackend {
+		return dispatchtick.SeatCheck{Total: dispatchtick.IntPtr(1), Free: dispatchtick.IntPtr(1), Leased: dispatchtick.IntPtr(0), Depleted: false}
+	}
 	if product == "codex" {
 		total := dispatchCodexOAuthSessionCap()
 		live := dispatchAmbientCodexProcessCount()

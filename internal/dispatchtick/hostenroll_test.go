@@ -51,3 +51,9 @@ func TestIsMicroBackendAndNormalize(t *testing.T) {
 		t.Fatalf("NormalizeBackend(MICRO) = %q, %v; want micro, nil", got, err)
 	}
 }
+
+func TestProductForMicroBackendIsLocal(t *testing.T) {
+	if got := ProductForBackend("micro"); got != MicroBackend {
+		t.Fatalf("ProductForBackend(micro) = %q, want %q", got, MicroBackend)
+	}
+}
