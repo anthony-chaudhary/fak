@@ -1,97 +1,73 @@
 ---
 name: run-it-all-night
-description: The agent door to unattended data collection — answer "what is the single most important datum I can collect on THIS box right now?" and then collect it on a loop. Wraps `fak nightrun`, which probes the local box (gpu/weights/datasets/creds), ranks the feasible-here collection tasks (the benchmark grid PLUS the curated open-witness backlog) by novelty × value × staleness, and closes the loop into a durable runtime ledger (.fak/nightrun/collected.jsonl, gitignored so a collection tick never dirties the shared tree). Use when the operator says "run it all night", "collect the next most important data", "what benchmark should I run on this machine", "start an overnight data-collection run", or when an agent on a fresh box (a Mac verify node, an A100, an H200) needs to know — without reading the whole repo — what data is worth gathering here.
-allowed-tools: Read, Bash, Write
-metadata:
-  opencode: claude-only   # the commit-by-explicit-path discipline + the honesty boundary are load-bearing and not portable per-skill
+description: Plan and run one bounded overnight issue worker through fak's guarded dispatch path, with typed capacity admission, lane leases, explicit dry-run/live gates, and independent git/DOS/test reconciliation. Use when the operator asks to let a narrow repo task run unattended overnight.
+allowed-tools: Bash, Read, Grep, Glob
 ---
 
-# /run-it-all-night — the next() data-collection door
+Run one narrow, issue-bound task overnight without bypassing the kernel's account, lease,
+or witness gates.
 
-> Wraps the `fak nightrun` leaf (`internal/nightrun`). The whole point is one
-> trivial answer for an operator OR an agent sitting on any box: **what is the
-> single most important datum to collect HERE, right now, and the exact command
-> to collect it** — then collect the whole feasible queue unattended, recording
-> what was gathered into a durable ledger so the next night picks up where this
-> one left off.
+## 1. Resolve the workspace and issue
 
-This is the front door over fak's existing collection parts (the benchmark
-catalog `internal/benchcatalog`, the results grid `experiments/benchmark/`, the
-remote-grid planner `tools/bench_plan.py`). It adds the piece those lacked: a
-**local-capability-aware**, **loop-closing** selector that never proposes work
-the box can't do.
+Start from the current repository root; never hard-code a checkout path. Confirm that the task
+has one dedicated issue, a bounded done condition, likely files, and a focused acceptance
+witness. If any of those are missing, repair the issue before launch.
 
-## The honesty boundary (load-bearing — do not cross)
-
-- `next` / `plan` / `caps` are **pure reads**. They never run anything.
-- `run` is **DRY-RUN by default**: it prints what it *would* execute and writes
-  nothing. Only `--apply` executes real commands.
-- A task the box cannot run is **never selected**, so the loop can never claim to
-  have collected HW-gated data on hardware that can't produce it.
-- An `--apply` row records what was **OBSERVED** (exit status, artifact path, a
-  parsed headline number only if one is actually present) — never a fabricated
-  number. Report outcomes faithfully: if a run failed, say so with the artifact.
-
-## Run it
-
-1. **Orient the box.** `fak nightrun caps` — the one-line fact-sheet (gpu,
-   weights, datasets, net, creds). This is *why* a task is or isn't feasible here.
-
-2. **Ask next().** `fak nightrun next` — the single most important feasible datum,
-   with the exact `run:` command and the `done:` acceptance criterion. For an
-   agent, `fak nightrun next --json` gives the structured task to act on.
-
-3. **See the whole night.** `fak nightrun plan` — the ranked queue (feasible
-   first, then blocked tasks with the capability they wait on). Use this to decide
-   whether tonight is worth a loop.
-
-4. **Collect.** Preview first: `fak nightrun run` (dry-run). Then, when the
-   operator approves executing real commands on this box:
-   - one task: `fak nightrun run --apply`
-   - the night: `fak nightrun run --apply --loop [--max N]`
-   Each task is attempted at most once per invocation (a failing task can't spin
-   the loop); every attempt appends an OBSERVED row to the ledger.
-
-5. **Show what was gathered.** `fak nightrun ledger` — the durable collection
-   history (newest first), and `--json` for the raw rows.
-
-## Enqueue a new datum (no recompile)
-
-When a NEW measurement becomes the most important thing to collect but isn't in
-the built-in backlog yet, add it to the operator overlay
-`experiments/nightrun/backlog.json` (a JSON array of tasks; `id` + `run` +
-`value` + `requires` + `acceptance`). `fak nightrun` reads it additively over the
-built-ins. Prefer this over editing the Go registry for a one-off; promote a
-durable, recurring datum into `internal/nightrun/backlog.go` (the `witnessTasks`
-registry) so it ships in the binary.
-
-A task is **work to do**, never a result — it cannot overclaim. Keep the
-`acceptance` honest (the artifact/number that proves the datum was gathered) and
-point `doc` at the canonical issue/methodology.
-
-## Committing (shared trunk)
-
-The live collection ledger is **not** a tracked file. As of the 2026-07-11
-migration (#3209), `fak nightrun run --apply` appends to the gitignored runtime
-root `.fak/nightrun/collected.jsonl`, so a collection tick never dirties the
-shared working tree or forces a telemetry-only commit. Don't hand-edit it.
-
-If this pass changes *tracked* files — the operator overlay or the witness
-registry — commit **only those paths** on the trunk:
-
-```
-git commit -s -- experiments/nightrun/backlog.json   # or the specific paths you changed
+```bash
+git rev-parse --show-toplevel
+gh issue view <issue> --json number,title,state,body,url
 ```
 
-Use a Conventional-Commits subject ending in a `(fak nightrun)` trailer. Never
-`git add -A` (shared multi-session tree). To publish collected evidence, copy a
-reviewed, scrubbed snapshot into `docs/nightrun/` and commit that explicit
-publication by path — there is no background auto-committer.
+## 2. Capture capacity and ownership evidence
 
-## When NOT to use
+Run the authoritative dispatch preflight and honor every typed refusal, account park, retry-after,
+session ceiling, and seat-depletion result. Never bypass a refusal with Claude dangerous-mode flags or an unguarded process launch.
 
-- To re-run a prompt/slash-command on a wall-clock interval → that's `/loop`
-  (`fak loop`), not nightrun. nightrun iterates over *data-collection tasks*.
-- To verify a shipped CLAIM from git evidence → that's `internal/witness` /
-  `dos verify`. nightrun's "acceptance" is the artifact that proves a datum was
-  *gathered*, a different thing from a witness over a claim.
+Acquire the issue's exact file tree through `dos lease-lane` before any edit or live dispatch.
+If another live holder owns the tree, stop this unit and choose non-overlapping work.
+
+## 3. Dry-run before live launch
+
+Render the issue-specific guarded command first. A dry-run must show the intended worker
+identity, bounded fuel, file tree, account admission, and zero launches. For stale-work units,
+use the issue-bound loop and keep issue creation separate from process launch:
+
+```bash
+fak stale-work loop --packet <packet.json> --issues <issues.json> --max-wave 1 --json
+```
+
+Inspect the plan. Do not add `--live-launch` until the issue is contract-valid, the typed
+capacity preflight admits it, and the lane lease is held.
+
+## 4. Launch one bounded worker
+
+Enable exactly one live gate for exactly one worker. Prefer the issue-specific command rendered
+by the dry-run (`fak dispatch tick ... --live`); for stale-work, use:
+
+```bash
+fak stale-work loop --packet <packet.json> --issues <issues.json> \
+  --live-launch --max-wave 1 --json
+```
+
+A wider wave is allowed only after collision pricing proves disjoint trees and the account/seat
+preflight admits the full width. Overnight duration is not permission for unbounded turns,
+workers, retries, or spend.
+
+## 5. Monitor and reconcile from independent witnesses
+
+Monitor the dispatch receipt and run archive, but never accept the worker's narration as proof.
+A ship requires all of:
+
+- the expected scoped git diff and origin ancestry;
+- the issue-specific test or read-back green;
+- `dos commit-audit` returning `OK` / `diff-witnessed`; and
+- independent issue state agreeing with the witnessed commit.
+
+If the worker exits without a commit, posts a typed refusal, or makes no progress, record the
+failure receipt on the issue. Do not relaunch until the cause is repaired and preflight is green.
+
+## 6. Finish safely
+
+Push promptly once the exact issue is green. Release the lane lease only after publication or a
+recorded non-ship. Before launching another worker, repeat capacity preflight, dry-run, and the
+full witness barrier.
