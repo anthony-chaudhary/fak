@@ -165,3 +165,32 @@ func TestValidateSnapshotBindsOmissionsAndSchema(t *testing.T) {
 		t.Fatal("mutated schema accepted under stale digest")
 	}
 }
+
+func TestResolveRegistrationUsesPinnedVisibleAlias(t *testing.T) {
+	reg, err := CompileSkill([]byte(skillFixture), ".claude/skills/repo-search/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Expose([]Registration{reg}, []string{"repo_search"}, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveRegistration(snapshot, "functions.shell_command", []Registration{reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Program.Name != "repo_search" || resolved.Digest != reg.Digest {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+	if _, err := ResolveRegistration(snapshot, "repo_search", []Registration{reg}); err == nil {
+		t.Fatal("canonical name accepted although model was shown only the alias")
+	}
+	stale := reg
+	stale.Program.Description = "mutated"
+	if _, err := ResolveRegistration(snapshot, "functions.shell_command", []Registration{stale}); err == nil {
+		t.Fatal("mutated registration accepted")
+	}
+	if _, err := ResolveRegistration(snapshot, "unknown", []Registration{reg}); err == nil {
+		t.Fatal("unknown provider-visible name accepted")
+	}
+}

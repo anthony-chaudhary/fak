@@ -410,3 +410,40 @@ func programBlock(src []byte) ([]byte, error) {
 	}
 	return []byte(strings.TrimSpace(text[bodyStart:end])), nil
 }
+
+// ResolveCall maps one provider-visible name from this exact snapshot back to
+// its canonical registration identity. Dispatch must use the request snapshot,
+// never current registry names or model priors.
+func ResolveCall(snapshot Snapshot, visibleName string) (ModelTool, error) {
+	if err := ValidateSnapshot(snapshot); err != nil {
+		return ModelTool{}, err
+	}
+	for _, tool := range snapshot.Tools {
+		if tool.Name == visibleName {
+			return tool, nil
+		}
+	}
+	return ModelTool{}, fmt.Errorf("TOOL_CALL_NOT_EXPOSED: %s", visibleName)
+}
+
+// ResolveRegistration verifies that the provider-visible call still identifies
+// the exact host registration whose digest was pinned into the request snapshot.
+func ResolveRegistration(snapshot Snapshot, visibleName string, registrations []Registration) (Registration, error) {
+	tool, err := ResolveCall(snapshot, visibleName)
+	if err != nil {
+		return Registration{}, err
+	}
+	for _, registration := range registrations {
+		if registration.Program.Name != tool.Canonical {
+			continue
+		}
+		if err := ValidateRegistration(registration); err != nil {
+			return Registration{}, err
+		}
+		if registration.Digest != tool.Digest {
+			return Registration{}, fmt.Errorf("TOOL_CALL_REGISTRATION_STALE: %s", tool.Canonical)
+		}
+		return registration, nil
+	}
+	return Registration{}, fmt.Errorf("TOOL_CALL_REGISTRATION_MISSING: %s", tool.Canonical)
+}
