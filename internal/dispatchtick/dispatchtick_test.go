@@ -105,6 +105,24 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 				Fallback:  tt.fallback,
 				Effort:    tt.effort,
 				Ultracode: tt.ultracode,
+				AccountTag: func() string {
+					if tt.backend == "opencode" {
+						return "test-seat"
+					}
+					return ""
+				}(),
+				AccountDir: func() string {
+					if tt.backend == "opencode" {
+						return "/tmp/opencode"
+					}
+					return ""
+				}(),
+				TaskTier: func() int {
+					if tt.backend == "opencode" {
+						return 3
+					}
+					return 0
+				}(),
 			})
 			if err != nil {
 				t.Fatalf("BuildWorkerCommand: %v", err)
@@ -235,5 +253,11 @@ func TestLaunchCommandShapeRedactsSensitiveFields(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("launch command shape missing %q: %#v", want, got)
 		}
+	}
+}
+
+func TestBuildWorkerCommandRejectsUnboundOpenCode(t *testing.T) {
+	if _, err := BuildWorkerCommand("opencode", "resolve it", WorkerLaunch{Model: "glm-5.2", RequireAccountBound: true}); err == nil || !strings.Contains(err.Error(), "account-bound") {
+		t.Fatalf("err = %v, want account-bound refusal", err)
 	}
 }

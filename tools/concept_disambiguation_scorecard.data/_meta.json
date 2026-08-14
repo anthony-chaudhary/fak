@@ -6413,6 +6413,11 @@
           "category": "incidental",
           "reason": "Diagnostic payload count of records considered by the existing dispatch decision; not a new decision concept.",
           "token": "decision_records"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed implementation record local to account-bound worker launch; not a reusable operator decision taxonomy",
+          "token": "LaunchDecision"
         }
       ],
       "id": "decision",
@@ -6428,6 +6433,7 @@
         "DecisionSamples",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
+        "LaunchDecision",
         "MeasureHeldDecisionOverhead",
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",

@@ -68,6 +68,13 @@ curl http://127.0.0.1:8080/healthz
 # verdict=DENY reason=POLICY_BLOCK
 ```
 
+## Fleet workers use account-bound launch
+
+For unattended super-loop/fleet work, do not run `XDG_CONFIG_HOME=... opencode run`
+directly. Use [`fak fleet-accounts launch|exec`](../fleet-accounts-launch.md), supply the
+task tier, and use `--allow-tier3-narrow` only for explicitly narrow tier-3 work. Hard
+engineering work cannot be overridden onto a restricted tier-3 OpenCode seat.
+
 ## Cross-references
 
 - **Integration index**: [README.md](README.md)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,6 +88,11 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	fs.IntVar(&count, "n", -1, "(wave) shorthand for --count")
 	explain := fs.Bool("explain", false, "(wave) emit the headroom witness projection")
 	waveID := fs.String("wave-id", "", "(wave) override the deterministic wave id")
+	taskTier := fs.Int("task-tier", 0, "(launch/exec) required task tier 1|2|3")
+	invokedModel := fs.String("invoked-model", "", "(launch/exec) model passed to the worker; defaults to account model")
+	prompt := fs.String("prompt", "", "(launch/exec) worker prompt")
+	tier3Override := fs.Bool("allow-tier3-narrow", false, "(launch/exec) explicitly authorize a restricted tier-3 seat for narrow tier-3 work")
+	launchLedger := fs.String("launch-ledger", ".fak/fleet-launches.jsonl", "(launch/exec) non-secret launch ledger path")
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -173,6 +179,37 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 
+	case "launch", "exec":
+		if *taskTier == 0 {
+			fmt.Fprintln(stderr, "fleet-accounts launch: --task-tier is required")
+			return 2
+		}
+		req := fleetaccounts.ResolveRequest{Pin: *account, WorkKind: *workKind, TaskText: *task, Product: *product, TaskClass: fmt.Sprintf("tier%d", *taskTier), StrictTier: true, AllowTierFallback: *allowFallback, FaklocalOK: *faklocalOK}
+		resolved := fleetaccounts.Resolve(rows, paths.Home, req, pol)
+		decision := fleetaccounts.DecideLaunch(fleetaccounts.LaunchRequest{Account: resolved, TaskTier: *taskTier, InvokedModel: *invokedModel, Prompt: *prompt, Tier3Override: *tier3Override})
+		if err := appendFleetLaunchLedger(*launchLedger, decision); err != nil {
+			fmt.Fprintf(stderr, "fleet-accounts launch ledger: %v\n", err)
+			return 1
+		}
+		out, _ := json.MarshalIndent(decision, "", "  ")
+		fmt.Fprintln(stdout, string(out))
+		if !decision.OK {
+			return 3
+		}
+		if mode == "launch" {
+			return 0
+		}
+		cmd := exec.Command(decision.Argv[0], decision.Argv[1:]...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+		cmd.Env = os.Environ()
+		for key, value := range decision.Env {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(stderr, "fleet-accounts exec: %v\n", err)
+			return 1
+		}
+		return 0
 	case "resolve":
 		taskClass := fleetAccountsTaskClass(*t1, *t2, *t3)
 		strict := *t1 || *t2 || *t3
@@ -240,7 +277,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	default:
-		fmt.Fprintln(stderr, "usage: fak fleet-accounts <roster|list|json|available|resolve|wave|seats|status> [flags]")
+		fmt.Fprintln(stderr, "usage: fak fleet-accounts <roster|list|json|available|resolve|launch|exec|wave|seats|status> [flags]")
 		fmt.Fprintln(stderr, "note: the active network probe + mutating ops (relogin/top-up/launch) remain on tools/fleet_accounts.py (issue #1415).")
 		return 2
 	}
@@ -413,4 +450,31 @@ func emitRosterJSON(stdout, stderr io.Writer, paths fleetaccounts.Paths,
 	}
 	fmt.Fprintln(stdout, string(out))
 	return 0
+}
+
+func appendFleetLaunchLedger(path string, decision fleetaccounts.LaunchDecision) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	record := struct {
+		At               string `json:"at"`
+		Account          string `json:"resolved_account,omitempty"`
+		Product          string `json:"product,omitempty"`
+		ConfiguredModel  string `json:"configured_model,omitempty"`
+		InvokedModel     string `json:"invoked_model,omitempty"`
+		EndpointClass    string `json:"endpoint_class,omitempty"`
+		TaskTier         int    `json:"task_tier,omitempty"`
+		OK               bool   `json:"ok"`
+		Reason           string `json:"reason,omitempty"`
+		OperatorOverride bool   `json:"operator_override,omitempty"`
+	}{time.Now().UTC().Format(time.RFC3339Nano), decision.Account, decision.Product, decision.ConfiguredModel, decision.InvokedModel, decision.EndpointClass, decision.TaskTier, decision.OK, decision.Reason, decision.OperatorOverride}
+	return json.NewEncoder(f).Encode(record)
 }

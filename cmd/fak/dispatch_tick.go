@@ -670,6 +670,12 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 		Effort:    modelPolicy.Effort,
 		Ultracode: modelPolicy.Ultracode,
 	}
+	if opts.Backend == "opencode" {
+		launch.AccountTag = account.Tag
+		launch.AccountDir = account.Dir
+		launch.TaskTier = accountTierNumber(account.Tier)
+		launch.RequireAccountBound = true
+	}
 	preview, err := dispatchtick.BuildWorkerCommand(opts.Backend, dispatchtick.PreviewPrompt(target, promptChars), launch)
 	if err != nil {
 		return dispatchtick.WorkerLaunch{}, nil, false, err
@@ -1528,4 +1534,19 @@ func validDispatchLeaseSessionID(id string) bool {
 		}
 	}
 	return true
+}
+
+func accountTierNumber(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case string:
+		n = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(n), "tier"))
+		if parsed, err := strconv.Atoi(n); err == nil {
+			return parsed
+		}
+	}
+	return 0
 }

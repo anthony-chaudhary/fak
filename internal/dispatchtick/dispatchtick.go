@@ -223,10 +223,15 @@ func joinDedupedChain(primary string, chain []string) string {
 // per-issue tier uplift. All four default to the zero value, so a WorkerLaunch{} yields
 // the exact pre-tier argv (byte-identical to the old model+fallback-only path).
 type WorkerLaunch struct {
-	Model     string // primary model to pin (Claude --model / opencode|codex -m)
-	Fallback  string // Claude-only comma-separated --fallback-model chain
-	Effort    string // Claude-only reasoning effort (--effort); ignored when Ultracode
-	Ultracode bool   // Claude-only: emit --settings ultracode (implies xhigh + workflow)
+	Model               string // primary model to pin (Claude --model / opencode|codex -m)
+	Fallback            string // Claude-only comma-separated --fallback-model chain
+	Effort              string // Claude-only reasoning effort (--effort); ignored when Ultracode
+	Ultracode           bool   // Claude-only: emit --settings ultracode (implies xhigh + workflow)
+	AccountTag          string // resolved fleet account; required for OpenCode fleet launches
+	AccountDir          string // resolved product config directory; never written to the ledger as a secret
+	TaskTier            int    // requested task tier (1 hard .. 3 narrow); required for OpenCode fleet launches
+	Override            bool   // explicit operator authorization for a restricted tier-3 OpenCode launch
+	RequireAccountBound bool   // fleet/super-loop seam; legacy non-fleet callers remain compatible
 }
 
 // BuildWorkerCommand returns the backend-specific issue-resolution worker argv.
@@ -267,6 +272,9 @@ func BuildWorkerCommand(backend, prompt string, launch WorkerLaunch) ([]string, 
 		}
 		return append(cmd, prompt), nil
 	case "opencode":
+		if launch.RequireAccountBound && (strings.TrimSpace(launch.AccountTag) == "" || strings.TrimSpace(launch.AccountDir) == "" || launch.TaskTier == 0) {
+			return nil, fmt.Errorf("account-bound opencode launch requires resolved account record and task tier")
+		}
 		// --print-logs is required for unattended workers: opencode writes run-level
 		// failures such as GLM quota walls to its logger, and without this flag #1275
 		// degrades into a banner-only no-op log.
