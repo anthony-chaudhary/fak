@@ -158,6 +158,84 @@ func landWorkerWorktreeVerified(root, wtPath, base string, tree []string, git wo
 // Python worker_resolving_sha scan_limit.
 const dispatchWitnessScanLimit = 300
 
+func readDurableDispatchWitnesses(runsDir string) []dispatchtick.WitnessRecord {
+	latest := map[int]dispatchtick.WitnessRecord{}
+	latestName := map[int]string{}
+	for _, path := range resolveWitnessFiles(runsDir) {
+		issue, ok := issueFromResolveAttempt(filepath.Base(path))
+		if !ok || filepath.Base(path) <= latestName[issue] {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var row struct {
+			Issue   int    `json:"issue"`
+			Log     string `json:"log"`
+			SHA     string `json:"sha"`
+			Claim   string `json:"claim"`
+			Verdict string `json:"verdict"`
+			Witness string `json:"witness"`
+			Reason  string `json:"reason"`
+			Model   string `json:"model"`
+			Zone    string `json:"zone"`
+		}
+		if json.Unmarshal(raw, &row) != nil || row.Claim == "" {
+			continue
+		}
+		if row.Issue > 0 {
+			issue = row.Issue
+		}
+		// Older durable sidecars predate reason/model persistence. Reconstruct those
+		// decision fields read-only from the same bounded log tail and model sidecar
+		// used by the original sweep; never rewrite historical evidence.
+		stem := strings.TrimSuffix(path, dispatchtick.WitnessSidecarSuffix)
+		if row.Claim == dispatchtick.ClaimNoCommit && !dispatchtick.ModelSwitchableReason(row.Reason) {
+			if tail, _ := dispatchWitnessLogTail(stem + ".log"); tail != "" {
+				row.Reason = dispatchtick.ClassifyNoCommitReason(tail, 0)
+			}
+		}
+		if strings.TrimSpace(row.Model) == "" {
+			if b, err := os.ReadFile(stem + dispatchtick.ModelSidecarSuffix); err == nil {
+				row.Model = strings.TrimSpace(string(b))
+			}
+		}
+		latest[issue] = dispatchtick.WitnessRecord{Issue: issue, Log: row.Log, SHA: row.SHA, Claim: row.Claim, Verdict: row.Verdict, Witness: row.Witness, Reason: row.Reason, Model: row.Model, Zone: row.Zone}
+		latestName[issue] = filepath.Base(path)
+	}
+	issues := make([]int, 0, len(latest))
+	for issue := range latest {
+		issues = append(issues, issue)
+	}
+	sort.Ints(issues)
+	out := make([]dispatchtick.WitnessRecord, 0, len(issues))
+	for _, issue := range issues {
+		out = append(out, latest[issue])
+	}
+	return out
+}
+
+func mergeDispatchWitnessRecords(durable, fresh []dispatchtick.WitnessRecord) []dispatchtick.WitnessRecord {
+	byIssue := make(map[int]dispatchtick.WitnessRecord, len(durable)+len(fresh))
+	for _, row := range durable {
+		byIssue[row.Issue] = row
+	}
+	for _, row := range fresh {
+		byIssue[row.Issue] = row
+	}
+	issues := make([]int, 0, len(byIssue))
+	for issue := range byIssue {
+		issues = append(issues, issue)
+	}
+	sort.Ints(issues)
+	out := make([]dispatchtick.WitnessRecord, 0, len(issues))
+	for _, issue := range issues {
+		out = append(out, byIssue[issue])
+	}
+	return out
+}
+
 func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []dispatchtick.WitnessRecord) {
 	audited := []any{}
 	buckets := map[string][]any{

@@ -420,7 +420,7 @@ type dispatchTickPick struct {
 // resolveDispatchTickPick computes this tick's candidate lane and target issue under
 // the live/cooldown/structurally-held skip set. Pure code motion out of
 // evaluateDispatchTick; behavior is unchanged.
-func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOptions, runsDir string, heldNoCommit map[int]bool) (dispatchTickPick, error) {
+func resolveDispatchTickPick(root string, stderr io.Writer, opts dispatchTickOptions, runsDir string, heldNoCommit, recoverable map[int]bool) (dispatchTickPick, error) {
 	// One runs-directory scan feeds every live/cooldown/collision view this tick needs
 	// (held lanes, live issue details, cooldown set + rows, and the per-pick tree-collision
 	// gate below), instead of re-globbing/re-statting the sidecars once per view (#3593).
@@ -776,24 +776,28 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	// write are the side effects, and a dry run must stay byte-identical); fail-open.
 	// The re-blockable guard refusals it surfaces (self_modify / policy_block) feed
 	// the pick's hold set below (#1396).
-	witnessedSlots := map[string]any{"skipped": true}
-	heldNoCommit := map[int]bool{}
-	var witnessRecords []dispatchtick.WitnessRecord
+	durableWitnessRecords := readDurableDispatchWitnesses(runsDir)
+	witnessedSlots := map[string]any{"skipped": true, "durable_records": len(durableWitnessRecords), "decision_records": len(durableWitnessRecords)}
+	witnessRecords := append([]dispatchtick.WitnessRecord(nil), durableWitnessRecords...)
+	var freshWitnessRecords []dispatchtick.WitnessRecord
 	if opts.Live {
 		tWitness := time.Now()
-		witnessedSlots, witnessRecords = witnessExitedWorkers(root, runsDir, true)
-		heldNoCommit = dispatchtick.HeldNoCommitIssues(witnessRecords)
-		// #5416 tracks E+F: fold this sweep's finished slots into durable capability
-		// evidence. This is the caller the producer and the journal were missing — without
-		// it every pure piece was correct and nothing on a live fleet ever wrote a row.
-		// Opt-in, live-only, and fail-open: the accounting lands in the payload either way,
-		// so an operator sees how much of the sweep became evidence and how much could not.
+		witnessedSlots, freshWitnessRecords = witnessExitedWorkers(root, runsDir, true)
+		witnessRecords = mergeDispatchWitnessRecords(durableWitnessRecords, freshWitnessRecords)
+		witnessedSlots["durable_records"] = len(durableWitnessRecords)
+		witnessedSlots["decision_records"] = len(witnessRecords)
+		// Durable records participate in decisions but never duplicate evidence rows.
 		if dispatchPlacementEvidenceEnabled() {
-			if ev := appendDispatchTurnOutcomes(runsDir, witnessRecords); len(ev) > 0 {
+			if ev := appendDispatchTurnOutcomes(runsDir, freshWitnessRecords); len(ev) > 0 {
 				witnessedSlots["turn_evidence"] = ev
 			}
 		}
 		dispatchStampMs(timings, "witness", tWitness)
+	}
+	heldNoCommit := dispatchtick.HeldNoCommitIssues(witnessRecords)
+	recoverableNoCommit := map[int]bool{}
+	for issue := range dispatchtick.ModelDowngradeReDispatch(witnessRecords, workerDowngradeChain(opts.Backend)) {
+		recoverableNoCommit[issue] = true
 	}
 
 	tPreflight := time.Now()
@@ -817,7 +821,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	tPick := time.Now()
-	pickRes, err := resolveDispatchTickPick(root, stderr, opts, runsDir, heldNoCommit)
+	pickRes, err := resolveDispatchTickPick(root, stderr, opts, runsDir, heldNoCommit, recoverableNoCommit)
 	if err != nil {
 		return nil, err
 	}
@@ -837,6 +841,16 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	dispatchStampMs(timings, "startup_bundle", tSeed)
 	if hasTarget {
 		payload["target_issue"] = target
+	}
+	if next, ok := dispatchtick.ModelDowngradeReDispatch(witnessRecords, workerDowngradeChain(opts.Backend))[target]; ok {
+		source := "durable"
+		for _, rec := range freshWitnessRecords {
+			if rec.Issue == target {
+				source = "fresh"
+				break
+			}
+		}
+		payload["model_recovery_evidence"] = map[string]any{"source": source, "next_model": next}
 	}
 	// Surface the slot witness only on a live tick where the sweep ran, and the
 	// structurally-held issues only when something is actually held, so the common

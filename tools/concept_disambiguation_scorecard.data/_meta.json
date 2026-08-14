@@ -3914,6 +3914,26 @@
           "category": "incidental",
           "reason": "private fold row type, not a distinct witness-proof concept",
           "token": "dogfoodWitnessOutcome"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local slice name for existing dispatch witness records; not a new witness concept.",
+          "token": "durableWitnessRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private persistence helper for the existing dispatch witness concept; not a new proof primitive.",
+          "token": "readDurableDispatchWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local slice name distinguishing newly graded records from durable records; not a new witness concept.",
+          "token": "freshWitnessRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private deduplication helper for existing dispatch witnesses; not a new witness concept.",
+          "token": "mergeDispatchWitnessRecords"
         }
       ],
       "id": "witness-proof",
@@ -3986,8 +4006,10 @@
         "dogfoodDispatchWitnessName",
         "dogfoodWitnessOutcome",
         "done_not_witnessed",
+        "durableWitnessRecords",
         "fak_fleet_goal_witnessed_registrations",
         "formatGuardCompactionWitness",
+        "freshWitnessRecords",
         "guardCompactionWitnessLedger",
         "guardCompactionWitnessLedgerRel",
         "guardCompactionWitnessSchema",
@@ -3996,6 +4018,7 @@
         "latestGuardCompactionWitness",
         "liveTreeWitness",
         "maxWitnessFileBytes",
+        "mergeDispatchWitnessRecords",
         "microCacheWitness",
         "motifDetectReproduceFixWitness",
         "named_witness",
@@ -4007,6 +4030,7 @@
         "proxyFillWitnessPrefix",
         "proxyFillWitnessTable",
         "proxyFillWitnesses",
+        "readDurableDispatchWitnesses",
         "readGuardCompactionWitnesses",
         "recordGuardCompactionWitness",
         "refutations",
@@ -6324,6 +6348,11 @@
           "category": "incidental",
           "reason": "Wire error or request shape within the #6547 full-power attachment decision path; not a separate user-facing concept.",
           "token": "SessionClientDecisionRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic payload count of records considered by the existing dispatch decision; not a new decision concept.",
+          "token": "decision_records"
         }
       ],
       "id": "decision",
@@ -6348,6 +6377,7 @@
         "appendsteerdecisions",
         "decisionStderr",
         "decision_ms_per_request",
+        "decision_records",
         "decision_surface",
         "deterministicSelectorDecision",
         "fixtureSelectStage",

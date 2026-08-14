@@ -871,3 +871,69 @@ func TestDispatchModelDowngradeDefaultAndEnvironmentAblation(t *testing.T) {
 		t.Fatal("explicit true environment should enable model recovery")
 	}
 }
+
+func TestReadDurableDispatchWitnessesKeepsLatestPerIssue(t *testing.T) {
+	dir := t.TempDir()
+	rows := map[string]string{
+		"resolve-12-20260704-010101.witness": `{"issue":12,"claim":"CLAIM_NO_COMMIT","reason":"rate_limit","model":"old-model"}`,
+		"resolve-12-20260704-020202.witness": `{"issue":12,"claim":"CLAIM_NO_COMMIT","reason":"usage_cap","model":"new-model"}`,
+		"resolve-13-20260704-030303.witness": `{"issue":13,"claim":"CLAIM_WITNESSED","sha":"abc"}`,
+		"resolve-bad.witness":                `not json`,
+	}
+	for name, body := range rows {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := readDurableDispatchWitnesses(dir)
+	if len(got) != 2 || got[0].Issue != 12 || got[0].Reason != dispatchtick.NoCommitUsageCap || got[0].Model != "new-model" || got[1].Issue != 13 {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestReadDurableDispatchWitnessesReconstructsLegacyDecisionFields(t *testing.T) {
+	dir := t.TempDir()
+	stem := filepath.Join(dir, "resolve-6724-20260814-010101")
+	if err := os.WriteFile(stem+dispatchtick.WitnessSidecarSuffix, []byte(`{"issue":6724,"claim":"CLAIM_NO_COMMIT","reason":"clean_exit_no_commit"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stem+".log", []byte("account cooled by a live usage cap\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stem+dispatchtick.ModelSidecarSuffix, []byte("claude-opus-4-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := readDurableDispatchWitnesses(dir)
+	if len(got) != 1 || got[0].Reason != dispatchtick.NoCommitUsageCap || got[0].Model != "claude-opus-4-1" {
+		t.Fatalf("got=%+v", got)
+	}
+	// Reconstruction is read-only: the historical sidecar remains byte-identical.
+	raw, err := os.ReadFile(stem + dispatchtick.WitnessSidecarSuffix)
+	if err != nil || strings.Contains(string(raw), "usage_cap") || strings.Contains(string(raw), "model") {
+		t.Fatalf("sidecar mutated: err=%v body=%s", err, raw)
+	}
+}
+
+func TestDurableDispatchWitnessPreservesModelRecoveryAcrossSweeps(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "resolve-6724-20260814-010101.witness"), []byte(`{"issue":6724,"claim":"CLAIM_NO_COMMIT","reason":"usage_cap","model":"claude-opus-4-1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later tick finds the durable sidecar after witnessExitedWorkers has skipped
+	// the already-graded slot. Recovery must still survive process/tick boundaries.
+	records := mergeDispatchWitnessRecords(readDurableDispatchWitnesses(dir), nil)
+	got := dispatchtick.ModelDowngradeReDispatch(records, []string{"claude-opus-4-1", "claude-sonnet-4-0"})
+	if got[6724] != "claude-sonnet-4-0" {
+		t.Fatalf("recovery=%v records=%+v", got, records)
+	}
+}
+
+func TestMergeDispatchWitnessRecordsFreshWins(t *testing.T) {
+	durable := []dispatchtick.WitnessRecord{{Issue: 12, Claim: dispatchtick.ClaimNoCommit, Reason: dispatchtick.NoCommitUsageCap, Model: "old"}}
+	fresh := []dispatchtick.WitnessRecord{{Issue: 12, Claim: dispatchtick.ClaimWitnessed, SHA: "new"}, {Issue: 13, Claim: dispatchtick.ClaimNoCommit, Reason: dispatchtick.NoCommitRateLimit}}
+	got := mergeDispatchWitnessRecords(durable, fresh)
+	if len(got) != 2 || got[0].Issue != 12 || got[0].Claim != dispatchtick.ClaimWitnessed || got[0].SHA != "new" || got[1].Issue != 13 {
+		t.Fatalf("got=%+v", got)
+	}
+}
