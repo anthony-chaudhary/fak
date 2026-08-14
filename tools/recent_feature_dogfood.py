@@ -287,9 +287,23 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
             ),
             Probe(
                 key="go-test-fak-loop-vcache-benchmarks",
-                description="unit-test the loop, vCache, and benchmark CLI surfaces",
-                command=["go", "test", "./cmd/fak", "-run", "TestLoop|TestRunVCache|TestReadVCache|TestBenchmarks"],
-                validator="exit_only",
+                description="unit-test the loop, vCache, and benchmark CLI surfaces in an owned-path isolated checkout",
+                command=fak + [
+                    "validate",
+                    "--test-only",
+                    "--wsl-tests",
+                    "--test-run",
+                    "TestLoop|TestRunVCache|TestReadVCache|TestBenchmarks",
+                    "--mine",
+                    "cmd/fak/vcache.go",
+                    "--mine",
+                    "cmd/fak/benchmarks.go",
+                    "--mine",
+                    "cmd/fak/benchmarks_test.go",
+                    "--json",
+                ],
+                json_source="stdout",
+                validator="validate_ok",
             ),
         ])
     return suite
@@ -404,6 +418,16 @@ def validate_payload(name: str, payload: Any) -> tuple[bool, str]:
         ratio = payload.get("realized_reuse_ratio", 0) if isinstance(payload, dict) else 0
         mt_turns = payload.get("multi_turn_turns", 0) if isinstance(payload, dict) else 0
         return bool(ok), f"nightrun score: reuse ratio {ratio:.1%} over {mt_turns} multi-turn turns" if ok else "nightrun score payload invalid"
+    if name == "validate_ok":
+        if not isinstance(payload, dict) or payload.get("schema") != "fak-validate/1":
+            return False, "validate schema is not fak-validate/1"
+        if payload.get("mode") != "test-only":
+            return False, "validate did not run in test-only mode"
+        if payload.get("ok") is not True:
+            return False, "isolated validate result is not ok"
+        if not payload.get("tested"):
+            return False, "isolated validate did not report tested packages"
+        return True, "isolated affected tests passed"
     return False, f"unknown validator {name}"
 
 
@@ -455,6 +479,13 @@ def summarize_payload(name: str, payload: Any) -> Any:
             "multi_turn_turns": payload.get("multi_turn_turns"),
             "realized_reuse_ratio": payload.get("realized_reuse_ratio"),
             "multi_turn_sessions": payload.get("multi_turn_sessions"),
+        })
+    elif name == "validate_ok":
+        base.update({
+            "schema": payload.get("schema"),
+            "mode": payload.get("mode"),
+            "tested": payload.get("tested"),
+            "failures": payload.get("failures"),
         })
     return base
 

@@ -76,6 +76,41 @@ def test_build_suite_names_recent_surfaces() -> None:
     ]
 
 
+def test_cmd_fak_probe_uses_owned_path_isolation() -> None:
+    dogfood = load()
+    with tempfile.TemporaryDirectory() as d:
+        probe = next(item for item in dogfood.build_suite(ROOT, Path(d)) if item.key == "go-test-fak-loop-vcache-benchmarks")
+    validate_index = probe.command.index("validate")
+    assert probe.command[validate_index:validate_index + 3] == ["validate", "--test-only", "--wsl-tests"]
+    assert probe.command[-1] == "--json"
+    assert probe.validator == "validate_ok"
+    assert probe.json_source == "stdout"
+    mine = [probe.command[i + 1] for i, arg in enumerate(probe.command[:-1]) if arg == "--mine"]
+    assert mine == [
+        "cmd/fak/vcache.go",
+        "cmd/fak/benchmarks.go",
+        "cmd/fak/benchmarks_test.go",
+    ]
+    assert "cmd/fak/loop.go" not in mine
+    assert probe.command[:3] != ["go", "test", "./cmd/fak"]
+
+
+def test_validate_ok_requires_typed_test_witness() -> None:
+    dogfood = load()
+    payload = {
+        "schema": "fak-validate/1",
+        "mode": "test-only",
+        "ok": True,
+        "tested": ["github.com/anthony-chaudhary/fak/cmd/fak"],
+        "failures": None,
+    }
+    ok, reason = dogfood.validate_payload("validate_ok", payload)
+    assert ok, reason
+    ok, reason = dogfood.validate_payload("validate_ok", dict(payload, ok=False))
+    assert not ok
+    assert "not ok" in reason
+
+
 def test_benchmarks_payload_is_valid_dogfood() -> None:
     mod = load()
     ok, reason = mod.validate_payload("benchmarks_offline", [
