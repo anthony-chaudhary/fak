@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
@@ -44,6 +45,21 @@ func decodeFindingsJSON(t *testing.T, findings []hooks.Finding, skipped []string
 // serialize as JSON null, and a gate that recorded the number 0 must serialize as 0. If these two
 // ever collapse, "this gate judged nothing" becomes unreadable from "this gate did not say", and
 // the payload is back to covering two worlds with one shape.
+
+func TestGateReportCarriesElapsedNanoseconds(t *testing.T) {
+	d := &hooks.StagedDiff{}
+	r := buildGateReport(d, "CONCEPT_ADMISSION", 0, false, 125*time.Millisecond)
+	if r.ElapsedNS != int64(125*time.Millisecond) {
+		t.Fatalf("elapsed_ns = %d, want %d", r.ElapsedNS, int64(125*time.Millisecond))
+	}
+	payload := decodeFindingsJSON(t, nil, nil, []gateReport{r})
+	gates := payload["gates"].([]any)
+	got := int64(gates[0].(map[string]any)["elapsed_ns"].(float64))
+	if got != r.ElapsedNS {
+		t.Fatalf("JSON elapsed_ns = %d, want %d", got, r.ElapsedNS)
+	}
+}
+
 func TestGateReportUnreportedIsNullNotZero(t *testing.T) {
 	d := &hooks.StagedDiff{}
 	d.NoteCandidates("GOFMT", 0, "staged .go file(s)") // ran, judged nothing — a REAL answer
@@ -101,19 +117,26 @@ func TestGateReportUnreportedIsNullNotZero(t *testing.T) {
 func TestEmitFindingsJSONStaysAdditive(t *testing.T) {
 	payload := decodeFindingsJSON(t, nil, nil, nil)
 
-	for _, key := range []string{
+	want := []string{
 		"findings", "count", "skipped_gates", "skipped_count", // #5299
 		"gates",                    // #5602
 		"scope", "scope_narrowing", // #5603
-	} {
+	}
+	known := make(map[string]bool, len(want))
+	for _, key := range want {
+		known[key] = true
 		if _, present := payload[key]; !present {
 			t.Errorf("key %q missing; every key is always present so a reader never treats absent as none", key)
 		}
 	}
-	if len(payload) != 7 {
-		t.Errorf("payload has %d keys (%v); this epic only ADDS — the four #5299 keys, plus `gates`\n"+
-			"(#5602), plus scope/scope_narrowing (#5603), and nothing renamed or removed",
-			len(payload), payload)
+	// The relation this stands for, not today's total: the epic only ADDS, so the
+	// payload carries exactly the documented keys and nothing is renamed or removed.
+	for key := range payload {
+		if !known[key] {
+			t.Errorf("undocumented key %q in payload (%v); this epic only ADDS — the four #5299 keys, plus `gates`\n"+
+				"(#5602), plus scope/scope_narrowing (#5603), and nothing renamed or removed",
+				key, payload)
+		}
 	}
 	// Empty must be [] and 0, never null: the nil-to-empty normalization is the reason a consumer
 	// can iterate without a nil check.

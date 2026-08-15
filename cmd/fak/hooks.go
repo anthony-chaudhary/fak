@@ -391,8 +391,9 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			}
 			break
 		}
+		started := time.Now()
 		findings, gerr := checkWithinBudget(g, d, gateBudget)
-		reports = append(reports, buildGateReport(d, g.Name, len(findings), gerr != nil))
+		reports = append(reports, buildGateReport(d, g.Name, len(findings), gerr != nil, time.Since(started)))
 		if gerr != nil {
 			// A single gate that could-not-run — or ran past its wall-clock budget (#5335) — is
 			// skipped (fail-open); the other gates still run. Either way the gate is NAMED and
@@ -627,13 +628,17 @@ type gateReport struct {
 	Unit       string `json:"unit,omitempty"` // what Candidates counts, in that gate's own terms
 	Findings   int    `json:"findings"`
 	Skipped    bool   `json:"skipped,omitempty"` // ran no verdict this commit (#5299/#5335)
+	ElapsedNS  int64  `json:"elapsed_ns"`
 }
 
 // buildGateReport folds one gate's outcome and the denominator that gate recorded for itself
 // into a report line. A gate that recorded nothing leaves Candidates nil — UNREPORTED, which the
 // caller must not render as 0.
-func buildGateReport(d *hooks.StagedDiff, name string, findings int, skipped bool) gateReport {
+func buildGateReport(d *hooks.StagedDiff, name string, findings int, skipped bool, elapsed ...time.Duration) gateReport {
 	r := gateReport{Gate: name, Findings: findings, Skipped: skipped}
+	if len(elapsed) > 0 {
+		r.ElapsedNS = elapsed[0].Nanoseconds()
+	}
 	if n, unit, ok := d.Candidates(name); ok {
 		r.Candidates = &n
 		r.Unit = unit
