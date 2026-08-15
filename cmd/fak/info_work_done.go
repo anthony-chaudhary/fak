@@ -140,7 +140,7 @@ type guardInfoWorkWindow struct {
 func guardInfoSessionWorkDoneQuery(v guardInfoVars, at time.Time) guardInfoWorkDoneQuery {
 	return guardInfoWorkDoneQuery{
 		Schema: guardInfoWorkDoneQuerySchema, GeneratedAt: at.UTC().Format(time.RFC3339Nano),
-		Window:   guardInfoWorkWindow{Kind: "session_total", EndUTC: at.UTC().Format(time.RFC3339Nano)},
+		Window:   guardInfoWorkWindow{Kind: "session_total", EndUTC: at.UTC().Format(time.RFC3339Nano), DurationNanos: int64(time.Duration(v.Gateway.UptimeSeconds * float64(time.Second)))},
 		WorkDone: guardInfoWorkDoneFromVars(v),
 	}
 }
@@ -345,6 +345,9 @@ func guardInfoWorkDoneRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) []s
 		rows = append(rows, " from  "+source+" · Cache tab for ablation")
 	} else {
 		rows = append(rows, " from  source unavailable · Cache tab for ablation")
+	}
+	if ctx.v.WorkHistory != nil {
+		rows = append(rows, guardInfoWorkHistoryRows(*ctx.v.WorkHistory)...)
 	}
 	return rows
 }

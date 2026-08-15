@@ -51,8 +51,9 @@ import (
 // OMITS the block until a turn carries provider cache activity (vcacheVarsFromSnapshot
 // returns nil), so "no cache yet" is distinguishable from "cache proved zero saving".
 type guardInfoVars struct {
-	WorkDone *guardInfoWorkDone `json:"work_done,omitempty"`
-	Gateway  struct {
+	WorkDone    *guardInfoWorkDone              `json:"work_done,omitempty"`
+	WorkHistory *guardInfoWorkHistoryComparison `json:"work_history,omitempty"`
+	Gateway     struct {
 		UptimeSeconds    float64 `json:"uptime_seconds"`
 		InflightRequests int64   `json:"inflight_requests"`
 		VDSO             bool    `json:"vdso"`
@@ -234,6 +235,7 @@ func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVar
 		return v, false
 	}
 	v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
+	c.decorateWorkHistory(&v)
 	return v, true
 }
 
@@ -302,6 +304,9 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
 	workDoneJSON := fs.Bool("work-done-json", false, "emit only the stable fak.info.work-done-query/1 accounting contract and exit")
 	workDoneWindow := fs.Duration("work-done-window", 0, "with --work-done-json, sample a bounded interval and emit deltas; 0 emits the session-total snapshot")
+	workDoneHistory := fs.String("work-done-history", "", "privacy-safe JSONL history file used to compare and retain work-done query records")
+	workloadKey := fs.String("workload-key", "", "stable workload key for history comparison; persisted only as a SHA-256 identity")
+	runKey := fs.String("run-key", "", "optional run key for history export; persisted only as a SHA-256 identity")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	maxIdle := fs.Duration("max-idle", 0, "issue #2340: in watch mode, self-exit (with a closing line) after the gateway has been unreachable for about this long WITHOUT ever answering — a self-terminating backstop so an auto-spawned pane (e.g. from `fak guard --split`) whose gateway never comes up cannot poll a dead URL forever and leak a terminal pane. 0 (default) polls indefinitely, the manual-run behavior. Ignored with --once/--json. Rounds up to a whole --interval tick.")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
@@ -318,8 +323,8 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
-	if *workDoneWindow < 0 || (*workDoneWindow > 0 && !*workDoneJSON) || (*workDoneJSON && *asJSON) {
-		fmt.Fprintln(stderr, "fak info: --work-done-window requires --work-done-json; --json and --work-done-json are mutually exclusive")
+	if *workDoneWindow < 0 || (*workDoneWindow > 0 && !*workDoneJSON) || (*workDoneJSON && *asJSON) || (*workDoneHistory != "" && *workloadKey == "") {
+		fmt.Fprintln(stderr, "fak info: --work-done-window requires --work-done-json; --json and --work-done-json are mutually exclusive; --work-done-history requires --workload-key")
 		return 2
 	}
 	if *receiptFile != "" {
@@ -421,7 +426,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *workDoneJSON {
-		return runInfoWorkDoneQuery(stdout, stderr, c, *workDoneWindow)
+		return runInfoWorkDoneHistoryQuery(stdout, stderr, c, *workDoneWindow, *workDoneHistory, *workloadKey, *runKey)
 	}
 	if *asJSON {
 		v, ok := fetchGuardInfoVars(c, stderr)
@@ -454,6 +459,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 	}
+	c.workHistoryPath, c.workloadKey, c.runKey = *workDoneHistory, *workloadKey, *runKey
 	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style, *color, *maxIdle)
 }
 
@@ -836,6 +842,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		sawHealthy = true
 		misses = 0
 		v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
+		c.decorateWorkHistory(&v)
 		if viewState.copyMode {
 			lastSample, haveSample = v, true // keep the sample fresh but stay frozen for copy/select
 		} else {

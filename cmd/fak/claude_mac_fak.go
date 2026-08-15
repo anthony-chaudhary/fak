@@ -428,10 +428,13 @@ type claudeMacDebugVars struct {
 // reuses the same one-shot bearer-GET shape as sessionClient (session_cmd.go) but
 // is kept local so the debug panel/overlay carry no extra coupling.
 type claudeMacDebugClient struct {
-	base    string
-	key     string
-	grafana string
-	hc      *http.Client
+	base            string
+	key             string
+	grafana         string
+	hc              *http.Client
+	workHistoryPath string
+	workloadKey     string
+	runKey          string
 }
 
 // do issues an authenticated GET to c.base+path with the shared client-resolution and
