@@ -160,6 +160,20 @@ var Cards = []Card{
 	{Key: "bench_dx", Debt: "bench_dx_debt", Script: "bench_dx_scorecard.py", Label: "bench-dx"},
 	{Key: "cuda_dev", Debt: "process_debt", Script: "cuda_dev_scorecard.py", Label: "cuda-dev"},
 	{Key: "persona_fit", Debt: "persona_fit_debt", Script: "persona_fit_scorecard.py", Label: "persona-fit"},
+	// The FLOW card (#6198, epic #6194): eight Little's-Law axes — flow efficiency, queue
+	// time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress
+	// and local (working-tree) WIP — folded by internal/flowmetrics. flow_debt is the COUNT
+	// of tripped axes, not a percentage.
+	//
+	// It is ORTHOGONAL to the neighbouring cards: `osp_residual` counts units awaiting an
+	// operator's look and `hygiene` grades repo shape, while this one grades how work MOVES
+	// — how long it waits, how much of it was never started, and how much is unlanded on
+	// disk. Nothing else here reads issue timestamps against commit timestamps.
+	//
+	// Corpus is deliberately EMPTY (never carried on a --since fold): the KPIs are a
+	// function of git history plus live issue state, not of tracked tree files, so a
+	// diff-disjoint carry would replay a stale reading as though it were fresh.
+	{Key: "flow", Debt: "flow_debt", Cmd: "go run ./cmd/fak score flow --json", Label: "flow-metrics"},
 }
 
 // goBackedKey reports whether a card key is a go run ./cmd/fak card. A simultaneous
