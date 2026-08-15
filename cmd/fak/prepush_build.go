@@ -205,17 +205,23 @@ func tryAcquireBuildSlot(advisory bool) (run bool, release func()) {
 }
 
 // trunkBuildResult is the JSON-stable verdict for agents / the shell rung.
+type trunkBuildPhase struct {
+	Name      string `json:"name"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+}
+
 type trunkBuildResult struct {
-	Schema           string   `json:"schema"`           // fak.trunk_build.v1
-	Reason           string   `json:"reason,omitempty"` // "TRUNK_WOULD_NOT_COMPILE" | "" (empty when it builds/NOOP)
-	OK               bool     `json:"ok"`               // true iff the push may proceed on build grounds
-	Ref              string   `json:"ref"`              // resolved HEAD sha (the pushed tip)
-	Base             string   `json:"base"`             // the base ref the range was computed against
-	ChangedPackages  []string `json:"changed_packages"`
-	SelectedPackages []string `json:"selected_packages"` // changed + importer closure — what was built
-	Detail           string   `json:"detail,omitempty"`  // trimmed `go build` output on a break
-	ElapsedMS        int64    `json:"elapsed_ms"`
-	Verdict          string   `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | TRUNK_ALREADY_RED | GATE_LATENCY_REGRESSION | COULD_NOT_RUN | SKIPPED_CONTENDED
+	Schema           string            `json:"schema"`           // fak.trunk_build.v1
+	Reason           string            `json:"reason,omitempty"` // "TRUNK_WOULD_NOT_COMPILE" | "" (empty when it builds/NOOP)
+	OK               bool              `json:"ok"`               // true iff the push may proceed on build grounds
+	Ref              string            `json:"ref"`              // resolved HEAD sha (the pushed tip)
+	Base             string            `json:"base"`             // the base ref the range was computed against
+	ChangedPackages  []string          `json:"changed_packages"`
+	SelectedPackages []string          `json:"selected_packages"` // changed + importer closure — what was built
+	Detail           string            `json:"detail,omitempty"`  // trimmed `go build` output on a break
+	ElapsedMS        int64             `json:"elapsed_ms"`
+	Phases           []trunkBuildPhase `json:"phases,omitempty"`
+	Verdict          string            `json:"verdict"` // OK | NOOP | TRUNK_WOULD_NOT_COMPILE | TRUNK_ALREADY_RED | GATE_LATENCY_REGRESSION | COULD_NOT_RUN | SKIPPED_CONTENDED
 	// Pre-existing-red tolerance (#3618). When the tip's cone fails to build, each failing
 	// package is re-built against the base trunk (origin/main) to attribute the break. BaseSha is
 	// the resolved base commit built against; PreExistingRed are packages red at BOTH tip and base
@@ -507,14 +513,18 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 	}
 	defer releaseSlot()
 
+	phaseStart := prepushNow()
 	dir, err := prepushExtractTip(r, tip)
+	res.Phases = append(res.Phases, trunkBuildPhase{Name: "extract_tip", ElapsedMS: prepushNow().Sub(phaseStart).Milliseconds()})
 	if err != nil {
 		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("cannot materialize tip %s: %v", short(tip), err)
 		return res, 2
 	}
 	defer os.RemoveAll(dir)
 
+	phaseStart = prepushNow()
 	fileToPkg, edges, _, err := prepushListGraph(dir)
+	res.Phases = append(res.Phases, trunkBuildPhase{Name: "list_graph", ElapsedMS: prepushNow().Sub(phaseStart).Milliseconds()})
 	if err != nil {
 		res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("go list in archive tip: %v", err)
 		return res, 2
@@ -529,9 +539,10 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 		return res, 0
 	}
 
-	start := prepushNow()
+	phaseStart = prepushNow()
 	detail, ok := prepushBuild(dir, res.SelectedPackages)
-	res.ElapsedMS = prepushNow().Sub(start).Milliseconds()
+	res.ElapsedMS = prepushNow().Sub(phaseStart).Milliseconds()
+	res.Phases = append(res.Phases, trunkBuildPhase{Name: "build_selected", ElapsedMS: res.ElapsedMS})
 	if !ok {
 		// The tip's cone did not build. Attribute the break before blaming this push: a package
 		// red at BOTH the tip AND the base trunk is a peer's already-published break, not this
