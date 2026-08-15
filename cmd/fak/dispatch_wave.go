@@ -388,6 +388,10 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, freshStartCap int, goalProfile ...string) (dispatchWavePrice, error) {
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	profile := dispatchWaveGoalProfile(goalProfile)
+	newlyUnblocked := map[int]bool{}
+	for _, n := range router.NewlyUnblocked {
+		newlyUnblocked[n] = true
+	}
 	// One runs-directory scan feeds every view this pricing pass needs -- held lanes, live
 	// issues, the cooldown set, and the poison-cap skip set -- instead of re-globbing the
 	// sidecars four times (#3593).
@@ -483,7 +487,7 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 			Lane:            leaseID,
 			Tree:            paths,
 			Mode:            "exclusive",
-			UpdatedUnix:     dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(paths)),
+			UpdatedUnix:     dispatchWaveReleaseStamp(dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(paths)), newlyUnblocked[route.Number]),
 			CreatedUnix:     int64(route.Number),
 			LastAttemptUnix: lastAttempt,
 		})
@@ -537,7 +541,7 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 			Lane:            leaseID,
 			Tree:            grp.Tree,
 			Mode:            "exclusive",
-			UpdatedUnix:     dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(grp.Tree)),
+			UpdatedUnix:     dispatchWaveReleaseStamp(dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(grp.Tree)), newlyUnblocked[issue]),
 			CreatedUnix:     int64(grp.Count*len(lanes) + (len(lanes) - i)),
 			LastAttemptUnix: lastAttempt,
 		})
@@ -706,6 +710,13 @@ func dispatchWaveOrderLaneIssues(nums []int, weights map[int]int) []int {
 		cands[i] = dispatchtick.LaneCandidate{Number: n, Weight: weight}
 	}
 	return dispatchtick.OrderLaneCandidates(cands, false)
+}
+
+func dispatchWaveReleaseStamp(stamp int64, newlyUnblocked bool) int64 {
+	if newlyUnblocked {
+		return stamp + 100_000_000
+	}
+	return stamp
 }
 
 func dispatchWaveOrderStamp(profile string, priority, stepBudget int, core bool) int64 {

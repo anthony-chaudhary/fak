@@ -301,7 +301,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	// It needs no whole-backlog regroup: live/cooldown filtering still happens in
 	// resolveDispatchTickPick after this return. Auto-pick and target routing retain
 	// the full router because they need cross-lane scores and per-issue scope.
-	if lane := strings.TrimSpace(explicit); lane != "" && targetIssue == 0 && !preferNewest && strings.TrimSpace(generation) == "" {
+	if lane := strings.TrimSpace(explicit); lane != "" && targetIssue == 0 && !preferNewest && strings.TrimSpace(generation) == "" && !dispatchPrereqTransitionPending(root) {
 		if pick, ok := dispatchPersistedLanePick(root, lane, time.Now()); ok {
 			return pick, nil
 		}
@@ -326,6 +326,10 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 				break
 			}
 		}
+	}
+	newlyUnblocked := map[int]bool{}
+	for _, n := range router.NewlyUnblocked {
+		newlyUnblocked[n] = true
 	}
 	numsByLane := map[string][]int{}
 	treesByLane := map[string][]string{}
@@ -363,7 +367,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 			priorityByLane[lane][n] = weight
 			cands[i] = dispatchtick.GenerationCandidate{Number: n, Weight: weight, Generation: info.Generation[n]}
 		}
-		numsByLane[lane] = dispatchtick.OrderEligibleGenerationCandidates(cands, generation, preferNewest)
+		numsByLane[lane] = promoteNewlyUnblocked(dispatchtick.OrderEligibleGenerationCandidates(cands, generation, preferNewest), priorityByLane[lane], newlyUnblocked)
 		counts[lane] = len(nums)
 		stepBudget := info.StepBudget
 		if stepBudget <= 0 {
@@ -411,6 +415,16 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		}
 		highPriority := goalProfile == dispatchGoalProfileHighPriority
 		orderedLanes := dispatchtick.DefaultDispatchLaneScorers(highPriority, maxStepBudget, maxCount).Order(laneCandidates)
+		// A dependency release wins only inside its declared priority tier; explicit higher
+		// priority remains authoritative. Stable sorting preserves the normal scorer order.
+		sort.SliceStable(orderedLanes, func(i, j int) bool {
+			if orderedLanes[i].Priority != orderedLanes[j].Priority {
+				return false
+			}
+			iNew := len(numsByLane[orderedLanes[i].Lane]) > 0 && newlyUnblocked[numsByLane[orderedLanes[i].Lane][0]]
+			jNew := len(numsByLane[orderedLanes[j].Lane]) > 0 && newlyUnblocked[numsByLane[orderedLanes[j].Lane][0]]
+			return iNew && !jNew
+		})
 		if len(orderedLanes) > 0 {
 			chosen = orderedLanes[0].Lane
 		}
@@ -462,6 +476,23 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		RouterError:        dispatchRouterError(router),
 		SelfSourceHeld:     selfSourceHeld,
 	}, nil
+}
+
+func promoteNewlyUnblocked(nums []int, weights map[int]int, newly map[int]bool) []int {
+	out := append([]int(nil), nums...)
+	weight := func(n int) int {
+		if w, ok := weights[n]; ok {
+			return w
+		}
+		return dispatchtick.PriorityWeightDefault
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if weight(out[i]) != weight(out[j]) {
+			return false
+		}
+		return newly[out[i]] && !newly[out[j]]
+	})
+	return out
 }
 
 func dispatchLaneTopPriority(nums []int, weights map[int]int) int {
@@ -598,6 +629,9 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 	// SkippedHumanBlocked (still open), so a dependent of it remains correctly held. Reads the
 	// ledger fresh each tick (never the routed cache), so a resume takes effect next tick.
 	payload = holdSteerPausedForRoute(root, payload)
+	// Compare the pre-hold graph with the prior durable hold set before removing current
+	// dependents. This turns prerequisite closure into a one-pass pickup signal (#6856).
+	payload = reconcilePrereqRelease(root, payload)
 	// Dependency soft-hold: after the known-bad hold, hold back any dispatchable leaf whose
 	// "depends-on:/blocked-by: #N" prerequisite is still an OPEN candidate this tick. Runs AFTER
 	// known-bad on purpose -- a known-bad-held prerequisite stays in SkippedHumanBlocked (still

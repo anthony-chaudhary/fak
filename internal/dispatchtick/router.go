@@ -320,6 +320,14 @@ type RouterPayload struct {
 	RepairQueues        []RouterRepairQueue        `json:"repair_queues,omitempty"`
 	UnroutableBacklog   []UnroutableBacklogRow     `json:"unroutable_backlog,omitempty"`
 	SkippedHumanBlocked []SkippedIssue             `json:"skipped_human_blocked"`
+	// NewlyUnblocked names open issues whose declared prerequisites were held on the prior
+	// routing pass and are absent now. The command shell derives this one-pass transition
+	// from durable state; the pure router only carries it to ordering and operator output.
+	NewlyUnblocked []int `json:"newly_unblocked,omitempty"`
+	// PrereqHeldCount is the number of dependency-held units observed before the command
+	// shell removed them from routable lanes. It keeps durable queue consumers from bypassing
+	// dependency reconciliation while any transition may still be pending.
+	PrereqHeldCount int `json:"prereq_held_count,omitempty"`
 }
 
 type RouterInput struct {

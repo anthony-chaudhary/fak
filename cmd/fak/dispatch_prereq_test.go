@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -152,5 +154,118 @@ func TestHoldOpenPrereqHoldsOnSkippedOpenPrereq(t *testing.T) {
 	}
 	if len(openPrereqBlockedSkipped(got)) != 1 {
 		t.Fatalf("want #102 held on the skipped-open prerequisite, got %d holds", len(openPrereqBlockedSkipped(got)))
+	}
+}
+
+func TestReconcilePrereqReleaseIsOneShotAndPriorityBounded(t *testing.T) {
+	root := t.TempDir()
+	open := dispatchtick.RouterPayload{
+		Issues: []dispatchtick.IssueRoute{
+			{Number: 10, Lane: "base", ExpectedSteps: 1},
+			{Number: 20, Lane: "next", ExpectedSteps: 1, BlockedBy: []string{"10"}},
+			{Number: 30, Lane: "other", ExpectedSteps: 1},
+		},
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"base":  {Issues: []int{10}, Count: 1, StepBudget: 1},
+			"next":  {Issues: []int{20}, Count: 1, StepBudget: 1},
+			"other": {Issues: []int{30}, Count: 1, StepBudget: 1},
+		},
+		Counts: dispatchtick.RouterCounts{Routed: 3, RoutedStepBudget: 3},
+	}
+
+	first := reconcilePrereqRelease(root, open)
+	if len(first.NewlyUnblocked) != 0 {
+		t.Fatalf("first newly_unblocked = %v, want none while prerequisite is open", first.NewlyUnblocked)
+	}
+	held := holdOpenPrereqForRoute(first)
+	heldReason := ""
+	for _, row := range held.SkippedHumanBlocked {
+		if row.Number == 20 {
+			heldReason = row.Reason
+		}
+	}
+	if heldReason != reasonBlockedByOpenPrereq {
+		t.Fatalf("held dependent reason = %q, want %s", heldReason, reasonBlockedByOpenPrereq)
+	}
+
+	closed := dispatchtick.RouterPayload{Issues: []dispatchtick.IssueRoute{
+		{Number: 20, BlockedBy: []string{"10"}},
+		{Number: 30},
+	}}
+	second := reconcilePrereqRelease(root, closed)
+	if !reflect.DeepEqual(second.NewlyUnblocked, []int{20}) {
+		t.Fatalf("second newly_unblocked = %v, want [20]", second.NewlyUnblocked)
+	}
+	if got := promoteNewlyUnblocked([]int{30, 20}, map[int]int{}, map[int]bool{20: true}); !reflect.DeepEqual(got, []int{20, 30}) {
+		t.Fatalf("same-priority release order = %v, want [20 30]", got)
+	}
+	if got := promoteNewlyUnblocked([]int{30, 20}, map[int]int{30: dispatchtick.PriorityWeightP1}, map[int]bool{20: true}); !reflect.DeepEqual(got, []int{30, 20}) {
+		t.Fatalf("higher explicit priority order = %v, want [30 20]", got)
+	}
+	base := dispatchWaveOrderStamp(dispatchGoalProfileThroughput, dispatchtick.PriorityWeightDefault, 10, false)
+	if dispatchWaveReleaseStamp(base, true) <= dispatchWaveReleaseStamp(base+1, false) {
+		t.Fatal("newly unblocked wave stamp must outrank ordinary same-tier work")
+	}
+
+	third := reconcilePrereqRelease(root, closed)
+	if len(third.NewlyUnblocked) != 0 {
+		t.Fatalf("third newly_unblocked = %v, want one-shot signal cleared", third.NewlyUnblocked)
+	}
+}
+
+func TestPickDispatchLaneNewlyUnblockedLeadsSamePriorityThenClears(t *testing.T) {
+	root := t.TempDir()
+	oldRoute := dispatchRouteIssues
+	defer func() { dispatchRouteIssues = oldRoute }()
+	pass := 0
+	dispatchRouteIssues = func(string, io.Writer) (dispatchtick.RouterPayload, error) {
+		pass++
+		newly := []int{20}
+		if pass > 1 {
+			newly = nil
+		}
+		return dispatchtick.RouterPayload{
+			NewlyUnblocked: newly,
+			Issues: []dispatchtick.IssueRoute{
+				{Number: 20, Lane: "next"},
+				{Number: 30, Lane: "other"},
+			},
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"next":  {Issues: []int{20}, Count: 1, StepBudget: 1},
+				"other": {Issues: []int{30}, Count: 1, StepBudget: 100},
+			},
+		}, nil
+	}
+
+	first, err := pickDispatchLane(root, io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Lane != "next" || !reflect.DeepEqual(first.Numbers, []int{20}) {
+		t.Fatalf("release pick = lane %q numbers %v, want next/[20]", first.Lane, first.Numbers)
+	}
+	second, err := pickDispatchLane(root, io.Discard, "", nil, false, "", dispatchGoalProfileThroughput, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Lane != "other" {
+		t.Fatalf("post-release lane = %q, want ordinary richer lane other", second.Lane)
+	}
+}
+
+func TestDispatchWaveNewlyUnblockedLeadsOrdinarySameTier(t *testing.T) {
+	router := dispatchtick.RouterPayload{
+		NewlyUnblocked: []int{20},
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"next":  {Issues: []int{20}, Count: 1, StepBudget: 1, Tree: []string{"internal/next"}},
+			"other": {Issues: []int{30}, Count: 1, StepBudget: 100, Tree: []string{"internal/other"}},
+		},
+	}
+	price, err := priceDispatchWavePayloadFilteredWithFreshCap(t.TempDir(), router, 1, 1, "", nil, 0, nil, 1, dispatchGoalProfileThroughput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(price.RunTargets) != 1 || price.RunTargets[0].Issue != 20 {
+		t.Fatalf("run targets = %+v, want newly unblocked issue 20", price.RunTargets)
 	}
 }

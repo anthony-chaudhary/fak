@@ -8,13 +8,16 @@ package main
 // removed from its lane (so PickTargetIssue cannot select it) and surfaced in the skipped set with
 // reason BLOCKED_BY_OPEN_PREREQ -- legible, not silently dropped.
 //
-// The hold is single-tick and self-clearing: the tick refetches the full open backlog each iteration,
-// so a prerequisite is present (and its dependent held) exactly until it CLOSES, at which point it
-// leaves the candidate set and the engine fails open (the dependent dispatches). No ledger, no clock,
-// no persisted state -- pure over the payload, so a peer can re-derive it.
+// The hold itself is single-tick and self-clearing. A tiny durable snapshot records only which
+// dependency edges were held on the prior pass, allowing prerequisite closure to produce one bounded
+// newly-unblocked pickup signal; failure to read or write that snapshot leaves ordinary routing intact.
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -106,4 +109,113 @@ func openPrereqBlockedSkipped(router dispatchtick.RouterPayload) []dispatchtick.
 		}
 	}
 	return out
+}
+
+const dispatchPrereqStateSchema = "fak-dispatch-prereq-state/1"
+
+type dispatchPrereqState struct {
+	Schema string              `json:"schema"`
+	Held   map[string][]string `json:"held"`
+}
+
+func dispatchPrereqStatePath(root string) string {
+	return filepath.Join(root, ".fak", "dispatch", "prereq-held.json")
+}
+
+// reconcilePrereqRelease compares the prior pass's durable dependency holds with the current
+// pre-hold open graph. A dependent that remains open after every prior prerequisite disappears
+// gets exactly one newly-unblocked pass: this call writes the current hold set, so the next call
+// no longer sees the transition. State I/O fails open; ordinary routing must never depend on it.
+func reconcilePrereqRelease(root string, payload dispatchtick.RouterPayload) dispatchtick.RouterPayload {
+	prior := readDispatchPrereqState(dispatchPrereqStatePath(root))
+	open := make(map[string]bool, len(payload.Issues))
+	for _, issue := range payload.Issues {
+		open[strconv.Itoa(issue.Number)] = true
+	}
+	newly := make([]int, 0)
+	for issueID, blockers := range prior.Held {
+		if !open[issueID] {
+			continue
+		}
+		blocked := false
+		for _, blocker := range blockers {
+			if open[blocker] {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			if n, err := strconv.Atoi(issueID); err == nil && n > 0 {
+				newly = append(newly, n)
+			}
+		}
+	}
+	sort.Ints(newly)
+	payload.NewlyUnblocked = newly
+	payload.PrereqHeldCount = len(currentDispatchPrereqState(payload).Held)
+	_ = writeDispatchPrereqState(dispatchPrereqStatePath(root), currentDispatchPrereqState(payload))
+	return payload
+}
+
+func currentDispatchPrereqState(payload dispatchtick.RouterPayload) dispatchPrereqState {
+	open := make(map[string]bool, len(payload.Issues))
+	for _, issue := range payload.Issues {
+		open[strconv.Itoa(issue.Number)] = true
+	}
+	held := map[string][]string{}
+	for _, issue := range payload.Issues {
+		var blockers []string
+		for _, blocker := range issue.BlockedBy {
+			if open[blocker] {
+				blockers = append(blockers, blocker)
+			}
+		}
+		if len(blockers) > 0 {
+			sort.Strings(blockers)
+			held[strconv.Itoa(issue.Number)] = blockers
+		}
+	}
+	return dispatchPrereqState{Schema: dispatchPrereqStateSchema, Held: held}
+}
+
+func dispatchPrereqTransitionPending(root string) bool {
+	return len(readDispatchPrereqState(dispatchPrereqStatePath(root)).Held) > 0
+}
+
+func readDispatchPrereqState(path string) dispatchPrereqState {
+	state := dispatchPrereqState{Schema: dispatchPrereqStateSchema, Held: map[string][]string{}}
+	b, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(b, &state) != nil || state.Schema != dispatchPrereqStateSchema || state.Held == nil {
+		return dispatchPrereqState{Schema: dispatchPrereqStateSchema, Held: map[string][]string{}}
+	}
+	return state
+}
+
+func writeDispatchPrereqState(path string, state dispatchPrereqState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".prereq-held-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
