@@ -22,10 +22,19 @@ func TestAuditUsesCanonicalProblemFrame(t *testing.T) {
 	if r.Counts.ProblemFrame != 2 {
 		t.Fatalf("complete frames = %d, want 2", r.Counts.ProblemFrame)
 	}
+	if r.Counts.Valid != 2 || r.Counts.Invalid != 2 || r.Counts.Unclassified != 1 {
+		t.Fatalf("frame statuses = %+v", r.Counts)
+	}
+	if len(r.Findings) != 5 || r.Findings[0].Status != "valid" || r.Findings[2].Status != "invalid" || r.Findings[4].Status != "unclassified" {
+		t.Fatalf("findings = %+v", r.Findings)
+	}
+	if len(r.Findings[4].RepairActions) != 1 || !strings.Contains(r.Findings[4].RepairActions[0], "do not infer") {
+		t.Fatalf("unclassified repair = %+v", r.Findings[4])
+	}
 	if r.CoveragePct != 80 {
 		t.Fatalf("coverage = %v, want 80", r.CoveragePct)
 	}
-	if got := r.Text(); !strings.Contains(got, "CENTRALITY COVERAGE 80.0% (4/5)") || !strings.Contains(got, "Unknown 1") {
+	if got := r.Text(); !strings.Contains(got, "CENTRALITY COVERAGE 80.0% (4/5)") || !strings.Contains(got, "Frame status: valid 2 | invalid 2 | unclassified 1") || !strings.Contains(got, "#5 [unclassified]") {
 		t.Fatalf("text output:\n%s", got)
 	}
 }
@@ -41,5 +50,8 @@ func TestAuditReportsCanonicalInvalidFrameAsIncomplete(t *testing.T) {
 	}
 	if len(r.Errors) != 1 {
 		t.Fatalf("errors = %#v", r.Errors)
+	}
+	if len(r.Findings) != 1 || r.Findings[0].Status != "invalid" || len(r.Findings[0].Reasons) == 0 || len(r.Findings[0].RepairActions) == 0 {
+		t.Fatalf("actionable finding missing: %+v", r.Findings)
 	}
 }

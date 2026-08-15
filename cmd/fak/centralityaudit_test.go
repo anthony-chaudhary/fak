@@ -20,7 +20,7 @@ func TestCentralityAuditFixtureCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v; stderr=%s", err, stderr.String())
 	}
-	if got := out.String(); !strings.Contains(got, "CENTRALITY COVERAGE 50.0% (1/2)") || !strings.Contains(got, "Complete P1-P4 frame 1/2") {
+	if got := out.String(); !strings.Contains(got, "CENTRALITY COVERAGE 50.0% (1/2)") || !strings.Contains(got, "Frame status: valid 1 | invalid 0 | unclassified 1") || !strings.Contains(got, "#2 [unclassified]") || !strings.Contains(got, "repair:") {
 		t.Fatalf("output:\n%s", got)
 	}
 }
@@ -34,7 +34,7 @@ func TestCentralityAuditJSONSchema(t *testing.T) {
 	if err := runCentralityAudit([]string{"--input", path, "--json"}, &out, &bytes.Buffer{}, time.Now); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); !strings.Contains(got, `"schema": "fak-issue-centrality-audit/1"`) || !strings.Contains(got, `"errors": []`) {
+	if got := out.String(); !strings.Contains(got, `"schema": "fak-issue-centrality-audit/1"`) || !strings.Contains(got, `"findings": []`) || !strings.Contains(got, `"errors": []`) {
 		t.Fatalf("json:\n%s", got)
 	}
 }
