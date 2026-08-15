@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -632,6 +633,21 @@ func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 	return out
 }
 
+const reservedGuardBanner = "[fak] BLOCKED_BY_GUARD"
+
+// demoteReservedGuardBanner keeps kernel terminal receipts distinguishable from model
+// prose. BLOCKED_BY_GUARD is emitted only by blockedResponsesCompletion after the
+// kernel has indexed real denied call IDs. If an upstream model writes the same reserved
+// prefix in ordinary assistant content, mark it untrusted before it reaches the client;
+// otherwise invented call IDs can masquerade as a kernel receipt and falsely stop the
+// managed harness (#6810).
+func demoteReservedGuardBanner(text string) string {
+	if !strings.Contains(text, reservedGuardBanner) {
+		return text
+	}
+	return strings.ReplaceAll(text, reservedGuardBanner, "[model text; not a fak receipt] BLOCKED_BY_GUARD")
+}
+
 // responsesOutputFromAssistant renders the adjudicated assistant turn into Responses
 // output items: a `message` item carrying the assistant prose as an output_text part
 // (emitted when there is any content), followed by one `function_call` item per KEPT
@@ -642,6 +658,7 @@ func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 func responsesOutputFromAssistant(asst agent.Message) []responsesOutputItem {
 	out := make([]responsesOutputItem, 0, 1+len(asst.ToolCalls))
 	if asst.Content != "" {
+		asst.Content = demoteReservedGuardBanner(asst.Content)
 		out = append(out, responsesOutputItem{
 			Type:   "message",
 			Role:   agent.RoleAssistant,

@@ -2276,6 +2276,16 @@
           "category": "incidental",
           "reason": "Example reason token parsed from historical decision evidence; it is data carried by a row, not a guard gate definition.",
           "token": "SOAK_GATE"
+        },
+        {
+          "category": "incidental",
+          "reason": "private implementation identifier for escaping reserved kernel receipt text",
+          "token": "reservedGuardBanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "private helper that escapes model-authored reserved kernel receipt text",
+          "token": "demoteReservedGuardBanner"
         }
       ],
       "exclude": [
@@ -2364,6 +2374,7 @@
         "commentQualityGate",
         "cooldownGateBlindWarning",
         "coreLockLandGate",
+        "demoteReservedGuardBanner",
         "dispatchGateProvenance",
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
@@ -2568,6 +2579,7 @@
         "readguardstoptranscript",
         "recordGuardCompactionWitness",
         "renderguardstartupreport",
+        "reservedGuardBanner",
         "runCacheValueGateScore",
         "runGuardGoalQuestionHook",
         "runGuardOperatorQuestionGate",
