@@ -68,11 +68,17 @@ func RenderHuman(w io.Writer, result RunResult, cfg Config) {
 		parts = append(parts, "none")
 	}
 	fmt.Fprintf(w, "  deduped/dropped: %s\n", strings.Join(parts, ", "))
+	renderConversion(w, result)
 	if len(result.Planned) == 0 {
 		fmt.Fprintln(w, "  -> nothing new worth filing today.")
 	} else {
 		verb := "would file"
-		if result.Mode == "live" {
+		switch {
+		case result.FilingGate.Paused:
+			// Never "FILED" under a held gate: a live run that filed nothing because
+			// the conversion gate stopped it must not read like one that filed.
+			verb = "did NOT file (gate paused)"
+		case result.Mode == "live":
 			verb = "FILED"
 		}
 		fmt.Fprintf(w, "  -> %s %d issue(s) (cap %d, min-score %d):\n", verb, len(result.Planned), cfg.MaxIssues, cfg.MinScore)
@@ -87,7 +93,44 @@ func RenderHuman(w io.Writer, result RunResult, cfg Config) {
 			fmt.Fprintf(w, "     ! %s\n", e)
 		}
 	}
-	if result.Mode == "dry-run" && len(result.Planned) > 0 {
+	if result.Mode == "dry-run" && len(result.Planned) > 0 && !result.FilingGate.Paused {
 		fmt.Fprintln(w, "\n  dry-run - file these for real with: fak idea-scout --live")
 	}
+}
+
+// renderConversion prints the three things #6506 found missing from a run that
+// still exited 0: what the existing stock looks like, whether any of it ever
+// converted, and whether a source lane was down for the whole run.
+func renderConversion(w io.Writer, result RunResult) {
+	b := result.Backlog
+	fmt.Fprintf(w, "  backlog: %d filed - %d open (%d untriaged, oldest %dd, median %dd) - %d closed\n",
+		b.Filed, b.Open, b.Untriaged, b.OldestOpenDays, b.MedianOpenDays, b.Closed)
+	fmt.Fprintf(w, "  conversion: %d triaged (%s), %d converted (%s, upper bound), %d no-action (%s)%s\n",
+		b.Triaged, pct(b.TriageRate), b.Converted, pct(b.ConversionRate), b.NoAction, pct(b.NoActionRate),
+		unclassifiedNote(b))
+	for _, lane := range result.SourceHealth {
+		if lane.Status == LaneOK {
+			continue
+		}
+		fmt.Fprintf(w, "  source %s: %s (%d/%d topic queries failed)\n", lane.Lane, strings.ToUpper(lane.Status), lane.Failed, lane.Attempted)
+	}
+	if result.Status == StatusDegraded {
+		fmt.Fprintln(w, "  status: DEGRADED - a source lane failed on every topic that armed it, so the candidate pool is incomplete")
+	}
+	if result.FilingGate.Paused {
+		fmt.Fprintf(w, "  FILING PAUSED (%s): %s\n", result.FilingGate.Reason, result.FilingGate.Detail)
+		fmt.Fprintln(w, "     drain the stock first (triage or close the open idea-scout issues); prefer a witnessed")
+		fmt.Fprintln(w, "     study + gap-witness pass over raw candidate filing while the backlog is above the cap.")
+	}
+}
+
+func unclassifiedNote(b BacklogStats) string {
+	if b.Unclassified == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" [%d of %d carry no state, so the ledger is partial]", b.Unclassified, b.Filed)
+}
+
+func pct(rate float64) string {
+	return fmt.Sprintf("%.1f%%", rate*100)
 }

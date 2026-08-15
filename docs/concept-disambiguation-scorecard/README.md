@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **261** (clarity 15 + coverage 246) |
-| **Crystal-clear concepts (and climbing)** | **454** crystal of 2167 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2321 / 2567** (90.4% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 191 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2845 indexed names |
+| **Disambiguation-debt (drive to 0)** | **257** (clarity 15 + coverage 242) |
+| **Crystal-clear concepts (and climbing)** | **458** crystal of 2171 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2325 / 2567** (90.6% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 192 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2849 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 87.4/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 87.5/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2167 concepts - score 87.4/100 (grade B) - disambiguation-debt 261
+concept-disambiguation chart - 2171 concepts - score 87.5/100 (grade B) - disambiguation-debt 257
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######..................... 454
+  * crystal       #######..................... 458
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ************oooooooooooooooooooooooooooooooo (44 concept(s); 12 crystal)
   gateway-engine   *************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (130 concept(s); 13 crystal)
-  guard-gate       *******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (332 concept(s); 91 crystal)
+  guard-gate       ***********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (336 concept(s); 95 crystal)
   layout           ****ooooooooo      (13 concept(s); 4 crystal)
   loop             ****************************oooooooooooooooooooooooooooooooooooooo (66 concept(s); 28 crystal)
   plan             ***********************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (264 concept(s); 23 crystal)
@@ -62,7 +62,7 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 52 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ########################.... 388/452
+  guard-gate       ########################.... 392/452
   plan             #########################... 320/357
   session-runtime  ########################.... 214/245
   policy-capability #########################... 159/181
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 90.4%  (2321/2567 confusable tokens positioned)
+namespace coverage  [#############################...] 90.6%  (2325/2567 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 190
+  mutual       ############################ 191
   one-sided    #........................... 1
   undrawn      ............................ 0
-  pairs separated   [################################] 191/191
+  pairs separated   [################################] 192/192
 
-name index: 2845 lookup name(s) -> 2167 concept(s), 61 ambiguous
+name index: 2849 lookup name(s) -> 2171 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 191 |
-| **Separated from each other (drive to all)** | **191 / 191** (190 mutual, 1 one-sided) |
+| Confusable name-pairs discovered | 192 |
+| **Separated from each other (drive to all)** | **192 / 192** (191 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1524 / 4031 |
+| Boundaries drawn (mutual / total) | 1532 / 4039 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2845 over 2167 concepts |
+| Lookup names indexed | 2849 over 2171 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2167 |
+| Concepts carrying a contrast set | 2171 |
 
 ## The concepts (best verdict first)
 
@@ -364,6 +364,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | guard-gate | **guardrail (safety boundary)** - A safety boundary or constraint that prevents an AI system from taking harmful actions; often implemented as policy checks or refusal reasons. |
 | * | crystal | symbol | guard-gate | **agentHookDelegate** - agentHookDelegate is one registered child process for one agent-LIFECYCLE event (PreToolUse/PostToolUse/Stop): the compiled stand-in for a single hooks entry in .claude/settings.json, carrying the event it serves and an Argv resolver that reports whether the delegate is present on this box at all. |
 | * | crystal | symbol | guard-gate | **repoguardArgv** - repoguardArgv resolves the repo-guard PreToolUse delegate's child command for a repo root: the compiled tools/.bin/repoguard if present, else the tools/repo_guard.py source, else NOT-PRESENT. It answers only 'what should be executed here, and does it exist', never whether the guard allows the call. |
+| * | crystal | symbol | guard-gate | **GateFiling** - The idea-scout's CONVERSION decision: given the ledger of what the scout already filed and the declared untriaged_cap, GateFiling returns the FilingGate that says whether a live run may create issues at all today. It pauses on stock (more untriaged open filings than the cap) and, as a fail-closed backstop, on a filed-issue index big enough to matter that reports no state. |
+| * | crystal | symbol | guard-gate | **FilingGate** - The RECORD GateFiling returns and the idea-scout run result carries as filing_gate: the cap in force, the untriaged stock it was measured against, whether filing is paused, and a reason plus an operator-actionable detail. It is what makes a run that filed nothing because of the backlog distinguishable from one that simply found nothing new. |
+| * | crystal | symbol | guard-gate | **GateUntriagedCap** - The FilingGate.Reason a paused idea-scout run carries when the scout's OWN untriaged open filings outnumber the declared untriaged_cap. It is a self-releasing brake: the same run files again as soon as the stock is triaged or closed back under the cap, so re-enablement needs no code change and no operator memory. |
+| * | crystal | symbol | guard-gate | **GateIndexUnclassified** - The FilingGate.Reason for the fail-closed arm of the idea-scout conversion gate: a filed-issue index larger than the cap that reports no state for any of its rows cannot be shown to be under the cap, so filing pauses rather than treating an unreadable ledger as an empty backlog. |
 | * | crystal | symbol | guard-gate | **FP4ClaimRuntimeDelegated** - The claim scope in which the checkpoint producer states that execution belongs to an external runtime rather than to whoever reads the metadata. It is a producer ASSERTION carried in the document, and reading it routes the artifact away from in-kernel execution even when every other field would license acceptance. |
 | * | crystal | symbol | guard-gate | **FP4Delegate** - The disposition meaning the FP4 document is readable and self-consistent but execution belongs to someone else -- because the producer said so, or because the declared hardware lacks native FP4 decode/GEMM. fak routes the artifact rather than claiming it can run it. |
 | * | crystal | symbol | guard-gate | **runtime_delegated** - The wire value of the runtime-delegated claim scope: the literal string a producer writes into an FP4 metadata document's claim_scope field to say that execution belongs to an external runtime. Being a wire value, it is part of the artifact's public contract and cannot be renamed without breaking documents already written. |
@@ -2444,19 +2448,19 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2507/4031 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2167 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2507/4039 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2171 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `pair_separated` | 100 | 0 | all 191 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 192 confusable name-pair(s) are separated |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 388 | 452 | 64 |
+| guard-gate | 392 | 452 | 60 |
 | plan | 320 | 357 | 37 |
 | session-runtime | 214 | 245 | 31 |
 | policy-capability | 159 | 181 | 22 |

@@ -1,0 +1,82 @@
+{
+  "rows": [
+    {
+      "id": "gatefiling",
+      "canonical": "GateFiling",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The idea-scout's CONVERSION decision: given the ledger of what the scout already filed and the declared untriaged_cap, GateFiling returns the FilingGate that says whether a live run may create issues at all today. It pauses on stock (more untriaged open filings than the cap) and, as a fail-closed backstop, on a filed-issue index big enough to matter that reports no state.",
+      "distinction": "GateFiling decides about the scout's OWN downstream backlog, so it is not a dedup rung (PlanIssues / the filed-stamp index, which decide about one candidate's novelty) and not a threshold like MinScore or MaxIssues (which shape a single day's batch). It is the DECISION function; FilingGate is the record it returns.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "filinggate"
+      ],
+      "aliases": [],
+      "grounding": "GateFiling",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "filinggate",
+      "canonical": "FilingGate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The RECORD GateFiling returns and the idea-scout run result carries as filing_gate: the cap in force, the untriaged stock it was measured against, whether filing is paused, and a reason plus an operator-actionable detail. It is what makes a run that filed nothing because of the backlog distinguishable from one that simply found nothing new.",
+      "distinction": "FilingGate is the decision RECORD, not the decision function (GateFiling) and not the ledger the decision reads (BacklogStats). It also is not a dedup outcome: a candidate dropped by a dedup rung is reported in dropped/skipped, while a held FilingGate suppresses the whole day's filing however novel the candidates are.",
+      "distinct_from": [
+        "gatefiling",
+        "gateuntriagedcap"
+      ],
+      "aliases": [],
+      "grounding": "FilingGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateuntriagedcap",
+      "canonical": "GateUntriagedCap",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The FilingGate.Reason a paused idea-scout run carries when the scout's OWN untriaged open filings outnumber the declared untriaged_cap. It is a self-releasing brake: the same run files again as soon as the stock is triaged or closed back under the cap, so re-enablement needs no code change and no operator memory.",
+      "distinction": "GateUntriagedCap is the STOCK reason -- the backlog was measured and found too large -- as opposed to GateIndexUnclassified, which fires when the backlog could not be measured at all. Neither is a refusal: the run still gathers, still reports its plan, and still exits 0.",
+      "distinct_from": [
+        "filinggate",
+        "gateindexunclassified"
+      ],
+      "aliases": [],
+      "grounding": "GateUntriagedCap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateindexunclassified",
+      "canonical": "GateIndexUnclassified",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The FilingGate.Reason for the fail-closed arm of the idea-scout conversion gate: a filed-issue index larger than the cap that reports no state for any of its rows cannot be shown to be under the cap, so filing pauses rather than treating an unreadable ledger as an empty backlog.",
+      "distinction": "GateIndexUnclassified is about the MEASUREMENT being blind, not about the stock being large (GateUntriagedCap). It is also not the scout-index saturation refusal, which exits 2 because the DEDUP guarantee is at risk; this one holds filing while the conversion evidence is missing and lifts by itself once gh returns state again.",
+      "distinct_from": [
+        "gateuntriagedcap"
+      ],
+      "aliases": [],
+      "grounding": "GateIndexUnclassified",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

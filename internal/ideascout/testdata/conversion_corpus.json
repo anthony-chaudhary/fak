@@ -1,0 +1,217 @@
+{
+  "schema": "fak/idea-scout-conversion-corpus@1",
+  "_comment": [
+    "The SHARED CONVERSION corpus (#6506). Read by BOTH scouts:",
+    "internal/ideascout/ideascout_test.go (TestSharedConversionCorpus*) and",
+    "tools/idea_scout_test.py (SharedConversionCorpusTest).",
+    "",
+    "Third sibling of dedup_corpus.json (never file the same source twice) and",
+    "source_corpus.json (which lanes exist and what they admit). This one ties the",
+    "two implementations' answer to a different question: may the scout file AT ALL",
+    "today, given what happened to everything it already filed.",
+    "",
+    "The observed defect: 160 filings, 117 still open AND still carrying",
+    "`needs-triage` (oldest 41.5 days), three more planned every morning, and every",
+    "run exiting 0 -- including the runs where all six Reddit queries returned HTTP",
+    "403. Discovery volume was measured; conversion never was. A gate that exists in",
+    "one implementation and not the other would be worthless here, because the",
+    "SCHEDULED daily path is tools/idea_scout.py while the interactive path is",
+    "`fak idea-scout` -- exactly the split that made #5543/#5544 the same defect",
+    "fixed twice.",
+    "",
+    "It lives under the Go package's testdata/ for the same reason its siblings do:",
+    "Go excludes testdata/ from builds and vet, while tools/*.json are scout CONFIG",
+    "files (--config) and a corpus dropped there would read as one."
+  ],
+
+  "default_untriaged_cap": 40,
+  "_cap_comment": "The declared ceiling on untriaged OPEN scout issues, in units of days-of-filing at max_issues=3: ~2 weeks of unattended filing may accumulate before the scout stops adding to it. Both implementations must default to this and both must expose it as the `untriaged_cap` threshold.",
+
+  "status_vocabulary": ["ok", "degraded", "paused"],
+  "_status_comment": "Precedence is degraded > paused > ok. A degraded run's candidate pool is incomplete, which invalidates every conclusion drawn from it -- including 'nothing new worth filing today' -- so it outranks the gate's own verdict, which stays separately readable in filing_gate.",
+  "lane_status_vocabulary": ["ok", "partial", "down"],
+  "gate_reasons": ["untriaged-cap", "index-unclassified"],
+
+  "now": "2026-08-11T00:00:00Z",
+
+  "_backlog_comment": "Each case is a filed-issue corpus (the rung-2 shape gh returns for `issue list --label idea-scout --state all --json ...,state,stateReason,createdAt,labels`) and the ledger both implementations must fold it into. `filed -> triaged` is exact; `triaged -> shipped` is bounded, because GitHub reports COMPLETED both for a `Fixes #N` commit and for a hand closure, so `converted` is an UPPER bound on shipped effect.",
+  "backlog_cases": [
+    {
+      "name": "the-observed-audit-shape",
+      "why": "The #6506 shape in miniature: filings that were closed WITHOUT ever clearing needs-triage, mostly as not-planned. Counting a closure as triage would report a healthy loop; it must not.",
+      "issues": [
+        {"number": 6428, "title": "idea-scout: a", "body": "<!-- idea-scout-source: arxiv:1 -->", "state": "OPEN", "stateReason": "", "createdAt": "2026-08-01T00:00:00Z", "labels": [{"name": "idea-scout"}, {"name": "needs-triage"}, {"name": "triage-only"}]},
+        {"number": 6427, "title": "idea-scout: b", "body": "<!-- idea-scout-source: arxiv:2 -->", "state": "OPEN", "stateReason": "", "createdAt": "2026-07-02T00:00:00Z", "labels": [{"name": "idea-scout"}, {"name": "needs-triage"}]},
+        {"number": 6426, "title": "idea-scout: c", "body": "<!-- idea-scout-source: arxiv:3 -->", "state": "OPEN", "stateReason": "", "createdAt": "2026-08-08T00:00:00Z", "labels": [{"name": "idea-scout"}, {"name": "needs-triage"}]},
+        {"number": 5884, "title": "idea-scout: d", "body": "<!-- idea-scout-source: github:o/d -->", "state": "CLOSED", "stateReason": "COMPLETED", "createdAt": "2026-07-20T00:00:00Z", "closedAt": "2026-08-09T00:00:00Z", "labels": [{"name": "idea-scout"}, {"name": "needs-triage"}]},
+        {"number": 5596, "title": "idea-scout: e", "body": "<!-- idea-scout-source: github:o/e -->", "state": "CLOSED", "stateReason": "NOT_PLANNED", "createdAt": "2026-07-10T00:00:00Z", "closedAt": "2026-08-08T00:00:00Z", "labels": [{"name": "idea-scout"}, {"name": "needs-triage"}]},
+        {"number": 5342, "title": "idea-scout: f", "body": "<!-- idea-scout-source: github:o/f -->", "state": "CLOSED", "stateReason": "NOT_PLANNED", "createdAt": "2026-06-30T00:00:00Z", "closedAt": "2026-08-09T00:00:00Z", "labels": [{"name": "idea-scout"}]}
+      ],
+      "expect": {
+        "filed": 6, "open": 3, "closed": 3, "untriaged_open": 3, "triaged": 1,
+        "converted": 1, "no_action": 2, "unclassified": 0,
+        "oldest_open_days": 40, "median_open_days": 10,
+        "conversion_rate": 0.1667, "no_action_rate": 0.3333, "triage_rate": 0.1667
+      }
+    },
+    {
+      "name": "a-triaged-open-issue-is-not-untriaged",
+      "why": "The label coming off is the ONLY thing that moves an issue out of the untriaged stock, so the gate re-opens by itself as triage happens. An open issue a human already scoped counts as triaged and does not hold the gate.",
+      "issues": [
+        {"number": 1, "title": "idea-scout: scoped", "body": "", "state": "OPEN", "createdAt": "2026-08-05T00:00:00Z", "labels": [{"name": "idea-scout"}]},
+        {"number": 2, "title": "idea-scout: raw", "body": "", "state": "OPEN", "createdAt": "2026-08-09T00:00:00Z", "labels": [{"name": "idea-scout"}, {"name": "needs-triage"}]}
+      ],
+      "expect": {
+        "filed": 2, "open": 2, "closed": 0, "untriaged_open": 1, "triaged": 1,
+        "converted": 0, "no_action": 0, "unclassified": 0,
+        "oldest_open_days": 6, "median_open_days": 4,
+        "conversion_rate": 0.0, "no_action_rate": 0.0, "triage_rate": 0.5
+      }
+    },
+    {
+      "name": "a-stateless-corpus-is-unclassified-not-empty",
+      "why": "A fixture replay (or a gh that stopped returning `state`) must read as a BLIND ledger, not as a backlog of zero. The count is what the fail-closed arm of the gate keys on.",
+      "issues": [
+        {"number": 1, "title": "idea-scout: x", "body": "<!-- idea-scout-source: arxiv:9 -->"},
+        {"number": 2, "title": "idea-scout: y", "body": "<!-- idea-scout-source: arxiv:8 -->"}
+      ],
+      "expect": {
+        "filed": 2, "open": 0, "closed": 0, "untriaged_open": 0, "triaged": 0,
+        "converted": 0, "no_action": 0, "unclassified": 2,
+        "oldest_open_days": 0, "median_open_days": 0,
+        "conversion_rate": 0.0, "no_action_rate": 0.0, "triage_rate": 0.0
+      }
+    },
+    {
+      "name": "an-empty-history-converts-nothing-and-blocks-nothing",
+      "why": "The first-ever run. Rates are 0 by definition (no denominator), and nothing about that may read as a reason to pause.",
+      "issues": [],
+      "expect": {
+        "filed": 0, "open": 0, "closed": 0, "untriaged_open": 0, "triaged": 0,
+        "converted": 0, "no_action": 0, "unclassified": 0,
+        "oldest_open_days": 0, "median_open_days": 0,
+        "conversion_rate": 0.0, "no_action_rate": 0.0, "triage_rate": 0.0
+      }
+    }
+  ],
+
+  "_gate_comment": "The gate takes the ledger above and the declared cap. Cases are stated on the ledger directly so both implementations answer the same question from the same numbers.",
+  "gate_cases": [
+    {
+      "name": "the-observed-stock-pauses-filing",
+      "why": "THE #6506 CASE: 117 untriaged open against the default cap of 40. New filing stops until the stock drains.",
+      "stats": {"filed": 160, "untriaged_open": 117, "unclassified": 0},
+      "cap": 40,
+      "paused": true,
+      "reason": "untriaged-cap"
+    },
+    {
+      "name": "a-drained-stock-re-opens-filing",
+      "why": "Re-enablement is MECHANICAL, not a note in an issue: the same run that sees the stock back under the cap files again.",
+      "stats": {"filed": 160, "untriaged_open": 39, "unclassified": 0},
+      "cap": 40,
+      "paused": false,
+      "reason": ""
+    },
+    {
+      "name": "exactly-at-the-cap-still-files",
+      "why": "The cap is the ceiling the stock may EXCEED before filing stops; at the cap the scout is still allowed its daily three.",
+      "stats": {"filed": 160, "untriaged_open": 40, "unclassified": 0},
+      "cap": 40,
+      "paused": false,
+      "reason": ""
+    },
+    {
+      "name": "a-negative-cap-disables-the-gate",
+      "why": "The declared escape hatch, so a maintainer draining by hand can still gather and file without editing code.",
+      "stats": {"filed": 160, "untriaged_open": 117, "unclassified": 0},
+      "cap": -1,
+      "paused": false,
+      "reason": ""
+    },
+    {
+      "name": "a-zero-cap-pauses-on-any-untriaged-issue",
+      "why": "0 is the strictest posture: file only while nothing at all is waiting on triage.",
+      "stats": {"filed": 10, "untriaged_open": 1, "unclassified": 0},
+      "cap": 0,
+      "paused": true,
+      "reason": "untriaged-cap"
+    },
+    {
+      "name": "a-blind-index-fails-closed",
+      "why": "A corpus big enough to matter that reports NO state cannot be shown to be under the cap. 'We could not tell' must not read as 'we are fine' -- a census that fails open has no meaning.",
+      "stats": {"filed": 160, "untriaged_open": 0, "unclassified": 160},
+      "cap": 40,
+      "paused": true,
+      "reason": "index-unclassified"
+    },
+    {
+      "name": "a-small-blind-corpus-does-not-fail-closed",
+      "why": "A fixture replay of a handful of issues is not evidence of an unmeasurable backlog; the fail-closed arm only engages once the blind corpus alone would exceed the cap.",
+      "stats": {"filed": 3, "untriaged_open": 0, "unclassified": 3},
+      "cap": 40,
+      "paused": false,
+      "reason": ""
+    }
+  ],
+
+  "_lane_comment": "Source health: which lanes were ATTEMPTED (derived from the topics, so a lane that failed before reporting anything is still covered) against the `lane[topic]: …` errors the gatherer recorded. A lane that failed on every topic that armed it is `down`, and one down lane degrades the whole run.",
+  "lane_cases": [
+    {
+      "name": "reddit-403-on-every-topic-is-down-and-degrades-the-run",
+      "why": "THE OBSERVED CASE: six Reddit queries, six HTTP 403s, run exits 0. It must now report status=degraded.",
+      "topics": [
+        {"key": "t1", "arxiv": "abs:agent", "reddit": "agent", "terms": ["agent"]},
+        {"key": "t2", "arxiv": "abs:tool", "reddit": "tool", "terms": ["tool"]}
+      ],
+      "fresh_per_topic": 0,
+      "errors": ["reddit[t1]: reddit status 403 Forbidden", "reddit[t2]: reddit status 403 Forbidden"],
+      "expect": [
+        {"lane": "arxiv", "attempted": 2, "failed": 0, "status": "ok"},
+        {"lane": "reddit", "attempted": 2, "failed": 2, "status": "down"}
+      ],
+      "degraded": true
+    },
+    {
+      "name": "one-flaky-topic-is-partial-not-degraded",
+      "why": "A single failed query is weather. Degrading on it would train the operator to ignore the status.",
+      "topics": [
+        {"key": "t1", "arxiv": "abs:agent", "terms": ["agent"]},
+        {"key": "t2", "arxiv": "abs:tool", "terms": ["tool"]}
+      ],
+      "fresh_per_topic": 0,
+      "errors": ["arxiv[t2]: arxiv status 503 Service Unavailable"],
+      "expect": [
+        {"lane": "arxiv", "attempted": 2, "failed": 1, "status": "partial"}
+      ],
+      "degraded": false
+    },
+    {
+      "name": "filing-errors-are-not-source-lanes",
+      "why": "`create[github:o/r]: …` has the same lane[topic] SHAPE as a source error. Attributing it to a lane would invent a dead source out of a failed issue creation.",
+      "topics": [
+        {"key": "t1", "github": "agent gateway", "terms": ["agent"]}
+      ],
+      "fresh_per_topic": 0,
+      "errors": ["create[github:o/r]: gh issue create: exit 1", "labels: gh label create: exit 1"],
+      "expect": [
+        {"lane": "github", "attempted": 1, "failed": 0, "status": "ok"}
+      ],
+      "degraded": false
+    },
+    {
+      "name": "the-fresh-lane-is-only-attempted-when-it-is-armed",
+      "why": "fresh_per_topic: 0 disables the lane. Counting it as attempted-and-healthy would report a lane the gatherer never walks.",
+      "topics": [
+        {"key": "t1", "github": "agent gateway", "terms": ["agent"]}
+      ],
+      "fresh_per_topic": 6,
+      "errors": ["github-fresh[t1]: gh search repos: exit 1"],
+      "expect": [
+        {"lane": "github", "attempted": 1, "failed": 0, "status": "ok"},
+        {"lane": "github-fresh", "attempted": 1, "failed": 1, "status": "down"}
+      ],
+      "degraded": true
+    }
+  ]
+}

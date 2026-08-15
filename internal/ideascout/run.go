@@ -28,6 +28,9 @@ func Run(opts RunOptions) (RunResult, error) {
 	if opts.MinScore != nil {
 		cfg.MinScore = *opts.MinScore
 	}
+	if opts.UntriagedCap != nil {
+		cfg.UntriagedCap = *opts.UntriagedCap
+	}
 	if opts.Milestone != nil {
 		cfg.Milestone = *opts.Milestone
 	}
@@ -104,7 +107,11 @@ func Run(opts RunOptions) (RunResult, error) {
 			}
 			issues = nil
 		}
-		return finishRun(finishInput{Workspace: workspace, Topics: topicsByKey, Config: cfg, Today: today, Now: now, Candidates: candidates, Issues: issues, ScoutIssues: scoutIssues, ScoutScanLimit: scoutLimit, Errors: errorsOut, Live: opts.Live, Fetcher: fetcher, Seen: seen})
+		// Per-lane attribution of whatever the gather recorded: a lane that failed on
+		// EVERY topic that armed it is a source that is down, and the run says so in
+		// its status instead of exiting 0 with six error strings nobody reads (#6506).
+		health := SourceHealth(topics, cfg, errorsOut)
+		return finishRun(finishInput{Workspace: workspace, Topics: topicsByKey, Config: cfg, Today: today, Now: now, Candidates: candidates, Issues: issues, ScoutIssues: scoutIssues, ScoutScanLimit: scoutLimit, Errors: errorsOut, Health: health, Live: opts.Live, Fetcher: fetcher, Seen: seen})
 	}
 	seen, err := LoadSeen(workspace)
 	if err != nil {
@@ -132,6 +139,7 @@ type finishInput struct {
 	ScoutIssues    []ExistingIssue
 	ScoutScanLimit int
 	Errors         []string
+	Health         []LaneHealth
 	Live           bool
 	Fetcher        Fetcher
 	Seen           map[string]SeenRecord
@@ -146,8 +154,15 @@ func finishRun(in finishInput) (RunResult, error) {
 		stamped[sid] = struct{}{}
 	}
 	toFile, skipStats, dropped := PlanIssues(in.Candidates, in.Topics, in.Seen, stamped, titleSets, bodiesJoined, in.Config, in.Today, in.Now)
+	// The conversion gate reads the SAME corpus the durable dedup rung just used, so
+	// it costs no extra fetch: what the scout has filed, how much of it is still
+	// untriaged, and how much of it ever converted. `Planned` is still reported when
+	// the gate holds — a paused run is a dry-run whose plan an operator can read
+	// while draining, not a run with nothing to say.
+	backlog := Backlog(in.ScoutIssues, in.Now)
+	gate := GateFiling(backlog, in.Config.UntriagedCap)
 	var filed []FiledIssue
-	if in.Live && len(toFile) > 0 {
+	if in.Live && len(toFile) > 0 && !gate.Paused {
 		if in.Fetcher == nil {
 			in.Fetcher = LiveFetcher{}
 		}
@@ -178,6 +193,10 @@ func finishRun(in finishInput) (RunResult, error) {
 		Schema:             Schema,
 		Date:               in.Today,
 		Mode:               mode(in.Live),
+		Status:             RunStatus(gate, in.Health),
+		Backlog:            backlog,
+		FilingGate:         gate,
+		SourceHealth:       in.Health,
 		CandidatesGathered: len(in.Candidates),
 		DedupIndex: DedupIndex{
 			FiledIssuesScanned:  len(in.ScoutIssues),

@@ -146,12 +146,19 @@ func (f LiveFetcher) FetchReddit(query string, limit int) (string, error) {
 //
 // `--state all` is unconditional and load-bearing on both: a source whose issue was
 // triaged and CLOSED is the exact case that must not come back.
+// issueListFields is what both corpora ask gh for. number/title/body feed the
+// dedup rungs; state/stateReason/createdAt/labels feed the conversion ledger
+// (#6506) — the scout's own backlog is the population being measured, so the
+// measurement rides the fetch that already exists rather than a second query that
+// could drift from it. tools/idea_scout.py asks for the same list.
+const issueListFields = "number,title,body,state,stateReason,createdAt,closedAt,labels"
+
 func issueListQuery(label string, limit int) []string {
 	argv := []string{"issue", "list", "--state", "all"}
 	if label != "" {
 		argv = append(argv, "--label", label)
 	}
-	return append(argv, "--limit", strconv.Itoa(limit), "--json", "number,title,body")
+	return append(argv, "--limit", strconv.Itoa(limit), "--json", issueListFields)
 }
 
 // ghJSONFn is the shell-out seam. Production always runs ghJSON; the query tests

@@ -10,7 +10,8 @@
       "distinct_from": [
         "operatorgate",
         "sealed-by-trust-gate",
-        "placement4801collectivewitnessmissing"
+        "placement4801collectivewitnessmissing",
+        "gatefiling"
       ],
       "aliases": [],
       "grounding": "INSUFFICIENT_AGGREGATE_HBM",

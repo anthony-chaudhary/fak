@@ -31,6 +31,7 @@ func DefaultConfig() Config {
 		DupJaccard:      0.55,
 		IssueScanLimit:  800,
 		ScoutScanLimit:  5000,
+		UntriagedCap:    DefaultUntriagedCap,
 	}
 }
 
@@ -104,12 +105,30 @@ func LoadConfig(path string) ([]Topic, Config, error) {
 }
 
 func topicNamesASource(t Topic) bool {
-	for _, v := range []string{t.Arxiv, t.GitHub, t.HN, t.Reddit} {
-		if strings.TrimSpace(v) != "" {
+	for _, key := range sourceTopicKeys() {
+		if strings.TrimSpace(topicQuery(t, key)) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+// topicQuery is the ONE place a topic-config key is turned into the query string
+// it holds. Both readers go through it — the "does this topic arm any lane at all"
+// check above and the per-lane attempt count the source-health table needs — so a
+// new source key cannot be served by one and silently ignored by the other.
+func topicQuery(t Topic, key string) string {
+	switch key {
+	case "arxiv":
+		return t.Arxiv
+	case "github":
+		return t.GitHub
+	case "hn":
+		return t.HN
+	case "reddit":
+		return t.Reddit
+	}
+	return ""
 }
 
 // checkTopicKeys refuses a topic key no lane reads. A key that is merely ignored
@@ -250,6 +269,8 @@ func applyThresholds(cfg *Config, values map[string]any) {
 			cfg.IssueScanLimit = anyInt(v, cfg.IssueScanLimit)
 		case "scout_scan_limit":
 			cfg.ScoutScanLimit = anyInt(v, cfg.ScoutScanLimit)
+		case "untriaged_cap":
+			cfg.UntriagedCap = anyInt(v, cfg.UntriagedCap)
 		case "milestone":
 			cfg.Milestone, _ = v.(string)
 		case "project":

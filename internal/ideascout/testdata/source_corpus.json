@@ -31,7 +31,7 @@
     "fresh_window_days", "github_per_topic", "hn_per_topic", "issue_scan_limit",
     "max_issues", "milestone", "min_points", "min_repo_size_kb", "min_score",
     "min_stars", "project", "project_owner", "recent_days", "reddit_per_topic",
-    "scout_scan_limit"
+    "scout_scan_limit", "untriaged_cap"
   ],
 
   "_config_comment": "The loud-refusal half of #5549: a config naming a lane the running implementation cannot serve must FAIL, not gather zero and exit 0. Each case is a topic object; `refuse` says whether load_config/LoadConfig must reject it, and `refuse_contains` pins the substrings the message must carry so the operator is told WHICH key was unknown. Substrings are quote-free on purpose: Go writes the key as %q and Python as repr(), and that is idiom, not contract -- what the contract requires is that the offending key be NAMED.",

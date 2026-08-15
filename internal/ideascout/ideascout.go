@@ -5,6 +5,7 @@ package ideascout
 // RunOptions a caller hands to Run.
 
 import (
+	"strings"
 	"time"
 )
 
@@ -69,10 +70,15 @@ type Config struct {
 	// label, i.e. the scout's own filing history. Bounded by MaxIssues/day (<=3), not
 	// by tracker growth, so one number covers years. Saturating it is a REFUSAL, never
 	// a silent truncation — see the scout-index gate in Run.
-	ScoutScanLimit int    `json:"scout_scan_limit"`
-	Milestone      string `json:"milestone,omitempty"`
-	Project        string `json:"project,omitempty"`
-	ProjectOwner   string `json:"project_owner,omitempty"`
+	ScoutScanLimit int `json:"scout_scan_limit"`
+	// UntriagedCap is the CONVERSION gate (#6506): while more than this many filed
+	// issues are still open AND still carry the needs-triage label, the scout stops
+	// adding to the pile. Negative disables the gate; 0 pauses while any untriaged
+	// filing is open. See conversion.go.
+	UntriagedCap int    `json:"untriaged_cap"`
+	Milestone    string `json:"milestone,omitempty"`
+	Project      string `json:"project,omitempty"`
+	ProjectOwner string `json:"project_owner,omitempty"`
 }
 
 type Candidate struct {
@@ -86,10 +92,44 @@ type Candidate struct {
 	Extra     map[string]any `json:"extra,omitempty"`
 }
 
+// ExistingIssue is one row of either dedup corpus. Number/Title/Body carry the
+// dedup rungs; the rest is the CONVERSION ledger (#6506) — read off the same
+// label-targeted fetch, since asking gh for four more fields costs nothing and a
+// second query for them would be a second thing to keep in sync. Every one of
+// those fields is optional: a fixture replay that supplies none of them still
+// dedups exactly as before and simply reports an unclassified backlog.
 type ExistingIssue struct {
-	Number int    `json:"number,omitempty"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
+	Number      int          `json:"number,omitempty"`
+	Title       string       `json:"title"`
+	Body        string       `json:"body"`
+	State       string       `json:"state,omitempty"`
+	StateReason string       `json:"stateReason,omitempty"`
+	CreatedAt   string       `json:"createdAt,omitempty"`
+	ClosedAt    string       `json:"closedAt,omitempty"`
+	Labels      []IssueLabel `json:"labels,omitempty"`
+}
+
+// IssueLabel mirrors the object gh emits for `--json labels`; only the name is
+// read.
+type IssueLabel struct {
+	Name string `json:"name"`
+}
+
+// IsOpen / IsClosed compare case-insensitively: gh emits "OPEN"/"CLOSED" while the
+// hand-written corpora spell them lower-case.
+func (i ExistingIssue) IsOpen() bool { return strings.EqualFold(strings.TrimSpace(i.State), "open") }
+
+func (i ExistingIssue) IsClosed() bool {
+	return strings.EqualFold(strings.TrimSpace(i.State), "closed")
+}
+
+func (i ExistingIssue) HasLabel(name string) bool {
+	for _, l := range i.Labels {
+		if strings.EqualFold(strings.TrimSpace(l.Name), name) {
+			return true
+		}
+	}
+	return false
 }
 
 type IssuePlan struct {
@@ -110,9 +150,16 @@ type SeenRecord struct {
 }
 
 type RunResult struct {
-	Schema             string          `json:"schema"`
-	Date               string          `json:"date"`
-	Mode               string          `json:"mode"`
+	Schema string `json:"schema"`
+	Date   string `json:"date"`
+	Mode   string `json:"mode"`
+	// Status is the run's headline verdict: ok / degraded / paused. It exists so a
+	// run whose sources were down, or whose filing the conversion gate stopped, is
+	// not indistinguishable from a clean one (#6506).
+	Status             string          `json:"status"`
+	Backlog            BacklogStats    `json:"backlog"`
+	FilingGate         FilingGate      `json:"filing_gate"`
+	SourceHealth       []LaneHealth    `json:"source_health,omitempty"`
 	CandidatesGathered int             `json:"candidates_gathered"`
 	DedupIndex         DedupIndex      `json:"dedup_index"`
 	Skipped            map[string]int  `json:"skipped"`
@@ -188,6 +235,7 @@ type RunOptions struct {
 	ConfigPath   string
 	MaxIssues    *int
 	MinScore     *int
+	UntriagedCap *int
 	Live         bool
 	JSON         bool
 	Milestone    *string
