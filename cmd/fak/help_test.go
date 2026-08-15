@@ -34,30 +34,41 @@ func TestUsageCompactStaysCompact(t *testing.T) {
 // exposing only runtime-owned help text. The development inventory belongs to
 // the separately built fak-dev artifact.
 
-// TestUsageCompactLeadsWithEfficiencyCapabilities is the discoverability
-// witness for the performance-first product focus. The compact front door must
-// name the whole-turn/session controls before the supporting policy floor; a
-// reader should not need to know internal package names to discover them.
-func TestUsageCompactLeadsWithEfficiencyCapabilities(t *testing.T) {
+// TestUsageCompactLeadsWithBaselineWorkflows is the front-door priority
+// witness. A new operator should see the primary ways to use fak before
+// diagnostics, measurement tools, and the supporting capability floor.
+func TestUsageCompactLeadsWithBaselineWorkflows(t *testing.T) {
 	var b strings.Builder
 	usageCompact(&b)
 	got := b.String()
 
-	focus := "spend fewer tokens + turns"
-	floor := "supporting capability floor"
-	if !strings.Contains(got, focus) {
-		t.Fatalf("compact overview missing %q section:\n%s", focus, got)
-	}
-	if !strings.Contains(got, floor) {
-		t.Fatalf("compact overview missing %q section:\n%s", floor, got)
-	}
-	if strings.Index(got, focus) > strings.Index(got, floor) {
-		t.Fatalf("efficiency section must precede supporting security floor:\n%s", got)
-	}
-	for _, capability := range []string{"ablate", "resume", "session", "info"} {
-		if !strings.Contains(got, "  "+capability) {
-			t.Errorf("compact overview does not expose %q", capability)
+	sections := []string{"start here", "save tokens + turns", "observe + operate", "capability floor", "models + housekeeping"}
+	last := -1
+	for _, section := range sections {
+		pos := strings.Index(got, section)
+		if pos < 0 {
+			t.Fatalf("compact overview missing %q section:\n%s", section, got)
 		}
+		if pos < last {
+			t.Fatalf("compact overview sections are not priority ordered at %q:\n%s", section, got)
+		}
+		last = pos
+	}
+
+	start := strings.Index(got, "start here")
+	next := strings.Index(got, "save tokens + turns")
+	baseline := got[start:next]
+	commands := []string{"manage", "serve", "agent", "run", "codex"}
+	last = -1
+	for _, command := range commands {
+		pos := strings.Index(baseline, "  "+command)
+		if pos < 0 {
+			t.Fatalf("start-here section missing baseline command %q:\n%s", command, got)
+		}
+		if pos < last {
+			t.Fatalf("baseline commands are not priority ordered at %q:\n%s", command, got)
+		}
+		last = pos
 	}
 }
 

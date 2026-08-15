@@ -43,32 +43,32 @@ var overviewGroups = []struct {
 	title   string
 	entries []overviewEntry
 }{
-	{"spend fewer tokens + turns", []overviewEntry{
-		{"capabilities", "query token, turn, cache, routing, and session-control outcomes"},
-		{"ablate", "same-trace cache ablation: attribute savings instead of guessing"},
-		{"resume", "price full replay vs cut/reset when resuming a long context"},
-		{"session", "budget turns/tokens/context; steer or stop without another prompt turn"},
-		{"info", "live reused-token, effective-cost, and total-savings overlay"},
-	}},
-	{"manage + serve", []overviewEntry{
-		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
+	{"start here", []overviewEntry{
 		{"manage", "wrap an agent harness: manage every tool call in-process ('fak m'; legacy: guard)"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
+		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
 	}},
-	{"supporting capability floor", []overviewEntry{
-		{"preflight", "adjudicate one tool call against a policy, no model in the loop"},
-		{"policy", "dump / check the deployable capability floor"},
-		{"attest", "compliance attestation: prove the policy floor from preflight"},
-		{"audit", "verify / export a guard decision journal's hash chain"},
-		{"egress", "prove the network-egress floor (cloud-metadata / SSRF class)"},
+	{"save tokens + turns", []overviewEntry{
+		{"session", "budget turns/tokens/context; steer or stop without another prompt turn"},
+		{"info", "live reused-token, effective-cost, and total-savings overlay"},
+		{"resume", "price full replay vs cut/reset when resuming a long context"},
+		{"ablate", "same-trace cache ablation: attribute savings instead of guessing"},
+		{"capabilities", "query token, turn, cache, routing, and session-control outcomes"},
 	}},
 	{"observe + operate", []overviewEntry{
 		{"ps", "live served-session process table ('fak top' = --watch)"},
 		{"signal", "job control for a running session: pause / resume / stop / steer"},
 		{"doctor", "operator diagnostic: answer-shape witness + kernel admit verdict"},
 		{"recover", "map a refusal reason token to concrete recovery commands"},
+	}},
+	{"capability floor", []overviewEntry{
+		{"preflight", "adjudicate one tool call against a policy, no model in the loop"},
+		{"policy", "dump / check the deployable capability floor"},
+		{"attest", "compliance attestation: prove the policy floor from preflight"},
+		{"audit", "verify / export a guard decision journal's hash chain"},
+		{"egress", "prove the network-egress floor (cloud-metadata / SSRF class)"},
 	}},
 	{"models + housekeeping", []overviewEntry{
 		{"model", "resolve / cache an hf:// model ('fak pull' / 'fak ls' aliases)"},
