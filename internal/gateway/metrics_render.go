@@ -838,6 +838,30 @@ func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_kv_memory_evictions_total{%s,kind=\"policy\"} %d\n", labels, st.PolicyEvictions)
 	writeHelpType(b, "fak_gateway_kv_memory_splits_total", "Radix KV prefix-cache edge splits performed to expose reusable mid-edge prefixes.", "counter")
 	fmt.Fprintf(b, "fak_gateway_kv_memory_splits_total{%s} %d\n", labels, st.Splits)
+	if st.L2HostCapacityBytes > 0 {
+		tierLabels := fmt.Sprintf("backend=\"%s\"", promQuote(backend))
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_resident_bytes", "Physical complete-prefix payload bytes owned by the native in-kernel cache, split by source tier and memory scope. Provider/proxy counters never enter this family.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"device_l1\",scope=\"device\"} %d\n", tierLabels, st.L1DeviceResidentBytes)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"device_l1\",scope=\"host_metadata\"} %d\n", tierLabels, st.L1HostResidentBytes)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_resident_bytes{%s,tier=\"host_dram_l2\",scope=\"host\"} %d\n", tierLabels, st.L2HostResidentBytes)
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_capacity_bytes", "Configured physical capacity for a native complete-prefix tier.", "gauge")
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_capacity_bytes{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2HostCapacityBytes)
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_lookups_total", "Native complete-prefix lookup outcomes by physical source tier. Host DRAM is consulted only after the hot tier misses.", "counter")
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"device_l1\",outcome=\"hit\"} %d\n", tierLabels, st.L1Hits)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"device_l1\",outcome=\"miss\"} %d\n", tierLabels, st.L1Misses)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"device_l1\",outcome=\"fault\"} %d\n", tierLabels, st.L1Faults)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"host_dram_l2\",outcome=\"hit\"} %d\n", tierLabels, st.L2Hits)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"host_dram_l2\",outcome=\"miss\"} %d\n", tierLabels, st.L2Misses)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_lookups_total{%s,tier=\"host_dram_l2\",outcome=\"fault\"} %d\n", tierLabels, st.L2Faults)
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_hit_tokens_total", "Prefix tokens restored from each native physical source tier.", "counter")
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_hit_tokens_total{%s,tier=\"device_l1\"} %d\n", tierLabels, st.L1HitTokens)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_hit_tokens_total{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2HitTokens)
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total", "Payload bytes physically copied between the native hot snapshot tier and host DRAM L2.", "counter")
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"host_dram_l2\",direction=\"stage\"} %d\n", tierLabels, st.L2StageBytes)
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_transfer_bytes_total{%s,tier=\"host_dram_l2\",direction=\"restore\"} %d\n", tierLabels, st.L2RestoreBytes)
+		writeHelpType(b, "fak_gateway_kv_prefix_tier_evictions_total", "Complete host-DRAM prefix images evicted from the bounded native L2.", "counter")
+		fmt.Fprintf(b, "fak_gateway_kv_prefix_tier_evictions_total{%s,tier=\"host_dram_l2\"} %d\n", tierLabels, st.L2Evictions)
+	}
 }
 
 func (m *gatewayMetrics) writeInKernelOOMMetrics(b *strings.Builder) {

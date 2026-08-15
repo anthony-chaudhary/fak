@@ -121,7 +121,13 @@ func (a *CapacityAdapter) Execute(ctx context.Context, mv PlacementMove) (Placem
 	// staging fault cannot lose the span. An evict skips staging (recompute on demand).
 	if d.Action == cachemeta.ActionDemote || d.Action == cachemeta.ActionSpill ||
 		d.Action == cachemeta.ActionCompressDemote {
-		staged, err := a.KV.StageSpan(ctx, mv.SpanDigest, mv.From, mv.N)
+		var staged abi.KVResidency
+		var err error
+		if placement, ok := a.KV.(abi.KVPlacementStager); ok {
+			staged, err = placement.StageSpanTo(ctx, mv.SpanDigest, mv.From, mv.N, string(d.ToTier))
+		} else {
+			staged, err = a.KV.StageSpan(ctx, mv.SpanDigest, mv.From, mv.N)
+		}
 		if err != nil {
 			// A transport error is a typed FAULT: retain the live span, record, never silent.
 			return a.record(mv, d, cachemeta.KVTransferFault, bytesMoved, err.Error(), 0, false), nil
@@ -143,7 +149,25 @@ func (a *CapacityAdapter) Execute(ctx context.Context, mv PlacementMove) (Placem
 	}
 
 	// (2) Evict the span from the live KV cache to reclaim room in the hot tier.
-	evicted := a.KV.Evict(mv.From, mv.N)
+	evicted := 0
+	digestAddressed := false
+	if digestEvictor, ok := a.KV.(abi.KVDigestEvictor); ok {
+		digestAddressed = true
+		evicted = digestEvictor.EvictDigest(mv.SpanDigest, mv.From, mv.N)
+	} else {
+		evicted = a.KV.Evict(mv.From, mv.N)
+	}
+	if digestAddressed && evicted <= 0 {
+		return a.record(
+			mv,
+			d,
+			cachemeta.KVTransferFault,
+			bytesMoved,
+			"digest-addressed hot owner was not evicted",
+			0,
+			false,
+		), nil
+	}
 
 	// (3) Record the offload as a typed event in the shared cache-entry stream.
 	return a.record(mv, d, outcome, bytesMoved, faultReason, evicted, true), nil

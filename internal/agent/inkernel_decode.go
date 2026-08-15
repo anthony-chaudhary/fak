@@ -49,14 +49,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		var m int
 		if scoped && p.scopedTree != nil {
 			if p.backend != nil {
-				matchedSnapshot, cachedLogits, m, _, err = p.scopedTree.LookupSnapshot(owner, ids)
+				matchedSnapshot, cachedLogits, m, _, _, err = p.scopedTree.LookupSnapshotTiered(owner, ids)
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
 			}
 		} else {
 			p.mu.Lock()
 			if p.backend != nil {
-				b, snap, legacyMatched, lookupErr := p.tree.LookupSnapshot(ids)
+				b, snap, legacyMatched, _, lookupErr := p.tree.LookupSnapshotTiered(ids)
 				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
 				if m >= len(ids) {
 					cachedLogits = b.Logits()

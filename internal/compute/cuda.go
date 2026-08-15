@@ -1261,6 +1261,94 @@ func (k *cudaKV) Clone() KVStore {
 	return n
 }
 
+// SnapshotToHost copies the complete CUDA KV owner into ordinary host DRAM,
+// including pre-RoPE Kraw. The source remains resident until the caller
+// explicitly frees/demotes it, preserving stage-before-evict ordering.
+func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
+	if k == nil {
+		return KVHostSnapshot{}, fmt.Errorf("cuda: cannot snapshot nil KV store")
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	copyDS := func(src dslice) []float32 {
+		out := make([]float32, src.len)
+		if len(out) > 0 {
+			C.fcuda_d2h(unsafe.Pointer(&out[0]), src.ptr, C.size_t(len(out)*F32.Bytes()))
+			atomic.AddUint64(&k.be.fenceGen, 1)
+		}
+		return out
+	}
+	out := KVHostSnapshot{
+		Config: cloneKVConfig(k.cfg),
+		Pos:    append([]int(nil), k.pos...),
+		K:      make([][]float32, len(k.K)),
+		KRaw:   make([][]float32, len(k.Kraw)),
+		V:      make([][]float32, len(k.V)),
+	}
+	for layer := range k.K {
+		out.K[layer] = copyDS(k.K[layer])
+		out.KRaw[layer] = copyDS(k.Kraw[layer])
+		out.V[layer] = copyDS(k.V[layer])
+	}
+	return out, out.Validate()
+}
+
+// RestoreKVFromHost bulk-copies a complete host image back into fresh CUDA KV
+// allocations. It is the inverse of SnapshotToHost; no per-token forward runs.
+func (c *cudaBackend) RestoreKVFromHost(state KVHostSnapshot) (out KVStore, err error) {
+	if err := state.Validate(); err != nil {
+		return nil, err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	k, ok := c.NewKV(cloneKVConfig(state.Config)).(*cudaKV)
+	if !ok || k == nil {
+		return nil, fmt.Errorf("cuda: NewKV returned an incompatible store during host restore")
+	}
+	k.pos = append([]int(nil), state.Pos...)
+	freePartial := func() {
+		free := func(d *dslice) {
+			if d.ptr != nil {
+				C.fcuda_free(d.ptr)
+				d.ptr = nil
+			}
+			d.len, d.cap = 0, 0
+		}
+		for layer := range k.K {
+			free(&k.K[layer])
+			free(&k.Kraw[layer])
+			free(&k.V[layer])
+		}
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			freePartial()
+			err = fmt.Errorf("cuda: restore KV from host: %v", r)
+			out = nil
+		}
+	}()
+	copyHost := func(dst *dslice, src []float32, site string) {
+		if len(src) == 0 {
+			return
+		}
+		if dst.ptr == nil || dst.cap < len(src) {
+			if dst.ptr != nil {
+				C.fcuda_free(dst.ptr)
+			}
+			buf := c.dallocKV(len(src)*F32.Bytes(), site)
+			dst.ptr, dst.cap = buf.ptr, len(src)
+		}
+		C.fcuda_h2d(dst.ptr, unsafe.Pointer(&src[0]), C.size_t(len(src)*F32.Bytes()))
+		dst.len = len(src)
+	}
+	for layer := range state.K {
+		copyHost(&k.K[layer], state.K[layer], "kv-key-host-restore layer "+itoaC(layer))
+		copyHost(&k.Kraw[layer], state.KRaw[layer], "kv-pre-rope-key-host-restore layer "+itoaC(layer))
+		copyHost(&k.V[layer], state.V[layer], "kv-value-host-restore layer "+itoaC(layer))
+	}
+	return k, nil
+}
+
 // Free releases every layer's K/Kraw/V VRAM buffer and clears the position list.
 func (k *cudaKV) Free() {
 	cudaMu.Lock()

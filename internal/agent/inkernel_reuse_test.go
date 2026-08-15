@@ -123,9 +123,16 @@ func decode(p *InKernelPlanner, ids []int, maxNew int) (gen []int, matched int) 
 
 type countingBackend struct {
 	compute.Backend
-	mu      sync.Mutex
-	mat     int
-	batched int
+	mu           sync.Mutex
+	mat          int
+	batched      int
+	deviceMemory bool
+}
+
+func (c *countingBackend) Caps() compute.Caps {
+	caps := c.Backend.Caps()
+	caps.DeviceMemory = c.deviceMemory
+	return caps
 }
 
 func (c *countingBackend) MatMul(w, x compute.Tensor) compute.Tensor {
@@ -140,6 +147,27 @@ func (c *countingBackend) BatchedMatMul(w, X compute.Tensor, P int) compute.Tens
 	c.batched++
 	c.mu.Unlock()
 	return c.Backend.BatchedMatMul(w, X, P)
+}
+
+func (c *countingBackend) CloneTensor(t compute.Tensor) (compute.Tensor, error) {
+	data := append([]float32(nil), c.Backend.Read(t)...)
+	host := compute.NewF32(compute.Default(), append([]int(nil), t.Shape...), data)
+	return c.Backend.Upload(host, compute.F32), nil
+}
+
+func (*countingBackend) Qwen35GDNPath() string { return model.Qwen35GDNCUDAPath }
+
+func (c *countingBackend) Qwen35GDNDecode(
+	normalizedInput,
+	_, _, _, _,
+	_, _, _, _, _,
+	convState, recurrentState compute.Tensor,
+	_, _, _, _, _ int,
+	_ float32,
+) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
+	data := append([]float32(nil), c.Backend.Read(normalizedInput)...)
+	host := compute.NewF32(compute.Default(), append([]int(nil), normalizedInput.Shape...), data)
+	return c.Backend.Upload(host, compute.F32), convState, recurrentState, nil
 }
 
 func (c *countingBackend) ops() (mat, batched int) {
@@ -407,6 +435,55 @@ func TestInKernelBackendGLMDsaExactHitCachedLogitsAvoidsRefeed(t *testing.T) {
 	}
 	if mat, batched := be.ops(); mat == 0 && batched == 0 {
 		t.Fatalf("two-token exact replay should compute a Step between generated tokens")
+	}
+}
+
+func TestInKernelBackendRestoresDemotedPrefixFromHostDRAML2(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	t.Setenv("FAK_INKERNEL_RADIX_HOST_L2_BYTES", "1073741824")
+	be := &countingBackend{Backend: compute.Default(), deviceMemory: true}
+	cfg := tinyHybridCfg()
+	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "qwen35-host-l2", false, be, false)
+	p.quant = false
+	ids := synthIDs(cfg.VocabSize, 9, 6851)
+	run := func(maxNew int) (gen []int, matched int) {
+		_, _, matched, _, _, _, err := p.generateReusedContext(context.Background(), ids, maxNew, 0, 0, 0, map[int]bool{}, func(id int) bool {
+			gen = append(gen, id)
+			return false
+		})
+		if err != nil {
+			t.Fatalf("generateReused: %v", err)
+		}
+		return gen, matched
+	}
+
+	first, matched := run(1)
+	if matched != 0 || len(first) != 1 {
+		t.Fatalf("cold turn matched=%d generated=%d", matched, len(first))
+	}
+	resident, candidates := p.KVPrefixPressuredCandidates()
+	if resident <= 0 || len(candidates) != 1 {
+		t.Fatalf("native pressure source resident=%d candidates=%+v", resident, candidates)
+	}
+	staged := p.StageKVPrefixToHost(context.Background(), candidates[0].SpanDigest)
+	if staged.Outcome != radixkv.SnapshotTransferOK || staged.BytesMoved <= 0 {
+		t.Fatalf("host stage=%+v", staged)
+	}
+	if evicted := p.EvictHotKVPrefix(candidates[0].SpanDigest); evicted != len(ids) {
+		t.Fatalf("hot eviction=%d, want %d", evicted, len(ids))
+	}
+
+	second, matched := run(1)
+	if matched != len(ids) || !eqInts(second, first) {
+		t.Fatalf("host-L2 replay matched=%d/%d tokens=%v want=%v", matched, len(ids), second, first)
+	}
+	stats := p.KVMemoryStats()
+	if stats.L2Hits != 1 || stats.L1Misses != 2 || stats.L2StageBytes != staged.BytesMoved ||
+		stats.L2RestoreBytes != staged.BytesMoved || stats.L2HostResidentBytes <= 0 {
+		t.Fatalf("host-L2 counters=%+v", stats)
+	}
+	if stats.L2HostCapacityBytes != 1<<30 {
+		t.Fatalf("host-L2 capacity=%d, want %d", stats.L2HostCapacityBytes, int64(1<<30))
 	}
 }
 

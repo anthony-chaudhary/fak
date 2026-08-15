@@ -43,6 +43,26 @@ func (f *fakeCapacityKV) RestoreSpan(_ context.Context, digest string) (abi.KVRe
 	return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest}, nil
 }
 
+type placementAwareKV struct {
+	*fakeCapacityKV
+	tier        string
+	evictDigest string
+	evicted     int
+}
+
+func (f *placementAwareKV) StageSpanTo(ctx context.Context, digest string, from, n int, tier string) (abi.KVResidency, error) {
+	f.tier = tier
+	return f.fakeCapacityKV.StageSpan(ctx, digest, from, n)
+}
+
+func (f *placementAwareKV) EvictDigest(digest string, _, n int) int {
+	f.evictDigest = digest
+	if f.evicted >= 0 {
+		return f.evicted
+	}
+	return n
+}
+
 // A demote, spill, and compress-demote all STAGE to the colder tier then EVICT the live
 // span, landing a typed HIT offload in the cache-entry stream. This is the load-bearing
 // Plank-4 control path: a PlanPlacement decision turned into a real Evict + stage.
@@ -124,6 +144,61 @@ func TestCapacityAdapterStagedBytesWinOverEstimate(t *testing.T) {
 	}
 	if res.Recorded.Entry.Metrics.BytesTransferred != 3<<20 {
 		t.Fatalf("measured stage bytes must win: got %d want %d", res.Recorded.Entry.Metrics.BytesTransferred, 3<<20)
+	}
+}
+
+func TestCapacityAdapterPassesTargetTierAndDigestToPhysicalOwner(t *testing.T) {
+	kv := &placementAwareKV{
+		fakeCapacityKV: &fakeCapacityKV{stageOut: abi.KVResidencyOK, stageBytes: 4096},
+		evicted:        -1,
+	}
+	adp := &engine.CapacityAdapter{KV: kv}
+	res, err := adp.Execute(context.Background(), engine.PlacementMove{
+		Decision: cachemeta.PlacementDecision{
+			Action: cachemeta.ActionDemote, FromTier: cachemeta.TierHBM, ToTier: cachemeta.TierDRAM,
+			Directive: cachemeta.KVOffload, EstMoveBytes: 2048,
+		},
+		SpanDigest: "complete-prefix", From: 0, N: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Applied || res.Evicted != 32 {
+		t.Fatalf("result=%+v", res)
+	}
+	if kv.tier != string(cachemeta.TierDRAM) {
+		t.Fatalf("stage target tier=%q, want %q", kv.tier, cachemeta.TierDRAM)
+	}
+	if kv.evictDigest != "complete-prefix" {
+		t.Fatalf("digest eviction=%q, want complete-prefix", kv.evictDigest)
+	}
+	if len(kv.evicts) != 0 {
+		t.Fatalf("range eviction ran instead of digest eviction: %+v", kv.evicts)
+	}
+}
+
+func TestCapacityAdapterDoesNotClaimDigestReclaimWhenOwnerRefusesEviction(t *testing.T) {
+	kv := &placementAwareKV{
+		fakeCapacityKV: &fakeCapacityKV{stageOut: abi.KVResidencyOK, stageBytes: 4096},
+		evicted:        0,
+	}
+	rec := engine.NewCacheEventRecorder()
+	adp := &engine.CapacityAdapter{KV: kv, Recorder: rec}
+	res, err := adp.Execute(context.Background(), engine.PlacementMove{
+		Decision: cachemeta.PlacementDecision{
+			Action: cachemeta.ActionDemote, FromTier: cachemeta.TierHBM, ToTier: cachemeta.TierDRAM,
+			Directive: cachemeta.KVOffload, EstMoveBytes: 2048,
+		},
+		SpanDigest: "complete-prefix", From: 0, N: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied || res.Evicted != 0 {
+		t.Fatalf("refused digest eviction claimed reclaim: %+v", res)
+	}
+	if res.Recorded.Verdict.Kind != cachemeta.LookupFault {
+		t.Fatalf("refused digest eviction verdict=%+v, want fault", res.Recorded.Verdict)
 	}
 }
 

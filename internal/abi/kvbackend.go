@@ -1,5 +1,7 @@
 package abi
 
+import "context"
+
 // KVResidencyOutcome is the typed result of a residency transfer on a span fak does
 // NOT host locally — the disaggregated / remote-L3 KV direction (the agent-memory
 // off-box tier). It is the ok | MISS | FAULT trichotomy cachemeta.KVTransferVerdict
@@ -52,4 +54,17 @@ type KVResidency struct {
 	Positions  int    // span length in positions, when known
 	BytesMoved int64  // bytes moved off / on box (0 for the in-process local no-op)
 	Reason     string // typed detail on MISS / FAULT; empty on OK
+}
+
+// KVPlacementStager is an optional extension for backends whose staging target
+// matters. CapacityAdapter uses it when available so a backend cannot stage to
+// host DRAM while the placement record falsely names disk or a remote tier.
+type KVPlacementStager interface {
+	StageSpanTo(ctx context.Context, digest string, from, n int, tier string) (KVResidency, error)
+}
+
+// KVDigestEvictor is an optional extension for caches whose resident entries are
+// complete digest-addressed owners rather than mutable ranges in one sequence.
+type KVDigestEvictor interface {
+	EvictDigest(digest string, from, n int) int
 }

@@ -927,14 +927,10 @@ func (c Config) usesMLAMoELayout() bool {
 	return c.isGLMMoeDsa() || c.ModelType == "deepseek2"
 }
 
-// InKernelBackendPrefixReuseSupported reports whether an in-kernel planner using a
-// compute.Backend may still reuse the host KV radix tree for this architecture.
-//
-// Most backend sessions keep their authoritative KV state in the backend HAL store
-// (Session.halKV), so a host KVCache clone is not enough to resume a prefix. GLM-MoE-DSA
-// is the current exception: its backend path routes dense GEMMs through the backend, but
-// the DSA attention/index cache remains the ordinary host KVCache (Session.Cache.glm).
-// That makes prefix clones exact for GLM-DSA even when Backend is non-nil.
+// InKernelBackendPrefixReuseSupported reports whether PrefixSnapshot owns every
+// architecture-specific continuation byte for an in-kernel backend session.
+// GLM-MoE-DSA keeps its authoritative DSA state in the host cache; Qwen3.5/3.6
+// snapshots additionally own backend attention KV plus convolution/recurrent state.
 func (c Config) InKernelBackendPrefixReuseSupported() bool {
 	return c.isGLMMoeDsa() || c.IsQwen35Hybrid()
 }

@@ -203,15 +203,15 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	// cpuOffloadExperts alone made it. Resolved HERE, once, because sizing walks every resident
 	// tensor name and the device path builds a session per request.
 	p.setExpertSpillFromEnv()
-	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off disables it
-	// (the A/B "tree OFF" arm). Most device backends keep authoritative KV in the backend
-	// HAL store, so host KV clones are disabled there. GLM-MoE-DSA is the exception: its
-	// backend path uses host DSA KV (Config.InKernelBackendPrefixReuseSupported), so the same
-	// radix tree safely skips repeated prefill on the live GCP GLM path.
+	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off
+	// disables it (the A/B "tree OFF" arm). Device reuse is admitted only for
+	// architectures whose PrefixSnapshot owns every continuation byte: GLM's
+	// host DSA state and Qwen3.5/3.6's attention plus recurrent backend state.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && inKernelPlannerPrefixReuseSupported(m, backend) {
-		p.tree = radixkv.NewWithBudgetsAndEvictionPolicy(
+		p.tree = radixkv.NewWithTierBudgetsAndEvictionPolicy(
 			envInt("FAK_INKERNEL_RADIX_BUDGET", 0),
 			envInt64("FAK_INKERNEL_RADIX_SNAPSHOT_BYTES", 0),
+			envInt64("FAK_INKERNEL_RADIX_HOST_L2_BYTES", 0),
 			inKernelRadixEvictionPolicyFromEnv(),
 		)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
@@ -297,11 +297,9 @@ func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
 // Model reports the model id (for /v1/models provenance + the planner seam).
 func (p *InKernelPlanner) Model() string { return p.modelID }
 
-// KVMemoryStats reports the in-process KV prefix cache's resident memory shape.
-// RadixAttention reuse is host-KV backed, so enabled=true reports host-scoped kv_cache
-// bytes. A device backend normally uses per-request backend KV and reports enabled=false
-// with per-token device KV geometry; GLM-MoE-DSA is the exception because its backend path
-// still keeps DSA KV in the host KVCache, so a non-nil tree is reported as host radixkv.
+// KVMemoryStats reports the in-process KV prefix cache's physical resident shape.
+// Native backend snapshots are split into hot device bytes, hot host metadata, and
+// the independently owned host-DRAM L2. Proxy/provider counters never enter here.
 func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	if p == nil || p.m == nil {
 		return KVMemoryStats{
@@ -342,8 +340,18 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	p.mu.Lock()
 	st := p.tree.Stats()
 	p.mu.Unlock()
-	stats.ResidentTokens = st.PrefixTokens
-	stats.ResidentBytes = compute.EstimateKVStoreBytes(kvCfg, st.PrefixTokens)
+	if p.backend != nil && p.backend.Caps().DeviceMemory {
+		stats.Backend = p.backend.Name()
+		stats.Scope = string(compute.MemoryScopeDevice)
+		stats.ResidentTokens = st.DeviceSnapshotTokens
+		stats.ResidentBytes = st.DeviceSnapshotBytes
+		total, free, known := compute.DeviceMemoryInfo(p.backend)
+		applyKVMemoryCapacity(&stats, total, free, known)
+	} else {
+		stats.ResidentTokens = st.PrefixTokens
+		stats.ResidentBytes = compute.EstimateKVStoreBytes(kvCfg, st.PrefixTokens)
+		applyKVMemoryCapacity(&stats, hostTotal, hostFree, hostKnown)
+	}
 	stats.BudgetTokens = st.MaxTokens
 	stats.LRUTokens = st.Tokens
 	stats.MaxDepthTokens = st.MaxDepthTokens
@@ -352,7 +360,21 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	stats.Evictions = st.Evictions
 	stats.PolicyEvictions = st.PolicyEvictions
 	stats.Splits = st.Splits
-	applyKVMemoryCapacity(&stats, hostTotal, hostFree, hostKnown)
+	stats.L1DeviceResidentBytes = st.DeviceSnapshotBytes
+	stats.L1HostResidentBytes = st.DeviceSnapshotHostBytes
+	stats.L2HostResidentBytes = st.HostSnapshotBytes
+	stats.L2HostCapacityBytes = st.MaxHostSnapshotBytes
+	stats.L1Hits = st.L1Hits
+	stats.L1Misses = st.L1Misses
+	stats.L1Faults = st.L1Faults
+	stats.L1HitTokens = st.L1HitTokens
+	stats.L2Hits = st.L2Hits
+	stats.L2Misses = st.L2Misses
+	stats.L2Faults = st.L2Faults
+	stats.L2HitTokens = st.L2HitTokens
+	stats.L2StageBytes = st.L2StageBytes
+	stats.L2RestoreBytes = st.L2RestoreBytes
+	stats.L2Evictions = st.L2Evictions
 	return stats
 }
 

@@ -123,14 +123,22 @@ func (s *ScopedTree) AdmitPrivateSnapshot(owner CacheIdentity, tokens []int, sna
 
 // LookupSnapshot returns the longest visible independently owned backend prefix.
 func (s *ScopedTree) LookupSnapshot(owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, error) {
+	snap, logits, matched, scope, _, err := s.LookupSnapshotTiered(owner, tokens)
+	return snap, logits, matched, scope, err
+}
+
+// LookupSnapshotTiered is LookupSnapshot with truthful physical source-tier
+// attribution. It searches every visible hot scope before consulting host DRAM.
+func (s *ScopedTree) LookupSnapshotTiered(owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, SnapshotTier, error) {
 	if strings.TrimSpace(owner.Tenant) == "" {
-		return nil, nil, 0, ScopeTenant, ErrCacheIdentity
+		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, ErrCacheIdentity
 	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	checks := []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet}
-	bestScope, bestMatched := ScopeTenant, 0
-	var best *node
+	bestHotScope, bestHotMatched := ScopeTenant, 0
+	bestHostScope, bestHostMatched := ScopeTenant, 0
+	var bestHot, bestHost *node
 	for _, scope := range checks {
 		if scope == ScopeAgent && strings.TrimSpace(owner.Agent) == "" {
 			continue
@@ -141,27 +149,44 @@ func (s *ScopedTree) LookupSnapshot(owner CacheIdentity, tokens []int) (*model.P
 		}
 		n, _ := s.tree.LookupNS(ns, tokens)
 		for candidate := n; candidate != nil; candidate = candidate.parent {
-			if candidate.snapshot == nil {
-				continue
+			if candidate.snapshot != nil && candidate.plen > bestHotMatched {
+				bestHot, bestHotMatched, bestHotScope = candidate, candidate.plen, scope
 			}
-			// Compare complete snapshots, not raw radix matches. A longer path in one
-			// scope may contain only host KV and must not mask a reusable device
-			// snapshot in another visible scope. Strictly-greater preserves the
-			// agent, tenant, fleet tie priority established by checks.
-			if candidate.plen > bestMatched {
-				best, bestMatched, bestScope = candidate, candidate.plen, scope
+			if candidate.hostSnapshot != nil && candidate.plen > bestHostMatched {
+				bestHost, bestHostMatched, bestHostScope = candidate, candidate.plen, scope
 			}
-			break
 		}
 		if n != nil {
 			s.tree.Done(n)
 		}
 	}
-	if best != nil {
-		snap, err := best.snapshot.Clone()
-		return snap, best.Logits(), bestMatched, bestScope, err
+	if bestHot != nil {
+		snap, err := bestHot.snapshot.Clone()
+		if err != nil {
+			s.tree.l1Faults++
+			return nil, nil, bestHotMatched, bestHotScope, SnapshotTierDeviceL1, err
+		}
+		s.tree.l1Hits++
+		s.tree.l1HitTokens += bestHotMatched
+		return snap, bestHot.Logits(), bestHotMatched, bestHotScope, SnapshotTierDeviceL1, nil
 	}
-	return nil, nil, 0, bestScope, nil
+	s.tree.l1Misses++
+	if !s.tree.HostL2Enabled() {
+		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
+	}
+	if bestHost != nil {
+		snap, err := bestHost.hostSnapshot.Restore()
+		if err != nil {
+			s.tree.l2Faults++
+			return nil, nil, bestHostMatched, bestHostScope, SnapshotTierHostL2, err
+		}
+		s.tree.l2Hits++
+		s.tree.l2HitTokens += bestHostMatched
+		s.tree.l2RestoreBytes += bestHost.hostSnapshot.TransferBytes()
+		return snap, bestHost.Logits(), bestHostMatched, bestHostScope, SnapshotTierHostL2, nil
+	}
+	s.tree.l2Misses++
+	return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
 }
 
 // Lookup returns the longest reusable prefix visible to owner. Agent-private is

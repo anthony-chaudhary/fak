@@ -10,13 +10,10 @@ package main
 // the gateway's wire-neutral candidates into engine.CapacityPressureCandidate, and runs
 // engine.RunCapacityPressureSweep. It is the cmd/fak twin of kvmmu_slot_bridge.go.
 //
-// SCOPE / FENCES. This only WIRES the existing executor onto the existing seam — no new eviction
-// policy, no flag handling of its own (the gateway owns FAK_INKERNEL_KVMMU; off, the edge is a
-// byte-identical no-op). The production provider is left nil at the serve.go call site (the real
-// in-kernel resident-span enumerator is the fenced follow-on #1074 / #987, over the persistent
-// kvmmu.Segment{From,Len,KV} ledger that InKernelPlanner does not surface yet); what this ships
-// is the LIVE sweeper closure + the lowering, so the executor has a real, non-test serve-path
-// caller for the first time.
+// The native complete-prefix bridge below supplies both halves from the in-kernel
+// radix tree: enumerable hot owners and a digest-addressed host-DRAM stage/restore
+// backend. It is deliberately direct-native-only; proxy/provider KV does not cross
+// this seam and cannot be counted as fak-owned residency.
 
 import (
 	"context"
@@ -24,11 +21,110 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
+
+type inKernelPrefixPressureBridge struct {
+	source agent.KVPrefixPressureSource
+}
+
+func newInKernelPrefixPressureBridge(source agent.KVPrefixPressureSource) *inKernelPrefixPressureBridge {
+	if source == nil {
+		return nil
+	}
+	return &inKernelPrefixPressureBridge{source: source}
+}
+
+func (b *inKernelPrefixPressureBridge) PressuredCandidates() (int64, []gateway.KVPressureCandidate) {
+	if b == nil || b.source == nil {
+		return 0, nil
+	}
+	resident, source := b.source.KVPrefixPressuredCandidates()
+	out := make([]gateway.KVPressureCandidate, 0, len(source))
+	for _, candidate := range source {
+		out = append(out, gateway.KVPressureCandidate{
+			SpanDigest: candidate.SpanDigest,
+			From:       0,
+			N:          candidate.Tokens,
+			ModelID:    candidate.ModelID,
+			SizeBytes:  candidate.SizeBytes,
+			Tokens:     candidate.Tokens,
+		})
+	}
+	return resident, out
+}
+
+func (b *inKernelPrefixPressureBridge) Len() int { return 0 }
+
+func (b *inKernelPrefixPressureBridge) Prefill([]int) []float32 { return nil }
+
+func (b *inKernelPrefixPressureBridge) Evict(int, int) int { return 0 }
+
+func (b *inKernelPrefixPressureBridge) EvictDigest(digest string, _, _ int) int {
+	if b == nil || b.source == nil {
+		return 0
+	}
+	return b.source.EvictHotKVPrefix(digest)
+}
+
+func (b *inKernelPrefixPressureBridge) ModelID() string {
+	if b == nil || b.source == nil {
+		return ""
+	}
+	_, candidates := b.source.KVPrefixPressuredCandidates()
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0].ModelID
+}
+
+func (b *inKernelPrefixPressureBridge) StageSpan(ctx context.Context, digest string, from, n int) (abi.KVResidency, error) {
+	return b.StageSpanTo(ctx, digest, from, n, string(cachemeta.TierDRAM))
+}
+
+func (b *inKernelPrefixPressureBridge) StageSpanTo(ctx context.Context, digest string, _, _ int, tier string) (abi.KVResidency, error) {
+	if tier != string(cachemeta.TierDRAM) {
+		return abi.KVResidency{
+			Outcome: abi.KVResidencyMiss,
+			Digest:  digest,
+			Reason:  "native prefix backend owns only the host DRAM L2",
+		}, nil
+	}
+	if b == nil || b.source == nil {
+		return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest, Reason: "native prefix source absent"}, nil
+	}
+	return lowerNativePrefixResidency(b.source.StageKVPrefixToHost(ctx, digest)), nil
+}
+
+func (b *inKernelPrefixPressureBridge) RestoreSpan(ctx context.Context, digest string) (abi.KVResidency, error) {
+	if b == nil || b.source == nil {
+		return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest, Reason: "native prefix source absent"}, nil
+	}
+	return lowerNativePrefixResidency(b.source.RestoreKVPrefixFromHost(ctx, digest)), nil
+}
+
+func lowerNativePrefixResidency(in agent.KVPrefixTransfer) abi.KVResidency {
+	outcome := abi.KVResidencyUnknown
+	switch in.Outcome {
+	case "ok":
+		outcome = abi.KVResidencyOK
+	case "miss":
+		outcome = abi.KVResidencyMiss
+	case "fault":
+		outcome = abi.KVResidencyFault
+	}
+	return abi.KVResidency{
+		Outcome:    outcome,
+		Digest:     in.SpanDigest,
+		Positions:  in.Positions,
+		BytesMoved: in.BytesMoved,
+		Reason:     in.Reason,
+	}
+}
 
 // wireKVPressureRelief is the serve-host installer for the #1073 post-decode capacity sweep — the
 // LIVE, non-test call site of gateway.Server.SetKVPressureRelief (#1094). It builds the host
@@ -39,20 +135,10 @@ import (
 // this installer can be called unconditionally — with a nil provider the edge stays inert
 // (fail-open), byte-identical to today.
 //
-// WHAT IS WIRED vs WHAT IS STILL MISSING (#1094, honest fence). The sweeper half is real: the
-// closure runs the genuine engine.RunCapacityPressureSweep executor (witnessed by
-// newCapacityPressureSweeper's tests + the gateway keystone test). The PROVIDER half — the live
-// resident-span enumerator over kvmmu.Segment{From,Len,KV} that yields the candidate list — is
-// passed in. In production serve.go passes nil for it (so the installed sweep is inert: a nil
-// provider is a clean no-op), because the durable resident-span ledger does not exist yet: the
-// InKernelPlanner builds a kvmmu.Context EPHEMERALLY per eviction (internal/agent's EvictKVSpan /
-// ElideKVSpans rebuild a fresh bridge over a fresh session and discard it) and keeps cross-turn
-// state only as the radixkv prefix-reuse tree, which is keyed by prefix node, not as enumerable
-// per-span retain-vs-evict candidates. Building that enumerator is the fenced follow-on #1074 /
-// #987. So this installer makes the executor ONE provider-construction away from live: the day the
-// span enumerator lands, serve.go passes it here instead of nil and the post-decode sweep fires on
-// real residency with no further wiring. A nil backend or KV leaves the sweeper a no-op too, so a
-// CPU-only / passthrough serve installs nothing live.
+// A nil backend/provider remains an inert no-op for CPU-only and passthrough
+// serves. For a native device serve with FAK_INKERNEL_RADIX_HOST_L2_BYTES set,
+// serve_stages wires the in-kernel bridge here and the existing post-turn sweep
+// stages complete PrefixSnapshot payloads before releasing their hot owners.
 func wireKVPressureRelief(srv *gateway.Server, backend compute.Backend, kv abi.KVBackend, provider gateway.KVPressureCandidateProvider) {
 	if srv == nil {
 		return

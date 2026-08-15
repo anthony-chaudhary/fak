@@ -55,6 +55,18 @@ import (
 )
 
 var ErrSnapshotByteBudget = errors.New("radixkv: snapshot resident-byte budget exceeded")
+var ErrHostSnapshotByteBudget = errors.New("radixkv: host snapshot resident-byte budget exceeded")
+
+// SnapshotTier is the physical source that satisfied a complete-prefix lookup.
+// The zero value is a miss; callers must never infer a hit without an owned
+// PrefixSnapshot result.
+type SnapshotTier string
+
+const (
+	SnapshotTierMiss     SnapshotTier = ""
+	SnapshotTierDeviceL1 SnapshotTier = "device_l1"
+	SnapshotTierHostL2   SnapshotTier = "host_dram_l2"
+)
 
 // node is one vertex of the compressed radix tree. The edge parent→node carries `key`
 // (a run of token ids); the path root→node spells the token prefix this node caches.
@@ -70,6 +82,11 @@ type node struct {
 	// to the cache the caller built, and by split to a truncated clone of a child's cache.
 	kv       *model.KVCache
 	snapshot *model.PrefixSnapshot // optional full device/hybrid prefix owner
+	// hostSnapshot is an independently owned complete PrefixSnapshot image in
+	// process-local host DRAM. It is not provider accounting: the image owns the
+	// attention K/Kraw/V rows, positions, and hybrid recurrent state needed to
+	// materialize a fresh backend snapshot after the hot owner is evicted.
+	hostSnapshot *model.HostPrefixSnapshot
 	// logits is the final-token distribution for this exact full prefix, when the caller
 	// provided it. It lets an exact-hit replay sample the first generated token without
 	// refeeding the prompt's final token just to recover logits. Splits intentionally do
@@ -116,12 +133,26 @@ type Tree struct {
 	// caller and test stays byte-identical. Eviction and Stats span EVERY root
 	// (forEachRoot): the token budget is ONE global pool, only node IDENTITY is
 	// namespace-scoped. See namespace.go.
-	nsRoots          map[string]*node
-	maxTokens        int    // LRU budget in cached tokens; 0 disables eviction (unbounded)
-	maxSnapshotBytes int64  // complete snapshot payload ceiling; 0 is unlimited
-	tokens           int    // total cached tokens = Σ len(node.key) over all nodes
-	snapshotBytes    int64  // complete snapshots plus cached final logits
-	clock            uint64 // logical access clock
+	nsRoots              map[string]*node
+	maxTokens            int    // LRU budget in cached tokens; 0 disables eviction (unbounded)
+	maxSnapshotBytes     int64  // complete snapshot payload ceiling; 0 is unlimited
+	maxHostSnapshotBytes int64  // complete host-DRAM L2 payload ceiling; 0 disables L2
+	tokens               int    // total cached tokens = Σ len(node.key) over all nodes
+	snapshotBytes        int64  // hot complete snapshots plus their cached final logits
+	hostSnapshotBytes    int64  // complete PrefixSnapshot payloads physically owned by host DRAM
+	clock                uint64 // logical access clock
+
+	l1Hits         int
+	l1Misses       int
+	l1Faults       int
+	l1HitTokens    int
+	l2Hits         int
+	l2Misses       int
+	l2Faults       int
+	l2HitTokens    int
+	l2StageBytes   int64
+	l2RestoreBytes int64
+	l2Evictions    int
 
 	// policy is the legacy two-value enum, retained as the back-compat knob and the
 	// selector for the cost-aware eviction counter (Stats.CostEvictions). strategy is the
@@ -204,13 +235,28 @@ func NewWithBudgets(maxTokens int, maxSnapshotBytes int64) *Tree {
 }
 
 func NewWithBudgetsAndEvictionPolicy(maxTokens int, maxSnapshotBytes int64, policy EvictionPolicy) *Tree {
+	return NewWithTierBudgetsAndEvictionPolicy(maxTokens, maxSnapshotBytes, 0, policy)
+}
+
+// NewWithTierBudgetsAndEvictionPolicy builds a tree with independent hot
+// snapshot and host-DRAM L2 payload budgets. A zero host budget leaves the L2
+// disabled, preserving every existing constructor's behavior.
+func NewWithTierBudgetsAndEvictionPolicy(maxTokens int, maxSnapshotBytes, maxHostSnapshotBytes int64, policy EvictionPolicy) *Tree {
 	if maxTokens < 0 {
 		maxTokens = 0
 	}
 	if maxSnapshotBytes < 0 {
 		maxSnapshotBytes = 0
 	}
-	t := &Tree{root: &node{children: map[int]*node{}}, maxTokens: maxTokens, maxSnapshotBytes: maxSnapshotBytes}
+	if maxHostSnapshotBytes < 0 {
+		maxHostSnapshotBytes = 0
+	}
+	t := &Tree{
+		root:                 &node{children: map[int]*node{}},
+		maxTokens:            maxTokens,
+		maxSnapshotBytes:     maxSnapshotBytes,
+		maxHostSnapshotBytes: maxHostSnapshotBytes,
+	}
 	t.SetEvictionPolicy(policy)
 	return t
 }
@@ -443,17 +489,49 @@ func (t *Tree) Insert(boundary *node, suffix []int, kv *model.KVCache) *node {
 	return t.InsertWithLogits(boundary, suffix, kv, nil)
 }
 
-// LookupSnapshot is Lookup plus a deep clone of an exact device/hybrid snapshot.
+// LookupSnapshot is Lookup plus a deep clone/restore of the longest complete
+// snapshot, consulting host DRAM only after the hot snapshot tier misses.
 func (t *Tree) LookupSnapshot(tokens []int) (*node, *model.PrefixSnapshot, int, error) {
+	n, snap, matched, _, err := t.LookupSnapshotTiered(tokens)
+	return n, snap, matched, err
+}
+
+// LookupSnapshotTiered is LookupSnapshot with truthful source-tier attribution.
+func (t *Tree) LookupSnapshotTiered(tokens []int) (*node, *model.PrefixSnapshot, int, SnapshotTier, error) {
 	n, _ := t.Lookup(tokens)
 	for candidate := n; candidate != nil; candidate = candidate.parent {
 		if candidate.snapshot == nil {
 			continue
 		}
 		snap, err := candidate.snapshot.Clone()
-		return n, snap, candidate.plen, err
+		if err != nil {
+			t.l1Faults++
+			return n, nil, candidate.plen, SnapshotTierDeviceL1, err
+		}
+		t.l1Hits++
+		t.l1HitTokens += candidate.plen
+		return n, snap, candidate.plen, SnapshotTierDeviceL1, nil
 	}
-	return n, nil, 0, nil
+	t.l1Misses++
+	if !t.HostL2Enabled() {
+		return n, nil, 0, SnapshotTierMiss, nil
+	}
+	for candidate := n; candidate != nil; candidate = candidate.parent {
+		if candidate.hostSnapshot == nil {
+			continue
+		}
+		snap, err := candidate.hostSnapshot.Restore()
+		if err != nil {
+			t.l2Faults++
+			return n, nil, candidate.plen, SnapshotTierHostL2, err
+		}
+		t.l2Hits++
+		t.l2HitTokens += candidate.plen
+		t.l2RestoreBytes += candidate.hostSnapshot.TransferBytes()
+		return n, snap, candidate.plen, SnapshotTierHostL2, nil
+	}
+	t.l2Misses++
+	return n, nil, 0, SnapshotTierMiss, nil
 }
 
 // InsertSnapshot transfers an independently owned device/hybrid snapshot to the tree.
@@ -496,7 +574,7 @@ func (t *Tree) makeSnapshotRoom(delta int64, exclude *node) bool {
 		if victim == nil {
 			return false
 		}
-		t.releaseSnapshot(victim)
+		t.releaseHotSnapshot(victim)
 	}
 	return true
 }
@@ -518,14 +596,16 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	return victim
 }
 
-func (t *Tree) releaseSnapshot(n *node) {
+func (t *Tree) releaseHotSnapshot(n *node) {
 	if n == nil || n.snapshot == nil {
 		return
 	}
 	t.snapshotBytes -= snapshotResidentBytes(n.snapshot, n.cachedLogits)
 	n.snapshot.Close()
 	n.snapshot = nil
-	n.cachedLogits = nil
+	if n.hostSnapshot == nil {
+		n.cachedLogits = nil
+	}
 }
 
 // InsertWithLogits is Insert plus an optional exact-prefix logits payload. The logits are
@@ -592,7 +672,7 @@ func (n *node) Logits() []float32 {
 	if n == nil {
 		return nil
 	}
-	if n.snapshot != nil {
+	if n.snapshot != nil || n.hostSnapshot != nil {
 		return append([]float32(nil), n.cachedLogits...)
 	}
 	return append([]float32(nil), n.logits...)
@@ -713,7 +793,7 @@ func (t *Tree) removeLeaf(v *node) {
 	}
 	delete(v.parent.children, v.key[0])
 	t.tokens -= len(v.key)
-	t.releaseSnapshot(v)
+	t.releaseSnapshotPayload(v)
 	v.kv = nil
 }
 
@@ -791,7 +871,7 @@ func (t *Tree) closeSubtreeSnapshots(n *node) {
 	if n == nil {
 		return
 	}
-	t.releaseSnapshot(n)
+	t.releaseSnapshotPayload(n)
 	for _, child := range n.children {
 		t.closeSubtreeSnapshots(child)
 	}
@@ -822,20 +902,36 @@ func truncatePrefix(c *model.KVCache, L int) *model.KVCache {
 
 // Stats is a snapshot of the cache's structural state for reporting.
 type Stats struct {
-	Tokens           int   // total cached tokens (Σ edge lengths) — the LRU-budget metric
-	PrefixTokens     int   // Σ node.plen over nodes holding a kv — TRUE resident KV positions
-	Nodes            int   // non-root nodes
-	SnapshotBytes    int64 `json:"snapshot_bytes"`
-	MaxSnapshotBytes int64 `json:"max_snapshot_bytes"`
-	Leaves           int   // leaf nodes
-	MaxDepthTokens   int   // longest cached prefix
-	Evictions        int   // LRU leaf evictions performed
-	CostEvictions    int   // cost-aware leaf evictions performed
-	PolicyEvictions  int   // EvictNode calls
-	Splits           int   // edge splits performed
-	MaxTokens        int   // configured LRU budget (0 = unbounded)
-	EvictionPolicy   string
-	ReuseHits        int
+	Tokens                  int   // total cached tokens (Σ edge lengths) — the LRU-budget metric
+	PrefixTokens            int   // Σ node.plen over nodes holding a kv — TRUE resident KV positions
+	Nodes                   int   // non-root nodes
+	SnapshotBytes           int64 `json:"snapshot_bytes"`
+	MaxSnapshotBytes        int64 `json:"max_snapshot_bytes"`
+	HostSnapshotBytes       int64 `json:"host_snapshot_bytes"`
+	MaxHostSnapshotBytes    int64 `json:"max_host_snapshot_bytes"`
+	DeviceSnapshotBytes     int64 `json:"device_snapshot_bytes"`
+	DeviceSnapshotHostBytes int64 `json:"device_snapshot_host_bytes"`
+	DeviceSnapshotTokens    int   `json:"device_snapshot_tokens"`
+	L1Hits                  int   `json:"l1_hits"`
+	L1Misses                int   `json:"l1_misses"`
+	L1Faults                int   `json:"l1_faults"`
+	L1HitTokens             int   `json:"l1_hit_tokens"`
+	L2Hits                  int   `json:"l2_hits"`
+	L2Misses                int   `json:"l2_misses"`
+	L2Faults                int   `json:"l2_faults"`
+	L2HitTokens             int   `json:"l2_hit_tokens"`
+	L2StageBytes            int64 `json:"l2_stage_bytes"`
+	L2RestoreBytes          int64 `json:"l2_restore_bytes"`
+	L2Evictions             int   `json:"l2_evictions"`
+	Leaves                  int   // leaf nodes
+	MaxDepthTokens          int   // longest cached prefix
+	Evictions               int   // LRU leaf evictions performed
+	CostEvictions           int   // cost-aware leaf evictions performed
+	PolicyEvictions         int   // EvictNode calls
+	Splits                  int   // edge splits performed
+	MaxTokens               int   // configured LRU budget (0 = unbounded)
+	EvictionPolicy          string
+	ReuseHits               int
 
 	LastEvictPolicy       string
 	LastEvictCandidates   int
@@ -895,6 +991,19 @@ func (t *Tree) Stats() Stats {
 		MaxTokens:             t.effectiveMaxTokens(),
 		SnapshotBytes:         t.snapshotBytes,
 		MaxSnapshotBytes:      t.maxSnapshotBytes,
+		HostSnapshotBytes:     t.hostSnapshotBytes,
+		MaxHostSnapshotBytes:  t.maxHostSnapshotBytes,
+		L1Hits:                t.l1Hits,
+		L1Misses:              t.l1Misses,
+		L1Faults:              t.l1Faults,
+		L1HitTokens:           t.l1HitTokens,
+		L2Hits:                t.l2Hits,
+		L2Misses:              t.l2Misses,
+		L2Faults:              t.l2Faults,
+		L2HitTokens:           t.l2HitTokens,
+		L2StageBytes:          t.l2StageBytes,
+		L2RestoreBytes:        t.l2RestoreBytes,
+		L2Evictions:           t.l2Evictions,
 		EvictionPolicy:        t.evictionStrategy().Name(),
 		LastEvictPolicy:       t.lastEvictPolicyName(),
 		LastEvictCandidates:   t.lastEvictCandidates,
@@ -926,6 +1035,14 @@ func (t *Tree) Stats() Stats {
 			s.Tokens += len(n.key)
 			if n.kv != nil {
 				s.PrefixTokens += n.plen
+			}
+			if n.snapshot != nil {
+				host, device := n.snapshot.ResidencyBytes()
+				s.DeviceSnapshotHostBytes += host
+				s.DeviceSnapshotBytes += device
+				if device > 0 {
+					s.DeviceSnapshotTokens += n.plen
+				}
 			}
 			if n.plen > s.MaxDepthTokens {
 				s.MaxDepthTokens = n.plen

@@ -226,29 +226,44 @@ func TestInKernelOOMRetryMetricsAndDebugVars(t *testing.T) {
 func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = kvMemoryStatsPlanner{stats: agent.KVMemoryStats{
-		Enabled:            true,
-		Backend:            "radixkv",
-		MemoryClass:        "kv_cache",
-		Scope:              "host",
-		DType:              "f32",
-		BytesPerToken:      6144,
-		ResidentTokens:     42,
-		ResidentBytes:      258048,
-		CapacityKnown:      true,
-		CapacityFreeKnown:  true,
-		CapacityTotalBytes: 2 << 20,
-		CapacityFreeBytes:  790528,
-		HeadroomRatio:      0.25,
-		FitBudgetBytes:     786432,
-		FitMarginBytes:     528384,
-		BudgetTokens:       64,
-		LRUTokens:          18,
-		MaxDepthTokens:     21,
-		Nodes:              3,
-		Leaves:             2,
-		Evictions:          4,
-		PolicyEvictions:    1,
-		Splits:             5,
+		Enabled:               true,
+		Backend:               "radixkv",
+		MemoryClass:           "kv_cache",
+		Scope:                 "host",
+		DType:                 "f32",
+		BytesPerToken:         6144,
+		ResidentTokens:        42,
+		ResidentBytes:         258048,
+		CapacityKnown:         true,
+		CapacityFreeKnown:     true,
+		CapacityTotalBytes:    2 << 20,
+		CapacityFreeBytes:     790528,
+		HeadroomRatio:         0.25,
+		FitBudgetBytes:        786432,
+		FitMarginBytes:        528384,
+		BudgetTokens:          64,
+		LRUTokens:             18,
+		MaxDepthTokens:        21,
+		Nodes:                 3,
+		Leaves:                2,
+		Evictions:             4,
+		PolicyEvictions:       1,
+		Splits:                5,
+		L1DeviceResidentBytes: 1000,
+		L1HostResidentBytes:   200,
+		L2HostResidentBytes:   3000,
+		L2HostCapacityBytes:   4096,
+		L1Hits:                4,
+		L1Misses:              3,
+		L1Faults:              1,
+		L1HitTokens:           40,
+		L2Hits:                2,
+		L2Misses:              1,
+		L2Faults:              1,
+		L2HitTokens:           20,
+		L2StageBytes:          5000,
+		L2RestoreBytes:        4000,
+		L2Evictions:           2,
 	}}
 
 	text := srv.renderMetrics()
@@ -271,6 +286,21 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		`fak_gateway_kv_memory_evictions_total{class="kv_cache",scope="host",backend="radixkv",kind="lru"} 4`,
 		`fak_gateway_kv_memory_evictions_total{class="kv_cache",scope="host",backend="radixkv",kind="policy"} 1`,
 		`fak_gateway_kv_memory_splits_total{class="kv_cache",scope="host",backend="radixkv"} 5`,
+		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="device_l1",scope="device"} 1000`,
+		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="device_l1",scope="host_metadata"} 200`,
+		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="host_dram_l2",scope="host"} 3000`,
+		`fak_gateway_kv_prefix_tier_capacity_bytes{backend="radixkv",tier="host_dram_l2"} 4096`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="device_l1",outcome="hit"} 4`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="device_l1",outcome="miss"} 3`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="device_l1",outcome="fault"} 1`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="host_dram_l2",outcome="hit"} 2`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="host_dram_l2",outcome="miss"} 1`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="host_dram_l2",outcome="fault"} 1`,
+		`fak_gateway_kv_prefix_tier_hit_tokens_total{backend="radixkv",tier="device_l1"} 40`,
+		`fak_gateway_kv_prefix_tier_hit_tokens_total{backend="radixkv",tier="host_dram_l2"} 20`,
+		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="host_dram_l2",direction="stage"} 5000`,
+		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="host_dram_l2",direction="restore"} 4000`,
+		`fak_gateway_kv_prefix_tier_evictions_total{backend="radixkv",tier="host_dram_l2"} 2`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("KV memory metrics missing %q\n--- metrics ---\n%s", want, text)
@@ -285,7 +315,14 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		vars.KVMemory.LRUTokens != 18 || vars.KVMemory.PolicyEvictions != 1 || vars.KVMemory.DType != "f32" ||
 		!vars.KVMemory.CapacityKnown || !vars.KVMemory.CapacityFreeKnown ||
 		vars.KVMemory.CapacityTotalBytes != 2<<20 || vars.KVMemory.CapacityFreeBytes != 790528 ||
-		vars.KVMemory.FitBudgetBytes != 786432 || vars.KVMemory.FitMarginBytes != 528384 {
+		vars.KVMemory.FitBudgetBytes != 786432 || vars.KVMemory.FitMarginBytes != 528384 ||
+		vars.KVMemory.L1DeviceResidentBytes != 1000 || vars.KVMemory.L1HostResidentBytes != 200 ||
+		vars.KVMemory.L2HostResidentBytes != 3000 || vars.KVMemory.L2HostCapacityBytes != 4096 ||
+		vars.KVMemory.L1Hits != 4 || vars.KVMemory.L1Misses != 3 || vars.KVMemory.L1Faults != 1 ||
+		vars.KVMemory.L1HitTokens != 40 || vars.KVMemory.L2Hits != 2 || vars.KVMemory.L2Misses != 1 ||
+		vars.KVMemory.L2Faults != 1 || vars.KVMemory.L2HitTokens != 20 ||
+		vars.KVMemory.L2StageBytes != 5000 || vars.KVMemory.L2RestoreBytes != 4000 ||
+		vars.KVMemory.L2Evictions != 2 {
 		t.Fatalf("debug kv_memory = %+v, want resident/lru/eviction fields", vars.KVMemory)
 	}
 }
@@ -326,6 +363,7 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 		"fak_gateway_kv_memory_resident_tokens",
 		"fak_gateway_kv_memory_evictions_total",
 		"fak_gateway_kv_memory_splits_total",
+		"fak_gateway_kv_prefix_tier_",
 	} {
 		if strings.Contains(text, absent) {
 			t.Fatalf("disabled KV memory reporter should not emit %q\n--- metrics ---\n%s", absent, text)

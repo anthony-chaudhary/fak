@@ -487,17 +487,11 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 		}
 	}
 
-	// Install the #1073 post-decode KV pressure-relief sweep (#1094): the LIVE, non-test caller
-	// of SetKVPressureRelief. The sweeper closure wraps the genuine engine capacity executor over
-	// the live device backend; the gateway gates the edge on FAK_INKERNEL_KVMMU AND on a non-nil
-	// provider, so installing it unconditionally is safe — with no provider the edge stays inert
-	// (a no-op, byte-identical to today). The PROVIDER (the resident-span enumerator over
-	// kvmmu.Segment{From,Len,KV}) is nil here because no durable cross-turn resident-span ledger
-	// exists yet — the in-kernel planner builds a kvmmu.Context ephemerally per eviction and keeps
-	// only a radixkv prefix-reuse tree, not enumerable per-span candidates. Building that
-	// enumerator is the fenced follow-on #1074 / #987; when it lands, serve.go passes it here
-	// instead of nil and the sweep fires on real residency with no other change. KV is nil for the
-	// same reason (a nil-provider sweep never calls it). See wireKVPressureRelief's honest fence.
+	// Install the post-decode capacity sweep over the complete native radix
+	// snapshots the in-kernel planner actually owns. A direct native planner
+	// exposes both the enumerable hot payloads and the host-DRAM stage/restore
+	// backend; proxy/dual planners expose neither, so provider counters can never
+	// be mistaken for fak-owned L2 bytes.
 	// Seed the peer-DRAM lender roster from FAK_PEER_DRAM_LENDER (#5083) BEFORE the first
 	// post-decode sweep runs probedTierProfilesForHost, so an operator declaration of a
 	// neighbor's lendable DRAM makes the peer-DRAM-over-RDMA rung (#4306) reachable in this
@@ -507,7 +501,12 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 		fmt.Fprintf(os.Stderr, "fak serve: registered %d peer-DRAM lender(s) from %s → remote-DRAM paging rung active (#5083)\n", n, peerDRAMLenderEnvVar)
 	}
 
-	wireKVPressureRelief(rt.srv, rt.chatBackend, nil, nil)
+	prefixBridge := newInKernelPrefixPressureBridge(rt.srv.InKernelKVPrefixPressureSource())
+	if prefixBridge != nil {
+		wireKVPressureRelief(rt.srv, rt.chatBackend, prefixBridge, prefixBridge)
+	} else {
+		wireKVPressureRelief(rt.srv, rt.chatBackend, nil, nil)
+	}
 
 	// Stream every drive-state revision on /v1/fak/session/changes (#630). Wired
 	// AFTER gateway.New so rt.srv exists: each Rev bump of the process-local table

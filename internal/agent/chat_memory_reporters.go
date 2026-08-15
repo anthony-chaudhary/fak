@@ -29,6 +29,26 @@ type KVMemoryStats struct {
 	Evictions          int
 	PolicyEvictions    int
 	Splits             int
+
+	// Complete-prefix tier telemetry is populated only by the native in-kernel
+	// radix path. Proxy planners never implement this reporter, and a tree with
+	// no physical host L2 leaves the capacity at zero so observers do not infer
+	// an offload tier from ordinary provider counters.
+	L1DeviceResidentBytes int64
+	L1HostResidentBytes   int64
+	L2HostResidentBytes   int64
+	L2HostCapacityBytes   int64
+	L1Hits                int
+	L1Misses              int
+	L1Faults              int
+	L1HitTokens           int
+	L2Hits                int
+	L2Misses              int
+	L2Faults              int
+	L2HitTokens           int
+	L2StageBytes          int64
+	L2RestoreBytes        int64
+	L2Evictions           int
 }
 
 // KVMemoryReporter is the optional interface a local planner implements when it

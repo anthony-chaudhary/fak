@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -59,6 +60,7 @@ type recordingQwen35Backend struct {
 	cloneCalls      int
 	badRoute        string
 	failAt          int
+	deviceMemory    bool
 }
 
 func newRecordingQwen35Backend(m *Model) *recordingQwen35Backend {
@@ -84,6 +86,11 @@ func (b *recordingQwen35Backend) Name() string                    { return "reco
 func (b *recordingQwen35Backend) Tier() string                    { return "recording" }
 func (b *recordingQwen35Backend) Class() compute.CorrectnessClass { return compute.Approx }
 func (*recordingQwen35Backend) Qwen35GDNPath() string             { return Qwen35GDNCUDAPath }
+func (b *recordingQwen35Backend) Caps() compute.Caps {
+	caps := b.Backend.Caps()
+	caps.DeviceMemory = b.deviceMemory
+	return caps
+}
 
 func (b *recordingQwen35Backend) UploadClass(t compute.Tensor, as compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
 	out := b.Backend.Upload(t, as)
@@ -484,5 +491,61 @@ func TestQwen35PrefixSnapshotClonesAndRestoresAllHybridDeviceState(t *testing.T)
 	linear := len(be.linearLayers)
 	if be.cloneCalls < 4*linear {
 		t.Fatalf("clone calls=%d want at least %d", be.cloneCalls, 4*linear)
+	}
+}
+
+func TestQwen35PrefixSnapshotHostRoundTripOwnsCompleteHybridState(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	be := newRecordingQwen35Backend(m)
+	be.deviceMemory = true
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Prefill([]int{3, 7, 11})
+	snap, err := s.PrefixSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostBytes, deviceBytes := snap.ResidencyBytes()
+	if hostBytes <= 0 || deviceBytes <= 0 {
+		snap.Close()
+		t.Fatalf("physical residency host=%d device=%d, want split metadata/payload ownership", hostBytes, deviceBytes)
+	}
+	host, err := snap.CloneToHost()
+	if err != nil {
+		snap.Close()
+		t.Fatal(err)
+	}
+	defer host.Close()
+	if host.ResidentBytes() <= 0 || host.TransferBytes() <= 0 {
+		snap.Close()
+		t.Fatalf("host image resident=%d transfer=%d, want owned payload", host.ResidentBytes(), host.TransferBytes())
+	}
+	freeBefore := totalFreeCalls(be)
+	snap.Close()
+	if totalFreeCalls(be) <= freeBefore {
+		t.Fatal("closing the hot snapshot did not release its backend-owned tensors")
+	}
+
+	restored, err := host.Restore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	roundTrip, err := restored.CloneToHost()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roundTrip.Close()
+	if !reflect.DeepEqual(roundTrip.cache, host.cache) {
+		t.Fatal("host model cache drifted across host→backend→host round trip")
+	}
+	if !reflect.DeepEqual(roundTrip.kv, host.kv) {
+		t.Fatal("attention K/Kraw/V or positions drifted across host round trip")
+	}
+	if !reflect.DeepEqual(roundTrip.qwen35.layers, host.qwen35.layers) {
+		t.Fatal("Qwen convolution/recurrent state drifted across host round trip")
 	}
 }

@@ -315,29 +315,44 @@ type debugMemoryFitVars struct {
 }
 
 type debugKVMemoryVars struct {
-	Enabled            bool    `json:"enabled"`
-	Backend            string  `json:"backend"`
-	MemoryClass        string  `json:"memory_class"`
-	Scope              string  `json:"scope"`
-	DType              string  `json:"dtype,omitempty"`
-	BytesPerToken      int64   `json:"bytes_per_token"`
-	ResidentTokens     int     `json:"resident_tokens,omitempty"`
-	ResidentBytes      int64   `json:"resident_bytes,omitempty"`
-	CapacityKnown      bool    `json:"capacity_known"`
-	CapacityFreeKnown  bool    `json:"capacity_free_known"`
-	CapacityTotalBytes int64   `json:"capacity_total_bytes,omitempty"`
-	CapacityFreeBytes  int64   `json:"capacity_free_bytes,omitempty"`
-	HeadroomRatio      float64 `json:"headroom_ratio,omitempty"`
-	FitBudgetBytes     int64   `json:"fit_budget_bytes,omitempty"`
-	FitMarginBytes     int64   `json:"fit_margin_bytes,omitempty"`
-	BudgetTokens       int     `json:"budget_tokens,omitempty"`
-	LRUTokens          int     `json:"lru_tokens,omitempty"`
-	MaxDepthTokens     int     `json:"max_depth_tokens,omitempty"`
-	Nodes              int     `json:"nodes,omitempty"`
-	Leaves             int     `json:"leaves,omitempty"`
-	Evictions          int     `json:"evictions,omitempty"`
-	PolicyEvictions    int     `json:"policy_evictions,omitempty"`
-	Splits             int     `json:"splits,omitempty"`
+	Enabled               bool    `json:"enabled"`
+	Backend               string  `json:"backend"`
+	MemoryClass           string  `json:"memory_class"`
+	Scope                 string  `json:"scope"`
+	DType                 string  `json:"dtype,omitempty"`
+	BytesPerToken         int64   `json:"bytes_per_token"`
+	ResidentTokens        int     `json:"resident_tokens,omitempty"`
+	ResidentBytes         int64   `json:"resident_bytes,omitempty"`
+	CapacityKnown         bool    `json:"capacity_known"`
+	CapacityFreeKnown     bool    `json:"capacity_free_known"`
+	CapacityTotalBytes    int64   `json:"capacity_total_bytes,omitempty"`
+	CapacityFreeBytes     int64   `json:"capacity_free_bytes,omitempty"`
+	HeadroomRatio         float64 `json:"headroom_ratio,omitempty"`
+	FitBudgetBytes        int64   `json:"fit_budget_bytes,omitempty"`
+	FitMarginBytes        int64   `json:"fit_margin_bytes,omitempty"`
+	BudgetTokens          int     `json:"budget_tokens,omitempty"`
+	LRUTokens             int     `json:"lru_tokens,omitempty"`
+	MaxDepthTokens        int     `json:"max_depth_tokens,omitempty"`
+	Nodes                 int     `json:"nodes,omitempty"`
+	Leaves                int     `json:"leaves,omitempty"`
+	Evictions             int     `json:"evictions,omitempty"`
+	PolicyEvictions       int     `json:"policy_evictions,omitempty"`
+	Splits                int     `json:"splits,omitempty"`
+	L1DeviceResidentBytes int64   `json:"l1_device_resident_bytes,omitempty"`
+	L1HostResidentBytes   int64   `json:"l1_host_resident_bytes,omitempty"`
+	L2HostResidentBytes   int64   `json:"l2_host_resident_bytes,omitempty"`
+	L2HostCapacityBytes   int64   `json:"l2_host_capacity_bytes,omitempty"`
+	L1Hits                int     `json:"l1_hits,omitempty"`
+	L1Misses              int     `json:"l1_misses,omitempty"`
+	L1Faults              int     `json:"l1_faults,omitempty"`
+	L1HitTokens           int     `json:"l1_hit_tokens,omitempty"`
+	L2Hits                int     `json:"l2_hits,omitempty"`
+	L2Misses              int     `json:"l2_misses,omitempty"`
+	L2Faults              int     `json:"l2_faults,omitempty"`
+	L2HitTokens           int     `json:"l2_hit_tokens,omitempty"`
+	L2StageBytes          int64   `json:"l2_stage_bytes,omitempty"`
+	L2RestoreBytes        int64   `json:"l2_restore_bytes,omitempty"`
+	L2Evictions           int     `json:"l2_evictions,omitempty"`
 }
 
 // debugMoEResidencyVars is the activated-expert residency block. Unlike the Prometheus family,
@@ -1252,29 +1267,44 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 	backend := defaultBackendLabel(st.Backend)
 	dtype := modelLoadDType(st.DType)
 	return &debugKVMemoryVars{
-		Enabled:            st.Enabled,
-		Backend:            backend,
-		MemoryClass:        class,
-		Scope:              scope,
-		DType:              dtype,
-		BytesPerToken:      st.BytesPerToken,
-		ResidentTokens:     st.ResidentTokens,
-		ResidentBytes:      st.ResidentBytes,
-		CapacityKnown:      st.CapacityKnown,
-		CapacityFreeKnown:  st.CapacityKnown && st.CapacityFreeKnown,
-		CapacityTotalBytes: st.CapacityTotalBytes,
-		CapacityFreeBytes:  st.CapacityFreeBytes,
-		HeadroomRatio:      st.HeadroomRatio,
-		FitBudgetBytes:     st.FitBudgetBytes,
-		FitMarginBytes:     st.FitMarginBytes,
-		BudgetTokens:       st.BudgetTokens,
-		LRUTokens:          st.LRUTokens,
-		MaxDepthTokens:     st.MaxDepthTokens,
-		Nodes:              st.Nodes,
-		Leaves:             st.Leaves,
-		Evictions:          st.Evictions,
-		PolicyEvictions:    st.PolicyEvictions,
-		Splits:             st.Splits,
+		Enabled:               st.Enabled,
+		Backend:               backend,
+		MemoryClass:           class,
+		Scope:                 scope,
+		DType:                 dtype,
+		BytesPerToken:         st.BytesPerToken,
+		ResidentTokens:        st.ResidentTokens,
+		ResidentBytes:         st.ResidentBytes,
+		CapacityKnown:         st.CapacityKnown,
+		CapacityFreeKnown:     st.CapacityKnown && st.CapacityFreeKnown,
+		CapacityTotalBytes:    st.CapacityTotalBytes,
+		CapacityFreeBytes:     st.CapacityFreeBytes,
+		HeadroomRatio:         st.HeadroomRatio,
+		FitBudgetBytes:        st.FitBudgetBytes,
+		FitMarginBytes:        st.FitMarginBytes,
+		BudgetTokens:          st.BudgetTokens,
+		LRUTokens:             st.LRUTokens,
+		MaxDepthTokens:        st.MaxDepthTokens,
+		Nodes:                 st.Nodes,
+		Leaves:                st.Leaves,
+		Evictions:             st.Evictions,
+		PolicyEvictions:       st.PolicyEvictions,
+		Splits:                st.Splits,
+		L1DeviceResidentBytes: st.L1DeviceResidentBytes,
+		L1HostResidentBytes:   st.L1HostResidentBytes,
+		L2HostResidentBytes:   st.L2HostResidentBytes,
+		L2HostCapacityBytes:   st.L2HostCapacityBytes,
+		L1Hits:                st.L1Hits,
+		L1Misses:              st.L1Misses,
+		L1Faults:              st.L1Faults,
+		L1HitTokens:           st.L1HitTokens,
+		L2Hits:                st.L2Hits,
+		L2Misses:              st.L2Misses,
+		L2Faults:              st.L2Faults,
+		L2HitTokens:           st.L2HitTokens,
+		L2StageBytes:          st.L2StageBytes,
+		L2RestoreBytes:        st.L2RestoreBytes,
+		L2Evictions:           st.L2Evictions,
 	}
 }
 

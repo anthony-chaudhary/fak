@@ -81,6 +81,16 @@ func (t *Tree) forEachRoot(fn func(r *node)) {
 	}
 }
 
+// forEachRootNS is the identity-preserving sibling of forEachRoot. Callers
+// that publish an address for a node must include its namespace so identical
+// token paths in isolated trees cannot alias.
+func (t *Tree) forEachRootNS(fn func(ns string, r *node)) {
+	fn("", t.root)
+	for ns, r := range t.nsRoots {
+		fn(ns, r)
+	}
+}
+
 // Namespaces reports how many distinct NON-default namespaces currently hold a virtual root
 // (an observability/testing seam). The default ("") namespace is always present via t.root
 // and is not counted.
