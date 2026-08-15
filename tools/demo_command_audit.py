@@ -47,7 +47,7 @@ PY_TOOL_CMD_RE = re.compile(
     rf"(?P<command>python(?:3)?\s+(?P<path>tools/[A-Za-z0-9_./-]+\.py){_TAIL})"
 )
 MAKE_CMD_RE = re.compile(
-    rf"(?P<command>make\s+(?P<target>[A-Za-z0-9_.-]+){_TAIL})"
+    rf"(?:^|[^A-Za-z0-9_])(?P<command>make\s+(?P<target>[A-Za-z0-9_.-]+){_TAIL})"
 )
 MAKE_TARGET_RE = re.compile(r"^(?P<target>[A-Za-z0-9_.-]+)\s*:(?!=)")
 BARE_INLINE_CMD_RE = re.compile(r"(?:<code>|`)\s*(?P<target>\./cmd/[A-Za-z0-9_-]+)\s*(?:</code>|`)")
