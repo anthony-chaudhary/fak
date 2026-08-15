@@ -89,6 +89,8 @@ func populatedCacheAttributionVars() CacheAttributionVars {
 		FakCompactionCacheReadTokens:              103,
 		FakKVPrefixReusedTokens:                   107,
 		FakVDSOAvoidedCalls:                       109,
+		FakInlineServedCalls:                      111,
+		FakResponseMemoCalls:                      112,
 
 		FakDeferColdTurns:      113,
 		FakDeferColdCount:      127,
@@ -102,6 +104,8 @@ const cacheAttributionVarsWire = `{
 	"fak_defer_cold_count": 127,
 	"total_token_equiv": 3.75,
 	"fak_vdso_avoided_calls": 109,
+	"fak_inline_served_calls": 111,
+	"fak_response_memo_calls": 112,
 	"provider_prompt_cache_write_premium_token_equiv": -6.25,
 	"cache_creation_tokens_head_only": 17,
 	"cache_creation_tokens_message_prefix": 19,
@@ -239,6 +243,8 @@ func TestCacheAttributionVarsWireKeys(t *testing.T) {
 		"fak_compaction_cache_read_tokens",
 		"fak_kv_prefix_reused_tokens",
 		"fak_vdso_avoided_calls",
+		"fak_inline_served_calls",
+		"fak_response_memo_calls",
 		"fak_defer_cold_turns",
 		"fak_defer_cold_count",
 		"fak_defer_cold_tool_names",
@@ -302,6 +308,8 @@ func TestWireKeysCarryTheRightValues(t *testing.T) {
 				"fak_compaction_cache_read_tokens":                float64(103),
 				"fak_kv_prefix_reused_tokens":                     float64(107),
 				"fak_vdso_avoided_calls":                          float64(109),
+				"fak_inline_served_calls":                         float64(111),
+				"fak_response_memo_calls":                         float64(112),
 				"fak_defer_cold_turns":                            float64(113),
 				"fak_defer_cold_count":                            float64(127),
 				"fak_defer_cold_tool_names":                       []any{"Bash", "Grep"},
@@ -361,7 +369,7 @@ func TestFieldCountsMatchThePinnedKeySets(t *testing.T) {
 		want int
 	}{
 		{"SessionVars", reflect.TypeOf(SessionVars{}), 14},
-		{"CacheAttributionVars", reflect.TypeOf(CacheAttributionVars{}), 16},
+		{"CacheAttributionVars", reflect.TypeOf(CacheAttributionVars{}), 18},
 		{"ManagedCacheVars", reflect.TypeOf(ManagedCacheVars{}), 6},
 	} {
 		if got := tc.typ.NumField(); got != tc.want {
@@ -413,7 +421,7 @@ func TestZeroValueEmitsExactlyTheMandatoryKeys(t *testing.T) {
 				`"provider_prompt_cache_read_token_equiv":0,` +
 				`"provider_prompt_cache_write_premium_token_equiv":0,` +
 				`"fak_compaction_shed_tokens":0,"fak_kv_prefix_reused_tokens":0,` +
-				`"fak_vdso_avoided_calls":0}`,
+				`"fak_vdso_avoided_calls":0,"fak_response_memo_calls":0,"fak_inline_served_calls":0}`,
 		},
 		{
 			name:  "ManagedCacheVars",
