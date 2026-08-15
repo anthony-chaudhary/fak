@@ -93,6 +93,7 @@ var tier = map[string]int{
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
 	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
 	"stackresolve":         1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
+	"workloadfit":          2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
 	"amdgpu":               2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
 	"accounts":             2, "accountobs": 1, "guardaudit": 2, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.

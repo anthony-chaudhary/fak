@@ -1,0 +1,53 @@
+{
+  "schema": "fak-workload-fit/1",
+  "as_of": "2026-08-15T12:00:00Z",
+  "contracts": [
+    {
+      "schema": "fak-workload-fit/1", "id": "coding-change@r1", "domain": "software-engineering", "revision": "r1", "owner": "coding-workload-adapter",
+      "requirements": [
+        {"id": "edit", "class": "hard", "capability": "repo.patch", "source": {"authority": "coding-workload-adapter", "reference": "coding-change@r1"}},
+        {"id": "test", "class": "hard", "capability": "repo.test", "source": {"authority": "coding-workload-adapter", "reference": "coding-change@r1"}},
+        {"id": "loop", "class": "preference", "capability": "coding.fast-loop", "weight": 10, "source": {"authority": "coding-benchmark", "reference": "coding-loop-2026-08"}},
+        {"id": "cost", "class": "cost", "metric": "usd_per_task", "maximum": 2.0, "source": {"authority": "operator", "reference": "coding-budget@r1"}}
+      ]
+    },
+    {
+      "schema": "fak-workload-fit/1", "id": "legal-review@r1", "domain": "legal-review", "revision": "r1", "owner": "legal-workload-adapter-draft",
+      "requirements": [
+        {"id": "citations", "class": "evidence", "capability": "citation.traceable", "minimum_tier": "evaluated", "source": {"authority": "legal-workload-adapter-draft", "reference": "legal-review@r1"}},
+        {"id": "human-review", "class": "authority", "capability": "control.human-approval", "source": {"authority": "legal-workload-adapter-draft", "reference": "legal-review@r1"}},
+        {"id": "confidential", "class": "hard", "capability": "data.confidential", "source": {"authority": "operator", "reference": "matter-policy@r3"}},
+        {"id": "jurisdiction", "class": "preference", "capability": "legal.jurisdiction-scoped", "weight": 10, "source": {"authority": "legal-workload-adapter-draft", "reference": "legal-review@r1"}}
+      ]
+    }
+  ],
+  "catalog": {
+    "schema": "fak-workload-fit/1",
+    "candidates": [
+      {
+        "id": "ponytail@r8",
+        "claims": [
+          {"capability": "repo.patch", "status": "supported", "source": {"authority": "harness-conformance", "reference": "ponytail@r8", "tier": "evaluated", "scope": "coding"}},
+          {"capability": "repo.test", "status": "supported", "source": {"authority": "harness-conformance", "reference": "ponytail@r8", "tier": "evaluated", "scope": "coding"}},
+          {"capability": "coding.fast-loop", "status": "supported", "source": {"authority": "coding-benchmark", "reference": "coding-loop-2026-08", "tier": "observed", "expires": "2026-09-15T00:00:00Z"}},
+          {"capability": "citation.traceable", "status": "unknown", "source": {"authority": "catalog", "reference": "not-evaluated"}},
+          {"capability": "control.human-approval", "status": "unsupported", "source": {"authority": "harness-manifest", "reference": "ponytail@r8"}},
+          {"capability": "data.confidential", "status": "unknown", "source": {"authority": "catalog", "reference": "not-evaluated"}}
+        ],
+        "metrics": {"usd_per_task": 0.8}
+      },
+      {
+        "id": "legal-review-harness@r4",
+        "claims": [
+          {"capability": "repo.patch", "status": "unknown", "source": {"authority": "catalog", "reference": "not-evaluated"}},
+          {"capability": "repo.test", "status": "unknown", "source": {"authority": "catalog", "reference": "not-evaluated"}},
+          {"capability": "citation.traceable", "status": "supported", "source": {"authority": "external-review-fixture", "reference": "citation-suite-v2", "tier": "reviewed", "scope": "fixture-only", "expires": "2026-09-15T00:00:00Z"}},
+          {"capability": "control.human-approval", "status": "supported", "source": {"authority": "policy", "reference": "legal-human-review@r2", "tier": "evaluated"}},
+          {"capability": "data.confidential", "status": "supported", "source": {"authority": "policy", "reference": "matter-isolation@r3", "tier": "evaluated"}},
+          {"capability": "legal.jurisdiction-scoped", "status": "supported", "source": {"authority": "external-review-fixture", "reference": "jurisdiction-fixture-v1", "tier": "reviewed", "scope": "fixture-only"}}
+        ],
+        "metrics": {"usd_per_task": 3.2}
+      }
+    ]
+  }
+}

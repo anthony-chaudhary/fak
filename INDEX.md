@@ -264,6 +264,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- **[Workload fitness contract spine](docs/notes/WORKLOAD-FITNESS-CONTRACT-SPINE-2026-08-15.md)** — Coding-versus-legal fixture separating hard requirements, authority, evidence floors, preferences, costs, and unknowns (#6893).
 - [Stack resolver completeness and bounded-cost witness](docs/notes/STACK-RESOLVER-COMPLETENESS-WITNESS-2026-08-15.md) -- auto-indexed dated note.
 - [Native harness stack-resolution spine witness](docs/notes/NATIVE-HARNESS-STACK-RESOLUTION-SPINE-2026-08-15.md) -- auto-indexed dated note.
 - [Harness-creation current-interest inventory — 2026-08-15](docs/notes/HARNESS-CREATION-CURRENT-INTEREST-2026-08-15.md) -- auto-indexed dated note.
