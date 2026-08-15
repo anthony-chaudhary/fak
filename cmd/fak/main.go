@@ -80,7 +80,7 @@ func dispatchCoreVerbA(name string, args []string) bool {
 	case "agent":
 		cmdAgent(args)
 	case "harness":
-		cmdHarness(args)
+		cmdHarnessCommand(args)
 	case "armbench":
 		cmdArmbench(args)
 	case "api-host":

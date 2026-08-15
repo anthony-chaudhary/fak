@@ -38,3 +38,24 @@ go test ./internal/supportgraph
 ```
 
 No real support edge is claimed yet. Existing support fixtures remain explicitly synthetic.
+
+## Clean-worker H100 dispatch attempt
+
+A sanctioned detached worker worktree pinned to `0a95d634f649592a11222f83de9429dc4756d713` removed the peer-dirty source-archive race. The benchmark driver's real Q8 launch path was then attempted in every offered `a3-highgpu-1g` zone:
+
+```text
+us-central1-a  STOCKOUT (resource_availability)
+us-central1-b  STOCKOUT (resource_availability)
+us-central1-c  STOCKOUT (resource_availability)
+```
+
+The quota probe still reported H100 quota as provisionable, but quota is not capacity: each `compute instances create` failed before VM creation with `NULL:0/NULL:0/NULL:0 (state:STOCKOUT)`. The driver teardown confirmed each requested instance was already gone; `gcloud compute instances list --filter="name~^fak-bench-"` returned none. No GPU execution, spend-backed result, or support witness exists from these attempts.
+
+Retry from a clean sanctioned worker when zonal capacity changes:
+
+```powershell
+python tools/gcp_gpu_probe.py --all-tiers
+python tools/gcp_bench.py --tier a3-high-h100-1g --zone us-central1-a --engine fak-cuda-q8
+```
+
+If `a` remains stockout, retry `us-central1-b` and `us-central1-c`. The default (without `--keep`) retains bounded auto-delete and always-teardown behavior.
